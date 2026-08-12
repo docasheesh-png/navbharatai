@@ -115,6 +115,22 @@ export function voiceRunningCostLabel(
   return lang === 'hi' ? `${time} · ${money}` : `${time} · ${money}`;
 }
 
+/**
+ * Which language the consent popup speaks.
+ *
+ * The admin asked for the price "user ki language me". The app already knows: the language picker
+ * writes `navbharat_language`. Hindi and Hinglish both get the Hindi text — a Hinglish speaker reads
+ * Devanagari comfortably, and the alternative (showing them English) would defeat the point of
+ * asking. Everything else, and an unset preference, gets English. PURE apart from the reader passed
+ * in, so the mapping is testable without a browser.
+ */
+export function resolveVoiceLang(get: (k: string) => string | null | undefined): VoiceLang {
+  let saved: string | null | undefined;
+  try { saved = get('navbharat_language'); } catch { return 'en'; }
+  const v = String(saved ?? '').trim().toLowerCase();
+  return v === 'hindi' || v === 'hinglish' ? 'hi' : 'en';
+}
+
 /** Master switch, project convention: `off` disables paid voice everywhere without a deploy. */
 export function voiceChatEnabled(env: Record<string, string | undefined>): boolean {
   return (env.VITE_VOICE_CHAT ?? env.VOICE_CHAT ?? '').trim().toLowerCase() !== 'off';

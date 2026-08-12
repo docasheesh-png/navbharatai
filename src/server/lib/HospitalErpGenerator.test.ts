@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateHospitalErpIntegration, HOSPITAL_SERVICE_SOURCE } from './HospitalErpGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateHospitalErpIntegration, HOSPITAL_SERVICE_SOURCE } from './HospitalErpGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateHospitalErpIntegration (wiring)', () => {
   it('emits the hospital service, routes and README + express dep', () => {
@@ -24,11 +21,8 @@ describe('generateHospitalErpIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the three guarantees (no double-booking, RBAC, audit)
 // are real invariants, verified against the actual emitted code (same approach as CrmGenerator.test.ts).
 describe('emitted HospitalService — real domain invariants', () => {
-  const artifact = join(here, `._hospital_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, HOSPITAL_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('hospital', HOSPITAL_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type Role = 'admin' | 'doctor' | 'nurse' | 'receptionist';
   interface Patient { id: string; name: string; mrn: string }
@@ -46,7 +40,7 @@ describe('emitted HospitalService — real domain invariants', () => {
   }
   interface Emitted { HospitalService: new () => Service; canEdit(r: Role): boolean; canView(r: Role): boolean }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   const admin: Actor = { id: 'a1', role: 'admin' };

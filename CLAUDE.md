@@ -442,6 +442,17 @@ the code (it is actually read somewhere) on 2026-07-11.
   ⚠️ **What to watch on the first real builds:** parallel build is the only one that changes HOW a build
   runs — its speedup is unmeasured and needs a real large multi-file build to judge. The other three are
   advisory or deterministic and cannot fail a build. Any of them reverts instantly by unsetting it.
+- **Android update notice (added 2026-08-11, admin sets after each Play upload):**
+  `ANDROID_LATEST_VERSION_CODE` (the versionCode of the build now live on Play — the android-aab
+  workflow stamps each build with the CI run number, so this is that number), `ANDROID_LATEST_VERSION_NAME`
+  (optional, shown in the message), `ANDROID_MIN_VERSION_CODE` (⚠️ FORCES an update for builds below it —
+  deliberately a SEPARATE key from the release number, because blocking someone out of an app they already
+  installed must be a decision, never a side effect of shipping; leave UNSET on a routine release),
+  `ANDROID_STORE_URL` (optional override of the Play listing).
+  **UNSET is safe by construction:** `/api/app-version` then returns a null versionCode and the client
+  treats an unknown as "no update", so a misconfiguration shows NOTHING rather than a false prompt.
+  Automating this needs a Play Developer service account, which this project does not have — until then
+  one number is set by hand after each upload, and that is stated plainly rather than pretended away.
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),
@@ -584,6 +595,17 @@ Bedrock test-chat page — neither is in use.)
   ("auto-focus broke", "sort ignores edits", "isAtLimit blocks Add") were all WARNINGS, which is exactly
   why C9 alone missed them. When a build feels too long, investigate the loop; never disable a
   correctness gate for a time saving that does not exist.
+- **`AGENTV3_DESIGN_GATE`** (built 2026-08-11, default OFF — admin flips on) — the fix for the admin's
+  report *"1st page beautiful, andar ke page bas HTML feel dete hai"*. `DesignCoverage.ts` judges EVERY
+  page/screen file on its own (not the app as a whole) for four mechanical defects: bare markup, no
+  heading, a raw `<table>`, and a list with no empty state. **Detection is deterministic — zero LLM cost
+  on a clean build**, and the findings are recorded as honest `DESIGN_PAGE_INCONSISTENT` warnings whether
+  the flag is on or off. Flag ON additionally runs ONE bounded repair pass naming the exact offending
+  pages (never touching pages that were fine), and reports `DESIGN_HEALED` or, honestly,
+  `DESIGN_PARTIALLY_HEALED`. It can NEVER fail or block a build — a working app with a plain page still
+  ships. Precision-first: skips Tailwind/CSS-module/styled-components/UI-library pages, leaf components,
+  and anything under 6 elements, so it cannot nag a good app. The upstream half (a five-point per-page
+  contract in the architect prompt, so the FIRST build is right) is always on and needs no flag.
 - **`AGENTV3_LINT_GATE`** — NOW SET to `on` (admin, 2026-07-11) → moved up into the configured "AgentV3
   controls" list above. It is live: a finished build fails on real ESLint **errors** (warnings/formatting
   never block). Watch the first few real builds; if a genuinely-working app gets blocked, set it `off`.
@@ -591,7 +613,14 @@ Bedrock test-chat page — neither is in use.)
 ## Play Store release — build a signed `.aab` on every roadmap/checkpoint completion (mandatory, admin-mandated 2026-07-10)
 
 **NavBharatAI is now LIVE on the Google Play Store** (Android app package `com.navbharat.ai`,
-a Capacitor wrapper that loads the hosted web app). Because of that, the store build must track
+a Capacitor shell). ⚠️ **BUNDLED MODE, not a remote wrapper** (corrected 2026-08-11 — this line
+previously said "loads the hosted web app", which has been WRONG since the 2026-07-10 switch and would
+mislead any session into thinking frontend fixes reach app users automatically). `capacitor.config.ts`
+sets `webDir: 'dist'` with **no `server.url`**, so the app boots from its own bundled assets.
+**What this means in practice:** a SERVER/backend change reaches installed app users immediately (API
+calls are rewritten to the production origin by `src/lib/apiBase.ts`), but a FRONTEND change does NOT —
+it is baked into `dist/` and needs a fresh signed `.aab`/`.ipa`. Locked by
+`tests/nativeShellInvariants.test.ts`. Because of that, the store build must track
 our progress: **whenever a roadmap phase completes, or any big checkpoint/milestone ships to
 `main`, Claude MUST build a fresh signed Android App Bundle (`.aab`) so a current, uploadable
 release is always ready for Play Console.** This is part of "done" for a phase/checkpoint, the

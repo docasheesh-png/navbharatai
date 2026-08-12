@@ -84,6 +84,23 @@ describe('Visual Editor — reliable data-nbai-src mapping', () => {
     expect(html).toContain('dblclick');           // text edit is a deliberate double-click
   });
 
+  it('the preview HTML carries multi-element select (ROADMAP §2)', () => {
+    const app = {
+      'package.json': JSON.stringify({ dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' } }),
+      'src/main.tsx': "import App from './App';\nexport default function boot(){ return App; }",
+      'src/App.tsx': 'export default function App(){ return <div><h1>Hi</h1><p>Yo</p></div>; }',
+    };
+    const html = buildReactPreview(VirtualFileSystem.fromRecord(app));
+    expect(html).toContain('extras');            // the additional selected elements
+    expect(html).toContain('selectionList');     // every selected element's source position
+    expect(html).toContain('targets');           // reported to the parent so it can group them by file
+    expect(html).toContain('metaKey');           // ctrl/cmd/shift-click adds to the selection
+    expect(html).toContain('clearExtras');       // and leaving edit mode drops them
+    // A style change must reach EVERY selected element, not just the primary — otherwise the preview
+    // would show one element changing while all of them were saved.
+    expect(html).toContain('targetEls');
+  });
+
   it('the preview HTML carries the Phase 2 resize + reposition mechanism (Slice D/E)', () => {
     const app = {
       'package.json': JSON.stringify({ dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' } }),

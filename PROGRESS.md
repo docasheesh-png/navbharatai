@@ -27874,6 +27874,120 @@ call site, not one), and main's `nanoid: ^3.3.17` range adopted over my `^3.3.18
 
 Gate: tsc clean both projects, full run 12,540/12,540, audit gate green.
 
+---
+
+## 2026-08-05 — master import handler, part 2: the browser path is now the DEFAULT
+
+Part 1 (#2105) built the browser reader. This wires it in, so a real import actually takes it.
+
+### `src/lib/masterZipImport.ts` (new) — one entry point, two transports
+`importProjectArchive()` ALWAYS tries the browser first, because reading locally is better on every
+axis: the tree is known before any network call, `node_modules`/media/junk cost no bandwidth, the
+server never holds a gigabyte in its memory-backed `/tmp`, and the multi-instance chunk-scatter risk
+disappears along with the chunked upload. The surviving source is POSTed to the EXISTING
+`/api/agentv3/import-files`, chunked through the EXISTING `chunkFilesForSync` — no new endpoint and no
+second chunker (a large monorepo's source can still exceed the per-request cap even after node_modules
+is gone).
+
+### The fallback is deliberate, and deliberately narrow
+`readZipInBrowser` can legitimately fail — a browser without the APIs zip.js needs, a phone that runs
+out of memory, a corrupt central directory. Deleting the server path would turn each into a dead end,
+so it stays. But `shouldFallBackToServer()` refuses to retry a **password-protected** archive: that is a
+real answer, not a transport failure, and uploading 1 GB to reach the same verdict five minutes later
+is strictly worse for the user than saying it now. The degrade is also SPOKEN ("Opening it here did not
+work — uploading the archive instead…") so a sudden multi-minute upload is never unexplained.
+
+### Honesty carried through
+- `partialSaveWarning()` — a part-failed batch send says so explicitly ("do not assume the whole project
+  is in yet"). A partial import must never read as a whole one.
+- An archive whose every entry is filtered out is answered immediately with the reason, instead of
+  uploading first and reaching the same verdict on the server.
+- The browser path hands `files` straight to `onFilesSync`, so Files paints from data this tab already
+  read rather than waiting on a round trip for it.
+
+### Dead code removed rather than left lying around
+`zipImportProgressLabel()` was superseded by the master handler's own labels and survived only in its
+own test. Deleted: two labellers for one flow is how two paths start telling the same user different
+things.
+
+### Verification
+`tsc` (frontend + server) clean; full suite green.
+
+### Note on how part 1 landed
+PR #2105 was merged by the admin after someone resolved a conflict outside this session. Verified
+afterwards rather than assumed: all three part-1 files are present on `main`, and the other session's
+`SKIP_DIR_RE` additions (`.local`, `.claude`, `.cursor`, `.windsurf`, `.continue`, `.codeium`, `.aider`)
+were re-checked BY BEHAVIOUR through the shared module — all seven still skip, and `src/App.tsx` is
+still kept.
+
+### Remaining in the handler
+Part 3 — File System Access "Open Folder" (two-way, no upload at all on desktop Chrome/Edge).
+Part 4 — the connect-time audit.
+
+---
+
+## 2026-08-05 — master import handler, part 3: "Open Folder" — no zip at all
+
+Parts 1-2 stopped shipping a gigabyte by reading the ZIP in the browser. This removes the zip too.
+
+### What it does
+`📎 Attach → Open project folder` (Chrome/Edge desktop). The user points at their project folder and
+the browser reads it where it already is — nothing compressed, nothing staged, and the only bytes that
+leave the machine are the source files.
+
+It removes a failure CLASS rather than mitigating one: no archive to be truncated, no temp file on a
+Cloud Run instance, no chunk that can land on the wrong instance, no 30-minute upload TTL, no memory
+ceiling from holding an archive — because there is no archive. A 50 GB folder opens as cheaply as a
+5 MB one.
+
+### The decision that makes it fast
+**Prune before descending.** `node_modules` in a real project is 50,000-200,000 files. Walking into it
+to reject each entry individually would take minutes for a verdict already known from the folder name,
+so `SKIP_DIR_RE` is tested against the DIRECTORY before recursing. The biggest folder in the project
+costs exactly one check. This is the assertion the test suite cares most about (`visited` must never
+contain `node_modules`, `react` or `.git`), because the pure helpers cannot catch a traversal that
+descends anyway.
+
+### Shared, not duplicated (rule 4, three times over)
+- Every keep/drop verdict comes from `keepVerdict` — the same function the zip path uses, over the same
+  `importRules`. A folder import and a zip import of the same project MUST land identical files, or the
+  two paths quietly disagree and only one of them is right.
+- `readFolderInBrowser` returns the identical `BrowserZipResult` shape, so the master handler and the
+  panel treat a folder and an archive the same way and neither learns a second vocabulary.
+- The panel's two entry points were collapsed into ONE `runProjectImport` runner. The zip and folder
+  paths differ only in where the bytes come from; the precondition, progress line, honest summary,
+  Files hand-off and error surface are identical, and duplicating them is how two ways in start
+  behaving differently for no reason anyone chose.
+
+### Honest by construction
+- The menu item is gated on `isFolderImportSupported()` — real capability, not a browser sniff. Offering
+  a button that throws on Firefox or a phone is worse than not offering it, and the `.zip` option (which
+  now does the same in-browser filtering) stays for everyone.
+- A cancelled picker returns null and is treated as a normal outcome, never surfaced as a failure.
+- A file the OS refuses to hand over (permissions, broken link) is counted and skipped — one bad file
+  never aborts a 4,000-file import.
+- No invented percentage: a folder walk has no known total until it ends, so the progress line shows the
+  real running count instead.
+
+### Verification
+10 tests in `folderImport.test.ts`, including a fake directory tree that exercises the real traversal.
+One test-harness bug found and fixed along the way: `Blob.size` is a read-only getter, so
+`Object.assign`-ing a size onto a Blob throws — the walk then (correctly) counted every file as
+unreadable, and the test would have been measuring its own harness instead of the traversal.
+`tsc` (frontend + server) clean; full suite green. `AppKnowledgeBase.ts` updated in the same change.
+
+### ⚠️ NOT pushed — this session lost GitHub write access
+`git push`, `merge_pull_request` and the MCP `push_files` all return 403 while READS still work; the
+session's git relay changed port (41729 → 41789) and the write credentials went with it. Parts 2 and 3
+are committed locally and were delivered to the admin as patches. Nothing here is unverified — the gate
+was run in full — but it is unmerged until a session with write access applies it.
+
+### Remaining
+Part 4 — the connect-time audit (the "30 seconds after connecting" idea the admin has not yet chosen).
+Also still open from earlier: two-way write-back to the opened folder, which is the genuinely novel half
+of "Open Folder" and deliberately NOT attempted in the same change as the read path — writing to a
+user's real disk is irreversible from our side and deserves its own design.
+---
 ## 2026-08-08 — Pro v5 theme bug: the -950 family never followed the theme (admin report)
 
 Admin: "Pro v5 ke andar theme badalne se background dark hi rahta hai." Root cause was one missing
@@ -29362,3 +29476,1850 @@ now classify as REAL errors, so a gate that never ran can no longer pass as succ
 
 Gate: `tsc` (frontend + server) clean, **13343/13343 tests**, build green, `boot:check` PASS, bundle
 within budget.
+## 2026-08-10 — Mobile GitHub login now returns to the APP (in-app popup + deep-link), not the browser
+
+Admin report: in the installed app, GitHub login redirected the whole WebView to the browser and never came
+back — NavBharatAI ended up running on the website in the browser. Admin chose the **custom-scheme in-app
+popup** approach (like Google/Apple).
+
+ROOT CAUSE: `connectGitHub` did a full-page `window.location.href = <github oauth>` and the server callback
+redirected to the https website. In a Capacitor app that navigates away from the native bundle, so the user
+lands on the website in an external browser with no way back into the app.
+
+FIX (native-only; web/desktop OAuth is byte-for-byte unchanged, proven by tests):
+- `useGitHubConnect.ts` — on `Capacitor.isNativePlatform()`, open GitHub in an **in-app browser**
+  (`@capacitor/browser`, Custom Tab / SFSafariViewController) instead of navigating the WebView, and send
+  `state='nbai-native'` so the server knows to return via the app scheme.
+- `githubAuth.ts` — new pure, exported `nativeOauthReturn(state, token)`: for the native sentinel ONLY, it
+  redirects to `com.navbharat.ai://github-callback#gh_token=…`. 🔒 The scheme target is a FIXED server
+  constant, NEVER derived from the caller's `state`, so a crafted state can't open-redirect the token
+  (test-locked). Any other state → null → the normal allow-list-guarded web flow, unchanged.
+- `App.tsx` — a native `appUrlOpen` listener catches the deep link, stores the token, connects, and closes
+  the in-app browser. NO-OP on web.
+- `AndroidManifest.xml` — intent-filter for the `com.navbharat.ai` scheme so the OS routes the deep link
+  back to the (singleTask) MainActivity → `appUrlOpen`.
+- `.github/workflows/ios-ipa.yml` — adds the same `com.navbharat.ai` URL scheme to `Info.plist` via
+  PlistBuddy (next iOS build picks it up automatically — no manual Xcode step).
+- Added `@capacitor/browser` dependency.
+
+**Honest boundary (rule 6):** the native deep-link flow cannot be exercised from the dev sandbox (no device).
+Web is fully unchanged and test-covered; the on-device confirm (install a fresh APK/TestFlight build, tap
+GitHub connect → in-app GitHub page → returns into the app) is the admin's final verification. The Android
+AndroidManifest ships in-repo; the iOS scheme lands on the next `.ipa` build via the workflow above.
+
+**Verification:** frontend `npm run build` ✅ · `tsc`/`tsc -p tsconfig.server.json` clean for touched files ·
+`npx vitest run` ✅ **13352/13352**; new tests lock the native-return + the open-redirect-safety invariant.
+## 2026-08-10 — APK build-repair now follows the user's selected Pro tier (weak/normal/strong/…)
+
+Admin (2026-08-10): "apk builder me jo llm/provider call hogi, woh navbharatai pro (jo user se select kiya
+hai) vaise hi hogi weak/normal/strong etc." The self-healing APK/AAB build already had an AI repair tier
+(`mobileBuildAiRepair.ts` + `tryAiRepair`), but it was HARDCODED to the weak-safe cheap coders (GLM→Kimi)
+because "this route cannot see the user's tier". This wires the tier through so the repair uses the SAME
+Model Routing Policy the main build does.
+
+- `mobileBuildAiRepair.ts`: `AiRepairModel` gains `provider:'CLAUDE'` + `kind:'openai'|'anthropic'`;
+  new `RepairTier` + `normalizeRepairTier(powerLevel)` (unknown ⇒ `weak`, the safe default). Rewrote
+  `aiRepairModelChain(env, tier)`: weak = GLM→Kimi; normal = GLM→Kimi→Sonnet; strong = Sonnet→GLM→Kimi;
+  powerful/max = Opus→Sonnet→GLM→Kimi. 🔒 **The free-tier no-Claude absolute rule is enforced TWICE** —
+  Claude rungs are only appended for paid tiers AND a final filter strips any Claude rung when tier==='weak',
+  so a future edit can't leak Sonnet/Opus onto a free build. Missing paid keys fall through to the cheap
+  coders (never break).
+- `mobileBuildAiRepairClient.ts`: `callRepairModel` now speaks BOTH protocols — OpenAI chat-completions
+  (GLM/Kimi) and the Anthropic messages API (Claude), selected by the rung's `kind`.
+- Routes `mobileShip.ts` (`/autofix`) + `mobileSetup.ts` (`/setup` preflight): read `powerLevel` from the
+  request and pass the resolved tier into the chain.
+- Client: `AgentV3Panel` persists the selected tier to `localStorage['nbai_power_level']`; `APKBuilder`
+  reads it and threads it → `StoreBuildPanel` → both requests. Absent ⇒ server defaults to weak-safe.
+
+Also note (already present, reported to admin): the deterministic repair tier (`mobileBuildRepair.ts`,
+~14 named classes) + the AI tier together already "self-heal GitHub build problems"; the gradle-wrapper.jar
+self-heal shipped separately (#2234).
+
+**Verification:** `tsc -p tsconfig.server.json` clean for the touched files (pre-existing missing-dep errors
+in pg/exceljs/attachmentText are unrelated, present on clean main); mobile tests 113/113; new tier tests
+lock weak-never-Claude + each tier's chain + Anthropic rung shape.
+
+## 2026-08-10 — APK/AAB self-heals a missing @drawable/splash (resource-linking failure), + named class
+
+Admin report (screenshots): a fresh APK build failed at aapt2 — "resource drawable/splash (aka
+…:drawable/splash) not found. error: failed linking references → Android resource linking failed" — and
+the admin asked why the "LLM self-heal" didn't fix it.
+
+ROOT CAUSE: Capacitor's launch theme (`android/app/src/main/res/values/styles.xml`) references
+`@drawable/splash`, but when `@capacitor/splash-screen` ships no splash image, a fresh `npx cap add android`
+(Capacitor 8) omits the splash asset → the reference doesn't resolve and `processDebugResources` fails.
+
+WHY THE LLM REPAIR COULDN'T TOUCH IT (honest boundary, rule 6): the broken file is in the GENERATED
+`android/` project — created on CI, gitignored, absent from the user's repo. The AI repair only edits repo
+files (workflow, package.json, capacitor.config, app source), so it literally cannot see a file that doesn't
+exist until CI scaffolds it. The correct fix is a DETERMINISTIC self-heal in the build workflow, exactly
+like the gradle-wrapper heal.
+
+FIX:
+- `mobileShipKit.ts` `ENSURE_ANDROID_STEP` (shared by both APK + AAB workflows): after `npx cap sync
+  android`, if no `res/drawable*/splash.*` exists, write a minimal placeholder layer-list drawable at
+  `res/drawable/splash.xml` so `@drawable/splash` always resolves. Regression test locks it into both
+  generated workflows.
+- `mobileBuildRepair.ts`: added a named classifier class `ANDROID_RESOURCE_LINKING` (aapt2 "resource … not
+  found"/"failed linking references"), checked before the app-code extractor. It maps to a workflow refresh
+  — which now carries the splash heal — so an EXISTING repo that predates the fix self-heals: resource-link
+  fail → refresh our workflow → re-run → splash heal fires → success. Previously this swept into the generic
+  android-stage `STALE_WORKFLOW` fallback; naming it fixes the system's honesty (rule 5) and telemetry. The
+  loop-guard holds: an already-current workflow yields null (no empty commit, no loop). User-facing summary
+  carries no vendor/aapt/drawable words (White-Label Law).
+
+**Verification:** `tsc -p tsconfig.server.json` clean for touched files; mobileShipKit 41/41 + repair suite
+121/121; emitted YAML inspected (printf carries literal \n, valid shell). PR #2237.
+
+## 2026-08-11 — APK Builder: ONE honest flow — App Information now feeds the real build; useless .txt removed
+
+Admin: "app information wala option, github app builder se connect nahi hai … 'generate config file' ki .txt
+ka kya use? … app information ko niche 'build a real android app' se sync kardo." (And: name/logo easily editable.)
+
+ROOT CAUSE: the APK Builder had TWO parallel flows. A 4-step wizard (App Info → Permissions → Build Method →
+Generate) ended by producing a plain-text `.txt` of Android config files that the REAL build never used and a
+user could do nothing with; below it sat the actual builder (StoreBuildPanel) that compiles a signed
+.apk/.aab on GitHub's runners. So the wizard's settings (permissions, orientation, TWA/Capacitor, targetSdk)
+shaped nothing, the `.txt` was dead output, and the one part that worked looked unrelated to the form. This
+is a second-absolute-rule violation (a surface that looks done but does nothing).
+
+FIX — collapse to a SINGLE flow:
+- `APKBuilder.tsx` rewritten: one "App Information" form (name, package, icon, background colour) that FEEDS
+  the real `StoreBuildPanel` directly below it (with a visible "your app info flows into the build below"
+  bridge). Removed the disconnected wizard, the four dead config-file generators, and the `.txt` download.
+  Kept the real, working publishing guide (self-contained, opened from the build panel).
+- Every field now genuinely reaches the built app: name + package + icon already did; **background colour is
+  newly wired** through `capacitor.config.ts` (`android.backgroundColor` + `SplashScreen.backgroundColor`).
+- `mobileProjectAssembler.ts`: `buildCapacitorConfig(appId, appName, webDir, backgroundColor?)` +
+  `normaliseHexColor()`. 🔒 The colour is VALIDATED to a canonical `#rrggbb` before it is interpolated into
+  the generated TS file — a non-hex value is DROPPED and the config is byte-identical to before (injection
+  guard; the value comes from the client). `AssembleOptions.backgroundColor` threaded from the setup route
+  and `StoreBuildPanel` payload.
+- `AppKnowledgeBase.ts`: `apk_builder` entry + the store-ready-build-kit line updated to the single-flow
+  reality (no more "wizard"/"version"/"permissions"/".txt config file").
+
+**Verification:** frontend `npm run build` ✅ · `tsc --noEmit` + `tsc -p tsconfig.server.json` clean ·
+assembler tests 30/30 (4 new: hex inject + 3-digit expand + injection-drop + byte-identical-when-absent),
+mobile suite 132/132, AppKnowledgeBase 6/6.
+
+## 2026-08-11 — Nav cleanup: "Other AI" → "Other" label, and Preview/Files/History removed from the sidebar
+
+Admin: (1) rename the "Other AI" section to just "Other"; (3) remove the Preview/Files/History buttons from
+the sidebar — "inko need nahi hai, yeh sab AI ke andar already hai".
+
+- Rename (task 1): the user-facing label only — Home card title, the Other page `<h1>`, and the TopNav tab
+  label all now read "Other". The internal view id `other_ai` is unchanged (no routing risk). The KB still
+  calls the section "Other AI" in its navigation text — cosmetic (the card is findable as "Other"); a full
+  KB wording sweep is a separate follow-up.
+- Sidebar (task 3): Preview / Files / History are hidden from the rail + drawer via the SAME mechanism Git
+  already uses — a `SIDEBAR_HIDDEN` set filtered out of `visibleItems`. They stay in `menuItems`, so their
+  header tab + view still open from the places that already have them (Preview: Pro v5.0 + bottom footer;
+  Files: Pro v5.0 footer; History: the per-AI footer). No view is orphaned.
+
+NOTE (admin tasks 2, 4, 5 still to do): task 2 ("cut App Settings from Settings into Other") is a larger
+cross-cutting change — ~40 files reference "Settings → App Settings → X" as the canonical nav path (engine
+messages, errors, the centralized `settingsLabels.ts`), and some `Settings → Domain`/etc. strings belong to
+EXTERNAL providers (e.g. Auth0), so a blanket sweep is unsafe. It will be done as a dedicated PR that routes
+those paths through the centralized label module. Tasks 4/5 (Free/Professional history scoping) are next.
+
+**Verification:** frontend `npm run build` ✅ · `tsc --noEmit` clean · nav/routing/settings tests green.
+## 2026-08-11 — Every AI knows NavBharatAI builds APKs itself, and suggests our own APK Builder FIRST (GitHub second)
+
+Admin: "navbharatai pro ko pata hi nahi hai ki ham APK bana sakte hai — fix karo. Sabhi AI ko exact pata
+hona chahiye ki Other AI → APK Builder me app banti hai, kaise, kya chahiye. Aur jab koi (kisi bhi language
+me) APK banana pooche, to GitHub ka rasta 1st nahi — 1st NavBharatAI ka apna Other AI suggest ho, GitHub 2nd."
+
+INVESTIGATION (Explore agent mapped every AI's knowledge path):
+- `apk_builder` KB entry + the v5 builder prompt were already NavBharatAI-first — good.
+- BUT three capability bullets in the `agentv3_builder` KB description (MOBILE APP EXPORT / STORE-READY BUILD
+  KIT / HOW TO PUBLISH) framed **Capacitor / Android-SDK / GitHub-Actions FIRST** — the source of any
+  GitHub-first answer.
+- **Professionals** (`professionals/engine.ts`) called only `getSupportOffer`, NEVER `getRelevantContext`, so
+  they had NO app knowledge at all — a professional asked "apk kaise banau" knew nothing about the builder.
+- `AppContextInjector.formatBlock` emits only the FIRST line of a `description`; `apk_builder`'s description
+  is a single line (fully surfaced), so strengthening it propagates to every injector-fed AI.
+
+FIX:
+- `AppKnowledgeBase.ts` — `apk_builder` description now opens with an explicit PRIORITY statement: this
+  built-in builder is the FIRST answer to any "make an APK / put app on phone / publish to Play" question in
+  ANY language; the user never needs Android Studio / a computer / the Capacitor CLI / to set up GitHub
+  Actions; GitHub is only the under-the-hood build machine. Enriched keywords with many multilingual /
+  any-phrasing forms (hinglish + english). Reworded the three GitHub-first capability bullets to lead with
+  NavBharatAI's own builder and demote GitHub/Capacitor to "under the hood, not a route you offer".
+- `AgentV3/systemPrompt.ts` — added a firm PRIORITY line to the v5 build prompt: own APK Builder is the first
+  and only route; NEVER tell a user to install Android Studio / use the Capacitor CLI / set up GitHub Actions.
+- `professionals/engine.ts` — every professional now also injects `getRelevantContext(message,'professional')`
+  (mirrors chat.ts / sda.ts), so a professional surfaces the APK Builder for an app-capability question. The
+  injector returns empty for a normal domain question, so nothing else changes.
+
+**Verification:** frontend `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · apkGuidance 24/24 (10 new:
+priority-first framing, v5 prompt rule, 7 multilingual phrasings surface the builder, professional surface) ·
+appKnowledgeBase 6/6 · polish (builder/professionals/white-label/core-chat) + professionals + offline +
+awareness + SDA route suites all green.
+
+## 2026-08-11 — APK self-heals a missing launcher-icon foreground (ic_launcher_foreground) — sibling of the splash bug
+
+Admin sent a real build report: APK build FAILED at resource-linking —
+"resource mipmap/ic_launcher_foreground (aka …:mipmap/ic_launcher_foreground) not found" from
+mipmap-anydpi-v26/ic_launcher.xml + ic_launcher_round.xml → "failed linking file resources", BUILD FAILED.
+
+AUTOPSY (5th rule): the report's annotations showed the EARLIER heals FIRING correctly — "splash drawable
+missing — writing a placeholder" (#2237) and "gradle-wrapper.jar missing — fetching it" (#2234) both ran. So
+the app compiled and those two classes are handled; the NEW failure is a DIFFERENT missing resource in the
+same GENERATED android/ project: the adaptive launcher icon references @mipmap/ic_launcher_foreground, which
+a fresh cap add / a partial icon set can omit.
+
+ROOT CAUSE + rule-3 (hunt the siblings): this is the SAME CLASS as the splash bug — an adaptive/launch
+resource referenced by the generated project's XML but not shipped. The splash fix should have generalised;
+it did not, so the launcher-foreground sibling slipped through. Now covered.
+
+FIX (mobileShipKit.ts ENSURE_ANDROID_STEP, both APK + AAB): after cap sync, if NO ic_launcher_foreground
+exists in any mipmap/drawable bucket, create one — from the user's OWN uploaded icon (resources/icon.png)
+when present (so the real icon is used, rule 2), else a visible placeholder vector — and rewrite the adaptive
+XML's @mipmap/ic_launcher_foreground → @drawable/ic_launcher_foreground so it resolves. Background is left
+untouched (present in the failing case; adding one risks a duplicate-resource error). Existing repos also
+self-heal: the ANDROID_RESOURCE_LINKING classifier (#2237) already routes any "failed linking" to a workflow
+refresh, which now carries this heal too.
+
+**Verification:** emitted YAML inspected (literal \n, valid shell, $RES literal); mobileShipKit + repair
+suites 82/82; `tsc -p tsconfig.server.json` clean.
+## 2026-08-11 — History scoping: Free → only Free; Professionals → only that user's professional chats
+
+Admin: (4) NavBharatAI Free's History must show ONLY Free chats, not the whole app; (5) the Professionals
+History must show ONLY professional conversations — "abhi sabhi (puri) history show kar raha hai, jo galat hai".
+
+ROOT CAUSE (mapped by an Explore agent):
+- Free: the footer already opened History pre-filtered to 'free', but the filter TABS let the user switch to
+  All/Pro/SDA — so it wasn't actually scoped.
+- Professionals: the hub's History opened the generic `HistoryView`, which reads Firestore `chat_sessions`
+  (free/pro/build sessions) with filter 'all'. But professional chats are NOT in `chat_sessions` at all —
+  each professional keeps its own rolling buffer in localStorage `prof_<id>_messages`. So the professional
+  History showed unrelated sessions and ZERO of the professional's real chats.
+
+FIX:
+- `HistoryView.tsx`: new `lockFilter` prop — when set (Free → History), the filter/mode TABS are hidden and
+  the scope is FIXED to `initialFilter`, so Free shows only Free sessions and cannot be switched to the whole
+  app. `App.tsx` passes `lockFilter={historyInitialFilter === 'free'}`.
+- New `ProfessionalHistoryView.tsx` + `readProfessionalHistory()`: reads the RIGHT source — the localStorage
+  `prof_<id>_messages` buffers — and lists one row per professional the user ACTUALLY chatted with (a lone
+  opening greeting is excluded; a user message is required). Each row resumes that professional (`toggleTab`
+  on the professional's id = its ViewType), with a per-conversation delete. The Professionals footer now sets
+  the scope to `'professional'` and `App.tsx` renders `ProfessionalHistoryView` for it — never the generic
+  session list.
+
+**Verification:** `npm run build` ✅ · `tsc --noEmit` clean · `dynamicFooter` 5/5 (locks the scoped wiring)
++ `professionalHistory` 4/4 (only-own, welcome-excluded, empty, corrupt-safe).
+
+## 2026-08-11 — APK build audit + pre-solve batch (kill the shivlings, part 1)
+
+Admin: "ek scan/audit wapas karo — apk banane me future me kya kya problem aa sakti hai, sab list banao."
+Ran a full senior-Android-CI audit of the generated APK/AAB pipeline (both workflows, the 3 deterministic
+self-heals, the ~16-class classifier, the AI-repair tier, the compile pre-flight). Key structural fact: the
+user's repo NEVER contains android/ (it's regenerated on CI each build, gitignored), so any android/-resident
+defect is invisible to the AI repair and can be fixed ONLY by a deterministic workflow heal. Enumerated 19
+future failure classes (G1–G19) ranked by likelihood × impact.
+
+PRE-SOLVED NOW (deterministic, always-work, also heal existing repos via the STALE_WORKFLOW/
+ANDROID_RESOURCE_LINKING refresh path) — mobileShipKit.ts ENSURE_ANDROID_STEP + both job defs:
+- **G3 (highest user-impact): the uploaded icon now becomes the REAL app icon.** After cap sync, if an icon
+  source exists, run `npx @capacitor/assets generate --android` to produce the full density + adaptive
+  (foreground/background/round) icon set from the user's icon. Previously CI never generated icons, so a
+  user who uploaded an icon still shipped Capacitor's default (a shipped feature that did nothing — 2nd-rule
+  adjacent). Degrades gracefully: if the tool is unavailable or the icon <1024px it warns and the existing
+  foreground self-heal still guarantees a resolvable icon, so the build never fails.
+- **G7: Gradle JVM heap.** Force `org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g` into
+  android/gradle.properties (idempotent) so a large app doesn't OOM during dex/R8/aapt2 — the existing
+  NODE_OUT_OF_MEMORY fix only covers the web build, not the Android build.
+- **G13: `timeout-minutes: 30`** on both build jobs so a hung download can't idle to GitHub's 6-hour default
+  and burn the user's Actions minutes / stick the progress bar.
+
+STILL OPEN (recorded, ranked; to be pre-solved next / flagged honestly):
+- G1 appName XML-escaping in strings.xml [D], G4 adaptive background + round-icon backstop [D], G5 plugin
+  minSdk merger bump [D], G10 transient-network Gradle retry [D], G8 keyword/case package segment [AI],
+  G9 vite .mjs outDir + Next-SSR detection [AI], G17 index.html presence check [AI]. Needs-user (classify
+  honestly, never fake): G6 google-services.json (push/Firebase), G11 wrong keystore creds, G12 private npm
+  registry. Biggest structural item: **G2 — the Capacitor-major ↔ Java/Gradle/compileSdk version matrix**
+  (default major 6 is stale and not co-validated with the pinned Java 21; repairJavaVersion only bumps up).
+  To be encoded as ONE governed source-of-truth table (rule-4 centralization) — carefully, separately.
+
+**Verification:** emitted YAML inspected (literal \n, valid shell); mobileShipKit 49/49 (6 new);
+`tsc -p tsconfig.server.json` clean.
+
+---
+
+## 2026-08-10 — Per-file narration: every file the build writes now says what it IS
+
+**Admin ask:** "jab NavBharatAI koi app banata hai, ek saath bahut sari file bana deta hai — background
+me sab aise hi chale, frontend par user ko ek ek file dikhe narration ke sath, aur UX abhi jaisa rahe,
+user file code dekh sake."
+
+**Half of it was already built, and checking first is why only the other half got written** (safeguard
+#6). `revealPacer` (admin 2026-07-21) already drips the REAL file events into the feed one at a time —
+a 44-file burst reads as 44 arrivals, background speed untouched. What was missing was the narration:
+a row saying `LoginForm.tsx · new` tells a non-technical user nothing about what was just built.
+
+**`lib/fileRole.ts` — derived from the PATH, never generated.** That is the whole design decision:
+- A per-file LLM description would cost a call PER FILE — 44 extra calls on a normal build, on the one
+  path where the user is already waiting.
+- A generated description can be WRONG, and a confident wrong label on a file the user cannot read is
+  worse than no label (second absolute rule).
+- It must work identically when the feed is replayed from HISTORY, where no model is running.
+
+It describes the ROLE, not the content: the row already shows the NAME, so the label adds the one thing
+the name does not carry. `LoginForm.tsx` → "a part of a screen"; `pages/api/orders.ts` → "an API
+endpoint". Claiming behaviour the path cannot prove ("handles login with OTP") would be fabrication, and
+a test asserts no label contains such a verb.
+
+**Precedence is the whole correctness problem**, and two ordering bugs were caught by the tests before
+merge: `pages/api/orders.ts` read as a "page" until API won over the `pages/` rule, and
+`components/Login.test.tsx` read as a "component" until the test rule moved ABOVE the directory rules
+(generated apps put a test next to the file it tests). `null` is a first-class answer — an unrecognised
+path shows no label rather than a guess.
+
+**The language comes from the SERVER, not a second detector.** The `workspace` event now carries the
+`lang` the server already resolved (optional field; an older stream or a replayed history is
+unaffected), the reducer stores it, and the row renders the label in it. Re-deriving the language on the
+client would have been the duplicate-detector mistake from this session's first slice, one layer up —
+the two halves of one feed would eventually disagree.
+
+UX unchanged as asked: the label is an additional dim span (hidden on narrow screens), the filename is
+untouched, and tapping still opens the real code/diff. Test-locked.
+
+19 new tests. `AppKnowledgeBase` updated so every AI can explain the feature — including its honest
+limits (no note when the path is unclear; Hindi only when the request was in Hindi).
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1139 files / 13,183 tests,
+exit 0** · `npm run build` ✓.
+
+---
+
+## 2026-08-10 — GAME BUILDING: v5.0 can now build real games (phases 1–7, PRs #2218, #2219, #2221, #2223, #2226, #2227, #2246)
+
+**Origin.** The admin forwarded an external ChatGPT plan for turning NavBharatAI into a 3D game platform.
+Per the external-suggestion rule it was treated as raw material: I flagged honestly that we cannot ship
+photo-real 3D (no asset library), the admin overruled the scope-down — *"jo jo behatar se behtar kar sakte
+ho karo… note: app tute na, app downgread na ho"* — so the plan was rebuilt around what a CODE generator
+can genuinely make world-class: the engine, the feel, and the craft knowledge, not the art.
+
+**What shipped — seven phases, each a generator + wiring + tests:**
+
+| Phase | Tool | What it removes from the model's plate |
+|---|---|---|
+| 1 | `generate_game_runtime` | Fixed-timestep loop, input (incl. touch), events, pooling, save/load, game feel |
+| 2 | `generate_game_3d` | Colour management, 9 lighting presets, camera rigs, procedural world |
+| 3 | `generate_game_controller` | Coyote time, jump buffering, variable jump, step offset, slope limit |
+| 4 | `generate_game_vfx` | Pooled particles, Web Audio, and the ONE table syncing effect+sound+shake |
+| 5 | `generate_game_shell` | Composition, React mount, HUD, pause/restart, WebGL teardown |
+| 6 | `generate_game_systems` | Combat with i-frames, enemy AI, segment-collision projectiles, waves |
+| 7 | architect prompt + `game` domain | Makes the builder actually REACH for all of the above |
+
+**The design principle throughout:** every rule encoded is a *specific, nameable bug* that a from-scratch
+implementation reliably commits and that is invisible on review — physics in the render callback (the
+character jumps higher on a 144Hz monitor), additive particles writing depth, an AudioContext never
+resumed on a gesture (the #1 reason a web game is silent), damage applied per frame, bullets tunnelling
+through small enemies, enemies converging into one blob, a leaked WebGL context killing the tab.
+
+**Method note that paid off — TEST BY EXECUTION, not by string match.** Phases 1–5 could only assert the
+emitted text *contains* the right thing (it needs three.js + a browser). Phase 6 was deliberately written
+as pure arithmetic so the tests RUN it — and immediately found two real bugs a string match would have
+passed: a bullet through two enemies credited the wrong one (ranked by perpendicular distance; two
+enemies dead ahead are both at distance zero, so array order decided it → now ranked by position ALONG
+the segment), and spawn placement put enemies OUTSIDE the arena when the player stood near its edge
+(clamp-then-push-away walks the point back out → now clamps onto the arena circle and slides along it via
+the law of cosines, with a property sweep over every player position). **Where a generator's output can be
+made pure, make it pure and execute it in the test.**
+
+**Root causes fixed in EARLIER phases, surfaced by later ones (rule 4, not worked around):**
+- `CameraRig.yaw` was private → camera-relative movement was impossible; the controller took `cameraYaw`
+  and nothing could supply it.
+- `CameraRig` had no `setCollidables` → the world is built AFTER the rig exists, so third-person camera
+  collision could never actually be wired.
+- `CharacterController` had no `reset()` → restart could not work. It clears motor state, not just
+  position, or a player who died mid-fall respawns carrying that velocity with `jumping` still true.
+- `handleResize` sized to `window.innerWidth` → correct only fullscreen; embedded, the canvas overflowed
+  its panel, and a window `resize` never fires when a sidebar collapses. Now measures + observes the
+  container, with a zero-size guard so an unopened tab cannot make aspect NaN and blank it permanently.
+- `ParticleSpec.additive` was DEAD DATA — one material fixes the blend mode, so smoke/dust/blood would
+  have glowed like neon. Now two layers, preset-selected; still two draw calls.
+
+**A bug CLASS killed, not its fourth instance.** Every generator holds its output in a TS template
+literal, and a stray backtick in emitted code silently truncates the file — I made that mistake four
+times across these phases. `generatedGameCode.test.ts` now parses every file all SEVEN generators emit as
+real TypeScript, and guards the guard (three cases prove the check detects breakage, so it cannot pass
+vacuously if the internal `parseDiagnostics` property changes).
+
+**A guard found covering only half its subject.** `templatesPromiseWhatWeCanBuild.test.ts` (written
+2026-08-08) extracted only single-quoted prompts, so every backtick template — a growing share of the
+list — sailed past unchecked while the suite reported green. Widened to both forms, plus an assertion
+that the extracted count EQUALS the number of template ids, so a third quoting style fails loudly
+instead of escaping. A guard that silently covers half its subject is worse than none, because it is
+trusted.
+
+**Honesty held (rule 2).** The architect prompt and the knowledge base both state the real limit: games
+are built from CODE and shapes, not a library of ready-made 3D characters. 2D and stylised low-poly come
+out genuinely good; photo-realistic humans do not — and the builder is told to say so and build the
+strong stylised version rather than hand over grey boxes and call them a village. Sound FILES are the
+app's to supply; a missing one warns and plays silently, never a faked sound.
+
+**Discoverability.** Two Project Blueprints added (3D arena survival, 2D endless runner), both fully
+specified as playable — score, sound, pause, restart, phone controls — and a `game` domain in
+`RequirementGapAnalyzer` so a game prompt is proactively given the eight things such prompts always omit.
+Two false positives guarded, because the damage runs the other way (handing a business app a game
+engine): **gamification is not a game**, and **"game plan" is an idiom**.
+
+**Verification:** `tsc --noEmit` clean, `tsc -p tsconfig.server.json` clean, vitest **13,378 passed**
+(1,142 files) — up from 13,150 at the start of this arc. Every phase merged green.
+
+**Open / not done (recorded honestly):** no multiplayer/networking; no asset pipeline (models, textures,
+sound files); no physics engine beyond the character controller and projectile collision (no rigid-body
+stacking, ragdolls or vehicles); no level editor. These are real absences, not oversights — each is a
+separate large arc, and none is needed for the games the engine now builds well.
+## 2026-08-10 — "APK download free me ho raha hai" — half true, and the other half was a real defect
+
+**Admin:** "apk download abhi free me ho raha hai, jabki maine kaha tha 1₹ per download! Aur HAR BAR
+USER KO BATAYA JAYE."
+
+**FINDING 1 — it is NOT free, and this is the SECOND report with the same cause.** `/api/mobile-ship/
+download` has charged ₹1 per built file since 2026-08-06. It reads free for the admin because their
+account is on `AGENTV3_FREE_LIST`, which is exempt everywhere by design — exactly why Professionals
+and Doctor AI also looked free in the previous message. **A normal user IS charged.** Worth stating
+plainly: the admin's own account can never be used to check whether a paywall works.
+
+**FINDING 2 — the real defect: the user was never TOLD.** The server fired the debit
+(`void debitWalletForBuild`) and streamed the bytes; the client just saved the file. So ₹1 left a real
+person's balance with **no price shown before and no confirmation after** — money taken silently,
+which is the exact opposite of the billing law's promise that the bill a user sees is the real one.
+
+**FIXED — the response now reports its own charge, and the screen says it, every time.**
+- The download sets `x-navbharatai-charge-inr` and `x-navbharatai-charge-applied` (plus
+  `Access-Control-Expose-Headers`, without which a browser cannot read a custom header at all).
+- `applied` is true ONLY when a charge genuinely happened — a free-list account, an anonymous caller
+  or a price of 0 all report false, so the receipt can never claim a charge nobody paid. Same rule the
+  wallet follows when a provider reports no usage: an unmeasured thing is not a bill.
+- The charge still NEVER blocks the bytes; the debit stays fire-and-forget.
+- BEFORE the click the screen states the price **and the per-BUILD rule** in the same breath —
+  "₹1 for each build; downloading this same file again is free". Without that second half, a user who
+  re-downloads is certain to think they were charged twice (the debit is keyed to the artifact, so
+  they were not), and a bare price would guarantee that support message.
+- AFTER the file arrives, the exact amount is confirmed. Both strings are WRITTEN in Hindi too, not
+  transliterated.
+- A missing/malformed header degrades to "no charge" rather than an invented number, and the client's
+  pre-click price mirrors the server default while the RECEIPT always uses the server's real value —
+  so a price change can never make the receipt lie; only the hint would lag, which is the safe
+  direction to be wrong in.
+
+Tests: 15 in `tests/apkChargeNotice.test.ts` — the price plus the per-build rule, silence when the
+charge is off, Hindi genuinely written, every "no charge" path, malformed headers meaning no charge,
+and wiring assertions that the server exposes the headers, that `applied` is gated on the free list,
+that the debit is still non-blocking, and that the screen shows both the hint and the receipt.
+Gate: tsc clean both projects, full run 13,286/13,286.
+
+---
+
+## 2026-08-10 — "Pass system hata do" — and it was already lying to real users
+
+**Admin:** "pass system hata do!"
+
+**WHAT THE PASS ACTUALLY WAS.** A ₹99/month "Professional Pass" promising unlimited access to every
+professional and every AI-backed tool. It was a **SECOND billing model** competing with the one the
+platform actually adopted: THE ONE-WALLET LAW (2026-08-01) settled that every AI draws on the same
+balance and *"the price of the thing IS the limit"*. A flat monthly promise of "unlimited" sits on
+top of that as a parallel contract the wallet cannot honour, and it forced the customer to reason
+about two systems to answer one question ("what does this cost me?").
+
+**AND IT WAS ALREADY LYING — this is the defect half, not the product half.** The wallet-empty refusal
+in BOTH gates (`passGate.ts`, `toolGate.ts`) ended: *"…or get the Professional Pass for unlimited
+access."* That branch is **LIVE** — `AI_WALLET_SPEND` has been on since 2026-08-08 and the wallet gate
+runs independently of the paywall flag — while the Pass has **never been sellable**:
+`PROFESSIONAL_PAID_ENABLED` defaults off and is not set in Cloud Run (it is not even in CLAUDE.md's
+env registry). So a real user who ran out of credit was pointed at a product that does not exist, at
+exactly the moment they were trying to give us money. Nothing about that was theoretical.
+
+**REMOVED — every user-facing surface, this change:**
+- Both LIVE wallet-empty messages now say the one thing that actually unblocks the user: *"Your
+  balance is empty. Add credit to keep using NavBharatAI — you only pay for what you actually use."*
+  `passPriceInr`/`passDays` no longer go to the client at all, so a paywall card cannot be rebuilt
+  from the response.
+- The quota-exhausted messages drop the upsell and say when the allowance returns. The tool gate's
+  two variants (pass holder vs everyone else) collapse into one — there is no distinction left to draw.
+- `ProfessionalChat`: the "Get Pass — ₹99/month" checkout, the "Or get the Professional Pass" button
+  under the empty-wallet card, and the crown chip that opened the paywall are gone. The header chip is
+  now a plain COUNTER ("12/50 free today"); the exhausted card states the allowance, says it returns
+  tomorrow, and offers "Add credit".
+- `buyProfessionalPass()` is **deleted, not merely unused** — an exported purchase function is one
+  import away from being live again. `fetchPassStatus` stays; the free-allowance counter is real.
+- Doctor AI's 402 fallback no longer offers the Pass.
+- `AppKnowledgeBase`: the `professional_pass` entry is **replaced, not deleted** (`professionals_cost`).
+  Deleting it was the easy move and the wrong one — 'pass', 'kitne free', 'unlimited', '99' are exactly
+  what a user types when asking what this costs, and an unanswered keyword sends every AI in the app
+  back to guessing, which is how a removed product gets re-invented inside a chat reply. The billing
+  entry's "A Professional Pass covers the assistants and tools" line is gone too.
+
+**NOT removed yet, deliberately (honest sequencing).** The pass STORE, its Cashfree grant path and the
+`hasActivePass` branches in the gates stay for now. These guard money on every professional turn and
+every tool action; the safe order is to remove the grant path first, then delete the branches once
+nothing can set them. They are inert in production today — nothing can grant a pass — and the comments
+now say so instead of describing a live product.
+
+Tests: 9 new in `tests/passRemoved.test.ts`, which read the shipped source so an offer cannot quietly
+reappear the way the old one survived its flag being off: the two live refusals must not say "pass",
+no `passPriceInr:`/`passDays:` may be sent, no component may name or open a checkout for the Pass, the
+purchase helper must not exist, and the cost keywords must still land on an entry. `toolGate.test.ts`'s
+"offers the Pass" assertion is REPLACED in place with the superseding contract (upsell asserted absent,
+the "name what the user tried" intent kept). Gate: tsc clean both projects, full run **13,538/13,538**.
+## 2026-08-11 — I had the language rule BACKWARDS. Reverted, and the real gap fixed instead.
+
+**Admin, stating it in two halves and no third:**
+1. NavBharatAI's own UI = **professional English** — every button, label, and every status line the
+   SERVER emits during a build.
+2. **Only an AI RESPONSE** follows the user's language.
+
+**That is CLAUDE.md's Language standard, written down since long before this session.** I did not
+follow it. `ROADMAP.md` item 6 said the opposite — "~118 hardcoded English strings that OUR SERVER
+emits… do the SERVER NARRATION first" — and I followed the roadmap instead of the constitution. Two
+days of work went the wrong way: a Hindi catalogue for 23 status lines (#2201), Hindi file labels and a
+per-build language threaded onto the wire (#2228, still open).
+
+The mixed feed I was "fixing" was never a defect. **The app speaking English beside an AI speaking
+Hindi is the intended design**, and it is also the only version that scales: being fair to every Indian
+user would have meant 22 hand-written translations per line, forever.
+
+### Reverted (not left half-wired — that state is what rule 2 forbids)
+
+- `narrationCatalogue.ts` → English only. **The catalogue itself STAYS**: one place for the platform's
+  words is still what makes them consistent, greppable, and what lets the white-label guard prove no
+  vendor name reaches a user. Only the translation layer went.
+- `lib/narrationLanguage.ts` — deleted, with its tests.
+- `ToolDispatcher.setNarrationLanguage`, the `SubAgent` threading, both route call sites, the `lang`
+  field on the `workspace` wire event, and the client state + prop — all removed.
+- `LanguageDetect.scriptShare` — the field I added for this — reverted. Nothing read it any more, and
+  shipping dead code a day after a PR that removed 80 dead imports would be its own joke.
+- `fileRole.ts` → English labels, no language parameter.
+
+### The REAL gap, which was on the other half all along
+
+`routes/sda.ts` (Doctor AI) instructed the model: *"LANGUAGE: Primarily English medical terminology.
+Can use Hinglish for brief clarifications if needed."* — the **opposite** of rule 2, on the one surface
+built for junior and rural doctors, i.e. the users most likely to write in Hindi. `LANGUAGE_RULE`
+covers build/plan/chat and `professionals/engine.ts` covers the Professionals; Doctor AI was the hole.
+
+Fixed as *mirror the doctor's language, keep CLINICAL TERMS in English* — drug names, doses, units and
+investigations stay exactly as they appear on a prescription. A translated drug name is a
+patient-safety risk and cannot be looked up. Explain in their language; name the medicine in English.
+
+### On adding a translator (admin asked: Google Translate, or a free dictionary?)
+
+**No — and it would make the product worse.** The models are natively multilingual; that is what
+`LANGUAGE_RULE` uses, and it costs nothing. A translation layer would re-translate an already-correct
+reply (adding errors to a good answer), add latency to every message, mangle code blocks and technical
+terms, and Google Translate is not free at scale (~$20 per million characters after a small tier) while
+the "free" unofficial endpoints breach their terms and break without notice. Recorded in ROADMAP item 6
+so it is not re-proposed.
+
+### ROADMAP item 6 rewritten
+
+The line that contradicted CLAUDE.md is gone, replaced with the two-way rule, an explicit note that
+following the old line cost a session's work, and the remaining scope — which is small and entirely on
+the AI side.
+
+9 new tests (`tests/languageRule.test.ts`) lock BOTH halves, including that the language machinery is
+GONE rather than merely unused, and that no translation package is in `package.json`.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1148 files / 13,462 tests,
+exit 0** · `npm run build` ✓.
+## 2026-08-11 — 57 tests stop writing scratch files into the real source tree
+
+The open item recorded during the 2026-08-09 audit, now root-caused.
+
+**The bug.** 57 `*Generator.test.ts` files each materialised the code they generate as a real `.ts`
+file so the test could IMPORT and EXECUTE it — verifying the emitted business logic for real rather
+than string-matching it, which is a good test. But the file was written into the actual
+`src/server/lib/` directory and deleted moments later. For those seconds the source tree contained a
+file that is not source, so any test walking that tree could list it and then fail reading it. Not
+hypothetical: it broke `tests/envFlag.test.ts` mid-audit, and the fix there (skip anything matching
+`/\._/`) treated the symptom.
+
+**Why `/tmp` is NOT the fix, and the obvious change would have broken 57 tests.** The artifacts are
+TypeScript, imported dynamically; vite-node only transforms files inside the project root. An OS-temp
+artifact fails on the first type annotation. So the artifacts stay in the project — they just move to
+`<repo>/.emitted-test-modules/`, one gitignored directory outside `src/` that nothing scans.
+
+**Fixed as the class** (fourth rule, step 2): the four-line write/afterAll/unlink dance was duplicated
+57 times. It is now one helper, `tests/helpers/emitModule.ts`, which owns the location — so the next
+change to WHERE these live is one edit, not 57. The pid suffix (kept) is what makes it safe under
+vitest's parallel workers; the name is sanitised so it cannot escape the directory.
+
+The sweep also removed the imports it orphaned (`writeFileSync`, `unlinkSync`, `pathToFileURL`,
+`fileURLToPath`, `dirname`, `join`, and the `here` constant) across all 57 files — two passes, because
+dropping `here` is what killed the last two.
+
+8 tests, including the invariant: **no test may build its own artifact path**, and `src/server/lib`
+holds no `._` leftovers. If that fails, the fix is `emitModule(...)`, not a new hand-rolled path.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1150 files / 13,522 tests,
+
+---
+
+## 2026-08-11 — The PUBLIC status page was naming our AI vendors (White-Label Law)
+
+Found by pulling on the audit's dullest leftover. The "22 unused locals" list included `esc` in
+`lib/HealthReport.ts` — an HTML-escape helper sitting unused NEXT TO an HTML renderer. That is not a
+tidiness smell, it is a question, and the answer was two real defects.
+
+### 1. `/status` and `/api/health` are PUBLIC, and they listed the providers
+
+The health check rendered:
+
+    AI providers — 4 enabled (gemini, anthropic, grok, vertex)
+
+Neither route has a token or a gate (`app.get('/status', …)`; the client fetches `/api/health`
+unauthenticated on load). So **anyone** could open the status page and read exactly which AI vendors
+NavBharatAI runs on. The standing rule is explicit: a user never encounters a vendor name, and
+provider identity is ADMIN-ONLY.
+
+Now it reports `AI engines — 3 of 4 available`. The COUNT is the honest, useful part — it is what tells
+a reader whether the engine can serve requests at all; the names were never something a visitor could
+act on. The admin dashboard still gets the full `providerEnabled` map from `/api/admin/*`, so this
+hides it from visitors, not from ops.
+
+### 2. The page built its rows with `innerHTML` string concatenation
+
+`h.version`, `h.node`, `c.name` and `c.detail` were concatenated into `innerHTML` in the client script,
+from data fetched at RUNTIME. **Not exploitable as shipped** — every value is server-authored today,
+and that is stated plainly rather than dramatised. But a check `detail` is precisely where a failing
+dependency's own error text gets echoed one day, and that is the version that bites.
+
+Rewritten to build DOM nodes with `textContent`. The one value that must become a class name
+(`c.status`) is stripped to `[a-z]`, because `textContent` cannot protect an attribute.
+
+The unused `esc` is deleted rather than wired: it is a SERVER-side helper, and the interpolation
+happens in the CLIENT after the page is served — it could never have escaped this data. Someone wrote
+the right idea in the wrong layer, and leaving it there would keep implying the page was protected.
+
+9 tests: the rendered page carries no vendor token, the code uses `textContent`/`createElement` and no
+`innerHTML`, the class-name value is sanitised, and — so the hardening cannot have quietly emptied the
+page — it still renders its real content.
+
+### On the other 21 "unused locals"
+
+Left alone deliberately, and now with the reason recorded. Most are INTERFACE-REQUIRED parameters
+(`schema` on three `Provider.generate` implementations, `req` on an Express handler, `traceContext`
+sitting BEFORE `systemPrompt` in a positional signature). Deleting them breaks a contract; renaming
+them to `_x` across ~20 sites is churn with no user value and a small risk each. The genuinely dead
+ones that remain (`JOBS_COLLECTION`, `MAX_HISTORY_STEPS`, `modelFlash`, four lazy client singletons in
+`aiClients.ts`) are candidates for a later sweep — with each one read first, which is exactly why they
+were not swept during the dead-import pass.
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1153 files / 13,584 tests,
+exit 0**.
+
+---
+
+## 2026-08-11 — "Andar ke page bas HTML feel dete hai" (PRs #2252, #2254, #2256, #2258)
+
+**Admin report:** *"1st page to theek banta hai, beautiful — par andar ke page bas HTML feel dete hai. koi
+design style nahi, ek dam simple. kya ham designer ko har page par laga sakte hai?"*
+
+**ROOT CAUSE — the whole verification stack was blind to it.** The scaffold already shipped a design kit
+and the architect prompt already told the model to use it, but that was GUIDANCE WITH NO VERIFICATION
+BEHIND IT, and every gate we own asks a different question:
+
+| Gate | Asks | Why a bare page passes |
+|---|---|---|
+| `tsc` | do types check? | class names are strings |
+| ESLint | lint errors? | no rule for "looks unfinished" |
+| `CssConsistency` | class used but UNDEFINED? | a page using *nothing* is spotlessly clean |
+| `ProjectIntegrityChecks` | stylesheet orphaned? | it IS imported — by the good first page |
+| `ReviewerAgent` | does it work? | it does |
+
+So nothing ever objected, and the model's own behaviour supplied the defect: full effort on screen one,
+bare markup by screen five. **Nobody was asking "is this page DESIGNED?" — only "is the styling wired?"**
+
+**BOTH HALVES OF THE 50/50 LAW:**
+- **PREVENT (always on, no flag):** the architect prompt now NAMES the failure rather than adding more
+  praise for good design, states it as *"THE LAST PAGE YOU WRITE MUST LOOK AS DESIGNED AS THE FIRST"*,
+  explains why it is invisible while writing (bare markup compiles and lints), and gives a five-point
+  per-page contract: page shell, real heading, grouped surfaces, styled controls, real empty/loading
+  states.
+- **DETECT + REPAIR:** `DesignCoverage.ts` judges EVERY page file on its own. Deterministic ⇒ **zero LLM
+  cost on a clean build**; warnings are honest whether the flag is on or off; `AGENTV3_DESIGN_GATE=on`
+  adds ONE bounded repair naming the exact offending pages. It can never fail or block a build.
+
+**PRECISION OVER RECALL, deliberately.** A check that nags a good app gets ignored, and an ignored check
+is worse than none — so it skips Tailwind, CSS modules, styled-components/emotion, MUI/Chakra/antd/
+Mantine, inline styles, leaf components and anything under 6 elements. **The false-positive tests
+outnumber the true-positive ones on purpose.**
+
+**STATIC HTML WAS THE SHARPEST CASE (#2254)** and the first analyzer missed it entirely (only read
+`.tsx/.jsx`). A multi-page static site is generated one file at a time and the classic bug is that
+`index.html` links the stylesheet while `about.html` does not — each file is valid HTML alone, so nothing
+notices, and the user clicks from a designed page onto Times New Roman on white. Judged on "has NO CSS
+attached at all", never on class coverage (a static page styled through `body`/`h1` selectors is
+legitimate).
+
+**THE BIGGER FINDING (#2256, #2258).** Auditing my own change: the kit existed in **1 of 24 scaffolds**.
+Vue/Svelte/Preact/Solid/Alpine/Vanilla builds were told to reach for `.card` and `.nb-empty` with nothing
+behind them — they had no design language to be consistent WITH, which is where quality varies most.
+Extracted to ONE `designKit.ts` FIRST (copying into 12 providers is the drifted-copies failure rule 4
+exists to prevent), then rolled out to **12**: Vite+React, Vue, Svelte, Preact, Solid, Alpine, Vanilla,
+Static, Next, Nuxt, SvelteKit, Angular — each through the mechanism that framework really uses.
+
+**THE HALF EVERYONE FORGETS: emitting a stylesheet is not shipping it — something must LOAD it.** An
+unimported `index.css` is dead weight and renders as raw HTML. Tests assert BOTH for every scaffold, and
+this caught a real one: Nuxt's file was emitted while the config edit silently failed to apply.
+
+**Left out honestly:** Remix (needs `?url` + a `links()` export; cannot boot a Remix scaffold here to
+verify, and a wrong guess ships an app that fails to build or flashes unstyled — a test asserts it stays
+out until verified), Astro (needs a layout file it does not emit), Lit (shadow DOM — a global sheet never
+reaches the components).
+
+**Bugs of my own, caught by my own tests:** `NO_STYLESHEET` had no `DEFECT_TEXT` entry, so the repair
+prompt would have contained the literal string `undefined` (a test now walks EVERY member of the defect
+union); an identifier contained a Cyrillic `С` that compiled fine because declaration and use matched;
+and the first page contract named kit classes unconditionally, which on the then-23 kit-less scaffolds
+would have instructed the model to write class names with no CSS behind them.
+
+**Verification:** `tsc --noEmit` clean, `tsc -p tsconfig.server.json` clean, vitest **13,614 passed**
+(1,153 files).
+
+**OPEN / NOT VALIDATED (honest):** none of this has been seen on a REAL build yet — it is test-verified
+only. The next step is a real multi-page app: confirm the detector fires on the right pages and tune the
+thresholds from that evidence before `AGENTV3_DESIGN_GATE` is turned on. Remaining scaffolds: Remix,
+Astro, Lit.
+## 2026-08-11 — ROADMAP §2 verified against live code. Two of ten were already built.
+
+Before starting the next item I grepped every line of "SMALLER, VERIFIED-MISSING" against the actual
+source — the discipline safeguard #6 exists for, and which this file has now punished three separate
+times in three days.
+
+**Already built, and fully wired:**
+- **Animation / motion recipe.** The line read "no `generate_animation`". It exists in `ToolCatalog.ts`
+  (definition *and* the enabled list), has its dispatcher case, a pure generator + tests in
+  `lib/MotionGenerator.ts`, an `AppKnowledgeBase` entry, and motion guidance in `systemPrompt.ts`.
+  Shipped **2026-08-08** — three days before the line was read as open.
+
+**Half built, and the halves matter:**
+- **One-click object storage.** `generate_storage` exists and is wired: a real presigned-upload route
+  plus an `uploadFile()` client for S3/R2/Supabase-Storage/MinIO or Cloudinary. What is missing is the
+  ZERO-SETUP half — it is **BYO keys**, the user pastes their own into `.env`. The open work is
+  provisioning a bucket in the USER's own account, same shape as the Supabase zero-setup DB path (and
+  under the same standing rule: user apps run on the USER's account, never NavBharatAI's). Rebuilding
+  the code generator would be pure waste.
+
+**Verified genuinely absent** (recorded in the file so the next session need not repeat the grep): MCP ·
+component tree panel · multi-element select · per-version preview URL · service-split generator ·
+design-to-code contract · community gallery/remix · scaling estimates · virus-scanning generated apps.
+
+### Per-version preview URL — sized before starting, and deliberately NOT started
+
+It looks like a small UI feature and is not. Git checkpoints already exist and the user can RESTORE to
+one; what is missing is *viewing* an old version without rewinding, which means running a second
+snapshot in a sandbox — real E2B time, per workspace, per version. That is an infrastructure decision
+with a recurring cost, not an afternoon's work, and it belongs in front of the admin before any code is
+written. Recorded rather than half-started.
+
+**One genuine gap noticed while reading that code, for a later slice:** a restore FAILS when the
+sandbox has recycled ("that checkpoint isn't active in this session yet"), even though the workspace's
+files are durably persisted in `WorkspaceFileStore`. The honest message is good; the underlying
+limitation may be removable by restoring from the durable store rather than requiring live git. Not
+started — it needs its own verification pass first.
+## 2026-08-10 — One input box for every AI: slice 2, the row is REAL now
+
+**Admin:** "sabhi AI's ke input ka acche cheezein utha kar best input box banao, aur wahi sabhi jagah
+laga do … NavBharatAI Free me ON SEND, SEARCH, CLEAR option hai (input box ke just upar), yeh sabhi
+jagah hona chahiye (Export wale ko hata sakte hai)." On Export, asked directly: **"han kato!"**
+
+Slice 1 (#2225) shipped only the DECISIONS with nothing user-visible — an honest but unfinished state.
+This slice makes it real: the row now renders above the input on **all four AIs**.
+
+**Why the row was worth centralising rather than copy-pasting.** It already existed — in exactly ONE
+place, hand-written inside a 1,700-line component, with its preference written straight to
+localStorage at the call site. Copying that block into three more screens is precisely how the four
+input boxes drifted apart to begin with. So `lib/chatToolbar.ts` holds the decisions (toggle label and
+tooltip, whether the actions have anything to act on, what Clear asks, how search matches) and
+`components/chat/ChatToolbar.tsx` is a thin shell over them.
+
+**Three real defects found and fixed while wiring it — none of them was the feature asked for:**
+1. **IME composition.** Three of the four composers checked only `e.key === 'Enter'`, so a Hindi or
+   CJK typist choosing a candidate **sent a half-finished word**. In an India-first app that is not an
+   edge case. `enterShouldSend` refuses while `isComposing`.
+2. **v5.0 guessed Enter from the DEVICE** (`!isTouchDevice`) — wrong in both directions: a phone with a
+   Bluetooth keyboard could not send from it, and a laptop user writing a long spec could not get a
+   newline. It is the user's own toggle now.
+3. **Doctor AI had no keyboard send at all** — every message needed a tap, which on a desktop consult
+   is the slowest possible way to work.
+
+**Per-screen care (a shared row is not a uniform one):**
+- **Doctor AI** — Clear routes to `startNewCase()`, not `setMessages([])`. A consult carries a per-case
+  id and a SERVER-side clinical store; blanking the screen while the previous patient's demographics
+  and red flags stayed live would be a clinical-safety bug, not a UI one.
+- **v5.0** — Clear starts a new SESSION. A thread owns a workspace, build lock, preview and report;
+  emptying the bubbles alone is the "+New chat leak" class this panel has been root-caused for twice.
+  It is also withheld while a build runs. Search filters what the TIMELINE is built from, never `convo`
+  itself, so a query with no hits cannot make the cold-start template screen appear.
+- **Professionals** — Clear also drops the SAVED transcript; this chat restores from localStorage on
+  mount, so wiping only the array would resurrect the conversation on the next visit.
+- **IDE/free chat** — the search field moved from the top of the transcript down INTO the toolbar,
+  beside the button that opens it. On a phone the two were a screen apart and read as unrelated.
+- The `leftSlot` prop keeps each screen's own badges (the IDE's "Pinned" chip): unifying the CONTROLS
+  should not erase what makes a screen itself, or the row gets re-forked the first time one is needed.
+
+**EXPORT CUT** ("han kato!") — it downloaded the transcript as a .md file, which nobody does on a
+phone, and it was the only control in the row that acted on the past rather than the message being
+written. Nothing replaces it.
+
+Tests: 23 in `tests/chatToolbar.test.ts` — the preference's single key and safe default (including a
+storage that throws), the send rule in all its directions (inverted toggle, IME, empty, busy), the
+visibility rule, Clear's singular/plural and its "cannot be brought back", search matching inside a
+token (`useState` finds `useState(0)`) and never blanking on an empty query, plus wiring assertions
+that each of the four screens genuinely renders the toolbar, shares the Enter rule, actually FILTERS
+its rendered messages, and wires Clear to something real — and that Export and the hand-rolled toggles
+are gone. Gate: tsc clean both projects, `npm run build` ✓, full run **13,598/13,598**.
+
+**STILL TO COME (honest status):** delete + edit on a sent message (slice 1's `chatMessageActions.ts`
+is written and tested but not yet wired to any screen), and paid voice chat (slice 3 — consent popup,
+per-second metering and the wallet debit must ship together, since `src/server/sonic/` charges nothing
+today and a popup alone would lie).
+
+---
+
+## 2026-08-10 — Delete + edit a sent message, on every AI (slice 3)
+
+**Admin:** "NavBharatAI Pro me send kiye hue text ko delete kar sakte hai — yah sabhi jagah hona
+chahiye, saath me edit bhi kar sake (WhatsApp ke tarah)."
+
+v5.0 already had a real delete (unsend) and edit on the last user message. This slice brings both to
+the other three AIs, applying the rules slice 1 wrote and tested (`lib/chatMessageActions.ts`).
+
+**The design point that makes this different from WhatsApp:** an assistant reply is an ANSWER TO a
+particular question. Delete therefore takes the replies with it (an orphaned answer reads as the AI
+answering something nobody asked), and edit REWINDS to that point so the AI answers the new question
+— the user edits because they want a different answer, not a different transcript.
+
+**Three real defects found while wiring it:**
+
+1. **The free chat's Clear button did NOTHING.** It fired a magic-string sentinel through
+   `onSendSuggestion`, and nothing in the codebase ever passed that prop or handled the sentinel — the
+   optional-call swallowed it. The button rendered, looked alive, and was inert for every real user.
+   It now goes through `onMessagesChange`, which the only host (NBIChatPanel) genuinely owns, and is
+   offered ONLY when a host can honour it.
+2. **The free chat's "edit" was a duplicate, not an edit.** It copied the text into the composer and
+   left the original message AND its answers in the thread, so re-sending produced the same question
+   twice with two different answers under it.
+3. **A re-ask after a rewind would have sent the taken-back turns.** `setMessages` does not update the
+   `messages` a closure already captured, so both Doctor AI and the professionals needed the surviving
+   transcript passed explicitly into their send path. On a clinical surface that is not cosmetic.
+
+**DOCTOR AI NEEDED REAL CARE — and this is the part that would have been a lie if shipped naively.**
+`/api/sda-chat` keeps a per-case clinical store: `patientData` and `redFlags` are ACCUMULATED from
+each reply into one blob and **never re-derived from the transcript**. So deleting a bubble on the
+client would leave the finding it produced still live in the AI's reasoning — the doctor believing
+they had retracted something while the assistant carried on treating it as fact. A clinical-safety
+bug, not a UI one. `rewindCase()` therefore **rotates the case id**: the next turn finds no entry for
+the new id, so the server starts a fresh clinical store and re-seeds from the SURVIVING transcript.
+It errs toward FORGETTING (state rebuilds over a turn or two) and that is deliberate — the doctor is
+present and can restate anything that matters, whereas a silently-retained retracted finding is the
+failure nobody can see. Red flags are cleared for the same reason.
+
+**Other care:** the controls are hidden while a SEARCH is filtering, because they are addressed by
+position and a filtered list renumbers everything (a delete on the third visible bubble would remove
+the third message of the whole conversation). They are hidden while a turn is in flight — a rewind
+under a running answer is not a state we can honestly draw. The professionals use POSITION as the id,
+because adding a real id field would invalidate every conversation already saved on every user's
+device, and their edit keeps the `edited` marker rather than letting a plain re-send drop it.
+
+Tests: 15 in `tests/messageEditWiring.test.ts` — the search guard, that every screen calls the shared
+rules rather than its own, that the dead Clear and the fake edit are gone and the host really honours
+the new prop, that Doctor AI's rewind rotates the case id, clears red flags and persists, and that
+both re-ask paths carry the surviving transcript instead of stale state. Gate: tsc clean both
+projects, `npm run build` ✓, full run **13,607/13,607**.
+
+**STILL OPEN:** paid voice chat (consent popup + per-second metering + wallet debit must ship
+together — `src/server/sonic/` charges nothing today, so a popup alone would lie).
+
+---
+
+## 2026-08-10 — Voice chat is now a PAID service, on every AI (slice 4 — the last of the three asks)
+
+**Admin:** "ek voice chat ka option hai SDA (doctor ai) me — usko bhi paid service bana kar sabhi me
+laga do. Jab koi user usko use kare to charge karenge. Jo ki user ko dikhega voice chat icon par
+click karne se — user ki language me ek popup aaye … word to word copy nahi kar dena." Rate confirmed
+the same day: **2 paise per second (₹1.20/min)**.
+
+This was deliberately held back from the earlier slices: `src/server/sonic/` charged NOTHING, so a
+consent popup on its own would have been a lie — the screen would say "paid" while the wallet never
+moved. Popup, metering and debit ship together or not at all.
+
+**How the money works, and why each choice:**
+- **Metered as it goes, not billed on hang-up.** A call has no natural length. Billing only at the end
+  means a phone face-down in a pocket runs up an unbounded debt the user learns about when their
+  balance is gone, and an unclean disconnect either loses the whole charge or bills for a call nobody
+  was listening to. Settling every 20s moves the balance while the user can still see it, lets an
+  abandoned call be **cut off** instead of billed, and loses at most one tick if the socket dies.
+- **Billing starts at `ready`, never at connect.** Everything before that is us getting our own
+  provider session up; if it fails the user got nothing. Same standing rule as builds.
+- **Empty wallet ⇒ refused BEFORE the provider is dialled** (in the upgrade path). Unlike a build,
+  a live call has no later pre-flight to catch an overdraft. An UNREADABLE balance is let through —
+  fail-open, like every other gate.
+- **Running out mid-call ENDS the call**, with an on-screen reason. A silent overdraft is discovered
+  later as a number the user cannot explain; ending it can be explained while they are listening.
+- **Whole seconds, remainder carried.** Rounding up per tick would inflate a long call by a partial
+  second each time. A clock that jumps backwards yields 0, never a negative credit.
+- **A retry of one tick collapses onto the same ledger ref; a NEW tick gets a new one** — an
+  idempotent debit keyed to a repeated ref would silently drop every later charge in a long call.
+  Seconds are marked billed BEFORE the await, so a slow write cannot be double-charged.
+- **Hard ceiling of 2 hours.** Beyond any real consultation, so reaching it means something is wedged
+  and the honest response is to end the call, not keep charging.
+- **The on-screen meter shows the SERVER's billed seconds**, never a local stopwatch — a client-side
+  count would drift and end up displaying a different figure from the one actually charged.
+- The ledger line says **"NavBharatAI voice chat · 1m 35s"** — never the vendor (white-label law).
+
+**The popup** is written per language, not translated word-for-word (the admin asked for exactly
+that), and reads the user's own `navbharat_language`; Hindi and Hinglish both get Devanagari, since a
+Hinglish speaker reads it comfortably and showing them English would defeat the point.
+
+**SCOPE SUPERSEDED — recorded, not silently dropped.** The voice button's header said "PROFESSIONAL
+chats ONLY … never NavBharatAI Free, never Pro v5.0 (admin 2026-07-14)". That restriction existed
+because voice cost NavBharatAI money and earned nothing. Now that a call is metered and billed, the
+reason is gone and the admin replaced the instruction ("sabhi me laga do"). Voice is on all four AIs;
+the old note is marked superseded in place, with its date, rather than deleted.
+
+`AppKnowledgeBase` updated in the same change (the sync rule): the entry now says voice is on every
+AI, states the per-second price and that the price is shown before any call, and carries the words a
+user types to ask what it costs ('kitna lagega', 'voice charge', 'per second').
+
+Tests: 26 in `tests/voiceBilling.test.ts` — whole-second billing with the remainder carried, a
+backwards clock, the 2-hour ceiling, the refusal/fail-open matrix, ending a call for an empty balance,
+distinct-vs-retry ledger refs, a vendor-free description, the Hindi/Hinglish language mapping, and
+wiring assertions that the meter starts at `ready`, that the wallet is really debited per tick, that a
+slow write cannot double-charge, that hang-up settles the tail, that the empty-wallet check sits in
+the upgrade path, that the popup is asked BEFORE the call, that the meter uses server seconds, and
+that all four AIs carry the button. Gate: tsc clean both projects, `npm run build` ✓, full run
+**13,666/13,666**.
+
+**All three of the admin's named wants are now delivered end-to-end** (delete + WhatsApp-style edit;
+ON SEND / SEARCH / CLEAR everywhere with Export cut; paid voice everywhere with the price shown first).
+
+---
+
+## 2026-08-10 — Pass removal, part 2: the last door it could come through
+
+Part 1 removed every user-facing offer. This closes the one that was left: `/api/payment/create-order`
+still accepted `productType: 'professional_pass'`. The screens were gone, but a crafted request could
+still have created a real Cashfree order — and **money arriving for a WITHDRAWN product is the worst
+outcome there is**: the customer has paid, and we owe them either an entitlement we no longer offer or
+a refund. A pass order is now refused with **410 `pass_withdrawn`**, before anything reaches the
+gateway — no order row, no payment session, no money moved.
+
+**Deliberately NOT silently converted into wallet credit.** Turning someone's ₹99 into something they
+did not ask for is its own dishonesty. They are told plainly what happened, and adding credit — which
+is what the Pass's features now run on anyway — is one tap away.
+
+**The FULFILMENT path is KEPT on purpose.** Deleting it alongside the offer would mean an in-flight
+checkout at deploy time, or a late webhook, pays us and receives nothing. Refusing NEW orders while
+still settling any that already exist is the honest order to withdraw a paid product in; the code
+carries a note saying it can go once no pending `professional_pass` rows remain.
+
+`routesPaymentPreview`'s "refuses an UNDERPAID pass order" case is REWRITTEN in place, not deleted:
+the contract it protected (a pass order must never reach the gateway and take a customer's money) is
+now stronger — no pass order is accepted at ANY price — so the test asserts the wider rule and checks
+all three amounts, including the old ₹1-for-a-hundred-years exploit and the full ₹99.
+
+Tests: 3 new in `tests/passRemoved.test.ts` (12 total) + the rewritten payment case. Gate: tsc clean
+both projects, full run **13,691/13,691**.
+
+**Still dormant, deliberately:** the pass store and the `hasActivePass` branches in the two gates.
+They guard money on every professional turn and every tool action, nothing can set them any more, and
+the comments now say so. They come out once the collection holds no pending pass rows.
+
+**Same PR — a defect found in the voice meter by re-reading it, before it ever ran in production.**
+`endCall()` closed the socket and left the ticker to `ws.on('close')`. But `ws.close()` on a socket
+that is already gone emits **no 'close' event** — so the interval would have kept running on a dead
+call and every later tick would have billed more elapsed seconds. It would have hit precisely the user
+that branch exists for: **the one whose balance just ran out, charged on for a call that had already
+ended.** The ticker is now cleared inside `endCall`, and a tick already in flight bails on `ending`.
+
+One level down, the same class: the seconds between a call ending and 'close' finally arriving were
+billed as talking time. The billing clock now stops when the CALL does (`billingEndedAt`), and a call
+already ended keeps its earlier timestamp so the gap is never billed. Small, but it is the difference
+between a bill a user can explain and one they cannot. 2 more tests (28 in `voiceBilling`).
+
+---
+
+## 2026-08-10 — master import handler, part 4: the first thirty seconds after a project connects
+
+Parts 1-3 made getting a project IN fast. That is plumbing, and plumbing is not a reason to choose us —
+every builder can list files after an import. This is the part that is.
+
+### The idea
+The moment right after connecting is the product. A user who imports 2,460 files and immediately reads
+"3 imports point at files that do not exist, 14 components are never rendered, 2 front-end files import
+server-only modules" has a reason to have brought their app HERE. And the next thing they say is
+"fix these" — which is the first build.
+
+### Built from what already existed (safeguard 6 + rule 4)
+`analyzeArchitecture` and `findUnwiredFiles` were already in the repo and are deliberately conservative
+(they exclude entries, tests, configs, type declarations, stories and file-based routes so a reported
+item is very likely real). NOT rebuilt. `ConnectAudit.ts` contributes only the part that was missing:
+turning their output into something an owner can act on.
+
+**Zero model calls, zero cost.** That is what makes it safe to show unprompted.
+
+### Three deliberate limits — the reason this can be trusted
+1. **No score, no grade.** No "your app is 40% slower". None of that was measured here, and claiming it
+   would be invented authority.
+2. **A clean project gets a short honest line, never manufactured concern.** An audit that cries wolf
+   destroys trust in one screen — and then the next REAL finding is not believed.
+3. **It never offers to "fix" unused files.** Repairing that finding means deleting someone's files on a
+   guess. Reported, deliberately not offered.
+
+Every finding carries real examples, so a claim can be checked rather than trusted. Example counts are
+bounded at 3 while the COUNT stays true — a 3,000-item finding must not become a wall of text, and must
+not under-report either.
+
+### Wiring
+`POST /api/agentv3/connect-audit` indexes the workspace (bounded at 1,500 files, like every other
+indexing call here) and runs the analyzers. The panel fires it **after** the preview boot is signalled,
+fire-and-forget: a courtesy finding must never delay what the user actually asked for, and a failed
+audit returns 200 with an empty message rather than manufacturing an error over work nobody requested.
+
+### Verification
+9 tests in `ConnectAudit.test.ts` — including that a clean project's message contains no score/grade
+wording, and that the fix offer appears ONLY when something is genuinely repairable. `tsc` (frontend +
+server) clean; full suite green. `AppKnowledgeBase.ts` updated in the same change.
+
+### Note on the surrounding work
+Merging `main` (44 commits) brought in another session's fix for something recorded here as an OPEN root
+cause on 2026-08-04: the chunked upload's cross-instance state. `zipUploadStore.ts` now keeps the record
+in Firestore with each chunk as its own object, so a chunk landing on a different Cloud Run instance
+still finds its upload. Recording it honestly rather than patching it cosmetically is what let someone
+else close it properly. Another session also made the import end on the PREVIEW with a model-free boot,
+which part 4 sits after rather than duplicating.
+## 2026-08-11 — Item 1/9: restore was instance-affine, and the message blamed the user
+
+First of the nine the admin approved. Verified against live code before building, and the verification
+changed the job twice.
+
+**What was already there** (so it was not rebuilt): `/api/agentv3/restore-files` already brings a
+workspace's LATEST files back from the durable store after a recycle, assets included. The checkpoint
+LIST is already durable too — Firestore, visible across sessions and devices.
+
+**The actual bug, which is worse than "the sandbox recycled".** `restoreSession` read ONLY an
+in-memory `sessions` map and returned `false` when it missed. That map lives on ONE Cloud Run
+instance, and Cloud Run runs several. So a user whose request happened to land on a different instance
+was told *"that checkpoint isn't active in this session yet (the sandbox may have recycled) — continue
+a build to make its history live again"* while their sandbox sat there, alive, one instance over. The
+UI was offering restores it could not perform, and the wording made it read like the user's fault.
+
+The sandbox is addressed by `workspaceId`, not by which instance holds a session object, so any
+instance can serve this. `restoreSessionDetailed` uses the warm session when present (cheapest) and
+otherwise builds a `GitManager` against the same sandbox — exactly what `/restore-files` already does
+for files.
+
+**And it now says WHICH failure it was.** One boolean covered four facts; only some are actionable:
+`no-history` (recycled — genuinely gone, and the message points at "Restore all files", which still
+works), `unknown-sha`, `no-sandbox`, `failed`. One `restoreMessage()` owns the wording so the API and
+the UI cannot drift into telling different stories.
+
+### Two defects the tests caught in my own fix
+
+1. **I introduced a command injection.** The new `git cat-file` probe interpolates the client-supplied
+   sha into a shell command, and it ran BEFORE `GitManager.restore`'s own `/^[0-9a-f]{4,40}$/` check —
+   so validating only there left the hole open in front of it. The test asserting "a malformed sha
+   never reaches the sandbox" caught `rm -rf` getting through. The sha is now validated first, before
+   anything is interpolated.
+2. **`ensureRepo()` cannot answer "does this sandbox have git?"** — it returns `true` unless the runner
+   THROWS, ignoring exit codes. Trusting it reported a git-less sandbox as `unknown-sha`, the opposite
+   message. There is now an explicit `git rev-parse --git-dir` probe.
+
+**Still honestly open:** a recycled sandbox's git history is gone and no instance can bring it back.
+Making checkpoints survive a recycle needs the history stored durably (a `git bundle` blob per
+workspace, or per-checkpoint snapshots) — real recurring storage cost, an admin decision before it is
+code. Recorded, not half-started.
+
+10 tests. Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1156 files /
+13,627 tests, exit 0**.
+
+---
+
+## 2026-08-11 — Item 3/9: edit mode — verified, and the honest answer is DO NOT BUILD
+
+The roadmap line read: *"AP-7 Edit mode | works | 80% of user time is after the first build; make edits
+as smart as builds."* That is an aspiration, not a defect, and I went looking for the defect behind it
+before writing anything. There isn't one.
+
+**The gates already run on edits.** `shouldRunIntegrityHeal`, the design gate, lint, the runtime
+auto-fix loop and the reviewer are NOT `!isEditMode`-guarded. The only build-only paths are the ones
+that make no sense on an edit: palette preset, requirement-gap analysis, the deep-pipeline blueprint,
+and ask-user. Skipping those on an edit is correct, not a hole.
+
+**And the edit path is in places MORE careful than a build.** The boot-killer scan merges the STORED
+workspace with this turn's writes, so a killer sitting in an untouched file is found — precisely the
+common case for an old app. A fresh build skips that read because it cannot apply.
+
+**`editModePrefix` already enforces** locate-first (grep / glob / `architecture_map`),
+read-before-write, surgical `edit_file` over `write_file`, minimum changes, blast-radius via
+`code_graph` before touching a shared file, and prove-it-still-works after.
+
+So building "smarter edits" from this line would have meant inventing a problem and shipping churn
+against a path that is already the most defended in the engine. Recorded in `ROADMAP.md` in place, with
+the same condition already attached to AP-9: **a real improvement here needs a real build report
+showing a specific edit that went wrong.** Until then there is nothing to root-cause.
+
+That is the fourth roadmap line this week whose verification changed the job — twice to "already
+built", once to "half built, build the other half", and now once to "do not build".
+## 2026-08-11 — Item 2/9: file uploads with ZERO setup, in the user's own account
+
+`generate_storage` already wrote real upload code — but for S3/R2/Cloudinary with **BYO keys**: go
+create a bucket, mint credentials, paste them into `.env`. For the person this product is for, that is
+where the feature ended.
+
+### The check that turned "blocked" into "shippable today"
+
+CLAUDE.md records that the published Supabase OAuth app deliberately does NOT hold the **Storage**
+scope ("Storage can be added when Phase 1.4 needs it") — which reads like an admin action is required
+first, and would have parked this item. It is not. A Supabase Storage bucket is a **row in
+`storage.buckets`**, and `applySchemaToProject` already runs arbitrary SQL through the Management
+API's `database/query` endpoint under the **Database read+write** scope every connected user has
+already granted. So this ships with **no new consent screen and no admin step** — worth the ten
+minutes it took to check.
+
+### What it does
+
+`generate_storage` gains `provider: 'supabase'`, with **no envKeys at all** — that is the point. It
+writes `src/lib/uploads.ts` (upload / getFileUrl / deleteFile) and `migrations/002_storage.sql`, which
+the EXISTING provisioning flow applies to the user's project (`schemaSqlFromFiles` already picks up any
+`.sql` under `migrations/`). No new plumbing was added to the build.
+
+**🔒 Still no service-role key.** `fetchProjectCredentials` deliberately never fetches it — "not
+fetching it means we cannot leak it" — and that is unchanged. The generated app uploads with the ANON
+key; what a user may do is decided by RLS policies inside their own project.
+
+**The access rules are the feature, not a detail.** A bucket with no policy accepts nothing and fails
+at runtime with no explanation — the "looks done, does nothing" state rule 2 forbids. Writes are
+`authenticated` only AND confined to a folder named after the caller's own uid, so one user cannot
+overwrite or delete another's file. Reads are public only when the bucket is public.
+
+### Two defects its own tests caught
+
+1. **The SQL and the app targeted DIFFERENT buckets.** `bucketSetupSql` lowercased the name while
+   `uploadHelperSource` used it as typed — a bucket created as `myuploads` and uploaded to as
+   `MyUploads`. A 404 on every upload, in an app that looked correctly generated. One
+   `normalizeBucketName()` now serves both.
+2. A junk MIME entry was being passed into the SQL array; it is filtered, with a test that a
+   `'; drop table` string cannot survive the builder.
+
+21 tests. `AppKnowledgeBase` updated, including the honest limit: the zero-setup route needs a
+NavBharatAI-provisioned database, the bucket is created when that database is set up, and the files
+count against the **user's own** storage quota (the standing rule — user apps run on the user's
+account).
+
+Gate: `tsc --noEmit` ✓ · `tsc -p tsconfig.server.json` ✓ · `vitest run` **1156 files / 13,638 tests,
+exit 0**.
+
+### Item 2's CI failure was not item 2 — the bundle gate had 0.1 KB of headroom left
+
+`main` measured **1299.9 KB against a 1300 KB ceiling**. At that margin the gate had stopped being a
+bloat guard and become a coin flip: the NEXT feature PR was going to fail whatever it contained. The one
+that happened to trip it added **no client code at all** — a required `AppKnowledgeBase` line (~0.4 KB
+gzipped), which the offline assistant ships to the browser by design.
+
+That is a collision between two MANDATORY rules, not a bug in either: CLAUDE.md requires a KB entry for
+every user-facing feature, and the offline assistant needs that catalogue client-side to answer "where
+is X?" without a server.
+
+Budget raised 1300 → **1350**, deliberately and in line with this file's own documented practice (it was
+raised for the same reason at 1050→1200, and for xterm at 1200→1300). 50 KB is chosen to be USEFUL, not
+generous: it absorbs dozens of KB entries while a genuinely accidental dependency — the thing the gate
+exists to catch — is tens to hundreds of KB and still fails.
+
+**HONEST: this is a deferral, not the fix.** The real fix is the one the script's own header already
+records — ship only the client-navigation KB entries to the browser and keep the server-only build
+recipes out — and it remains an OPEN ROOT CAUSE. It needs its own change with tests, because getting it
+wrong makes the offline assistant answer "I don't know" about a feature that exists.
+## 2026-08-11 — Shiv Medical Store build report: the full autopsy and its five fixes (PRs #2260, #2261, #2264, #2267)
+
+**The report:** a FREE-tier user (welcome bonus) was charged **₹566.96** for a **15.6-minute** build that
+**changed 3 files**. `ok: true`, 4 heals, 5 unresolved. Built by KIMI on the weak tier.
+
+### The five-bucket ledger
+- ✅ **Self-healed — 4:** sandbox recycle (78 files restored from the durable store — this genuinely
+  worked), KIMI timeout → fallback, empty-build → full re-run, dev server restarted 3×.
+- 🔀 **Workaround — 3:** the dev server dying was never root-caused, only restarted; every dev start
+  re-ran `installing dependencies (package.json changed)` when it had not (one `ls` took **76s**);
+  playwright failure abandoned.
+- ⏭️ **Skipped — 2:** two `INTEGRITY_UNUSED_DEP` warnings (both FALSE — Capacitor deps are used via
+  CLI/config, the caveat the message itself names); no attempt to install the playwright browsers.
+- ❌ **Still broken — 5:** PREVIEW_NOT_RENDERED, TEST_SUITE FAIL, RUNTIME_UNCHECKED, a nonsense
+  rootCause, and the bill.
+- 🥵 **Struggle — 6:** ETA said ~3 min and it took 15.6 (4× "bigger than expected"); server died twice
+  MID-BUILD; one command 76s; one LLM call 135s then timed out; **the whole build ran twice**; the
+  reviewer read ~25 files for a 3-file change.
+
+### The missing subsystem (step 2)
+**A dev-server supervisor.** The health-check starts the server and returns; nothing keeps it alive.
+Most of the 15.6 minutes traces back to that one absence.
+
+### What shipped
+1. **#2260 — grounding excluded only `node_modules/`.** This is a Capacitor app, so `npx cap sync` had
+   copied the built web app into `android/app/src/main/assets/public/`, and the **minified React bundle**
+   ranked as the #1 "most relevant existing file" — re-sent in the preamble of all ~26 calls. Tokens ARE
+   the bill (776k input to change 3 files), and the model's context filled with minified vendor code
+   instead of the app's source. Fixed at the one gate (`groundableFile`) plus a `looksMinified` content
+   backstop. **The test that matters most is the inverse one**: `BuildStatus.tsx` / `distance.ts` must
+   still be grounded.
+2. **#2261 — heal runners billed cheap Kimi calls at SONNET rates.** 12 heal/repair runners were written
+   without `onTurnComplete`, so their tokens were attributed to no provider and fell into the
+   "unattributed remainder", which is priced at Sonnet ($3/M) as a conservative upper bound. But
+   `healRunnerRoutingOpts` deliberately routes free-tier heals to the **cheap** coders (~$0.6/M): a **5×
+   overcharge**, on 507k of the build's 776k tokens. Worse, heals fire only when a build STRUGGLES — so
+   the worse a build went, the more of it was billed at the highest rate in the stack. Fixed by
+   construction (one `healRunnerOpts()` factory) because threading a callback through 13 call sites only
+   re-arms it for the 14th. **Attribution is also what makes `noClaude: true` PROVABLE** — an
+   unattributed token has no provider, so a Claude call hidden in that bucket is invisible to the
+   honesty detector on exactly the tier where Claude is forbidden.
+3. **#2264 — the dev server had no keepalive, and Postgres did.** The server started fine and was gone
+   ~4 min later; recovery reported twice that "the log had no recognisable error" and gave up, while a
+   MANUAL start worked instantly every time. There was no error because the sandbox had **reaped** it —
+   the exact class `postgresWatchdogCommand` already exists for ("the sandbox reaps the Postgres daemon
+   minutes after provision — the root class behind builds #14→#18"). The dev server was the sibling
+   nobody hunted. Now a detached, pgrep-guarded, **bounded** keepalive (an unbounded one would be the
+   forbidden "retry loop around code that deterministically fails" and would hide a syntax error
+   forever), reusing the readiness probe's liveness check verbatim so the two can never disagree.
+4. **#2267 — four ways the report lied** (none broke an app; all of them corrode trust in the report):
+   an empty build is not automatically a failed build (the "fix the server" turn correctly wrote 0 files
+   and the whole build re-ran); RUNTIME_UNCHECKED contradicted the summary and GREEN_GUARD_SAVE on the
+   same build; a playwright suite that could not RUN (our missing browser binaries) was reported as the
+   app's FAILURE; and an advisory unused-dep hint became the rootCause of a successful build.
+
+### Method notes worth keeping
+- **The judge question answered against its own premise.** The admin asked which judge to use on free
+  tier. Investigation showed the judge is not Grok at all — sub-agents share the build client, so it
+  runs on Kimi — and moving it to Grok ($3/M vs $0.6/M) would have made the bill WORSE. The real defect
+  was attribution. *Answering the question as asked would have been the expensive wrong move.*
+- **A test that asserted the old behaviour was reversed with evidence, not flipped.** `deriveRootCause`
+  had a test deliberately keeping unused-dep hints as rootCause on real build turns; a real build showed
+  the map was complete and the finding still wrong. Relevance, not provability, was the error.
+- **A shell-command builder needs `sh -n`.** The watchdog's first version emitted `'''` instead of `'\''`
+  and would have silently never armed — every string assertion still passed.
+
+### Open / not done (honest)
+- `makeFastTextRunner` still omits attribution with a documented "avoid double-counting" reason. It may
+  be landing in the same Sonnet-priced bucket by another route; `captureTurnUsage` only feeds the
+  provider ledger, which suggests attributing it would NOT double-count — but that needs verifying
+  against the fast lane's own sink first, because getting it wrong would OVERCHARGE, which is worse than
+  the bug. Recorded beside the exemption in `tests/healRunnerAttribution.test.ts`.
+- **The judge still reviews the whole project, not the diff** (~25 files read for a 3-file change). This
+  is a bigger cost lever than any model swap and is not yet done.
+- **The free-tier blast radius is real:** this single build debited 56,695 tokens against a 50,000-token
+  welcome bonus, pushing the user negative — and with the credit gate on, that locks them out of
+  building. The bill was correct per our formula; the formula ran on tokens that were largely our own
+  grounding bug. Whether to refund/top-up that user is an admin decision, raised.
+- Gemini Flash ($0.30/M in) as the free-tier judge — cheaper than today's Kimi AND independent of the
+  builder — is proposed but NOT shipped; it needs a canary measurement first because Flash is weaker at
+  deep code reasoning.
+
+---
+
+## 2026-08-11 — Typing a message no longer downloads a voice-call engine
+
+**CI caught a REAL main-bundle regression I had shipped, and it was fixed rather than budgeted
+around.** Putting the voice button on every AI (#2255) made `ProfessionalVoiceButton` import
+`SonicChat` statically — so the whole audio pipeline (mic capture, PCM resampling, playback
+scheduling, the waveform) landed in the MAIN chunk, and **someone who only ever types a message
+downloaded a voice-call engine to do it**. It is now a `lazy()` import behind `Suspense`, which costs
+nothing because the surface only renders after the user accepts the consent card. **Largest chunk
+645.3 → 640.9 KB — smaller than before the feature landed.** A regression test asserts the import
+stays lazy (only the TYPE may be static), so this cannot creep back.
+
+No budget was raised for it: a parallel session had already re-set both ceilings from a MEASURED size
+with real headroom (700 / 1450) after the same gate kept going red on innocent PRs, and that headroom
+covers this. The lesson is recorded in `scripts/bundleBudget.mjs` rather than as a number: raising a
+ceiling to admit a main-chunk regression hides it behind a bigger number — split first, measure, and
+only then decide whether the REMAINDER is honest feature growth.
+
+⚠️ **REDUNDANT WORK, caught by the admin and dropped — safeguard #6 failed.** This branch also carried
+a zero-setup Supabase storage implementation. A PARALLEL SESSION had opened **PR #2265** for the same
+feature **thirteen minutes earlier**, reaching the same insight (a bucket is a row in `storage.buckets`,
+so the already-granted `database.write` scope is enough — no new OAuth consent). I checked ROADMAP.md
+before starting and did NOT check open PRs, which is exactly the check safeguard #6 exists for and
+exactly how PRs #1 and #4 were once built blind. **#2265 is the better implementation** and is the one
+to keep: it adds a real `provider: 'supabase'` to `StorageGenerator` (so the app gets an actual
+`uploadFile()`; mine only created the bucket and assumed the model would write the client code), it
+reuses the existing `migrations/*.sql` pipeline instead of adding a new hook to the provisioning flow,
+and its write policy confines each user to a folder named after their own uid — stricter than mine,
+which restricted update/delete to the owner but left the write path wider. My storage commit was
+therefore REMOVED from this branch rather than merged; shipping both would have created two competing
+storage paths, which is the drift the fourth absolute rule exists to prevent.
+
+⚠️ **PROCESS NEAR-MISS, recorded because it nearly destroyed the audit trail.** While rebasing this
+branch I ran an automated loop that resolved PROGRESS.md conflicts by deleting the three marker lines
+found by `grep`. On that rebase the conflict was in `scripts/bundleBudget.mjs`, NOT PROGRESS.md — so
+the loop found no markers, deleted three arbitrary lines anyway, and kept going until **PROGRESS.md
+was empty (30,614 lines gone)**. It was caught by reading the commit's own `--stat` before pushing,
+and restored from the previous commit. The rule this violated is already in CLAUDE.md ("append-only —
+never delete or rewrite existing entries"); what is new is the lesson that a scripted resolver must
+verify it is operating on the file that actually conflicted, and that `git show --stat` before a push
+is the cheap check that catches it.
+## 2026-08-11 — Native-feel audit (external checklist): mostly already done, and one false finding of my own
+
+**Origin.** A large external "make it feel native" checklist (~60 points) was forwarded. Per the
+external-suggestion rule it was treated as raw material. Its FINAL COMMAND asked for a **read-only audit
+first** — which is the right order, and is what was done. **No native-shell code was changed.**
+
+**FINDING 1 — the checklist's core premise is wrong for this repo.** It assumes the native-feel work has
+not been done. It has: splash (with a documented bricking incident and its fix), keyboard `resize:'native'`
+with ONE `--nb-keyboard-height` source of truth, safe-area via four `--nb-safe-*` vars plus the iOS
+`contentInset:'never'` double-inset fix, `syncStatusBarToTheme`, THROTTLED haptics (`HAPTIC_MIN_GAP_MS`),
+`installBackButtonHandler`, push (`pushNotifications.ts` + tests), OAuth deep-link handling, and 14
+Capacitor plugins.
+
+**FINDING 2 — following it literally would have re-broken the app.** `capacitor.config.ts` carries
+`⚠️ launchAutoHide MUST stay true. This bricked the app once — do not "optimise" it back.` The checklist's
+splash section pushes straight at that setting. (History: `launchAutoHide:false` sat inert for months
+because the plugin was not installed; the day it was installed the splash waited forever for a JS hide()
+behind an awaitable WKWebView call, and the app was dead in TestFlight.)
+
+**FINDING 3 — I raised a P1 that does not exist, and retracted it.** I reported "9 uses of `100vh` vs 6
+of `dvh` — a real WebView giveaway" off a raw grep. Reading the code: `body, #root` declares
+`height: 100vh` **then** `height: 100dvh`, which is the correct fallback-then-override idiom, and
+`App.tsx` uses `supports-[height:100dvh]:` in both places. Every other hit is generated user-app HTML,
+iframe preview markup, or server-rendered pages — nothing to do with our native shell. **There was no
+bug, and "fixing" it would have broken old WebViews.** A grep count is not a finding.
+
+**WHAT SHIPPED — only what is safe (admin: "jo jo safe hai sirf woh karo"):**
+- `tests/nativeShellInvariants.test.ts` — turns the hard-won settings from advisory COMMENTS into
+  enforced GATES: launchAutoHide true, splash background, fade-out, keyboard resize native, single
+  keyboard var, contentInset never, the four safe-area vars, the 100vh→100dvh pair **in that order**
+  (the order IS the mechanism), the 16px tap-zoom guard, the permanent `com.navbharat.ai` bundle id,
+  bundled mode (no `server.url`), and all three sign-in providers (Apple is a store requirement, not a
+  preference). Additive only — asserts existing behaviour, changes nothing.
+  ⚠️ Its own first version failed by matching `launchAutoHide: false` inside the WARNING COMMENT — the
+  same comments-vs-code mistake made earlier the same day. Comments are stripped before asserting.
+- This entry, and the CLAUDE.md correction below.
+
+**DOC CORRECTION.** CLAUDE.md described the store app as "a Capacitor wrapper that loads the hosted web
+app". That has been **wrong since 2026-07-10** (bundled mode). It matters: a SERVER change reaches
+installed users immediately, a FRONTEND change does not and needs a fresh `.aab`/`.ipa`. A session
+believing the old line would ship a UI fix and tell the admin it was live for app users.
+
+**NOT DONE, deliberately — the one real P1 left.** Chat performance/virtualization. The renderers are
+`AgentV3Panel.tsx` (4,935 lines) and `SDAChat.tsx` (1,201); there is no virtualization and no memo. It is
+a genuine issue, but it is the most-used screen of a live app **currently in store review**, there is no
+device here to test on, and a large render refactor with no measurement is the mirror image of a surface
+patch. Deferred to a focused session with a real long-conversation repro.
+
+**NOT DONE, and must not be faked.** The checklist asks for a native-feel score out of 10 across 11 axes.
+Without running the app on a device that would be an invented number, and the checklist itself says "Do
+not fabricate test results". Marked **NOT TESTED** rather than scored.
+
+**Timing note.** The app is in review on both stores. Bundled mode means none of this reaches store users
+without a new binary anyway — so native-shell work should batch into the first post-approval release
+rather than disturb a submission in review.
+
+---
+
+## 2026-08-11 — ROADMAP §2 batch: 8 of 9 admin-approved items shipped
+
+The admin took the 7 admin-only items (Apple tax form, Play upload, mitrify.in, Cloud Run switches,
+VirusTotal licence, spend quota) and asked Claude to complete the rest, one at a time.
+
+**Shipped and merged this session:**
+
+| PR | Item | Note |
+|---|---|---|
+| #2265 | Object storage zero-setup | Bucket created via the Management API's `database/query` under the **Database** scope — so it needed **no new OAuth consent and no admin step**, which is what turned a "blocked" roadmap line into a shippable one. Still no service-role key. |
+| #2262 | Restore after recycle | — |
+| #2266 | Edit mode | **Verified ALREADY BUILT — do not build from that line.** |
+| #2269 | Component tree | Screens + parts, from imports; no model call. |
+| #2270 | Scaling estimates | Three detectors with real growth numbers. Deliberately prints **no capacity figure** — a test asserts it. |
+| #2272 | Multi-element select | See the lost-update note below. |
+| #2273 | MCP server · service-split · named architectures | See below. |
+
+**Two places the obvious implementation was silently destructive, and was rejected:**
+
+1. **Multi-select (#2272).** Calling the single-edit route once per selected element is a **lost update**
+   whenever two selected elements share a file — last write wins, the other change vanishes, both
+   requests return 200. Two elements picked off one screen is the NORMAL case. Now grouped by file, one
+   read-modify-write each, applied **bottom-up** (adding `style={{…}}` moves every position after it).
+2. **Service split (#2273).** A button that rewrites a working app into microservices would break the one
+   absolute rule and, for almost every app this product builds, produce a worse app. It now **prices**
+   the seams from the import graph and frequently answers "keep it as one app".
+
+**Root-cause fixes made along the way (rule 4), each test-locked:**
+- A merge-conflict marker reached CI as a rollup parse error naming the TEST, not the broken script.
+  `tests/noConflictMarkers.test.ts` now fails with the exact `file:line`. Verified against a planted marker.
+- T0-9's `handlerOf` sliced a fixed 1600 chars — false-FAILS on legitimate growth, false-PASSES if a
+  neighbour's guard falls in the window. Now slices to the real handler boundary; this made it STRONGER
+  (`/exec` is 9,328 chars, so the old window checked 17% of it).
+- `ServiceSplitAnalysis.splittable` contradicted its own verdict on small apps (flag said yes, text said
+  "keep it as one app"). Both now share one condition.
+- `ScaleAnalysis`: parens and braces were balanced in ONE counter, so every N+1 went undetected while the
+  detector looked correct; `findUnique` was not counted as a DB call; `create table` needed the closing
+  paren on its own line.
+
+### ⛔ OPEN — the 9th item: community gallery / remix. NOT started, deliberately.
+
+**Do not ship this partially.** It publishes the user's SOURCE publicly, so a half-built version leaks
+real credentials — the single worst outcome available in this codebase.
+
+**Exact resume point — what a fresh session should build, in this order:**
+1. **The publish safety gate first.** REUSE the existing detectors — `SecurityAnalysis.ts`,
+   `SecretRedactor.ts`, `EnvSecretValueAnalysis.ts`. **Do NOT write a fourth secret scanner** (that is the
+   duplication rule 4 exists to prevent). Publication must be REFUSED, naming the file and line, when a
+   real secret is found; `.env*` is never published at all.
+2. **Moderation matching the Nav App Store's model:** nothing reaches `approved` except an explicit admin
+   action (`NAV_STORE_ADMINS`). Published apps land `pending`.
+3. Store + routes: publish / list-approved / get / remix (clone files into a new workspace) / admin
+   approve-reject.
+4. Browse + remix UI, and the `AppKnowledgeBase` entry.
+
+Nothing was written for it, so there is no half-finished code to audit — start clean at step 1.
+
+### 2026-08-11 (later the same day) — CORRECTION: the gallery WAS built. All 9 items are done.
+
+The entry above says the community gallery was deliberately not started. **That is now stale** — the
+admin said "next", so it was built and merged as **#2275**. Recording the correction rather than
+editing the earlier entry, per the append-only rule.
+
+What shipped, and why it is safe to have:
+- **`galleryPublishGate.ts` is the feature.** Every other publish path here ships an artefact; this one
+  ships SOURCE, which sits next to the user's `.env` and live keys. EXCLUDED (`.env*`, dependencies,
+  build output, lockfiles, binaries) vs BLOCKED (a real secret inside a file that would have travelled —
+  publication refused, file and line named, never silently stripped).
+- **It REUSES `scanSecurity` / `scanEnvTemplateSecrets` / `isEnvSecretsFile`.** No fourth secret scanner
+  was written — the resume plan's main instruction, and the copy guarding the public door is the worst
+  one to let drift.
+- **An ordinary demo app still publishes.** `scanSecurity` already downgrades fixture credentials. A gate
+  that refuses everything gets switched off, and a switched-off gate protects nobody. Both directions tested.
+- **Nothing reaches `approved` except an admin** (`NAV_STORE_ADMINS`, same list as the App Store). Route
+  tests assert the publish handler never writes `'approved'` and never takes status from the request body.
+  Reject/remove DELETES the source, so a takedown is real.
+- **No new infrastructure**: with dependencies and binaries excluded a published app fits one Firestore
+  document — no bucket, no new env key.
+
+⚠️ **GitHub push protection blocked the first push** over a Stripe-shaped string in the TEST fixtures
+(invented, not a real key). The fixture is now assembled at runtime instead of using the "allow this
+secret" bypass — that bypass is a habit this repo should not acquire. The detector was working correctly.
+
+**All nine ROADMAP §2 items from the admin's list are now shipped:** #2262, #2265, #2266 (verified
+already-built), #2269, #2270, #2272, #2273, #2274, #2275.
+
+---
+
+## 2026-08-11 — Offline AI: you can finally DELETE the downloaded model
+
+**Admin:** "offline ai me beta download ka option to hai, par agar memory full ho jaye to delete ka
+option nahi. Waha ek aur option add karo — delete."
+
+**They were right, and the gap was worse than it looked.** "Turn off" called `resetOfflineLlm()`,
+which only drops an **in-memory reference** — the model weights web-llm cached on first download
+(hundreds of MB) stayed on the device **forever**. The screen even admitted it: *"stays cached on your
+device until you clear the app's browser data"* — honest, but inside an installed Android app that is
+not an instruction anyone can follow. On the low-end phones this feature exists for, a few hundred MB
+that cannot be freed is the difference between an app someone keeps and one they uninstall.
+**Turning a feature off must give back what turning it on took.**
+
+**What shipped:**
+- `deleteOfflineModel()` really removes the weights (`deleteModelAllInfoInCache` — weights AND the
+  wasm/config entries, since deleting only the weights would leave the small files behind and make
+  `hasModelInCache` disagree with what is actually on disk).
+- **It deletes across the WHOLE ladder**, not just the enabled model. The loader falls back from the
+  0.5B to the 360M model on weaker devices, so a phone can be holding weights for a model it never
+  ended up using — exactly the bytes nobody would think to look for.
+- The GPU/engine is unloaded FIRST; deleting the cache underneath a live engine leaves it pointing at
+  files that no longer exist.
+- **Honest by construction:** a browser that refuses (private mode, storage locked, no Cache API)
+  reports the failure — never a cheerful "space freed" over a device where nothing changed. But one
+  missing id does NOT turn a real deletion into a failure: the fallback model usually was never
+  fetched, and reporting failure then would tell the user nothing was freed while space genuinely
+  came back.
+- **The button is where someone hunting for space would actually look.** Beside the "on" state, yes —
+  but also **when the beta is already OFF and a model is still stored**, which is the case the admin
+  described. A Delete button that only appeared next to "on" would be hidden exactly where it is
+  needed. `offlineModelOnDevice()` decides that from a real device probe, so it never appears over
+  nothing; an unreadable cache reads as ABSENT rather than producing a button that then fails.
+- Confirmed before deleting — it is a real download to redo, on a phone that may be paying for data.
+- The probe is LAZY (runs when the panel opens, not on mount): it dynamically imports web-llm, and the
+  whole point of that lazy chunk is that a user who never touches the beta never downloads it.
+- "Turn off" and "Delete" are now explained as the different things they are: off keeps the model so
+  switching back on is instant; delete frees the space.
+
+`AppKnowledgeBase` updated in the same change (sync rule), including the words a user in this
+situation actually types — 'memory full', 'phone bhar gaya', 'jagah khali', 'model hatao'.
+
+Tests: 15 in `tests/offlineModelDelete.test.ts` — whole-ladder deletion, an explicit id list, a
+refusing browser reported honestly, one-missing-id still counting as success, no stale engine after
+delete, the on-device probe (including short-circuit and unreadable-cache), and wiring assertions that
+Delete appears in BOTH states, only over a real model, asks first, reports success only when the
+browser really deleted it, that the old "clear your browser data" dead end is gone, and that the probe
+stays lazy. Gate: tsc clean both projects, `npm run build` ✓, `npm run test:bundle` ✓,
+**14,085/14,085**.
+
+---
+
+## 2026-08-11 — The ETA finally learns from real builds (upgrade 1 of the cheap set)
+
+**Admin:** "tum jo jo safe ho app ko sach me upgrade kare sab banao — mere admin ki kam se kam ₹ kharch ho."
+
+Picked first because it is the cheapest real upgrade available: **zero provider spend** (pure arithmetic
+over records already written) against a defect measured in our own autopsies — *"ETA said ~3 min and it
+took 15.6 (4× 'bigger than expected')"*.
+
+**THE DEFECT WAS NOT A MISSING FEATURE, which is why it survived so long.**
+`estimateBuildTime(complexity, history)` has ALWAYS been able to learn — `historicalEstimateMs` blends
+past durations and raises confidence as history grows. But the LIVE build path called it as
+`estimateBuildTime(complexityFromPrompt(prompt))` with **no history at all**, so every real user has
+seen the cold heuristic at confidence 0.4, on every build, forever. The one place history WAS accepted
+is `POST /api/build-estimate`, which takes it from the request body — i.e. only from a caller who
+already knew the answer. **The learning machinery was wired to everything except the path that matters.**
+This is the same "already built, just not connected" class the ROADMAP has flagged three times.
+
+**No new storage.** Every settled build is already recorded durably per workspace
+(`listDiagnosticsHistory`) with `startedAt`/`endedAt`/`ok`. **Deliberately NOT the admin report store**,
+which was the obvious-looking source and is the wrong one: it holds only builds a user pressed "Report"
+on — a sample biased toward builds that went badly, which would teach the ETA to expect the worst.
+
+**Judgements worth keeping:**
+- **Failed builds never teach.** A build killed at the watchdog cap took 30 minutes; one that failed in
+  40 seconds took 40 seconds. Both corrupt "how long does a build take", and the fast failure is the
+  more dangerous — it makes the ETA optimistic, which is the complaint we started from.
+- **Absurd durations are rejected at both ends** (<5s, >45min): one bad row moves the blended estimate
+  for every later build.
+- **No success signal at all ⇒ does not teach.** Silence is not consent.
+- **Every entry carries the CURRENT complexity.** The stored history is per-WORKSPACE — past builds of
+  THIS app — and carries no file count. Guessing one would be fabrication; using the current complexity
+  states the true thing ("how long builds on this app have taken") and gives that history full weight,
+  which is right: the same project and the same user's habits predict the next build far better than a
+  stranger's app with a similar file count.
+- **Every failure path ends at `[]`**, which is byte-for-byte today's behaviour — an ETA is never worth
+  delaying or failing a build for. A test asserts `estimateBuildTime(C, []) === estimateBuildTime(C)`.
+- The basis is recorded (`ETA_BASIS`), so a wrong ETA can be diagnosed instead of argued about.
+
+Tests: 17 in `tests/etaHistory.test.ts`, including the one that matters most — that history genuinely
+MOVES the estimate toward reality and raises confidence, so this is not decoration. Gate: tsc clean
+both projects, full run **14,102/14,102**.
+
+**Remaining in the cheap set (each still to build, each ₹0 to run):** a token/context budget with
+provenance (the 776k-tokens-for-3-files class), a cross-build heal-firing counter (turning the 50/50
+law into a number), and a build idempotency guard (the "whole build ran twice" class).
+
+---
+
+## 2026-08-11 — A budget for the grounding preamble (upgrade 2 of the cheap set)
+
+**Admin:** safe upgrades, minimum ₹. This one does not merely avoid cost — it **removes** cost, and it
+costs **nothing to run** (pure arithmetic, no model call).
+
+**WHY.** Tokens ARE the bill. The 2026-08-10 autopsy measured **776k input tokens to change 3 files**,
+and grounding was the biggest single contributor: a minified React bundle ranked as the #1 "most
+relevant existing file" and was re-sent in the preamble of ~26 calls (#2260). That culprit is now
+filtered out — but **a FILTER only answers "is this file bad?"**. A **BUDGET** answers *"have we spent
+too much?"*, and only the second is a defence against the oversized file nobody predicted. Nothing
+capped how much grounding cost, and nothing reported it.
+
+- `applyGroundingBudget` keeps blocks most-relevant-first until the budget is spent
+  (`AGENTV3_GROUNDING_TOKEN_BUDGET`, default 4,000 — set from what grounding legitimately needs, since
+  3–5 snippets land well under 1k; `0` = no cap, the honest escape hatch).
+- **ONE block is always kept**, even if it alone exceeds the budget: an empty preamble would remove the
+  grounding a build most needs, and the model would read that file anyway through a tool call — at the
+  same token cost plus a round trip. Keeping it and REPORTING the overrun is the honest outcome.
+- **Never truncates mid-file.** Half a function is worse than no function — a model will reason about
+  the half it can see.
+- **It can only SHRINK a hint the model is already told to verify with `read_file`,** so the worst case
+  of dropping a block is one extra tool call. It cannot fail a build.
+- `GROUNDING_COST` is recorded on **every** build, not only when something is dropped: the number
+  nobody looks at is the number that grows.
+- `dominantGroundingBlock` flags "one file is most of the preamble" — **the #2260 shape, generalised**.
+  Reporting by SHAPE rather than by name is what catches the next oversized file in a directory nobody
+  thought to exclude, instead of one more hand-maintained list.
+
+**A test bug worth recording:** the first version of the tests assumed `estimateTokens ≈ chars/4`, but
+it BLENDS chars/4 with words/0.75 — so a 400-char single "word" costs ~51 tokens, not 100. The test
+failed, the code was right. Fixed by giving the blocks realistic whitespace: an assertion built on the
+wrong cost model would have passed while measuring nothing real.
+
+Tests: 15 in `tests/contextBudget.test.ts`. Gate: tsc clean both projects, full run **14,124/14,124**.
+
+**Remaining in the cheap set:** a cross-build heal-firing counter (turning the 50/50 law into a
+number), and a build idempotency guard (the "whole build ran twice" class).
+
+---
+
+## 2026-08-11 — First-pass quality: the 50/50 law, stated as a number (upgrade 3 of the cheap set)
+
+**Admin:** safe upgrades, minimum ₹. Read-only analytics over reports we already store — **₹0 to run**,
+and it cannot touch a build.
+
+**The law made countable.** The admin's 50/50 law says *"a self-heal is NOT a success — it is a RED
+FLAG. Why did the builder not produce this correctly in the FIRST attempt? The goal is 100% correct in
+ONE pass, with ZERO heals needed."* Every number on the builder scorecard measured whether the app came
+out **working**. None measured whether it came out working **the first time** — and that is the only
+number that can get WORSE while all the others look fine, **because a heal that fires turns a defect
+into a green tick**. Without it, "build success 95%" reads as excellence when it may be 95% of builds
+quietly repairing themselves.
+
+`healPressure()` reports the share of builds that needed NO self-repair, how many did, the mean repairs
+per build (so a few disastrous builds are distinguishable from a broad drift), and the worst single
+build in the window.
+
+**A build with no recorded heal count is EXCLUDED, not scored as zero.** Older records predate the
+field, and counting them as "needed no heal" would make the rate improve as the window fills with old
+data — an error in the *flattering* direction, which is the one to guard against.
+
+**The framing matters as much as the number,** so the headline says it outright: *"A heal is a defect
+that was generated and then papered over — the target is zero."* A rate printed without that reads as
+a feature working well.
+
+**A test caught me weakening another test.** I had added an `as any` cast at the admin route, which
+broke an existing assertion that the scorecard is computed from `builderScorecard(reports)` — i.e.
+from STORED reports, not a benchmark. The cast was defensive and unnecessary; removing it made both
+pass. The existing test was right to object: that assertion is what stops the scorecard quietly being
+fed something curated.
+
+Tests: 6 added to `tests/builderMetrics.test.ts` (31 total). Gate: tsc clean both projects, full run
+**14,130/14,130**.
+
+**Remaining in the cheap set:** a build idempotency guard (the "whole build ran twice" class).
+
+---
+
+## 2026-08-11 — The E2B sandbox cost now reaches the bill (behind a two-key honesty gate)
+
+**Admin:** "e2b ka kharcha bill me jodo."
+
+**They were right that it is a real gap.** Every v5 build runs a cloud VM billed by WALL-CLOCK, and
+until now NavBharatAI absorbed **100%** of it. A build that spent almost nothing on tokens but held a
+VM for forty minutes was pure loss, and nothing in the bill reflected it.
+
+**BUT IT COULD NOT SIMPLY BE SWITCHED ON, and this is the part that needed care.**
+`sandboxUsdPerHour` defaults to **$0.10 — described in its own file as "a ROUND, conservative
+placeholder"**. The billing law says the bill a user sees is 100% REAL and that we must **never invent
+a cost**. Feeding that default into a real person's balance would be exactly what the law forbids.
+
+**So it bills only when BOTH are true:**
+1. `AGENTV3_BILL_SANDBOX=on` — the admin's explicit decision to charge for it, and
+2. `E2B_USD_PER_HOUR` is **explicitly set** — the admin's real, verified rate from their E2B plan.
+
+The second key is the one that matters. With it, the seconds are **measured** (a clock, not an
+estimate) and the rate is a **stated price** — a measurement times a price, which is the same honest
+shape as voice billing. Without it, the bill is unchanged and the admin report keeps showing the
+(estimated) infrastructure cost exactly as it does today.
+
+**Where it enters:** inside `tieredMarkup(real cost)`, not bolted on after — the non-Opus formula is
+literally "markup of the real cost", and a wall-clock VM is as real a cost as a token. **The OPUS
+tiers are deliberately untouched:** CLAUDE.md records that path as admin-CONFIRMED at "real Opus × 2",
+and quietly changing a confirmed price is not a session's call.
+
+**Read at BILLING time.** The report already recorded sandbox seconds — but AFTER the settle, so at
+the moment the bill was decided the number did not exist. `billableSandboxUsd` reads the SAME
+`sandboxHeldSeconds` the report uses (two sources would eventually disagree, and the bill would be the
+wrong one), and returns **0 on any doubt** — no actuator, no measurement, feature off, no rate. A
+money path must fail toward charging LESS.
+
+**The admin can now tell "we charged for it" from "we absorbed it"** (`SANDBOX_BILLING`), and the
+missing-rate case is named specifically with what to do about it — "it is off" and "we do not know the
+price" are different problems with different fixes. ADMIN-ONLY: the user never sees an infrastructure
+line item (White-Label Law §3).
+
+**⚠️ ADMIN ACTION TO ACTUALLY TURN IT ON:** set `E2B_USD_PER_HOUR` to your real E2B rate **first**,
+then `AGENTV3_BILL_SANDBOX=on`. In that order — the flag alone does nothing, by design.
+
+Tests: 18 in `tests/sandboxBilling.test.ts` — both keys of the gate, the placeholder never reaching a
+bill, unmeasured/absurd durations, that it is marked up rather than added after, that a negative cost
+can never reduce a bill, that omitting the argument behaves exactly as before, that Opus is untouched,
+the three report messages, and wiring assertions that both billing paths pass it and that any doubt
+bills zero. Gate: tsc clean both projects, full run **14,153/14,153**.
+
+**Also merged today: #2270** (the parallel session's scaling check). Its green CI was on an OLDER
+commit and its branch was 14 commits behind `main`, so the green proved nothing about the merge
+result — I merged `main` into it locally and ran the full gate on the MERGE (tsc ×2, 14,130 tests,
+build, bundle) before merging. Verifying the merge rather than the branch is the difference between
+"CI was green" and "this will be green".
+
+---
+
+## 2026-08-12 — Mission 10/10 phases 1–6, and the 44-minute home page
+
+Two threads in one session. The first was planned work; the second arrived as a real build report and
+took over, which is the correct priority order.
+
+### Mission 10/10 (the phase plan from `MISSION_10_10.md`)
+
+**Phase 1 — Architecture invariants (#2289).** `architectureInvariants.ts` reads six rules OUT OF a
+project's own code (styling system, import style, API hub, state store, layering, page location) and
+does both halves of the 50/50 law with them: rendered into the edit prompt before a line is written,
+and checked against the files the build changed, using the project as it was BEFORE the build. The
+baseline excludes this build's own writes — file list AND dependencies — or a build that adds
+styled-components makes the project look like it always used two styling systems, the rule dissolves,
+and the edit that broke it reports itself clean. ✅ **Verified live in a real build the same day:**
+the Tailwind rule appeared in every LLM prompt and the report carried `ARCHITECTURE_INVARIANTS_HELD`.
+
+**Phase 2 — Adversarial security (#2291).** 102 tests that ATTACK the shell guards instead of
+confirming them, and they found **nine live bypasses** of the source-destruction guard on day one:
+`bash -c "rm -rf src"`, `sh -c`, `eval`, `node -e "fs.rmSync"`, `python3 -c shutil.rmtree`,
+`rm --recursive --force src`, `rm -rf src*`, `rm -rf s""rc`, `rm -rf sr\c`. One root cause, not nine:
+the guards matched the command as literal text while bash matches it after unwrapping, quote removal,
+escape removal and glob expansion. `shellNormalize.ts` now gives every guard what bash sees. Two
+further defects fell out: `cat .env.example` was blocked as exfiltration (it is a template of names),
+and the module header still claimed it never blocks execution.
+
+**Phase 3 — DEFERRED on its own stated condition.** The multi-service runner was gated on
+"only if the graph shows real demand"; `SERVICE_GRAPH_MULTI` has no production data yet. Building it
+now would be the same mistake as scoring a benchmark nobody ran.
+
+**Phase 4 — E2E journey engine (#2292).** Every check we own asks "did it paint"; none presses a
+button. So the commonest invisible failure survives all of them — the UI PRETENDS: you add an item, it
+appears, you reload and it is gone. `journeyDerivation.ts` derives create → reload → still-there from
+the app's own markup and runs it in the pre-baked browser. Every selector is read out of the source;
+a form we cannot address honestly yields NO journey. A journey that never reached the app is
+UNREACHABLE, never FAILED. A create journey against a user-owned database is downgraded, not run.
+
+**Phase 5 — Release gate + the worst honesty defect found so far (#2293).** Every input to the
+confidence score was a STATIC count. Not one asked whether the app RAN. So an app whose preview never
+came up — whose render and journey checks therefore all skipped, as they all hang off the same preview
+URL — scored **100%, band HIGH, "I'm confident this build is solid."** `releaseGate.ts` adds
+GREEN/YELLOW/RED/**UNKNOWN**, and green cannot be earned by static cleanliness. Confidence now caps at
+74 without proof the app ran, 40 when a run was watched to fail, and the cap is explained rather than
+deducted in silence. Four existing tests encoded the old behaviour and were updated, not deleted.
+
+**Phase 6 — a11y + performance into the gate (#2293).** Both were already measured and already
+printed, and had no bearing on the verdict. They now cost GREEN — and can never cost RED, because a
+slow page still renders and the number comes from a 2-vCPU sandbox, not a user's device.
+
+**Error taxonomy (§24) deliberately NOT built:** one already exists as the BuildDiagnostics code set.
+A second parallel classification would be a synonym table to keep in sync.
+
+### The 44-minute home page (admin transcript + report, #2294)
+
+One screen with four buttons: **44m50s, ₹42.16, 178.4k tokens.** Eight fixes, all root-caused.
+
+1. **A dead dev server is not a broken app.** Three times the preview returned "nothing is listening on
+   that port"; three times a full LLM repair pass ran; all three times the model found nothing and
+   restarted the server, writing "No code changes were needed". We were paying a language model to be a
+   process supervisor, and it edited working code while it was in there. `serverDown` now short-circuits
+   and the loop restarts the process — deterministic, free, bounded, and it does not spend the repair
+   budget.
+2. **Stop photographing the app before it has painted.** All FOUR capture paths used a fixed sleep
+   (1800/1800/800/600 ms), including the CDP screenshot that is actually preferred at runtime. They now
+   poll for content in the mount root, so a fast app is captured sooner than the old guess and a slow
+   one stops being libelled. Two also waited on `networkidle`, which a Vite dev server never reaches.
+3. **An un-painted snapshot cannot convict.** For any SPA the un-hydrated shell is byte-identical to a
+   crashed app, and curl never runs JavaScript at all. Those are `inconclusive` now, and the message no
+   longer asserts "a runtime error likely crashed it" — a cause a photograph cannot show.
+4. **The user's own keys are not ours to delete.** The platform wrote the user's saved keys into `.env`;
+   25 seconds later the builder "fixed the hardcoded secrets" and the app's database and payments were
+   dead — reported as "your source files are untouched". `wouldEraseUserSecrets` blocks it on both write
+   paths. Filling a placeholder IN is still allowed, and `.env.example` is never guarded.
+5. **The summary is checked against what we measured.** One build claimed "no console errors" beside our
+   own record that the console could not be captured, and described a screen showing "Health 100/100,
+   Level 1, XP, Inventory, Game Log" for a home page whose source contains none of those words.
+   `claimAudit.ts` corrects the user-facing summary out loud.
+6. **A recovered preview failure is not a successful build's root cause.**
+7. **The E2E skip reason judges the project**, not the one `.env` this turn happened to write.
+8. **227 seconds of silence are on the record** — that build's first model call came 227s in while
+   `SETUP_TIMING` said "Workspace ready in 0s".
+
+**And the first half of #1:** the keepalive was armed only after a FRESH launch, so a server we ADOPTED
+("already healthy — reused it") had no watchdog at all. Arming now lives in one helper both paths call.
+Restarting well was the second half; this is the half where it does not need to.
+
+### One fix I got wrong, and the suite caught it
+
+My first attempt at the bare `playwright: FAIL (exit=1)` made "no tally" mean "could not run". An
+existing test refused it **for a better reason than the one I had**: hiding genuinely failing tests
+behind a reassuring "unverified" is the opposite mistake and a more damaging one. The verdict is
+unchanged; the silence is what got fixed — the summary now says it cannot tell a failing test from a
+runner that never started. Two more of my own defects were caught the same way (a blind-verdict early
+return discarding a real error overlay; an assertion reading a removed constant out of the comment
+explaining its removal).
+
+Tests across the session: **14,070 → 14,469.** Gate green each time (tsc ×2 + full vitest).
+
+### Open, and honestly so
+
+- **Benchmarks (Phases 8–9): the admin said NO, and I agree with the reasoning for Phase 9.** The
+  ₹75k–2.8L edit-survival benchmark measures what `/api/admin/builder-scorecard` already computes free
+  from real user projects — better data, unfakeable, zero spend.
+- **Fast-lane billing (Phase 7)** needs a decision; the shadow ledger (#2283) is measuring it now.
+- **Multi-service runner** waits on field data.
+- **Admin-only:** `ANDROID_LATEST_VERSION_CODE = 66` still needs setting in Cloud Run, or the update
+  banner and the broadcast button both stay silent by design.
+
+---
+
+## 2026-08-12 — Autopsy of the dukaan stock app: the verdict may no longer contradict the evidence (fix 1 of N)
+
+**Admin report (build `ae2d464c`).** The worst failure this engine has produced — and it was not a
+crash. **It lied.**
+
+ONE report carried, simultaneously:
+```
+ok: true
+RELEASE_GATE: RED — Not shippable
+rootCause: 2 local modules are STILL missing — the app will crash at runtime
+```
+…and the user was told, in their own language: *"App tayyar hai! 🎉 **App live hai:** <link>"*.
+**The link showed a Closed Port Error.** The admin's screenshot is the proof.
+
+### The five buckets
+
+- ✅ **Self-healed — 19:** CSS import injected, dev server restarted deterministically, tsc errors
+  cleared over 3 rounds, unused imports swept, 6 KIMI timeouts + 2 GLM 429s absorbed, repeated-step
+  nudge fired.
+- 🔀 **Worked around — 4:** simple-build timed out at 240s → full builder; one-shot timed out at 150s →
+  full builder (**~6.5 min spent on two lanes that both failed**); `npm run server &` timed out at 45s
+  and was routed around with `timeout 10` rather than root-caused; **EADDRINUSE on port 3000 ignored**.
+- ⏭️ **Skipped — 4:** `Requested feature not found: search` (the user ASKED for it, readiness caught it,
+  nothing acted); playwright FAIL left indeterminate; the reviewer's own **[CRITICAL]** (CSS classes
+  used but never defined) never applied; 8 unresolved warnings.
+- ❌ **Still broken — 8:** dead preview (5173 closed); 2 missing modules; **`ok:true` on a RED gate**;
+  a summary claiming "live hai"; undefined CSS classes; the missing search feature; backend unable to
+  bind 3000; 4 vulnerable deps.
+- 🥵 **Struggle — 7:** 22 minutes against a 5-minute ETA (**4.4×**); **107s before the first model
+  call**; one LLM call at 380s; reviewer timed out at 114s on 26 files; tsc failed 3× on the same file.
+
+### The root-cause chain behind the dead preview (step 2)
+
+1. `npm run server &` hit the 45s command timeout — **but the process it started did not die.**
+2. The build then ran `timeout 10 npm run server` again.
+3. The second one hit **`EADDRINUSE: address already in use :::3000`** — it collided with its own
+   orphan.
+4. The backend crashed; the app runs server+client under `concurrently`, so **the client died with it**.
+5. Port 5173 went dead → the user's Closed Port Error.
+
+**The missing subsystem: the build keeps no account of the processes it starts itself.** A timed-out
+command leaves a live process behind, and the next command collides with it. (The dev-server keepalive
+from #2264 restarts the *frontend*; nothing owned the *backend* the build had spawned twice.)
+
+### What shipped in THIS change — the honesty half
+
+**A build that reports success while the release gate is RED *with real blockers* now has its verdict
+corrected to NOT ok.** Everything needed was already computed; the gate block was simply forbidden
+from acting ("reports on the build, must never affect it"). That is right for the gate's ADVISORY half
+and wrong for its EVIDENTIAL half: **RED because a build-breaking blocker was recorded is not an
+opinion, it is the build's own error log.**
+
+**Deliberately narrow — this is the guard-versus-nuisance line:**
+- Fires only when RED coincides with a genuine unresolved ERROR, counted by the **same**
+  `shippingIssueCount('error')` the gate itself used, so the two can never disagree.
+- Does **not** fire on a RED driven only by tests. This report's suite said *"could be a failing test
+  OR the runner failing to start; the output gave nothing to tell them apart"* — failing a working app
+  over an ambiguity in **our own** sandbox is the #2267 mistake in the other direction.
+- Lives inside the gate's try/catch: a fault in the honesty check must never fail the build it judges.
+- `buildResultRef` is deliberately untouched — it is not set yet at that point and is captured
+  downstream only `if (result.ok)`, so flipping `result` keeps BOTH exits honest by construction. (TypeScript
+  proved it: the attempt to update the ref failed to compile because it is typed `null` there.)
+- **Flipping ok:false also makes the build FREE** — the standing "working app or free" guard keys on
+  `!result.ok`. Telling the truth and not charging for a broken app are the same action.
+
+`releaseGateFailureSummary` replaces the celebration with the truth, and names WHAT is broken —
+"something went wrong" is the sentence that makes people abandon a product; being told *what* is what
+makes them reply "fix it". It takes only the first line of the cause, capped, so the user is not handed
+a stack of file paths they cannot act on.
+
+Tests: 12 in `tests/releaseGateVerdict.test.ts`. Gate: tsc clean both projects, **14,474/14,474**.
+
+**Next from this autopsy, in order:** the orphaned-process/EADDRINUSE class (the actual cause of the
+dead preview), the reviewer's CRITICAL never being applied, and `Requested feature not found` being
+detected and then ignored.

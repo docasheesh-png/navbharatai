@@ -99,7 +99,102 @@ export function loadOfflineLlm(opts: { modelId?: string; onProgress?: ProgressCb
   return cached;
 }
 
-/** Drop any cached engine (used on disable/reset). */
+/** Drop any cached engine (used on disable/reset). In-memory ONLY — see `deleteOfflineModel`. */
 export function resetOfflineLlm(): void {
   cached = null;
+}
+
+/**
+ * Is any model from the ladder still taking up space on this device?
+ *
+ * THE CASE THAT MATTERS is the one the admin described: the beta is already OFF, so the screen shows
+ * nothing about it — while hundreds of MB sit on the phone. Without this check the Delete button would
+ * only appear where it is least needed (while the feature is on) and stay hidden exactly where the
+ * user is hunting for space. Returns false on any error, so an unreadable cache never produces a
+ * button that then fails.
+ */
+export async function offlineModelOnDevice(opts: {
+  modelIds?: string[];
+  hasFn?: (modelId: string) => Promise<boolean>;
+} = {}): Promise<boolean> {
+  const ids = opts.modelIds?.length ? opts.modelIds : STAGE1_MODELS;
+  const has = opts.hasFn ?? (async (id: string) => {
+    const webllm = await import('@mlc-ai/web-llm');
+    return webllm.hasModelInCache(id);
+  });
+  for (const id of ids) {
+    try { if (await has(id)) return true; } catch { /* unreadable cache — treat as absent */ }
+  }
+  return false;
+}
+
+/** How the delete went, so the screen can tell the truth instead of always claiming success. */
+export interface DeleteResult {
+  ok: boolean;
+  /** Ids we genuinely removed weights for. */
+  deleted: string[];
+  /** Present only when the browser refused — the UI shows it rather than a fake "freed up!". */
+  error?: string;
+}
+
+/**
+ * ACTUALLY DELETE the downloaded model from the device.
+ *
+ * ADMIN 2026-08-11: "offline ai me beta download ka option to hai, par agar memory full ho jaye to
+ * delete ka option nahi."
+ *
+ * They are right, and the gap was worse than it looked. "Turn off" called `resetOfflineLlm()`, which
+ * only drops an in-memory reference — the model weights web-llm cached on first download (hundreds of
+ * MB) stayed on the device **forever**, with no way for the user to reclaim the space. On the low-end
+ * Android phones this feature exists for, a few hundred MB that cannot be freed is the difference
+ * between an app someone keeps and one they uninstall. Turning a feature off must give back what
+ * turning it on took.
+ *
+ * Deletes across the WHOLE ladder by default, not just the model that is currently enabled: the loader
+ * falls back from the 0.5B to the 360M model on weaker devices, so a phone can easily be holding
+ * weights for a model it never ended up using — and those are exactly the bytes nobody would think to
+ * look for. It also unloads GPU memory first, because deleting the cache underneath a live engine
+ * leaves it pointing at files that no longer exist.
+ *
+ * Honest by construction: a browser that refuses (private mode, storage locked, no Cache API) reports
+ * the failure instead of a cheerful "space freed" over a device where nothing changed.
+ */
+export async function deleteOfflineModel(opts: {
+  modelIds?: string[];
+  /** Injectable for tests — the real one dynamically imports web-llm, exactly like the engine factory. */
+  deleteFn?: (modelId: string) => Promise<void>;
+} = {}): Promise<DeleteResult> {
+  const ids = opts.modelIds?.length ? opts.modelIds : STAGE1_MODELS;
+  // Free the GPU/engine BEFORE touching the cache, or a live engine is left holding deleted files.
+  try {
+    const live = cached ? await cached.catch(() => null) : null;
+    await live?.unload();
+  } catch { /* best-effort: an engine that will not unload must not block reclaiming the disk */ }
+  cached = null;
+
+  const del = opts.deleteFn ?? (async (id: string) => {
+    const webllm = await import('@mlc-ai/web-llm');
+    // Removes the weights AND the wasm + config entries — deleting only the weights would leave the
+    // small files behind and, worse, make `hasModelInCache` disagree with what is really on disk.
+    await webllm.deleteModelAllInfoInCache(id);
+  });
+
+  const deleted: string[] = [];
+  const failures: string[] = [];
+  for (const id of ids) {
+    try {
+      await del(id);
+      deleted.push(id);
+    } catch (e) {
+      // A model that was never downloaded is not an error worth showing the user; a real storage
+      // refusal is. We cannot always tell them apart, so a failure is only surfaced when EVERY id
+      // failed — otherwise the user sees "couldn't delete" while space was genuinely reclaimed.
+      failures.push(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  if (deleted.length === 0 && failures.length > 0) {
+    return { ok: false, deleted, error: failures[0] };
+  }
+  return { ok: true, deleted };
 }

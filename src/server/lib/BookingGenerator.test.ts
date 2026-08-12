@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateBookingIntegration, BOOKING_SERVICE_SOURCE } from './BookingGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateBookingIntegration, BOOKING_SERVICE_SOURCE } from './BookingGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateBookingIntegration (wiring)', () => {
   it('emits the booking service, routes and README', () => {
@@ -23,11 +20,8 @@ describe('generateBookingIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the double-booking guarantee is a real business rule,
 // so it is verified against the actual emitted code, not just asserted structurally.
 describe('emitted BookingService — double-booking prevention (real logic)', () => {
-  const artifact = join(here, `._booking_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, BOOKING_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('booking', BOOKING_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Booking { id: string; slotId: string; customer: string; status: string }
   interface Service {
@@ -39,7 +33,7 @@ describe('emitted BookingService — double-booking prevention (real logic)', ()
   }
   interface Emitted { BookingService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('books an available slot and then REJECTS a second booking of the same slot', async () => {

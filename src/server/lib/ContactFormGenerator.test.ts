@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateContactFormIntegration, CONTACTFORM_SERVICE_SOURCE } from './ContactFormGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateContactFormIntegration, CONTACTFORM_SERVICE_SOURCE } from './ContactFormGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateContactFormIntegration (wiring)', () => {
   it('emits the contact service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateContactFormIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the validation + honeypot + status rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted ContactService — validated capture + honeypot spam + status lifecycle (real logic)', () => {
-  const artifact = join(here, `._contact_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, CONTACTFORM_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('contact', CONTACTFORM_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   type ContactStatus = 'new' | 'read' | 'archived' | 'spam';
   interface ContactMessage { id: string; name: string; email: string; subject: string; message: string; status: ContactStatus; createdAt: string }
@@ -40,7 +34,7 @@ describe('emitted ContactService — validated capture + honeypot spam + status 
   }
   interface Emitted { ContactService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('accepts a clean submission as new and validates required fields + email', async () => {

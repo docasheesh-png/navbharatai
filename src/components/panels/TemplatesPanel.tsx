@@ -9,7 +9,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import {
   Sparkles, Activity, Cpu, Clock, Smartphone, Globe, ShieldCheck, LayoutDashboard,
-  Package, Plus, X, IndianRupee, Languages, FileText, Building2,
+  Package, Plus, X, IndianRupee, Languages, FileText, Building2, Gamepad2, Rocket,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -269,6 +269,62 @@ A simple job listing app that shows in both Hindi and English.
 - Dark theme with saffron accent (#FF9933)
 - Mobile-first (founders use phones)
 - Progress indicators with green checkmarks`,
+  },
+  {
+    id: 'game_3d', name: '3D Game', icon: Gamepad2, isPro: true,
+    prompt: `Build a playable 3D action game that runs in the browser.
+
+### THE GAME
+A third-person arena survival game. You control a character in a stylised low-poly world and survive
+waves of enemies for as long as you can.
+
+### MUST BE PLAYABLE, NOT A DEMO
+1. **Movement that feels good** — run, sprint and jump with a camera that follows and does not clip
+   through walls. Steep slopes slide; small ledges are stepped over.
+2. **Enemies** that notice you at a sensible distance, chase you, spread out instead of merging into
+   one clump, and attack on a cooldown.
+3. **Combat** — a ranged attack, health for you and for them, and a brief protection window after
+   every hit so an adjacent enemy cannot drain the whole health bar at once.
+4. **Waves** that get harder: more enemies, tougher, but never faster than you can escape.
+5. **Impact** — every hit fires a particle burst, a sound and a small camera shake together.
+6. **HUD + flow** — score, health bar, pause (Esc) and a game-over screen with Play Again that really
+   restarts. Save the high score so it survives a reload.
+7. **Phone playable** — on-screen stick and buttons on touch devices.
+
+### LOOK
+Stylised low-poly where simple shapes ARE the art style — one colour palette for the whole scene,
+strong lighting and fog, procedurally generated terrain with scattered rocks and trees. Pick a sunset
+or night mood and commit to it. Do not aim for photo-realism; a confident stylised world reads far
+better than a half-realistic one.
+
+Keep it smooth on a mid-range Android phone — that matters more than any visual detail.`,
+  },
+  {
+    id: 'game_2d', name: '2D Arcade Game', icon: Rocket,
+    prompt: `Build a complete 2D arcade game that runs in the browser and works on a phone.
+
+### THE GAME
+An endless side-scrolling runner. Jump and duck through obstacles, collect coins, and survive as long
+as you can while it steadily speeds up.
+
+### MUST BE FULLY PLAYABLE
+1. **Controls that forgive** — the jump still works for a split second after you run off a ledge, and
+   a jump pressed just before landing fires the moment you touch down. Tapping the screen jumps;
+   holding jumps higher.
+2. **Endless generation** — obstacles and gaps generated as you run, always clearable, never an
+   impossible pattern.
+3. **Difficulty curve** — speed rises gradually and caps, so it stays hard but fair.
+4. **Score + high score** saved between sessions, with a coin counter.
+5. **Sound and feel** — a jump sound, a coin sound, a crash sound, plus a small screen shake and a
+   brief freeze on impact.
+6. **Full flow** — a start screen explaining the controls in one line, pause, and a game-over screen
+   showing the score, the best score, and Play Again.
+
+### LOOK
+Crisp 2D with a bold, limited colour palette and a parallax background of two or three layers. Big,
+readable score text. Design it portrait-first for a phone and let it scale up on desktop.
+
+It must hold a steady frame rate on a cheap Android phone.`,
   },
 ];
 

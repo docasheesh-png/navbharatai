@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateExperimentsIntegration, EXPERIMENTS_SERVICE_SOURCE } from './ExperimentsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateExperimentsIntegration, EXPERIMENTS_SERVICE_SOURCE } from './ExperimentsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateExperimentsIntegration (wiring)', () => {
   it('emits the experiment service, routes and README', () => {
@@ -21,11 +18,8 @@ describe('generateExperimentsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the deterministic sticky assignment + weight split + exposure
 // counts are real business rules, verified against the actual emitted code.
 describe('emitted ExperimentService — deterministic sticky assignment + weight split (real logic)', () => {
-  const artifact = join(here, `._experiment_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, EXPERIMENTS_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('experiment', EXPERIMENTS_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Variant { key: string; weight: number }
   interface Experiment { key: string; salt: string; active: boolean; variants: Variant[] }
@@ -39,7 +33,7 @@ describe('emitted ExperimentService — deterministic sticky assignment + weight
   }
   interface Emitted { ExperimentService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('assignment is DETERMINISTIC and STICKY (same user → same variant, always)', async () => {

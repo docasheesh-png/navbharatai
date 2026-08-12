@@ -1,3 +1,4 @@
+import { DESIGN_KIT_CSS } from './designKit';
 import { ITemplateProvider } from './ViteReactProvider';
 
 // SolidJS + Vite scaffold. Solid is a popular fine-grained-reactive UI library (no virtual DOM, JSX like
@@ -102,7 +103,8 @@ export class SolidProvider implements ITemplateProvider {
       'vite.config.ts': VITE_CONFIG,
       'tsconfig.json': TSCONFIG,
       'index.html': INDEX_HTML,
-      'src/index.tsx': INDEX_TSX,
+      'src/index.css': DESIGN_KIT_CSS,
+      'src/index.tsx': `import './index.css';\n` + INDEX_TSX,
       'src/App.tsx': APP_TSX,
     };
   }

@@ -25,12 +25,13 @@ import { classifyBuildFailure, failedStepSection, normalizeLog, repairFiles } fr
 // Code runs, which is exactly what the admin asked for ("jo claude code karta hai, woh navbharatai
 // nahi kar sakta kya?", 2026-08-03). See mobileBuildAiRepair.ts for the full safety model.
 import {
-  aiRepairAllowedPaths, aiRepairEnabled, aiRepairModelChain, runAiRepair,
+  aiRepairAllowedPaths, aiRepairEnabled, aiRepairModelChain, runAiRepair, normalizeRepairTier,
 } from '../lib/mobileBuildAiRepair';
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 import { commitFiles, githubApiHeaders, readRepoFiles } from '../lib/githubRepoWrite';
-import { buildPackageJson, detectProjectKind } from '../lib/mobileProjectAssembler';
+import { buildPackageJson, detectProjectKind, capacitorMajorFromFiles } from '../lib/mobileProjectAssembler';
 import { apkChargeInr, isChargeableApk, apkChargeRef, chargeDescription } from '../lib/apkCharge';
+import { CHARGE_PRICE_HEADER, CHARGE_APPLIED_HEADER } from '../../lib/apkChargeNotice';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { debitWalletForBuild } from '../lib/walletDebit';
@@ -165,10 +166,21 @@ export function registerMobileShipRoutes(app: Express): void {
     // built .apk/.aab/.ipa — never on a failed build (nothing streams), never twice for one artifact
     // (the debit ref IS the artifact), never for free-list/anon, and never blocking the bytes. See
     // lib/apkCharge.ts for the full contract.
+    //
+    // TELL THE USER (admin 2026-08-10: "har bar user ko bataya jaye"). Until now the debit was fired
+    // and the bytes streamed — so ₹1 left a real person's balance with NO price shown before and NO
+    // confirmation after. Money taken silently is the exact opposite of the billing law's promise
+    // that the bill a user sees is the real one. The response now REPORTS its own charge, so the
+    // client can show the price on the button and confirm the amount once the file arrives.
+    // `applied` is only true when a charge genuinely happened: a free-list account (which is why this
+    // reads "free" for the admin), an anonymous caller, or a price of 0 all report false rather than
+    // printing a number nobody paid.
+    let chargeApplied = false;
     try {
       if (isChargeableApk(got.fileName)) {
         const identity = await verifyFirebaseIdentity(req);
         if (identity?.uid && !isAgentV3FreeUser(identity.uid, identity.email)) {
+          chargeApplied = apkChargeInr() > 0;
           void debitWalletForBuild(getServerDb() as any, identity.uid, {
             billedInr: apkChargeInr(),
             buildRef: apkChargeRef(owner, repo, artifactId),
@@ -177,6 +189,9 @@ export function registerMobileShipRoutes(app: Express): void {
         }
       }
     } catch { /* the charge must never break the download */ }
+    res.setHeader(CHARGE_PRICE_HEADER, String(isChargeableApk(got.fileName) ? apkChargeInr() : 0));
+    res.setHeader(CHARGE_APPLIED_HEADER, chargeApplied ? 'true' : 'false');
+    res.setHeader('Access-Control-Expose-Headers', `${CHARGE_PRICE_HEADER}, ${CHARGE_APPLIED_HEADER}`);
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${got.fileName}"`);
     res.send(got.bytes);
@@ -187,13 +202,14 @@ export function registerMobileShipRoutes(app: Express): void {
    * POST /api/github/push and follows `requiredSecrets` / SHIPPING.md.
    */
   app.post('/api/mobile-ship/kit', (req: Request, res: Response) => {
-    const { appName, appId, webDir, ios } = (req.body || {}) as Record<string, unknown>;
+    const { appName, appId, webDir, ios, capacitorMajor } = (req.body || {}) as Record<string, unknown>;
     try {
       const kit = generateShipKit({
         appName: typeof appName === 'string' ? appName : undefined,
         appId: typeof appId === 'string' ? appId : undefined,
         webDir: typeof webDir === 'string' ? webDir : undefined,
         ios: ios !== false,
+        capacitorMajor: typeof capacitorMajor === 'number' ? capacitorMajor : undefined,
       });
       res.json(kit);
     } catch (e) {
@@ -261,7 +277,10 @@ export function registerMobileShipRoutes(app: Express): void {
     const token = githubToken(req);
     if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
 
-    const { owner, repo, workflow, runId, ref = 'main' } = (req.body || {}) as Record<string, unknown>;
+    const { owner, repo, workflow, runId, ref = 'main', powerLevel } = (req.body || {}) as Record<string, unknown>;
+    // The user's selected NavBharatAI Pro tier decides which models the AI repair may use — weak stays
+    // GLM/Kimi (never Claude), paid tiers escalate to Sonnet/Opus, exactly like the main build.
+    const repairTier = normalizeRepairTier(typeof powerLevel === 'string' ? powerLevel : undefined);
     if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
     if (!isDispatchableWorkflow(workflow)) return res.status(400).json({ error: 'Unknown build workflow.' });
     if (!/^\d{1,20}$/.test(String(runId || ''))) return res.status(400).json({ error: 'A valid build id is required.' });
@@ -303,11 +322,12 @@ export function registerMobileShipRoutes(app: Express): void {
      * left to change. It sees the FAILING STEP's log and the files involved (including the app source
      * files the error names — the app was generated by NavBharatAI, so repairing it is repairing our
      * own output), and its reply is only accepted inside the hard validation gates in
-     * mobileBuildAiRepair.ts. Model chain: flagship cheap coders only, never Sonnet/Opus.
+     * mobileBuildAiRepair.ts. Model chain follows the user's selected tier (weak = GLM/Kimi only;
+     * paid tiers add Sonnet/Opus) — the same Model Routing Policy the main build uses.
      */
     const tryAiRepair = async (): Promise<boolean> => {
       if (!aiRepairEnabled()) return false;
-      const chain = aiRepairModelChain();
+      const chain = aiRepairModelChain(process.env, repairTier);
       if (chain.length === 0) return false;
       const failingStep = failedStepSection(normalizeLog(log));
       const allowed = aiRepairAllowedPaths(wfPath, failingStep);
@@ -348,7 +368,9 @@ export function registerMobileShipRoutes(app: Express): void {
       // comments and summary text, so the repository's own name is a perfectly good source.
       const currentPkg = current['package.json'];
       const repair = repairFiles(diag, current, wfPath, {
-        workflow: generateShipKit({ appName: String(repo) }).files[wfPath],
+        // Regenerate the workflow with the Java THIS repo's Capacitor major needs, so a refresh of an old
+        // Capacitor-6 repo pins Java 17 rather than the newer default (G2).
+        workflow: generateShipKit({ appName: String(repo), capacitorMajor: capacitorMajorFromFiles(current) ?? undefined }).files[wfPath],
         packageJson: currentPkg
           ? buildPackageJson(currentPkg, String(repo), detectProjectKind({ 'package.json': currentPkg }))
           : undefined,

@@ -19,6 +19,14 @@ vi.mock('@capacitor/core', () => ({
   },
 }));
 
+// The device's own build number, reported alongside the token (2026-08-11) so the server can notify
+// ONLY the devices that are genuinely behind. `appBuild` is set per-test; null models a device that
+// cannot tell us — and an unknown must never be treated as "probably old".
+let appBuild: string | null = null;
+vi.mock('@capacitor/app', () => ({
+  App: { getInfo: async () => ({ build: appBuild }) },
+}));
+
 vi.mock('./pushApi', () => ({
   registerDeviceToken: (...args: unknown[]) => registerMock(...args),
   unregisterDeviceToken: (...args: unknown[]) => unregisterMock(...args),
@@ -62,7 +70,8 @@ describe('pushNotifications (native mobile push bootstrap)', () => {
     platform = 'ios';
     const { initPushNotifications } = await freshModule();
     await initPushNotifications('user-1');
-    expect(registerMock).toHaveBeenCalledWith('user-1', 'fcm-tok-1', 'ios');
+    // The 4th argument is the device's versionCode; null here because this device reports none.
+    expect(registerMock).toHaveBeenCalledWith('user-1', 'fcm-tok-1', 'ios', null);
   });
 
   it('an honest stop when permission is denied — never fakes a registration', async () => {
@@ -84,7 +93,17 @@ describe('pushNotifications (native mobile push bootstrap)', () => {
     await initPushNotifications('user-1');
     await initPushNotifications('user-2');
     expect(registerMock).toHaveBeenCalledTimes(2);
-    expect(registerMock.mock.calls[1]).toEqual(['user-2', 'fcm-tok-1', 'android']);
+    expect(registerMock.mock.calls[1]).toEqual(['user-2', 'fcm-tok-1', 'android', null]);
+  });
+
+  it('reports the device\'s BUILD NUMBER when it has one — the whole point of the change', async () => {
+    // Without this the server cannot tell an old install from a current one, and an update broadcast
+    // has to choose between notifying everybody (which trains people to ignore us) or nobody.
+    appBuild = '57';
+    const { initPushNotifications } = await freshModule();
+    await initPushNotifications('user-9');
+    expect(registerMock).toHaveBeenCalledWith('user-9', 'fcm-tok-1', 'android', 57);
+    appBuild = null;
   });
 
   it('a token refresh re-registers the new token against the currently signed-in user', async () => {
@@ -92,8 +111,10 @@ describe('pushNotifications (native mobile push bootstrap)', () => {
     await initPushNotifications('user-1');
     expect(listeners.tokenReceived).toBeTypeOf('function');
     listeners.tokenReceived({ token: 'fcm-tok-REFRESHED' });
-    await Promise.resolve(); // let the fire-and-forget re-register microtask settle
-    expect(registerMock).toHaveBeenLastCalledWith('user-1', 'fcm-tok-REFRESHED', 'android');
+    // Back to a single microtask: the version is cached at init, so the refresh path no longer awaits
+    // a dynamic import before re-registering. CI caught the racy version of this.
+    await Promise.resolve();
+    expect(registerMock).toHaveBeenLastCalledWith('user-1', 'fcm-tok-REFRESHED', 'android', null);
   });
 
   it('teardown unregisters the current token and resets session state for the next sign-in', async () => {

@@ -866,6 +866,10 @@ const VISUAL_EDITOR_SCRIPT = `<script>
   var editing = null;
   var selected = null;      // the element picked in edit mode (Phase 2 — toolbar/resize/reposition target)
   var selectedSrc = null;   // { fileName, lineNumber, columnNumber } for the selected element
+  // MULTI-ELEMENT SELECT (ROADMAP §2): ctrl/cmd/shift-click adds more elements. 'selected' stays the
+  // PRIMARY one — it keeps owning the resize grip and text editing, which are single-element by nature —
+  // and 'extras' holds the rest. A style change applies to the primary AND every extra.
+  var extras = [];          // [{ el, src }]
 
   function fiberOf(el) {
     var key = Object.keys(el).find(function (k) { return k.indexOf('__reactFiber$') === 0; });
@@ -915,10 +919,34 @@ const VISUAL_EDITOR_SCRIPT = `<script>
       width: el.style && el.style.width || '', height: el.style && el.style.height || ''
     };
   }
+  function clearExtras() {
+    for (var i = 0; i < extras.length; i++) {
+      try { extras[i].el.style.outline = ''; extras[i].el.style.outlineOffset = ''; } catch (e) {}
+    }
+    extras = [];
+  }
   function clearSelection() {
     if (selected) { selected.style.outline = ''; selected.style.outlineOffset = ''; }
+    clearExtras();
     selected = null; selectedSrc = null;
     if (handle) handle.style.display = 'none';
+  }
+  function indexOfExtra(el) {
+    for (var i = 0; i < extras.length; i++) { if (extras[i].el === el) return i; }
+    return -1;
+  }
+  /** Every selected element's source position — the primary first, then the extras, in click order. */
+  function selectionList() {
+    var out = [];
+    if (selectedSrc) {
+      out.push({ file: selectedSrc.fileName, line: selectedSrc.lineNumber, column: selectedSrc.columnNumber,
+        tag: selected && selected.tagName ? selected.tagName.toLowerCase() : '' });
+    }
+    for (var i = 0; i < extras.length; i++) {
+      out.push({ file: extras[i].src.fileName, line: extras[i].src.lineNumber, column: extras[i].src.columnNumber,
+        tag: extras[i].el && extras[i].el.tagName ? extras[i].el.tagName.toLowerCase() : '' });
+    }
+    return out;
   }
   function reportSelection() {
     if (!selected || !selectedSrc) return;
@@ -926,14 +954,37 @@ const VISUAL_EDITOR_SCRIPT = `<script>
       (window.parent || window.top).postMessage({
         __nbaiSelect: true, file: selectedSrc.fileName, line: selectedSrc.lineNumber, column: selectedSrc.columnNumber,
         tag: (selected.tagName || '').toLowerCase(), styles: readStyles(selected),
+        // Multi-select: every element the change will touch, so the parent can group them by file and
+        // send ONE request per file.
+        targets: selectionList(),
       }, '*');
     } catch (e) {}
   }
   // Select an element (draw the selection box + resize grip + tell the parent, which shows the toolbar).
   // Does NOT edit text — that's a double-click (or the toolbar's "Edit text") — so a single click is safe.
-  function selectEl(host, info) {
+  //
+  // 'additive' (ctrl/cmd/shift-click) ADDS to the selection instead of replacing it, and clicking an
+  // already-selected element removes it again — the behaviour every file manager and design tool has, so
+  // it needs no explaining. The primary selection is never removed this way: it owns the resize grip and
+  // text editing, and leaving those with no owner would break them.
+  function selectEl(host, info, additive) {
     clearHover();
+    if (additive && selected && selected !== host) {
+      var at = indexOfExtra(host);
+      if (at >= 0) {
+        try { extras[at].el.style.outline = ''; extras[at].el.style.outlineOffset = ''; } catch (e) {}
+        extras.splice(at, 1);
+      } else {
+        // Dashed outline distinguishes the extras from the primary at a glance.
+        host.style.outline = '2px dashed #10b981';
+        host.style.outlineOffset = '1px';
+        extras.push({ el: host, src: { fileName: info.fileName, lineNumber: info.lineNumber, columnNumber: info.columnNumber } });
+      }
+      reportSelection();
+      return;
+    }
     if (selected && selected !== host) { selected.style.outline = ''; selected.style.outlineOffset = ''; }
+    if (!additive) clearExtras();
     selected = host;
     selectedSrc = { fileName: info.fileName, lineNumber: info.lineNumber, columnNumber: info.columnNumber };
     host.style.outline = '2px solid #10b981';
@@ -1046,7 +1097,8 @@ const VISUAL_EDITOR_SCRIPT = `<script>
     if (!info) { flashNotEditable(e.target); return; }
     e.preventDefault();
     e.stopPropagation();
-    selectEl(info.host, info);
+    // Ctrl/Cmd (and Shift) add to the selection — the convention from every file manager and design tool.
+    selectEl(info.host, info, !!(e.ctrlKey || e.metaKey || e.shiftKey));
   }
   function beginTextEdit(host, src) {
     editing = host;
@@ -1087,12 +1139,18 @@ const VISUAL_EDITOR_SCRIPT = `<script>
     // Live-apply a style change to the SELECTED element (instant preview; the parent also persists it to
     // source via the visual-edit endpoint). camelCase CSS keys; '' removes the inline value.
     if (d.__nbaiApplyStyle && typeof d.__nbaiApplyStyle === 'object' && selected) {
-      for (var k in d.__nbaiApplyStyle) {
-        if (Object.prototype.hasOwnProperty.call(d.__nbaiApplyStyle, k)) {
-          try { selected.style[k] = d.__nbaiApplyStyle[k]; } catch (err) {}
+      // Applies to the primary AND every extra — otherwise multi-select would preview a change on one
+      // element while silently saving it to all of them.
+      var targetEls = [selected];
+      for (var xi = 0; xi < extras.length; xi++) targetEls.push(extras[xi].el);
+      for (var ti = 0; ti < targetEls.length; ti++) {
+        for (var k in d.__nbaiApplyStyle) {
+          if (Object.prototype.hasOwnProperty.call(d.__nbaiApplyStyle, k)) {
+            try { targetEls[ti].style[k] = d.__nbaiApplyStyle[k]; } catch (err) {}
+          }
         }
       }
-      try { (window.parent || window.top).postMessage({ __nbaiSelect: true, file: selectedSrc.fileName, line: selectedSrc.lineNumber, column: selectedSrc.columnNumber, tag: (selected.tagName || '').toLowerCase(), styles: readStyles(selected) }, '*'); } catch (e2) {}
+      reportSelection();
       return;
     }
     // Toolbar asked to edit the selected element's text.

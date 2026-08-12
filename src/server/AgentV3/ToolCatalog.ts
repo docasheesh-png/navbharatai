@@ -875,16 +875,74 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'generate_storage',
       description:
-        'Add real file uploads to the app (Bring-Your-Own keys): a server route + a client uploadFile() helper ' +
-        'that uploads DIRECTLY to storage (never proxied through the server). "s3" (AWS S3 / Cloudflare R2 / ' +
-        'Supabase Storage / MinIO via a presigned URL) or "cloudinary" (image-focused, signed upload). The user ' +
-        'pastes their keys into .env; NavBharatAI never stores them. Never overwrites an existing .env.example.',
+        'Add real file uploads to the app. PREFER provider "supabase": ZERO SETUP — the bucket and its ' +
+        'access rules are created inside the user\'s own database project and the app uploads with the public ' +
+        'anon key, so there are NO keys for the user to paste. Use it whenever the app has (or will have) a ' +
+        'NavBharatAI-provisioned database. The other two are Bring-Your-Own keys, for a user who already has ' +
+        'that storage: "s3" (AWS S3 / Cloudflare R2 / MinIO via a presigned URL) or "cloudinary" ' +
+        '(image-focused, signed upload) — the user pastes their keys into .env; NavBharatAI never stores them. ' +
+        'All three upload DIRECTLY to storage (never proxied through the app server). Never overwrites an ' +
+        'existing .env.example.',
       input_schema: {
         type: 'object',
         properties: {
-          provider: { type: 'string', enum: ['s3', 'cloudinary'], description: 'The storage provider to wire up.' },
+          provider: { type: 'string', enum: ['supabase', 's3', 'cloudinary'], description: 'The storage provider to wire up.' },
         },
         required: ['provider'],
+      },
+    },
+    {
+      name: 'analyze_service_split',
+      description:
+        'Answer "should this app be split into separate services, and where?" using the app\'s real import ' +
+        'graph. Names the natural modules, counts EXACTLY how many imports would have to become API calls ' +
+        'for each possible split, and says honestly when there is no good split — which is the correct ' +
+        'answer for most apps. Use it when the user asks about splitting, microservices, or app structure. ' +
+        'Read-only analysis: it changes nothing. Do NOT split an app just because the user asked — show ' +
+        'them this first; for a small app, splitting adds deployment and networking work and solves nothing.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'setup_architecture',
+      description:
+        'Set up a named architecture — "clean", "ddd", "mvc" or "hexagonal" — as real folders PLUS an ' +
+        'ESLint config that ENFORCES the layer boundaries (import/no-restricted-paths), so a cross-layer ' +
+        'import fails the lint instead of quietly eroding the structure. Writes ARCHITECTURE.md and a ' +
+        'README per layer. Existing code is never moved or rewritten. Prefer this only for a genuinely ' +
+        'large app or a team — layers add indirection a small app does not need.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          style: { type: 'string', enum: ['clean', 'ddd', 'mvc', 'hexagonal'], description: 'The architecture to set up.' },
+        },
+        required: ['style'],
+      },
+    },
+    {
+      name: 'generate_mcp_server',
+      description:
+        'Give the app an MCP server, so the user can connect it to Claude Desktop, Cursor or any AI ' +
+        'assistant and ask questions about their real data ("how many orders today?"). Generates a ' +
+        'runnable stdio MCP server exposing list/get/search tools for the named tables, plus the exact ' +
+        'config block the user pastes into their AI client. Requires the app to have a Supabase database ' +
+        '(the zero-setup one counts). READ-ONLY unless allowWrites is true — and it NEVER generates a ' +
+        'delete tool at any setting, because an AI drives these calls with no human approving each one. ' +
+        'Uses the public anon key only, so the user\'s row-level security still applies.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          tables: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Database tables to expose, e.g. ["orders", "menu_items"]. Plain names only.',
+          },
+          allowWrites: {
+            type: 'boolean',
+            description: 'Also allow the assistant to add/update rows. Default false. Delete is never generated.',
+          },
+          appName: { type: 'string', description: "The app's name, shown in the AI client." },
+        },
+        required: ['tables'],
       },
     },
     {
@@ -2039,6 +2097,34 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_game_systems',
+      description:
+        'Add the gameplay systems that make it a GAME rather than a walkable scene: combat (health, '
+        + 'damage, death), enemy AI, projectiles and enemy waves. Call generate_game_runtime first. '
+        + 'Emits src/game/systems as PURE arithmetic, so the rules hold rather than being approximated. '
+        + 'IT ENCODES THE RULES A HAND-WRITTEN VERSION GETS WRONG — do not reimplement them: damage '
+        + 'needs BOTH an attack cooldown and invulnerability frames (i-frames), because without them an '
+        + 'adjacent enemy deals its damage 60 times a second and the player dies in half a second, and '
+        + 'lowering the damage number is not a fix; projectiles test the SEGMENT they travelled rather '
+        + 'than their new position, because a fast bullet would otherwise tunnel straight through a '
+        + 'small enemy; enemies use separation steering, or a group converges to one point and reads as '
+        + 'a single enemy; the de-aggro radius is larger than the detect radius so they cannot flicker '
+        + 'at the boundary; death fires exactly once; and a wave clears when every enemy is dead OR has '
+        + 'fallen out of the world, so one enemy through the floor cannot hang the level forever. '
+        + 'The AI only REQUESTS an attack — a Cooldown decides. Everything emits events, so pair it with '
+        + 'generate_game_vfx for impact.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: combat, ai, projectile, spawner. Default = all.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_game_shell',
       description:
         'COMPOSE a runnable game from the other game layers. Call generate_game_runtime, '
@@ -3169,6 +3255,7 @@ export const CATALOG_TOOL_NAMES = [
   'analyze_requirements',
   'generate_i18n',
   'request_secrets',
+  'generate_game_systems',
   'generate_game_shell',
   'generate_game_vfx',
   'generate_game_controller',
@@ -3194,6 +3281,9 @@ export const CATALOG_TOOL_NAMES = [
   'generate_payment',
   'generate_email',
   'generate_storage',
+  'generate_mcp_server',
+  'analyze_service_split',
+  'setup_architecture',
   'generate_realtime',
   'generate_search',
   'generate_otp',

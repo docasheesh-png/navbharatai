@@ -70,7 +70,15 @@ export interface IEngineerActuator {
    * Fetch a URL from inside the sandbox and return the HTML body.
    * Requires a real sandbox; LocalActuator rejects for the same reason as runCommand.
    */
-  browseUrl(workspaceId: string, url: string): Promise<{ html: string }>;
+  /**
+   * Fetch the preview's DOM.
+   *
+   * `painted` and `source` exist because an un-hydrated snapshot and a crashed app produce the SAME
+   * html — `<div id="root"></div>` — and treating the first as the second made the platform "repair"
+   * working apps in a loop. `painted: undefined` means the transport could not tell us; it must never
+   * be read as `false`.
+   */
+  browseUrl(workspaceId: string, url: string): Promise<{ html: string; painted?: boolean; source?: 'browser' | 'curl' }>;
   /**
    * Return the public HTTPS URL for a port running inside the sandbox.
    * Used for live-preview when the agent starts a dev server.

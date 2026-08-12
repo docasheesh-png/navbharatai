@@ -293,8 +293,34 @@ export function runtimeVerifiedRecord(): RuntimeVerifyRecord {
   };
 }
 
-/** The browser console could not be captured, so runtime was NOT verified — never a clean guarantee. */
-export function runtimeUncheckedRecord(): RuntimeVerifyRecord {
+/**
+ * The browser console could not be captured, so runtime was NOT verified — never a clean guarantee.
+ *
+ * `previewRendered` exists because the flat version of this record CONTRADICTED the rest of the report
+ * (Shiv Medical Store, 2026-08-10). That build opened the app in a real browser, recorded
+ * GREEN_GUARD_SAVE ("opened in a real browser and rendered") and told the user "confirmed it loads
+ * successfully… with no console errors" — while this record simultaneously said the browser console
+ * "could not be captured (no live preview session)". Both cannot be true, and a report that argues with
+ * itself teaches the admin to trust none of it.
+ *
+ * The two questions are different and must be answered separately: DOES IT RUN was answered — the app
+ * was seen rendering — while WERE THERE CONSOLE ERRORS was not. Saying so is honest; collapsing them
+ * into "runtime NOT verified" is not, and neither is claiming clean.
+ */
+export function runtimeUncheckedRecord(opts?: { previewRendered?: boolean }): RuntimeVerifyRecord {
+  if (opts?.previewRendered) {
+    return {
+      phase: 'autofix',
+      severity: 'info',
+      code: 'RUNTIME_UNCHECKED',
+      message:
+        'The app WAS opened in a real browser and rendered, but its console could not be captured on this ' +
+        'run — so console errors specifically were not checked. Not a clean-console guarantee; the app is ' +
+        'confirmed to render.',
+      // The question this gate exists to answer — does the built app actually run — WAS answered.
+      autoResolved: true,
+    };
+  }
   return {
     phase: 'autofix',
     severity: 'warning',
@@ -321,4 +347,34 @@ export function runtimeErrorsRemainRecord(errors: RuntimeError[]): RuntimeVerify
       `but these were detected in the browser at runtime and may still be present.${fatalNote}`,
     autoResolved: false,
   };
+}
+
+/**
+ * What the user is told when the build reported success while the release gate was RED.
+ *
+ * ADMIN REPORT 2026-08-12 (the dukaan stock app) — the worst failure this engine has produced, and it
+ * was not a crash: it LIED. One report carried `ok: true`, `RELEASE_GATE: RED — Not shippable`, and
+ * `rootCause: 2 local modules are STILL missing — the app will crash at runtime` — while the user was
+ * told, in their own language, *"App tayyar hai! 🎉 App live hai: <link>"*. The link showed a Closed
+ * Port Error.
+ *
+ * The wording follows the same three rules as the reviewer-critical summary above, because the user's
+ * situation is identical: their work is SAFE, they are NOT charged, and there is one thing to type.
+ * It names the count and (when known) the actual cause, because "something went wrong" is the sentence
+ * that makes people abandon a product — being told *what* is what makes them reply "fix it".
+ *
+ * WHITE-LABEL: never a provider or model name. PURE.
+ */
+export function releaseGateFailureSummary(blockerCount: number, rootCause?: string | null): string {
+  const n = Math.max(1, blockerCount);
+  const one = n === 1;
+  // The root cause is an internal diagnostic sentence; take only its first line and cap it, so the
+  // user gets the fact without a stack of file paths they cannot act on.
+  const because = String(rootCause ?? '').split('\n')[0].trim();
+  const why = because ? ` The main one: ${because.length > 160 ? `${because.slice(0, 157)}…` : because}` : '';
+  return (
+    `Your app is built and saved, but ${n} thing${one ? '' : 's'} ${one ? 'is' : 'are'} still broken, so it ` +
+    `is NOT ready to use yet — I will not tell you it is working when it is not.${why} ` +
+    `You have NOT been charged for this build. Reply "fix it" (or "continue") and I'll finish it.`
+  );
 }

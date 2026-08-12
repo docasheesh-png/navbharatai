@@ -1,0 +1,23 @@
+# PROGRESS.md conflicts on EVERY merge, and none of those conflicts are real.
+#
+# CLAUDE.md makes PROGRESS.md append-only: "add a new dated milestone entry — never delete or rewrite
+# existing entries". Several sessions work this repo one after another, and each one appends its entry
+# to the END of the file. So the moment two branches both add a milestone, git sees two different sets
+# of lines at the same place and stops — even though the correct answer is always the same and always
+# obvious: keep both. That resolution has now been done by hand more than once on a single PR, because
+# `main` moves again while the branch is in CI, and each round is a chance to drop somebody's entry
+# while hand-editing a 30,000-line file.
+#
+# `merge=union` is git's built-in driver for exactly this shape: instead of stopping, it keeps BOTH
+# sides of the overlapping region, in order, with no markers. For an append-only log that IS the right
+# answer, so the conflict class disappears rather than being resolved faster.
+#
+# What it costs, honestly: union cannot detect a genuine disagreement. If a session ever does edit an
+# existing entry — which CLAUDE.md forbids — both versions survive side by side instead of raising a
+# conflict. That is a visible, correctable artifact in a log file, and it is a far smaller risk than a
+# manual re-resolution every time main moves.
+#
+# Scope note: this governs merges git performs (`git merge origin/main`, which is how every session
+# updates its branch). GitHub's server-side "Update branch"/merge does not run local merge drivers, so
+# a conflict raised there is still resolved by merging locally — which is when this rule applies.
+PROGRESS.md merge=union

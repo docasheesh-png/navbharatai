@@ -17,6 +17,7 @@ const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
   lazy(() => fn().then(m => ({ default: m[k] as React.ComponentType<any> })));
 
 const ProjectInsightsPanel = _lz(() => import('./ProjectInsightsPanel'), 'ProjectInsightsPanel');
+const GalleryPanel = _lz(() => import('./GalleryPanel'), 'GalleryPanel');
 const CodeStudio        = _lz(() => import('../ide/CodeStudio'),         'CodeStudio');
 const TestPanel         = _lz(() => import('../ide/TestPanel'),          'TestPanel');
 const DiffViewer        = _lz(() => import('../ide/DiffViewer'),         'DiffViewer');
@@ -53,7 +54,6 @@ const CICDPipeline      = _lz(() => import('../ide/CICDPipeline'),       'CICDPi
 const PluginSystem      = _lz(() => import('../ide/PluginSystem'),       'PluginSystem');
 const WhitelabelBranding= _lz(() => import('../ide/WhitelabelBranding'), 'WhitelabelBranding');
 const AIProjectManager  = _lz(() => import('../ide/AIProjectManager'),   'AIProjectManager');
-const MultiCloudDeploy  = _lz(() => import('../ide/MultiCloudDeploy'),   'MultiCloudDeploy');
 const DesignSystem      = _lz(() => import('../ide/DesignSystem'),       'DesignSystem');
 const AppHealthMonitor  = _lz(() => import('../ide/AppHealthMonitor'),   'AppHealthMonitor');
 const APITester         = lazy(() => import('../ide/APITester'));
@@ -432,6 +432,14 @@ export function ViewPanels({
         </div>
       )}
 
+      {/* Community gallery / remix (ROADMAP §2). Publishing lands as `pending`; only an admin can
+          make an app public, so this screen never claims an app is live. */}
+      {activeView === 'gallery' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <GalleryPanel user={user} files={files as Record<string, string>} />
+        </div>
+      )}
+
       {/* Phase 6 — AI Debugger */}
       {activeView === 'debugger' && (
         <div className="flex-1 h-full overflow-hidden">
@@ -652,11 +660,6 @@ export function ViewPanels({
         </div>
       )}
 
-      {activeView === 'cloudeploy' && (
-        <div className="flex-1 h-full overflow-hidden">
-          <MultiCloudDeploy generatedCode={generatedCode} />
-        </div>
-      )}
 
       {activeView === 'designsys' && (
         <div className="flex-1 h-full overflow-hidden">

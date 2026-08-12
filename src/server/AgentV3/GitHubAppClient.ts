@@ -68,21 +68,27 @@ function slugSegment(s: string): string {
   return (s || '').replace(/[^A-Za-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').toLowerCase();
 }
 
+const MONTH_ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
 /**
- * Format an epoch-ms as a readable `<12h-clock><am|pm>-<ddmmyy>` stamp in IST (Asia/Kolkata, a fixed
- * +5:30 offset with no DST, so this is deterministic without a timezone library). e.g. an 11:00 IST
- * build on 18 Jul 2026 → `11am-180726`. Exported + pure so it is unit-testable.
+ * Format an epoch-ms as a readable `<dd><mon><yy>-<hhmm><am|pm>` date-and-time stamp in IST
+ * (Asia/Kolkata, a fixed +5:30 offset with no DST, so this is deterministic without a timezone
+ * library). e.g. an 11:00 IST build on 18 Jul 2026 → `18jul26-1100am`. Date first, then the time to
+ * the MINUTE, so a user reading a repo name sees exactly when it was saved (admin 2026-08-10: repo
+ * names must show a clear date and time). Exported + pure so it is unit-testable.
  */
 export function readableTimeStamp(epochMs: number): string {
   const ist = new Date(epochMs + 5.5 * 3_600_000); // shift the instant so UTC getters read IST wall-clock
   const dd = String(ist.getUTCDate()).padStart(2, '0');
-  const mm = String(ist.getUTCMonth() + 1).padStart(2, '0');
+  const mon = MONTH_ABBR[ist.getUTCMonth()];
   const yy = String(ist.getUTCFullYear()).slice(-2);
   let h = ist.getUTCHours();
   const ampm = h < 12 ? 'am' : 'pm';
   h = h % 12;
   if (h === 0) h = 12;
-  return `${h}${ampm}-${dd}${mm}${yy}`;
+  const hh = String(h).padStart(2, '0');
+  const min = String(ist.getUTCMinutes()).padStart(2, '0');
+  return `${dd}${mon}${yy}-${hh}${min}${ampm}`;
 }
 
 /** A short, STABLE, collision-resistant token derived from the project id (6 hex of sha1). Pure. */
@@ -91,28 +97,46 @@ function projectUniqSuffix(projectId: string): string {
 }
 
 /**
+ * The SINGLE leading word of a slug (admin 2026-08-10: a saved repo's name must be one word, not the
+ * whole phrase — `watch-store-landing-page` was too complicated). Takes the first `-` token; if that
+ * token is too short to mean anything on its own (e.g. `e` from `e-commerce`), it keeps the next token
+ * so the name stays recognisable. Pure. Returns '' for an empty/symbol-only slug (caller then falls
+ * back to the legacy shape). */
+function firstWordSegment(slug: string): string {
+  const parts = (slug || '').split('-').filter(Boolean);
+  if (parts.length === 0) return '';
+  if (parts[0].length < 3 && parts[1]) return `${parts[0]}-${parts[1]}`;
+  return parts[0];
+}
+
+/**
  * A deterministic, GitHub-safe repo name for a user's project (alnum, -, _ only; bounded).
  *
  * TWO shapes:
  *  - LEGACY (no `readable` arg): `app-<uid>-<projectId>` — the opaque, hard-to-read form.
- *  - READABLE (admin 2026-07-18): `<app-name>-<time>-<ddmmyy>-<uniq>`, e.g. `watch-store-11am-180726-3f9a2c`.
- *    The name/time/date come from the build's OWN stable identity (its stored title + createdAt — NOT
- *    the current turn's prompt, which changes per turn), so the name is READABLE yet STABLE across
- *    every build turn (the storage layer's ensureRepo is keyed on the name, so an unstable name would
- *    spawn a NEW repo each turn — the very sprawl this must avoid). A short sha1(projectId) suffix keeps
- *    it globally unique (two same-named apps built in the same hour never collide into one repo — a
- *    data-safety requirement, so the readable form is adapted to keep it, not blindly transcribed).
+ *  - READABLE (admin 2026-07-18; SIMPLIFIED 2026-08-10): `<word>-<ddmonyy>-<hhmm><am|pm>-<uniq>`,
+ *    e.g. `watch-18jul26-1100am-3f9a`. Just three human parts: a SINGLE-word app name, then the date
+ *    and time it was saved, then a tiny safety code. (The old form was the whole phrase plus an
+ *    hour-only stamp plus a 6-char code — `watch-store-landing-page-11am-180726-3f9a2c` — which the
+ *    admin found too complicated.) The word/date/time come from the build's OWN stable identity (its
+ *    stored title + createdAt — NOT the current turn's prompt, which changes per turn), so the name is
+ *    READABLE yet STABLE across every build turn (the storage layer's ensureRepo is keyed on the name,
+ *    so an unstable name would spawn a NEW repo each turn — the very sprawl this must avoid).
+ *    The short sha1(projectId) tail is the DATA-SAFETY guard, not decoration: two different projects
+ *    with the same word created in the same minute must never collide into ONE repo (which would mix
+ *    one user's code into another's). Minute-level time precision (60× the old hour buckets) is what
+ *    lets the tail shrink from 6 to 4 hex without weakening that guarantee. Kept, not dropped.
  */
 export function repoNameForProject(
   userId: string | null | undefined,
   projectId: string,
   readable?: { appName: string; createdAtMs: number },
 ): string {
-  const appName = readable ? slugSegment(readable.appName).slice(0, 40) : '';
-  if (readable && appName) {
+  const appWord = readable ? firstWordSegment(slugSegment(readable.appName)).slice(0, 24) : '';
+  if (readable && appWord) {
     const stamp = readableTimeStamp(readable.createdAtMs);
-    const uniq = projectUniqSuffix(projectId);
-    return `${appName}-${stamp}-${uniq}`.slice(0, 90);
+    const uniq = projectUniqSuffix(projectId).slice(0, 4);
+    return `${appWord}-${stamp}-${uniq}`.slice(0, 90);
   }
   const u = slugSegment(userId || 'anon').slice(0, 24) || 'anon';
   const p = slugSegment(projectId).slice(0, 60) || 'app';

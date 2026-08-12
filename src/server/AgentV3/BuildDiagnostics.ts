@@ -223,6 +223,20 @@ export interface BuildDiagnosticsReport {
    *  calls). The report-level view of the Billing-Phase-3 ledger. */
   providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   /**
+   * OBSERVATIONAL ONLY — fast-lane turns, which today reach the bill through neither the provider
+   * ledger nor (for four of the seven call sites) the build total at all.
+   *
+   * WHY IT EXISTS (2026-08-11). Fixing fast-lane attribution moves real money in BOTH directions:
+   * three call sites put their tokens in the build TOTAL but not the ledger, so they land in the
+   * unattributed remainder and are priced at SONNET rates despite running on the cheap floor
+   * (over-charge); four record nothing anywhere, so they are billed to nobody (our loss). The admin's
+   * decision was to MEASURE BEFORE CHANGING — and measurement was impossible, because the second group
+   * is invisible by construction.
+   *
+   * This makes it visible WITHOUT touching billing: it is never read by the cost path, only reported.
+   */
+  shadowFastLaneTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  /**
    * ADMIN-ONLY infrastructure cost: how long this build held a real E2B VM, and our estimated spend on
    * it. Billed by WALL-CLOCK, so it is a completely different cost shape from token spend — a build
    * that used almost no tokens but sat on a VM for forty minutes still cost real money, and nothing in
@@ -351,6 +365,7 @@ export class BuildDiagnostics {
   private readonly providerDelivery = new Map<string, number>();
   private readonly providerFailures = new Map<string, number>();
   private providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  private shadowFastLaneTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
   private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
   private cacheReadInputTokens?: number;
   private billing?: BuildBillingRecord;
@@ -564,7 +579,64 @@ export class BuildDiagnostics {
    * preview, finish reason, tokens, latency). A `finishReason: 'max_tokens'` here is the smoking gun
    * for a truncated multi-file generation (the OneShot 8K-token cut-off).
    */
+  /**
+   * HOW LONG BEFORE THE BUILD ACTUALLY STARTED THINKING (admin report 2026-08-12).
+   *
+   * That build's first model call came 227 seconds in. For those 3 minutes 47 the user saw heartbeats
+   * saying "still working" with nothing to report, and `SETUP_TIMING` cheerfully said "Workspace ready
+   * in 0s" — measured before the sandbox restore, the dependency install and the secrets load, which
+   * were the whole of it. So the one number the report did print about setup was the one part of setup
+   * that was instant.
+   *
+   * Recorded HERE, on the first LLM call, because that is the only moment that can be defined without
+   * guessing: everything before it is preparation, and the user experiences all of it as waiting. A
+   * number nobody records is a number that grows.
+   *
+   * SECOND ROOT CAUSE — this diagnostic was itself misattributing time (admin report 2026-08-12, the
+   * dukaan stock app). It printed:
+   *
+   *     107s passed before the build made its first model call — sandbox setup, project restore,
+   *     dependency install and secrets loading all happen before this point
+   *
+   * The same report's narration disproves it: "Setting up your workspace…" at 0s, keys loaded at 18s,
+   * "Planning the file list…" at 20s. Setup was over at ~20 seconds. The other ~87 were the planning
+   * CALL running — because this hook fires from `recordLlmCall`, which runs when a call RETURNS, so
+   * the number always contained the first call's own duration and then blamed setup for it.
+   *
+   * That is not a rounding error, it is a diagnostic pointing at the wrong subsystem: anyone acting on
+   * it goes and optimises sandbox startup and finds nothing, while an 87-second model call goes
+   * unexamined. (The "227 seconds" in the note above came from this same inflated measurement.) So the
+   * call's own latency is subtracted, and the two numbers are reported separately — preparation is a
+   * platform problem, model latency is a provider one, and they have nothing to do with each other.
+   */
+  private recordTimeToFirstCall(latencyMs?: number): void {
+    if (this.llmCalls.length > 0) return; // only the first
+    const elapsedMs = Math.max(0, this.now() - this.startedAt);
+    // Clamped to the elapsed time: a provider-reported latency longer than the whole build so far is
+    // not a measurement we can subtract, and a negative prep time would be worse than the old bug.
+    const lat = typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0
+      ? Math.min(latencyMs, elapsedMs)
+      : undefined;
+    const seconds = Math.round((lat === undefined ? elapsedMs : elapsedMs - lat) / 1000);
+    const message = lat === undefined
+      // NEVER INVENT THE SPLIT. Without a latency we cannot separate the two, so we say the number is
+      // an upper bound rather than repeating the old confident, wrong attribution.
+      ? `${seconds}s passed before the build's first model call was recorded — this includes the call's own duration, which was not measured, so treat it as an upper bound on setup.`
+      : `${seconds}s of preparation before the build's first model call began — sandbox setup, project restore, dependency install and secrets loading all happen in it, and the user waits through every second. The first call itself then took ${Math.round(lat / 1000)}s; that is model time, not setup.`;
+    this.record({
+      phase: 'plan',
+      // Loud past the point where a user starts wondering whether anything is happening. Judged on
+      // PREPARATION alone now — a fast setup followed by a slow model call is a provider problem, and
+      // flagging it here sent the reader hunting the wrong subsystem.
+      severity: seconds >= 60 ? 'warning' : 'info',
+      code: 'TIME_TO_FIRST_CALL',
+      message,
+      autoResolved: seconds < 60,
+    });
+  }
+
   recordLlmCall(rec: Omit<LlmCallRecord, 'ts' | 'promptPreview' | 'responsePreview'> & { promptPreview?: string; responsePreview?: string }): void {
+    this.recordTimeToFirstCall(rec.latencyMs);
     if (this.llmCalls.length < MAX_LLM_CALLS) {
       this.llmCalls.push({
         ts: this.now(),
@@ -906,6 +978,14 @@ export class BuildDiagnostics {
   }
 
   /** Per-provider real token spend (the Billing-Phase-3 ledger, reconciled to the billed total). */
+  /**
+   * Record fast-lane usage for OBSERVATION. Deliberately a separate setter from setProviderTokens:
+   * anything written here must never be able to reach the billing path by accident.
+   */
+  setShadowFastLaneTokens(u: Record<string, { inputTokens: number; outputTokens: number }>): void {
+    if (u && Object.keys(u).length > 0) this.shadowFastLaneTokens = u;
+  }
+
   setProviderTokens(u: Record<string, { inputTokens: number; outputTokens: number }>): void {
     if (u && Object.keys(u).length > 0) this.providerTokens = u;
   }
@@ -970,6 +1050,41 @@ export class BuildDiagnostics {
     return true;
   }
 
+  /**
+   * How many findings of a severity are about THE APP, for the release gate.
+   *
+   * The exclusion list is the reason this is a method and not a filter at the call site. Several
+   * findings measure OUR OWN process — how the grounding budget was spent, how long the post-answer
+   * pass took, what shape the service graph has — and are recorded at warning severity so a human
+   * notices them. None of them is a reason to hesitate before shipping the user's app, and letting
+   * them demote a green build to yellow would make the gate's most important state unreachable in
+   * practice, which is the same as not having it. Anything already resolved is likewise not a caveat.
+   */
+  shippingIssueCount(severity: IssueSeverity): number {
+    const PROCESS_ONLY = new Set([
+      'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
+      'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
+    ]);
+    return this.issues.filter(
+      (i) => i.severity === severity && !i.autoResolved && !PROCESS_ONLY.has(i.code),
+    ).length;
+  }
+
+  /**
+   * Did a given TOOL actually run during this build?
+   *
+   * Exists so the claim audit can check a sentence like "I verified this with a real browser
+   * screenshot" against whether a screenshot was ever taken. Reads the timeline rather than a separate
+   * counter, so it cannot drift from what the report shows.
+   */
+  toolWasUsed(tool: string): boolean {
+    const needle = String(tool ?? '').trim().toLowerCase();
+    if (!needle) return false;
+    return this.issues.some(
+      (i) => i.phase === 'tool' && i.code === 'TOOL_DONE' && i.message.toLowerCase().includes(needle),
+    );
+  }
+
   report(): BuildDiagnosticsReport {
     // Normalize recovered-on-success issues at SERIALIZATION time, so counts, issues[] and the derived
     // rootCause are all consistent even when a finalize path bypassed finish()'s back-fill. Idempotent.
@@ -1026,6 +1141,7 @@ export class BuildDiagnostics {
       builtBy: dominantDeliveryProvider(this.providerDelivery),
       providerFailures: this.providerFailures.size ? Object.fromEntries(this.providerFailures) : undefined,
       providerTokens: this.providerTokens,
+      shadowFastLaneTokens: this.shadowFastLaneTokens,
       sandboxCost: this.sandboxCostRecord,
       cacheReadInputTokens: this.cacheReadInputTokens,
       billing: this.billing,
@@ -1161,10 +1277,52 @@ export function isTestOnlyTypecheckFailure(command: string, stdout?: string, std
  * and deriveRootCause — so all three agree. Pure.
  */
 const RECOVERABLE_ON_SUCCESS: ReadonlySet<string> = new Set([
+  // A PREVIEW FAILURE THE BUILD LATER RECOVERED FROM (admin report 2026-08-12). The preview went down
+  // mid-build, was restarted, and was then verified rendering by a real browser — and the report still
+  // named "nothing is listening on that port" as the ROOT CAUSE of a SUCCESSFUL build. A recovered
+  // transient is not a root cause; it is a thing that happened and then stopped happening. Guarded
+  // below by the same rule as a failed command: only forgiven when the run carries no surviving
+  // problem about it (`previewVerifiedRendered` records the positive proof).
+  'PREVIEW_NOT_RENDERED',
   'TOOL_ERROR', 'NO_BUILD_NUDGE', 'EMPTY_BUILD_RETRY', 'SANDBOX_CMD_FAILED',
 ]);
 export function isRecoverableOnSuccess(code: string): boolean {
   return RECOVERABLE_ON_SUCCESS.has(code);
+}
+
+/**
+ * ADVISORY findings that must NEVER be named as a build's root cause — on any outcome.
+ *
+ * ROOT CAUSE (Shiv Medical Store report, 2026-08-10): an `ok: true` build whose app was verified
+ * rendering reported its rootCause as
+ *   "@capacitor/android is declared in package.json dependencies but no project file imports it."
+ * That is a tidiness hint, and in this case a FALSE one — Capacitor's packages are consumed by its CLI
+ * and native config, exactly the caveat the message itself spells out. It was the loudest thing in a
+ * clean build, so it won.
+ *
+ * The class was already known: `importTurnObservation` was written for precisely this
+ * ("…named `@hookform/resolvers is declared … but no project file imports it` as the build's
+ * rootCause"), but that fix only covered IMPORT turns, so the sibling survived on every normal build.
+ * Fixing it by code is what closes it for good: an advisory can be reported, counted and read, but it
+ * can never be promoted to the explanation of a build.
+ *
+ * These are findings ABOUT the project that no build outcome depends on. A genuine failure always has
+ * a louder, non-advisory record — and when nothing else exists, "completed successfully with no
+ * problems recorded" is the honest answer, not a dependency hint.
+ */
+const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
+  'INTEGRITY_UNUSED_DEP',        // dependency hygiene; false-positives on CLI/config-only packages
+  'DEPHEALTH_ADVISORY',          // CVE/licence advisory appended to an already-successful build
+  'DESIGN_PAGE_INCONSISTENT',    // per-page design coverage — a quality note, never a cause
+  'TEST_SUITE_UNVERIFIED',       // our sandbox could not run the suite; not the app's defect
+  'REQUIREMENT_GAPS',            // "this domain usually also needs…" — a suggestion, not a fault
+  'POST_ANSWER_TIMING',          // pure measurement
+  'ARCHITECTURE_INVARIANT_VIOLATED', // consistency with the project's own conventions — not a failure
+]);
+
+/** True when a finding is advisory-only and must never become the build's rootCause. Pure. */
+export function isNeverRootCause(code: string): boolean {
+  return NEVER_ROOT_CAUSE.has(code);
 }
 
 /**
@@ -1310,6 +1468,9 @@ export function deriveRootCause(input: {
     || recovered.has(commandKey(i.message))
     || !failureHasSurvivingConsequence(i.message, issues);
   const excluded = (i: BuildIssue): boolean => isInfra(i)
+    // Advisory findings are excluded on EVERY outcome — a tidiness hint explains nothing, and on this
+    // build it was both the rootCause and factually wrong.
+    || isNeverRootCause(i.code)
     || (ok === true && isRecoverableOnSuccess(i.code) && forgiven(i));
   // Pick the TERMINAL cause, not merely the FIRST noisy one. An unresolved ERROR outranks an unresolved
   // WARNING even when the warning appears earlier in the timeline (EstateNest autopsy 2026-07-20: two

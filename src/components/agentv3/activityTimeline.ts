@@ -229,6 +229,17 @@ export function carryOverActivity(prevLog: ActivityEntry[], prevActivity: Activi
 }
 
 /** Detail rows for an expanded group: real entries, minus tool lines that duplicate a file event. */
+/**
+ * The file path an activity row is about, or null when the row is not about a file.
+ *
+ * Exported so the ROW component can label a file without re-parsing the entry text — the parsing
+ * rules live here, and a second copy in the component is how the two would drift apart.
+ */
+export function entryFilePath(e: ActivityEntry): string | null {
+  const c = classify(e);
+  return 'path' in c && c.path ? c.path : null;
+}
+
 export function detailEntries(entries: ActivityEntry[]): ActivityEntry[] {
   const filePaths = new Set<string>();
   for (const e of entries) {

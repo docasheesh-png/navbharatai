@@ -89,9 +89,6 @@ export function buildHealthReport(s: HealthSignals): HealthReport {
   };
 }
 
-const esc = (v: string): string =>
-  String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
 /** Render a self-contained (no external CDN → CSP-safe) status page that live-polls /api/health. */
 export function renderStatusPageHtml(): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -138,11 +135,22 @@ a{color:#58a6ff}
     var meta=[['Uptime',h.uptimeHuman],['Version',h.version],['Node',h.node],
       ['Memory (RSS)',mb(h.memoryMb&&h.memoryMb.rss)],['Ready',h.ready?'yes':'no'],
       ['Maintenance',h.maintenanceMode?'on':'off']];
-    document.getElementById('meta').innerHTML=meta.map(function(m){
-      return '<div class="card"><div class="k">'+m[0]+'</div><div class="v">'+m[1]+'</div></div>';}).join('');
-    document.getElementById('checks').innerHTML=(h.checks||[]).map(function(c){
-      return '<div class="check"><span class="s-'+c.status+'">●</span><span class="name">'+c.name+
-        '</span><span class="detail">'+(c.detail||'')+'</span></div>';}).join('');
+    // Built as DOM with textContent, never as an innerHTML string. This page renders values that
+    // arrive at RUNTIME from /api/health — versions, check names, failure details — and a detail line
+    // is exactly where a dependency's own error text would one day be echoed. Concatenating those into
+    // innerHTML is a DOM-XSS waiting for the first check that reports something it did not author.
+    // (A server-side escape helper existed for this and was never wired; it could not have worked
+    // either, since the data arrives after the page is served.)
+    function el(tag,cls,text){var n=document.createElement(tag);if(cls)n.className=cls;
+      if(text!==undefined&&text!==null)n.textContent=String(text);return n;}
+    var metaBox=document.getElementById('meta');metaBox.textContent='';
+    meta.forEach(function(m){var card=el('div','card');card.appendChild(el('div','k',m[0]));
+      card.appendChild(el('div','v',m[1]));metaBox.appendChild(card);});
+    var checksBox=document.getElementById('checks');checksBox.textContent='';
+    (h.checks||[]).forEach(function(c){var row=el('div','check');
+      row.appendChild(el('span','s-'+String(c.status||'').replace(/[^a-z]/g,''),'●'));
+      row.appendChild(el('span','name',c.name));
+      row.appendChild(el('span','detail',c.detail||''));checksBox.appendChild(row);});
   }
   function poll(){fetch('/api/health').then(function(r){return r.json();}).then(render).catch(function(){
     document.getElementById('headline').textContent='Status unavailable';});}

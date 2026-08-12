@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateAvailabilityIntegration, AVAILABILITY_SERVICE_SOURCE } from './AvailabilityGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateAvailabilityIntegration, AVAILABILITY_SERVICE_SOURCE } from './AvailabilityGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateAvailabilityIntegration (wiring)', () => {
   it('emits the availability service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateAvailabilityIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the overnight-span + exception rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted AvailabilityService — weekly windows + overnight spans + exceptions (real logic)', () => {
-  const artifact = join(here, `._availability_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, AVAILABILITY_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('availability', AVAILABILITY_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Window { open: string; close: string }
   type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -39,7 +33,7 @@ describe('emitted AvailabilityService — weekly windows + overnight spans + exc
   }
   interface Emitted { AvailabilityService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   // 2026-07-20 is a Monday (getUTCDay()===1). We use fixed UTC dates so tests are deterministic.

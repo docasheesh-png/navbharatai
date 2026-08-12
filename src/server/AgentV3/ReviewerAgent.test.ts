@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reviewBuild, formatReview, isReviewFailureSummary, selectAutoFixableWarnings, parseReviewOutput } from './ReviewerAgent';
+import { reviewBuild, formatReview, isReviewFailureSummary, selectAutoFixableWarnings, parseReviewOutput, reviewScope } from './ReviewerAgent';
 import type { ReviewIssue } from './ReviewerAgent';
 import type { SubAgentSpawn } from './ToolDispatcher';
 
@@ -238,5 +238,49 @@ describe('formatReview', () => {
     });
     expect(out).toContain('Missing auth');
     expect(out).toContain('🚨');
+  });
+});
+
+/**
+ * DIFF-SCOPED REVIEW.
+ *
+ * Shiv Medical Store report (2026-08-10): a turn that changed 3 files in a 78-file project sent the
+ * reviewer through ~25 read_file calls across the whole app. Tokens are the user's bill, and it is
+ * also the wrong review — it re-litigates code the user never touched, which is how a clean edit
+ * collects "issues" about pre-existing decisions.
+ */
+describe('reviewScope', () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => `src/f${i}.ts`);
+
+  it('focuses on a small edit in a large project — the reported case', () => {
+    const scope = reviewScope(['src/App.tsx', 'index.html', '.env.example'], 78);
+    expect(scope.focused).toBe(true);
+    expect(scope.files).toHaveLength(3);
+  });
+
+  it('does NOT focus a new build — everything changed, so everything is in scope', () => {
+    expect(reviewScope(many(40), 40).focused).toBe(false);
+  });
+
+  it('does NOT focus when a large share of the project moved — a rebuild in all but name', () => {
+    expect(reviewScope(many(30), 60).focused).toBe(false);
+  });
+
+  it('does NOT focus a small project — reviewing it whole is cheap anyway', () => {
+    expect(reviewScope(['src/a.ts'], 6).focused).toBe(false);
+  });
+
+  it('does NOT focus when nothing was recorded — never guess a narrow scope', () => {
+    // Guessing here would review 3 files while the thing that broke sits in the fourth.
+    expect(reviewScope(undefined, 78).focused).toBe(false);
+    expect(reviewScope([], 78).focused).toBe(false);
+    expect(reviewScope(['', '  '], 78).focused).toBe(false);
+  });
+
+  it('is stable at the boundary rather than flipping on one file', () => {
+    // The rule is MORE THAN a third, so exactly a third (26 of 78) still focuses — reviewing 26 named
+    // files beats surveying all 78 — and 27 tips it into "review the whole thing".
+    expect(reviewScope(many(26), 78).focused).toBe(true);
+    expect(reviewScope(many(27), 78).focused).toBe(false);
   });
 });

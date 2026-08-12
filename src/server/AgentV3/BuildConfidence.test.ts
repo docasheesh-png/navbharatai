@@ -1,6 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import { computeBuildConfidence, buildConfidenceSummary, type BuildConfidenceInput } from './BuildConfidence';
 
+/**
+ * `runtimeProven: 'passed'` is not decoration on this fixture — it is the correction of a real defect
+ * (Mission 10/10 Phase 5, 2026-08-12).
+ *
+ * These tests used to omit it, and the fixture was named "clean" and asserted 100% / High. That was the
+ * bug in miniature: every other field here is a STATIC analysis count, so the old fixture described an
+ * app with immaculate code that NOBODY HAD EVER SEEN RUN — and confidence said "I'm confident this
+ * build is solid" about it. Since every runtime check in the engine is gated on a preview URL, they all
+ * skip together, and they skip precisely when the app is most broken.
+ *
+ * So confidence is now capped below "high" without positive proof the app ran. These fixtures state
+ * that proof explicitly, which is what "every gate is clean" was always meant to mean. See
+ * releaseGate.test.ts for the cases that pin the caps themselves.
+ */
 const clean: BuildConfidenceInput = {
   readinessScore: 100,
   ready: true,
@@ -11,6 +25,7 @@ const clean: BuildConfidenceInput = {
   envVarsMissing: 0,
   accessibility: { high: 0, medium: 0, low: 0 },
   compliance: { high: 0, medium: 0, low: 0 },
+  runtimeProven: 'passed',
 };
 
 describe('computeBuildConfidence', () => {

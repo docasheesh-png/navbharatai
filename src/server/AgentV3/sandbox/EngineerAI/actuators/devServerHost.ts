@@ -142,7 +142,7 @@ export function resolvePmScript(command: string, scripts: Record<string, string>
  * flag. When `framework` is undefined the historical Vite-style `--host` pass-through is kept, so
  * existing callers and the common Vite scaffold are byte-for-byte unchanged.
  */
-export function ensureHostBinding(command: string, framework?: DevFramework): string {
+export function ensureHostBinding(command: string, framework?: DevFramework, resolvedScript?: string): string {
   if (!command) return command;
   // Already binds a host (any interface / explicit flag) — leave untouched.
   if (/--host|-H\b|HOST=|0\.0\.0\.0/.test(command)) return command;
@@ -153,7 +153,17 @@ export function ensureHostBinding(command: string, framework?: DevFramework): st
   // the bind host from `HOST` (or bind 0.0.0.0 already). Prefix `HOST=0.0.0.0` so a config-driven server
   // is reachable on the PUBLIC E2B preview instead of binding localhost-only (blank preview). A server
   // that ignores HOST is unchanged. (Mitrify node-express import fix, 2026-07-24.)
-  if (isNodeServerCommand(command)) return `HOST=0.0.0.0 ${command}`;
+  //
+  // LOOK THROUGH `npm run server` TOO — the drifted sibling of report 26a8e81c. That report fixed
+  // `pinDevServerPort` to test the RESOLVED script instead of the raw pm command, because a Node server
+  // behind `npm run dev` shows no `tsx`/`node` to match on. The function immediately above it was never
+  // given the same signal, so the identical blind spot survived here: `npm run server` → the branch below
+  // sees no node server, no `dev|serve` keyword either, and returns the command untouched — so an Express
+  // app that binds `localhost` (its own default, unless it reads HOST) is up, healthy, and NOT reachable
+  // on the public preview. Same defect, same line of reasoning, one function apart.
+  if (isNodeServerCommand(command) || (!!resolvedScript && isNodeServerCommand(resolvedScript))) {
+    return `HOST=0.0.0.0 ${command}`;
+  }
   // Next.js dev server.
   if (/\bnext\b/.test(command)) return `${command} -H 0.0.0.0`;
   // Vite invoked directly.
@@ -204,6 +214,28 @@ function isDevServerInvocation(segment: string): boolean {
     // command timeout (deadline_exceeded), wasting ~10 min per build when the agent tried it and the
     // live preview still never came up. `npm run build` stays excluded (compiles then exits).
     /(?:npm|pnpm|yarn)\s+run\s+(?:dev|start|serve|preview)\b/i.test(segment) ||
+    // THE BACKEND IS ALSO A LONG-RUNNING SERVER (admin report 2026-08-12, the dukaan stock app).
+    //
+    // `npm run server` matched NOTHING here: `serve\b` does not match "server", and the script it
+    // actually runs (`tsx watch server/index.ts`) is invisible at this point — we only see the script
+    // NAME. So a full-stack app's backend took the FOREGROUND path, blocked for the 45s command
+    // timeout, and — this is the part that broke the build — **the process it started did not die**.
+    // The build then ran the same command again and collided with its own orphan:
+    //     Error: listen EADDRINUSE: address already in use :::3000
+    // The backend crashed; the app runs server+client under `concurrently`, so the CLIENT died with
+    // it; port 5173 went dead and the user's preview showed a Closed Port Error — on a build that had
+    // just told them "App live hai".
+    //
+    // Classifying it correctly is the upstream fix, not a heal: it then takes the background path,
+    // which already brings the port fast-path (an existing healthy server is REUSED, never collided
+    // with) and the keepalive. The failure cannot recur rather than being recovered from.
+    //
+    // Anchored on the script NAME so `server`, `api`, `backend` and the `dev:`/`start:` variants match
+    // while a one-shot like `npm run server:build` does not.
+    /(?:npm|pnpm|yarn)\s+run\s+(?:dev|start):?(?:server|api|backend)\b(?!:)/i.test(segment) ||
+    /(?:npm|pnpm|yarn)\s+run\s+(?:server|api|backend)\b(?!:)/i.test(segment) ||
+    // The tools those scripts run, when the agent invokes them directly instead of through a script.
+    /\btsx\s+watch\b|\bnodemon\b|\bts-node-dev\b/i.test(segment) ||
     /python.*http\.server|http-server|live-server/i.test(segment) ||
     /\buvicorn\b|\bgunicorn\b|\bflask\s+run\b/i.test(segment) ||
     // Shell scripts that wrap dev servers (Django, Flask, FastAPI dev.sh)
@@ -591,6 +623,84 @@ export function shouldSkipDevServerLaunch(portAlreadyUp: boolean, depsStale: boo
  */
 export function buildHttpLivenessCommand(port: number): string {
   return `if curl -s -o /dev/null --max-time 3 http://127.0.0.1:${port} 2>/dev/null; then echo HTTP_OK; else echo HTTP_DOWN; fi`;
+}
+
+/** Marker embedded as the watchdog shell's $0 so `pgrep -f` finds it (and never stacks a second one). */
+export const DEV_SERVER_WATCHDOG_MARKER = 'nb_dev_watchdog';
+
+/** Where the watchdog records each revival, so a reaped server is DISTINGUISHABLE from a crashed one. */
+export const DEV_SERVER_WATCHDOG_LOG = '/tmp/nb_dev_watchdog.log';
+
+/**
+ * KEEPALIVE WATCHDOG for the dev server — the sibling of the Postgres one, and the same root cause.
+ *
+ * THE EVIDENCE (Shiv Medical Store build report, 2026-08-10). The dev server was started successfully
+ * and was gone ~4 minutes later: `curl` returned exit 7 and `ps aux | grep vite` printed nothing. The
+ * automatic recovery then reported, twice, "the dev server did not start and the log had no
+ * recognisable error", and gave up with "Automatic recovery is exhausted" — while a MANUAL
+ * `npm run dev` brought it up instantly, every time.
+ *
+ * Nothing was wrong with the app. The classifier found no error because THERE WAS NO ERROR: the
+ * sandbox had reaped the process. This codebase already knows that happens — postgresWatchdogCommand
+ * exists because "the sandbox reaps the Postgres daemon minutes after provision — the root class behind
+ * builds #14→#18". The dev server is the sibling that was never hunted.
+ *
+ * BOUNDED ON PURPOSE. An unbounded restart loop around a server that dies from a SYNTAX ERROR is
+ * exactly the "retry loop around code that deterministically fails" the engineering rules forbid: it
+ * would burn CPU and hide the real defect forever. So the loop counts revivals, stops after
+ * `maxRevivals`, and leaves its tally on disk — which also gives the classifier something it never had
+ * before: the difference between "reaped and revived" and "keeps dying on its own".
+ *
+ * Detached with nohup + setsid so it outlives the command that armed it. Pure command builder.
+ */
+export function devServerWatchdogCommand(opts: {
+  port: number;
+  /** The concrete dev command to re-run (already host/port-normalised by the caller). */
+  runCommand: string;
+  /** The workspace root. REQUIRED: duplicating the actuator's WORKSPACE_ROOT here would be a
+   *  second source of truth for it, and a watchdog that cd's to the wrong directory is silent. */
+  cwd: string;
+  /** Give up after this many revivals so a genuinely broken server is not restarted forever. */
+  maxRevivals?: number;
+  /** Seconds between liveness checks. */
+  intervalSeconds?: number;
+}): string {
+  const port = Math.max(1, Math.floor(opts.port));
+  const maxRevivals = Math.max(1, Math.floor(opts.maxRevivals ?? 5));
+  const interval = Math.max(5, Math.floor(opts.intervalSeconds ?? 15));
+  const cwd = opts.cwd;
+  // The SAME three-way liveness check buildPortWaitCommand uses — a watchdog that disagreed with the
+  // readiness probe about what "up" means would fight it, restarting a server the build considers ready.
+  const check = `nc -z 127.0.0.1 ${port} 2>/dev/null || curl -s -o /dev/null --max-time 2 http://127.0.0.1:${port} 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null`;
+  // The watchdog body is wrapped in single quotes, so a single quote inside the dev command must be
+  // closed-escaped-reopened ('\'') or it terminates the body and emits a broken shell command.
+  // Written as split/join rather than a template literal: the backslash is too easy to lose there.
+  const safeRun = opts.runCommand.split("'").join("'\\''");
+  return `if ! pgrep -f ${DEV_SERVER_WATCHDOG_MARKER} >/dev/null 2>&1; then
+  nohup setsid sh -c 'n=0
+while [ $n -lt ${maxRevivals} ]; do
+  sleep ${interval}
+  if ! ( ${check} ); then
+    n=$((n+1))
+    echo "REVIVED $n $(date -u +%H:%M:%S)" >> ${DEV_SERVER_WATCHDOG_LOG}
+    cd ${cwd} && nohup ${safeRun} >> ${DEV_SERVER_LOG_PATH} 2>&1 &
+  fi
+done
+echo "GAVE_UP after ${maxRevivals} revivals" >> ${DEV_SERVER_WATCHDOG_LOG}' ${DEV_SERVER_WATCHDOG_MARKER} >/dev/null 2>&1 &
+fi
+echo DEV_WATCHDOG_ARMED`;
+}
+
+/**
+ * Read the watchdog tally. `revivals > 0` means the dev server was REAPED and brought back — which is
+ * the honest explanation for a preview that flickered, and is NOT the same thing as a crash.
+ */
+export function parseDevServerWatchdogLog(log: string): { revivals: number; gaveUp: boolean } {
+  const text = String(log || '');
+  return {
+    revivals: (text.match(/^REVIVED /gm) || []).length,
+    gaveUp: /^GAVE_UP /m.test(text),
+  };
 }
 
 export function buildPortWaitCommand(port: number, maxSeconds: number): string {

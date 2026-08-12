@@ -1,10 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { generateCommentsIntegration, COMMENT_SERVICE_SOURCE } from './CommentsGenerator';
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { generateCommentsIntegration, COMMENT_SERVICE_SOURCE } from './CommentsGenerator';
+import { emitModule } from '../../../tests/helpers/emitModule';
 
 describe('generateCommentsIntegration (wiring)', () => {
   it('emits the comment service, routes and README', () => {
@@ -22,11 +19,8 @@ describe('generateCommentsIntegration (wiring)', () => {
 // Materialize + execute the emitted domain logic — the parent/depth/soft-delete rules are real business
 // rules, verified against the actual emitted code.
 describe('emitted CommentService — thread integrity + soft-delete (real logic)', () => {
-  const artifact = join(here, `._comment_emitted_${process.pid}.ts`);
-  writeFileSync(artifact, COMMENT_SERVICE_SOURCE);
-  afterAll(() => {
-    try { unlinkSync(artifact); } catch { /* already gone */ }
-  });
+  const emitted = emitModule('comment', COMMENT_SERVICE_SOURCE);
+  afterAll(emitted.cleanup);
 
   interface Comment { id: string; threadId: string; parentId: string | null; depth: number; deleted: boolean; body: string }
   interface ThreadNode extends Comment { replies: ThreadNode[] }
@@ -41,7 +35,7 @@ describe('emitted CommentService — thread integrity + soft-delete (real logic)
   }
   interface Emitted { CommentService: new () => Service }
   async function load(): Promise<Emitted> {
-    return (await import(/* @vite-ignore */ pathToFileURL(artifact).href)) as unknown as Emitted;
+    return (await import(/* @vite-ignore */ emitted.href)) as unknown as Emitted;
   }
 
   it('a reply inherits its parent thread and gets depth = parent.depth + 1', async () => {

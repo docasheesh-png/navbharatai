@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { tokenize, contentSearchTerms } from './ContextReranker';
+import {
+  tokenize, contentSearchTerms, groundableFile, isGeneratedArtifact, looksMinified,
+  rankByBM25, selectGroundingCandidates,
+} from './ContextReranker';
 
 describe('tokenize', () => {
   it('lowercases, splits on non-alphanumerics, drops stopwords + 1-char tokens', () => {
@@ -199,5 +202,87 @@ describe('pathTokenize (camelCase-aware filename matching)', () => {
   it('handles consecutive capitals (AIChat → ai chat is at least not one opaque token)', () => {
     const t = pathTokenize('components/AIChat.tsx');
     expect(t).toContain('chat');
+  });
+});
+
+/**
+ * GENERATED OUTPUT MUST NEVER BE GROUNDING MATERIAL.
+ *
+ * From a real build report (Shiv Medical Store, 2026-08-10): a Capacitor app, so `npx cap sync` had
+ * copied the built web bundle into android/app/src/main/assets/public/. Only node_modules/ was
+ * excluded, so the MINIFIED REACT BUNDLE ranked as the #1 "most relevant existing file" and rode along
+ * in the grounding preamble of all ~26 model calls. That build spent ~776k input tokens to change 3
+ * files and billed ₹567 to a free-tier user.
+ *
+ * It costs twice: tokens are the bill, and the model's context fills with minified vendor code instead
+ * of the app's real source.
+ */
+describe('generated build output is never grounded on', () => {
+  it('rejects the EXACT file from the report', () => {
+    expect(groundableFile('android/app/src/main/assets/public/assets/index-CW6KpYSX.js')).toBe(false);
+    expect(isGeneratedArtifact('android/app/src/main/assets/public/assets/index-CW6KpYSX.js')).toBe(true);
+  });
+
+  it('rejects every common build output directory', () => {
+    for (const p of [
+      'dist/index.js', 'build/main.js', 'out/page.js', 'coverage/lcov-report/x.js',
+      '.next/static/chunks/main.js', '.nuxt/dist/client.js', '.svelte-kit/output/x.js',
+      'node_modules/react/index.js', 'ios/App/App/public/assets/index-abc.js',
+      'www/js/app.js', 'test-results/x.js', 'playwright-report/index.html', 'vendor/jquery.js',
+    ]) {
+      expect(groundableFile(p), p).toBe(false);
+    }
+  });
+
+  it('rejects bundler output by name, wherever it sits', () => {
+    for (const p of ['src/lib.min.js', 'public/app.bundle.js', 'src/app.js.map', 'styles.min.css']) {
+      expect(groundableFile(p), p).toBe(false);
+    }
+  });
+
+  it('STILL ACCEPTS ordinary source — the check must not eat the app', () => {
+    // The failure that would matter more than the bug: grounding on nothing at all.
+    for (const p of [
+      'src/App.tsx', 'src/pages/Dashboard.tsx', 'src/components/Card.jsx', 'src/index.css',
+      'index.html', 'package.json', 'README.md', 'app/routes/_index.tsx', 'src/App.vue',
+      'src/App.svelte', 'server/main.py',
+      // Names that merely CONTAIN a banned word must survive.
+      'src/components/BuildStatus.tsx', 'src/lib/distance.ts', 'src/pages/about-us.tsx',
+    ]) {
+      expect(groundableFile(p), p).toBe(true);
+    }
+  });
+
+  it('BM25 refuses a minified doc even when its path looks innocent', () => {
+    // A hashed chunk dropped somewhere unusual would otherwise win on raw term frequency.
+    const bundle = `var a=1;${'x'.repeat(4000)};function q(){return 1}`.replace(/\n/g, '');
+    const ranked = rankByBM25(
+      { 'src/weird/chunk-abc.js': `${bundle} medicine stock inventory`, 'src/Real.tsx': 'medicine stock inventory list' },
+      'medicine stock inventory',
+    );
+    expect(ranked.map((r) => r.path)).toEqual(['src/Real.tsx']);
+  });
+
+  it('looksMinified is about LINE LENGTH, not file size — a long normal file is fine', () => {
+    const normal = Array.from({ length: 2000 }, (_, i) => `const x${i} = ${i}; // a normal line of source`).join('\n');
+    expect(looksMinified(normal)).toBe(false);
+    expect(looksMinified('a'.repeat(2000))).toBe(true);
+    expect(looksMinified('')).toBe(false);
+    expect(looksMinified('short')).toBe(false);
+  });
+
+  it('the candidate selector drops them too, so nothing downstream can resurrect one', () => {
+    const { candidates } = selectGroundingCandidates({
+      fileTree: [
+        'android/app/src/main/assets/public/assets/index-CW6KpYSX.js',
+        'dist/assets/index-9f8a.js',
+        'src/App.tsx',
+        'src/pages/Medicines.tsx',
+      ],
+      prompt: 'fix the medicines page',
+    });
+    expect(candidates.some((c) => c.includes('android/app'))).toBe(false);
+    expect(candidates.some((c) => c.startsWith('dist/'))).toBe(false);
+    expect(candidates).toContain('src/pages/Medicines.tsx');
   });
 });

@@ -9,14 +9,14 @@ import {
   Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
-  Star, Search, Mic, Camera,
+  Star, Search, Mic, Camera, Volume2,
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
 import {  } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
-import { uploadZipProject } from '../../lib/zipProjectUpload';
-import { resolveImportWorkspaceId, importTargetUnavailableMessage, zipImportProgressLabel } from './zipImportTarget';
+import { importProjectArchive, importProjectFolder, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
+import { resolveImportWorkspaceId, importTargetUnavailableMessage } from './zipImportTarget';
 import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
@@ -44,6 +44,9 @@ import { loadDraft, saveDraft } from './composerDraft';
 import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
 import { buildChatBlocks } from './activityTimeline';
+import { ChatToolbar } from '../chat/ChatToolbar';
+import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
+import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 import { ActionGroupRow } from './ActivityTimelineRow';
 import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
@@ -187,6 +190,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     setPowerLevel((cur) => (powerUnlocked ? cur : 'weak'));
   }, [powerUnlocked]);
+  // Persist the selected tier so OTHER surfaces (e.g. the APK builder's build-repair) can route the AI
+  // to the SAME models the user picked here — weak stays on the cheap coders, paid tiers get Sonnet/Opus.
+  useEffect(() => {
+    try { localStorage.setItem('nbai_power_level', powerLevel); } catch { /* storage unavailable — the reader falls back to the weak-safe default */ }
+  }, [powerLevel]);
   // Derived for the existing boolean call sites (start/telemetry) — any Opus power level.
   const onlyOpus = powerLevel === 'mini' || powerLevel === 'medium' || powerLevel === 'max';
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
@@ -258,6 +266,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Composer: auto-growing textarea + expand/minimize + device-aware Enter behaviour.
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
+  // Shared composer toolbar state (admin 2026-08-10). The Enter preference is the ONE key every AI
+  // reads — set it here and Doctor AI, the professionals and the free chat all follow.
+  const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => readSendOnEnter((k) => localStorage.getItem(k)));
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [showChatSearch, setShowChatSearch] = useState(false);
   // INLINE voice dictation (admin 2026-07-22): the mic types speech straight into the composer on this
   // page — no separate Voice-to-App page. Same Web Speech engine the standalone tool uses.
   const [listening, setListening] = useState(false);
@@ -560,10 +573,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [gitStatus, setGitStatus] = useState<import('../../hooks/useAgentV3Build').GitStatus | null>(null);
   const handleRestoreCheckpoint = async (sha: string) => {
     setRestoreNote('Restoring…');
-    const ok = await restore(sha);
-    setRestoreNote(ok
-      ? '✅ Restored your workspace to that checkpoint.'
-      : "⚠️ That checkpoint isn't active in this session yet (the sandbox may have recycled). Continue a build to make its history live again.");
+    // The SERVER decides the wording: it is the only side that knows whether the history is gone, the
+    // workspace is cold, or git simply refused. This used to print one guess for all of them — and the
+    // guess ("continue a build to make its history live again") was wrong for the most common case,
+    // which was the request landing on a different Cloud Run instance.
+    const { ok, message } = await restore(sha);
+    setRestoreNote(`${ok ? '✅' : '⚠️'} ${message}`);
   };
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // A stable session id keeps the SAME sandbox + memory + workspace across messages,
@@ -656,8 +671,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Build actions (activity/diffs) decorate ONLY the Build tab; the read-only Plan/Advise pages render a
   // clean conversation. Prior turns' archived activity (activityLog) is included so a finished build's
   // action rows + diff stats stay in the chat forever within the session (admin 2026-07-21 — no vanish).
+  // SEARCH (shared composer toolbar, admin 2026-08-10) filters the messages the timeline is built
+  // from, not `convo` itself — the empty-state below must keep answering "is this conversation
+  // empty?", never "did the search match?", or a query with no hits would show the cold-start
+  // template screen as if the user had never sent anything.
+  const visibleConvo = filterMessages(convo, chatSearchQuery) as ChatMsg[];
   const chatBlocks = buildChatBlocks(
-    convo,
+    visibleConvo,
     chatMode === 'build' ? [...state.activityLog, ...state.activity] : [],
     chatMode === 'build' ? state.diffs : {},
   );
@@ -1237,14 +1257,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // uploaded in chunks (so archive size is not a limit — see zipProjectUpload.ts), extracted and
   // landed SERVER-SIDE into this workspace, and then shown in Files. It never becomes base64 in a
   // build request, which is exactly what capped it at 18 MB and made a 161 MB import impossible.
-  const handleZipProject = async (file: File) => {
+  // ONE import runner, two entry points. The zip and folder paths differ ONLY in where the bytes come
+  // from; every step after that — the precondition, the progress line, the honest summary, the Files
+  // hand-off, the error surface — is identical, and duplicating it per entry point is how two ways in
+  // start behaving differently for no reason anyone chose.
+  const runProjectImport = async (
+    announce: string,
+    run: (workspaceId: string, onProgress: (p: { label: string }) => void) => Promise<MasterImportResult | null>,
+  ) => {
     if (running || zipImporting) return;
-    // PRECONDITION FIRST (admin report 2026-08-04). The workspace id is only used by the COMMIT call,
-    // which runs AFTER the entire archive has been transferred — so a missing one used to cost a 161 MB,
-    // multi-minute upload before the server could correctly refuse it. Resolve and validate the target
-    // here, in the first millisecond, exactly like the server's own size/disk preflight. This also fixes
-    // the id itself: this was the one call site passing `state.workspaceId` (empty until a build
-    // attaches) instead of the session's real id, so a FRESH tab could never import at all.
+    // PRECONDITION FIRST (admin report 2026-08-04). The workspace id is only used once the bytes are
+    // already moving, so a missing one used to cost a 161 MB, multi-minute transfer before the server
+    // could correctly refuse it. Resolve and validate here, in the first millisecond — the same shape as
+    // the server's own size/disk preflight. This also fixes the id itself: the import was the one call
+    // site passing `state.workspaceId` (empty until a build attaches) instead of the session's real id,
+    // so a FRESH tab could never import at all.
     const targetWorkspaceId = resolveImportWorkspaceId({
       stateWorkspaceId: state.workspaceId,
       fallbackWorkspaceId: clientWorkspaceId(userId, sessionIdRef.current),
@@ -1254,15 +1281,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       return;
     }
     setZipImporting(true);
-    const started = Date.now();
-    setUserMsgs((c) => [...c, { role: 'agent', text: `📦 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`, ts: started }]);
+    setUserMsgs((c) => [...c, { role: 'agent', text: announce, ts: Date.now() }]);
     try {
-      const result = await uploadZipProject(file, targetWorkspaceId, (p) => {
-        setZipProgress(zipImportProgressLabel(p.phase, p.fraction));
-      });
-      // The success line now STATES what did not come in. A green tick over a silently-gutted project
-      // is the product lying about its own result — the exact thing the second and third absolute rules
-      // forbid. `dropSummary` is '' for a clean import, so a complete project reads exactly as before.
+      const result = await run(targetWorkspaceId, (p) => setZipProgress(p.label));
+      if (!result) return; // the user cancelled the picker — a normal outcome, not a failure
+      // The tree is already in hand on the browser path — paint Files immediately instead of making the
+      // user wait on a round trip for data this tab just read itself.
+      if (result.files) { try { onFilesSync?.(result.files); } catch { /* the read-back below still covers it */ } }
+      // The success line STATES what did not come in. A green tick over a silently-gutted project is the
+      // product lying about its own result — the exact thing the second and third absolute rules forbid.
+      // `dropSummary` is '' for a clean import, so a complete project reads exactly as before.
       setUserMsgs((c) => [...c, {
         role: 'agent',
         // It also says what happens NEXT, because the import now starts the app itself: the user should
@@ -1278,8 +1306,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         const res = await fetch('/api/agentv3/workspace-files', {
           method: 'POST',
           headers: await authJsonHeaders(),
-          // The SAME resolved id the import landed in — reading back `state.workspaceId` here would
-          // ask an empty workspace for the files on exactly the fresh session this fix is about.
           body: JSON.stringify({ workspaceId: targetWorkspaceId, userId, email }),
         });
         const data = await res.json().catch(() => null);
@@ -1303,6 +1329,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       // in this file would have raced the first and booted the same sandbox twice.
       setTab('preview');
       setPreviewBootSignal(Date.now());
+      // CONNECT AUDIT (master import, part 4). Landing and running the project is plumbing — every
+      // builder does it. What makes bringing an app HERE worth doing is being told something about it
+      // you did not already know, for free, before spending anything. Deterministic and model-free
+      // (the analyzers this repo already has), so it costs the user nothing and cannot start a build.
+      //
+      // Fire-and-forget on purpose, AFTER the preview boot is signalled: a courtesy finding must never
+      // delay the thing the user actually asked for, and its absence must never look like a failed
+      // import. The import is already complete and reported by the time this runs.
+      void (async () => {
+        try {
+          const res = await fetch('/api/agentv3/connect-audit', {
+            method: 'POST',
+            headers: await authJsonHeaders(),
+            body: JSON.stringify({ workspaceId: targetWorkspaceId, userId, email }),
+          });
+          const audit = await res.json().catch(() => null);
+          if (audit?.message) setUserMsgs((c) => [...c, { role: 'agent', text: audit.message, ts: Date.now() }]);
+        } catch { /* a bonus that did not arrive is never reported as an import failure */ }
+      })();
     } catch (err) {
       setUserMsgs((c) => [...c, {
         role: 'agent',
@@ -1314,6 +1359,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setZipProgress('');
     }
   };
+
+  // A .zip: read in the browser, uploading only the surviving source; the chunked server upload stays
+  // as an honest fallback when the browser genuinely cannot open it.
+  const handleZipProject = (file: File) => runProjectImport(
+    `📦 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`,
+    (workspaceId, onProgress) => importProjectArchive(file, workspaceId, userId, email, onProgress),
+  );
+
+  // A FOLDER: no zip, no archive, nothing staged — the browser reads the project where it already is.
+  const handleOpenFolder = () => runProjectImport(
+    '📂 Opening your project folder…',
+    async (workspaceId, onProgress) => {
+      const dir = await pickProjectFolder();
+      if (!dir) return null; // cancelled
+      return importProjectFolder(dir, dir.name || 'your project', workspaceId, userId, email, onProgress);
+    },
+  );
 
   // FULL TEAM mid-build steering (Fix 60, admin 2026-07-13): on the 'max' tier the composer stays
   // LIVE during a build — a sent message is queued server-side (/steer) and the AgentRunner injects
@@ -3737,6 +3799,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 title="Attach (photo, gallery, file, or a website screenshot → app)"
                 buttonClassName="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
                 onZipProject={(f) => void handleZipProject(f)}
+                onOpenFolder={() => void handleOpenFolder()}
               />
               {/* Voice to App — INLINE dictation (admin 2026-07-22): tap to speak → text types into THIS
                   input box live; tap again to stop. No separate page. Turns red/pulsing while listening. */}
@@ -3750,6 +3813,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               >
                 <Mic className="w-4 h-4" />
               </button>
+              {/* TALK TO NAVBHARATAI BY VOICE (admin 2026-08-10: "sabhi me laga do"). Distinct from
+                  the dictation mic on its left, which types speech into this box — this opens a live
+                  spoken conversation. PAID: the button opens a consent card stating the per-second
+                  price in the user's own language first, and renders nothing unless voice is enabled
+                  and the user is signed in. */}
+              <ProfessionalVoiceButton
+                title="Talk to NavBharatAI by voice"
+                className="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-emerald-300"
+                icon={<Volume2 className="w-4 h-4" />}
+                getHistory={() => convo
+                  .filter((m) => (m.text || '').trim())
+                  .slice(-12)
+                  .map((m) => ({
+                    role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+                    content: String(m.text || ''),
+                  }))}
+              />
               {/* Hidden gallery picker — drives the inline "Screenshot → App" flow for BOTH entry points
                   (the glowing template button and the Attach-menu option). accept=image/* (no capture) so
                   it opens the photo gallery/library. */}
@@ -3767,6 +3847,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <span className="shrink-0 text-indigo-400">Large projects take a few minutes</span>
                 </div>
               )}
+              {/* THE SHARED COMPOSER TOOLBAR (admin 2026-08-10: "wahi sabhi jagah laga do"). order-0 so
+                  it sits directly above the input, matching every other AI. Clear starts a NEW SESSION
+                  rather than emptying the message array: a v5.0 thread owns a workspace, a build lock,
+                  a preview and a report, and blanking only the bubbles would leave all of that live
+                  underneath — the exact "+New chat leak" class this panel has been root-caused for twice. */}
+              <div className="order-0 w-full mb-1">
+                <ChatToolbar
+                  messageCount={convo.length}
+                  sendOnEnter={sendOnEnter}
+                  onSendOnEnterChange={setSendOnEnter}
+                  searchQuery={chatSearchQuery}
+                  onSearchQueryChange={setChatSearchQuery}
+                  searchOpen={showChatSearch}
+                  onSearchOpenChange={setShowChatSearch}
+                  searchMatches={visibleConvo.length}
+                  onClear={running ? undefined : newChatFromHistory}
+                  charCount={prompt.length}
+                />
+              </div>
               <div className="relative w-full order-1" data-tour="chat">
                 <textarea
                   ref={composerRef}
@@ -3799,10 +3898,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     // U7: Cmd/Ctrl+Enter ALWAYS sends — even on touch or in the expanded editor — so a
                     // finished multiline message ships without reaching for the button.
                     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && prompt.trim()) { e.preventDefault(); if (steering) sendSteer(); else if (chatMode === 'build') send(); else sendRole(chatMode); return; }
-                    // Laptop (physical keyboard) → Enter sends. Phone (touch) → Enter inserts a newline
-                    // (send only via the button). In the expanded editor Enter always inserts a newline
-                    // so a long message can be edited freely. Shift+Enter is always a newline.
-                    if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice && !composerExpanded) {
+                    // The Enter behaviour used to be GUESSED from the device: laptop sends, phone
+                    // inserts a newline. That guess is wrong in both directions — a phone user with a
+                    // Bluetooth keyboard could not send from it, and a laptop user writing a long
+                    // multi-line spec could not get a newline. It is now the user's own choice via the
+                    // toolbar toggle above (shared with every other AI), so nobody is stuck with a
+                    // decision the app made for them. The expanded editor still always inserts a
+                    // newline — that is an explicit "I am writing something long" mode.
+                    if (!composerExpanded && enterShouldSend({
+                      key: e.key,
+                      shiftKey: e.shiftKey,
+                      sendOnEnter,
+                      hasContent: !!prompt.trim(),
+                      isBusy: false, // a running build is steerable; the branch below picks the right send
+                      isComposing: (e.nativeEvent as any)?.isComposing,
+                    })) {
                       e.preventDefault();
                       if (steering) sendSteer(); else if (chatMode === 'build') send(); else sendRole(chatMode);
                     }

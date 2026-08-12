@@ -8,6 +8,8 @@
 //
 // Pure + deterministic → unit-tested. No dependency.
 
+import { applyGroundingBudget, groundingTokenBudget, type BudgetedBlock, type BudgetResult } from './contextBudget';
+
 const STOPWORDS = new Set(
   'the a an and or of to in for on with is are be this that it as at by from into your you i we my our app build make create add fix change update use using need want please'.split(
     ' ',
@@ -54,7 +56,10 @@ export function rankByBM25(files: Record<string, string>, query: string, limit =
   const queryTerms = [...new Set(tokenize(query))];
   if (queryTerms.length === 0) return [];
   const docs: Doc[] = Object.entries(files || {})
-    .filter(([, c]) => typeof c === 'string')
+    // Generated output is never grounding material, and a minified bundle is the single most
+    // expensive thing that can win a ranking — see the note on isGeneratedArtifact. The path rule
+    // catches the usual homes; looksMinified catches a hashed chunk sitting somewhere unexpected.
+    .filter(([p, c]) => typeof c === 'string' && !isGeneratedArtifact(p) && !looksMinified(c))
     .map(([path, content]) => ({ path, tokens: tokenize(content) }));
   if (docs.length === 0) return [];
 
@@ -178,6 +183,7 @@ export function structuralAnchors(fileTree: readonly string[], max = 8): string[
 
 /**
  * Rank files by IMPORT-GRAPH CENTRALITY (in-degree): how many OTHER files import them. Central files
+import { applyGroundingBudget, groundingTokenBudget, type BudgetedBlock, type BudgetResult } from './contextBudget';
  * (storage.ts, schema.ts, lib/db.ts) are structurally load-bearing for almost any edit, even when
  * their name echoes nothing in the request. Import specifiers are resolved to tree files by basename
  * (`./storage`, `@/lib/db` → the tree file whose path ends with that segment) — a deliberate, cheap
@@ -207,8 +213,63 @@ export function centralFiles(fileTree: readonly string[], imports: Record<string
     .map(([p]) => p);
 }
 
+/**
+ * GENERATED OUTPUT — never grounding material, and expensive to include.
+ *
+ * ROOT CAUSE (real build report, Shiv Medical Store, 2026-08-10, ₹567 on a free-tier build): this is a
+ * Capacitor app, so `npx cap sync` copies the built web bundle into
+ * `android/app/src/main/assets/public/`. Only `node_modules/` was excluded, so the MINIFIED REACT
+ * BUNDLE (`assets/index-CW6KpYSX.js`) ranked as the #1 "most relevant existing file" and was re-sent in
+ * the grounding preamble of all ~26 model calls in that build.
+ *
+ * It costs twice over. Tokens are the bill — that build spent ~776k input tokens to change 3 files —
+ * and the model's context is filled with minified vendor code instead of the app's real source, so it
+ * grounds on nothing useful. A build artifact can never inform an edit: it is the OUTPUT of the very
+ * files we should be showing.
+ */
+const GENERATED_PATH_RE = [
+  /(^|\/)node_modules\//,
+  /(^|\/)(dist|build|out|coverage|\.next|\.nuxt|\.svelte-kit|\.output|\.turbo|\.cache)\//,
+  // Capacitor / Cordova copy the built web app into the native projects.
+  /(^|\/)android\/app\/src\/main\/assets\/public\//,
+  /(^|\/)ios\/App\/App\/public\//,
+  /(^|\/)(www|platforms)\//,
+  // Test/report output.
+  /(^|\/)(test-results|playwright-report|\.nyc_output)\//,
+  /(^|\/)vendor\//,
+  // Bundler output by name.
+  /\.min\.(js|css)$/i,
+  /\.bundle\.(js|css)$/i,
+  /\.(js|css)\.map$/i,
+];
+
+/** True when the path is generated/build output rather than source the model should read. Pure. */
+export function isGeneratedArtifact(p: string): boolean {
+  return GENERATED_PATH_RE.some((re) => re.test(p));
+}
+
+/**
+ * A content-side backstop for bundles the path rules miss (a hashed chunk dropped somewhere unusual).
+ * Minified code is characterised by enormously long lines — real source almost never exceeds ~200
+ * columns, while a bundle is routinely one line of hundreds of thousands of characters.
+ *
+ * Checked on a PREFIX, so this stays cheap on a large file.
+ */
+export function looksMinified(content: string): boolean {
+  const head = content.slice(0, 20000);
+  if (!head.trim()) return false;
+  let longest = 0;
+  for (const line of head.split('\n')) {
+    if (line.length > longest) longest = line.length;
+    if (longest > 1000) return true;
+  }
+  // A single unbroken line that fills the whole sample is a bundle even below the 1000 threshold.
+  return content.length > 5000 && !head.includes('\n');
+}
+
 /** Files worth grounding on: code + the two doc anchors (package.json / README). Pure. */
 export function groundableFile(p: string): boolean {
+  if (isGeneratedArtifact(p)) return false;
   return /\.(t|j)sx?$|\.vue$|\.svelte$|\.css$|\.html$|\.py$/.test(p) || /(^|\/)package\.json$/.test(p) || /(^|\/)readme\.md$/i.test(p);
 }
 
@@ -263,18 +324,41 @@ export function buildGroundedContext(files: Record<string, string>, query: strin
     ? Object.keys(files).slice(0, Math.max(0, topK)).map((path) => ({ path, score: 1 }))
     : rankByBM25(files, query, topK);
   if (ranked.length === 0) return '';
-  const blocks: string[] = [];
+  const blocks: BudgetedBlock[] = [];
   for (const { path } of ranked) {
     const content = files[path];
     if (typeof content !== 'string') continue;
     const line = firstRelevantLine(content, query);
     const snippet = snippetAround(content, line);
-    blocks.push(`• ${path}:${line}\n${snippet}`);
+    blocks.push({ path, text: `• ${path}:${line}\n${snippet}` });
   }
-  if (blocks.length === 0) return '';
+  // TOKEN BUDGET (admin 2026-08-11). Tokens ARE the bill: an autopsy measured 776k input tokens to
+  // change 3 files, with grounding the biggest contributor. The specific culprit then (a minified
+  // bundle ranked #1) is now filtered out, but a FILTER only answers "is this file bad?" — a BUDGET
+  // answers "have we spent too much?", which is the only defence against the oversized file nobody
+  // predicted. It can only ever REMOVE blocks from a hint the model is already told to verify with
+  // read_file, so the worst case is one extra tool call.
+  const budgeted = applyGroundingBudget(blocks, groundingTokenBudget());
+  lastGroundingBudget = budgeted;
+  if (budgeted.kept.length === 0) return '';
   return [
     'RELEVANT EXISTING FILES (grounding — ranked by relevance to this request; cited as path:line).',
     'These are the most likely files to read/modify; open them with read_file for full content before editing:',
-    ...blocks,
+    ...budgeted.kept.map((b) => b.text),
   ].join('\n\n');
+}
+
+/**
+ * What the last grounding preamble cost, for the build report.
+ *
+ * Module-level rather than returned, because `buildGroundedContext` returns a STRING to a dozen call
+ * sites and changing that signature to carry provenance would touch every one of them — the kind of
+ * wide edit that breaks something unrelated. The caller that wants the number reads it immediately
+ * after building the context; nothing else depends on it, and a stale read costs a slightly wrong
+ * diagnostic line, never a wrong build.
+ */
+let lastGroundingBudget: BudgetResult | null = null;
+
+export function lastGroundingCost(): BudgetResult | null {
+  return lastGroundingBudget;
 }

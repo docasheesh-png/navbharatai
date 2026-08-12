@@ -248,3 +248,64 @@ describe('domain classification corpus — a stem must never match inside an unr
     }
   });
 });
+
+/**
+ * GAMES. Added when v5.0 gained a real game engine (phases 1–6). A game prompt is the most
+ * under-specified kind there is — people describe the fantasy ("a ninja platformer") and never the
+ * things that decide whether it is playable twice.
+ */
+describe('game domain', () => {
+  it('classifies the obvious ones', () => {
+    for (const prompt of [
+      'Make a 3D shooter game where you fight robots in a desert.',
+      'A 2D platformer with double jump and collectible coins',
+      'Build an endless runner for mobile',
+      'a tower defence game with waves of enemies',
+      'racing game with three tracks',
+    ]) {
+      expect(analyzeRequirementGaps(prompt).domain, prompt).toBe('game');
+    }
+  });
+
+  it('asks for exactly what a game prompt leaves out', () => {
+    // "a ninja platformer" says nothing about how you win, whether it saves, or how it plays on a
+    // phone — and all three decide whether anyone plays it twice.
+    const g = analyzeRequirementGaps('Make a 3D ninja platformer game');
+    const missing = g.likelyMissing.join(' | ');
+    expect(missing).toMatch(/win \/ lose/i);
+    expect(missing).toMatch(/touch controls/i);
+    expect(missing).toMatch(/saving progress/i);
+    expect(missing).toMatch(/sound/i);
+    expect(missing).toMatch(/pause and restart/i);
+  });
+
+  it('does not nag about what the prompt already covered', () => {
+    const g = analyzeRequirementGaps(
+      'A shooter game with score, sound effects, a pause menu, saved high scores and touch controls for mobile.',
+    );
+    expect(g.mentioned.join(' | ')).toMatch(/scoring|sound|pause|saving|touch/i);
+    expect(g.likelyMissing).not.toContain('sound effects and music');
+  });
+
+  it('GAMIFICATION IS NOT A GAME — the damage here is handing a business app a game engine', () => {
+    for (const prompt of [
+      'A gamified habit tracker with streaks and badges',
+      'Add gamification to our employee training portal',
+    ]) {
+      expect(analyzeRequirementGaps(prompt).domain, prompt).not.toBe('game');
+    }
+  });
+
+  it('"game plan" is an idiom, not a game', () => {
+    expect(analyzeRequirementGaps('A CRM to track our sales game plan and customer leads').domain).not.toBe('game');
+  });
+
+  it('a game with shopping in it is still a game', () => {
+    // The scorer picks the domain hitting more of its own signals; an in-game shop must not turn a
+    // game build into an ecommerce build.
+    const g = analyzeRequirementGaps(
+      'A roguelike game with waves of enemies, a score, unlockable levels, sound, and a shop to buy upgrades between runs.',
+    );
+    expect(g.domain).toBe('game');
+  });
+});

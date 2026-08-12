@@ -5,7 +5,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand } from './devServerHost';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
 import { dbProvisionScript, parseDbProvision, provisionOutcomeNote, provisionDiagnostics, CANONICAL_DB_URL, type DbProvisionOutcome } from '../../dbProvisionVerify';
@@ -25,6 +25,10 @@ import { idleLimitMs, reapAfterMs, sandboxesToReap, shouldTouchDurable } from '.
 // five-minute build was followed by three quarters of an hour of billed idle VM, usually for someone
 // who had already closed the tab.
 const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
+
+import {
+  BROWSE_PAINT_DEADLINE_MS, BROWSE_PAINT_POLL_MS, splitPaintMarker,
+} from '../../../PreviewVerify';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -48,6 +52,7 @@ function assertSafeId(id: string, label: string): string {
 }
 // Dedicated tools dir outside the user's workspace — persists across workspace resets
 const TOOLS_DIR = '/home/user/.e-tools';
+
 // 1-hour sandbox lifetime. Refreshed on every activity via sandbox.setTimeout() so
 // a long build (npm install + AI steps) never gets killed mid-run.
 const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
@@ -107,6 +112,37 @@ export function resolveE2bTemplate(env: NodeJS.ProcessEnv = process.env): string
 const CDP_PORT = 9222;
 const CONSOLE_LOG = `${TOOLS_DIR}/console.log`;
 
+/**
+ * WAIT FOR THE APP TO PAINT, NOT FOR A CLOCK — the in-sandbox snippet, shared by every capture path.
+ *
+ * ROOT CAUSE (admin field report 2026-08-12): all three capture paths waited a FIXED number of
+ * milliseconds and then looked. A fixed sleep has exactly one failure mode — an app slower than the
+ * guess is captured mid-load. The screenshot then shows a spinner or a blank page, the DOM scan finds
+ * no elements, the preview verdict reads an empty `<div id="root">` and declares the app crashed, and
+ * a repair pass edits code that was never broken. The repair restarts the dev server, the preview
+ * really does go down, and the next capture can be early again. That loop turned a 7-minute app into a
+ * 34-minute build.
+ *
+ * Polling ends the moment content appears, so a fast app is captured SOONER than the old fixed sleep
+ * while a slow one stops being libelled. Written ONCE and shared, because three copies of a timing
+ * rule is three chances for one of them to keep the old bug (the safeRelPath lesson).
+ *
+ * `networkidle` is not an option and never was: a Vite/CRA dev server's HMR socket never goes idle.
+ */
+const paintWaitJs = (page: string): string => `
+  var painted=0;
+  for(var i=0;i<${Math.ceil(BROWSE_PAINT_DEADLINE_MS / BROWSE_PAINT_POLL_MS)};i++){
+    var n=await ${page}.evaluate(function(){
+      var r=document.getElementById('root')||document.getElementById('app')||document.body;
+      if(!r) return 0;
+      return (r.children?r.children.length:0)+((r.innerText||'').trim().length);
+    }).catch(function(){return 0;});
+    if(n>0){painted=1;break;}
+    await ${page}.waitForTimeout(${BROWSE_PAINT_POLL_MS});
+  }
+  if(painted){await ${page}.waitForTimeout(250);}
+`;
+
 const SCREENSHOT_SCRIPT = `
 const {chromium}=require('playwright');
 (async()=>{
@@ -116,8 +152,8 @@ const {chromium}=require('playwright');
   const vh=parseInt(process.argv[4],10)||720;
   await p.setViewportSize({width:vw,height:vh});
   const url=process.argv[2]||'about:blank';
-  await p.goto(url,{waitUntil:'networkidle',timeout:15000}).catch(()=>{});
-  await new Promise(r=>setTimeout(r,800));
+  await p.goto(url,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
+${paintWaitJs('p')}
   const buf=await p.screenshot({type:'png',fullPage:false});
   process.stdout.write(buf.toString('base64'));
   await b.close();
@@ -140,9 +176,9 @@ const {chromium}=require('playwright');
   let page=ctx.pages()[0]||await ctx.newPage();
   await page.setViewportSize({width:vw,height:vh}).catch(()=>{});
   if(target && page.url()!==target){
-    await page.goto(target,{waitUntil:'networkidle',timeout:15000}).catch(()=>{});
+    await page.goto(target,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
   }
-  await new Promise(r=>setTimeout(r,600));
+${paintWaitJs('page')}
   const buf=await page.screenshot({type:'png',fullPage:false});
   process.stdout.write(buf.toString('base64'));
   process.exit(0);
@@ -794,6 +830,22 @@ export class E2BActuator implements IEngineerActuator {
       // already reflects file edits via HMR, so relaunching just re-pays ~25s+ for nothing. Both checks
       // are real sandbox probes (a false "up"/"fresh" is impossible), and on ANY doubt we fall through
       // to the full, proven sequence below — never worse than today. AGENTV3_DEVSERVER_FASTPATH=off bypasses.
+      // ARM THE KEEPALIVE — from ONE place, so a path cannot quietly skip it.
+      //
+      // ROOT CAUSE (admin build transcript 2026-08-12). The watchdog was armed only after a FRESH
+      // launch. The fast path below — "already healthy on port N, reused it" — returned a healthy
+      // verdict and armed nothing, so a server we adopted rather than started had no keepalive at all.
+      // It then died mid-build with nothing watching, the preview went to the host's closed-port page,
+      // and the platform spent an LLM repair pass concluding "the app itself is fine; it just needed
+      // the dev server restarted". Three times, in one build.
+      //
+      // Restarting well was the second half of that fix. This is the first half: not needing to.
+      const armKeepalive = async (livePort: number): Promise<void> => {
+        await sandbox.commands
+          .run(devServerWatchdogCommand({ port: livePort, runCommand: devCommand, cwd: WORKSPACE_ROOT }), { timeoutMs: 15_000 })
+          .catch(() => null); // best-effort: every reactive net still stands if detaching is refused
+      };
+
       if (process.env.AGENTV3_DEVSERVER_FASTPATH !== 'off') {
         const alreadyUp = await sandbox.commands.run(buildPortWaitCommand(port, 2), { timeoutMs: 6000 })
           .then((r) => r.stdout.includes('PORT_UP')).catch(() => false);
@@ -802,6 +854,9 @@ export class E2BActuator implements IEngineerActuator {
             .then((r) => r.stdout.includes('STALE')).catch(() => false);
           if (shouldSkipDevServerLaunch(alreadyUp, stale)) {
             const boundPort = port;
+            // A server we ADOPTED needs the keepalive exactly as much as one we started — arguably
+            // more, since nobody in this process has been watching it so far.
+            await armKeepalive(boundPort);
             return { exitCode: 0, stdout: `[health-check] dev server already healthy on port ${boundPort} — reused it (no relaunch; edits apply via HMR).\n${devServerHealthLine(true, boundPort)}`, stderr: '' };
           }
         }
@@ -848,7 +903,7 @@ export class E2BActuator implements IEngineerActuator {
         // `resolvedCommand` is passed so the pin decision can see THROUGH `npm run dev` to the script it
         // actually runs (report 26a8e81c): a Node server behind a pm script used to get Vite's
         // `--port … --strictPort`, which it ignores, and the health check then watched the wrong port.
-        disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(strippedForResolve, framework), port, framework, resolvedCommand)),
+        disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(strippedForResolve, framework, resolvedCommand), port, framework, resolvedCommand)),
       );
       // LOAD .env INTO THE DEV-SERVER ENV (Mitrify autopsy 2026-08-02): a Drizzle/Express app that reads
       // process.env.DATABASE_URL directly (no dotenv) crashes on boot even though .env holds the value —
@@ -910,7 +965,15 @@ export class E2BActuator implements IEngineerActuator {
         const w = await sandbox.commands.run(buildPortWaitCommand(port, seconds), { timeoutMs: (seconds + 5) * 1000 })
           .catch(() => ({ stdout: 'PORT_DOWN' } as { stdout: string }));
         await h.disconnect().catch(() => {});
-        return w.stdout.includes('PORT_UP');
+        const up = w.stdout.includes('PORT_UP');
+        // ARM THE KEEPALIVE the moment the port is genuinely up — the sibling of the Postgres watchdog
+        // above, for the same root cause. The Shiv Medical Store report (2026-08-10) showed a dev server
+        // that started fine and was simply GONE ~4 minutes later, with no error in its log to classify,
+        // twice; the sandbox had reaped it. Bounded (see devServerWatchdogCommand) so a server dying of
+        // a real code error is never restarted forever. Best-effort: if nohup/setsid cannot detach in
+        // this sandbox, every existing reactive net still stands.
+        if (up) await armKeepalive(port);
+        return up;
       };
       const readDevLog = async (): Promise<string> =>
         sandbox.commands.run(`cat ${DEV_SERVER_LOG_PATH} 2>/dev/null | tail -80`, { cwd: WORKSPACE_ROOT, timeoutMs: 5000 })
@@ -1073,7 +1136,7 @@ export class E2BActuator implements IEngineerActuator {
     return { exitCode: -1, stdout: '', stderr: 'sandbox unavailable after recreate attempt' };
   }
 
-  async browseUrl(workspaceId: string, url: string): Promise<{ html: string }> {
+  async browseUrl(workspaceId: string, url: string): Promise<{ html: string; painted?: boolean; source?: 'browser' | 'curl' }> {
     const sandbox = await this.getSandbox(workspaceId);
 
     // Ensure the shared Playwright install (same one the screenshot path uses) has been kicked
@@ -1098,30 +1161,52 @@ export class E2BActuator implements IEngineerActuator {
       // waitUntil MUST NOT be 'networkidle' for a Vite/CRA dev server: its HMR WebSocket stays open
       // forever, so the network is NEVER idle → goto times out at 15s and p.content() captures the
       // un-hydrated shell (root #root empty) — the exact false "Present: none" from deep-test build #2.
-      // 'domcontentloaded' + a short settle lets React actually paint into the root before we snapshot.
+      //
+      // WAIT FOR THE APP TO PAINT, NOT FOR A CLOCK (admin field report 2026-08-12). The previous fix
+      // for that was `waitForTimeout(1800)` — a guess, and a guess has exactly one failure mode: an app
+      // that takes longer than the guess is snapshotted BLANK. PreviewVerify then reads the empty
+      // `<div id="root"></div>` and declares "a runtime error likely crashed it before render", the
+      // build launches a repair pass for a bug that does not exist, the repair restarts the dev server,
+      // the preview really does go down for a while, and the next check may snapshot early again. That
+      // loop is what turned a 7-minute app into a 34-minute build.
+      //
+      // The condition replaces the clock: poll until the mount root actually has content, up to a
+      // bounded deadline. A fast app is snapshotted SOONER than the old fixed sleep; a slow one is no
+      // longer libelled. Whether it ever painted is reported, because "I looked and nothing had
+      // painted" and "the app crashed" are different facts and only one of them is a defect.
       const playwrightScript = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node -e "
 const {chromium}=require('playwright');
 (async()=>{
   const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
   const p=await b.newPage();
   await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
-  await p.waitForTimeout(1800); // let the SPA client-render into the root mount
+${paintWaitJs('p')}
+  console.log('NBAI_PAINTED:'+painted);
   console.log((await p.content()).slice(0,30000));
   await b.close();
 })().catch(e=>{process.stderr.write(e.message);process.exit(1)});
 " 2>/dev/null`;
       const pw = await sandbox.commands.run(playwrightScript, {
-        cwd: TOOLS_DIR, timeoutMs: 25_000,
+        cwd: TOOLS_DIR, timeoutMs: BROWSE_PAINT_DEADLINE_MS + 20_000,
       }).catch(() => null);
-      if (pw && pw.exitCode === 0 && pw.stdout.trim()) return { html: pw.stdout };
+      if (pw && pw.exitCode === 0 && pw.stdout.trim()) {
+        const { painted, html } = splitPaintMarker(pw.stdout);
+        return { html, painted, source: 'browser' };
+      }
     }
 
     // Fallback: raw HTML via curl (static shell only — no client-rendered DOM).
+    //
+    // `source: 'curl'` is the important part of this return, not the html. For ANY single-page app the
+    // static shell is `<div id="root"></div>` and nothing else — so judged by the same rules as a real
+    // browser snapshot, a perfectly healthy React app looks exactly like one that crashed on mount.
+    // Every caller must treat an un-painted curl snapshot as "we could not see the app", never as
+    // evidence against it.
     const result = await sandbox.commands.run(
       `curl -s -L --max-time 20 -A "Mozilla/5.0" "${url}" 2>/dev/null | head -c 30000`,
       { cwd: WORKSPACE_ROOT, timeoutMs: 30_000 }
     );
-    return { html: result.stdout || result.stderr };
+    return { html: result.stdout || result.stderr, painted: false, source: 'curl' };
   }
 
   async getPortUrl(workspaceId: string, port: number): Promise<string> {
@@ -1161,7 +1246,7 @@ const {chromium}=require('playwright');
   const p=await b.newPage();
   await p.setViewportSize({width:1280,height:800});
   await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
-  await p.waitForTimeout(1800);
+${paintWaitJs('p')}
   const out=await p.evaluate(()=>{
     var res=[];
     var all=document.querySelectorAll('body *');

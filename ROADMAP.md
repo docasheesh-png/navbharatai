@@ -122,36 +122,62 @@ Ordered by what a user would actually feel.
    anywhere, and no `/api/templates` endpoint. (`savedTemplates` does exist, so the save-as-template
    half is partly there — check it before rebuilding that piece.) Screenshots + categories + "build
    this" kills cold-start and drops weak-tier cost toward zero.
-6. **Regional languages** — ⚠️ **RE-SCOPED 2026-08-08; the old "prompt + UI, 3–4 PR" line was wrong in
-   both directions.** The *prompt* half is **already shipped**: `LANGUAGE_RULE` in
-   `AgentV3/systemPrompt.ts` names Tamil/Bengali/Marathi explicitly, sits at the top of every prompt
-   that produces user-facing text (build, plan and chat), and is test-locked in `systemPrompt.test.ts`.
-   A user who writes in Tamil already gets Tamil replies and Tamil narration *from the model*.
-   **What is actually left is bigger than 3–4 PRs**, because it is not a prompt problem at all:
-   - **~118 hardcoded English strings that OUR SERVER emits** during a build (`ToolDispatcher.ts` +
-     `routes/agentv3.ts` — "🔐 Loaded 3 of your saved keys…", "🗄️ Creating your app's tables…", every
-     honest failure line added this session). No prompt rule can touch these; they never pass through a
-     model. A Tamil user gets Tamil from the AI and English from the platform, in the same feed.
-   - **NavBharatAI's own UI** — every button, label and settings screen. A real i18n pass.
-   Do the SERVER NARRATION first: it is the jarring half (the AI speaks your language, the app does
-   not), it is bounded and countable, and it needs one message catalogue rather than a framework.
+6. **Regional languages** — ⚠️ **RE-SCOPED AGAIN 2026-08-11 by the admin, and the 2026-08-08 line above
+   it was WRONG. It contradicted CLAUDE.md's own Language standard and cost a session's work.**
+
+   THE RULE, from the admin, in two halves and no third:
+   - **NavBharatAI's own text = professional ENGLISH.** Every button, label, settings screen, error
+     toast — AND every status line the SERVER emits during a build ("🗄️ Provisioning a local
+     PostgreSQL…"). Those are the PLATFORM speaking, not the AI, so they stay English.
+   - **Every AI RESPONSE = the user's language.** Chat replies, build narration written BY the model,
+     Doctor AI, every Professional. This is CLAUDE.md's stated single exception, and it is the only one.
+
+   **What the old line got wrong:** it called the server's ~118 status strings "the jarring half" and
+   told the next session to translate them FIRST. Translating them is precisely what CLAUDE.md forbids
+   — they are platform UI. A session followed it (2026-08-09/10), shipped a Hindi catalogue for 23 of
+   them, and the work had to be reverted. The mixed feed it was trying to fix is not a defect: the app
+   speaking English beside an AI speaking Hindi is the intended design.
+
+   **What is actually left is therefore SMALL, and on the AI side only:** make sure every AI surface
+   carries the language rule. `LANGUAGE_RULE` covers build/plan/chat; `professionals/engine.ts` covers
+   the Professionals. The one real gap found on 2026-08-11 was Doctor AI (`routes/sda.ts`), whose
+   prompt said "LANGUAGE: Primarily English medical terminology" — the opposite of the rule, on the
+   surface aimed at rural/junior doctors most likely to write in Hindi.
+
+   **Do NOT install a translation service for this** (Google Translate or otherwise). The models are
+   natively multilingual — that is what LANGUAGE_RULE uses. A translator would re-translate an
+   already-correct reply, add latency to every message, cost per character, and mangle code blocks.
 
 ---
 
 ## 2 · 🟢 SMALLER, VERIFIED-MISSING (each checked against live code 2026-08-07)
 
-- **Animation / motion recipe** — no `generate_animation`; micro-interactions are what make an app feel alive.
-- **MCP support** — nothing imports `@modelcontextprotocol`.
-- **Component tree panel** and **multi-element select** in the editor.
+- ~~**Animation / motion recipe**~~ — ✅ **ALREADY BUILT AND WIRED (verified against live code 2026-08-11).**
+  `generate_animation` is in `ToolCatalog.ts` (twice — definition + the enabled list), has its dispatcher
+  case in `ToolDispatcher.ts`, a pure generator + tests in `lib/MotionGenerator.ts`, an `AppKnowledgeBase`
+  entry, AND motion guidance in `systemPrompt.ts`. Shipped 2026-08-08 — three days before this line was
+  read as open. **This file has now sent a session at already-built work three times; verify before building.**
+- ~~**MCP support**~~ — ✅ **SHIPPED 2026-08-11 (#2273)** as `generate_mcp_server`: the USER's app gets its own stdio MCP server (Claude Desktop / Cursor). Read-only by default, NEVER a delete tool, anon key only. Do not rebuild.
+
+> **Verified genuinely ABSENT on 2026-08-11** (grepped against live code, so the next session need not repeat it):
+> MCP · component tree panel · multi-element select · per-version preview URL · service-split generator ·
+> design-to-code contract (AP-8) · community gallery/remix · scaling/load estimates · virus-scanning the apps
+> we generate. Everything else in this section had already shipped.
+- ~~**Component tree panel** and **multi-element select**~~ — ✅ **BOTH SHIPPED 2026-08-11** (#2269, #2272). Do not rebuild.
 - **Per-version preview URL** — v0 has it.
-- **One-click object storage provisioning** — Replit has it.
-- **Service-split generator** + named paradigms (Clean/DDD/MVC/Hexagonal). Coupling is already *scored*;
-  nothing turns that score into a split.
+- 🟡 **One-click object storage provisioning** — **HALF BUILT, and the halves matter (verified 2026-08-11).**
+  `generate_storage` EXISTS and is fully wired (catalog + dispatcher + `StorageGenerator`): it writes a real
+  presigned-upload route and an `uploadFile()` client for S3/R2/Supabase-Storage/MinIO or Cloudinary. What is
+  missing is the ZERO-SETUP half — it is **BYO keys**: the user pastes their own credentials into `.env`.
+  The open work is provisioning a bucket in the USER's own account automatically, the same shape as the
+  Supabase zero-setup DB path (and subject to the same standing rule: user apps run on the USER's account,
+  never NavBharatAI's). Do NOT rebuild the code generator.
+- ~~**Service-split generator** + named paradigms~~ — ✅ **SHIPPED 2026-08-11 (#2273)**: `analyze_service_split` PRICES each seam from the import graph and often answers "keep it as one app"; `setup_architecture` scaffolds clean/ddd/mvc/hexagonal with ESLint-ENFORCED boundaries. It deliberately does NOT auto-rewrite an app into microservices. Do not rebuild. (The original line read: "coupling is already scored; nothing turns that score into a split." It does now.)
 - **Design-to-code intermediate contract** (AP-8) — the vision pipeline exists; the
   image → layout-contract → build step does not.
 - ~~**Template-free scaffold fallback**~~ — ✅ **ALREADY BUILT (verified 2026-08-08).** There is no separate module, which is why a name-based grep missed it: the fallthrough is a BRANCH, present in all three prompts that need it — `OneShotBuilder.oneShotUserPrompt` ("The project starts empty — create all files at the project root"), `ProjectPlan.projectPlanUserPrompt`, and the manifest prompt. It is reachable: `scaffold` comes from `listFiles(...).catch(() => [])`, so an empty workspace or a listing error takes it. The roadmap line itself said "verify before building" — this is that verification, and it says do not build.
-- **Community gallery / remix** — both Lovable and v0 have it.
-- **Scaling / load estimates with real numbers** — today's critique is qualitative only.
+- ~~**Community gallery / remix**~~ — ✅ **SHIPPED 2026-08-11 (#2275)**, later the same day the line above said it was deferred. Browse / publish / remix, behind `galleryPublishGate.ts`: `.env*`, dependencies, build output and binaries are EXCLUDED, and a real secret inside source REFUSES the publish naming the file and line. It REUSES `scanSecurity` / `scanEnvTemplateSecrets` — no fourth secret scanner was written. Publishing can only produce `pending`; only an admin (`NAV_STORE_ADMINS`) can approve, and a reject/remove DELETES the stored source. Do not rebuild.
+- ~~**Scaling / load estimates with real numbers**~~ — ✅ **SHIPPED 2026-08-11 (#2270)** as `POST /api/workspace/scale-check`. Deliberately prints NO capacity figure. Do not rebuild.
 - **Upload virus-scanning for the apps we generate** — the Nav App Store has it; generated apps do not.
 - 👤 **Daily-spend quota gauge** (`/api/usage/tokens`) — the endpoint does not exist, but building it
   needs the admin to define what the quota IS first. A decision, then a small build.
@@ -212,7 +238,7 @@ Each of these is genuinely useful today; the remainder is usually infra-shaped.
 | **T1-watchdog** | zombie-build sweeper | 🔒 force-killing the orphaned E2B VM (needs GA-2) |
 | **Codemod scale** | relevance-scoped, 2000-file cap, honest truncation | auto-loop when the shortlist itself exceeds 2000 files (rare) |
 | **AP-5 Prompt cache** | stable-prefix structure built | per-provider cache markers — ⚠️ **moat, do not change autonomously** |
-| **AP-7 Edit mode** | works | 80% of user time is *after* the first build; make edits as smart as builds |
+| **AP-7 Edit mode** | works | ✅ **VERIFIED 2026-08-11 — no gap found; do not build from this line.** The aspiration ("make edits as smart as builds") is not a defect, and the code contradicts it: the post-build quality gates (integrity heal, design gate, lint, runtime autofix, reviewer) are **not** `!isEditMode`-guarded — they run on edits too. The only build-only paths are ones that make no sense on an edit (palette preset, requirement-gap analysis, deep-pipeline blueprint, ask-user). And the edit path is in places **more** careful than a build: it scans the STORED workspace merged with this turn's writes, so a boot-killer sitting in an untouched file is caught — a fresh build skips that read because it cannot apply. `editModePrefix` already enforces locate-first (grep/glob/architecture_map), read-before-write, surgical `edit_file`, minimum changes, blast-radius via `code_graph`, and prove-it-still-works. **A real improvement here needs a real build report showing a specific edit that went wrong** — the same rule already recorded for AP-9. |
 | **AP-9 Requirement coverage** | works; root-caused TWICE already (`Registration.tsx` not matching `/register/`; `components/admin/` dropped by basename-only matching) and now matches full paths + component names + routes | ⚠️ **NEEDS EVIDENCE, not more guessing (2026-08-08).** The "false positives" line has no reproduction behind it. The one gap visible in the code is deliberate — the surface is paths and names, never file CONTENTS — and loosening that would trade false positives for FALSE NEGATIVES (reporting a feature as built because the word appears in a comment), which is strictly worse. Do not touch this without a real build report showing a specific feature wrongly flagged; then fix that case. |
 | **GA-5 / GA-6 / GA-7 / GA-8 / GA-10 / GA-12 / GA-13 / GA-14 / GA-15** | main engine in each | narrow tails; **verify each against live code before starting** — several neighbours in this list turned out to be finished |
 

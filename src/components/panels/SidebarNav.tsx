@@ -114,7 +114,13 @@ export function SidebarNav({
   // Git lives in App Settings now (admin 2026-08-01: "Git option sidebar se App Settings me move karo"),
   // so it is excluded from the rail/drawer here. It stays in `menuItems` so its header tab + view still
   // open (from Settings → Git & Deployment).
-  const visibleItems = menuItems.filter(item => item.id !== 'git' && enabledModules[item.id] !== false);
+  //
+  // Preview / Files / History are also hidden from the sidebar (admin 2026-08-11: "inko need nahi hai, yeh
+  // sab AI ke andar already hai") — each already has a doorway INSIDE the relevant AI's footer (Preview:
+  // Pro v5.0 + bottom footer; Files: Pro v5.0 footer; History: the per-AI footer). They stay in `menuItems`
+  // so their header tab + view still open from those footers — only the redundant sidebar entry is removed.
+  const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'history']);
+  const visibleItems = menuItems.filter(item => !SIDEBAR_HIDDEN.has(item.id) && enabledModules[item.id] !== false);
 
   const makeClickHandler = (item: MenuItem, closeMenu?: boolean) => () => {
     if (item.id === 'preview') { toggleTab('preview'); if (closeMenu) setIsMenuOpen(false); return; }

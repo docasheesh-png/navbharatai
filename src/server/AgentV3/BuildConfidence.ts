@@ -27,6 +27,19 @@ export interface BuildConfidenceInput {
   envVarsMissing: number;
   accessibility: SeverityTally;
   compliance: SeverityTally;
+  /**
+   * Whether the app was actually observed to RUN — see releaseGate.runtimeProven().
+   *
+   * Every other field on this interface is a static analysis count, and that was a real honesty defect:
+   * an app whose preview never came up, whose page-render check was therefore skipped and whose
+   * journeys never ran — an app about which we knew NOTHING — scored 100% and said "I'm confident this
+   * build is solid." Every runtime check is gated on a preview URL, so they all skip together, and they
+   * skip precisely when the app is most broken. A quiet report is the shape failure takes.
+   *
+   * Optional, and 'unknown' when omitted, because a caller with no runtime information must not be able
+   * to claim high confidence by simply not mentioning it. Silence caps confidence; it never earns it.
+   */
+  runtimeProven?: 'passed' | 'failed' | 'unknown';
 }
 
 export type ConfidenceBand = 'high' | 'medium' | 'low';
@@ -114,11 +127,20 @@ export function computeBuildConfidence(i: BuildConfidenceInput): BuildConfidence
   if (buildBreaker) score = Math.min(score, 35);
   else if (hardBlock) score = Math.min(score, 60);
 
+  // THE CEILING THAT WAS MISSING. Confidence is a claim about whether the app WORKS, and every input
+  // above is a claim about whether the code READS well. Without any evidence that it ran, the honest
+  // upper bound is "reasonably confident, review before shipping" — never "I'm confident this build is
+  // solid". A run we watched FAIL caps it lower still.
+  const runtime = i.runtimeProven ?? 'unknown';
+  if (runtime === 'failed') score = Math.min(score, 40);
+  else if (runtime === 'unknown') score = Math.min(score, 74);
+
   score = clamp(score);
   const band: ConfidenceBand = score >= 80 ? 'high' : score >= 55 ? 'medium' : 'low';
 
   // Positives — clean gates, in user-meaningful order.
   const positives: string[] = [];
+  if (runtime === 'passed') positives.push('Proven to RUN — it came up and rendered in a real browser');
   if (!buildBreaker) positives.push('No build-breakers (imports & dependencies resolve)');
   if (secCount === 0) positives.push('No security issues');
   if (compCount === 0) positives.push('Launch-safe: no privacy/compliance blockers');
@@ -128,6 +150,13 @@ export function computeBuildConfidence(i: BuildConfidenceInput): BuildConfidence
   if (i.architecture.cycles === 0 && i.architecture.layering === 0) positives.push('Clean architecture');
 
   const negSorted = negatives.sort((a, b) => b.weight - a.weight).map((n) => n.text);
+  // Named as a gap in evidence, not as a defect in the app — because that is what it is, and because a
+  // number that quietly drops with no stated reason is the thing nobody trusts.
+  if (runtime === 'unknown') {
+    negSorted.unshift('Nothing here was ever proven to RUN — no preview, so the render and journey checks all skipped');
+  } else if (runtime === 'failed') {
+    negSorted.unshift('The app was run and it did NOT work');
+  }
   return { score, band, positives, negatives: negSorted };
 }
 

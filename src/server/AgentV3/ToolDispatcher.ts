@@ -1,7 +1,6 @@
 import type { AgentEventStream } from './AgentEventStream';
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
-import type { NarrationLanguage } from '../lib/narrationLanguage';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { planSecretRequest, secretRequestPrompt, secretRequestResult, type SecretAsk } from './secretRequest';
@@ -75,7 +74,7 @@ import { redactCredentialLogs } from './credentialLogRedaction';
 import type { DependencyIssue } from './DependencyAnalysis';
 import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
@@ -237,6 +236,7 @@ import { generateGame3D } from '../lib/Game3DGenerator';
 import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
+import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -288,6 +288,9 @@ import { generateWebhookIntegration } from '../lib/WebhookGenerator';
 import { generateWebhookSenderIntegration } from '../lib/WebhookSenderGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
+import { generateMcpServer, normalizeMcpTables } from '../lib/McpServerGenerator';
+import { analyzeServiceSplit } from './ServiceSplitAnalysis';
+import { generateArchitectureScaffold, isArchitectureStyle } from '../lib/ArchitectureScaffold';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
 import { generateSearchIntegration, isSearchProvider } from '../lib/SearchGenerator';
 import { generateMobileExport } from '../lib/MobileExportGenerator';
@@ -467,17 +470,6 @@ export class ToolDispatcher {
     this.signatureEnabled = enabled !== false;
   }
 
-  /**
-   * The language THIS BUILD's platform narration speaks (ROADMAP item 6). Defaults to English, and
-   * the composition root sets it from the user's own prompt exactly as `LANGUAGE_RULE` tells the
-   * model to — so the AI and the platform can never disagree inside one feed.
-   */
-  private narrationLang: NarrationLanguage = 'en';
-
-  /** Set by the composition root from `resolveNarrationLanguage(userPrompt)` before the build runs. */
-  setNarrationLanguage(lang: NarrationLanguage): void {
-    this.narrationLang = lang;
-  }
 
   /**
    * Emit one platform narration line. THE choke point: call sites name a message id, never a
@@ -485,7 +477,7 @@ export class ToolDispatcher {
    * language. Best-effort like every other narration — it must never be able to break a build.
    */
   private narrate<K extends NarrationId>(id: K, params: NarrationParams[K], agent: AgentRole = 'architect'): void {
-    this.events?.emit({ type: 'narration', agent, text: narrationText(this.narrationLang, id, params), ts: Date.now() });
+    this.events?.emit({ type: 'narration', agent, text: narrationText(id, params), ts: Date.now() });
   }
 
   /**
@@ -2013,6 +2005,19 @@ export class ToolDispatcher {
           );
           return blockMsg;
         }
+        // THE USER'S OWN KEYS ARE NOT OURS TO DELETE (admin build transcript 2026-08-12). The platform
+        // writes .env from the user's saved secrets; twenty-five seconds later the builder "fixed" the
+        // hardcoded secrets it found there, and the app's database and payments were dead — reported as
+        // "your source files are untouched". A prompt asking the model not to would be one more
+        // instruction to forget; this makes the write impossible.
+        const erasedKeys = wouldEraseUserSecrets(path, existingContent, content);
+        if (erasedKeys.length > 0) {
+          const blockMsg = eraseUserSecretsMessage(path, erasedKeys);
+          getWorkspaceMemory(this.workspaceId).recordAudit(
+            `[BLOCKED-DESTRUCTIVE] refused to erase ${erasedKeys.length} user secret(s) in ${path}`,
+          );
+          return blockMsg;
+        }
         // DUPLICATE-MODULE guard (TaskForge autopsy 2026-07-18): the ORIGIN of the 2-hour failure was the
         // builder CREATING the same component under two convention roots (app/ AND src/), whose interfaces
         // then drift and break the build. Refuse to create a parallel copy of a module that already exists
@@ -2141,6 +2146,14 @@ export class ToolDispatcher {
           if (isDestructiveEmptyOverwrite(file.path, priorContent, file.content)) {
             getWorkspaceMemory(this.workspaceId).recordAudit(
               `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file (batch): ${file.path}`,
+            );
+            return { path: file.path, kind, shrink: false, blocked: true };
+          }
+          // Secrets guard PARITY — a guard that only covers write_file is one tool call from bypassed.
+          const batchErased = wouldEraseUserSecrets(file.path, priorContent, file.content);
+          if (batchErased.length > 0) {
+            getWorkspaceMemory(this.workspaceId).recordAudit(
+              `[BLOCKED-DESTRUCTIVE] refused to erase ${batchErased.length} user secret(s) in ${file.path} (batch)`,
             );
             return { path: file.path, kind, shrink: false, blocked: true };
           }
@@ -2751,7 +2764,12 @@ export class ToolDispatcher {
           .episodes.filter((e) => e.kind === 'request')
           .map((e) => e.text);
         const requestText = currentRequestForCoverage(requestEpisodes);
-        const reqCoverage = analyzeRequirementCoverage(requestText, mem.graph());
+        // The file BODIES are passed alongside the graph so a feature built INLINE (a search box
+        // inside a list page owns no file of its own) is seen as built instead of reported missing —
+        // and so a feature found in neither names nor bodies is a CONFIRMED absence rather than a
+        // guess. Everything readiness needs is already in `snap.sources`; this analyzer simply was
+        // never given it.
+        const reqCoverage = analyzeRequirementCoverage(requestText, mem.graph(), snap.sources);
         // Best-effort runnability pass (Phase 6 — Execution Quality): can the app
         // actually start/build? Reads package.json; never throws, never breaks
         // evaluate. "Preview is EARNED" — a build that compiles can still not run.
@@ -2869,7 +2887,13 @@ export class ToolDispatcher {
         if (portBindings.length) extra.push({ severity: 'medium', label: `${portBindings.length} hardcoded server port(s) (use process.env.PORT)` });
         if (viteEnv.length) extra.push({ severity: 'medium', label: `${viteEnv.length} non-VITE_ import.meta.env reference(s) (undefined in the browser)` });
         if (asyncPatterns.length) extra.push({ severity: 'medium', label: `${asyncPatterns.length} forEach(async …) loop(s) that do not await` });
-        for (const f of reqCoverage.findings) extra.push({ severity: 'medium', label: `Requested feature not found: ${f.feature}` });
+        // A CONFIRMED absence says so plainly. The old single wording — "not found" — read like a
+        // lookup that came up empty, which is exactly how a true finding gets skimmed past: in the
+        // dukaan report the user had literally written "upar search box ho", no search existed, this
+        // line said so, and the build shipped anyway. "not built" is what actually happened.
+        for (const f of reqCoverage.findings) {
+          extra.push({ severity: 'medium', label: f.confirmed ? `Requested feature NOT BUILT: ${f.feature}` : `Requested feature not found: ${f.feature}` });
+        }
         if (errorBoundary.findings.length) extra.push({ severity: 'medium', label: 'React app has no error boundary' });
         if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
         // Best-effort design-consistency pass (P-PIPE.C stage 32 — advisory, NEVER a readiness
@@ -5257,6 +5281,28 @@ export class ToolDispatcher {
         return `${okLine} They are in the app's .env now — read them with process.env / import.meta.env and build the feature for real. ${notes.join(' ')}`.trim();
       }
 
+      case 'generate_game_systems': {
+        // PHASE 6. Combat, AI, projectiles and waves — written as PURE arithmetic so the rules that a
+        // hand-written version gets wrong (i-frames, segment collision, separation, de-aggro
+        // hysteresis, single death) are provable rather than approximated.
+        const gsyRec = (input as Record<string, unknown>) || {};
+        const gsyInclude = Array.isArray(gsyRec.include)
+          ? gsyRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const gsy = generateGameSystems(gsyInclude);
+        const gsyWritten: string[] = [];
+        for (const [path, content] of Object.entries(gsy.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gsyWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('gameplay systems');
+        return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}`;
+      }
+
       case 'generate_game_shell': {
         // PHASE 5, and the one that makes the other four pay off. Composition is where a first build
         // goes wrong — physics in the render callback, one particle layer added, audio never unlocked,
@@ -5776,10 +5822,59 @@ export class ToolDispatcher {
         return `Wired ${eProvider} email:\n${emWritten.join('\n')}\nAdd the dependency: ${ecfg.dependency.name}@${ecfg.dependency.version}\n\n${ecfg.instructions}`;
       }
 
+      case 'analyze_service_split': {
+        // ROADMAP §2 — turns the coupling score into a priced split decision. READ-ONLY: it never
+        // rewrites the app, because auto-splitting a working app is a harmful refactor, not a feature.
+        const { files: splitFiles } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
+        const split = analyzeServiceSplit(splitFiles);
+        const seamLines = split.seams.slice(0, 8).map((s) => `- ${s.cluster} [${s.verdict}] ${s.reason}`);
+        return `${split.verdict}\n\nLooked at ${split.filesScanned} files.\n${seamLines.join('\n')}`;
+      }
+
+      case 'setup_architecture': {
+        const archStyle = optStr(input, 'style');
+        if (!isArchitectureStyle(archStyle)) return 'setup_architecture: pass style = "clean" | "ddd" | "mvc" | "hexagonal".';
+        const arch = generateArchitectureScaffold(archStyle);
+        const archWritten: string[] = [];
+        for (const [path, content] of Object.entries(arch.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          archWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('architecture scaffold');
+        return `${archWritten.join('\n')}\nAdd the dependency: ${arch.dependencies.map((d) => `${d.name}@${d.version}`).join(', ')}\n\n${arch.instructions}`;
+      }
+
+      case 'generate_mcp_server': {
+        // ROADMAP §2 — the USER's app becomes usable from Claude Desktop / Cursor. Pure generator.
+        const mcpTables = normalizeMcpTables((input as Record<string, unknown>)?.tables);
+        if (!mcpTables.ok) return `generate_mcp_server: ${mcpTables.message}`;
+        const mcpCfg = generateMcpServer({
+          tables: mcpTables.tables,
+          allowWrites: (input as Record<string, unknown>)?.allowWrites === true,
+          appName: optStr(input, 'appName') || undefined,
+        });
+        const mcpWritten: string[] = [];
+        for (const [path, content] of Object.entries(mcpCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mcpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('MCP server');
+        const mcpDeps = mcpCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `${mcpWritten.join('\n')}\nAdd the dependencies: ${mcpDeps}\n\n${mcpCfg.instructions}`;
+      }
+
       case 'generate_storage': {
         // U-4 recipe — real BYO file uploads (S3-compatible presigned / Cloudinary signed). Pure generator.
         const sProvider = optStr(input, 'provider');
-        if (!isStorageProvider(sProvider)) return 'generate_storage: pass provider = "s3" | "cloudinary".';
+        if (!isStorageProvider(sProvider)) return 'generate_storage: pass provider = "supabase" (zero setup) | "s3" | "cloudinary".';
         const scfg = generateStorageIntegration(sProvider);
         const stWritten: string[] = [];
         for (const [path, content] of Object.entries(scfg.files)) {

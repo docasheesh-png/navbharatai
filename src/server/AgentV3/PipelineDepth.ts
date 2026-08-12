@@ -85,3 +85,42 @@ export function reviewerBudgetMs(fileCount: number, headroomMs: number, projectF
   if (!Number.isFinite(headroomMs)) return scaled;          // no wall-clock cap → the scaled budget
   return Math.max(MIN, Math.min(scaled, headroomMs - SAFETY)); // else leave a 60s wall-clock safety margin
 }
+
+/**
+ * After the reviewer's budget expires, how long may we still COLLECT a review that is about to land?
+ *
+ * ROOT CAUSE — admin report 2026-08-12, the dukaan stock app. The report's own timeline, to the
+ * millisecond:
+ *
+ *     …696475  REVIEW_INCOMPLETE   Post-build review timed out after 114000ms on 26 files
+ *     …697977  AGENT_STEP          "## Code Review Report
+ *                                    ### [CRITICAL] (confidence: high) Missing CSS Styling —
+ *                                    App will look broken … classes not defined anywhere"
+ *     …697978  EVENT               • agent_done (reviewer)
+ *
+ * The reviewer finished **1.5 seconds** after the stopwatch gave up on it. `raceTimeout` discards the
+ * loser, so `review` became null: the [CRITICAL] was never recorded, never auto-fixed, and never
+ * allowed to make the verdict honest — while the user was told "the deeper completeness review didn't
+ * finish". A visually broken app shipped with its own diagnosis sitting in the log, 1.5s too late.
+ *
+ * THE CLASS, not the instance: the budget is a GUESS about how long a review takes, so every value has
+ * a cliff and some review will always land just past it. Raising BASE only moves the cliff. What was
+ * actually wrong is that finished, already-paid-for work (26 files of the user's tokens) was thrown
+ * away because a timer fired first. So the timeout keeps its real job — stop WAITING — and loses the
+ * job it should never have had: stop LOOKING.
+ *
+ * Deliberately small and headroom-gated: a review that is genuinely hung must not be able to spend the
+ * build's remaining wall clock, so the grace is a fraction of the budget, hard-capped, and returns 0
+ * (skip entirely — today's behaviour exactly) whenever the same 60s safety margin the budget respects
+ * is not available. Pure + unit-tested.
+ */
+export function reviewGraceMs(budgetMs: number, headroomMs: number): number {
+  const FRACTION = 0.25, MIN = 10_000, MAX = 30_000, SAFETY = 60_000;
+  if (!Number.isFinite(budgetMs) || budgetMs <= 0) return 0;
+  const scaled = Math.min(Math.max(Math.round(budgetMs * FRACTION), MIN), MAX);
+  if (!Number.isFinite(headroomMs)) return scaled;
+  const room = headroomMs - SAFETY;
+  // Below the floor there is no grace worth taking — waiting 3s for a review that needs 10 buys
+  // nothing and still costs the build 3s. Take the whole grace or none of it.
+  return room >= MIN ? Math.min(scaled, room) : 0;
+}

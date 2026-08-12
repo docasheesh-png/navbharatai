@@ -1,12 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Loader2, Sparkles, X, FileText, Crown, LogIn, Wallet } from 'lucide-react';
+import { Send, Loader2, Sparkles, X, FileText, Clock, LogIn, Wallet } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { auth } from '../../lib/firebase';
-import { fetchPassStatus, buyProfessionalPass, type PassStatus } from './professionalPass';
+import { fetchPassStatus, type PassStatus } from './professionalPass';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
+import { ChatToolbar } from '../chat/ChatToolbar';
+import { MessageEditActions } from '../chat/MessageEditActions';
+import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
+import { deleteMessage, editMessage, editedLabel } from '../../lib/chatMessageActions';
 
 /**
  * Generic, config-driven chat UI for the "Professional AI" framework. One
@@ -24,7 +28,28 @@ export interface ProfessionalChatConfig {
   endpoint?: string;
 }
 
-interface Msg { role: 'user' | 'assistant'; content: string; }
+interface Msg { role: 'user' | 'assistant'; content: string; edited?: boolean; }
+
+/**
+ * The professionals' transcript has no message ids — it is a plain `{role, content}[]` persisted to
+ * localStorage, and adding a real id field would invalidate every conversation already saved on every
+ * user's device. So the POSITION is the id, and these two adapters translate in and out of the shared
+ * delete/edit rules. The index is only ever the true one because the edit/delete controls are hidden
+ * while a search is filtering the list (see `searchActive`).
+ */
+const msgId = (index: number) => String(index);
+const withIds = (list: readonly Msg[]) => list.map((m, i) => ({
+  id: msgId(i),
+  sender: (m.role === 'user' ? 'user' : 'ai') as 'user' | 'ai',
+  text: m.content,
+  edited: m.edited,
+}));
+const fromIds = (list: ReadonlyArray<{ sender: 'user' | 'ai'; text?: string; edited?: boolean }>): Msg[] =>
+  list.map((m) => ({
+    role: m.sender === 'user' ? 'user' : 'assistant',
+    content: m.text ?? '',
+    ...(m.edited ? { edited: true } : {}),
+  }));
 
 const MAX_FILES = 4;
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB per file
@@ -68,35 +93,27 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
   // same wallet as a build). Telling an empty-balance user they "used their free messages" would be
   // simply untrue, and would offer them the wrong action.
   const [paywall, setPaywall] = useState<null | 'paywall' | 'login' | 'wallet'>(null);
-  const [buying, setBuying] = useState(false);
+  // Shared composer toolbar state (admin 2026-08-10) — the Enter preference comes from the ONE key
+  // every AI reads, so the setting follows the user between screens instead of resetting per chat.
+  const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => readSendOnEnter((k) => localStorage.getItem(k)));
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [showChatSearch, setShowChatSearch] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   // Composer auto-grow (admin 2026-07-20): starts at 1 line, grows while typing (max-h-32 = 128px),
   // snaps back to 1 line when send() clears the input.
   const composerRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (!input && composerRef.current) resetGrow(composerRef.current); }, [input]);
 
+  // ADMIN 2026-08-10 — "pass system hata do". The Professional Pass is gone, so there is no purchase
+  // to start from this screen any more. What remains is the free-allowance COUNTER, which is real and
+  // worth showing: it tells a signed-in user how many messages they have left today. The status call
+  // stays for exactly that.
   const refreshPass = React.useCallback(() => { fetchPassStatus().then((p) => setPass(p)).catch(() => {}); }, []);
-  // Load pass/quota state on mount and whenever the signed-in user changes (also picks up a pass that
-  // was just granted after returning from the Cashfree checkout).
   useEffect(() => {
     refreshPass();
     const unsub = auth.onAuthStateChanged(() => refreshPass());
     return () => unsub();
   }, [refreshPass]);
-
-  const startBuyPass = async () => {
-    if (buying || !pass) return;
-    setBuying(true);
-    try {
-      const outcome = await buyProfessionalPass(pass.priceInr, pass.passDays);
-      if (outcome === 'granted') { setPaywall(null); refreshPass(); } // simulator (dev) → pass active now
-      // 'redirecting' → the gateway page took over; on return the app refetches status.
-    } catch (e: any) {
-      alert(e?.message || 'Could not start the Pass purchase. Please try again.');
-    } finally {
-      setBuying(false);
-    }
-  };
 
   useEffect(() => {
     try { localStorage.setItem(storeKey, JSON.stringify(messages.slice(-120))); } catch { /* ignore */ }
@@ -118,7 +135,13 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
     if (allowed.length > 0) setFiles((prev) => [...prev, ...allowed].slice(0, MAX_FILES));
   };
 
-  const send = async (text?: string) => {
+  /**
+   * `resendOf` carries the transcript an EDIT already produced. Without it, re-asking an edited
+   * question would append a second copy of it — the edit rewinds the transcript and keeps the edited
+   * message in place, so send() must build on that instead of on stale state and must not re-add it.
+   * It also preserves the `edited` marker, which a plain re-send would quietly drop.
+   */
+  const send = async (text?: string, resendOf?: Msg[]) => {
     const content = (text ?? input).trim();
     if ((!content && files.length === 0) || loading) return;
     const sendFiles = files;
@@ -127,7 +150,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
     const shownContent = sendFiles.length > 0
       ? `${content || '(files attached)'}\n📎 ${sendFiles.map((f) => f.name).join(', ')}`
       : content;
-    const next: Msg[] = [...messages, { role: 'user', content: shownContent }];
+    const next: Msg[] = resendOf ?? [...messages, { role: 'user', content: shownContent }];
     setMessages(next);
     setLoading(true);
     try {
@@ -172,22 +195,13 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2 shrink-0">
         <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center"><Sparkles className="w-4 h-4" /></div>
         <span className="font-bold text-sm">{config.name}</span>
-        {/* Pass / free-quota chip — only when the paid gate is on for a signed-in user. */}
-        {pass?.enabled && pass?.signedIn && (
-          pass.unlimited ? (
-            <span className="ml-auto flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
-              <Crown className="w-3 h-3" /> {pass.hasPass ? 'Pass active' : 'Unlimited'}
-            </span>
-          ) : (
-            <button
-              onClick={() => setPaywall('paywall')}
-              title="Get the Professional Pass for unlimited access"
-              className="ml-auto flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-[#c9d1d9]"
-            >
-              <span className={pass.remainingFree <= 3 ? 'text-amber-300' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
-              <Crown className="w-3 h-3 text-amber-400" />
-            </button>
-          )
+        {/* Free-allowance chip — only when the daily gate is on for a signed-in user. It is a COUNTER
+            now, not an upsell: it used to be a button that opened a Pass paywall, and there is nothing
+            left to sell. Unlimited accounts show nothing at all rather than a crown they cannot act on. */}
+        {pass?.enabled && pass?.signedIn && !pass.unlimited && (
+          <span className="ml-auto text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-[#c9d1d9]">
+            <span className={pass.remainingFree <= 3 ? 'text-amber-300' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
+          </span>
         )}
       </div>
 
@@ -196,11 +210,32 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           const lastUser = [...messages].reverse().find((m) => m.role === 'user');
           return lastUser ? <AppUpdateChatNotice userText={lastUser.content} /> : null;
         })()}
-        {messages.map((m, i) => (
-          <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+        {filterMessages(messages as any, chatSearchQuery).map((m: any, i: number) => (
+          <div key={i} className={`group/msg ${m.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'}`}>
             <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-[#161b22] border border-white/10 text-[#c9d1d9]'}`}>
               {m.content}
+              {m.edited && <span className="ml-2 text-[10px] opacity-60 align-middle">{editedLabel()}</span>}
             </div>
+            {/* DELETE + EDIT on a sent message (admin 2026-08-10). Only the user's own, and only while
+                no answer is in flight — rewinding under a running turn is not a state we could honestly
+                represent on screen. Hidden until hover on a pointer device; always present on touch,
+                where there is no hover to reveal them with. */}
+            {m.role === 'user' && !searchActive(chatSearchQuery) && (
+              <MessageEditActions
+                className="mt-0.5 opacity-60 md:opacity-0 md:group-hover/msg:opacity-100 transition-opacity"
+                text={String(m.content ?? '')}
+                disabled={loading}
+                onDelete={() => setMessages(fromIds(deleteMessage(withIds(messages), msgId(i))))}
+                onEdit={(next) => {
+                  const r = editMessage(withIds(messages), msgId(i), next);
+                  const rewound = fromIds(r.messages);
+                  setMessages(rewound);
+                  // The edited message is ALREADY the last entry of `rewound`; handing it to send()
+                  // keeps it (and its "edited" marker) instead of appending a duplicate.
+                  if (r.resend) void send(r.resend, rewound);
+                }}
+              />
+            )}
           </div>
         ))}
         {loading && (
@@ -228,6 +263,29 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
         </div>
       )}
 
+      {/* THE SHARED COMPOSER TOOLBAR (admin 2026-08-10: "wahi sabhi jagah laga do"). The professionals
+          had none of it — no way to change how Enter behaves, no way to find something said earlier,
+          no way to start over without clearing site data. Clear also drops the SAVED transcript, not
+          just the on-screen one: this chat restores itself from localStorage on mount, so wiping only
+          the array would resurrect the whole conversation on the next visit. */}
+      <div className="px-3 pt-2 shrink-0">
+        <ChatToolbar
+          messageCount={messages.length}
+          sendOnEnter={sendOnEnter}
+          onSendOnEnterChange={setSendOnEnter}
+          searchQuery={chatSearchQuery}
+          onSearchQueryChange={setChatSearchQuery}
+          searchOpen={showChatSearch}
+          onSearchOpenChange={setShowChatSearch}
+          searchMatches={filterMessages(messages as any, chatSearchQuery).length}
+          onClear={() => {
+            setMessages([{ role: 'assistant', content: config.welcome }]);
+            try { localStorage.removeItem(storeKey); } catch { /* private mode — the screen is still cleared */ }
+          }}
+          charCount={input.length}
+        />
+      </div>
+
       <div className="p-3 border-t border-white/5 flex items-end gap-2 shrink-0">
         <AttachMenu
           onFiles={(fl) => addFiles(fl)}
@@ -241,7 +299,21 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           ref={composerRef}
           value={input}
           onChange={(e) => { setInput(e.target.value); autoGrow(e.target, 128); }}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          onKeyDown={(e) => {
+            // Was unconditional: Enter ALWAYS sent, the toggle did not exist here, and it fired mid-IME
+            // composition — so a Hindi or CJK typist sent a half-finished word. One shared rule now.
+            if (enterShouldSend({
+              key: e.key,
+              shiftKey: e.shiftKey,
+              sendOnEnter,
+              hasContent: !!input.trim() || files.length > 0,
+              isBusy: loading,
+              isComposing: (e.nativeEvent as any)?.isComposing,
+            })) {
+              e.preventDefault();
+              void send();
+            }
+          }}
           onPaste={(e) => {
             const items: DataTransferItem[] = e.clipboardData ? Array.from(e.clipboardData.items) : [];
             const pasted = items.map((it) => (it.kind === 'file' ? it.getAsFile() : null)).filter(Boolean) as File[];
@@ -282,13 +354,6 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
                 >
                   <Wallet className="w-4 h-4" /> Add credit
                 </button>
-                <button
-                  onClick={startBuyPass}
-                  disabled={buying}
-                  className="mt-2 w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-60 text-[#8b949e] text-xs font-semibold"
-                >
-                  {buying ? 'Opening checkout…' : `Or get the Professional Pass — ₹${pass?.priceInr ?? 99}/month, unlimited`}
-                </button>
               </>
             ) : paywall === 'login' ? (
               <>
@@ -298,20 +363,20 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
               </>
             ) : (
               <>
-                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-amber-300 flex items-center justify-center"><Crown className="w-6 h-6" /></div>
-                <h3 className="font-bold text-white mb-1">Get the Professional Pass</h3>
+                {/* Was a "Get the Professional Pass — ₹99/month" checkout. The Pass is gone (admin
+                    2026-08-10), so this card no longer sells anything: it states the allowance, says
+                    when it returns, and offers the one action that genuinely helps today. */}
+                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-amber-300 flex items-center justify-center"><Clock className="w-6 h-6" /></div>
+                <h3 className="font-bold text-white mb-1">That's today's free messages</h3>
                 <p className="text-sm text-[#8b949e] mb-4">
-                  You've used your {pass?.freeDailyLimit ?? 50} free messages for today. Unlock <span className="text-white font-semibold">unlimited</span> access to every professional.
+                  You've used all {pass?.freeDailyLimit ?? 50} of them. They come back tomorrow — or add credit and carry on now, paying only for what you use.
                 </p>
                 <button
-                  onClick={startBuyPass}
-                  disabled={buying}
-                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-60 text-black font-bold flex items-center justify-center gap-2"
+                  onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
+                  className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold flex items-center justify-center gap-2"
                 >
-                  {buying ? <TirangaLoader className="w-4 h-4" /> : <Crown className="w-4 h-4" />}
-                  {buying ? 'Opening checkout…' : `Get Pass — ₹${pass?.priceInr ?? 99}/month`}
+                  <Wallet className="w-4 h-4" /> Add credit
                 </button>
-                <p className="text-[11px] text-[#586069] mt-2">Cancel anytime · secure payment</p>
               </>
             )}
           </div>

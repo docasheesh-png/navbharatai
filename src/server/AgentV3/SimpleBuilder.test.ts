@@ -176,6 +176,13 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     // The assertion is on that OBSERVABLE — whether the contract reached the per-file prompts — deliberately
     // NOT on wall-clock elapsed time or on r.ok, both of which drift when the whole suite runs in parallel.
     // A flaky test that reddens CI at random is worse than no test.
+    //
+    // SINGLE-TIER MANIFEST (dukaan report 2026-08-12): all three files are foundation-tier, so this lane
+    // runs ONE generation stage. That is not incidental — `canFinishAfterPreamble` now bails a lane whose
+    // plan call proves the remaining stages cannot fit, and a plan eating 38% of the budget across THREE
+    // stages is doomed by arithmetic (0.38 × 3 > 1). Keeping this fixture multi-tier would test the new
+    // bail, not the contract cap. The property under test is unchanged: a slow plan must starve the
+    // contract rather than compound with it.
     const filePrompts: string[] = [];
     await runSimpleBuild(baseDeps({
       shareContract: true,
@@ -184,7 +191,7 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
       generate: async (_s: string, user: string) => {
         if (user.includes('Plan the file list')) {
           await new Promise((res) => setTimeout(res, 380));
-          return 'src/App.tsx :: root\nsrc/TodoList.tsx :: the list\nsrc/index.css :: styles';
+          return 'src/types.ts :: shared types\nsrc/utils.ts :: helpers\nsrc/index.css :: styles';
         }
         if (user.includes('Design the shared contract')) {
           await new Promise((res) => setTimeout(res, 300));

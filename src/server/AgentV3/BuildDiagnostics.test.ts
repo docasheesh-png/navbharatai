@@ -713,12 +713,27 @@ describe('BuildDiagnostics — AI Diagnosis Bundle (raw logs, LLM I/O, full erro
     expect(r.issues.find((i) => i.code === 'LLM_CALL_FAILED')?.message).toContain('overloaded');
   });
 
-  it('#4 a normal (end_turn) call adds NO timeline noise, only the channel record', () => {
+  it('#4 a normal (end_turn) call adds NO PER-CALL timeline noise, only the channel record', () => {
+    // The invariant this protects is per-call: a clean call must not leave a struggle marker, or a
+    // 100-step build buries its real findings under 100 non-findings. It is NOT "recordLlmCall may
+    // never touch the timeline" — the first call also stamps TIME_TO_FIRST_CALL, one entry for the
+    // whole build, because 227 seconds of setup silence was invisible until something recorded it
+    // (admin report 2026-08-12). Asserted below as exactly one, and never again.
     const d = fresh();
     d.recordLlmCall({ model: 'claude-opus-4', finishReason: 'end_turn', toolCalls: 1, inputTokens: 50, outputTokens: 200, latencyMs: 1500, ok: true });
     const r = d.report();
     expect(r.llmCalls).toHaveLength(1);
-    expect(r.issues).toHaveLength(0); // success + not truncated → no struggle marker
+    expect(r.issues.filter((i) => i.code !== 'TIME_TO_FIRST_CALL')).toHaveLength(0);
+  });
+
+  it('#4b a SECOND clean call adds nothing at all — the per-call invariant, sharpened', () => {
+    const d = fresh();
+    d.recordLlmCall({ model: 'claude-opus-4', finishReason: 'end_turn', toolCalls: 1, inputTokens: 50, outputTokens: 200, latencyMs: 1500, ok: true });
+    const after = d.report().issues.length;
+    for (let i = 0; i < 20; i += 1) {
+      d.recordLlmCall({ model: 'claude-opus-4', finishReason: 'end_turn', toolCalls: 1, inputTokens: 50, outputTokens: 200, latencyMs: 1500, ok: true });
+    }
+    expect(d.report().issues).toHaveLength(after);
   });
 
   it('#1 keeps the FULL error message (un-truncated) alongside the short timeline line', () => {
@@ -1253,10 +1268,29 @@ describe('importTurnObservation (mitrify autopsy 2026-07-27)', () => {
     expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
   });
 
-  it('the SAME finding on a real build turn still surfaces as the rootCause (no regression)', () => {
+  /**
+   * SUPERSEDED BY EVIDENCE (Shiv Medical Store report, 2026-08-10). This case previously asserted the
+   * opposite — that on a REAL build turn the same finding SHOULD become the rootCause — on the
+   * reasoning that the file map is the app we just wrote, so "no project file imports it" is provable
+   * there even though it is not on a partial import map.
+   *
+   * A real build disproved it. That turn WAS a normal build turn with a complete map, it succeeded, its
+   * app was verified rendering, and its reported rootCause was
+   * `"@capacitor/android" is declared … but no project file imports it` — which is also FALSE:
+   * Capacitor's packages are consumed by its CLI and native config, exactly the caveat the message
+   * itself spells out.
+   *
+   * The deeper error was never provability, it was relevance: a dependency-hygiene hint explains
+   * nothing about why a build did or did not work. It is still recorded and still visible — it simply
+   * cannot be promoted to the explanation of a build. See NEVER_ROOT_CAUSE.
+   */
+  it('an unused-dep hint is not the rootCause on a real build turn either', () => {
     const real = importTurnObservation(false, MSG);
     const issues = [{ ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'INTEGRITY_UNUSED_DEP', ...real }];
-    expect(deriveRootCause({ issues, ok: true })).toBe(MSG);
+    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+    // The finding itself is NOT suppressed — only its promotion to rootCause.
+    expect(real.message).toBe(MSG);
+    expect(real.autoResolved).toBe(false);
   });
 });
 

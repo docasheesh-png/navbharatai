@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { oauthTargetOrigin } from './githubAuth';
+import { oauthTargetOrigin, nativeOauthReturn } from './githubAuth';
 
 describe('oauthTargetOrigin — OAuth popup token postMessage target', () => {
   it('NEVER returns a wildcard (the property that stops window.opener token theft)', () => {
@@ -27,5 +27,27 @@ describe('oauthTargetOrigin — OAuth popup token postMessage target', () => {
     const out = oauthTargetOrigin('https://evil.example.com/steal');
     expect(out).toBe('https://evil.example.com');
     expect(out).not.toBe('*');
+  });
+});
+
+describe('nativeOauthReturn — the native-app OAuth deep-link return', () => {
+  it('returns the app custom-scheme URL ONLY for the native sentinel state', () => {
+    expect(nativeOauthReturn('nbai-native', 'tok123')).toBe('com.navbharat.ai://github-callback#gh_token=tok123');
+  });
+
+  it('is null for the normal web flow, so browser/desktop OAuth is completely unchanged', () => {
+    expect(nativeOauthReturn('https://navbharatai.com/build', 'tok')).toBeNull();
+    expect(nativeOauthReturn('', 'tok')).toBeNull();
+    expect(nativeOauthReturn(undefined, 'tok')).toBeNull();
+    expect(nativeOauthReturn(null, 'tok')).toBeNull();
+  });
+
+  it('🔒 the scheme target is a FIXED constant — a crafted state can NEVER redirect the token elsewhere', () => {
+    // Any non-sentinel state (including an attacker's https/scheme) yields null → falls to the normal,
+    // allow-list-guarded web path. The token can only ever reach the app's own com.navbharat.ai scheme.
+    expect(nativeOauthReturn('https://evil.example.com', 'tok')).toBeNull();
+    expect(nativeOauthReturn('evil://steal', 'tok')).toBeNull();
+    // And the URL it DOES produce always points at our own scheme, whatever the token contains.
+    expect(nativeOauthReturn('nbai-native', 'a b&c')).toBe('com.navbharat.ai://github-callback#gh_token=a%20b%26c');
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
 
 describe('classifyCommandRisk — HIGH', () => {
   it('flags recursive delete of root/home/wildcard', () => {
@@ -333,3 +333,104 @@ describe('importedFileDeletionMessage — honest refusal naming the real importe
   });
 });
 
+
+/**
+ * THE USER'S OWN KEYS ARE NOT OURS TO DELETE.
+ *
+ * Admin build transcript, 2026-08-12. The platform wrote the user's saved keys into `.env` — "🔐 Loaded
+ * 3 of your saved keys (Settings → Secrets & API Keys) into the app". Twenty-five seconds later the
+ * reviewer flagged "hardcoded secrets in .env", the builder replaced them with placeholders, and told
+ * the user to "add your real credentials later". The app's database and payments were dead from that
+ * moment — and the build reported "Your source files are untouched — I only wrote a setup file (.env)".
+ * That one file was the only thing it broke.
+ *
+ * The model was applying a real best practice to a file that is sandbox-only, gitignored, and written
+ * BY US from the user's vault. A prompt asking it not to would be one more instruction to forget.
+ */
+describe('a write must not erase the user\'s real secrets', () => {
+  const REAL = [
+    'DATABASE_URL=postgresql://user:pa55@ep-cool.neon.tech/db',
+    'RAZORPAY_KEY_SECRET=rzp_live_9x8y7z',
+    'VITE_RAZORPAY_KEY_ID=rzp_id_12345',
+  ].join('\n');
+
+  it('blocks the exact rewrite from the transcript', () => {
+    const placeholders = [
+      'DATABASE_URL=your_database_url_here',
+      'RAZORPAY_KEY_SECRET=your_razorpay_secret',
+      'VITE_RAZORPAY_KEY_ID=your_razorpay_key_id',
+    ].join('\n');
+    const erased = wouldEraseUserSecrets('.env', REAL, placeholders);
+    expect(erased).toEqual(['DATABASE_URL', 'RAZORPAY_KEY_SECRET', 'VITE_RAZORPAY_KEY_ID']);
+  });
+
+  it('a key DELETED outright is as gone as one blanked', () => {
+    expect(wouldEraseUserSecrets('.env', REAL, 'DATABASE_URL=postgresql://user:pa55@ep-cool.neon.tech/db'))
+      .toEqual(['RAZORPAY_KEY_SECRET', 'VITE_RAZORPAY_KEY_ID']);
+  });
+
+  it('blanking to empty counts', () => {
+    expect(wouldEraseUserSecrets('.env', 'API_KEY=sk-real-value', 'API_KEY=')).toEqual(['API_KEY']);
+  });
+
+  it('recognises the placeholder shapes a model actually writes', () => {
+    for (const p of ['your_key_here', '<your-key>', 'xxxxx', 'CHANGEME', 'placeholder', 'TODO', '...', '""']) {
+      expect(wouldEraseUserSecrets('.env', 'K=sk-real', `K=${p}`), p).toEqual(['K']);
+    }
+  });
+
+  it('ADDING a key is not erasing one', () => {
+    expect(wouldEraseUserSecrets('.env', REAL, `${REAL}\nNEW_KEY=abc`)).toEqual([]);
+  });
+
+  it('changing one real value to another real value is allowed', () => {
+    expect(wouldEraseUserSecrets('.env', 'API_KEY=sk-old', 'API_KEY=sk-new')).toEqual([]);
+  });
+
+  it('filling a placeholder IN is exactly what we want, and is allowed', () => {
+    expect(wouldEraseUserSecrets('.env', 'API_KEY=your_key_here', 'API_KEY=sk-real')).toEqual([]);
+  });
+
+  it('creating the file for the first time is allowed', () => {
+    expect(wouldEraseUserSecrets('.env', '', 'API_KEY=your_key_here')).toEqual([]);
+  });
+
+  it('.env.example is the RIGHT place for placeholders and is never guarded', () => {
+    // The refusal message tells the model to write one; blocking it would be self-contradictory.
+    expect(wouldEraseUserSecrets('.env.example', 'API_KEY=sk-real', 'API_KEY=your_key')).toEqual([]);
+  });
+
+  it('an ordinary source file is not a dotenv', () => {
+    expect(wouldEraseUserSecrets('src/config.ts', 'API_KEY=sk-real', 'API_KEY=x')).toEqual([]);
+  });
+
+  it('comments and blank lines do not confuse it', () => {
+    const before = '# database\nDATABASE_URL=postgres://real\n\n# payments\nPAY=live_1';
+    expect(wouldEraseUserSecrets('.env', before, '# database\nDATABASE_URL=\n\n# payments\nPAY=live_1'))
+      .toEqual(['DATABASE_URL']);
+  });
+
+  it('the refusal explains WHY, and offers the right alternative', () => {
+    const m = eraseUserSecretsMessage('.env', ['DATABASE_URL']);
+    expect(m).toContain('Settings → Secrets & API Keys');
+    expect(m).toContain('already gitignored');
+    expect(m).toContain('.env.example');
+  });
+
+  it('survives junk', () => {
+    expect(() => wouldEraseUserSecrets(null as never, null as never, null as never)).not.toThrow();
+    expect(wouldEraseUserSecrets('.env', null as never, null as never)).toEqual([]);
+  });
+});
+
+describe('the secrets guard is wired into BOTH write paths', () => {
+  const dispatcher = require('fs').readFileSync(
+    require('path').join(__dirname, 'ToolDispatcher.ts'), 'utf8',
+  ) as string;
+
+  it('write_file and write_files_batch both check it', () => {
+    // A guard on only one of them is one tool call away from being bypassed — the exact shape the
+    // duplicate-module guard had to be fixed for.
+    expect((dispatcher.match(/wouldEraseUserSecrets\(/g) || []).length).toBeGreaterThanOrEqual(2);
+  });
+});

@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
-import { Camera, Image as ImageIcon, FileText, Paperclip, Folder } from 'lucide-react';
+import { Camera, Image as ImageIcon, FileText, Paperclip, Folder, FolderOpen } from 'lucide-react';
+import { isFolderImportSupported } from '../lib/folderImport';
 
 // Shared attach menu (admin 2026-07-12): tapping the 📎 attach button opens a 3-option sheet —
 // Take Photo (camera) / Choose photo or video (gallery) / Choose file — the SAME everywhere
@@ -35,6 +36,8 @@ export interface AttachMenuProps {
    * Given its own picker so a project can never accidentally take the attachment path again.
    */
   onZipProject?: (file: File) => void;
+  /** Open a project FOLDER directly (Chrome/Edge desktop). The menu hides it where unsupported. */
+  onOpenFolder?: () => void;
 }
 
 export function AttachMenu({
@@ -46,6 +49,7 @@ export function AttachMenu({
   title = 'Attach',
   badge,
   onZipProject,
+  onOpenFolder,
 }: AttachMenuProps) {
   const [open, setOpen] = useState(false);
   const cameraRef = useRef<HTMLInputElement | null>(null);
@@ -131,6 +135,21 @@ export function AttachMenu({
             >
               <span className="text-emerald-400"><Folder className="w-4 h-4" /></span>
               <span>Import project (.zip)<span className="block text-[11px] text-zinc-500">Opens your app in Files — any size</span></span>
+            </button>
+          )}
+          {/* OPEN FOLDER — no zip at all. Gated on real capability rather than a browser sniff: the
+              File System Access API is Chrome/Edge desktop only, and offering a button that throws on
+              Firefox or a phone is worse than not offering it. The .zip option above stays for
+              everyone, so nobody loses a way in. */}
+          {onOpenFolder && isFolderImportSupported() && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { setOpen(false); onOpenFolder(); }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 transition-colors border-t border-zinc-800"
+            >
+              <span className="text-sky-400"><FolderOpen className="w-4 h-4" /></span>
+              <span>Open project folder<span className="block text-[11px] text-zinc-500">No zipping, no upload of extras — pick the folder itself</span></span>
             </button>
           )}
         </div>

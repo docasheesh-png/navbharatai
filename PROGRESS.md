@@ -31506,3 +31506,37 @@ the allowlist (runtime-error auto-fix and feature-presence heal stay — those a
 not our opinion).
 
 Gate: tsc clean both projects, full run **14,694 / 14,694**.
+
+---
+
+## 2026-08-12 (continued) — GREEN FREEZE: deny writes to a verified-working app by default
+
+The admin approved the structural fix the post-green audit recommended (default on). After the app is
+latched `previewGreen`, twelve write-capable passes could still edit it and only one (GREEN STOP)
+checked. The real bug is that write permission was OPEN BY DEFAULT after green — the guarantee had to be
+re-remembered at every call site. Same class the codebase already solved twice (noClaudeZone,
+aiSpendZone) by moving the invariant to the ONE place the thing happens and denying by construction.
+
+greenFreeze.ts: a per-workspace latch (the set of source paths present at green) + an AsyncLocalStorage
+pass zone. The actuator's writeFile calls assertWriteAllowed at its first line; a write that would
+OVERWRITE a file present at green is refused (throws GreenFreezeError) UNLESS the current async pass is
+allowlisted. Every post-build pass writes through the same idiom — actuator.writeFile THEN record into
+writtenFiles/durable — so a throw cleanly skips the sandbox write, the in-memory record AND the durable
+save together, and the pass's try/catch swallows it. Refusing a write can only ever keep the working app
+as it was; it can never break it — safe by the one absolute rule, by construction.
+
+Allowlist (the user's own requests + the safety mechanism): runtime-error-autofix, feature-presence-heal,
+green-guard-restore — each wrapped in runInPass. A NEW file is always allowed (a test/doc scaffold cannot
+break the rendered app). Everything else — the reviewer's opinions, the deterministic sweeps, index.html
+rewrites — becomes a no-op it cannot perform, recorded as GREEN_FREEZE_DEFERRED and offered to the user.
+The latch is cleared in BOTH the main finally and the deadline finalizer so it can never leak to the next
+build. Kill switch AGENTV3_GREEN_FREEZE=off restores today's behaviour byte-for-byte.
+
+A nice consequence: because the freeze prevents the corrupting post-green writes, GreenGuard's end-of-turn
+save now saves a GOOD state (there is no damage left to save), without touching GreenGuard.
+
+Before merge: an adversarial review (3 attackers + judge) is checking for any way a refused write could
+break a build, any latch-leak timing hole, and any post-green write path still un-guarded. Not merged
+until that clears.
+
+Gate: tsc clean both projects, full run **14,718 / 14,718** (24 new green-freeze tests).

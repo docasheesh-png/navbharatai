@@ -1,4 +1,6 @@
 import { Sandbox } from 'e2b';
+import { parseNpmAuditSummary } from '../../../npmAuditSummary';
+import { shouldRunAuditFix, AUDIT_FIX_COMMAND, AUDIT_FIX_TIMEOUT_MS } from '../../../npmAuditFix';
 import { commandFailureResult } from '../../../../lib/sandboxCommandError';
 import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
@@ -409,13 +411,40 @@ export class E2BActuator implements IEngineerActuator {
       }
     } catch { /* warm-primer is best-effort — never blocks the real install below */ }
 
+    /**
+     * SECURITY REMEDIATION (admin 2026-08-12). npm has just told us, in this very log, how many known
+     * vulnerabilities the tree carries. When high/critical ones are present and the admin has switched
+     * this on, apply npm's OWN SemVer-compatible fixes — never `--force`, which applies breaking major
+     * upgrades and is a way to break a working app while claiming to secure it (see npmAuditFix.ts).
+     *
+     * It runs HERE, inside the one install implementation every path funnels through, so no build path
+     * can quietly skip it — and it lands BEFORE the typecheck and build gates, so the rare regression a
+     * patch release causes is caught by checks that already exist rather than shipped.
+     *
+     * Best-effort in every direction: a failure, a timeout, or an unreadable result all fall through to
+     * the install's own result. Securing dependencies must never be able to fail a working build.
+     */
+    const withAuditFix = async (log: string): Promise<string> => {
+      try {
+        if (!shouldRunAuditFix(parseNpmAuditSummary(log))) return log;
+        const fix = await sandbox.commands
+          .run(AUDIT_FIX_COMMAND, { cwd: WORKSPACE_ROOT, timeoutMs: AUDIT_FIX_TIMEOUT_MS })
+          .catch((err: any) => commandFailureResult(err));
+        // The fix's own output carries the POST-fix audit summary, so appending it is what lets the
+        // report state the tree the app actually ships with rather than the one it started from.
+        return `${log}\n[${AUDIT_FIX_COMMAND}]\n${fix.stdout}${fix.stderr}`;
+      } catch {
+        return log; // a security step that breaks the install would be worse than the vulnerability
+      }
+    };
+
     // Step 1: npm ci when a lock file exists (clean, reproducible install)
     const hasLock = await sandbox.files.exists(`${WORKSPACE_ROOT}/package-lock.json`).catch(() => false);
     if (hasLock) {
       const ci = await sandbox.commands.run('npm ci', {
         cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
       }).catch((err: any) => commandFailureResult(err));
-      if (ci.exitCode === 0) return { success: true, log: ci.stdout + ci.stderr };
+      if (ci.exitCode === 0) return { success: true, log: await withAuditFix(ci.stdout + ci.stderr) };
       // npm ci failed (stale lock, missing lock entry) — fall through to npm install
     }
 
@@ -424,7 +453,7 @@ export class E2BActuator implements IEngineerActuator {
       cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
     }).catch((err: any) => commandFailureResult(err));
     const installLog = install.stdout + install.stderr;
-    if (install.exitCode === 0) return { success: true, log: installLog };
+    if (install.exitCode === 0) return { success: true, log: await withAuditFix(installLog) };
 
     // Step 3: ERESOLVE peer-dep conflict — retry with --legacy-peer-deps
     if (/ERESOLVE|peer dep(endenc)?/i.test(installLog)) {
@@ -432,9 +461,12 @@ export class E2BActuator implements IEngineerActuator {
         cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
       }).catch((err: any) => commandFailureResult(err));
       const retryLog = retry.stdout + retry.stderr;
+      const combined = installLog + '\n[--legacy-peer-deps retry]\n' + retryLog;
       return {
         success: retry.exitCode === 0,
-        log: installLog + '\n[--legacy-peer-deps retry]\n' + retryLog,
+        // Only a SUCCESSFUL install gets the remediation pass — running it over a broken tree would
+        // spend two minutes on a dependency graph that does not resolve in the first place.
+        log: retry.exitCode === 0 ? await withAuditFix(combined) : combined,
       };
     }
 

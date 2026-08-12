@@ -88,8 +88,17 @@ describe('the SWEEP — no call site may re-invent the lossy version (rule 3)', 
     }
   });
 
-  it('all nine former sites now go through the one helper', () => {
+  it('every site goes through the one helper — a NEW one must join it, not re-invent it', () => {
+    /**
+     * The count is the tripwire, not the point: it fails when anyone adds a sandbox command, so they
+     * have to prove the new one preserves the failure's output instead of discarding it.
+     *
+     * 9 → 10 on 2026-08-12: the `npm audit fix` remediation pass (npmAuditFix.ts) runs one more sandbox
+     * command, and it uses the shared helper. That matters here specifically — if that command fails,
+     * its stdout is the ONLY evidence of why npm could not apply the fixes, and a lossy handler would
+     * leave the build reporting "the result could not be re-read" with nothing to explain it.
+     */
     const total = FILES.reduce((n, f) => n + (read(f).match(/commandFailureResult\(err\)/g) || []).length, 0);
-    expect(total).toBe(9);
+    expect(total).toBe(10);
   });
 });

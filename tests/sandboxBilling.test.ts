@@ -125,20 +125,41 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
 
   it('both billing paths pass it, so the settle and the watchdog can never disagree', () => {
     // Fix 67 established that these two must agree; a cost on one and not the other would revive that.
-    const hits = route.match(/billableSandboxUsd\(actuator, workspaceId\)/g) || [];
+    const hits = route.match(/billableSandboxUsd\(actuator, workspaceId, /g) || [];
     expect(hits.length).toBe(2);
+  });
+
+  it('BOTH paths pass the build start, so neither can bill idle preview time', () => {
+    /**
+     * ADMIN QUESTION 2026-08-12: "AGENTV3_BILL_SANDBOX se in-browser preview ke paise to nahi lagenge?"
+     *
+     * They were right to ask. `sandboxHeldSeconds` measures from when the sandbox came UP — the clock is
+     * set once per workspace and cleared only on pause/reap — so a user who built, read their preview
+     * for twenty minutes, then asked for one more change would have had those twenty idle minutes billed
+     * onto the SECOND build. A third build would be charged for all of it again: the same seconds, sold
+     * twice. Capping at the build's own duration fixes both at once.
+     */
+    expect(route).toContain('billableSandboxUsd(actuator, workspaceId, billingCtx.buildStartedAt)');
+    expect(route).toContain('billableSandboxUsd(actuator, workspaceId, buildStartedAt)');
+    expect(route).toContain('sandboxBillableUsd(sandboxCost(Math.min(seconds, buildSeconds)))');
+  });
+
+  it('an UNKNOWN build start bills nothing rather than guessing', () => {
+    const at = route.indexOf('function billableSandboxUsd');
+    const fn = route.slice(at, at + 2200);
+    expect(fn).toContain('if (!Number.isFinite(started) || started <= 0) return 0;');
   });
 
   it('it reads the SAME measurement the report uses', () => {
     // Two different sources of "how long did the VM run" would eventually disagree, and the bill
     // would be the one that was wrong.
     expect(route).toContain('sandboxHeldSeconds');
-    expect(route).toContain('sandboxBillableUsd(sandboxCost(fn.call(actuator, workspaceId)))');
+    expect(route).toContain('const held = fn.call(actuator, workspaceId);');
   });
 
   it('any doubt bills ZERO — a money path must fail toward charging less', () => {
     const at = route.indexOf('function billableSandboxUsd');
-    const fn = route.slice(at, at + 700);
+    const fn = route.slice(at, at + 2200);
     expect(fn).toContain("if (typeof fn !== 'function' || !workspaceId) return 0;");
     expect(fn).toContain('catch {\n    return 0;');
   });

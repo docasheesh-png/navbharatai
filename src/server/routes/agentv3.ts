@@ -256,7 +256,7 @@ import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
@@ -11097,7 +11097,49 @@ export function registerAgentV3Routes(app: Express): void {
           message: releaseGateSummary(gate),
           autoResolved: gate.state === 'green',
         });
-      } catch { /* the gate reports on the build; it must never affect it */ }
+        // ── THE VERDICT MAY NO LONGER CONTRADICT THE EVIDENCE ────────────────────────────────────
+        //
+        // ADMIN REPORT 2026-08-12 (the dukaan stock app) — the worst failure this engine has produced,
+        // and not a crash: it LIED. One report carried, simultaneously:
+        //     ok: true
+        //     RELEASE_GATE: RED — Not shippable
+        //     rootCause: 2 local modules are STILL missing — the app will crash at runtime
+        // …and the user was told, in their own language, "App tayyar hai! 🎉 App live hai: <link>".
+        // The link showed a Closed Port Error. Everything needed to know better was already computed
+        // and written down; nothing was allowed to act on it, because this block was explicitly
+        // "reports on the build, must never affect it".
+        //
+        // That separation was right for the gate's ADVISORY half and wrong for its evidential half. A
+        // gate that is RED *because a build-breaking blocker was recorded* is not an opinion — it is the
+        // build's own error log, and shipping ok:true over it is a false success the platform forbids.
+        //
+        // ⚠️ DELIBERATELY NARROW — this is the difference between a guard and a nuisance:
+        //   • It fires ONLY when RED coincides with a genuine unresolved ERROR (`shippingIssueCount`),
+        //     which is the same count the gate itself used, so the two can never disagree.
+        //   • It does NOT fire on a RED driven only by tests, because a suite can be RED while merely
+        //     INDETERMINATE — this very report's suite said "could be a failing test OR the runner
+        //     failing to start; the output gave nothing to tell them apart". Failing a working app over
+        //     an ambiguity of OUR OWN sandbox is exactly the #2267 mistake, in the other direction.
+        //   • Flipping ok:false also makes the build FREE (the standing "working app or free" guard
+        //     keys on !result.ok) — so this fix hands money back as well as telling the truth.
+        const gateBlockers = buildDiag.shippingIssueCount('error');
+        const settled = result; // captured once — `result` is reassigned in the heal loop above
+        if (gate.state === 'red' && gateBlockers > 0 && settled && settled.ok) {
+          // The cause comes from the gate's own sentence, not a second derivation — one source, so the
+          // summary the user reads and the verdict that flipped can never describe different builds.
+          result = { ...settled, ok: false, summary: releaseGateFailureSummary(gateBlockers, releaseGateSummary(gate)) };
+          // NOTE: `buildResultRef` (the deadline finalizer's snapshot) is deliberately NOT touched here
+          // — it is not set yet at this point, and downstream it is captured ONLY `if (result.ok)`.
+          // Flipping `result` above therefore keeps BOTH exits honest by construction, which is the
+          // same reasoning the preview-compile guard records. TypeScript agrees: it types the ref as
+          // null here, which is how the attempt to update it failed to compile.
+          buildDiag.record({
+            phase: 'readiness', severity: 'error', code: 'OUTCOME_RELEASE_GATE_RED',
+            message: `The build reported success while the release gate was RED with ${gateBlockers} unresolved build-breaking issue(s) — the verdict has been corrected to NOT ok.`,
+            autoResolved: false,
+          });
+        }
+      } catch { /* the gate reports on the build; a fault HERE must never affect it */ }
 
       // APP HEALTH CULTURE — RED-TEAM (Immune System Phase 3 / GA-17, opt-in AGENTV3_REDTEAM=on): the
       // happy-path preview check only proves the app renders on GOOD input. The red-team ADVERSARIALLY

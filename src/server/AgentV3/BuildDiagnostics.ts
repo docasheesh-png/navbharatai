@@ -1218,6 +1218,7 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   'TEST_SUITE_UNVERIFIED',       // our sandbox could not run the suite; not the app's defect
   'REQUIREMENT_GAPS',            // "this domain usually also needs…" — a suggestion, not a fault
   'POST_ANSWER_TIMING',          // pure measurement
+  'ARCHITECTURE_INVARIANT_VIOLATED', // consistency with the project's own conventions — not a failure
 ]);
 
 /** True when a finding is advisory-only and must never become the build's rootCause. Pure. */

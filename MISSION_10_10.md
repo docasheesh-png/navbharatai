@@ -160,3 +160,51 @@ NEXT PHASE:     1 — Architecture invariants
 ```
 
 **No score in this document is 10/10, and none will be until there is evidence behind it.**
+
+---
+
+## PHASE 1 REPORT
+
+```
+PHASE:          1 — Architecture invariants (§10)
+STATUS:         SHIPPED (implementation) · UNVERIFIED (field)
+CURRENT SCORE:  Dimension 11 (Existing-App Evolution) 7 → 7. Unchanged ON PURPOSE: the mechanism
+                is in, but the scoring rule in this document says 9–10 needs field evidence, and
+                there is none yet. Claiming 8 for shipping code would be the exact inflation §39
+                forbids.
+TARGET:         9 once real edit builds show ARCHITECTURE_INVARIANTS_HELD dominating
+                ARCHITECTURE_INVARIANT_VIOLATED, and edit survival (#2277) holds across 20+ edits.
+WHAT CHANGED:   src/server/AgentV3/architectureInvariants.ts — a project's own architectural rules,
+                READ OUT OF its code, never a house style of ours. Six kinds: styling system,
+                internal import style, API hub, state store, client/server layering, page location.
+                • PREVENT — rendered into the edit prompt before the model writes a line. Derived
+                  from the already-warm project graph, so it costs zero extra file reads.
+                • DETECT — the files the build changed are checked against the rules derived from
+                  the project as it was BEFORE the build. Deterministic, no model call, advisory.
+                Wired in src/server/routes/agentv3.ts (both halves). Kill switch
+                AGENTV3_ARCH_INVARIANTS=off. ARCHITECTURE_INVARIANT_VIOLATED added to
+                NEVER_ROOT_CAUSE — a consistency note must never be blamed for a build.
+
+                THE GAP IT CLOSES: every gate we own judges a file on its OWN merits. Not one asked
+                "is this how THIS app is built?" So an app is degraded not by one bad edit but by
+                fifty locally-reasonable ones, and the whole stack stays silent through all of them.
+
+                WHAT IT DELIBERATELY DOES NOT DO: three of the six invariants are stated to the
+                builder but never checked. A new useState does not violate "shared state lives in
+                the store", and accusing it would be a false alarm — false alarms are what teach
+                people to ignore a report. Layering is checkable but stays with
+                ArchitectureAnalysis; two modules reporting one defect is how they drift apart.
+                A project that genuinely uses two styling systems gets NO styling rule at all.
+TESTS:          14,181 passing (1,184 files), up from 14,070. 46 new, most of them about the cases
+                where the honest answer is "this project has not decided that" — including the
+                self-exoneration trap: judged against the project as it BECAME rather than as it
+                WAS, the very edit that broke a rule dissolves the rule and reports itself clean.
+                Both the file list and the dependencies read out of the graph are filtered to the
+                baseline for that reason.
+BENCHMARK:      NOT RUN — no cost incurred, per the cost warning above. The field evidence arrives
+                free, from real edit builds, through the two new report codes.
+REGRESSIONS:    None. tsc (frontend + server) clean; full suite green. Every path is advisory and
+                best-effort — it cannot fail, block or slow a build, and a fresh build derives no
+                invariants at all, so the prompt is byte-identical to before.
+NEXT PHASE:     2 — Adversarial security suite (§4)
+```

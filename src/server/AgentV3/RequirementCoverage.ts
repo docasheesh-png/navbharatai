@@ -150,6 +150,61 @@ export function currentRequestForCoverage(requests: ReadonlyArray<string>): stri
  * safely act on. Omitting `sources` keeps the previous name-only behaviour exactly, with every finding
  * `confirmed: false`.
  */
+/**
+ * The features the user's OWN WORDS asked for — the request half of the audit below, on its own.
+ *
+ * WHY IT IS SPLIT OUT (2026-08-10). The dukaan report is the clearest broken promise this engine has
+ * produced: the user wrote *"Saari cheezon ki list dikhe, upar search box ho"*, no search was built,
+ * this module said so, and the app shipped with the user told it was ready. Everything since has gone
+ * into making that finding TRUSTWORTHY — reading bodies, the `confirmed` flag — which is the honest
+ * half. It is still the half that runs AFTER the app is built.
+ *
+ * The 50/50 law asks the other question: why was a feature the user typed in plain words not built in
+ * the FIRST pass? The list of what they asked for is computed here, deterministically, from their own
+ * text — so there is no reason it cannot be handed to the builder UP FRONT instead of only being
+ * graded at the end. Same table, same regexes, same negation handling: what the build is asked for and
+ * what it is judged on are then, by construction, the same list and cannot drift apart.
+ *
+ * PURE. Returns [] for an empty/irrelevant request, which is what keeps the prompt unchanged for a
+ * request that names no known surface.
+ */
+export function requestedFeatureLabels(request: string): string[] {
+  const req = (request || '').toString();
+  if (!req.trim()) return [];
+  // Negation-aware, exactly like the audit — "no login" must not become a requirement to build one.
+  return FEATURES.filter((f) => isAffirmativelyRequested(req, f.request)).map((f) => f.label);
+}
+
+/**
+ * The prompt block that names those features to the builder. '' when the request named none, so a
+ * prompt that matches nothing is left byte-identical.
+ *
+ * Deliberately NOT a licence to invent: it lists only what the user themselves asked for, and only
+ * labels the end-of-build audit will grade. It is a restatement, not an addition — which is why it
+ * needs no flag, unlike the requirement-GAP guidance that proposes features the user never mentioned.
+ */
+export function renderRequestedFeatureContract(labels: readonly string[]): string {
+  const list = (Array.isArray(labels) ? labels : []).filter((l) => typeof l === 'string' && l.trim());
+  if (!list.length) return '';
+  // Capped so a kitchen-sink request cannot crowd out the user's actual prompt. The audit still checks
+  // every one of them; this only bounds how many are restated.
+  const shown = list.slice(0, MAX_CONTRACT_FEATURES);
+  const more = list.length - shown.length;
+  return [
+    'WHAT THE USER EXPLICITLY ASKED FOR — build every one of these, in this app:',
+    ...shown.map((l) => `  • ${l}`),
+    ...(more > 0 ? [`  • …and ${more} more named in the request above.`] : []),
+    '',
+    'These are not suggestions and not extras: each one was named in the user\'s own words, and the',
+    'build is checked against this exact list when it finishes. A feature may live inside an existing',
+    'page (a search box at the top of a list is fine — it does not need its own file), but it must',
+    'really work. Shipping without one of these is shipping an app that does not do what was asked.',
+  ].join('\n');
+}
+
+/** Bound on how many features the contract restates. The audit is unbounded; only the prompt is. */
+export const MAX_CONTRACT_FEATURES = 12;
+
 export function analyzeRequirementCoverage(
   request: string,
   graph: ProjectGraph,

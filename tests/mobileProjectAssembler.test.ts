@@ -60,6 +60,39 @@ describe('detectWebDir', () => {
     const files = { 'vite.config.ts': 'export default { build: { outDir: "public/out" } }' };
     expect(detectWebDir(files, 'built')).toBe('public/out');
   });
+
+  it('reads a custom outDir from an ESM/.mjs/.mts vite config too (G9)', () => {
+    expect(detectWebDir({ 'vite.config.mjs': 'export default { build: { outDir: "dist/app" } }' }, 'built')).toBe('dist/app');
+    // a leading ./ is stripped
+    expect(detectWebDir({ 'vite.config.mts': 'export default { build: { outDir: "./out" } }' }, 'built')).toBe('out');
+    // a trailing slash is trimmed so the path Capacitor gets is clean
+    expect(detectWebDir({ 'vite.config.cjs': 'module.exports = { build: { outDir: "www/" } }' }, 'built')).toBe('www');
+  });
+
+  it('knows each framework’s real output folder so the FIRST ship is right, not a self-heal (G9)', () => {
+    // Create React App → build (this was the drift: the setup path used to ship a wrong "dist")
+    expect(detectWebDir({ 'package.json': JSON.stringify({ dependencies: { 'react-scripts': '^5' } }) }, 'built')).toBe('build');
+    // Next.js static export → out
+    expect(detectWebDir({ 'package.json': JSON.stringify({ dependencies: { next: '^14' } }) }, 'built')).toBe('out');
+    // Vite → dist
+    expect(detectWebDir({ 'package.json': JSON.stringify({ devDependencies: { vite: '^5' } }) }, 'built')).toBe('dist');
+    // detected from the build script even when the dep list is indirect
+    expect(detectWebDir({ 'package.json': JSON.stringify({ scripts: { build: 'react-scripts build' } }) }, 'built')).toBe('build');
+  });
+
+  it('flags a Next.js SSR app honestly instead of shipping a build that cannot produce a static site (G9)', () => {
+    const ssr = { 'package.json': JSON.stringify({ dependencies: { next: '^14' }, scripts: { build: 'next build' } }) };
+    const out = assembleMobileProject(ssr, SHIP_KIT, { appName: 'My App', appId: 'com.acme.app' });
+    expect(out.notes.some((n) => /Next\.js app without static export/i.test(n))).toBe(true);
+
+    // With output: 'export' configured, it is a real static site → no warning.
+    const exported = {
+      ...ssr,
+      'next.config.js': "module.exports = { output: 'export' }",
+    };
+    const ok = assembleMobileProject(exported, SHIP_KIT, { appName: 'My App', appId: 'com.acme.app' });
+    expect(ok.notes.some((n) => /without static export/i.test(n))).toBe(false);
+  });
 });
 
 describe('normaliseAppId — Android rejects anything that is not reverse-domain', () => {

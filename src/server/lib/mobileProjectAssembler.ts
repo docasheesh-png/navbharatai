@@ -99,12 +99,47 @@ export function detectProjectKind(files: Record<string, string>): 'built' | 'sta
   }
 }
 
-/** Where the built app ends up, read from the project's own Vite config when it says something unusual. */
+/** The dependencies + build script of a repo's package.json, parsed safely (empty on missing/corrupt). */
+function packageInfo(files: Record<string, string>): { deps: Record<string, string>; build: string } {
+  let pkg: Record<string, unknown> = {};
+  try { pkg = JSON.parse(files['package.json'] || '{}') as Record<string, unknown>; } catch { /* defaults */ }
+  const deps = {
+    ...((pkg.dependencies as Record<string, string> | undefined) || {}),
+    ...((pkg.devDependencies as Record<string, string> | undefined) || {}),
+  };
+  const build = String((pkg.scripts as Record<string, string> | undefined)?.build || '');
+  return { deps, build };
+}
+
+/** True when a Next.js app is configured to emit a STATIC site (the only shape Capacitor can wrap). */
+export function isNextStaticExport(files: Record<string, string>): boolean {
+  const { build } = packageInfo(files);
+  if (/next\s+export/.test(build)) return true; // the classic `next export` step
+  const cfg = files['next.config.js'] || files['next.config.mjs'] || files['next.config.ts']
+    || files['next.config.cjs'] || files['next.config.json'] || '';
+  return /output\s*:\s*['"]export['"]/.test(cfg); // Next 13+/14 `output: 'export'`
+}
+
+/**
+ * Where the built app ends up. Framework-aware and SHARED with the self-healing repair path (rule 3/4) so
+ * the first ship already points Capacitor at the right folder instead of shipping a wrong `dist`, failing,
+ * and self-healing it afterwards (rule 5 — prevent, don't heal): a real Create-React-App ships to `build`,
+ * a Next static export to `out`, Vite to `dist` (or the config's own `outDir`, read from any config
+ * extension). A Next app WITHOUT static export is server-rendered and produces no static folder — that
+ * honest case is surfaced as a note in assembleMobileProject, not silently mis-detected here.
+ */
 export function detectWebDir(files: Record<string, string>, kind: 'built' | 'static'): string {
   if (kind === 'static') return 'www';
-  const viteConfig = files['vite.config.ts'] || files['vite.config.js'] || '';
+  // An explicit Vite outDir wins over every default, read from whichever config extension the app uses.
+  const viteConfig = files['vite.config.ts'] || files['vite.config.js'] || files['vite.config.mjs']
+    || files['vite.config.mts'] || files['vite.config.cjs'] || '';
   const outDir = viteConfig.match(/outDir\s*:\s*['"]([^'"]+)['"]/);
-  if (outDir) return outDir[1].replace(/^\.\//, '');
+  if (outDir) return outDir[1].replace(/^\.\//, '').replace(/\/+$/, '');
+  // Otherwise the framework decides the folder.
+  const { deps, build } = packageInfo(files);
+  if (deps.next || /next build/.test(build)) return 'out';               // static export → out (SSR flagged elsewhere)
+  if (deps['react-scripts'] || /react-scripts build/.test(build)) return 'build'; // Create React App
+  if (deps.vite || /vite build/.test(build)) return 'dist';
   return 'dist';
 }
 
@@ -309,6 +344,22 @@ export function assembleMobileProject(
       files[path] = content;
     }
     notes.push(`Your app builds itself with "npm run build", so the build output in "${webDir}/" is what gets packaged.`);
+    // HONEST Next.js SSR case (rule 6): a plain `next build` produces a SERVER bundle (.next), not a static
+    // site, so there is nothing for Capacitor to wrap. We say so plainly instead of shipping a build that
+    // will fail with a confusing "out/index.html missing" three steps later.
+    const nextFiles = Object.fromEntries(usable);
+    const { deps: nDeps, build: nBuild } = ((): { deps: Record<string, string>; build: string } => {
+      try {
+        const p = JSON.parse(nextFiles['package.json'] || '{}') as Record<string, unknown>;
+        return {
+          deps: { ...((p.dependencies as Record<string, string>) || {}), ...((p.devDependencies as Record<string, string>) || {}) },
+          build: String((p.scripts as Record<string, string> | undefined)?.build || ''),
+        };
+      } catch { return { deps: {}, build: '' }; }
+    })();
+    if ((nDeps.next || /next build/.test(nBuild)) && !isNextStaticExport(nextFiles)) {
+      notes.push('This is a Next.js app without static export, so its build produces a server app, not a static site a mobile app can wrap. Add output: "export" to next.config (Next 13+/14) — then rebuild — so it produces the "out/" folder.');
+    }
   }
 
   files['package.json'] = buildPackageJson(appFiles['package.json'], opts.appName, kind);

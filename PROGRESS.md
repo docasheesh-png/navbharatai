@@ -31049,3 +31049,112 @@ commit and its branch was 14 commits behind `main`, so the green proved nothing 
 result — I merged `main` into it locally and ran the full gate on the MERGE (tsc ×2, 14,130 tests,
 build, bundle) before merging. Verifying the merge rather than the branch is the difference between
 "CI was green" and "this will be green".
+
+---
+
+## 2026-08-12 — Mission 10/10 phases 1–6, and the 44-minute home page
+
+Two threads in one session. The first was planned work; the second arrived as a real build report and
+took over, which is the correct priority order.
+
+### Mission 10/10 (the phase plan from `MISSION_10_10.md`)
+
+**Phase 1 — Architecture invariants (#2289).** `architectureInvariants.ts` reads six rules OUT OF a
+project's own code (styling system, import style, API hub, state store, layering, page location) and
+does both halves of the 50/50 law with them: rendered into the edit prompt before a line is written,
+and checked against the files the build changed, using the project as it was BEFORE the build. The
+baseline excludes this build's own writes — file list AND dependencies — or a build that adds
+styled-components makes the project look like it always used two styling systems, the rule dissolves,
+and the edit that broke it reports itself clean. ✅ **Verified live in a real build the same day:**
+the Tailwind rule appeared in every LLM prompt and the report carried `ARCHITECTURE_INVARIANTS_HELD`.
+
+**Phase 2 — Adversarial security (#2291).** 102 tests that ATTACK the shell guards instead of
+confirming them, and they found **nine live bypasses** of the source-destruction guard on day one:
+`bash -c "rm -rf src"`, `sh -c`, `eval`, `node -e "fs.rmSync"`, `python3 -c shutil.rmtree`,
+`rm --recursive --force src`, `rm -rf src*`, `rm -rf s""rc`, `rm -rf sr\c`. One root cause, not nine:
+the guards matched the command as literal text while bash matches it after unwrapping, quote removal,
+escape removal and glob expansion. `shellNormalize.ts` now gives every guard what bash sees. Two
+further defects fell out: `cat .env.example` was blocked as exfiltration (it is a template of names),
+and the module header still claimed it never blocks execution.
+
+**Phase 3 — DEFERRED on its own stated condition.** The multi-service runner was gated on
+"only if the graph shows real demand"; `SERVICE_GRAPH_MULTI` has no production data yet. Building it
+now would be the same mistake as scoring a benchmark nobody ran.
+
+**Phase 4 — E2E journey engine (#2292).** Every check we own asks "did it paint"; none presses a
+button. So the commonest invisible failure survives all of them — the UI PRETENDS: you add an item, it
+appears, you reload and it is gone. `journeyDerivation.ts` derives create → reload → still-there from
+the app's own markup and runs it in the pre-baked browser. Every selector is read out of the source;
+a form we cannot address honestly yields NO journey. A journey that never reached the app is
+UNREACHABLE, never FAILED. A create journey against a user-owned database is downgraded, not run.
+
+**Phase 5 — Release gate + the worst honesty defect found so far (#2293).** Every input to the
+confidence score was a STATIC count. Not one asked whether the app RAN. So an app whose preview never
+came up — whose render and journey checks therefore all skipped, as they all hang off the same preview
+URL — scored **100%, band HIGH, "I'm confident this build is solid."** `releaseGate.ts` adds
+GREEN/YELLOW/RED/**UNKNOWN**, and green cannot be earned by static cleanliness. Confidence now caps at
+74 without proof the app ran, 40 when a run was watched to fail, and the cap is explained rather than
+deducted in silence. Four existing tests encoded the old behaviour and were updated, not deleted.
+
+**Phase 6 — a11y + performance into the gate (#2293).** Both were already measured and already
+printed, and had no bearing on the verdict. They now cost GREEN — and can never cost RED, because a
+slow page still renders and the number comes from a 2-vCPU sandbox, not a user's device.
+
+**Error taxonomy (§24) deliberately NOT built:** one already exists as the BuildDiagnostics code set.
+A second parallel classification would be a synonym table to keep in sync.
+
+### The 44-minute home page (admin transcript + report, #2294)
+
+One screen with four buttons: **44m50s, ₹42.16, 178.4k tokens.** Eight fixes, all root-caused.
+
+1. **A dead dev server is not a broken app.** Three times the preview returned "nothing is listening on
+   that port"; three times a full LLM repair pass ran; all three times the model found nothing and
+   restarted the server, writing "No code changes were needed". We were paying a language model to be a
+   process supervisor, and it edited working code while it was in there. `serverDown` now short-circuits
+   and the loop restarts the process — deterministic, free, bounded, and it does not spend the repair
+   budget.
+2. **Stop photographing the app before it has painted.** All FOUR capture paths used a fixed sleep
+   (1800/1800/800/600 ms), including the CDP screenshot that is actually preferred at runtime. They now
+   poll for content in the mount root, so a fast app is captured sooner than the old guess and a slow
+   one stops being libelled. Two also waited on `networkidle`, which a Vite dev server never reaches.
+3. **An un-painted snapshot cannot convict.** For any SPA the un-hydrated shell is byte-identical to a
+   crashed app, and curl never runs JavaScript at all. Those are `inconclusive` now, and the message no
+   longer asserts "a runtime error likely crashed it" — a cause a photograph cannot show.
+4. **The user's own keys are not ours to delete.** The platform wrote the user's saved keys into `.env`;
+   25 seconds later the builder "fixed the hardcoded secrets" and the app's database and payments were
+   dead — reported as "your source files are untouched". `wouldEraseUserSecrets` blocks it on both write
+   paths. Filling a placeholder IN is still allowed, and `.env.example` is never guarded.
+5. **The summary is checked against what we measured.** One build claimed "no console errors" beside our
+   own record that the console could not be captured, and described a screen showing "Health 100/100,
+   Level 1, XP, Inventory, Game Log" for a home page whose source contains none of those words.
+   `claimAudit.ts` corrects the user-facing summary out loud.
+6. **A recovered preview failure is not a successful build's root cause.**
+7. **The E2E skip reason judges the project**, not the one `.env` this turn happened to write.
+8. **227 seconds of silence are on the record** — that build's first model call came 227s in while
+   `SETUP_TIMING` said "Workspace ready in 0s".
+
+**And the first half of #1:** the keepalive was armed only after a FRESH launch, so a server we ADOPTED
+("already healthy — reused it") had no watchdog at all. Arming now lives in one helper both paths call.
+Restarting well was the second half; this is the half where it does not need to.
+
+### One fix I got wrong, and the suite caught it
+
+My first attempt at the bare `playwright: FAIL (exit=1)` made "no tally" mean "could not run". An
+existing test refused it **for a better reason than the one I had**: hiding genuinely failing tests
+behind a reassuring "unverified" is the opposite mistake and a more damaging one. The verdict is
+unchanged; the silence is what got fixed — the summary now says it cannot tell a failing test from a
+runner that never started. Two more of my own defects were caught the same way (a blind-verdict early
+return discarding a real error overlay; an assertion reading a removed constant out of the comment
+explaining its removal).
+
+Tests across the session: **14,070 → 14,469.** Gate green each time (tsc ×2 + full vitest).
+
+### Open, and honestly so
+
+- **Benchmarks (Phases 8–9): the admin said NO, and I agree with the reasoning for Phase 9.** The
+  ₹75k–2.8L edit-survival benchmark measures what `/api/admin/builder-scorecard` already computes free
+  from real user projects — better data, unfakeable, zero spend.
+- **Fast-lane billing (Phase 7)** needs a decision; the shadow ledger (#2283) is measuring it now.
+- **Multi-service runner** waits on field data.
+- **Admin-only:** `ANDROID_LATEST_VERSION_CODE = 66` still needs setting in Cloud Run, or the update
+  banner and the broadcast button both stay silent by design.

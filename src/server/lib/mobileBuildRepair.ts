@@ -19,7 +19,7 @@
 // whatever comes out, which is what makes every branch below unit-testable.
 
 import { toolchainForMajor } from './capacitorToolchain';
-import { capacitorMajorFromFiles } from './mobileProjectAssembler';
+import { capacitorMajorFromFiles, detectWebDir } from './mobileProjectAssembler';
 
 /** Every failure class NavBharatAI can name from a build log. */
 export type RepairCode =
@@ -486,20 +486,15 @@ export function repairOutOfMemory(workflow: string): string | null {
   return `${workflow.slice(0, at)}\n${m[1]}env:\n${m[1]}  NODE_OPTIONS: --max-old-space-size=4096${workflow.slice(at)}`;
 }
 
-/** The directory a given toolchain writes its built app into. */
+/**
+ * The directory a given toolchain writes its built app into. Delegates to the SHARED framework-aware
+ * detector in mobileProjectAssembler (rule 4 — no drift) so the repair path and the setup path always
+ * agree on where a build lands. Takes just the package.json string for its existing call sites.
+ */
 export function webDirForPackageJson(pkgJson: string): string {
-  let pkg: Record<string, unknown> = {};
-  try { pkg = JSON.parse(pkgJson || '{}') as Record<string, unknown>; } catch { /* fall through to the default */ }
-  const deps = {
-    ...(pkg.dependencies as Record<string, string> | undefined),
-    ...(pkg.devDependencies as Record<string, string> | undefined),
-  };
-  const scripts = (pkg.scripts as Record<string, string> | undefined) || {};
-  const build = String(scripts.build || '');
-  if (deps.next || /next build/.test(build)) return 'out';
-  if (deps['react-scripts'] || /react-scripts build/.test(build)) return 'build';
-  if (deps.vite || /vite build/.test(build)) return 'dist';
-  return 'dist';
+  // Always 'built' here: this repair only fires once a build has genuinely produced output, so the folder
+  // is a build folder — never the static 'www'. That also keeps a corrupt package.json defaulting to dist.
+  return detectWebDir({ 'package.json': pkgJson || '' }, 'built');
 }
 
 /** Point Capacitor at the directory the app's own build genuinely produces. */
@@ -612,7 +607,9 @@ export function repairFiles(
     case 'NODE_OUT_OF_MEMORY':
       return one(workflowPath, repairOutOfMemory(wf), 'NavBharatAI: give the build enough memory for this app');
     case 'WEB_DIR_MISSING': {
-      const want = webDirForPackageJson(current['package.json'] || '');
+      // Read from the WHOLE repo, not just package.json, so a custom Vite outDir in the app's own config
+      // is honoured too (the build only fires here, so it is a 'built' app by construction).
+      const want = detectWebDir(current, 'built');
       // The log names the directory Capacitor LOOKED in; repairing to that same value would be a no-op,
       // so the truth comes from what the app's own toolchain actually writes.
       if (diag.detail?.expected && diag.detail.expected === want) return null;

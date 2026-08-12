@@ -31847,3 +31847,92 @@ worse than the disease, so no such guard was added.
 browser_action reliability fix (#2319): the trigger (interaction failing) is now rare. A verdict-level guard
 that catches "claimed interactive PASS while the browser tool failed" remains genuinely fuzzy (false-positive
 risk) and is NOT faked — recorded as the one remaining open item.
+
+---
+
+## 2026-08-10 (later) — The dukaan broken promise, closed at both ends; and two things I did NOT build
+
+Merged: **#2307** (assistant spend), **#2309** (heal-ledger evidence), **#2322** (requested-feature
+contract), **#2324** (missing-feature honesty).
+
+### Two items I was about to build were already done — safeguard #6 earned its keep
+
+The previous autopsy listed three follow-ups "in order". I opened the code for the first two before
+writing anything, and BOTH had already shipped from other sessions:
+
+1. **Orphaned-process / EADDRINUSE** — the actual cause of "app kayi bar band hui". `npm run server &`
+   hit the 45s timeout, the process did NOT die, the build re-ran it, `EADDRINUSE :::3000` collided
+   with its own orphan, the backend crashed, `concurrently` took the client down with it, port 5173
+   went dead. Fixed in **#2297**, and fixed UPSTREAM: `npm run server` is now classified long-running
+   from the start, so it takes the background path that already has the port fast-path and keepalive.
+   The failure cannot recur rather than being recovered from — the 50/50 law's preferred half.
+2. **"Requested feature not found" false alarms** — now reads file BODIES, so the finding is
+   trustworthy and carries a `confirmed` flag.
+
+Had I rebuilt either, it would have been the PR #1 / PR #4 mistake again. The redundant-work check is
+the cheapest rule in this file and it saved a day's work twice in one session.
+
+### The dukaan promise — both halves, in the right order
+
+The user wrote, in their own words: *"Saari cheezon ki list dikhe, upar search box ho"*. No search was
+built. The scan noticed. The app shipped and the user was told it was ready.
+
+**#2322 — prevention.** The feature list is computed deterministically from the user's own text at
+audit time, so there was no reason the builder could not be handed it UP FRONT. `requestedFeatureLabels`
+is the request half of the same audit, split out, and its contract is prepended to the build prompt.
+Same table, same regexes, same negation handling — what the build is ASKED for and what it is JUDGED on
+are now one list by construction. A test pins that property directly, because two separately-maintained
+lists is precisely how a true finding starts looking like a false alarm and gets ignored.
+No flag: it invents nothing (unlike the requirement-GAP guidance beside it, which proposes features the
+user never mentioned and is rightly opt-in), and gating it would leave a known broken promise switched
+off by default. A request naming no known surface leaves the prompt byte-identical.
+
+**#2324 — honesty.** A confirmed-missing feature is a WARNING, which by design does not block. But
+"do not block" had quietly become "do not mention": the build succeeded and the user read the model's
+summary of everything it HAD made. The app still ships, and the summary now names what is missing and
+gives the one sentence that fixes it. Only CONFIRMED absences reach the text — the unconfirmed
+name-only wording has produced real false positives, and telling a user their app lacks something it
+HAS is worse than silence. Applied at BOTH `done` emits: the step-cap exit is a separate path, and a
+long build is the kind most likely to drop a feature. Verified rather than assumed that `medium`
+severity routes to `warnings` — had it been a blocker the notice could never have fired.
+
+### #2309 — the ledger asserted a cause it had never checked
+
+Going after the 20-minute loop, the evidence itself turned out to be broken twice. The ledger was blind
+to the heal that repeated FIRST (missing-import wrote files and never reported), and its message claimed
+a repeat "proves the write was NOT present" — one of two possible answers, asserted as fact, while the
+hash that could settle it sat unread. Now: `found ≠ left` → the file moved underneath us (write/restore
+path); `found = left` → our write held and the DETECTOR re-fired (our analyzer). The second branch had
+never been considered and points at a different file entirely. Where the before-content is absent, the
+cause is reported as unknown rather than guessed.
+
+### #2307 — the free-model share, measured before it stops being free
+
+Answering "what does Professional AI cost us?" from the code: every assistant turn starts on
+GLM-4.7-Flash, priced at ZERO, so a normal answer costs us ₹0 and the user ₹0. Money appears only on a
+fallback (~₹0.66 Gemini / ₹1.53 Haiku / ₹4.59 Grok per turn, billed at the same ×4 markup a build uses).
+That is a good position resting entirely on a VENDOR's pricing decision, and it fails in the most
+dangerous shape a cost problem has: correct behaviour, silent expense. The signal is the FREE SHARE, not
+the rupee total. Recorded beside `recordAiSpend` — the one chokepoint every professional and Other-AI
+tool passes — so coverage is by construction. Unmeasured turns are counted apart from free and paid; a
+day with nothing measurable has NO free share rather than a confident 0%; no verdict below 20 turns.
+
+### Open root causes (unchanged, honestly)
+
+- **The 20-minute build loop.** NOT explained. #2309 makes the next real report able to answer it. The
+  loop is driven by the model continuing to call tools; post-build gates are capped at 120s and are not
+  a candidate.
+- **Why heal writes do not survive** — now splittable into two named causes by the next report.
+- **A CONFIRMED-missing feature is still not BUILT.** `confirmedMissing` has no consumer. #2322 prevents
+  it upstream and #2324 tells the user honestly; making a survivor get built automatically is a
+  post-build LLM pass on a WORKING app, which carries real breakage risk and belongs behind an admin
+  decision rather than an autonomous one.
+
+### Admin config recorded this session
+
+`AI_WALLET_SPEND` re-confirmed `on`; `CASHFREE_WEBHOOK_SECRET` SET (Cashfree PG has no separate webhook
+secret — the value is the merchant Client Secret). `E2B_USD_PER_HOUR` deliberately left at the `0.10`
+placeholder by admin decision: admin-only, never on a user's bill, always carries `estimated: true`.
+A correction is pinned on `AGENTV3_REVIEW_AUTOFIX_WARNINGS`: I recommended turning it OFF to shorten a
+23-minute build, from memory rather than from the code. It adds no pass and all post-build work is
+capped at 120s, so it cannot help — and OFF ships real functional bugs.

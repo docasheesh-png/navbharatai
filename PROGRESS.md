@@ -32112,3 +32112,76 @@ AppKnowledgeBase PUBLISH/HOSTING CHOOSER entry updated to the new three-way stru
 it correctly (mandatory sync rule). HostingChooser.test.tsx: BYO empty-state text updated, + new tests for
 the APK card (present, honest cost, disabled without opener) and that self-host now lives inside "Host
 somewhere else". Gate: tsc clean both.
+
+---
+
+## 2026-08-13 — E2B idle 15→5 (made safe first), per-version preview, design-to-code contract
+
+Three merged this session, plus one still in CI. All on the "finish the open ROADMAP §2 items" thread.
+
+**#2343 — E2B idle window 15 → 5 minutes, but the guard shipped FIRST.**
+Admin asked for the 5-minute window (worth ~₹1,500/month against the measured $172 E2B bill: at ~1,260
+sandboxes, 15 idle minutes each is ~315 billed hours, 5 minutes is ~105).
+
+The number ALONE would have been a bug, and this is the part worth remembering. Idle is measured from the
+last SANDBOX operation — and a long model call is not one. While the AI thinks, nothing touches the sandbox.
+At 15 minutes that silence never mattered; at 5 it is ordinary. Worse, the sweep pauses WITHOUT dropping the
+handle, so a swept build carries on writing into a paused VM: a broken app for a real user. I caught this
+mid-implementation, reverted the naive change, and reported it honestly rather than shipping it.
+
+So the sweep learned to skip a live build first: `E2BActuator._activeBuilds` + a `_buildInFlight` check that
+runs BEFORE the idle comparison; `ToolDispatcher.markBuildActive()` raises it and the route releases it in
+the FINALLY (a crash or timeout still frees the sandbox); the hold EXPIRES after `reapAfterMs()` so a crashed
+build cannot leave an immortal VM — which would cost far more than the sweep saves and go unnoticed for
+weeks. The DURABLE reaper is untouched: it still waits a full max-build + 10 min, because it catches
+sandboxes orphaned by an instance recycle where no in-memory hold exists to consult.
+`tests/sandboxIdleBuildAware.test.ts` holds the two halves together — remove the hold and the short window is
+dangerous again, and that file says so.
+ACCEPTED TRADE-OFF (admin's call): a user returning after 6 minutes meets a cold sandbox and a slower first
+build. Revert instantly with `AGENTV3_SANDBOX_IDLE_MINUTES=15`.
+
+**#2344 — Per-version preview URL (ROADMAP §2, "v0 has it").**
+Until now the ONLY way to see an old checkpoint was `/api/agentv3/restore`, which overwrites the working
+tree — the user had to destroy the present to inspect the past. History tab now has **Preview** beside
+Restore (placed first, so the non-destructive action is the one the thumb reaches).
+
+Costs NOTHING extra, which was the design constraint: booting a second sandbox would have doubled the E2B
+bill on the same day #2343 cut it. Instead it runs in the sandbox the user already has warm — `git worktree`
+gives a second checkout, and E2B exposes every port of one VM as its own hostname. One VM, two servers, two
+URLs. `sandboxWarm` asks `getSandboxId`, never `ensureWorkspace`, so a curious click can never BOOT a billed
+sandbox.
+Four honest outcomes, not one boolean: `sandbox-cold` · `version-not-in-sandbox` (restore cannot reach it
+either) · `worktree-failed` · `server-did-not-start` (usually the old version's dependencies). A URL is
+returned ONLY after something really answered on that port, and a failed start cleans its checkout up.
+Live state is read from the SANDBOX, never a Map in this process — a Map reads empty the moment Cloud Run
+serves the next request from another instance, so the slot allocator would hand out a bound port and the
+preview would fail with `server-did-not-start`, a LIE about the cause.
+node_modules is SHARED by symlink deliberately; the honest consequence (a version whose deps really differ
+may not boot) is reported, not smoothed over.
+ROOT-CAUSE BONUS: this needed "which npm script runs this app?" a THIRD time, and the two existing copies had
+already drifted — a `preview`-only project got `npm run dev` from ToolDispatcher's copy and the right answer
+from WorkspaceLauncher's. One `AgentV3/devScript.ts` now answers it for all three; the drift case is
+test-locked.
+
+**#2345 (in CI) — Design-to-code contract (AP-8).**
+The vision pipeline existed; upload a design and it wrote a PARAGRAPH into the build prompt. Prose is advice,
+and a builder treats advice as optional — a five-section landing page routinely came back with three, and
+nothing noticed. Now the same single vision call also returns a typed contract (screens, sections in
+top-to-bottom order, verbatim labels), which is fed to the builder as requirements and VERIFIED against the
+written files afterwards. No extra model call — a separate structured pass would have doubled the vision cost
+of every screenshot to buy the same information twice.
+EVIDENCE, NEVER A GATE: `DESIGN_CONTRACT_MET` / `_PARTIAL` (missing items BY NAME) / `_ABSENT`. `ABSENT` is
+the honest default — a model that ignored the JSON request must never read as "the design matched".
+The verification bias is deliberately asymmetric and documented: it searches source text and does not parse
+JSX, so a label in a comment can fool it. That is correct — a false "missing" sends the next turn to rebuild
+a section that was already there, spending the user's money to damage working code; a false "present" merely
+fails to notice.
+
+**Also closed as OBSOLETE:** "regional languages half 2 (~131 route narration lines)". `narrationCatalogue.ts`
+is English-only by an admin-restated rule and its header explicitly forbids re-introducing the Hindi table.
+The task was a leftover from before that revert; it is not work that was skipped.
+
+**Still genuinely open in ROADMAP §2:** one-click object-storage provisioning (the ZERO-SETUP half only — the
+code generator exists) · virus-scanning generated apps (note the open VirusTotal commercial-licence item
+before building on it) · daily spend-quota gauge (blocked on the admin defining the quota) · cache TTL jitter
+(explicitly "do NOT build yet" until one of its four named triggers is true).

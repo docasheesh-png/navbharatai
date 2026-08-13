@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from 'react';
 import { Camera, Image as ImageIcon, FileText, Paperclip, Folder, FolderOpen } from 'lucide-react';
 import { isFolderImportSupported } from '../lib/folderImport';
+import { zipAccept } from '../lib/zipPicker';
 
 // Shared attach menu (admin 2026-07-12): tapping the 📎 attach button opens a 3-option sheet —
 // Take Photo (camera) / Choose photo or video (gallery) / Choose file — the SAME everywhere
@@ -164,7 +165,7 @@ export function AttachMenu({
       <input
         ref={zipRef}
         type="file"
-        accept=".zip,application/zip,application/x-zip-compressed"
+        accept={zipAccept()}
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];

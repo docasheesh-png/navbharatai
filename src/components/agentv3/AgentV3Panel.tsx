@@ -40,6 +40,7 @@ import { deployBlockedReason } from '../../lib/deployGuard';
 import { simplifyHealthLines } from '../../lib/buildHealthDisplay';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
+import { acceptZipPick, notZipMessage } from '../../lib/zipPicker';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
 import { loadDraft, saveDraft } from './composerDraft';
@@ -1363,10 +1364,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
   // A .zip: read in the browser, uploading only the surviving source; the chunked server upload stays
   // as an honest fallback when the browser genuinely cannot open it.
-  const handleZipProject = (file: File) => runProjectImport(
-    `📦 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`,
-    (workspaceId, onProgress) => importProjectArchive(file, workspaceId, userId, email, onProgress),
-  );
+  const handleZipProject = async (file: File) => {
+    // The picker now asks broadly, because ANY filter hides archives on Android (admin report
+    // 2026-08-13). So the real check is here and reads the file's MAGIC BYTES: a photo picked by
+    // mistake is refused before a multi-minute upload starts, while a genuine archive whose bytes
+    // cannot be read still gets in on its name. See lib/zipPicker.ts.
+    const pick = await acceptZipPick(file);
+    if (!pick.ok) { setZipProgress(notZipMessage(file.name)); return; }
+    await runProjectImport(
+      `📦 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`,
+      (workspaceId, onProgress) => importProjectArchive(file, workspaceId, userId, email, onProgress),
+    );
+  };
 
   // A FOLDER: no zip, no archive, nothing staged — the browser reads the project where it already is.
   const handleOpenFolder = () => runProjectImport(

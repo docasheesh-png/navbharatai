@@ -474,10 +474,45 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   /** Pause sandboxes with no activity for the idle limit (abandoned sessions). */
+  /**
+   * Workspaces with a build IN FLIGHT → the epoch it started. The idle sweep skips these.
+   *
+   * Idle is measured from the last SANDBOX operation, and a long model call is not one: while the AI
+   * is thinking, nothing touches the sandbox. That silence is indistinguishable from an abandoned
+   * session, so a short idle window would pause a sandbox in the middle of a live build — a broken app
+   * for a real user, which no amount of saved compute is worth.
+   */
+  private _activeBuilds = new Map<string, number>();
+
+  /** @see IEngineerActuator.setBuildActive */
+  setBuildActive(workspaceId: string, active: boolean): void {
+    if (active) this._activeBuilds.set(workspaceId, Date.now());
+    else this._activeBuilds.delete(workspaceId);
+  }
+
+  /**
+   * True while a build is genuinely in flight.
+   *
+   * ⚠️ THE FLAG EXPIRES ON ITS OWN. A build that crashes between `true` and `false` would otherwise
+   * keep its VM alive forever — the exact opposite of what this whole change is for, and a far more
+   * expensive bug than the one it prevents. Past one full max-length build plus a margin, the flag is
+   * ignored and the sandbox is swept like any other.
+   */
+  private _buildInFlight(workspaceId: string, now: number): boolean {
+    const startedAt = this._activeBuilds.get(workspaceId);
+    if (startedAt === undefined) return false;
+    if (now - startedAt > reapAfterMs()) {
+      this._activeBuilds.delete(workspaceId);
+      return false;
+    }
+    return true;
+  }
+
   private async _sweepIdleSandboxes(): Promise<void> {
     const now = Date.now();
     const limit = idleLimitMs();
     for (const [workspaceId, sandbox] of [...this.sandboxes]) {
+      if (this._buildInFlight(workspaceId, now)) continue;
       const last = this._lastActivity.get(workspaceId) ?? now;
       if (now - last > limit) {
         await this.pauseSandbox(sandbox.sandboxId).catch(() => {});

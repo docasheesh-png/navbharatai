@@ -5942,7 +5942,7 @@ export function registerAgentV3Routes(app: Express): void {
     const emit = (e: unknown): void => { sessionTimeline.record(e); broadcastBuild(rb, e); };
     // Exposed to the finally so the LAST background checkpoint is flushed on every exit path
     // (success, error, abort). Held outside the try because `dispatcher` is block-scoped to it.
-    let dispatcherForFlush: { flushCheckpoints: () => Promise<void> } | undefined;
+    let dispatcherForFlush: { flushCheckpoints: () => Promise<void>; markBuildActive: (active: boolean) => void } | undefined;
     let disposeGreenFreezeObserver: (() => void) | null = null;
 
     const events = new AgentEventStream();
@@ -8213,6 +8213,8 @@ export function registerAgentV3Routes(app: Express): void {
       }
 
       dispatcherForFlush = dispatcher; // let the finally flush the final checkpoint
+      // Hold the idle sweep off this workspace for the life of the build (released in the finally).
+      dispatcher.markBuildActive(true);
 
       // Surgical edit mode (gold standard): when the user is editing an existing
       // app rather than building fresh, inject the CURRENT file tree and the
@@ -13056,6 +13058,10 @@ export function registerAgentV3Routes(app: Express): void {
       // the ONLY place git is awaited, and the cap guarantees a slow/stuck git can never re-stall a
       // build the way the old per-write checkpoints did. Files are durably saved regardless, so even
       // if this is skipped the user never loses code — it only keeps History complete.
+      // The build is over however it ended — release the idle-sweep hold so an abandoned sandbox is
+      // pausable again on the normal short window. In the `finally` so a crash or a timeout releases
+      // it too; the flag also expires on its own as a second line of defence.
+      try { dispatcherForFlush?.markBuildActive(false); } catch { /* best-effort */ }
       if (dispatcherForFlush) {
         await raceTimeout(dispatcherForFlush.flushCheckpoints(), 6_000, 'flushCheckpoints').catch(() => {});
       }

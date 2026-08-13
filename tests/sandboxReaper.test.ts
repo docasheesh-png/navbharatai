@@ -21,25 +21,31 @@ const rec = (id: string, ageMinutes: number): ReapableSandbox =>
   ({ workspaceId: `ws-${id}`, sandboxId: id, updatedAt: T0 - ageMinutes * MIN });
 
 describe('the defaults', () => {
-  it('idles for 15 minutes, not 45', () => {
-    expect(idleLimitMs({})).toBe(15 * MIN);
+  it('idles for 5 minutes — 45 → 15 → 5, each from a measured bill', () => {
+    // 5 is only safe because the in-memory sweep now SKIPS a workspace with a build in flight
+    // (E2BActuator.setBuildActive). Idle is measured from the last sandbox operation, and a long model
+    // call is not one — without that hold, five minutes would pause live builds. See
+    // tests/sandboxIdleBuildAware.test.ts, which holds the two halves together.
+    expect(idleLimitMs({})).toBe(5 * MIN);
   });
 
   it('every threshold is retunable from Cloud Run without a deploy', () => {
-    expect(idleLimitMs({ AGENTV3_SANDBOX_IDLE_MINUTES: '5' })).toBe(5 * MIN);
+    expect(idleLimitMs({ AGENTV3_SANDBOX_IDLE_MINUTES: '20' })).toBe(20 * MIN);
     expect(maxBuildMs({ AGENTV3_MAX_BUILD_SECONDS: '600' })).toBe(10 * MIN);
   });
 
   it('ignores rubbish and keeps the safe default', () => {
-    expect(idleLimitMs({ AGENTV3_SANDBOX_IDLE_MINUTES: 'soon' })).toBe(15 * MIN);
-    expect(idleLimitMs({ AGENTV3_SANDBOX_IDLE_MINUTES: '-5' })).toBe(15 * MIN);
+    expect(idleLimitMs({ AGENTV3_SANDBOX_IDLE_MINUTES: 'soon' })).toBe(5 * MIN);
+    expect(idleLimitMs({ AGENTV3_SANDBOX_IDLE_MINUTES: '-5' })).toBe(5 * MIN);
     expect(maxBuildMs({ AGENTV3_MAX_BUILD_SECONDS: 'lots' })).toBe(30 * MIN);
   });
 });
 
 describe('the reaper can never reach a running build', () => {
   it('waits out a whole max-length build plus a margin, not just the idle limit', () => {
-    // 30-minute build ceiling + 10-minute margin = 40 minutes, well past the 15-minute idle limit.
+    // 30-minute build ceiling + 10-minute margin = 40 minutes, far past the 5-minute idle limit. The
+    // durable reaper deliberately does NOT follow the idle window down: it catches sandboxes orphaned
+    // by an instance recycle, where no in-memory build hold survives to protect a running build.
     expect(reapAfterMs({})).toBe(40 * MIN);
     expect(reapAfterMs({})).toBeGreaterThan(idleLimitMs({}));
     expect(reapAfterMs({})).toBeGreaterThan(maxBuildMs({}));

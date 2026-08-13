@@ -140,6 +140,15 @@ export interface IEngineerActuator {
    */
   pauseSandbox(sandboxId: string): Promise<boolean>;
   /**
+   * Mark a workspace as having a build IN FLIGHT, so the idle sweep leaves it alone.
+   *
+   * WHY IT IS NEEDED: idle is measured from the last SANDBOX operation, and a long model call is not
+   * one — while the AI is thinking, nothing touches the sandbox at all. With a short idle window that
+   * silence looks identical to an abandoned session, and pausing a sandbox mid-build breaks a real
+   * user's app. Optional: an actuator without an idle sweep has nothing to protect.
+   */
+  setBuildActive?(workspaceId: string, active: boolean): void;
+  /**
    * Search for workspace files whose content matches ANY of the given terms
    * (grep -rl style). Used by ContextRetriever to rank files by relevance to
    * the current task. Skips node_modules/.git/dist. Returns relative paths.

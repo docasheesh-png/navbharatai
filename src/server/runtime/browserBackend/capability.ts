@@ -23,7 +23,11 @@
 export type BackendBlocker =
   /** An import we do not implement. The default outcome for anything unrecognised. */
   | 'unsupported-import'
-  /** A real database driver. Slice 2 (PGlite) territory — until then, the sandbox owns it. */
+  /**
+   * A database driver we do NOT speak. `pg` is no longer one of these — pgShim.ts runs real Postgres
+   * (PGlite) in the browser. The rest generate SQL and run migrations through their own engines, and a
+   * half-supported migration tool produces a schema that is subtly not the user's.
+   */
   | 'needs-database'
   /** Reaches for the machine: the filesystem, a child process, a socket, the clock as a scheduler. */
   | 'needs-machine'
@@ -38,6 +42,8 @@ export interface BackendCapability {
   blockers: BackendBlocker[];
   /** The specific import names that caused a refusal — so the honest message can name them. */
   unsupported: string[];
+  /** Every bare import the server graph makes. The renderer ships a shim only for what is used. */
+  imports: string[];
   /** One user-facing sentence. Empty when runnable. Never names a vendor (the white-label law). */
   reason: string;
 }
@@ -59,11 +65,19 @@ const SUPPORTED_MODULES = new Set([
   'bcryptjs', 'jsonwebtoken', 'jose', 'zod', 'yup', 'joi', 'validator',
   'uuid', 'nanoid', 'dayjs', 'date-fns', 'lodash', 'lodash-es', 'ramda',
   'axios', 'node-fetch', 'cross-fetch', 'qs', 'slugify', 'ms', 'debug', 'dotenv',
+  // `pg` is REAL here, not approximated: pgShim.ts implements node-postgres over PGlite — Postgres
+  // itself compiled to WebAssembly — and its tests execute the actual database, so a constraint that
+  // would fail on a server fails in the preview too. It earns its place on this list the way the
+  // header demands: by a test proving faithfulness, not by looking harmless.
+  'pg',
 ]);
 
 /** Database drivers — real, and not ours yet. Named separately so the refusal can say WHY. */
 const DATABASE_MODULES = new Set([
-  'pg', 'postgres', 'mysql', 'mysql2', 'sqlite3', 'better-sqlite3', 'mongodb', 'mongoose',
+  // `pg` is DELIBERATELY absent — see SUPPORTED_MODULES. Everything below generates SQL through its own
+  // engine and runs migrations through its own CLI, and half-supporting a migration tool produces a
+  // schema that is subtly not the user's. Those apps keep the sandbox, where the real toolchain is.
+  'postgres', 'mysql', 'mysql2', 'sqlite3', 'better-sqlite3', 'mongodb', 'mongoose',
   '@prisma/client', 'prisma', 'drizzle-orm', 'typeorm', 'sequelize', 'knex', 'redis', 'ioredis',
 ]);
 
@@ -163,7 +177,7 @@ export function proveBackendRunnable(files: Record<string, string> | null | unde
   const map = files && typeof files === 'object' ? files : {};
   const entry = findServerEntry(map);
   if (!entry) {
-    return { runnable: false, entry: null, blockers: ['no-server-entry'], unsupported: [], reason: REASON['no-server-entry'] };
+    return { runnable: false, entry: null, blockers: ['no-server-entry'], unsupported: [], imports: [], reason: REASON['no-server-entry'] };
   }
 
   const imports = new Set<string>();
@@ -194,6 +208,7 @@ export function proveBackendRunnable(files: Record<string, string> | null | unde
     entry,
     blockers: list,
     unsupported,
+    imports: [...imports].sort(),
     reason: list.length === 0 ? '' : REASON[list[0]],
   };
 }

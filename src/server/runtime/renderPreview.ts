@@ -14,7 +14,7 @@ import { buildReactPreview, isReactProject } from './ReactPreview';
 import { buildVuePreview, isVueProject } from './VuePreview';
 import { injectPreviewNavGuard } from './previewNavGuard';
 
-export function renderPreview(vfs: VirtualFileSystem, origin?: string): string {
+export function renderPreview(vfs: VirtualFileSystem, origin?: string, workspaceId?: string): string {
   // `origin` (the caller's site origin, e.g. https://navbharatai.com) is used to load the
   // self-hosted compiler via an ABSOLUTE URL. Inside a sandboxed <iframe srcDoc> a root-relative
   // path like "/vendor/babel.min.js" does not reliably resolve to the app origin, so the compiler
@@ -25,7 +25,9 @@ export function renderPreview(vfs: VirtualFileSystem, origin?: string): string {
   // location='/', a link to '/') would otherwise load the NavBharatAI platform app INTO the preview
   // (preview-takeover autopsy 2026-07-21). The guard neutralizes those cross-document platform escapes.
   const html =
-    isReactProject(vfs) ? buildReactPreview(vfs, origin)
+    // workspaceId namespaces the app's browser-side database (pgShim). Without it the database is
+    // memory-only — honest, and stated in the preview's console — rather than shared between apps.
+    isReactProject(vfs) ? buildReactPreview(vfs, origin, workspaceId)
     : isVueProject(vfs) ? buildVuePreview(vfs, origin)
     : buildStaticPreview(vfs);
   return injectPreviewNavGuard(html);

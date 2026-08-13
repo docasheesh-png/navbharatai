@@ -4962,7 +4962,7 @@ export function registerAgentV3Routes(app: Express): void {
         return;
       }
       const vfs = VirtualFileSystem.fromRecord(files);
-      const html = renderPreview(vfs, previewOrigin);
+      const html = renderPreview(vfs, previewOrigin, workspaceId);
       // Detect the renderer used so the client can label the mode honestly.
       const kind = isReactProject(vfs) ? 'react' : isVueProject(vfs) ? 'vue' : 'static';
       inbrowserPreviewCache.set(cacheKey, { hash: filesHash, html, kind, ts: Date.now() });

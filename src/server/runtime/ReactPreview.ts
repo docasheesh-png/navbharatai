@@ -25,6 +25,7 @@ import { startDepWarmup, getWarmDepUrls, WARMUP_MAX_MODULES } from './PreviewDep
 import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE, PROCESS_SHIM_SOURCE } from './previewImportMeta';
 import { proveBackendRunnable } from './browserBackend/capability';
 import { EXPRESS_SHIM_SOURCE, BACKEND_BRIDGE_SOURCE, EXPRESS_SHIM_PATH, BACKEND_BRIDGE_PATH } from './browserBackend/expressShim';
+import { pgShimSource, pgliteDataDir, PG_SHIM_PATH, PGLITE_VERSION } from './browserBackend/pgShim';
 
 // Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
@@ -267,7 +268,7 @@ function baseStyles(vfs: VirtualFileSystem): string {
  * Build a self-contained, in-browser-bundled React preview document.
  * Returns an HTML string; if no entry module is found, falls back to a clear notice.
  */
-export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): string {
+export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, workspaceId?: string): string {
   const entry = findEntry(vfs);
 
   // Gather every source + css module so the in-browser loader can resolve imports.
@@ -316,10 +317,21 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
    * test covered.
    */
   const backend = proveBackendRunnable(modules);
+  // The database comes through the SAME same-origin mirror every other dependency uses, so it is
+  // cached immutably by the browser and a reopened app pays nothing for it a second time.
+  const mirrorBase = origin && process.env.AGENTV3_PREVIEW_DEP_PROXY !== 'off'
+    ? `${origin.replace(/\/$/, '')}/api/esm/`
+    : ESM;
+  const pgliteUrl = `${mirrorBase}@electric-sql/pglite@${PGLITE_VERSION}`;
   const shipped: Record<string, string> = { ...(compiled ?? modules) };
+  const usesPg = backend.runnable && backend.imports.includes('pg');
   if (backend.runnable && backend.entry) {
     shipped[EXPRESS_SHIM_PATH] = EXPRESS_SHIM_SOURCE;
     shipped[BACKEND_BRIDGE_PATH] = BACKEND_BRIDGE_SOURCE;
+    // The database is shipped ONLY when the server actually imports it. PGlite is a multi-megabyte
+    // WebAssembly download, and an app that never queries must never pay for it — speed is the first
+    // reason this whole preview exists.
+    if (usesPg) shipped[PG_SHIM_PATH] = pgShimSource(pgliteUrl, pgliteDataDir(workspaceId));
   }
   const backendEntry = backend.runnable ? backend.entry : null;
 
@@ -432,8 +444,9 @@ ${babelTag}
   // Path aliases (e.g. '@' -> '/client/src'): rewrite an alias-prefixed import to a root-absolute
   // LOCAL path so it resolves against the project's own files instead of being fetched from the CDN.
   var ALIASES = ${aliasesJson};
-  ${backendEntry ? `// Route the bare specifier "express" to the shim rather than to the CDN.
+  ${backendEntry ? `// Route the bare specifiers to the shims rather than to the CDN.
   ALIASES['express'] = '/${EXPRESS_SHIM_PATH.replace(/\.js$/, '')}';` : ''}
+  ${usesPg ? `ALIASES['pg'] = '/${PG_SHIM_PATH.replace(/\.js$/, '')}';` : ''}
   function applyAlias(spec) {
     for (var a in ALIASES) {
       if (spec === a) return ALIASES[a];

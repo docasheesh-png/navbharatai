@@ -66,9 +66,11 @@ describe('an app whose backend CANNOT be proved — the page must be unchanged',
    * The negative case carries more weight than the positive one. Almost every app that has ever been
    * built here must keep exactly the page it has today, and the prover's default is what guarantees it.
    */
+  // `pg` is deliberately NOT the example here: it became supported when pgShim.ts landed. A refusal
+  // fixture has to use something the prover still refuses, or it silently stops testing a refusal.
   const withDatabase = buildReactPreview(vfs({
     ...FRONTEND,
-    'server/index.js': `const express = require('express'); const { Pool } = require('pg'); const app = express();`,
+    'server/index.js': `const express = require('express'); const mongoose = require('mongoose'); const app = express();`,
   }));
 
   it('ships no shim, no bridge, no backend entry', () => {
@@ -175,5 +177,45 @@ describe('END TO END — the emitted payload really serves a fetch', () => {
     // app's API surface and must keep its old behaviour.
     const { fetch } = bootPayload(html);
     await expect(fetch('data.json')).rejects.toThrow('network');
+  });
+});
+
+describe('the database is shipped only when the server actually uses one', () => {
+  /**
+   * PGlite is a multi-megabyte WebAssembly download. Shipping it to an app that never queries would
+   * tax the very thing this preview exists for — the speed the user feels — so its presence is tied to
+   * a real `pg` import, not to "there is a backend".
+   */
+  const PG_SERVER = `
+    const express = require('express');
+    const { Pool } = require('pg');
+    const app = express();
+    const pool = new Pool();
+    app.get('/api/items', async (req, res) => res.json((await pool.query('SELECT * FROM items')).rows));
+  `;
+
+  it('a pg-using server ships the database shim and aliases `pg`', () => {
+    const html = buildReactPreview(vfs({ ...FRONTEND, 'server/index.js': PG_SERVER }), undefined, 'agentv3-alice-s1');
+    expect(html).toContain('__nbai/pg.js');
+    expect(html).toContain("ALIASES['pg']");
+  });
+
+  it('an in-memory server ships NO database at all', () => {
+    const html = buildReactPreview(vfs({ ...FRONTEND, 'server/index.js': RUNNABLE_SERVER }));
+    expect(html).not.toContain('__nbai/pg.js');
+  });
+
+  it('the database is namespaced per workspace, so two apps never share rows', () => {
+    const a = buildReactPreview(vfs({ ...FRONTEND, 'server/index.js': PG_SERVER }), undefined, 'agentv3-alice-s1');
+    const b = buildReactPreview(vfs({ ...FRONTEND, 'server/index.js': PG_SERVER }), undefined, 'agentv3-alice-s2');
+    expect(a).toContain('idb://nbai-pg-agentv3-alice-s1');
+    expect(b).toContain('idb://nbai-pg-agentv3-alice-s2');
+  });
+
+  it('without a workspace it is memory-only, and SAYS so', () => {
+    // Losing data on reload is a real limitation. Stating it in the console is what keeps it a known
+    // limitation rather than a bug the user discovers by losing their work.
+    const html = buildReactPreview(vfs({ ...FRONTEND, 'server/index.js': PG_SERVER }));
+    expect(html).toContain('memory-only');
   });
 });

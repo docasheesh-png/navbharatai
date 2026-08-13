@@ -44,11 +44,11 @@ describe('the case this was built for', () => {
     // The realistic shape: index.js looks clean, and the disqualifying import is one file deeper.
     const c = proveBackendRunnable({
       ...server(`const express = require('express'); const routes = require('./routes'); const app = express(); app.use(routes);`),
-      'server/routes.js': `const { Pool } = require('pg'); module.exports = null;`,
+      'server/routes.js': `const mongoose = require('mongoose'); module.exports = null;`,
     });
     expect(c.runnable).toBe(false);
     expect(c.blockers).toContain('needs-database');
-    expect(c.unsupported).toContain('pg');
+    expect(c.unsupported).toContain('mongoose');
   });
 });
 
@@ -64,11 +64,24 @@ describe('the default is NO', () => {
     expect(c.unsupported).toContain('stripe');
   });
 
-  it('a database is refused and SAYS it is a database', () => {
+  it('an UNSUPPORTED database is refused and SAYS it is a database', () => {
     // A specific reason is what lets the user act on it; "unsupported" alone teaches them nothing.
-    const c = proveBackendRunnable(server(`const express = require('express'); const { Pool } = require('pg');`));
+    const c = proveBackendRunnable(server(`const express = require('express'); const m = require('mongoose');`));
     expect(c.blockers).toContain('needs-database');
     expect(c.reason).toContain('database');
+  });
+
+  it('`pg` is now SUPPORTED — it earned the list by a test against a real database', () => {
+    /**
+     * The behaviour deliberately changed when pgShim.ts landed. `pg` is not approximated here: the shim
+     * runs Postgres compiled to WebAssembly, and its tests execute the actual engine, so a constraint
+     * that would fail on a server fails in the preview too. Every other driver on DATABASE_MODULES
+     * still refuses, because none of them has that behind it.
+     */
+    expect(proveBackendRunnable(server(`const express = require('express'); const { Pool } = require('pg');`)).runnable).toBe(true);
+    for (const driver of ['mysql2', 'mongoose', '@prisma/client', 'drizzle-orm', 'sequelize']) {
+      expect(proveBackendRunnable(server(`const express=require('express');const d=require('${driver}');`)).runnable, driver).toBe(false);
+    }
   });
 
   it('machine access is refused', () => {
@@ -116,12 +129,12 @@ describe('the default is NO', () => {
   it('every blocker is collected, not just the first', () => {
     const c = proveBackendRunnable(server(`
       const express = require('express');
-      const { Pool } = require('pg');
+      const mysql = require('mysql2');
       const fs = require('fs');
       const stripe = require('stripe');
     `));
     expect(c.blockers.length).toBeGreaterThan(2);
-    expect(c.unsupported).toEqual(expect.arrayContaining(['pg', 'fs', 'stripe']));
+    expect(c.unsupported).toEqual(expect.arrayContaining(['mysql2', 'fs', 'stripe']));
   });
 });
 
@@ -185,7 +198,7 @@ describe('the import reader', () => {
 
 describe('the refusal message', () => {
   it('names no vendor and no model — the white-label law holds here too', () => {
-    const c = proveBackendRunnable(server(`const express=require('express');const {Pool}=require('pg');`));
+    const c = proveBackendRunnable(server(`const express=require('express');const m=require('mongoose');`));
     expect(c.reason).not.toMatch(/\b(E2B|GLM|Kimi|Claude|Anthropic|Gemini|Grok|Postgres|Express)\b/i);
     expect(c.reason.length).toBeGreaterThan(10);
   });

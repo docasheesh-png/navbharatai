@@ -441,6 +441,23 @@ the code (it is actually read somewhere) on 2026-07-11.
   - ⚠️ **This is ONE 30-day snapshot, not a forecast.** Cost scales with concurrent build hours, so it
     moves with usage. To recompute: E2B dashboard → Billing → Usage; per-hour = cost ÷ vCPU-hours.
     Re-measure before quoting these numbers as current.
+- **Sandbox-time billing — NOW LIVE (admin SET both in Cloud Run 2026-08-13):** `AGENTV3_BILL_SANDBOX` and
+  `E2B_USD_PER_HOUR`. ✅ **`AGENTV3_BILL_SANDBOX=on`** + ✅ **`E2B_USD_PER_HOUR=0.083`** together turn on
+  charging the user for the REAL E2B VM time their build actually held — the *measured* sandbox seconds ×
+  the admin's *real* rate ($0.083/hr, which is exactly the measured rate from the E2B cost analysis above),
+  included in the build's real cost BEFORE markup (`sandboxCost.ts` → `sandboxBillableUsd`). This is honest
+  by construction — a clock times a stated price, never an estimate. ⚠️ **BOTH are required together:**
+  with `AGENTV3_BILL_SANDBOX=on` but `E2B_USD_PER_HOUR` unset, the code bills **ZERO** (it refuses to charge
+  the $0.10 placeholder — inventing a cost is exactly what the billing law forbids); with the rate set but
+  the flag off, the sandbox cost is absorbed by NavBharatAI and only shown in the ADMIN report. So a build
+  now recovers its VM cost, closing the old loss where a low-token build that held a VM for 40 min was pure
+  loss. (Values noted because they are non-secret config, not credentials — same as the other toggles here.)
+- **Auto-fix vulnerable dependencies — NOW LIVE (admin SET in Cloud Run 2026-08-13):** ✅
+  **`AGENTV3_AUDIT_FIX=on`** runs `npm audit fix` during a build to apply npm's COMPATIBLE security fixes to
+  vulnerable dependencies (`npmAuditFix.ts`) — it does NOT upgrade across a major version, so it cannot
+  change how the app behaves. This directly addresses the "1 vulnerable dep(s)" advisory seen on real game
+  builds. When OFF (default), a build that ships with high/critical vulns says so honestly and points at
+  this flag; when ON, the compatible fixes are applied automatically before ship. Never blocks a build.
 - **Payment recovery (shipped 2026-08-04):** `PAYMENT_RECONCILE_MIN_AGE_MINUTES` (2),
   `PAYMENT_RECONCILE_MAX_AGE_DAYS` (7), `PAYMENT_RECONCILE_MAX_ORDERS` (5). On sign-in the server settles
   the user's own unfinished orders against Cashfree. ⚠️ CORRECTION 2026-08-10: this entry used to say

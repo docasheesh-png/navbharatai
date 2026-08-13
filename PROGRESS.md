@@ -32208,3 +32208,19 @@ TWO FIXES, not one:
 
 Also worth recording: `AppKnowledgeBase.ts` line 285 already described the zero-setup storage accurately. The
 KB was RIGHT and the ROADMAP was WRONG — when the two disagree, the KB is the one tied to shipped code.
+
+### §2 status after this session: everything left is a DECISION, not code
+
+With per-version preview (#2344) and the AP-8 design contract (#2345) merged, and object storage confirmed
+already shipped (#2265), the remaining ROADMAP §2 items are all blocked on something only the admin can
+settle — recorded here so the next session does not mistake them for available work:
+
+- **Virus-scanning generated apps** — blocked on the VirusTotal commercial-licence decision, and analysed
+  down to a much narrower gap than the original line implied. The App Store scans an APK we DISTRIBUTE to
+  strangers; a ZIP in a user's own workspace is their own code, which we distribute to nobody. The path where
+  a generated app really reaches other people is publication, and that is already scanned. When a scanner is
+  chosen, the right place is the DISTRIBUTION boundary, not every upload — same cost, real coverage, and it
+  fits inside a rate cap.
+- **Daily spend-quota gauge** — needs the admin to define what the quota IS. A decision, then a small build.
+- **Cache TTL jitter** — the roadmap itself says do not build it until one of its four named triggers is
+  true, and none is. Building it now would cost determinism and buy nothing measurable.

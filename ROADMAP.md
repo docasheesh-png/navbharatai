@@ -183,7 +183,20 @@ Ordered by what a user would actually feel.
 - ~~**Template-free scaffold fallback**~~ — ✅ **ALREADY BUILT (verified 2026-08-08).** There is no separate module, which is why a name-based grep missed it: the fallthrough is a BRANCH, present in all three prompts that need it — `OneShotBuilder.oneShotUserPrompt` ("The project starts empty — create all files at the project root"), `ProjectPlan.projectPlanUserPrompt`, and the manifest prompt. It is reachable: `scaffold` comes from `listFiles(...).catch(() => [])`, so an empty workspace or a listing error takes it. The roadmap line itself said "verify before building" — this is that verification, and it says do not build.
 - ~~**Community gallery / remix**~~ — ✅ **SHIPPED 2026-08-11 (#2275)**, later the same day the line above said it was deferred. Browse / publish / remix, behind `galleryPublishGate.ts`: `.env*`, dependencies, build output and binaries are EXCLUDED, and a real secret inside source REFUSES the publish naming the file and line. It REUSES `scanSecurity` / `scanEnvTemplateSecrets` — no fourth secret scanner was written. Publishing can only produce `pending`; only an admin (`NAV_STORE_ADMINS`) can approve, and a reject/remove DELETES the stored source. Do not rebuild.
 - ~~**Scaling / load estimates with real numbers**~~ — ✅ **SHIPPED 2026-08-11 (#2270)** as `POST /api/workspace/scale-check`. Deliberately prints NO capacity figure. Do not rebuild.
-- **Upload virus-scanning for the apps we generate** — the Nav App Store has it; generated apps do not.
+- 🔴 **Upload virus-scanning for the apps we generate** — **BLOCKED ON A DECISION, and smaller than it sounds
+  (analysed 2026-08-13). Do NOT just wire `malwareScan.ts` into workspace uploads.** Two honest reasons:
+  1. **Licensing.** `malwareScan.ts` (VirusTotal) is used by ONE caller, `navStore.ts`. CLAUDE.md already
+     records that VirusTotal's FREE API is, by their terms, not for use in a commercial product, and is capped
+     at ~4 req/min and 500/day. Every workspace ZIP upload would blow that cap in a day AND deepen a licensing
+     problem the admin has not yet resolved. Extending the dependency before the paid plan (or MetaDefender)
+     is chosen would be knowingly making a known problem worse.
+  2. **The threat models are NOT the same, and this is the part the original one-line item hid.** The App
+     Store scans an APK **we distribute to strangers** — that is a real duty of care. A ZIP a user uploads
+     into their OWN workspace is **their own code, which they are about to edit**; we are not distributing it
+     to anyone. The path where a generated app actually reaches other people is publication — which goes
+     through the App Store, and is **already scanned**. So the genuine remaining gap is narrow.
+  **What to do instead, when the admin picks a scanner:** scan at the DISTRIBUTION boundary (publish/export),
+  not on every workspace upload — same cost, real coverage, and it stays inside any rate cap.
 - 👤 **Daily-spend quota gauge** (`/api/usage/tokens`) — the endpoint does not exist, but building it
   needs the admin to define what the quota IS first. A decision, then a small build.
 - ⏳ **Cache TTL jitter** (admin-requested 2026-08-08: "kabhi to pad sakti hai, roadmap me likh do") —

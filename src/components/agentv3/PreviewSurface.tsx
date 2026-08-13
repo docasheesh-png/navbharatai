@@ -12,7 +12,7 @@ import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview } from './previewAutoReboot';
 import { shouldBootImportedProject } from './importedProjectBoot';
 import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
-import { shouldFailoverToLive, liveFailoverNotice } from './previewLiveFailover';
+import { shouldFailoverToLive, liveFailoverNotice, noLiveRescueNotice } from './previewLiveFailover';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
@@ -580,13 +580,39 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       // away — so a build that genuinely succeeded read as "the app didn't build". Reporting the
       // failure honestly is necessary; leaving the user staring at it when we can fix it is not.
       const source: 'in-browser' | 'live' = d.source === 'live' ? 'live' : 'in-browser';
-      if (shouldFailoverToLive({
-        mode, hasLiveUrl: !!effectiveUrl, errorSource: source,
-        alreadyFailedOver: failedOverToLive.current, userPickedInBrowser: userPickedInBrowser.current,
-      })) {
-        failedOverToLive.current = true;
-        setFailoverNote(liveFailoverNotice());
-        setMode('live');
+      // Ask the server whether anything is ACTUALLY serving before moving the user. Probed here, fresh,
+      // rather than read from the polling state: the failover is a rare event and a stale "healthy" is
+      // exactly the wrong thing to act on. See previewLiveFailover.ts for the report this closes —
+      // switching on URL presence alone sent a user from one broken preview to another while promising
+      // "that is your app really running".
+      if (source === 'in-browser' && mode === 'inbrowser' && effectiveUrl
+          && !failedOverToLive.current && !userPickedInBrowser.current) {
+        failedOverToLive.current = true; // claim the one attempt now, so a burst of errors cannot race
+        void (async () => {
+          let healthy: boolean | null = null;
+          try {
+            const hres = await fetch('/api/agentv3/preview-health', {
+              method: 'POST',
+              headers: await authJsonHeaders(),
+              body: JSON.stringify({ workspaceId, userId, email, framework, previewUrl: effectiveUrl }),
+            });
+            const h = await hres.json().catch(() => null) as { status?: unknown; serving?: unknown } | null;
+            // "live" alone is not enough: a port can answer while serving a 404, which we would then
+            // render AS the user's app. Both signals must agree before we call it running.
+            if (hres.ok && h) healthy = h.status === 'live' && h.serving !== false;
+          } catch { healthy = null; /* an unanswered probe is not a yes */ }
+          if (shouldFailoverToLive({
+            mode, hasLiveUrl: !!effectiveUrl, errorSource: source, liveHealthy: healthy,
+            alreadyFailedOver: false, userPickedInBrowser: userPickedInBrowser.current,
+          })) {
+            setFailoverNote(liveFailoverNotice());
+            setMode('live');
+          } else {
+            // Nothing to rescue them with. Say so plainly instead of leaving a red wall unexplained —
+            // and never move them to a second broken view just to look like something happened.
+            setFailoverNote(noLiveRescueNotice());
+          }
+        })();
       }
       fetch('/api/agentv3/preview-error', {
         method: 'POST',

@@ -66,17 +66,33 @@ export function isDispatchableWorkflow(file: unknown): file is ShipWorkflowFile 
 export function friendlyBuildStep(rawName: string): string | null {
   const n = (rawName || '').toLowerCase().trim();
   if (!n) return null;
-  if (/^set up job$|^complete job$|^post\b/.test(n)) return null;      // GitHub internal
-  if (/checkout/.test(n)) return null;                                  // trivial, instant
-  if (/remove the keystore|summary|explain what stopped/.test(n)) return null; // housekeeping / failure-only
-  if (/set ?up node|setup-node|set ?up java|setup-java/.test(n)) return 'Getting the build machine ready';
+  // GitHub's own housekeeping + trivial / failure-only steps → hidden.
+  if (/^set up job$|^complete job$|^post\b/.test(n)) return null;
+  if (/checkout/.test(n)) return null;
+  if (/remove the keystore|always remove|clean ?up|summary|explain what stopped/.test(n)) return null;
+
+  // Build-machine setup, both platforms.
+  if (/set ?up node|setup-node|set ?up java|setup-java|select xcode|xcode-select|install ruby|bundler|bundle install/.test(n)) return 'Getting the build machine ready';
+
+  // iOS-specific — checked BEFORE the Android/generic rules so "cap sync ios", the TestFlight upload and
+  // Apple signing are never mislabelled as Android or as a generic "download".
+  if (/cocoapods|pod install|cap (add|sync) ios|the ios project|sync the ios/.test(n)) return 'Preparing the iOS project';
+  if (/testflight|upload_to_testflight|pilot|\bdeliver\b|app store connect/.test(n)) return 'Uploading to TestFlight';
+  if (/certificate|provisioning|keychain|import_certificate|\bmatch\b|code ?sign/.test(n)) return 'Setting up signing';
+  if (/\.ipa|xcodebuild|build_app|\bgym\b|archive the app|build the (signed )?ios/.test(n)) return 'Compiling your iOS app';
+
+  // Shared build steps.
   if (/install/.test(n) && /librar/.test(n)) return "Installing your app's libraries";
   if (/build the web app|npm run build/.test(n)) return 'Building your app';
+
+  // Android-specific.
   if (/generate and sync|android project|cap (add|sync)/.test(n)) return 'Preparing the Android project';
-  if (/signing secret|pre-?flight/.test(n)) return 'Checking your signing key';
-  if (/versioncode|stamp.*version/.test(n)) return 'Setting the app version';
   if (/keystore|wire gradle signing/.test(n)) return 'Setting up signing';
   if (/bundle|assemble|installable apk|compil/.test(n)) return 'Compiling your Android app';
+
+  // Generic, either platform.
+  if (/signing secret|pre-?flight/.test(n)) return 'Checking your signing key';
+  if (/versioncode|build number|stamp.*version|export compliance/.test(n)) return 'Setting the app version';
   if (/upload/.test(n)) return 'Packaging your download';
   // Our step names are white-label by construction; anything unmatched is safe to show as-is.
   return rawName.trim();

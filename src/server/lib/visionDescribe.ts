@@ -10,6 +10,7 @@
 import { isVisionAttachment } from './attachmentText';
 import { claudeVisionModel, grokVisionModels, geminiVisionModels } from './visionModels';
 import { noClaudeZoneActive } from '../AgentV3/noClaudeZone';
+import { DESIGN_CONTRACT_INSTRUCTION } from '../AgentV3/designContract';
 
 export interface RawAttachment {
   name: string;
@@ -30,7 +31,7 @@ function clamp(s: string): string {
 }
 
 /** Describe one image/PDF via Gemini (cheap). Returns '' on any failure. */
-async function describeWithGemini(att: RawAttachment): Promise<string> {
+async function describeWithGemini(att: RawAttachment, instruction: string): Promise<string> {
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
   if (!key) return '';
   try {
@@ -40,7 +41,7 @@ async function describeWithGemini(att: RawAttachment): Promise<string> {
       try {
         const r = await ai.models.generateContent({
           model: m,
-          contents: [{ parts: [{ text: DESCRIBE_INSTRUCTION }, { inlineData: { mimeType: att.type, data: att.base64 } }] }],
+          contents: [{ parts: [{ text: instruction }, { inlineData: { mimeType: att.type, data: att.base64 } }] }],
           config: { thinkingConfig: { thinkingBudget: 0 } } as any,
         });
         const t = (r.text || '').trim();
@@ -52,7 +53,7 @@ async function describeWithGemini(att: RawAttachment): Promise<string> {
 }
 
 /** Describe one image via Grok vision (cheap fallback; Grok can't read PDFs). */
-async function describeWithGrok(att: RawAttachment): Promise<string> {
+async function describeWithGrok(att: RawAttachment, instruction: string): Promise<string> {
   if (att.type === 'application/pdf') return '';
   const key = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
   if (!key) return '';
@@ -65,7 +66,7 @@ async function describeWithGrok(att: RawAttachment): Promise<string> {
           model: m, max_tokens: 1200,
           messages: [{ role: 'user', content: [
             { type: 'image_url', image_url: { url: `data:${att.type};base64,${att.base64}` } },
-            { type: 'text', text: DESCRIBE_INSTRUCTION },
+            { type: 'text', text: instruction },
           ] }],
         });
         const t = r.choices[0]?.message?.content?.trim();
@@ -77,7 +78,7 @@ async function describeWithGrok(att: RawAttachment): Promise<string> {
 }
 
 /** Describe one image/PDF via Claude (used only in Power mode, or as last resort). */
-async function describeWithClaude(att: RawAttachment): Promise<string> {
+async function describeWithClaude(att: RawAttachment, instruction: string): Promise<string> {
   // UNBREAKABLE weak-module guard (admin absolute rule, 2026-07-13): if a weak/free build is in progress
   // (a no-Claude zone is active), vision must stay on the cheap providers (Gemini/Grok) — never Claude,
   // even as a last resort. This is the raw-SDK sibling of the ClaudeClient chokepoint (rule 3 — hunt the
@@ -94,7 +95,7 @@ async function describeWithClaude(att: RawAttachment): Promise<string> {
       : { type: 'image', source: { type: 'base64', media_type: att.type, data: att.base64 } };
     const r = await claude.messages.create({
       model: claudeVisionModel(), max_tokens: 1500,
-      messages: [{ role: 'user', content: [block as any, { type: 'text', text: DESCRIBE_INSTRUCTION }] }],
+      messages: [{ role: 'user', content: [block as any, { type: 'text', text: instruction }] }],
     });
     return ((r.content.find((c: any) => c.type === 'text') as any)?.text || '').trim();
   } catch { return ''; }
@@ -127,7 +128,7 @@ export function visionProviderChain(opts: { useClaude?: boolean; noClaude?: bool
  */
 export async function describeVisionAttachments(
   atts: RawAttachment[],
-  opts: { useClaude?: boolean; noClaude?: boolean } = {},
+  opts: { useClaude?: boolean; noClaude?: boolean; designContract?: boolean } = {},
 ): Promise<string> {
   const vision = (atts || []).filter((a) => a && a.base64 && isVisionAttachment(a.type, a.name));
   if (vision.length === 0) return '';
@@ -135,12 +136,19 @@ export async function describeVisionAttachments(
   // The rung order comes from visionProviderChain (pure, tested): a weak/free (noClaude) build never
   // even lists the Claude rung. Belt & braces: the noClaudeZone check inside describeWithClaude is the
   // same rule for in-zone callers that forget the flag.
-  const describers: Record<VisionProvider, (att: RawAttachment) => Promise<string>> = {
+  const describers: Record<VisionProvider, (att: RawAttachment, instruction: string) => Promise<string>> = {
     gemini: describeWithGemini,
     grok: describeWithGrok,
     claude: describeWithClaude,
   };
   const chain = visionProviderChain(opts);
+  // AP-8: when the caller is a v5.0 BUILD, the same single vision call also asks for a structured
+  // design contract (see AgentV3/designContract.ts). Requesting it here rather than in a second pass
+  // is the whole reason the contract is free — a separate structured call would double the vision
+  // cost of every screenshot upload to buy the same information twice.
+  const instruction = opts.designContract
+    ? `${DESCRIBE_INSTRUCTION}\n${DESIGN_CONTRACT_INSTRUCTION}`
+    : DESCRIBE_INSTRUCTION;
   // Each attachment is described INDEPENDENTLY, so fan them out concurrently instead of N sequential
   // round-trips (perf audit 2026-07-18: multi-image/PDF prompts paid N× latency). The inner provider
   // FALLBACK stays sequential PER attachment (try gemini → grok → …, stop at the first that succeeds),
@@ -150,7 +158,7 @@ export async function describeVisionAttachments(
     vision.map(async (att) => {
       let desc = '';
       for (const provider of chain) {
-        desc = await describers[provider](att);
+        desc = await describers[provider](att, instruction);
         if (desc) break;
       }
       const label = att.type === 'application/pdf' ? 'PDF' : 'Image';

@@ -283,6 +283,13 @@ import '../AgentV3/VercelProvider';
 import '../AgentV3/NetlifyProvider';
 import '../AgentV3/CloudflareProvider';
 import { describeVisionAttachments } from '../lib/visionDescribe';
+import {
+  parseDesignContract,
+  stripContractBlock,
+  contractToPromptBlock,
+  verifyDesignContract,
+  type DesignContract,
+} from '../AgentV3/designContract';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
@@ -5815,15 +5822,22 @@ export function registerAgentV3Routes(app: Express): void {
     const zipImports = rawAttachments.filter((a) => isZipAttachment(a));
     const docAttachments = rawAttachments.filter((a) => !isZipAttachment(a));
     let attachmentContext = '';
+    // AP-8 — the structured design contract extracted from an uploaded mockup, when there was one.
+    // Held outside the try so it survives to the build prompt AND to the post-build verification.
+    let designContract: DesignContract | null = null;
     if (docAttachments.length > 0) {
       send({ type: 'narration', agent: 'architect', text: `📎 Reading ${docAttachments.length} file(s)…`, ts: Date.now() });
       try {
         const docs = await buildDocumentContext(docAttachments);
         // Bounded (8s) — a stalled vision provider must not hang the request before the deadline
         // timer is armed; on timeout we proceed without the image description.
-        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: pinnedOpus, noClaude: noClaudeBuild }), 8_000, 'describeVisionAttachments')
+        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: pinnedOpus, noClaude: noClaudeBuild, designContract: true }), 8_000, 'describeVisionAttachments')
           .catch(() => '');
-        const extractedRaw = [docs, vis].filter(Boolean).join('\n\n');
+        // AP-8: pull the contract OUT of the description and strip its JSON from the prose, so the
+        // build prompt carries the requirements once as instructions rather than twice — once as
+        // advice it can ignore and once as raw JSON it has to interpret.
+        designContract = parseDesignContract(vis);
+        const extractedRaw = [docs, stripContractBlock(vis)].filter(Boolean).join('\n\n');
         // P-AI.6 — mask personal data (Aadhaar/PAN/phone/email/IFSC) in user-uploaded content
         // BEFORE it enters the transcript/model context. Best-effort; never throws.
         const extracted = redactPII(extractedRaw);
@@ -5831,6 +5845,12 @@ export function registerAgentV3Routes(app: Express): void {
         // or repo that carries an injection payload. Fence the extracted content as untrusted
         // DATA so the agent reads it but never executes instructions hidden inside it.
         attachmentContext = fenceUntrusted('attached files', extracted);
+        // The contract sits OUTSIDE the untrusted fence on purpose: it is not the user's raw content
+        // any more, it is a validated, bounded structure this server built from it (every field
+        // length-capped and type-checked by parseDesignContract). Fencing it would tell the builder
+        // to read the requirements as data it must not act on — the exact opposite of the point.
+        const contractBlock = contractToPromptBlock(designContract);
+        if (contractBlock) attachmentContext = `${attachmentContext}\n\n${contractBlock}`;
       } catch { /* best-effort — a bad file never blocks the turn */ }
     }
 
@@ -10615,6 +10635,26 @@ export function registerAgentV3Routes(app: Express): void {
                 }
               }
             } catch { /* architecture invariants are advisory — they can never affect a build */ }
+          }
+
+          // AP-8 — did the build actually deliver the design that was uploaded?
+          //
+          // 🔒 EVIDENCE, NEVER A GATE. A contract that could fail a build would let a vision model's
+          // misreading of a screenshot destroy a working app. It only ever records what is missing, BY
+          // NAME, so the next turn (or the user) can ask for exactly those parts — which is the whole
+          // improvement over the prose description this replaced, since prose could only be believed.
+          if (designContract) {
+            try {
+              const contractCheck = verifyDesignContract(designContract, Object.fromEntries(writtenFiles));
+              buildDiag.record({
+                phase: 'build',
+                severity: contractCheck.verdict === 'DESIGN_CONTRACT_PARTIAL' ? 'warning' : 'info',
+                code: contractCheck.verdict,
+                ...(contractCheck.verdict === 'DESIGN_CONTRACT_PARTIAL'
+                  ? obs(contractCheck.summary)
+                  : { message: contractCheck.summary, autoResolved: true }),
+              });
+            } catch { /* the design check is advisory — it can never affect a build */ }
           }
 
           const designFiles = Object.fromEntries(writtenFiles);

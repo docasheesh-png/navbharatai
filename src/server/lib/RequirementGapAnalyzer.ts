@@ -364,6 +364,28 @@ export function shouldSurfaceRequirementGaps(g: RequirementGaps): boolean {
   return g.domain !== 'general' && (g.likelyMissing.length > 0 || g.clarifyingQuestions.length > 0);
 }
 
+/**
+ * Domain feature labels this app does NOT yet have — checked against its REAL source, not just the
+ * prompt — for the "what could I build next?" suggestion bulb (admin 2026-08-13).
+ *
+ * Detects the domain from `appText` (the original intent / summary), then keeps each domain feature whose
+ * presence regex fires NOWHERE — neither in the app's files nor in the intent text. So a feature added in
+ * a later build turn is correctly treated as already-present and never re-suggested. Pure.
+ */
+export function missingDomainFeatures(appText: string, source: string): { domain: string; labels: string[] } {
+  const text = String(appText || '');
+  const src = String(source || '');
+  const domain = DOMAINS
+    .filter((d) => d.re.test(text))
+    .reduce<DomainDef | undefined>(
+      (best, d) => (best && domainFeatureScore(best, text) >= domainFeatureScore(d, text) ? best : d),
+      undefined,
+    );
+  const feats = domain ? domain.features : GENERIC_FEATURES;
+  const labels = feats.filter((f) => !f.re.test(src) && !f.re.test(text)).map((f) => f.label);
+  return { domain: domain ? domain.key : 'general', labels };
+}
+
 /** Build a concise, bounded guidance block that tells the BUILDER to proactively INCLUDE the features a
  *  domain almost always needs but the prompt left implicit — so a rich request never gets a shallow app,
  *  with NO clarifying round-trip (friction-free requirement awareness). Returns '' when there is nothing

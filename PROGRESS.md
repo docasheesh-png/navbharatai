@@ -32287,3 +32287,30 @@ rather than patched cosmetically.
   project: these are the user's own pre-existing issues, correctly reported rather than "fixed".
 - The build ended `ok: false` with summary "Build stopped by the user" — the user gave up. That is the
   honest read, and it is the strongest signal in the whole report.
+
+---
+
+## 2026-08-13 — Next-build suggestions 💡 (contextual "what to build next", free + honest)
+
+Admin request: after a build, show the user tailored next-build ideas behind a 💡 bulb below the message box
+(bottom-right), notification-style — "ye sirf suggestion hai, blind follow nahi, behtareen system banao".
+
+Built end-to-end, deterministic + FREE (no AI call per build):
+- **`RequirementGapAnalyzer.ts`** — new pure `missingDomainFeatures(appText, source)`: detects the app's
+  domain and returns the domain features whose presence regex fires NOWHERE (files + intent), so a feature
+  added in a later turn is never re-suggested.
+- **`nextBuildSuggestions.ts`** (new, pure) — `nextBuildSuggestions({appText, source, max})`: domain-specific
+  gaps FIRST (marked "For this app"), then a curated universal-enhancement list (dark mode, mobile, search,
+  share, export, empty states, animations, settings), each with its own presence regex so an app that
+  already has it is never told to add it. Returns `{id,title,detail,prompt,kind}` — the prompt is a
+  ready-to-send instruction. Reuses the existing domain engine, so a game gets game ideas (sound / save /
+  tutorial / difficulty). 6 tests.
+- **Endpoint** `GET /api/agentv3/next-suggestions?workspaceId=` (ownership-checked, honest empty-list
+  fallback) — reads the workspace files and returns suggestions. No conversation lookup: the app's own files
+  are its intent signal.
+- **`NextSuggestionsBulb.tsx`** (new) — a self-contained 💡 button with a count badge, placed order-2 (below
+  the composer, right-aligned) in AgentV3Panel. Fetches when a build finishes (`state.done && !running`),
+  renders NOTHING when there are no ideas (no clutter), opens a popover, and on tap FILLS the composer
+  (`setPrompt`) — never auto-runs. 2 render tests.
+
+AppKnowledgeBase gets a NEXT-BUILD SUGGESTIONS entry (mandatory sync). Gate: tsc clean both; vitest 15,087.

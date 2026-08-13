@@ -3,6 +3,7 @@ import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, pr
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
+import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { requestedFeatureLabels, renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -3068,6 +3069,31 @@ export function registerAgentV3Routes(app: Express): void {
       providerLabel: (id) => dbProvider(id)?.label ?? null,
       supabaseConnected,
     }));
+  });
+
+  // NEXT-BUILD SUGGESTIONS (admin 2026-08-13) — after a build, "what could I add next?" for THIS app.
+  // Deterministic + free (no model call): reads the app's own files, detects its domain, and proposes
+  // domain-specific gaps + universal enhancements it does not already have. Only a suggestion — the client
+  // shows them behind a 💡 and fills the input for the user to review/edit/send; nothing runs on its own.
+  app.get('/api/agentv3/next-suggestions', async (req: Request, res: Response) => {
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required' }); return; }
+    if (!await assertVerifiedWorkspaceOwner(req, workspaceId)) {
+      res.status(403).json({ error: 'Not your workspace.' });
+      return;
+    }
+    try {
+      const files = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+      const source = Object.values(files).join('\n');
+      // The app's own files ARE its intent signal (title, game.ts, product page, …) — no conversation
+      // lookup needed. Cap the text so a huge app can't blow the regex work up.
+      const appText = `${Object.keys(files).join(' ')}\n${source}`.slice(0, 20000);
+      const suggestions = nextBuildSuggestions({ appText, source, max: 5 });
+      res.json({ suggestions });
+    } catch {
+      // A suggestion surface must never error the app — an empty list is the honest fallback.
+      res.json({ suggestions: [] });
+    }
   });
 
   app.get('/api/agentv3/diagnostics', async (req: Request, res: Response) => {

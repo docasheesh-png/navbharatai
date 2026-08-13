@@ -28,6 +28,7 @@ import { saveLastReport, readLastReport } from './reportCache';
 import type { ReportPickerItem } from '../../lib/reportPicker';
 import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
+import { NextSuggestionsBulb } from './NextSuggestionsBulb';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
@@ -3998,6 +3999,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     <Send className="w-4 h-4" />
                   </button>
                 )}
+              </div>
+              {/* NEXT-BUILD SUGGESTIONS 💡 (admin 2026-08-13) — below the input, right side. After a build
+                  finishes it lights up with tailored "what to add next" ideas for THIS app; tapping one
+                  fills the box for the user to review/edit/send. Only a suggestion — nothing auto-runs. */}
+              <div className="order-2 w-full flex justify-end mt-1">
+                <NextSuggestionsBulb
+                  workspaceId={expectedWorkspaceId()}
+                  ready={!!state.done && !running}
+                  onPick={(text) => { setPrompt(text); setTimeout(() => composerRef.current?.focus(), 0); }}
+                />
               </div>
             </div>
           </div>

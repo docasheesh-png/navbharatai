@@ -92,8 +92,21 @@ describe('the allowlist — the user\'s own requests still write to a green app'
     expect(writeRefused(WS, 'src/App.tsx')).toBe(true);
   });
 
-  it('the allowlist is exactly the three user-request / safety passes', () => {
-    expect([...ALLOWED_PASSES].sort()).toEqual(['feature-presence-heal', 'green-guard-restore', 'runtime-error-autofix']);
+  // The count changed from three to four on 2026-08-10, and this test firing is exactly what it is for:
+  // the list's own comment says adding to it is a DELIBERATE ACT, so an addition must be argued, not
+  // slipped in. The argument for 'design-consistency-heal':
+  //   • it repairs the app against ITS OWN stated design contract — the five-point per-page standard the
+  //     architect prompt already sets — rather than the reviewer's opinion ABOUT the code, which is the
+  //     distinction this allowlist actually encodes;
+  //   • it carries its own revert net (designHealGuard.ts): a page it leaves unparseable is restored;
+  //   • it is behind AGENTV3_DESIGN_GATE, default OFF, so nothing changes until an admin decides;
+  //   • on the normal path it runs BEFORE the preview is browsed, so no latch exists yet and this entry
+  //     is not what lets it write — it is here so a RESUMED already-green session behaves the same way
+  //     instead of silently doing nothing on one path and working on the other.
+  it('the allowlist is exactly the four user-request / safety passes', () => {
+    expect([...ALLOWED_PASSES].sort()).toEqual([
+      'design-consistency-heal', 'feature-presence-heal', 'green-guard-restore', 'runtime-error-autofix',
+    ]);
   });
 });
 

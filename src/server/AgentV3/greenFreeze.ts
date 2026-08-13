@@ -52,6 +52,13 @@ export const ALLOWED_PASSES: ReadonlySet<string> = new Set([
   'runtime-error-autofix', // the app renders but throws — the user wants a working app
   'feature-presence-heal', // a feature the user explicitly asked for is missing
   'green-guard-restore',   // puts the last-known-good files back — the safety mechanism itself
+  // The design repair runs BEFORE the preview is browsed, so on the normal path the workspace is not
+  // latched yet and this entry is not what lets it write. It is here for the case where a latch DOES
+  // exist by then (a resumed session that was already proven green), so the pass behaves the same either
+  // way instead of silently doing nothing on one path. It carries its own revert net — see
+  // designHealGuard.ts — and unlike the reviewer it repairs the app's OWN stated design contract, not an
+  // opinion about it.
+  'design-consistency-heal',
 ]);
 
 interface GreenLatch {

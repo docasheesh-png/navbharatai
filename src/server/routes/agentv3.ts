@@ -184,6 +184,7 @@ import { deployBackendToRender, resolveRenderKey, renderRequirement } from '../A
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
+import { designHealDecision, designHealGuardNote } from '../AgentV3/designHealGuard';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
@@ -10468,9 +10469,38 @@ export function registerAgentV3Routes(app: Express): void {
                   model: resolveModel(powerLevelReqEffective),
                   persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                 });
-                const healed = await designRunner.run(
+                // GUARD THE REPAIR (2026-08-10). The other two post-build write passes are wrapped in
+                // verifyAfterFix — snapshot the GREEN app, apply, re-render, revert if it broke. That net
+                // cannot be strung here: this pass runs inside the post-answer integrity block, BEFORE the
+                // preview has ever been browsed, so there is no green snapshot and no URL to re-render.
+                // What IS available is the file content, and the most common way an LLM edit breaks an app
+                // is that it stops parsing — which is free to check and needs no sandbox. So a page this
+                // repair rewrites into something unparseable is put back, and the pages it improved stand.
+                // Narrower than verifyAfterFix and honest about it: a repair that parses but breaks the app
+                // at runtime is caught later by the preview check and reported, not reverted.
+                const beforeHeal = { ...Object.fromEntries(writtenFiles) };
+                const brokenBefore = (await findSyntaxErrors(beforeHeal).catch(() => [])).map((e) => e.path);
+                const healed = await runInPass('design-consistency-heal', () => designRunner.run(
                   `The app is built and compiles. ${designRepairInstruction(design)}`,
-                );
+                ));
+                try {
+                  const afterHeal = Object.fromEntries(writtenFiles);
+                  const brokenAfter = (await findSyntaxErrors(afterHeal).catch(() => [])).map((e) => e.path);
+                  const verdict = designHealDecision({ before: beforeHeal, after: afterHeal, brokenAfter, brokenBefore });
+                  for (const path of verdict.revert) {
+                    const original = beforeHeal[path];
+                    if (typeof original !== 'string') continue;
+                    try { await actuator.writeFile(workspaceId, path, original); } catch { /* per-file */ }
+                    writtenFiles.set(path, original);
+                  }
+                  if (verdict.revert.length) {
+                    await mergeWorkspaceFiles(workspaceId, Object.fromEntries(verdict.revert.map((f) => [f, beforeHeal[f]]))).catch(() => {});
+                    buildDiag.record({
+                      phase: 'build', severity: 'warning', code: 'DESIGN_HEAL_REVERTED',
+                      message: designHealGuardNote(verdict), autoResolved: true,
+                    });
+                  }
+                } catch { /* the guard is best-effort — it must never itself break a build */ }
                 if (healed.ok) {
                   // Same honesty rule as the integrity heal: keep the REAL build summary, take only the
                   // edits. A no-op heal must never replace the user's build result with its own chatter.

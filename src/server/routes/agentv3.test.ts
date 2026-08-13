@@ -2191,7 +2191,12 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      skip the builds that need it (same discipline as the vite.config ensure). It writes ONE
     //      types-only declaration, never overwrites an existing file, and stays silent unless the app
     //      genuinely reads import.meta.env with no `vite/client` declared anywhere. Considered ✓.
-    expect(count).toBe(16);
+    //   1× the DESIGN-HEAL REVERT (2026-08-10) — puts a page back when the design repair left it
+    //      unparseable. It lives inside `shouldRunIntegrityHeal`, which requires `expectsArtifacts`
+    //      (false on every import/survey turn) AND `result.ok` AND the AGENTV3_DESIGN_GATE flag, so it
+    //      cannot write on a read-only turn — and it only ever restores content the SAME pass had just
+    //      overwritten, never anything the user owns. Considered ✓.
+    expect(count).toBe(17);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

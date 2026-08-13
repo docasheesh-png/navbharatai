@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { playTapTone } from '../../lib/tapTone';
 import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Search, Volume2 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { AttachMenu } from '../AttachMenu';
 import { saveSecret } from '../../lib/secretsApi';
-import { speechRecognitionSupported } from '../../lib/voiceInput';
+import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { AgentProgress, BuildStep } from './AgentProgress';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
@@ -426,36 +426,19 @@ export const AIChat: React.FC<AIChatProps> = ({
   // The mic button only renders where the Web Speech API actually exists (desktop Chrome/Edge). On
   // iOS/iPadOS WKWebView (the Capacitor app) it's absent — never a dead/"unresponsive" button (Apple
   // App Review 2.1(a), iPad, 2026-08-02). See src/lib/voiceInput.ts.
-  const recognitionRef = useRef<any>(null);
-  const [isListening, setIsListening] = useState(false);
-  const [voiceSupported] = useState(speechRecognitionSupported);
-
-  const startVoice = () => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return; // unsupported platforms never render the button; this is a defensive no-op
-    const rec = new SR();
-    rec.lang = 'en-IN';
-    rec.interimResults = true;
-    rec.continuous = true;
-    rec.onresult = (e: any) => {
-      const transcript = Array.from(e.results as any[]).map((r: any) => r[0].transcript).join('');
-      onInputChange(transcript);
+  // Shared hook (hooks/useSpeechInput.ts). This screen is where the admin's 2026-08-13 report came
+  // from: it read the whole results list and joined it, which on Android glues every revision of the
+  // sentence together ("voicevoice typingvoice typing Mein…"). It also pinned lang to 'en-IN', so a
+  // Hindi speaker was transcribed by an English recogniser. Both decisions now live in one place.
+  const { supported: voiceSupported, listening: isListening, toggle: toggleVoice } = useSpeechInput(
+    useCallback((text: string) => {
+      onInputChange(text);
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
         textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 240)}px`;
       }
-    };
-    rec.onerror = () => setIsListening(false);
-    rec.onend = () => setIsListening(false);
-    rec.start();
-    recognitionRef.current = rec;
-    setIsListening(true);
-  };
-
-  const stopVoice = () => {
-    recognitionRef.current?.stop();
-    setIsListening(false);
-  };
+    }, [onInputChange]),
+  );
   
   useEffect(() => {
     console.log('[AIChat] Received buildSteps:', buildSteps.length, buildSteps);
@@ -1732,7 +1715,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                     {voiceSupported && (
                       <button
                         type="button"
-                        onClick={isListening ? stopVoice : startVoice}
+                        onClick={() => toggleVoice(input)}
                         title={isListening ? 'Stop voice input' : 'Voice input'}
                         aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
                         className={`p-2.5 transition-colors ${isListening ? 'text-red-400 animate-pulse' : 'text-gray-500 hover:text-blue-400'}`}

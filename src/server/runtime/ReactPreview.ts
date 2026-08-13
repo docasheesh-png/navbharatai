@@ -22,7 +22,7 @@ import { normalizePath } from '../project/ProjectModel';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { precompileModules } from './PreviewPrecompile';
 import { startDepWarmup, getWarmDepUrls, WARMUP_MAX_MODULES } from './PreviewDepWarmup';
-import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE } from './previewImportMeta';
+import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE, PROCESS_SHIM_SOURCE } from './previewImportMeta';
 
 // Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
@@ -575,6 +575,17 @@ ${babelTag}
       mirror('error', ['Unhandled promise rejection: ' + (r instanceof Error ? r.message : String(r))]);
     });
   })();
+  // PROCESS SHIM (Phase 1b) — the same bug class as import.meta, one layer along. "process" is a Node
+  // global; in a browser it does not exist, so a module reading process.env.NODE_ENV throws
+  // "ReferenceError: process is not defined" and dies, taking the preview with it. That line is one of
+  // the most common in ordinary React source (dev-only logging and checks), and while packages from the
+  // dependency mirror are built with it already substituted, the USER's own code is not — and the
+  // user's own code is the entire imported project.
+  //
+  // Defined on window so a free "process" identifier inside a module resolves through the global scope
+  // chain, which covers the precompiled path and the browser-compiled path with one declaration. An
+  // existing process (a page that already polyfilled one) is left completely alone.
+  ${PROCESS_SHIM_SOURCE}
   function dirname(p) { var i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); }
   function normalize(p) {
     var parts = p.split('/'), out = [];

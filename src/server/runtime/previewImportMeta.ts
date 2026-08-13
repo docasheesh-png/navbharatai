@@ -58,6 +58,48 @@ export function importMetaObjectSource(modulePath: string): string {
 }
 
 /**
+ * `process.env`, as JS source — the SAME class of bug as `import.meta`, one layer along.
+ *
+ * `process` is a Node global. In a browser it does not exist, so a module reading `process.env.NODE_ENV`
+ * throws `ReferenceError: process is not defined` and dies — taking the preview with it, exactly like
+ * the `import.meta` SyntaxError did.
+ *
+ * It is easy to assume this is a CRA-only concern and therefore rare. It is not: `process.env.NODE_ENV`
+ * is one of the most common lines in ordinary React source, used to gate dev-only logging and checks.
+ * Libraries pulled from the dependency mirror are already built with it substituted; the USER's own
+ * code is not, and the user's own code is the entire imported project.
+ *
+ * NODE_ENV is 'development' because that is what this preview genuinely is. `REACT_APP_*` /
+ * `NEXT_PUBLIC_*` are absent for the same reason their Vite counterparts are: live .env files are
+ * excluded at the import boundary on purpose, so `undefined` is the honest answer and the one the real
+ * toolchain gives for an undefined variable.
+ */
+export const PROCESS_ENV_SOURCE = '{NODE_ENV:"development"}';
+
+/**
+ * The whole shim, as the JS source both preview pages embed verbatim.
+ *
+ * ONE constant rather than a copy per renderer. The React and Vue pages both execute the user's own
+ * code in the browser, so both need it — and two hand-written copies is precisely the drift this
+ * codebase has been bitten by before (four copies of `safeRelPath`, five hardcoded model ids). Having
+ * nothing to keep in agreement is stronger than a test asserting they agree.
+ *
+ * `argv` / `exit` / `cwd` / `nextTick` are present because code that reaches for `process` often
+ * reaches for those too: an undefined call is a crash, while a no-op is merely nothing happening. They
+ * are honestly inert — there is no process to exit and no stdout to write to.
+ *
+ * The `typeof` guard keeps this strictly ADDITIVE. If the page or a polyfilled dependency already
+ * provided a real `process`, overwriting it with this minimal stand-in would turn a fix into a
+ * regression for the app that had it right.
+ */
+export const PROCESS_SHIM_SOURCE = [
+  `if (typeof window.process === 'undefined') {`,
+  `    window.process = { env: ${PROCESS_ENV_SOURCE}, platform: 'browser', version: '', browser: true,`,
+  `      argv: [], exit: function () {}, cwd: function () { return '/'; }, nextTick: function (f) { Promise.resolve().then(f); } };`,
+  `  }`,
+].join('\n');
+
+/**
  * The Babel plugin, for the SERVER precompile path.
  *
  * ⚠️ The browser fallback path in ReactPreview.ts carries a hand-written twin of this, for the same

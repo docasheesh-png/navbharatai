@@ -11,6 +11,7 @@ import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY } from 
 import { songcraftFor } from '../AI/songcraft';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { detectImageIntent, imageGenGuidance, imageGenToolPointer } from '../lib/imageIntent';
+import { isFirstChatTurn, sessionGreetingRule } from '../lib/sessionGreeting';
 import { fetchPollinationsImage, imageMarkdown } from '../lib/imageGen';
 
 /**
@@ -147,9 +148,12 @@ One line: what you built.
     projects?: string[];
   }
 
-  const buildFreeSystemPrompt = (profile?: ApnapanProfile): string => {
+  const buildFreeSystemPrompt = (profile?: ApnapanProfile, isFirstTurn: boolean = true): string => {
     const profileLines: string[] = [];
-    if (profile?.preferredGreeting)
+    // The greeting-style hint only matters on the FIRST turn — after that the user has already been
+    // greeted this session, so mirroring a greeting again would repeat "namaste" every message (admin
+    // 2026-08-12: "ek session me bas 1 baar namaste").
+    if (profile?.preferredGreeting && isFirstTurn)
       profileLines.push(`Preferred greeting: "${profile.preferredGreeting}" — mirror this style when you initiate a greeting`);
     if (profile?.preferredTitle)
       profileLines.push(`Preferred title/address: "${profile.preferredTitle}" — use occasionally and naturally, NOT in every reply`);
@@ -192,6 +196,8 @@ Greeting map (detect → respond):
 • Good Night → Good Night!
 
 CONTEXT RULE: If user asks a direct question (no greeting opener), do NOT add any greeting in your reply. Just answer the question directly. Adding "नमस्ते!" before a medical/factual answer is wrong — skip it.
+
+${sessionGreetingRule(isFirstTurn)}
 
 EMOTIONAL INTELLIGENCE:
 • User sounds stressed/sad → respond with warmth, patience ("मैं आपकी बात सुन रहा हूँ...")
@@ -252,7 +258,9 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // Pick system prompt based on tier + context
     let systemPrompt: string;
     if (isFree) {
-      systemPrompt = buildFreeSystemPrompt(userProfile || undefined);
+      // First turn = no prior conversation history. Only then may the AI greet, so "namaste" appears
+      // once per session, not on every message (admin 2026-08-12).
+      systemPrompt = buildFreeSystemPrompt(userProfile || undefined, isFirstChatTurn(history));
     } else if (hasCanvas) {
       systemPrompt = SYSTEM_PROMPT_EDIT;
     } else if (isBuildIntent) {

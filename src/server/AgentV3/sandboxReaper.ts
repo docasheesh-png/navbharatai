@@ -39,11 +39,22 @@ export interface ReapableSandbox {
 /** Idle minutes before the in-memory sweep pauses a sandbox it can see. Env-tunable. */
 export function idleLimitMs(env: NodeJS.ProcessEnv = process.env): number {
   const mins = Number(env.AGENTV3_SANDBOX_IDLE_MINUTES);
-  // 15 minutes, not 45. The sandbox is kept alive after a build so the live preview keeps working, but
-  // a typical build takes about five minutes — so a 45-minute window meant roughly nine times more idle
-  // VM than working VM, most of it for someone who had already closed the tab. Fifteen still comfortably
-  // covers "user is looking at their app", and a returning user simply resumes the paused sandbox.
-  return Number.isFinite(mins) && mins > 0 ? Math.floor(mins * 60_000) : 15 * 60_000;
+  // 5 minutes (admin decision 2026-08-13, from the measured bill).
+  //
+  // The history is the argument. It was 45: a typical build takes about five minutes, so that window
+  // meant roughly nine times more idle VM than working VM, most of it for someone who had already
+  // closed the tab. It went to 15, and the measured month still showed ~315 billed hours of pure idle
+  // across 1,260 sandboxes — about 15% of the whole E2B bill. At 5 that falls to ~105 hours.
+  //
+  // ⚠️ THIS NUMBER IS ONLY SAFE BECAUSE THE SWEEP IS BUILD-AWARE. Idle is measured from the last
+  // SANDBOX operation, and a long model call is not one — while the AI thinks, nothing touches the
+  // sandbox, and at five minutes that silence would look exactly like an abandoned session. The sweep
+  // skips workspaces with a build in flight (E2BActuator.setBuildActive), so it can only ever pause a
+  // sandbox nobody is building in. Do NOT lower this further without checking that hold still exists.
+  //
+  // The accepted trade: a user who returns after six minutes meets a PAUSED sandbox and waits through
+  // a resume. Nothing is lost — it resumes by id, with its files — it is slower, not broken.
+  return Number.isFinite(mins) && mins > 0 ? Math.floor(mins * 60_000) : 5 * 60_000;
 }
 
 /** The longest a build may legally run, in ms — mirrors the route's own watchdog default. */

@@ -398,6 +398,8 @@ export interface ActuatorPort {
   ): Promise<{ errors: { t: number; kind: string; text: string }[]; captured?: boolean }>;
   /** The built static site (dist/) as path→bytes, for a real persistent deploy. */
   downloadDistFiles?(workspaceId: string): Promise<Map<string, Buffer>>;
+  /** Hold the idle sweep off a workspace while its build runs — see markBuildActive. */
+  setBuildActive?(workspaceId: string, active: boolean): void;
 }
 
 /** One source file read into the shared evaluate snapshot (path + content). */
@@ -1276,6 +1278,23 @@ export class ToolDispatcher {
   }
 
   /** Await any in-flight/pending checkpoint — call once at build end so the final state is committed. */
+  /**
+   * Tell the sandbox a build is IN FLIGHT / finished, so the idle sweep never pauses a live one.
+   *
+   * Idle is measured from the last SANDBOX operation, and a long model call is not one — while the AI
+   * is thinking nothing touches the sandbox, and that silence is indistinguishable from an abandoned
+   * session. Without this, a short idle window pauses a sandbox mid-build: a broken app for a real
+   * user, which no amount of saved compute is worth.
+   *
+   * Marked from the dispatcher because it is built once per build and already holds both the actuator
+   * and the workspace. `endBuild` is called from the build's `finally`, so it runs however the build
+   * ended; and the flag EXPIRES on its own besides, so a crash between the two can never leave a
+   * sandbox alive for ever (which would cost more than the sweep saves).
+   */
+  markBuildActive(active: boolean): void {
+    try { this.actuator.setBuildActive?.(this.workspaceId, active); } catch { /* never affects a build */ }
+  }
+
   async flushCheckpoints(): Promise<void> {
     try { await this._cpChain; } catch { /* best-effort */ }
   }

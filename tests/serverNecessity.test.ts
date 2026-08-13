@@ -210,3 +210,35 @@ describe('WIRING — measured from real builds, and it changes nothing', () => {
     expect(mod).not.toMatch(/process\.env|writeFile|runCommand|actuator/);
   });
 });
+
+describe('the admin panel puts it one click away — with its caveat attached', () => {
+  const panel = readFileSync(join(process.cwd(), 'src/components/AdminDashboard.tsx'), 'utf8');
+
+  it('a button runs it, rather than the tab paying for 500 documents on every visit', () => {
+    expect(panel).toContain("fetch('/api/admin/server-necessity?limit=500'");
+    expect(panel).toContain('onClick={fetchNecessity}');
+  });
+
+  it('the HEADLINE is shown, not just the percentage', () => {
+    // The headline is what carries "this is an upper bound". Rendering only the number would strip
+    // exactly the sentence that keeps a large decision honest.
+    expect(panel).toContain('{necessity.headline}');
+  });
+
+  it('all four buckets are shown — including the one that is NOT about cost', () => {
+    // "Needed a server and did not get one" is a correctness gap. Hiding it because this screen is
+    // about saving money is how a real defect goes unnoticed inside a cost review.
+    for (const b of ['builtButNotNeeded', 'neitherNeededNorBuilt', 'neededAndBuilt', 'neededButMissing']) {
+      expect(panel, b).toContain(`necessity.tally.${b}`);
+    }
+  });
+
+  it('real builds are shown for spot-checking', () => {
+    expect(panel).toMatch(/Check it against \{necessity\.sample\.length\} real builds/);
+    expect(panel).toContain('s.reasons.join');
+  });
+
+  it('a failed or empty measurement says so instead of rendering an empty card', () => {
+    expect(panel).toContain("toast(d?.error || 'Could not measure — no builds with enough recorded detail yet.')");
+  });
+});

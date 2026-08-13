@@ -512,9 +512,57 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.get('/api/admin/first-pass-quality', verifyAdminToken, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
-      const reports = await listAdminBuildReports(limit);
-      const stats = firstPassStatsFromMeta(reports);
-      res.json({ ...stats, headline: firstPassHeadline(stats), target: FIRST_PASS_TARGET, window: limit });
+      /**
+       * IT WAS MEASURING COMPLAINTS, NOT BUILDS (admin screenshot 2026-08-12, showing 4.3%).
+       *
+       * This endpoint's own comment above calls it "the one number that says whether the ENGINE is
+       * getting better" — and it read `listAdminBuildReports`, which is the inbox of reports USERS
+       * SUBMITTED by pressing "Report". People press Report when something went WRONG. So the sample
+       * was self-selected for failure, and the headline read as an engine-wide rate.
+       *
+       * "4.3% of builds are right first time" and "4.3% of the builds people complained about were
+       * right first time" are different sentences, and only the second one was ever true. This is the
+       * same defect class as TIME_TO_FIRST_CALL blaming setup for a model's latency: a number measured
+       * off the wrong source, presented with total confidence.
+       *
+       * ALL BUILDS is now the headline, read from the engine's own durable record of every build by
+       * every user — no submit needed. The reported-only figure is kept ALONGSIDE it rather than
+       * deleted, because the GAP between the two is itself the signal: complaints far below the
+       * engine-wide rate is healthy self-selection; the two being equal would mean users are reporting
+       * a fair sample, which is much worse news.
+       */
+      const [allBuilds, reports] = await Promise.all([
+        listAllDiagnostics(limit).catch(() => []),
+        listAdminBuildReports(limit).catch(() => []),
+      ]);
+      /**
+       * THE TWO SOURCES SPEAK DIFFERENT SHAPES, AND THE MISMATCH IS SILENT.
+       *
+       * `firstPassStatsFromMeta` reads the ADMIN-REPORT projection (`healCount` / `unresolvedCount`);
+       * the engine's own build record carries the same two numbers under `counts.autoResolved` /
+       * `counts.unresolved`. Passing the second straight in type-checks — every field is optional — and
+       * then classifies EVERY delivered build as "legacy, no counts recorded", leaving only the
+       * `ok === false` rows to be counted. The card would have read close to 100% failed.
+       *
+       * That would have been a worse lie than the one being fixed here, and it would have looked just
+       * as confident. Mapped explicitly, at the one place the two vocabularies meet.
+       */
+      const stats = firstPassStatsFromMeta(allBuilds.map((b) => ({
+        ok: b.ok,
+        healCount: b.counts?.autoResolved,
+        unresolvedCount: b.counts?.unresolved,
+      })));
+      const reported = firstPassStatsFromMeta(reports);
+      res.json({
+        ...stats,
+        headline: firstPassHeadline(stats),
+        source: 'all-builds',
+        // Named for what it is. A field called `reported` sitting beside the headline is what stops
+        // the next reader from quietly assuming the two were ever the same population.
+        reported: { ...reported, headline: firstPassHeadline(reported) },
+        target: FIRST_PASS_TARGET,
+        window: limit,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to compute first-pass quality.' });
     }

@@ -38,6 +38,7 @@ import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachment
 import { deployBlockedReason } from '../../lib/deployGuard';
 import { simplifyHealthLines } from '../../lib/buildHealthDisplay';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
+import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
 import { loadDraft, saveDraft } from './composerDraft';
@@ -273,11 +274,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [showChatSearch, setShowChatSearch] = useState(false);
   // INLINE voice dictation (admin 2026-07-22): the mic types speech straight into the composer on this
   // page — no separate Voice-to-App page. Same Web Speech engine the standalone tool uses.
-  const [listening, setListening] = useState(false);
   // Web Speech API types aren't in this project's TS lib — use `any`, as the standalone Voice tool does.
-  const voiceRef = useRef<any>(null);
-  const voiceBaseRef = useRef(''); // composer text captured when dictation started (interim appends after it)
-  const voiceFinalRef = useRef(''); // finalized transcript accumulated this dictation session
   const speechSupported = speechRecognitionSupported();
   // INLINE "Screenshot → App": pick a screenshot from the gallery → build from it, right here (admin
   // 2026-07-22). A hidden gallery input drives BOTH entry points (the glowing template button AND the
@@ -292,7 +289,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // PreviewSurface's own auto-resume is deliberately gated to once per workspace.
   const [previewBootSignal, setPreviewBootSignal] = useState(0);
   // Stop any live dictation when the panel unmounts (never leave the mic hot).
-  useEffect(() => () => { try { voiceRef.current?.stop(); } catch { /* already stopped */ } }, []);
   // Fix 60 — Team HQ elapsed clock (Full Team tier): anchored when a build STARTS; ticks every
   // second while the premium card is visible. FREEZE-ON-STOP (admin 2026-07-21 — "time reset ho
   // jata hai, error ane par nahi hona chahiye"): the old effect zeroed the clock the moment
@@ -1117,7 +1113,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     const sendFiles = override ? [] : files;
     if ((!text && sendFiles.length === 0) || running) return;
     // Stop live voice dictation the moment the message is sent (never leave the mic recording).
-    if (listening) { try { voiceRef.current?.stop(); } catch { /* already stopped */ } setListening(false); }
+    if (listening) stopVoice();
     setInterruptedResume(false); // AP-3 — a new build/turn resolves any "unfinished build" offer
     // A fresh user message resets the Layer-3 auto-continue budgets for the new turn — the pause
     // budget, the plan-continue count, AND the plan-progress watermark (SPM-3), so a typed
@@ -1198,39 +1194,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Tap the mic → speech types straight into the composer on THIS page (interim + final), tap again to
   // stop. Same Web Speech engine as the standalone tool. On a platform without Web Speech, fall back to
   // the dedicated Voice-to-App page so the feature still works.
-  const stopVoice = () => {
-    try { voiceRef.current?.stop(); } catch { /* already stopped */ }
-    setListening(false);
-  };
+  // Shared hook (hooks/useSpeechInput.ts). v5's own reading was already correct, but it was a fourth
+  // hand-written copy -- and copies are exactly how the free chat and Doctor AI ended up with the
+  // duplicate-word bug the admin reported on 2026-08-13. One implementation, no room to drift again.
+  const { listening, start: startVoiceInput, stop: stopVoice } = useSpeechInput(
+    useCallback((text: string) => setPrompt(text), []),
+  );
   const toggleVoice = () => {
     if (!speechSupported) {
+      // No Web Speech here -- send them to the dedicated page rather than leave a dead mic.
       window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'voice' } }));
       return;
     }
     if (listening) { stopVoice(); return; }
-    const w = window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any };
-    const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
-    if (!SR) return;
-    const sr = new SR();
-    sr.continuous = true;
-    sr.interimResults = true;
-    sr.lang = (typeof navigator !== 'undefined' && navigator.language) || 'en-IN';
-    voiceBaseRef.current = prompt ? prompt.replace(/\s+$/, '') + ' ' : '';
-    voiceFinalRef.current = '';
-    sr.onresult = (event: any) => {
-      let interim = '';
-      let newFinal = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const t = event.results[i][0].transcript;
-        if (event.results[i].isFinal) newFinal += t; else interim += t;
-      }
-      if (newFinal) voiceFinalRef.current += (voiceFinalRef.current ? ' ' : '') + newFinal.trim();
-      setPrompt((voiceBaseRef.current + voiceFinalRef.current + (interim ? ' ' + interim : '')).replace(/^\s+/, ''));
-    };
-    sr.onerror = () => setListening(false);
-    sr.onend = () => setListening(false);
-    voiceRef.current = sr;
-    try { sr.start(); setListening(true); setTimeout(() => composerRef.current?.focus(), 0); } catch { setListening(false); }
+    startVoiceInput(prompt);
+    setTimeout(() => composerRef.current?.focus(), 0);
   };
 
   // ── INLINE "SCREENSHOT → APP" (admin 2026-07-22) ─────────────────────────────────────────────

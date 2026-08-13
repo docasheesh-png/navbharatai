@@ -12,6 +12,7 @@ import {
   Info,
 } from 'lucide-react';
 import { speechRecognitionSupported } from '../../lib/voiceInput';
+import { useSpeechInput } from '../../hooks/useSpeechInput';
 
 interface VoiceToAppProps {
   /**
@@ -36,9 +37,6 @@ const TIPS = [
 ];
 
 export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
-  const [isRecording, setIsRecording] = useState(false);
-  const [interimText, setInterimText] = useState('');
-  const [finalText, setFinalText] = useState('');
   const [editablePrompt, setEditablePrompt] = useState('');
   const [lang, setLang] = useState<'hi-IN' | 'en-US'>('hi-IN');
   const [activeEnhancers, setActiveEnhancers] = useState<string[]>([]);
@@ -47,8 +45,6 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
   const [errorMsg, setErrorMsg] = useState('');
   const [speechSupported] = useState(speechRecognitionSupported);
 
-  const recognitionRef = useRef<any>(null);
-
   const buildFullPrompt = useCallback(() => {
     const base = editablePrompt.trim();
     if (!base) return '';
@@ -56,85 +52,30 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
     return `${base}\n\nRequirements: ${activeEnhancers.join(', ')}.`;
   }, [editablePrompt, activeEnhancers]);
 
-  useEffect(() => {
-    if (!speechSupported) return;
-    const SRClass =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
-    const sr = new SRClass();
-    sr.continuous = true;
-    sr.interimResults = true;
-    sr.lang = lang;
-
-    sr.onresult = (event: any) => {
-      let interim = '';
-      let newFinal = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript: string = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          newFinal += transcript;
-        } else {
-          interim += transcript;
-        }
-      }
-      if (newFinal) {
-        setFinalText((prev) => {
-          const updated = prev + (prev ? ' ' : '') + newFinal.trim();
-          setEditablePrompt(updated);
-          return updated;
-        });
-      }
-      setInterimText(interim);
-    };
-
-    sr.onerror = () => {
-      setIsRecording(false);
-      setInterimText('');
-    };
-
-    sr.onend = () => {
-      setIsRecording(false);
-      setInterimText('');
-    };
-
-    recognitionRef.current = sr;
-
-    return () => {
-      sr.onresult = null;
-      sr.onerror = null;
-      sr.onend = null;
-      if (isRecording) {
-        try { sr.stop(); } catch (_) {}
-      }
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [speechSupported, lang]);
+  // Shared hook (hooks/useSpeechInput.ts). This screen's reading was already correct, but it was one of
+  // four hand-written copies -- and copies are how the free chat and Doctor AI ended up with the
+  // duplicate-word bug the admin reported on 2026-08-13. The language PICKER is passed through, since
+  // choosing Hindi or English is this screen's own feature rather than a hardcoded default.
+  const {
+    listening: isRecording,
+    toggle: toggleVoice,
+    stop: stopVoice,
+    final: finalText,
+    interim: interimText,
+  } = useSpeechInput(
+    useCallback((text: string) => setEditablePrompt(text), []),
+    { lang },
+  );
 
   const toggleRecording = () => {
     if (!speechSupported) return;
-    const sr = recognitionRef.current;
-    if (!sr) return;
-    if (isRecording) {
-      sr.stop();
-      setIsRecording(false);
-    } else {
-      setInterimText('');
-      try {
-        sr.start();
-        setIsRecording(true);
-      } catch (_) {
-        setIsRecording(false);
-      }
-    }
+    // Dictation continues the text already on screen, so a second burst adds to the first instead of
+    // replacing it -- and an edit the user typed by hand is never thrown away by tapping the mic.
+    toggleVoice(editablePrompt);
   };
 
   const clearTranscript = () => {
-    if (isRecording) {
-      recognitionRef.current?.stop();
-      setIsRecording(false);
-    }
-    setFinalText('');
-    setInterimText('');
+    if (isRecording) stopVoice();
     setEditablePrompt('');
     setStatus('idle');
     setErrorMsg('');
@@ -143,7 +84,6 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
   const applyQuickPrompt = (qp: string) => {
     const val = editablePrompt.trim() ? `${editablePrompt.trim()} — ${qp}` : qp;
     setEditablePrompt(val);
-    setFinalText(val);
   };
 
   const toggleEnhancer = (e: string) => {
@@ -156,10 +96,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
     const prompt = buildFullPrompt();
     if (!prompt) return;
     // Stop the mic before leaving this view, then hand the prompt to the real engine.
-    if (isRecording) {
-      try { recognitionRef.current?.stop(); } catch { /* already stopped */ }
-      setIsRecording(false);
-    }
+    if (isRecording) stopVoice();
     setStatus('success');
     setErrorMsg('');
     onBuildViaV5(prompt);

@@ -17,7 +17,7 @@ import { newSdaCaseId } from '../../lib/sdaCaseId';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { initialToolsOpen, saveToolsOpen } from './sdaChrome';
-import { speechRecognitionSupported } from '../../lib/voiceInput';
+import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { MessageEditActions } from '../chat/MessageEditActions';
 import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
@@ -280,17 +280,14 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [patient, setPatient] = useState<PatientSnapshot>({});
   const [activeRedFlags, setActiveRedFlags] = useState<string[]>([]);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
-  const [isListening, setIsListening] = useState(false);
   // Mic renders only where the Web Speech API exists — absent on iOS/iPadOS WKWebView so it is never a
   // dead "unresponsive" button (Apple App Review 2.1(a), 2026-08-02). See src/lib/voiceInput.ts.
-  const [voiceSupported] = useState(speechRecognitionSupported);
   const [suggestPDF, setSuggestPDF] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; name: string } | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const recognitionRef = useRef<any>(null);
   // Gates the Firestore autosave effect until the cross-device fetch (below) has
   // finished — otherwise a stale local case could overwrite a newer one mid-fetch.
   const hydratedRef = useRef(false);
@@ -416,31 +413,16 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
   // ── Voice Input ──────────────────────────────────────────────────────────
 
-  const startVoice = () => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return; // unsupported platforms never render the button; this is a defensive no-op
-    const rec = new SR();
-    rec.lang = 'en-IN';
-    rec.interimResults = true;
-    rec.continuous = true;
-    rec.onresult = (e: any) => {
-      const transcript = Array.from(e.results as any[])
-        .map((r: any) => r[0].transcript)
-        .join('');
-      setInput(transcript);
+  // Shared hook (hooks/useSpeechInput.ts) -- this screen carried the same defect the admin reported
+  // in the free chat on 2026-08-13: it joined the whole results list, which on Android glues every
+  // revision of the sentence together, and it pinned lang to 'en-IN' so a patient describing symptoms
+  // in Hindi was transcribed by an English recogniser. Both now live in one place.
+  const { supported: voiceSupported, listening: isListening, toggle: toggleVoice } = useSpeechInput(
+    useCallback((text: string) => {
+      setInput(text);
       if (inputRef.current) autoResize(inputRef.current);
-    };
-    rec.onerror = () => setIsListening(false);
-    rec.onend = () => setIsListening(false);
-    rec.start();
-    recognitionRef.current = rec;
-    setIsListening(true);
-  };
-
-  const stopVoice = () => {
-    recognitionRef.current?.stop();
-    setIsListening(false);
-  };
+    }, []),
+  );
 
   // ── PDF ──────────────────────────────────────────────────────────────────
 
@@ -1109,7 +1091,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                     the Web Speech API exists; absent on iOS/iPadOS WKWebView (no dead button). */}
                 {voiceSupported && (
                   <button
-                    onClick={isListening ? stopVoice : startVoice}
+                    onClick={() => toggleVoice(input)}
                     disabled={loading}
                     title={isListening ? 'Stop voice input' : 'Dictate (speech → text)'}
                     className={cn(

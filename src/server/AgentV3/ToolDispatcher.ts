@@ -56,6 +56,7 @@ import { injectAppSignature, hasAppSignature } from './appSignature';
 import { mergeDotEnv, gitignoreWithEnv, dotEnvValue } from '../secrets/appSecretsEnv';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
+import { importCheckNote } from './writeTimeImportCheck';
 import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
@@ -2076,6 +2077,14 @@ export class ToolDispatcher {
             : '';
         // Level 6: test file hint — if a test file exists, suggest running it.
         const testHint = testFileHint(path);
+        // WRITE-TIME IMPORT CHECK (admin report 2026-08-11): a generated TEST importing a member its
+        // component does not export failed a user's APK build on GitHub. Detection and a deterministic
+        // fixer both already existed but ran at the END, by which time "the agent's intent was
+        // elsewhere and these files are never revisited". Told here, it is fixed in the same turn.
+        // Never blocks the write; any failure inside it yields no note at all.
+        const importNote = await importCheckNote(path, content, {
+          readFile: (p: string) => this.actuator.readFile(this.workspaceId, p),
+        });
         // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard — steer the model to fix a
         // runtime-crashing hook THIS turn, before the build ships it (readiness gate stays the backstop).
         const hooksNote = await this.hookWriteNote({ [path]: content });
@@ -2096,10 +2105,10 @@ export class ToolDispatcher {
           return (
             `Updated ${path} (${content.length} bytes).\n` +
             `${risk.message} The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
-            reviewNote + cascadeNote + testHint + hooksNote
+            reviewNote + cascadeNote + testHint + hooksNote + importNote
           );
         }
-        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + hooksNote;
+        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + hooksNote + importNote;
       }
 
       case 'write_files_batch': {

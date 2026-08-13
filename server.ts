@@ -6,6 +6,8 @@ import net from 'net';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { LEGACY_EMBEDDED_API_KEY } from './src/server/lib/aiClients';
 import { corsMiddleware } from './src/server/lib/cors';
+import { backendSubdomainRouter } from './src/server/lib/backendSubdomainRouter';
+import { registerManagedBackendRoutes } from './src/server/routes/managedBackend';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
@@ -282,6 +284,11 @@ setInterval(() => {
   installGlobalErrorHandlers();
 
   const app = express();
+  // Managed-backend wildcard proxy ({app}.MANAGED_BACKEND_APPS_DOMAIN → the user app's Cloud Run
+  // URL). Mounted FIRST, before helmet/cors/body parsers, deliberately: proxied user-app responses
+  // must not inherit the PLATFORM's CSP, and their request streams must not be consumed by our JSON
+  // parser. With MANAGED_BACKEND_APPS_DOMAIN unset (the default) this is a pass-through no-op.
+  app.use(backendSubdomainRouter());
   // P-TQA.10 — HTTP security headers. The exact policy (CSP directives, COOP, etc.) lives in
   // src/server/lib/securityHeaders.ts so it can be unit-tested; see that file for why each
   // directive is shaped the way it is (Firebase Auth popups, live-preview iframes, OAuth opener).
@@ -591,6 +598,10 @@ setInterval(() => {
   registerDesignRoutes(app);
   // P-CGE.9 — deploy artifact generator (stateless → Dockerfile / compose / CI workflow).
   registerDeployArtifactsRoutes(app);
+  // Managed backend hosting ("Deploy to NavBharatAI Cloud") — user backends on the platform's own
+  // Cloud Run + Neon, gated by AGENTV3_MANAGED_BACKEND + the ₹199/30d wallet plan.
+  // See MANAGED_BACKEND_HOSTING.md for the full admin setup.
+  registerManagedBackendRoutes(app);
   registerSecretsRoutes(app);
   registerPushRoutes(app); // Push-notification device-token registration (native mobile app)
   registerSbomRoutes(app);

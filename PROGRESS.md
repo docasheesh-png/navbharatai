@@ -24,6 +24,18 @@
 
 ## ▶ CURRENT RESUME POINT
 
+**Session 2026-08-13 — MANAGED BACKEND HOSTING v1 ("Deploy to NavBharatAI Cloud") built + fully gated OFF (`AGENTV3_MANAGED_BACKEND`, default off → zero live-path change). Branch: `claude/managed-backend-hosting`.**
+
+Admin-mandated (2026-08-13): user backends hosted on the PLATFORM's own account, user pays the wallet plan — the managed counterpart to the BYO tier (renderDeploy/backendDeployConfig stay the free default). What shipped (each honest at every gate, per rule 2):
+- **Engine** `src/server/lib/cloudRunBackend.ts` — source→tar.gz→GCS→Cloud Build→Artifact Registry→Cloud Run v2 (Mumbai default), poll-driven (`advanceManagedDeploy` re-derives phase from Cloud Build/Run — restart-safe), pure request builders, reuses the BYO Dockerfile generator (one Dockerfile truth).
+- **DBs** `neonProvision.ts` — one Neon project per app (Singapore default), URI captured at create; 404-tolerant delete.
+- **Money** `backendHostingPlan.ts` — ₹199/30d (`BACKEND_HOSTING_PLAN_PRICE_INR`) on the ONE wallet via the SAME computeDebitedWallet discipline as the ₹99 domain plan (idempotent per period, lazy renewal, 3-day grace; deliberately a sibling module, NOT a risky generalisation of the live plan).
+- **Caps** `backendLimits.ts` — plan-enforced spend ceiling (1 vCPU/512Mi/max 2 instances/120s) + source caps + node_modules/.git/.env stripping; `backendRegistry.ts` — server-only Firestore collection `managed_backends` (covered by the existing default-deny rule).
+- **Wildcard proxy** `backendSubdomainRouter.ts` — `{app}.MANAGED_BACKEND_APPS_DOMAIN` → Cloud Run URL; mounted FIRST in server.ts (before helmet/parsers — proxied apps must not inherit our CSP); per-app req/min cap; lapsed plan → honest 402; store outage → serve (rule 1).
+- **Routes** `src/server/routes/managedBackend.ts` — status / plan purchase / deploy / poll-status (advances) / suspend / resume / delete. Docs: `MANAGED_BACKEND_HOSTING.md` (admin setup: GCP roles, AR repo, bucket, Neon key, wildcard DNS). `.env.example` updated.
+- **Verified locally (exact CI gates):** `tsc --noEmit` ✓, `tsc -p tsconfig.server.json` ✓, `vitest run` FULL suite ✓ (1239 files / 15,293 tests, incl. 44 new across 6 new test files).
+- **Known v1 follow-ups (honest, in MANAGED_BACKEND_HOSTING.md):** no WS proxying on the apps domain; no reminder sweep for this plan yet (lazy renewal + grace work); IDE UI panel not built yet (API-complete only) — UI slice must update AppKnowledgeBase.ts when it lands.
+
 **Session 2026-06-22 (d) — Pro v3.0 BUILT end-to-end (P0 → P5). Merged to main: P0–P3b (#181–#189). Awaiting manual merge: P3.5–P5 (PR #191).**
 
 ⚠️ **CI INFRA NOTE:** From ~11:42 on 2026-06-22, GitHub Actions started failing at job startup (~4s, zero logs, even on an empty commit) — diagnosed as Actions minutes/spending-limit exhausted on this PRIVATE repo (all prior runs that day succeeded; the transition is abrupt and content-independent). **Admin must raise the Actions spending limit / wait for quota reset** to restore the automated gate. Until then, every v3.0 step below was verified with the EXACT CI commands locally (`tsc --noEmit` + `tsc -p tsconfig.server.json` + `vitest run` + `boot:check` + `npm run build`) and merged manually by admin. No red CI was merged on the basis of "skip the gate" — the gate ran locally.

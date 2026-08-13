@@ -323,3 +323,29 @@ export function freeSlot(live: readonly { port: number }[], max = MAX_LIVE_VERSI
   for (let i = 0; i < max; i += 1) if (!taken.has(slotPort(i))) return i;
   return 0;
 }
+
+/**
+ * THE WHOLE SLOT DECISION, in one place: what to stop, and which slot the new preview takes.
+ *
+ * This used to be three statements inline in the route, and being inline is precisely how it shipped
+ * wrong. Re-opening a version that was ALREADY live retired nothing (correctly — it is a refresh), but
+ * the slot was then chosen from a list that still counted the old server, so the refresh took a SECOND
+ * port while `worktreeAddCommand` deleted the directory out from under the first. The result was an
+ * orphan process still bound to the old port, with no directory behind it and no stamp for any
+ * instance to find it by — a leak that only showed up on the second tap of the same button.
+ *
+ * Pure, so the ordering that matters — stop first, THEN choose from what is genuinely still running —
+ * is testable instead of implied.
+ */
+export function planVersionSlot(
+  live: readonly LiveVersion[],
+  incomingSha: string,
+  max = MAX_LIVE_VERSIONS,
+): { toStop: LiveVersion[]; slot: number } {
+  const key = incomingSha.slice(0, 12).toLowerCase();
+  const already = live.find((v) => v.sha.toLowerCase() === key);
+  const retire = versionsToRetire(live, incomingSha, max);
+  const toStop = already ? [already, ...retire.filter((r) => r.sha !== already.sha)] : retire;
+  const stopped = new Set(toStop.map((v) => v.sha));
+  return { toStop, slot: freeSlot(live.filter((v) => !stopped.has(v.sha)), max) };
+}

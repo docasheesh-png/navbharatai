@@ -340,8 +340,7 @@ import {
   listLiveVersionsCommand,
   parseLiveVersions,
   stopVersionCommand,
-  versionsToRetire,
-  freeSlot,
+  planVersionSlot,
   isValidSha,
   versionPreviewMessage,
   type VersionPreviewDeps,
@@ -4216,11 +4215,14 @@ export function registerAgentV3Routes(app: Express): void {
       const live = parseLiveVersions(
         await deps.run(listLiveVersionsCommand()).then((r) => r.stdout).catch(() => ''),
       );
-      for (const old of versionsToRetire(live, sha)) {
+      // One pure decision (planVersionSlot) owns what to stop AND which slot the new preview takes —
+      // the ordering between those two is exactly what shipped wrong when it lived here as loose
+      // statements. See its doc for the orphan-server leak that motivated extracting it.
+      const { toStop, slot } = planVersionSlot(live, sha);
+      for (const old of toStop) {
         await deps.run(stopVersionCommand(old.sha, old.port)).catch(() => null);
       }
-      const remaining = live.filter((v) => !versionsToRetire(live, sha).some((r) => r.sha === v.sha));
-      const result = await startVersionPreview(sha, freeSlot(remaining), deps);
+      const result = await startVersionPreview(sha, slot, deps);
       res.json(result);
     } catch {
       // A preview is a convenience; it must never surface as a broken screen on the history panel.

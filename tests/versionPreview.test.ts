@@ -32,6 +32,7 @@ import {
   shellQuote,
   versionsToRetire,
   freeSlot,
+  planVersionSlot,
   versionPreviewMessage,
   startVersionPreview,
   patchViteConfigForHost,
@@ -206,8 +207,10 @@ describe('🔒 live state is read from the sandbox, not from this process', () =
   });
 });
 
+type LiveVersionish = { sha: string; port: number; startedAt: number };
+
 describe('slots and retirement', () => {
-  const v = (sha: string, port: number, startedAt: number) => ({ sha, port, startedAt });
+  const v = (sha: string, port: number, startedAt: number): LiveVersionish => ({ sha, port, startedAt });
 
   it('retires nothing while there is room', () => {
     expect(versionsToRetire([], SHA)).toEqual([]);
@@ -225,6 +228,51 @@ describe('slots and retirement', () => {
 
   it('is case-insensitive about the sha, as git is', () => {
     expect(versionsToRetire([v(SHA.toUpperCase(), 5310, 1), v('bbbbbbb', 5311, 2)], SHA)).toEqual([]);
+  });
+
+  it('🔒 REGRESSION — re-opening a LIVE version stops it first and REUSES its slot', () => {
+    // The leak this encodes: retirement correctly returns [] for a refresh, so the slot used to be
+    // chosen from a list that still counted the old server. The refresh took a SECOND port while
+    // worktreeAddCommand deleted the directory out from under the first, leaving an orphan process
+    // bound to the old port with no stamp for any instance to find it by. Only showed up on the
+    // second tap of the same button.
+    const plan = planVersionSlot([v(SHA.slice(0, 12), 5310, 100)], SHA);
+    expect(plan.toStop.map((s) => s.sha)).toEqual([SHA.slice(0, 12)]);
+    expect(plan.slot).toBe(0); // its OWN slot back, not a second one
+  });
+
+  it('🔒 a refresh at full capacity does not evict the other version', () => {
+    const plan = planVersionSlot([v(SHA.slice(0, 12), 5310, 100), v('bbbbbbbbbbbb', 5311, 200)], SHA);
+    expect(plan.toStop.map((s) => s.sha)).toEqual([SHA.slice(0, 12)]);
+    expect(plan.slot).toBe(0);
+  });
+
+  it('a NEW version at full capacity evicts the oldest and takes its slot', () => {
+    const plan = planVersionSlot([v('aaaaaaaaaaaa', 5310, 500), v('bbbbbbbbbbbb', 5311, 100)], SHA);
+    expect(plan.toStop.map((s) => s.sha)).toEqual(['bbbbbbbbbbbb']);
+    expect(plan.slot).toBe(1); // the evicted one's slot
+  });
+
+  it('🔒 the chosen slot is NEVER one that stays occupied', () => {
+    const cases: LiveVersionish[][] = [
+      [],
+      [v('aaaaaaaaaaaa', 5310, 1)],
+      [v('aaaaaaaaaaaa', 5311, 1)],
+      [v('aaaaaaaaaaaa', 5310, 1), v('bbbbbbbbbbbb', 5311, 2)],
+      [v(SHA.slice(0, 12), 5310, 1), v('bbbbbbbbbbbb', 5311, 2)],
+      [v(SHA.slice(0, 12), 5311, 1), v('bbbbbbbbbbbb', 5310, 2)],
+    ];
+    for (const live of cases) {
+      const { toStop, slot } = planVersionSlot(live, SHA);
+      const stopped = new Set(toStop.map((s) => s.sha));
+      const stillRunning = live.filter((x) => !stopped.has(x.sha)).map((x) => x.port);
+      expect(stillRunning, JSON.stringify(live)).not.toContain(slotPort(slot));
+    }
+  });
+
+  it('🔒 never stops the same version twice — one stop command per server', () => {
+    const plan = planVersionSlot([v(SHA.slice(0, 12), 5310, 1), v('bbbbbbbbbbbb', 5311, 2)], SHA);
+    expect(new Set(plan.toStop.map((s) => s.sha)).size).toBe(plan.toStop.length);
   });
 
   it('picks the lowest free slot so a retired port is reused immediately', () => {

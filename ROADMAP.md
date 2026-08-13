@@ -164,21 +164,39 @@ Ordered by what a user would actually feel.
 > design-to-code contract (AP-8) · community gallery/remix · scaling/load estimates · virus-scanning the apps
 > we generate. Everything else in this section had already shipped.
 - ~~**Component tree panel** and **multi-element select**~~ — ✅ **BOTH SHIPPED 2026-08-11** (#2269, #2272). Do not rebuild.
-- **Per-version preview URL** — v0 has it.
-- 🟡 **One-click object storage provisioning** — **HALF BUILT, and the halves matter (verified 2026-08-11).**
-  `generate_storage` EXISTS and is fully wired (catalog + dispatcher + `StorageGenerator`): it writes a real
-  presigned-upload route and an `uploadFile()` client for S3/R2/Supabase-Storage/MinIO or Cloudinary. What is
-  missing is the ZERO-SETUP half — it is **BYO keys**: the user pastes their own credentials into `.env`.
-  The open work is provisioning a bucket in the USER's own account automatically, the same shape as the
-  Supabase zero-setup DB path (and subject to the same standing rule: user apps run on the USER's account,
-  never NavBharatAI's). Do NOT rebuild the code generator.
+- ~~**Per-version preview URL**~~ — ✅ **SHIPPED 2026-08-13 (#2344)**: History tab → "Preview" opens that checkpoint running in a new tab while the current app stays untouched, so Restore becomes a decision made AFTER seeing. Runs as a `git worktree` + second port INSIDE the sandbox the user already has warm, so it adds NO E2B cost; `sandboxWarm` asks `getSandboxId` and never boots one. Four honest outcomes, and a URL only after a server really answered. Do not rebuild.
+- ~~**One-click object storage provisioning**~~ — ✅ **SHIPPED 2026-08-11 (#2265)**, as `supabaseStorageBucket.ts`
+  + `zeroSetupStorageFiles` in `StorageGenerator.ts`. `generate_storage` with provider `"supabase"` is the
+  ZERO-SETUP path: the bucket and its RLS policies are created in the USER's own Supabase project, written as
+  a migration the provisioning flow applies. No new OAuth scope was needed (a bucket is a row in
+  `storage.buckets`, reachable through the Database grant) and **no service-role key is ever fetched** — the
+  generated app uploads with the anon key and RLS decides what a user may do. `s3`/`cloudinary` remain the
+  BYO-keys options. Do not rebuild.
+  ⚠️ **THIS LINE IS WHY THE WARNING ABOVE EXISTS.** It stayed at "🟡 HALF BUILT — the open work is provisioning
+  a bucket in the user's own account automatically" for two days AFTER #2265 shipped exactly that, and on
+  2026-08-13 it sent a session (mine) to build a second, complete implementation — `storageProvision.ts` plus
+  28 passing tests — before a wider grep found the real one and the duplicate was deleted unmerged. Nothing
+  reached `main`, but the credit was spent. **The lesson is specific: grep the whole `src/server/lib` for the
+  DOMAIN NOUN ("bucket"), not just the tool name, before believing any 🟡 in this file.**
 - ~~**Service-split generator** + named paradigms~~ — ✅ **SHIPPED 2026-08-11 (#2273)**: `analyze_service_split` PRICES each seam from the import graph and often answers "keep it as one app"; `setup_architecture` scaffolds clean/ddd/mvc/hexagonal with ESLint-ENFORCED boundaries. It deliberately does NOT auto-rewrite an app into microservices. Do not rebuild. (The original line read: "coupling is already scored; nothing turns that score into a split." It does now.)
-- **Design-to-code intermediate contract** (AP-8) — the vision pipeline exists; the
-  image → layout-contract → build step does not.
+- ~~**Design-to-code intermediate contract** (AP-8)~~ — ✅ **SHIPPED 2026-08-13 (#2345)**: the same single vision call now also returns a typed contract (screens, sections top-to-bottom, verbatim labels), fed to the builder as requirements and VERIFIED against the written files afterwards — `DESIGN_CONTRACT_MET` / `_PARTIAL` (missing items by name) / `_ABSENT`. No extra model call. Evidence, never a gate. Do not rebuild.
 - ~~**Template-free scaffold fallback**~~ — ✅ **ALREADY BUILT (verified 2026-08-08).** There is no separate module, which is why a name-based grep missed it: the fallthrough is a BRANCH, present in all three prompts that need it — `OneShotBuilder.oneShotUserPrompt` ("The project starts empty — create all files at the project root"), `ProjectPlan.projectPlanUserPrompt`, and the manifest prompt. It is reachable: `scaffold` comes from `listFiles(...).catch(() => [])`, so an empty workspace or a listing error takes it. The roadmap line itself said "verify before building" — this is that verification, and it says do not build.
 - ~~**Community gallery / remix**~~ — ✅ **SHIPPED 2026-08-11 (#2275)**, later the same day the line above said it was deferred. Browse / publish / remix, behind `galleryPublishGate.ts`: `.env*`, dependencies, build output and binaries are EXCLUDED, and a real secret inside source REFUSES the publish naming the file and line. It REUSES `scanSecurity` / `scanEnvTemplateSecrets` — no fourth secret scanner was written. Publishing can only produce `pending`; only an admin (`NAV_STORE_ADMINS`) can approve, and a reject/remove DELETES the stored source. Do not rebuild.
 - ~~**Scaling / load estimates with real numbers**~~ — ✅ **SHIPPED 2026-08-11 (#2270)** as `POST /api/workspace/scale-check`. Deliberately prints NO capacity figure. Do not rebuild.
-- **Upload virus-scanning for the apps we generate** — the Nav App Store has it; generated apps do not.
+- 🔴 **Upload virus-scanning for the apps we generate** — **BLOCKED ON A DECISION, and smaller than it sounds
+  (analysed 2026-08-13). Do NOT just wire `malwareScan.ts` into workspace uploads.** Two honest reasons:
+  1. **Licensing.** `malwareScan.ts` (VirusTotal) is used by ONE caller, `navStore.ts`. CLAUDE.md already
+     records that VirusTotal's FREE API is, by their terms, not for use in a commercial product, and is capped
+     at ~4 req/min and 500/day. Every workspace ZIP upload would blow that cap in a day AND deepen a licensing
+     problem the admin has not yet resolved. Extending the dependency before the paid plan (or MetaDefender)
+     is chosen would be knowingly making a known problem worse.
+  2. **The threat models are NOT the same, and this is the part the original one-line item hid.** The App
+     Store scans an APK **we distribute to strangers** — that is a real duty of care. A ZIP a user uploads
+     into their OWN workspace is **their own code, which they are about to edit**; we are not distributing it
+     to anyone. The path where a generated app actually reaches other people is publication — which goes
+     through the App Store, and is **already scanned**. So the genuine remaining gap is narrow.
+  **What to do instead, when the admin picks a scanner:** scan at the DISTRIBUTION boundary (publish/export),
+  not on every workspace upload — same cost, real coverage, and it stays inside any rate cap.
 - 👤 **Daily-spend quota gauge** (`/api/usage/tokens`) — the endpoint does not exist, but building it
   needs the admin to define what the quota IS first. A decision, then a small build.
 - ⏳ **Cache TTL jitter** (admin-requested 2026-08-08: "kabhi to pad sakti hai, roadmap me likh do") —

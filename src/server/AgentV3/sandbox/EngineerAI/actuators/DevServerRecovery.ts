@@ -20,6 +20,7 @@ export type DevServerFailureCause =
   | 'db_engine_unavailable' // the app needs a database ENGINE the sandbox cannot start (MongoDB, MySQL, Redis…)
   | 'db_client_missing' // a script shells out to psql/createdb/pg_dump, which this PostgreSQL does not ship
   | 'missing_credential' // the app kills itself at boot because a USER-supplied key isn't set yet
+  | 'missing_session_secret' // express-session has no secret — the platform env that supplied it wasn't imported
   | 'code_error'      // a syntax/transform error in the generated source — a restart can NEVER fix it
   | 'out_of_memory'   // the process was OOM-killed ("JavaScript heap out of memory" / "Killed")
   | 'crash'           // the process exited/crashed with no more specific signal
@@ -248,6 +249,9 @@ function recoveryFor(cause: DevServerFailureCause): DevServerRecovery {
     // missing tool. The SCRIPT must use the database client the app already has.
     case 'db_client_missing': return 'code_fix';
     case 'missing_credential': return 'code_fix'; // the key is still unset on every restart — only the SOURCE can stop crashing
+    // The secret is not coming back on a restart either: it lived in a .env we deliberately never
+    // import. Only the SOURCE can stop every request 500-ing.
+    case 'missing_session_secret': return 'code_fix';
     case 'code_error': return 'code_fix'; // a restart cannot fix a syntax error — the source must change
     case 'out_of_memory': return 'plain_retry';
     case 'crash': return 'plain_retry';
@@ -292,6 +296,34 @@ export function missingCredentialFromLog(log: string): string | null {
     if (name && name !== 'DATABASE_URL') return name;
   }
   return null;
+}
+
+/**
+ * TRUE when the app's session middleware has no secret.
+ *
+ * ADMIN REPORT 2026-08-13 (zip import of a Replit-exported app). The boot log said, in as many words:
+ *
+ *     express-session deprecated req.secret; provide secret option at …/replitAuth.ts
+ *     … secret option required for sessions
+ *
+ * and the verdict the user was shown said the opposite — "this is common for a full-stack app whose
+ * client routes aren't served (only its API)". Not a routing problem at all. We printed the real cause
+ * directly beneath a sentence that guessed a different one.
+ *
+ * WHY THIS IS A CLASS AND NOT ONE APP. Exports from Replit, Heroku and Railway lean on a
+ * platform-provided session secret, and NavBharatAI deliberately never imports `.env` files
+ * (SECRET_FILE_RE — we do not take somebody's secrets). So the secret is missing by DESIGN on every
+ * such import, and the app 500s on its very first request while the port looks perfectly healthy.
+ *
+ * `missingCredentialFromLog` cannot catch it: that one extracts an UPPER_SNAKE variable NAME, and this
+ * message contains no name at all — the library is describing its own option, not an env var. Hence a
+ * separate detector rather than a looser pattern in that one, which would cost it the precision its
+ * header promises. The phrase is express-session's own fixed wording, so matching it is exact. PURE.
+ */
+export function sessionSecretMissing(log: string): boolean {
+  const text = stripAnsi(log || '').slice(-8000);
+  return /secret option required for sessions/i.test(text)
+    || /express-session\b[\s\S]{0,120}\bprovide secret option/i.test(text);
 }
 
 /**
@@ -443,6 +475,13 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
       ...make('db_engine_unavailable', `The app is trying to reach ${engine.label}, which this preview cannot start — only PostgreSQL can be started here. Connect a ${engine.label} database (Settings → App Settings → Database), or switch the app to a database available in the preview.`),
       dbEngine: engine.id,
     };
+  }
+
+  // BEFORE the generic credential scan: this failure carries no variable name, so that scan cannot see
+  // it, and after it the log would fall through to a bare 'crash' with nothing useful to say.
+  if (sessionSecretMissing(text)) {
+    return make('missing_session_secret',
+      'The app\'s login sessions have no secret key, so every page request fails. That key normally comes from an environment file, and NavBharatAI never imports those — your secrets stay yours. Fix the SOURCE: give the session middleware a secret that reads from the environment with a generated development fallback (e.g. `secret: process.env.SESSION_SECRET || crypto.randomUUID()`), so the app runs here and still uses your real key once you add SESSION_SECRET in Settings → App Settings → Secrets & API Keys.');
   }
 
   const missingCred = missingCredentialFromLog(text);

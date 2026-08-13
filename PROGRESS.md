@@ -32224,3 +32224,66 @@ settle — recorded here so the next session does not mistake them for available
 - **Daily spend-quota gauge** — needs the admin to define what the quota IS. A decision, then a small build.
 - **Cache TTL jitter** — the roadmap itself says do not build it until one of its four named triggers is
   true, and none is. Building it now would cost determinism and buy nothing measurable.
+## 2026-08-13 — AUTOPSY of build 79d0e3a4: my own failover told the user a lie
+
+Admin sent a screenshot + report. Two findings, and the first one is mine.
+
+### ✅ What worked
+The preview auto-failover shipped in #2026 FIRED in production, exactly as designed. The banner read:
+*"The in-browser preview could not load this app's packages, so I switched you to the live server."*
+
+### ❌ What it switched them TO
+"Closed Port Error — The sandbox is running but there's no service running on port 3000. Connection
+refused on port 3000." So the user was moved from one broken preview to another — and my notice ended
+with **"that is your app really running"**, which was FALSE.
+
+Worse, the system already knew: the same build's own release gate recorded *"NOT established: no live
+preview was ever available, so nothing here was proven to RUN"*. The truth was in the report while the
+screen asserted the opposite.
+
+### ROOT CAUSE — and it was already written down in this repo
+`shouldFailoverToLive` gated on `hasLiveUrl`: a URL. **A preview URL is PERMANENT while the service
+behind it is EPHEMERAL.** `previewAutoReboot.ts` — a file I read while building this — says exactly
+that, in a comment about a past bug: *"URL presence was being used as liveness. Liveness must come from
+the server's REAL health probe."* I repeated a documented mistake, in a module whose entire purpose was
+honesty about preview state.
+
+### Fix
+- `LiveFailoverSignals.liveHealthy: boolean | null` — the server's real verdict. The failover now
+  requires a CONFIRMED yes; an unanswered probe (`null`) is not a yes, and a port that answers while
+  serving a 404 is not one either (`status === 'live' && serving !== false`, both required).
+- Probed FRESH at failover time rather than read from polling state — the failover is a rare event and a
+  stale "healthy" is precisely the wrong thing to act on.
+- `noLiveRescueNotice()` for when nothing can rescue them: states both facts, points at Diagnose, and
+  reassures that the files are safe. Never moves them to a second broken view just to look busy.
+- Tests lock all three: no failover on `false`, none on `null`, and the notice may not contain
+  "really running".
+
+### 🚨 The BIGGER root cause — NOT mine to close alone, recorded honestly (rule 6)
+**Three different port numbers in one build, none of which agreed:**
+| Source | Port |
+|---|---|
+| What the agent actually started | **5000** (`"Server port 5000 पर चल रहा है!"`) |
+| What the service graph recorded | **3001** (`SERVICE_GRAPH_SINGLE: rest-express (backend on port 3001)`) |
+| What the preview URL pointed at | **3000** |
+
+`oneShotDevPort('vite-react')` returns 5173, so 3000 came from a full-stack heuristic; the agent then
+started the real server on 5000; the graph believed 3001. **The preview port is GUESSED (or taken from
+whatever the model passes to `update_preview`) instead of being taken from what the sandbox actually
+observed listening** — and a real detector already exists (`"dev server is UP on port N"`, parsed at
+agentv3.ts:1676). The infrastructure for the truth is present and the preview does not consult it.
+
+Not fixed in this change: it touches the build loop's port plumbing broadly, another session is
+actively working in this area (they shipped `zipUploadStore.ts` and #2303 in the last day), and a
+half-done port change would break previews that currently work. Recorded here so it is closed properly
+rather than patched cosmetically.
+
+### Other unresolved items in the same report (for the record, not all actionable here)
+- `TIME_TO_FIRST_CALL`: **293s** of preparation before the first model call — sandbox setup, restore,
+  install and secrets, all before any work starts.
+- A credential appeared in a `SANDBOX_CMD_FAILED` line and WAS redacted (`[REDACTED:credential]`) — the
+  redaction is working.
+- 14 × `INTEGRITY_UNUSED_DEP` and 2 × `ARCHITECTURE_INVARIANT_VIOLATED` on an imported third-party
+  project: these are the user's own pre-existing issues, correctly reported rather than "fixed".
+- The build ended `ok: false` with summary "Build stopped by the user" — the user gave up. That is the
+  honest read, and it is the strongest signal in the whole report.

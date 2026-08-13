@@ -22,6 +22,22 @@ export interface LiveFailoverSignals {
   mode: 'live' | 'inbrowser';
   /** A live preview URL exists (this session's `url` or one recovered by Diagnose). */
   hasLiveUrl: boolean;
+  /**
+   * The server's REAL health verdict for that URL — `true` only when something is genuinely serving
+   * there. `null` means the probe has not answered yet (never assume either way from silence).
+   *
+   * ROOT CAUSE (admin report 2026-08-13, build 79d0e3a4). The first version of this module gated the
+   * failover on `hasLiveUrl` alone, and a preview URL is PERMANENT while the service behind it is
+   * EPHEMERAL. So a broken in-browser preview handed the user to a live server that was serving
+   * nothing — "Closed Port Error … Connection refused on port 3000" — while the notice claimed "that
+   * is your app really running". The build's own release gate had already recorded "no live preview
+   * was ever available": the system knew, and this screen contradicted it.
+   *
+   * Worse, that exact mistake was already written down in this codebase. `previewAutoReboot.ts` says:
+   * "URL presence was being used as liveness. Liveness must come from the server's REAL health probe."
+   * This field is that lesson applied here, where it should have been from the start.
+   */
+  liveHealthy: boolean | null;
   /** Which surface reported the error. A live-server error must never bounce back to live. */
   errorSource: 'in-browser' | 'live';
   /** The once-per-workspace guard — a failover must never fight the user or loop. */
@@ -44,9 +60,24 @@ export function shouldFailoverToLive(s: LiveFailoverSignals): boolean {
   if (s.mode !== 'inbrowser') return false;
   if (s.errorSource !== 'in-browser') return false;
   if (!s.hasLiveUrl) return false;
+  // A URL is not a running service. Move the user only when the server has CONFIRMED something is
+  // serving there — an unanswered probe (null) is not a yes, and moving them to a second broken view
+  // is worse than leaving them on the first, because it also costs them their trust in the switch.
+  if (s.liveHealthy !== true) return false;
   if (s.alreadyFailedOver) return false;
   if (s.userPickedInBrowser) return false;
   return true;
+}
+
+/**
+ * What to say when the in-browser preview failed and the live server CANNOT rescue it.
+ *
+ * The alternative — staying silent — leaves the user staring at a red wall with no idea whether
+ * anything is wrong on our side or theirs. This states both facts plainly and points at the one action
+ * that actually helps, without claiming anything that has not been verified.
+ */
+export function noLiveRescueNotice(): string {
+  return 'The in-browser preview could not load this app’s packages, and the live server is not serving anything yet either. Tap Diagnose to start it — nothing here means your files are lost.';
 }
 
 /**

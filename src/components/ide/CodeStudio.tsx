@@ -14,7 +14,8 @@ import { GitPanel } from './GitPanel';
 import { PreviewPanel } from './PreviewPanel';
 import { PreviewSurface } from '../agentv3/PreviewSurface';
 import { uploadZipProject } from '../../lib/zipProjectUpload';
-import { zipReplaceWarningFor, looksLikeZip } from '../../lib/zipReplaceWarning';
+import { zipReplaceWarningFor } from '../../lib/zipReplaceWarning';
+import { zipAccept, acceptZipPick, notZipMessage } from '../../lib/zipPicker';
 import { auth } from '../../App';
 import { AgentV3MiniChat } from './AgentV3MiniChat';
 import { SecurityScan } from './SecurityScan';
@@ -493,7 +494,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const handleZipUpload = async (file: File) => {
     if (zipBusy) return;
     setZipError('');
-    if (!looksLikeZip(file)) { setZipError(`${zipText.failed}: .zip`); return; }
+    // The picker now asks broadly (Android hides archives behind ANY filter), so the real check moved
+    // here and reads the file's MAGIC BYTES rather than its name — a photo picked by mistake is caught,
+    // and a genuine archive whose bytes cannot be read still gets in on its name. See lib/zipPicker.ts.
+    const pick = await acceptZipPick(file);
+    if (!pick.ok) { setZipError(notZipMessage(file.name)); return; }
     const workspaceId = v3Preview?.workspaceId || v3WorkspaceId;
     if (!workspaceId || !v3UserId) { setZipError(zipText.failed); return; }
 
@@ -1078,7 +1083,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
       <input
         ref={zipInputRef}
         type="file"
-        accept=".zip,application/zip,application/x-zip-compressed"
+        accept={zipAccept()}
         className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleZipUpload(f); }}
       />
@@ -1408,6 +1413,20 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
              </button>
            ))}
          </div>
+
+         {/* Upload ZIP lived ONLY in the mobile bottom-bar "More" menu, so on a desktop there was no
+             way to bring an existing project in at all (admin report 2026-08-13). Here it is visible
+             at every size; the mobile menu entry stays, because a phone user never sees this bar. */}
+         {!isMobile && (
+           <button
+             onClick={() => { setZipError(''); setZipConfirmOpen(true); }}
+             title={zipText.menuLabel}
+             className="flex items-center gap-1.5 px-2 h-6 rounded-md border border-white/5 bg-black/20 hover:bg-black/30 hover:border-white/10 text-[10px] font-medium text-white/60 hover:text-white transition-all shrink-0"
+           >
+             <UploadCloud className="w-3 h-3" />
+             {zipText.menuLabel}
+           </button>
+         )}
 
          <div className="flex-1 flex justify-center mx-4">
             <button

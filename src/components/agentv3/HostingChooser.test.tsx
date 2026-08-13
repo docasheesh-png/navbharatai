@@ -34,7 +34,7 @@ describe('HostingChooser — the two-path Publish surface', () => {
     const html = render([P('firebase', 'Firebase Hosting', true)]);
     // firebase is the NavBharatAI path, not a BYO row
     expect(html).not.toContain('Publish to Firebase Hosting');
-    expect(html).toContain('No other providers connected yet'); // BYO empty state
+    expect(html).toContain('No provider connected yet'); // BYO empty state
   });
 
   it('disables the NavBharatAI publish button when our host is not configured', () => {
@@ -96,6 +96,32 @@ describe('HostingChooser — "I host it myself" (BYO hosting via own-repo git st
   });
 });
 
+// "Make an Android app" — the third Publish path opens the built-in APK Builder, pre-targeted to this
+// app (admin 2026-08-13: publish chooser ke teesre option se APK builder khule).
+describe('HostingChooser — "Make an Android app" (APK) path', () => {
+  it('always offers the Android APK card as the third path', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    expect(html).toContain('Make an Android app');
+    expect(html).toContain('Open APK Builder');
+    expect(html).toContain('installable Android app (.apk)');
+    expect(html).toContain('paid step'); // honest about the cost up front
+  });
+
+  it('the APK button is disabled when no opener is wired (no dead action)', () => {
+    // Without onOpenApkBuilder there is nothing to open, so the button must be disabled, not a fake click.
+    const html = render([P('firebase', 'Firebase Hosting', true)]); // no onOpenApkBuilder passed
+    const btnIdx = html.indexOf('Open APK Builder');
+    expect(html.slice(0, btnIdx)).toMatch(/disabled/);
+  });
+
+  it('self-hosting now lives INSIDE "Host somewhere else" (folded in, not a separate card)', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    // Both sub-choices of path 2 are present in one card.
+    expect(html).toContain('We deploy to your provider');
+    expect(html).toContain('I host it myself');
+  });
+});
+
 // ADMIN REPORT 2026-08-02 (phone, Publish surface): "niche scroll nahi ho raha. iske sabhi button
 // farzi hai, koi bhi kaam nahi kar raha hai." Two real defects, both locked here.
 describe('HostingChooser — the sheet must scroll on a phone (clipped-content fix)', () => {
@@ -128,10 +154,12 @@ describe('HostingChooser — a publish that cannot start SAYS SO (no dead button
         onDeploy={() => 'Build an app first — there is nothing to publish yet.'}
         onClose={() => { closed = true; }}
         busy={false}
+        onOpenApkBuilder={() => {}}
       />,
     );
-    // Static render can't click, so assert the wiring that makes it possible: the button is enabled
-    // (a real action), and the chooser owns an error surface for the returned reason.
+    // Static render can't click, so assert the wiring that makes it possible: every action is enabled
+    // (a real action — NavBharatAI publish, and the APK opener), and the chooser owns an error surface
+    // for the returned reason.
     expect(html).toContain('Publish on NavBharatAI');
     expect(html).not.toContain('disabled=""');
     expect(closed).toBe(false); // onClose is never called just by rendering

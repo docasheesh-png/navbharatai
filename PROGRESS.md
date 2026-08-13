@@ -32088,3 +32088,27 @@ Note: this is prompt-level (the greeting is model-emitted, so the instruction is
 binary "do not greet again" is far stronger than the old fuzzy rule. Streaming makes a deterministic
 post-strip risky, so it was deliberately not added; if a slip is ever reported, a buffered strip is the
 follow-up.
+
+---
+
+## 2026-08-13 — Publish chooser restructured: self-host folded in, new "Make an Android app" (APK)
+
+Admin request: change the v5.0 Publish chooser's three options to (1) Host on NavBharatAI, (2) Host somewhere
+else — with "I host it myself" as a sub-choice inside it, (3) Make an Android app (APK) → opens the APK
+builder. UI in English.
+
+Implemented in `HostingChooser.tsx` + wired in `AgentV3Panel.tsx`:
+- Card 1 "Host on NavBharatAI" — unchanged.
+- Card 2 "Host somewhere else" — now ONE card with TWO clear sub-choices: (a) "We deploy to your provider"
+  (the existing Vercel/Netlify/Cloudflare/GitHub-Pages BYO list), (b) "I host it myself (Set up)" — the
+  existing own-repo-git-PR self-host flow, folded in (same `selfhost` sub-view, GitHub connect + repo).
+- Card 3 "Make an Android app" (NEW) — opens the existing, real APK Builder via
+  `navbharat:navigate {view:'apk'}`, which already reads `currentProSessionId`, so it lands **pre-targeted
+  to this exact app** (user never re-picks). Honest card: built on your own GitHub, a paid step ("the
+  builder shows the price first") — not a fake button (rule 2). New optional prop `onOpenApkBuilder`; the
+  button is disabled when no opener is wired (no dead action).
+
+AppKnowledgeBase PUBLISH/HOSTING CHOOSER entry updated to the new three-way structure so every AI describes
+it correctly (mandatory sync rule). HostingChooser.test.tsx: BYO empty-state text updated, + new tests for
+the APK card (present, honest cost, disabled without opener) and that self-host now lives inside "Host
+somewhere else". Gate: tsc clean both.

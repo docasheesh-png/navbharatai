@@ -1,3 +1,51 @@
+> # ⛔ SHELVED — DO NOT MERGE (2026-08-13)
+>
+> **The work is complete and the tests are green.** This is not abandoned or half-built — it is
+> finished code held back on purpose. Two reasons, and both must be cleared before merging.
+>
+> ### 1. Three service-account holes — security, must be fixed first
+>
+> Nothing here sets a service account, so every piece runs as GCP's **default** account, which
+> carries the **Editor** role on the whole project. Any user's uploaded code can read the token from
+> the metadata server and use it.
+>
+> | # | Where | What is missing |
+> |---|---|---|
+> | 1 | `cloudRunBackend.ts` → `cloudRunServiceBody` | No `serviceAccount` on the Cloud Run service — the user's **running app** gets Editor. |
+> | 2 | `cloudRunBackend.ts` → `buildStartBuildRequest` | No `serviceAccount` on the Cloud Build — and the generated Dockerfile runs `npm ci` **without** `--ignore-scripts`, so a `postinstall` in the user's `package.json` executes arbitrary code **inside the build**. This one fires by design, before anything is even deployed. |
+> | 3 | This document, "Admin setup" step 1 | It says the GCP project *"can be the platform's existing one"*. If an admin follows that literally, the two holes above point at `gen-lang-client-0866594388` — the project holding **every user's Firestore data, wallets, encrypted secrets, the App Store bucket and the production service**. |
+>
+> **The fix (roughly 40 minutes):** a dedicated runtime SA and a dedicated build SA, both with
+> **zero roles**, made REQUIRED in the type so a future edit cannot omit them; deploy refuses
+> honestly when they are unset; and this document must say the project MUST be separate.
+> Do **not** reach for `--ignore-scripts` instead — `backendDeployConfig.ts` is shared with the BYO
+> tier, and real apps (Prisma, native modules) need install scripts. A powerless token is the fix.
+>
+> ⚠️ The green test suite did **not** catch any of this: the tests assert the request shapes that
+> ARE built, and cannot see a field that was never there. The fix must ship with tests that fail
+> when a service account is absent.
+>
+> ### 2. Product decision — the cheaper path comes first
+>
+> Reviewed with the admin on 2026-08-13. The honest sizing: roughly **7–8 of every 10 apps need no
+> separate backend at all** — a frontend plus Supabase (database + auth + storage + generated API)
+> is a complete app. This tier serves the remaining 20–30%, and it turns NavBharatAI from a tool
+> into a hosting provider, which brings a support pager, Indian IT-Rules intermediary duties, and an
+> abuse surface on our own domain. None of those are undone by fixing the service accounts.
+>
+> So the agreed order is: **make the Supabase-first path the default** (shrinking the 20–30%), and
+> **smooth the BYO Render flow** (its "go make an account and paste a key" step is the real drop-off).
+> Both fix the same user pain with none of the above risk.
+>
+> ### Build this when all three are true
+>
+> 1. Real demand — 10+ users a month visibly stalling at the backend-deploy step.
+> 2. The Supabase-first work has shipped, so whoever is left genuinely needs a server.
+> 3. The admin accepts being a hosting provider: support, legal exposure, abuse handling.
+>
+> On 2026-08-13 none of the three were true. The branch is kept because the work is sound and this
+> decision may reverse — re-read this block first, then fix the three holes, then merge.
+
 # Managed Backend Hosting — "Deploy to NavBharatAI Cloud"
 
 User backends (Node/Express + PostgreSQL) running on **NavBharatAI's own GCP account**, paid by the

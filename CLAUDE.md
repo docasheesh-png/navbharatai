@@ -1015,7 +1015,21 @@ jo select kiya hai, wahi backend par provider call ho, koi aur nahi"). Enforced 
 | **Judge / Reviewer** | **Grok** | **Grok or Sonnet** | **Opus** |
 | Plan phase | Grok | Grok/Sonnet | **Opus** |
 | Vision (image describe) | Gemini/Grok (cheap) | Gemini/Grok | Claude/Opus |
-| Heal gates (integrity / preview / C9 / runtime) | **FLAGSHIP `glm-5.2`/`kimi-k2.7-code` — the TOP GLM/Kimi (admin 2026-08-02: "weak me last me GLM/Kimi ke top module"). NEVER Sonnet/Opus. A heal only runs on a FAILING build, so the flagship cost is bounded to failing weak builds; the main weak build stays cheapest-first. Kill switch `AGENTV3_WEAK_FLAGSHIP_HEAL=off` reverts to the old cheap-coder heal.** | Claude/Sonnet | Opus |
+| Heal gates (integrity / preview / C9 / runtime) | **FLAGSHIP `glm-5.2`/`kimi-k2.7-code` — the TOP GLM/Kimi (admin 2026-08-02, RE-CONFIRMED 2026-08-13: "weak tier ke heal me flagship use karo"). NEVER Sonnet/Opus. A heal only runs on a FAILING build, so the flagship cost is bounded to failing weak builds; the main weak build stays cheapest-first. Kill switch `AGENTV3_WEAK_FLAGSHIP_HEAL=off` → the free cheapest-first ladder (flash → cheap coder → flagship LAST).** ⚠️ **`off` IS NOT THE CHEAPER OPTION — see the note below.** | Claude/Sonnet | Opus |
+
+⚠️ **`AGENTV3_WEAK_FLAGSHIP_HEAL=off` WAS A COST TRAP (found and fixed 2026-08-13, while answering the
+admin's "mera kharcha kam ho").** The `off` branch returned `{ claudeFirst: false, cheapOnly: true }` with
+**no `allowCheapFloor`** — and that does NOT mean "cheap coders instead of the flagship". `buildTurnRunner`
+only builds the GLM/Kimi floor when `allowCheapFloor` is set, and `cheapOnly` self-disables without one
+(`cheapOnly && floorRunners.length > 0`), so the weak heal chain collapsed to **VERTEX → GEMINI → Haiku with
+no GLM/Kimi in it at all**. On the tier NavBharatAI pays for ITSELF, that made the "cheaper-sounding" switch
+the **most expensive** rung in the stack: gemini-pro **$10/MTok out** and Haiku **$5**, against flagship
+glm-5.2's **$4.40** and kimi-k2.7's **$4.00** (`providerRates.ts`). The branch now carries
+`allowCheapFloor: true, free: true`, so it does what its name says.
+
+**COST CONCLUSION, FOR THE RECORD: on a weak heal the FLAGSHIP GLM/Kimi IS the cheap choice — turning it off
+costs the admin MORE, not less.** Test-locked in `agentv3.test.ts`: BOTH branches must keep a real floor, so
+no future edit can silently route a weak heal to Gemini/Haiku again.
 
 ### Env model-id defaults (tune the exact ids here — the code reads these, so no redeploy to change a rung)
 - Free ladder (LIVE, Slice 3): flash-first — `AGENTV3_FREE_GLM_MODEL` (default `glm-4.7-flash,glm-4.7,glm-5.2`),

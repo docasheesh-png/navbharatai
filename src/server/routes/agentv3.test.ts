@@ -387,10 +387,31 @@ describe('healRunnerRoutingOpts — free heal is cheap-only (no Claude); paid/po
     delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; // default on
     expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, flagship: true });
   });
-  it('FREE build with the kill switch OFF → reverts to plain cheap-only (no flagship floor)', () => {
+  it('FREE build with the kill switch OFF → the free CHEAPEST-FIRST ladder, still with a real floor', () => {
+    /**
+     * THE TRAP THIS FIXES (admin 2026-08-13). This used to assert `{ claudeFirst: false, cheapOnly: true }`
+     * — no `allowCheapFloor` — and that does NOT mean "cheap coders instead of the flagship".
+     * `buildTurnRunner` only builds the GLM/Kimi floor when `allowCheapFloor` is set, and `cheapOnly`
+     * self-disables without one, so the weak heal chain collapsed to VERTEX → GEMINI → Haiku with no
+     * GLM/Kimi in it at all.
+     *
+     * Which made the "cheaper" switch the MOST EXPENSIVE option, on precisely the tier NavBharatAI pays
+     * for itself: gemini-pro is $10/MTok out and Haiku $5, against glm-5.2's $4.40 and kimi-k2.7's $4.00.
+     * The flag now does what its name says.
+     */
     process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = 'off';
-    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true });
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true });
     expect(weakFlagshipHealEnabled()).toBe(false);
+  });
+
+  it('BOTH weak-heal settings keep a real GLM/Kimi floor — neither can silently route to Gemini/Haiku', () => {
+    // The property that matters more than either branch: `allowCheapFloor` is what makes a floor exist
+    // at all, so a weak heal must never be configured without it. This is the assertion that would have
+    // caught the trap above.
+    for (const v of ['on', 'off']) {
+      process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = v;
+      expect(healRunnerRoutingOpts(true), v).toMatchObject({ allowCheapFloor: true, free: true, cheapOnly: true, claudeFirst: false });
+    }
   });
   it('PAID / POWER build → Claude-first, not cheap-only (UNCHANGED — flagship weak-heal never touches paid)', () => {
     expect(healRunnerRoutingOpts(false)).toEqual({ claudeFirst: true, cheapOnly: false });

@@ -2165,7 +2165,18 @@ export function healRunnerRoutingOpts(
   if (!freeTierBuildActive) return { claudeFirst: true, cheapOnly: false };
   return weakFlagshipHealEnabled()
     ? { claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, flagship: true }
-    : { claudeFirst: false, cheapOnly: true };
+    // KILL-SWITCH TRAP FIXED (admin 2026-08-13). This branch used to return `{ claudeFirst: false,
+    // cheapOnly: true }` with NO `allowCheapFloor` — which does NOT mean "cheap coders instead of the
+    // flagship". `buildTurnRunner` only builds the GLM/Kimi floor when `allowCheapFloor` is set, and
+    // `cheapOnly` is then self-disabled (`cheapOnly && floorRunners.length > 0`), so the weak heal chain
+    // collapsed to VERTEX → GEMINI → Haiku with NO GLM/Kimi in it at all.
+    //
+    // That made the switch cost MORE, not less, on exactly the tier NavBharatAI pays for itself:
+    // gemini-pro is $10/MTok out and Haiku $5, against the flagship glm-5.2's $4.40 and kimi-k2.7's
+    // $4.00 (providerRates.ts). A flag named "no flagship heal" that silently routes to the most
+    // expensive rung in the stack is a trap, so it now does what its name says — the SAME free
+    // cheapest-first ladder the main weak build uses (flash → cheap coder → flagship LAST).
+    : { claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true };
 }
 
 /**

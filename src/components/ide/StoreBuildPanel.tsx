@@ -89,9 +89,13 @@ export interface StoreBuildPanelProps {
 // TWO Android paths (admin 2026-08-02). The APK one needs NO secrets — Gradle signs a debug build
 // with Android's universal key — so a non-technical user can hold their app today with one click. The
 // AAB one is for Google Play and genuinely needs the user's own signing key.
-type BuildKind = 'apk' | 'aab';
+type BuildKind = 'apk' | 'aab' | 'ipa';
 const workflowFor = (kind: BuildKind): ShipWorkflowFile =>
-  kind === 'apk' ? SHIP_WORKFLOWS.androidApk : SHIP_WORKFLOWS.androidAab;
+  kind === 'apk' ? SHIP_WORKFLOWS.androidApk
+    : kind === 'aab' ? SHIP_WORKFLOWS.androidAab
+      : SHIP_WORKFLOWS.iosIpa;
+/** iOS produces no installable file for the user — a green build lands in TestFlight (Apple's rule). */
+const isIos = (kind: BuildKind): boolean => kind === 'ipa';
 
 // HOW FAR ALONG ARE WE (admin 2026-08-03: "user ko bas loading % show ho").
 //
@@ -109,6 +113,12 @@ export function buildProgressPercent(attempt: number, elapsedMs: number): number
   const [start, end] = ATTEMPT_BANDS[Math.min(attempt, ATTEMPT_BANDS.length - 1)];
   const share = Math.min(Math.max(elapsedMs, 0) / TYPICAL_BUILD_MS, 1) * 0.97;
   return Math.round(start + (end - start) * share);
+}
+
+/** m:ss for the live elapsed clock. */
+function fmtDuration(totalSec: number): string {
+  const s = Math.max(0, Math.floor(totalSec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 function fmtSize(bytes: number): string {
@@ -142,6 +152,10 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
    * remit — and until now that left the user holding an error message with nothing to press.
    */
   const [fixReport, setFixReport] = useState('');
+  // How long the current build has been running — shown alongside the steps so the wait feels honest
+  // ("2:14 · usually about 5 minutes") instead of a bar that could sit still.
+  const [buildStartedAt, setBuildStartedAt] = useState(0);
+  const [elapsedSec, setElapsedSec] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const [busyNote, setBusyNote] = useState('');
   const [downloading, setDownloading] = useState('');
@@ -150,6 +164,14 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
   const liveRef = useRef(true);
   useEffect(() => () => { liveRef.current = false; }, []);
+
+  // A once-a-second elapsed clock while a build runs, so the wait has an honest number even in the gaps
+  // between the 5-second status polls. Stops the moment the build leaves the 'building' phase.
+  useEffect(() => {
+    if (phase !== 'building' || !buildStartedAt) return;
+    const t = setInterval(() => setElapsedSec(Math.max(0, Math.round((Date.now() - buildStartedAt) / 1000))), 1000);
+    return () => clearInterval(t);
+  }, [phase, buildStartedAt]);
 
   const ghHeaders = useCallback(async (extra?: Record<string, string>) => {
     const h = await authedHeaders(extra);
@@ -193,12 +215,12 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
    * cycle instead of watching for a run that was never created — the exact failure this feature shipped
    * with, where a rejected dispatch still left the panel spinning.
    */
-  const dispatch = useCallback(async (workflow: ShipWorkflowFile): Promise<boolean> => {
+  const dispatch = useCallback(async (workflow: ShipWorkflowFile, inputs?: Record<string, string>): Promise<boolean> => {
     if (!setup) return false;
     const res = await fetch('/api/mobile-ship/trigger', {
       method: 'POST',
       headers: await ghHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ owner: setup.owner, repo: setup.repo, ref: setup.branch, workflow }),
+      body: JSON.stringify({ owner: setup.owner, repo: setup.repo, ref: setup.branch, workflow, ...(inputs ? { inputs } : {}) }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -238,7 +260,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       setProgressNote(attempt === 0 ? 'Sending your app to be built…' : 'Starting the build again…');
       setProgress(ATTEMPT_BANDS[attempt][0]);
 
-      if (!(await dispatch(workflow))) { if (liveRef.current) setPhase('ready'); return; }
+      // iOS has no installable file to hand back; a green build goes to the user's TestFlight, so we ask
+      // the workflow to upload there (Apple's rule). Android just builds the file.
+      if (!(await dispatch(workflow, isIos(kind) ? { upload: 'true' } : undefined))) { if (liveRef.current) setPhase('ready'); return; }
       if (!liveRef.current) return;
       setProgressNote('Building your app…');
 
@@ -292,9 +316,17 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       }
       seen.add(finished.id);
 
-      // ── Finished successfully: fetch what it produced ──
+      // ── Finished successfully ──
       if (finished.conclusion === 'success') {
         setProgress(96);
+        if (isIos(kind)) {
+          // iOS has no file to collect — it went to TestFlight. Straight to the honest done state.
+          setProgressNote('Sending to TestFlight…');
+          if (!liveRef.current) return;
+          setProgress(100);
+          setPhase('built');
+          return;
+        }
         setProgressNote('Collecting your app file…');
         try {
           const aRes = await fetch(
@@ -363,6 +395,8 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     setRun(null);
     setSteps([]);
     setAttempt(0);
+    setBuildStartedAt(Date.now());
+    setElapsedSec(0);
     setProgress(ATTEMPT_BANDS[0][0]);
     setProgressNote('Sending your app to be built…');
     void runCycle(kind);
@@ -573,6 +607,44 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
               </button>
             </div>
 
+            {/* iPhone / TestFlight. Apple LEGALLY requires a Mac + an Apple signing identity, so this path
+                needs the user's own Apple credentials as repository secrets — exactly like the Play Store
+                needs a keystore. A successful build goes straight to TestFlight (there is no installable
+                file for the user to download — Apple's rule), and the panel says so honestly. */}
+            {setup.requiredSecrets.ios.length > 0 && (
+              <div className="rounded-lg border border-sky-500/25 p-3 text-xs leading-relaxed"
+                   style={{ background: 'rgba(56,189,248,0.07)' }}>
+                <p className="flex items-center gap-1.5 text-sky-300 font-semibold mb-1.5">
+                  <Key size={13} /> Building for iPhone? What only you can do
+                </p>
+                <p className="text-white/60">
+                  Apple only lets an app reach an iPhone through TestFlight or the App Store, and only from
+                  a Mac with your own Apple signing identity. Add your Apple credentials to the repository
+                  as {setup.requiredSecrets.ios.length} secrets — they are yours, and NavBharatAI never
+                  sees them. A successful build is sent to your TestFlight (no file to download).
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {setup.requiredSecrets.ios.map((s) => (
+                    <li key={s.name} className="text-white/55">
+                      <span className="text-white/85 font-mono text-[11px]">{s.name}</span>
+                      {s.what ? <> — {s.what}</> : null}
+                    </li>
+                  ))}
+                </ul>
+                {onOpenGuide && (
+                  <button onClick={onOpenGuide} className="mt-2 text-indigo-400 hover:text-indigo-300 font-medium">
+                    Show me how, step by step →
+                  </button>
+                )}
+                <button
+                  onClick={() => build('ipa')}
+                  className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold border border-sky-500/40 text-sky-200 hover:bg-sky-500/10 transition-colors"
+                >
+                  <Rocket size={14} /> Build for iPhone (TestFlight)
+                </button>
+              </div>
+            )}
+
             {/* Second route to the same file — straight to their own repo on GitHub. */}
             <a
               href={`https://github.com/${setup.owner}/${setup.repo}/actions`}
@@ -623,9 +695,13 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                 ))}
               </ul>
             )}
-            <p className="text-xs text-white/40 mt-3 leading-relaxed">
-              This takes a few minutes and runs on its own — if anything goes wrong NavBharatAI fixes it
-              and starts again. You can leave this screen open.
+            {/* An honest clock: how long it has been running, against how long these builds usually take. */}
+            <p className="text-xs text-white/55 mt-3 tabular-nums">
+              {fmtDuration(elapsedSec)} elapsed · usually about {isIos(buildKind) ? '8' : '5'} minutes
+            </p>
+            <p className="text-xs text-white/40 mt-1 leading-relaxed">
+              This runs on its own — if anything goes wrong NavBharatAI fixes it and starts again. You can
+              leave this screen open.
               {attempt > 0 && ` (Attempt ${attempt + 1} of ${MAX_AUTO_ATTEMPTS}.)`}
             </p>
             {run && (
@@ -637,8 +713,33 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           </div>
         )}
 
-        {/* Step 4 — the actual file */}
-        {phase === 'built' && (
+        {/* Step 4 — the result. iOS has no installable file to download: a green build lands in the
+            user's TestFlight (Apple allows no other way to put an app on an iPhone), so we tell the truth
+            instead of showing a download button that would hand over an unusable .ipa. */}
+        {phase === 'built' && isIos(buildKind) && (
+          <div className="space-y-2">
+            <p className="flex items-center gap-1.5 text-sm text-green-400 font-semibold">
+              <CheckCircle2 size={15} /> Sent to TestFlight
+            </p>
+            <p className="text-xs text-white/55 leading-relaxed">
+              Your iPhone app was built and uploaded to TestFlight. Open App Store Connect → your app →
+              TestFlight to invite testers; internal testers get it automatically once Apple finishes
+              processing (a few minutes). An iPhone app can only be installed through TestFlight or the App
+              Store, so there is no file to download here.
+            </p>
+            <a href="https://appstoreconnect.apple.com/apps" target="_blank" rel="noreferrer"
+               className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
+              <ExternalLink size={11} /> Open App Store Connect
+            </a>
+            {run && (
+              <a href={run.url} target="_blank" rel="noreferrer"
+                 className="block text-[11px] text-white/35 hover:text-indigo-300">Watch the build details</a>
+            )}
+          </div>
+        )}
+
+        {/* Step 4 — the actual file (Android). */}
+        {phase === 'built' && !isIos(buildKind) && (
           artifacts.length > 0 ? (
             <div className="space-y-2">
               <p className="flex items-center gap-1.5 text-sm text-green-400 font-semibold">

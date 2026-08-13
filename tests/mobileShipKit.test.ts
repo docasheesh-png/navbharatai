@@ -26,12 +26,25 @@ describe('friendlyBuildStep — real build progress, in plain white-label langua
     }
   });
 
-  it('never leaks a vendor/tool name to the user (White-Label Law)', () => {
-    const raw = ['Set up Java', 'Set up Node.js', 'Run ./gradlew bundleRelease', 'npm run build', 'npx cap sync android'];
+  it('maps iOS / TestFlight steps to plain labels too (cross-platform build progress)', () => {
+    expect(friendlyBuildStep('Install CocoaPods dependencies')).toBe('Preparing the iOS project');
+    expect(friendlyBuildStep('Import the distribution certificate')).toBe('Setting up signing');
+    expect(friendlyBuildStep('Build the signed .ipa')).toBe('Compiling your iOS app');
+    expect(friendlyBuildStep('Upload to TestFlight')).toBe('Uploading to TestFlight');
+    expect(friendlyBuildStep('Select Xcode')).toBe('Getting the build machine ready');
+    // an iOS "upload to TestFlight" must NOT be mislabelled as the Android "Packaging your download"
+    expect(friendlyBuildStep('upload_to_testflight')).not.toBe('Packaging your download');
+  });
+
+  it('never leaks a vendor/tool name to the user (White-Label Law), Android or iOS', () => {
+    const raw = [
+      'Set up Java', 'Set up Node.js', 'Run ./gradlew bundleRelease', 'npm run build', 'npx cap sync android',
+      'Run xcodebuild archive', 'pod install', 'fastlane gym', 'npx cap sync ios',
+    ];
     for (const r of raw) {
       const label = friendlyBuildStep(r);
       if (label === null) continue;
-      expect(label).not.toMatch(/gradle|java|node|npm|npx|capacitor|\bcap\b|android studio|github/i);
+      expect(label).not.toMatch(/gradle|java|node|npm|npx|capacitor|\bcap\b|android studio|github|xcode|xcodebuild|fastlane|cocoapods|\bpod\b|\bgym\b/i);
     }
   });
 });

@@ -26,6 +26,7 @@
  */
 
 import { envKillSwitch } from '../lib/envFlag';
+import { importMetaPlugin, importMetaObjectSource, IMPORT_META_IDENT } from './previewImportMeta';
 
 // Lazily loaded: @babel/standalone is a ~3 MB parse, paid once per process, and only when the
 // in-browser preview is actually rendered.
@@ -108,11 +109,15 @@ export function precompileModules(modules: Record<string, string>): Record<strin
       const res = Babel.transform(code, {
         filename: path,
         presets,
-        plugins: [srcStampPlugin(path), 'transform-modules-commonjs'],
+        // importMetaPlugin runs BEFORE the commonjs transform leaves `import.meta` verbatim in the
+        // output, where `new Function` would reject it as a syntax error and kill the whole preview.
+        plugins: [srcStampPlugin(path), importMetaPlugin, 'transform-modules-commonjs'],
         sourceType: 'module',
       });
       if (typeof res?.code !== 'string') return null;
-      out[path] = res.code;
+      // Bind the identifier the plugin substituted. Declared per module (not once globally) so each
+      // module's `import.meta.url` names ITS own file, exactly as it would under a real bundler.
+      out[path] = `var ${IMPORT_META_IDENT} = ${importMetaObjectSource(path)};\n${res.code}`;
     } catch {
       // A module that fails HERE fails identically in the browser — falling back lets the existing
       // in-preview error path name the file and the reason, unchanged from today.

@@ -188,6 +188,7 @@ import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxChec
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
+import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { pickerItems } from '../../lib/reportPicker';
@@ -4884,6 +4885,12 @@ export function registerAgentV3Routes(app: Express): void {
       // project it cannot vouch for keeps today's behaviour exactly. Computed from the same `files`
       // already in hand, so it costs one pass over a map we just read — no extra I/O, no model call.
       const capability = proveBrowserRunnable(files);
+      // Config variables the app READS but that we deliberately do not hold: live .env files are
+      // excluded at the import boundary (SECRET_FILE_RE — we never import somebody's secrets), so these
+      // are undefined here exactly as they would be under Vite with an empty env. Named rather than
+      // left silent: a missing value the user can see is a known limitation, a missing value they
+      // cannot see is a feature that "looks done" and is not.
+      const envVarsUsed = viteEnvVarsUsed(files);
       // The client's own origin (sent in the body, validated to an http/https URL) is used to load
       // the self-hosted preview compiler via an absolute same-origin URL — a root-relative path
       // doesn't resolve inside the sandboxed <iframe srcDoc>, which produced "Could not load the
@@ -4905,7 +4912,7 @@ export function registerAgentV3Routes(app: Express): void {
       const fresh = req.body?.fresh === true;
       const cached = fresh ? undefined : inbrowserPreviewCache.get(cacheKey);
       if (cached && cached.hash === filesHash && Date.now() - cached.ts < INBROWSER_CACHE_TTL_MS) {
-        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason });
+        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed });
         return;
       }
       const vfs = VirtualFileSystem.fromRecord(files);
@@ -4917,7 +4924,7 @@ export function registerAgentV3Routes(app: Express): void {
         const oldest = inbrowserPreviewCache.keys().next().value;
         if (oldest !== undefined) inbrowserPreviewCache.delete(oldest);
       }
-      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason });
+      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
     }

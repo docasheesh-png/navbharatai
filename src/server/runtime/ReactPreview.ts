@@ -22,6 +22,7 @@ import { normalizePath } from '../project/ProjectModel';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { precompileModules } from './PreviewPrecompile';
 import { startDepWarmup, getWarmDepUrls, WARMUP_MAX_MODULES } from './PreviewDepWarmup';
+import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE } from './previewImportMeta';
 
 // Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
@@ -612,6 +613,19 @@ ${babelTag}
     styleEl.appendChild(document.createTextNode('\\n' + t));
   }
 
+  // The runtime twin of importMetaObjectSource (previewImportMeta.ts). The env literal is interpolated
+  // from the SAME exported constant the server path uses, so the two can never disagree about what an
+  // app sees. "hot" stays undefined on purpose — there is no HMR in a static render, and an app guarded
+  // with "if (import.meta.hot)" must take the false branch rather than register callbacks that never fire.
+  function nbaiImportMeta(p) {
+    // No regex on purpose: this whole loader is a template literal, where a backslash escape is
+    // consumed before the browser ever sees it — /^\\/+/ silently emitted the broken /^/+/ and the
+    // page stopped parsing. A plain loop cannot be mangled by the layer it is written inside.
+    var s = String(p);
+    while (s.charAt(0) === '/') s = s.slice(1);
+    return { url: 'file:///' + s, env: ${IMPORT_META_ENV_SOURCE}, hot: undefined };
+  }
+
   function requireModule(path) {
     if (cache.hasOwnProperty(path)) return cache[path].exports;
     var code = SOURCES[path];
@@ -657,10 +671,17 @@ ${babelTag}
         p.node.attributes.push(t.jsxAttribute(t.jsxIdentifier('data-nbai-src'), t.stringLiteral(v)));
       } } };
     };
+    // IMPORT.META (Phase 1b) — the browser twin of importMetaPlugin (previewImportMeta.ts). Babel's
+    // commonjs transform leaves \`import.meta\` verbatim, and \`import.meta\` inside a new Function body
+    // is a SyntaxError that kills the module and with it the whole preview — the single biggest reason
+    // an IMPORTED Vite app showed nothing. Replaced with an identifier the wrapper binds below.
+    // Hand-written here because this path builds a script as a template string and cannot import a
+    // module; previewImportMeta.test.ts locks the two together, exactly as the stamping plugin is.
+    var nbaiImportMetaPlugin = { visitor: { MetaProperty: function (p) { p.replaceWithSourceString(${JSON.stringify(IMPORT_META_IDENT)}); } } };
     // Precompiled pages: the server already ran this exact transform (PreviewPrecompile.ts) — the
     // code in SOURCES IS the compiled output, so it runs as-is. The Babel branch is the fallback
     // path and the two must stay semantically identical (locked by ReactPreview.precompile.test.ts).
-    try { transformed = PRECOMPILED ? code : Babel.transform(code, { filename: path, presets: presets, plugins: [nbaiSrcPlugin, 'transform-modules-commonjs'], sourceType: 'module' }).code; }
+    try { transformed = PRECOMPILED ? code : Babel.transform(code, { filename: path, presets: presets, plugins: [nbaiSrcPlugin, nbaiImportMetaPlugin, 'transform-modules-commonjs'], sourceType: 'module' }).code; }
     catch (e) { throw new Error('Compile ' + path + ': ' + e.message); }
     var module = { exports: {} };
     cache[path] = module;
@@ -706,7 +727,11 @@ ${babelTag}
       }
       return requireModule(resolved);
     }
-    try { (new Function('require', 'module', 'exports', transformed))(localRequire, module, module.exports); }
+    // The 4th parameter binds what the plugin substituted for \`import.meta\`. Passed as an argument
+    // rather than declared in the source so it works for BOTH paths identically: a precompiled module
+    // already carries its own \`var\` declaration (which simply shadows this), while a browser-compiled
+    // one relies on this binding.
+    try { (new Function('require', 'module', 'exports', ${JSON.stringify(IMPORT_META_IDENT)}, transformed))(localRequire, module, module.exports, nbaiImportMeta(path)); }
     catch (e) { throw new Error('Run ' + path + ': ' + e.message); }
     return module.exports;
   }

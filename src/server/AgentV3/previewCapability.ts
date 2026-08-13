@@ -27,6 +27,7 @@
 // PURE and deterministic — file map in, verdict out. No I/O, no model call, no cost.
 
 import { detectBackendPresence } from './BackendPresence';
+import { usesImportMetaGlob } from '../runtime/previewImportMeta';
 
 /** Why the browser cannot be trusted with this project. Each is a genuinely different refusal. */
 export type PreviewBlocker =
@@ -38,6 +39,8 @@ export type PreviewBlocker =
   | 'node-only-dependency'
   /** App source imports a Node builtin. See the note on NODE_BUILTIN_RE — this one has real history. */
   | 'node-builtin-import'
+  /** `import.meta.glob` — a BUILD-TIME expansion we cannot perform, so the app would render empty. */
+  | 'import-meta-glob'
   /** Nothing the in-browser renderers know how to start from. */
   | 'no-renderable-entry';
 
@@ -128,6 +131,7 @@ const BLOCKER_REASON: Record<PreviewBlocker, string> = {
   'has-backend': 'this project has its own server or database, which the live server has to run',
   'node-only-dependency': 'this project uses a package that only works on a real server',
   'node-builtin-import': 'this project’s code uses Node features that only exist on a real server',
+  'import-meta-glob': 'this project builds part of itself while it compiles, which only the live server can do',
   'no-renderable-entry': 'no page could be found to render — the live server can start it properly',
 };
 
@@ -162,6 +166,14 @@ export function proveBrowserRunnable(files: Record<string, string> | null | unde
     return typeof src === 'string' && NODE_BUILTIN_RE.test(src);
   });
   if (usesBuiltin) blockers.push('node-builtin-import');
+
+  /**
+   * `import.meta.glob` is the one part of `import.meta` a value cannot answer. Phase 1b makes
+   * `import.meta.env` work by supplying Vite's real dev values, but glob is a BUILD-TIME directory
+   * expansion: with no `glob` on the object, an app that builds its routes from one would render with
+   * no routes — working-looking and wrong, which is worse than an honest refusal.
+   */
+  if (usesImportMetaGlob(map)) blockers.push('import-meta-glob');
 
   if (!hasRenderableEntry(map, paths)) blockers.push('no-renderable-entry');
 

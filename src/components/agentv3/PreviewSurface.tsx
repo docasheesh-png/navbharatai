@@ -140,6 +140,8 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
    */
   const [browserRunnable, setBrowserRunnable] = useState<boolean | null>(null);
   const [browserBlockedReason, setBrowserBlockedReason] = useState('');
+  /** Config variables the app reads that we deliberately do not hold — see the banner below. */
+  const [envVarsUsed, setEnvVarsUsed] = useState<string[]>([]);
   const [backendReason, setBackendReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>('');
@@ -458,6 +460,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       // rule reads as "still pending" rather than a verdict it never gave.
       setBrowserRunnable(typeof data.browserRunnable === 'boolean' ? data.browserRunnable : null);
       setBrowserBlockedReason(typeof data.browserBlockedReason === 'string' ? data.browserBlockedReason : '');
+      setEnvVarsUsed(Array.isArray(data.envVarsUsed) ? data.envVarsUsed.filter((v: unknown): v is string => typeof v === 'string') : []);
       return nextHtml.length > 0;
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -1035,6 +1038,17 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         <div className="px-3 py-1.5 text-[11px] text-amber-200 bg-amber-950/40 border-b border-amber-900 flex items-center justify-between gap-2">
           <span>ℹ️ Heads up — {browserBlockedReason}. What you see here may be incomplete.</span>
           <button onClick={() => setMode('live')} className="shrink-0 px-2 py-0.5 rounded bg-amber-800 hover:bg-amber-700 text-amber-100 font-semibold">Live server</button>
+        </div>
+      )}
+      {/* CONFIG VARIABLES WE DO NOT HOLD (Phase 1b). Live .env files are excluded at the import
+          boundary on purpose — we never import somebody's secrets — so these read as undefined here,
+          exactly as they would under Vite with an empty env. Saying which ones turns "one feature
+          behaves oddly and nobody knows why" into a known, named limitation. */}
+      {mode === 'inbrowser' && envVarsUsed.length > 0 && (
+        <div className="px-3 py-1.5 text-[11px] text-zinc-300 bg-zinc-900/70 border-b border-zinc-800">
+          ⚙️ This app reads {envVarsUsed.length === 1 ? 'a setting' : `${envVarsUsed.length} settings`} we
+          don't hold ({envVarsUsed.slice(0, 3).join(', ')}{envVarsUsed.length > 3 ? `, +${envVarsUsed.length - 3} more` : ''}) —
+          your .env is never uploaded, so anything using them will be blank here.
         </div>
       )}
       {mode === 'inbrowser' && hasBackend && (

@@ -32067,3 +32067,24 @@ the weak-tier routing. Gate: tsc clean both.
 engine refused to fake success, protected the app, and charged nothing. The heal now turns that honest
 failure into an honest COMPLETION where the weak model can finish the job; where it genuinely cannot, it
 still fails honestly rather than shipping a stub.
+
+---
+
+## 2026-08-12 — Once-per-session greeting (admin: "ek session me bas 1 baar namaste")
+
+The free-chat AI greeted with "namaste" (or the user's mirrored greeting) on EVERY message. Root cause:
+`buildFreeSystemPrompt` (routes/chat.ts) injected "Preferred greeting … mirror this style" on every turn, and
+the only guard was a fuzzy "don't repeat the same opening phrase" — which the model routinely ignored.
+
+Fix (root, not a surface patch): the prompt now KNOWS whether it is the first turn (derived from the
+conversation `history`) and states the rule firmly. On the FIRST message a single greeting is allowed; on
+every later message the prompt says, unambiguously, "you have ALREADY greeted this user this session — do NOT
+greet again (no नमस्ते / Namaste / राम-राम / Hello / प्रणाम / any opener); begin with the answer." The
+greeting-style hint itself is also gated to the first turn. Extracted as a pure, tested module
+(`sessionGreeting.ts`: `isFirstChatTurn`, `sessionGreetingRule`) so the gate is unit-locked; a wiring test
+asserts chat.ts derives the first turn from history and embeds the rule. tsc clean both.
+
+Note: this is prompt-level (the greeting is model-emitted, so the instruction is the right lever) — a firm
+binary "do not greet again" is far stronger than the old fuzzy rule. Streaming makes a deterministic
+post-strip risky, so it was deliberately not added; if a slip is ever reported, a buffered strip is the
+follow-up.

@@ -159,6 +159,19 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const [liveLoading, setLiveLoading] = useState(false);
   // null = serving fine / not checked; string[] = the server answered but did NOT serve the app.
   const [notServing, setNotServing] = useState<string[] | null>(null);
+  /**
+   * The preview URL did not answer AT ALL — connection refused, not a bad response.
+   *
+   * ADMIN REPORT 2026-08-13 (mitrify port change). This case had no state of its own: the health probe
+   * throws, the catch swallows it, `notServing` stays null, and the iframe below renders the SANDBOX
+   * PROVIDER'S OWN "Closed Port Error" page as though it were the user's app. Two failures in one — the
+   * user cannot tell "still starting" from "broken", and a third-party vendor name is put on screen,
+   * which the white-label law forbids outright.
+   *
+   * `notServing` cannot carry this: it means "the server answered but did not serve", which is a
+   * genuinely different state with a different remedy.
+   */
+  const [unreachable, setUnreachable] = useState(false);
   const [sandbox, setSandbox] = useState<{ livePreviewAvailable: boolean; actuator: string; previewDomainWarning: string | null } | null>(null);
   // LIVE FAILOVER (admin report 858f6d7b) — a broken in-browser preview must never be a dead end while
   // the real app is running on the sandbox. Both refs are once-per-workspace guards; `failoverNote`
@@ -389,7 +402,14 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             ? (Array.isArray(health.servingProblems) ? health.servingProblems.filter((x): x is string => typeof x === 'string') : [])
             : null);
         }
-      } catch { /* probe failed → status stays null → never reboot on a guess */ }
+        // The probe answered, so whatever it says, the origin is reachable.
+        setUnreachable(false);
+      } catch {
+        // The probe could not complete. Status stays null so we never reboot on a guess — but the
+        // fact itself is no longer swallowed, because it is what tells the user why the frame is
+        // showing a stranger's error page.
+        setUnreachable(true);
+      }
       const h = healRef.current;
       const decide = shouldAutoRebootPreview({
         autoResume: !!autoResume, liveTabShown: mode === 'live', hasUrl,
@@ -864,9 +884,36 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             <div className="h-full w-1/3 bg-indigo-500 animate-pulse" />
           </div>
         )}
-        <ResponsiveFrame viewport={viewport}>
-          <iframe key={liveReloadKey} title="Live preview" src={effectiveUrl} onLoad={() => setLiveLoading(false)} className="w-full h-full bg-white border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
-        </ResponsiveFrame>
+        {unreachable ? (
+          /**
+           * THE URL IS NOT ANSWERING — so we do NOT frame it (admin report 2026-08-13, mitrify).
+           *
+           * Rendering it anyway put the sandbox provider's own "Closed Port Error" page on screen in
+           * place of the user's app: it names a vendor, which the white-label law forbids, and it tells
+           * the user their app is broken when the truthful answer is usually "it has not started yet".
+           * `notServing` is the neighbouring case (the server answers but serves the wrong thing) and
+           * there the frame DOES stay, because what it shows is at least the user's own server.
+           */
+          <div className="flex-1 flex items-center justify-center p-6 text-center">
+            <div className="max-w-md text-sm text-zinc-400 space-y-3">
+              <div className="w-12 h-12 mx-auto" dangerouslySetInnerHTML={{ __html: ashokChakraSvg(48, '#4f6ef7') }} />
+              <p className="text-zinc-200 font-medium">Your app hasn’t started serving yet.</p>
+              <p>
+                NavBharatAI is still bringing it up. If a build is running, this clears on its own the
+                moment your server starts — it usually takes under a minute.
+              </p>
+              <div className="flex items-center justify-center gap-2 pt-1">
+                <button onClick={() => { setLiveReloadKey((k) => k + 1); void probeAndMaybeHeal(); }} className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-semibold">Check again</button>
+                <button onClick={() => setMode('inbrowser')} className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Open the in-browser preview</button>
+              </div>
+              <p className="text-zinc-600 text-xs">The in-browser preview renders your current files right now, without waiting for the server.</p>
+            </div>
+          </div>
+        ) : (
+          <ResponsiveFrame viewport={viewport}>
+            <iframe key={liveReloadKey} title="Live preview" src={effectiveUrl} onLoad={() => setLiveLoading(false)} className="w-full h-full bg-white border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+          </ResponsiveFrame>
+        )}
       </div>
     );
   }

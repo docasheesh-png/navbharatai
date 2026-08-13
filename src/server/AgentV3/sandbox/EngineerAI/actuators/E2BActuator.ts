@@ -1,4 +1,6 @@
 import { Sandbox } from 'e2b';
+import { parseNpmAuditSummary } from '../../../npmAuditSummary';
+import { shouldRunAuditFix, AUDIT_FIX_COMMAND, AUDIT_FIX_TIMEOUT_MS } from '../../../npmAuditFix';
 import { commandFailureResult } from '../../../../lib/sandboxCommandError';
 import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
@@ -156,7 +158,8 @@ const {chromium}=require('playwright');
   await p.goto(url,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
 ${paintWaitJs('p')}
   const buf=await p.screenshot({type:'png',fullPage:false});
-  process.stdout.write(buf.toString('base64'));
+  require('fs').writeFileSync('${TOOLS_DIR}/last-shot.png', buf);
+  process.stdout.write('OK');
   await b.close();
 })().catch(e=>{process.stderr.write(String(e));process.exit(1)});
 `.trim();
@@ -181,7 +184,8 @@ const {chromium}=require('playwright');
   }
 ${paintWaitJs('page')}
   const buf=await page.screenshot({type:'png',fullPage:false});
-  process.stdout.write(buf.toString('base64'));
+  require('fs').writeFileSync('${TOOLS_DIR}/last-shot.png', buf);
+  process.stdout.write('OK');
   process.exit(0);
 })().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
 `.trim();
@@ -252,7 +256,13 @@ const {chromium}=require('playwright');
   }catch(e){result='ERROR: '+String(e&&e.message||e);}
   const url=page.url();
   const buf=await page.screenshot({type:'png'});
-  process.stdout.write(JSON.stringify({result,url,screenshot:buf.toString('base64'),cursorX,cursorY}));
+  // Write the PNG to a FILE instead of embedding its base64 in stdout. The sandbox caps commands.run
+  // stdout at 64KB (65536 bytes); a base64 screenshot blows past that, which truncated the JSON
+  // mid-string and broke JSON.parse with "Unterminated string in JSON at position 65536" on EVERY
+  // interaction (BENCHMARK #2/#3 + the restart-button fix, 2026-08-12) — so the model could never
+  // verify a click and fell back to claiming PASS it had not confirmed. The TS side reads the bytes.
+  require('fs').writeFileSync('${TOOLS_DIR}/last-action.png', buf);
+  process.stdout.write(JSON.stringify({result,url,cursorX,cursorY}));
   process.exit(0);
 })().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
 `.trim();
@@ -401,13 +411,40 @@ export class E2BActuator implements IEngineerActuator {
       }
     } catch { /* warm-primer is best-effort — never blocks the real install below */ }
 
+    /**
+     * SECURITY REMEDIATION (admin 2026-08-12). npm has just told us, in this very log, how many known
+     * vulnerabilities the tree carries. When high/critical ones are present and the admin has switched
+     * this on, apply npm's OWN SemVer-compatible fixes — never `--force`, which applies breaking major
+     * upgrades and is a way to break a working app while claiming to secure it (see npmAuditFix.ts).
+     *
+     * It runs HERE, inside the one install implementation every path funnels through, so no build path
+     * can quietly skip it — and it lands BEFORE the typecheck and build gates, so the rare regression a
+     * patch release causes is caught by checks that already exist rather than shipped.
+     *
+     * Best-effort in every direction: a failure, a timeout, or an unreadable result all fall through to
+     * the install's own result. Securing dependencies must never be able to fail a working build.
+     */
+    const withAuditFix = async (log: string): Promise<string> => {
+      try {
+        if (!shouldRunAuditFix(parseNpmAuditSummary(log))) return log;
+        const fix = await sandbox.commands
+          .run(AUDIT_FIX_COMMAND, { cwd: WORKSPACE_ROOT, timeoutMs: AUDIT_FIX_TIMEOUT_MS })
+          .catch((err: any) => commandFailureResult(err));
+        // The fix's own output carries the POST-fix audit summary, so appending it is what lets the
+        // report state the tree the app actually ships with rather than the one it started from.
+        return `${log}\n[${AUDIT_FIX_COMMAND}]\n${fix.stdout}${fix.stderr}`;
+      } catch {
+        return log; // a security step that breaks the install would be worse than the vulnerability
+      }
+    };
+
     // Step 1: npm ci when a lock file exists (clean, reproducible install)
     const hasLock = await sandbox.files.exists(`${WORKSPACE_ROOT}/package-lock.json`).catch(() => false);
     if (hasLock) {
       const ci = await sandbox.commands.run('npm ci', {
         cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
       }).catch((err: any) => commandFailureResult(err));
-      if (ci.exitCode === 0) return { success: true, log: ci.stdout + ci.stderr };
+      if (ci.exitCode === 0) return { success: true, log: await withAuditFix(ci.stdout + ci.stderr) };
       // npm ci failed (stale lock, missing lock entry) — fall through to npm install
     }
 
@@ -416,7 +453,7 @@ export class E2BActuator implements IEngineerActuator {
       cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
     }).catch((err: any) => commandFailureResult(err));
     const installLog = install.stdout + install.stderr;
-    if (install.exitCode === 0) return { success: true, log: installLog };
+    if (install.exitCode === 0) return { success: true, log: await withAuditFix(installLog) };
 
     // Step 3: ERESOLVE peer-dep conflict — retry with --legacy-peer-deps
     if (/ERESOLVE|peer dep(endenc)?/i.test(installLog)) {
@@ -424,9 +461,12 @@ export class E2BActuator implements IEngineerActuator {
         cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
       }).catch((err: any) => commandFailureResult(err));
       const retryLog = retry.stdout + retry.stderr;
+      const combined = installLog + '\n[--legacy-peer-deps retry]\n' + retryLog;
       return {
         success: retry.exitCode === 0,
-        log: installLog + '\n[--legacy-peer-deps retry]\n' + retryLog,
+        // Only a SUCCESSFUL install gets the remediation pass — running it over a broken tree would
+        // spend two minutes on a dependency graph that does not resolve in the first place.
+        log: retry.exitCode === 0 ? await withAuditFix(combined) : combined,
       };
     }
 
@@ -1342,13 +1382,23 @@ ${paintWaitJs('p')}
     // Prefer the SHARED persistent browser (CDP) so the screenshot reflects the
     // same session the agent's browser_action hands have been driving. Falls back
     // to a fresh standalone browser if the daemon/CDP isn't reachable.
+    // The PNG is read from a FILE, never stdout. commands.run caps stdout at 64KB (65536 bytes), so a
+    // base64 screenshot past that was silently TRUNCATED to a corrupt image (the same 64KB cap that broke
+    // browser_action loudly; here it failed quietly because raw base64 needs no JSON.parse). files.read
+    // has no such cap. Returns '' when the file is missing, so an empty result falls through / throws.
+    const readShotBase64 = async (): Promise<string> => {
+      const bytes = await sandbox.files.read(`${TOOLS_DIR}/last-shot.png`, { format: 'bytes' }).catch(() => null);
+      return bytes ? Buffer.from(bytes as Uint8Array).toString('base64') : '';
+    };
+
     await this._ensureBrowserDaemon(sandbox, workspaceId).catch(() => {});
     const cdp = await sandbox.commands.run(
       `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${TOOLS_DIR}/screenshot-cdp.js ${JSON.stringify(url)} ${vw} ${vh}`,
       { cwd: TOOLS_DIR, timeoutMs: 30_000 }
     ).catch(() => null);
-    if (cdp && cdp.exitCode === 0 && cdp.stdout) {
-      return { base64: cdp.stdout.trim(), mimeType: 'image/png' };
+    if (cdp && cdp.exitCode === 0) {
+      const b64 = await readShotBase64();
+      if (b64) return { base64: b64, mimeType: 'image/png' };
     }
 
     // Fallback: fresh standalone browser (clean session, but always works).
@@ -1361,7 +1411,9 @@ ${paintWaitJs('p')}
       throw new Error(`Screenshot failed: ${result.stderr.slice(0, 300)}`);
     }
 
-    return { base64: result.stdout.trim(), mimeType: 'image/png' };
+    const b64 = await readShotBase64();
+    if (!b64) throw new Error('Screenshot produced no image file');
+    return { base64: b64, mimeType: 'image/png' };
   }
 
   /** Launch the persistent browser daemon once and wait for its CDP port to open. */
@@ -1431,7 +1483,13 @@ ${paintWaitJs('p')}
       if (!result.stdout || result.exitCode !== 0) {
         throw new Error(`Browser action failed: ${result.stderr.slice(0, 300) || 'the browser was not reachable'}`);
       }
-      return JSON.parse(result.stdout.trim());
+      const meta = JSON.parse(result.stdout.trim()) as { result: string; url?: string; cursorX?: number; cursorY?: number };
+      // The screenshot comes from a FILE, never stdout — stdout is capped at 64KB and a base64 PNG blows
+      // past it, which is exactly what broke every interaction with "Unterminated string in JSON at
+      // position 65536". files.read has no such cap. A missing file degrades to no image, never a throw.
+      const shot = await sandbox.files.read(`${TOOLS_DIR}/last-action.png`, { format: 'bytes' }).catch(() => null);
+      const screenshot = shot ? Buffer.from(shot as Uint8Array).toString('base64') : '';
+      return { ...meta, screenshot };
     };
 
     // The one failure worth retrying: the CDP daemon was not reachable (the action script's OUTER catch,

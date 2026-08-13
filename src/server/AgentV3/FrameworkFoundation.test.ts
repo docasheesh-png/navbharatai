@@ -103,6 +103,9 @@ describe('ensureViteReactFoundation — idempotence & non-destructiveness', () =
       'index.html': '<!doctype html><div id="root"></div><script type="module" src="/src/main.tsx"></script>',
       'vite.config.ts': 'export default {};',
       'tsconfig.json': '{}',
+      // The release typecheck config is foundational too (2026-08-11): without it the generated build
+      // script `tsc -p tsconfig.build.json` cannot run at all.
+      'tsconfig.build.json': '{"extends":"./tsconfig.json"}',
       'src/main.tsx': "import App from './App';",
       'src/App.tsx': 'export default () => null;',
     };
@@ -121,7 +124,7 @@ describe('ensureViteReactFoundation — idempotence & non-destructiveness', () =
   it('respects existingPaths (an actuator scaffold already on disk) and never re-creates them', () => {
     const res = ensureViteReactFoundation(LEVEL1_PLANNER_OUTPUT, {
       framework: 'vite-react',
-      existingPaths: ['package.json', 'index.html', 'tsconfig.json'],
+      existingPaths: ['package.json', 'index.html', 'tsconfig.json', 'tsconfig.build.json'],
     });
     expect(res.added).toEqual([]); // everything missing-from-files is present on disk
   });

@@ -12,7 +12,7 @@ export const packageJson = JSON.stringify({
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc -p tsconfig.build.json && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -72,6 +72,26 @@ export const tsconfig = JSON.stringify({
   },
   "include": ["src"]
 }, null, 2);
+
+/**
+ * The RELEASE typecheck config — tsconfig's rules, minus the tests.
+ *
+ * ROOT CAUSE (admin report 2026-08-11, a real user APK build): the release build is
+ * `tsc && vite build` and tsconfig includes ALL of `src`, so `src/components/Login.test.tsx` importing
+ * a member `Login.tsx` does not export killed the build with exit code 2 — and no APK was produced.
+ * A broken TEST stopped a RELEASE, which is the wrong shape: tests are checked by the test runner, and
+ * a release build should typecheck what actually SHIPS.
+ *
+ * tsconfig.json is deliberately UNCHANGED, so tests keep their editor and vitest typechecking. They
+ * simply cannot block a release any more.
+ */
+export const tsconfigBuild = JSON.stringify({
+  extends: './tsconfig.json',
+  exclude: [
+    '**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx',
+    '**/__tests__/**', '**/__mocks__/**',
+  ],
+}, null, 2) + '\n';
 
 export const tsconfigNode = JSON.stringify({
   "compilerOptions": {

@@ -11,7 +11,7 @@
 // image carries these template strings (a few tens of KB of text).
 
 import {
-  packageJson, viteConfig, tsconfig, tsconfigNode, indexHtml, mainTsx, errorBoundaryTsx, indexCss,
+  packageJson, viteConfig, tsconfig, tsconfigBuild, tsconfigNode, indexHtml, mainTsx, errorBoundaryTsx, indexCss,
 } from '../sandbox/AppMakerLab/generator/templates/ViteReactProviderContents';
 
 /**
@@ -66,6 +66,9 @@ export function goldenBaseFiles(title: string, appTsx: string): Record<string, s
     'package.json': packageJson,
     'vite.config.ts': viteConfig,
     'tsconfig.json': tsconfig,
+    // Release typecheck: same rules, minus the tests. A broken test file must not be able to stop a
+    // release build (admin report 2026-08-11 — an APK died on a Login.test.tsx import).
+    'tsconfig.build.json': tsconfigBuild,
     'tsconfig.node.json': tsconfigNode,
     'index.html': indexHtml.replace('<title>App</title>', `<title>${title}</title>`),
     'src/vite-env.d.ts': viteEnvDts,

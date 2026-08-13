@@ -11,6 +11,7 @@ import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
+import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
 import { PathWriteLock } from '../AgentV3/pathWriteLock';
@@ -1155,11 +1156,31 @@ export interface BillingLedgerView {
  * Returns 0 on ANY doubt: no actuator, no measurement, the feature off, or no real rate configured.
  * A money path must fail toward charging LESS, never toward charging for something we cannot measure.
  */
-function billableSandboxUsd(actuator: unknown, workspaceId: string | null | undefined): number {
+function billableSandboxUsd(actuator: unknown, workspaceId: string | null | undefined, buildStartedAtMs?: number): number {
   try {
     const fn = (actuator as any)?.sandboxHeldSeconds;
     if (typeof fn !== 'function' || !workspaceId) return 0;
-    return sandboxBillableUsd(sandboxCost(fn.call(actuator, workspaceId)));
+    const held = fn.call(actuator, workspaceId);
+    /**
+     * BILL ONLY THE TIME WE WERE ACTUALLY USING THE VM (admin question 2026-08-12: "AGENTV3_BILL_SANDBOX
+     * se in-browser preview ke paise to nahi lagenge?").
+     *
+     * `sandboxHeldSeconds` measures from the moment the sandbox came UP, not from the moment this build
+     * began — the clock is set once per workspace and only cleared when the VM is paused or reaped. So a
+     * user who builds, then reads their preview for twenty minutes, then asks for one more change would
+     * have had those twenty idle minutes billed onto the SECOND build. A third build would be charged
+     * for all of it again: the same seconds, sold twice.
+     *
+     * Capping at the build's own duration fixes both at once. Idle time between builds is a cost of OUR
+     * idle reaper, not of the user's next request, and no second can land on more than one bill. It
+     * errs downward by construction — an unknown build start bills nothing rather than guessing.
+     */
+    const seconds = Number(held);
+    if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+    const started = Number(buildStartedAtMs);
+    if (!Number.isFinite(started) || started <= 0) return 0;
+    const buildSeconds = Math.max(0, (Date.now() - started) / 1000);
+    return sandboxBillableUsd(sandboxCost(Math.min(seconds, buildSeconds)));
   } catch {
     return 0;
   }
@@ -6771,7 +6792,7 @@ export function registerAgentV3Routes(app: Express): void {
       let watchdogBilledUsd = 0;
       if (ok && billingCtx.providerLedger) {
         try {
-          const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, billableSandboxUsd(actuator, workspaceId));
+          const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, billableSandboxUsd(actuator, workspaceId, billingCtx.buildStartedAt));
           watchdogBilledUsd = decided.effectiveBilledUsd;
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
           buildDiagRef?.setCacheReadInputTokens(billingCtx.cacheReadInputTokens ?? 0);
@@ -10666,6 +10687,54 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* hooks heal is best-effort — never blocks or fails a build */ }
       }
 
+      // INCOMPLETE-CODE HEAL — complete a fix the (weak/free) model left as a stub, WITHIN the same tier
+      // (admin 2026-08-12: "free tier me claude nahi. jo kuch karna hai isi me karo"). A real report: KIMI
+      // correctly DIAGNOSED the Level-2 bug but left one function a placeholder/not-implemented, so the
+      // authenticity scan raised a build-breaking READINESS_BLOCKER, the build failed honestly, GreenGuard
+      // restored the working app, and the user was charged ₹0 — all correct, but the fix never LANDED. This
+      // runs ONE bounded pass that completes the flagged stub, then RE-JUDGES through the SAME readiness gate.
+      //
+      // Weak-tier routed BY CONSTRUCTION: buildTurnRunner(healRunnerOpts()) carries the same `noClaude`
+      // enforcement as every build turn, so on a free build the completion runs on GLM/Kimi flagship →
+      // Vertex/Gemini → Haiku (last) and NEVER Sonnet/Opus (the 🔒 weak-module law). Fires ONLY when a
+      // build FAILED with a real HIGH-severity authenticity issue (a clean build pays nothing), is time-
+      // budgeted + abortable, never flips a still-not-ready verdict to ok, and the honest failure + GreenGuard
+      // restore below remain the backstop if it cannot complete. Kill switch AGENTV3_INCOMPLETE_CODE_HEAL=off.
+      if ((process.env.AGENTV3_INCOMPLETE_CODE_HEAL ?? '').trim().toLowerCase() !== 'off'
+        && result && !result.ok && expectsArtifacts && writtenFiles.size > 0 && autoFixEnabled() && !abort.signal.aborted) {
+        try {
+          const stubs = highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles));
+          const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
+          if (stubs.length > 0 && timeLeft) {
+            events.emit({ type: 'narration', agent: 'architect', text: `🔧 Completing ${stubs.length} unfinished piece(s) of the code so the feature actually works…`, ts: Date.now() });
+            const completeRunner = new AgentRunner({
+              ...baseRunnerOpts,
+              client: buildTurnRunner(healRunnerOpts()),
+              model: resolveModel(powerLevelReqEffective),
+              persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+            });
+            const healed = await completeRunner.run(authenticityRepairInstruction(stubs));
+            if (healed.ok) {
+              const after = highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles));
+              if (after.length === 0) {
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'INCOMPLETE_CODE_HEALED', message: `Completed ${stubs.length} unfinished/placeholder code section(s) the first pass left behind.`, autoResolved: true });
+                // Recover to OK only if the FULL readiness gate now passes — a build with OTHER unresolved
+                // blockers stays honestly NOT-ready (same discipline as the hooks heal above).
+                if (readinessGateEnabled()) {
+                  try {
+                    const verdict = await dispatcher.assessBuildReadiness();
+                    if (verdict.ready) {
+                      result = { ...result, ok: true, summary: 'Built your app — an unfinished section of the code was detected and completed, so the feature now works.' };
+                      buildDiag.record({ phase: 'build', severity: 'info', code: 'READINESS_RECOVERED_AFTER_COMPLETION', message: `Readiness re-judged after completing the unfinished code: now READY (score ${verdict.score}/100).`, autoResolved: true });
+                    }
+                  } catch { /* re-judge is best-effort — the honest NOT-ready verdict stands */ }
+                }
+              }
+            }
+          }
+        } catch { /* completion heal is best-effort — never blocks or fails a build */ }
+      }
+
       // BOOT-KILLER HEAL — the second half of the missing-credential contract (admin 2026-08-03: "us option
       // ko 'coming soon' likh kar freeze kar do, puri app band na ho"). The contract is injected into the
       // builder's prompt so the FIRST build is already correct; injecting a rule is NOT proof it was
@@ -12447,7 +12516,7 @@ export function registerAgentV3Routes(app: Express): void {
       // shared decideBuildBilledUsd so this settle path and the watchdog finalization (Fix 67) never
       // drift. The realcost path is default-ON (kill-switch `AGENTV3_REALCOST_BILLING`).
       const { effectiveBilledUsd: decidedBilledUsd, reconciledProviderUsage } =
-        decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, billableSandboxUsd(actuator, workspaceId));
+        decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, billableSandboxUsd(actuator, workspaceId, buildStartedAt));
       let effectiveBilledUsd: number = decidedBilledUsd;
       // WHY a build ended up free — recorded into the build report's billing section (admin
       // 2026-07-11) so a ₹0 build always explains itself.

@@ -31983,3 +31983,108 @@ symbol I had just been reading (`confirmedMissing`) instead of for the capabilit
 ever repaired?*). Grepping for the name you have in hand finds the absence of that name, not the absence
 of the behaviour — and it reads exactly like proof. The redundant-work check has to be run against the
 BEHAVIOUR, which is the same discipline that caught the two already-shipped items earlier today.
+## 2026-08-12 — Autopsy (2 reports: restart-button fix + BENCHMARK #3 power-ups): the REAL browser_action bug
+
+Both reports (same game workspace) confirmed fixes already shipped AND exposed one dominant NEW bug.
+
+**Confirmed already-fixed (these builds predate the deploys):**
+- rootCause = TIME_TO_FIRST_CALL "169s/167s of preparation" on a SUCCESSFUL build → now "completed
+  successfully" via #2318.
+- RELEASE_GATE YELLOW "whether it actually SAVES anything is untested" on a game → honest wording via #2321.
+
+**THE NEW BUG (fixed here) — browser_action 64KB stdout truncation.** In BOTH reports browser_action failed
+(twice each) with "Unterminated string in JSON at position 65536". Root cause: `browser-action.js`
+`JSON.stringify({...,screenshot:<base64 PNG>,...})` to stdout, and the sandbox caps `commands.run` stdout at
+64KB (65536 bytes) — a base64 screenshot blows past it, truncating the JSON mid-string so `JSON.parse` throws
+on EVERY interaction. This — not the CDP daemon (#2319) — is why the model could never actually click a
+button and kept claiming "Verified"/"PASS"/"Final gate: GREEN" on interactions it never drove (the true root
+of the item-1 honesty gap: the restart-button report claimed the button "fixed & Verified" and #3 claimed all
+power-ups "PASS (verified)", both while browser_action was failing).
+
+**Fix:** the action script writes the PNG to a FILE (`${TOOLS_DIR}/last-action.png`) and its stdout carries
+only small JSON metadata `{result,url,cursorX,cursorY}`; the TS side reads the screenshot bytes via
+`sandbox.files.read(path, {format:'bytes'})` (no 64KB cap). Both browser_action failure modes are now closed
+(#2319 daemon reachability + this truncation), so the engine can finally PROVE interactive features work
+instead of guessing PASS. Source-level regression test locks the fix (no base64 in stdout JSON; screenshot
+read from file). tsc clean both.
+
+**SIBLING recorded (rule 3/6 — next, careful): `screenshot()` / `screenshot-cdp.js` have the SAME latent
+64KB truncation** — they write raw base64 to stdout, so a large/detailed screen is silently truncated to a
+corrupt image (it did not bite these simple game screens, and screenshot "succeeds" without throwing because
+raw base64 needs no JSON.parse). Will be converted to the same file-based read as a focused follow-up, kept
+separate to avoid regressing the working screenshot path on the untestable E2B sandbox.
+
+**Advisory (not platform bugs):** 4× unsafe-html-sink (innerHTML) in the generated game.ts — the systemPrompt
+already warns against dynamic innerHTML; edit_file "old_string not found" once (self-healed retry); KIMI
+provider timeout once (self-healed fallback); DATA_LOSS_EVENT (sandbox recycle) restored from durable store.
+
+---
+
+## 2026-08-12 — Sibling closed: screenshot() also file-based (64KB truncation class fully killed)
+
+Follow-up to #2328. `screenshot()` (both the CDP path and the standalone-browser fallback) had the SAME
+64KB stdout cap: `screenshot.js` / `screenshot-cdp.js` wrote raw base64 to stdout, so a large/detailed
+screen was silently TRUNCATED to a corrupt image. It failed quietly (raw base64 needs no JSON.parse, so it
+"succeeded" with a cut-off image) — worse than a loud failure, because the model then "saw" a corrupt
+screenshot and could misjudge the app.
+
+Fix (mirrors #2328): both scripts now write the PNG to `${TOOLS_DIR}/last-shot.png` and emit only an "OK"
+marker; `screenshot()` reads the bytes via `sandbox.files.read(path, {format:'bytes'})` (no 64KB cap), with
+an empty read falling through to the fallback / throwing rather than returning a truncated image. Regression
+test extended (no raw base64 to stdout; screenshot reads last-shot.png). The entire 64KB-truncation class —
+browser_action (loud) AND screenshot (silent) — is now closed. Same rule-6 boundary: the E2B sandbox path is
+verified by code-reasoning + tsc + source test, confirmed live on the next real build.
+
+---
+
+## 2026-08-12 — Incomplete-code heal: complete a weak-tier stub WITHIN the tier (admin "free tier me claude nahi")
+
+**Report (Level-2 fix attempt, ok:FALSE, ₹0):** the honesty architecture worked PERFECTLY — KIMI (weak/free
+tier) correctly DIAGNOSED the Level-2 bug (score-based win condition + coin carry-forward + undefined
+`loadLevel2()`), but left one function a placeholder/not-implemented. The authenticity scan raised a
+build-breaking `READINESS_BLOCKER`, the release gate went RED honestly (no fake GREEN), GreenGuard restored
+the last working version (app NOT broken — Level 1 still works), and the user was charged ₹0. #2318 also
+validated live: rootCause was the REAL blocker (fake code), NOT the 233s timing note. The ONLY gap: the fix
+never LANDED — the weak model left a stub and nothing escalated to complete it.
+
+**Admin decision:** "free tier me claude nahi. jo kuch karna hai isi me karo" — complete the fix WITHIN the
+weak tier, never Sonnet/Opus.
+
+**Fix — INCOMPLETE_CODE_HEAL (default on, kill AGENTV3_INCOMPLETE_CODE_HEAL=off):** after a build that
+FAILED with a real HIGH-severity authenticity issue, run ONE bounded pass that COMPLETES the flagged stub
+(`authenticityRepairInstruction` names the exact file:line and forbids placeholder/delete/hide), then
+RE-JUDGE through the SAME readiness gate; recover ok:true ONLY if the WHOLE gate now passes. Mirrors the
+existing hooks-heal / credential-guard heals exactly. **Weak-tier-safe BY CONSTRUCTION:**
+`buildTurnRunner(healRunnerOpts())` carries the same `noClaude` enforcement as every build turn, so on a
+free build the completion runs GLM/Kimi flagship → Vertex/Gemini → Haiku (last) and NEVER Sonnet/Opus (the
+🔒 weak-module law) — there is no separate model path to leak through. Fires only on a FAILED build with a
+genuine stub (a clean build pays nothing), is time-budgeted + abortable, never flips a still-not-ready
+verdict to ok, and the honest failure + GreenGuard restore remain the backstop if it cannot complete.
+`highSeverityAuthenticityIssues` + `authenticityRepairInstruction` are pure + tested; wiring test asserts
+the weak-tier routing. Gate: tsc clean both.
+
+**Honesty win to record plainly:** this build is the proof the whole session's honesty work landed — the
+engine refused to fake success, protected the app, and charged nothing. The heal now turns that honest
+failure into an honest COMPLETION where the weak model can finish the job; where it genuinely cannot, it
+still fails honestly rather than shipping a stub.
+
+---
+
+## 2026-08-12 — Once-per-session greeting (admin: "ek session me bas 1 baar namaste")
+
+The free-chat AI greeted with "namaste" (or the user's mirrored greeting) on EVERY message. Root cause:
+`buildFreeSystemPrompt` (routes/chat.ts) injected "Preferred greeting … mirror this style" on every turn, and
+the only guard was a fuzzy "don't repeat the same opening phrase" — which the model routinely ignored.
+
+Fix (root, not a surface patch): the prompt now KNOWS whether it is the first turn (derived from the
+conversation `history`) and states the rule firmly. On the FIRST message a single greeting is allowed; on
+every later message the prompt says, unambiguously, "you have ALREADY greeted this user this session — do NOT
+greet again (no नमस्ते / Namaste / राम-राम / Hello / प्रणाम / any opener); begin with the answer." The
+greeting-style hint itself is also gated to the first turn. Extracted as a pure, tested module
+(`sessionGreeting.ts`: `isFirstChatTurn`, `sessionGreetingRule`) so the gate is unit-locked; a wiring test
+asserts chat.ts derives the first turn from history and embeds the rule. tsc clean both.
+
+Note: this is prompt-level (the greeting is model-emitted, so the instruction is the right lever) — a firm
+binary "do not greet again" is far stronger than the old fuzzy rule. Streaming makes a deterministic
+post-strip risky, so it was deliberately not added; if a slip is ever reported, a buffered strip is the
+follow-up.

@@ -3,7 +3,7 @@ import { chargeReceipt, chargeHint, readChargeHeaders, APK_PRICE_INR } from '../
 import { PublishToNavStore } from './PublishToNavStore';
 import {
   Loader2, Github, Download, CheckCircle2, AlertTriangle, ExternalLink,
-  Rocket, Key, RefreshCw,
+  Rocket, Key, RefreshCw, Wrench,
 } from 'lucide-react';
 import { authedHeaders } from '../../App';
 // The workflow filenames come from the ONE shared registry the server's dispatch allow-list also reads.
@@ -131,6 +131,17 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   // What the user actually watches while everything else happens by itself.
   const [progress, setProgress] = useState(0);
   const [progressNote, setProgressNote] = useState('');
+  // The REAL steps of the running build, read from GitHub — so the user sees where it actually is, not a
+  // guess from a timer. Empty until the run appears and its steps are readable.
+  const [steps, setSteps] = useState<Array<{ label: string; state: 'done' | 'running' | 'pending' | 'failed' }>>([]);
+  /**
+   * The FULL problem from the server, ready to hand to NavBharatAI Pro v5.
+   *
+   * The auto-repair above only fixes what NavBharatAI itself SET UP (the workflow, the Capacitor
+   * project, the signing wiring). When the failure is in the user's own APP CODE it is out of its
+   * remit — and until now that left the user holding an error message with nothing to press.
+   */
+  const [fixReport, setFixReport] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [busyNote, setBusyNote] = useState('');
   const [downloading, setDownloading] = useState('');
@@ -233,10 +244,10 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
       const startedAt = Date.now();
       let finished: RunInfo | null = null;
+      const bumpProgress = (next: number) => setProgress((p) => Math.max(p, next)); // never go backward
       for (let i = 0; i < 150 && liveRef.current && !finished; i++) {
         await new Promise((r) => setTimeout(r, 5000));
         if (!liveRef.current) return;
-        setProgress(buildProgressPercent(attempt, Date.now() - startedAt));
         try {
           const res = await fetch(
             `/api/mobile-ship/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&workflow=${workflow}`,
@@ -244,8 +255,29 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           );
           const data = await res.json().catch(() => null);
           const ours = ((data?.runs || []) as RunInfo[]).find((r) => !seen.has(r.id));
-          if (!ours) continue;
+          if (!ours) {
+            // The run has not appeared yet — a brief gap; a time estimate keeps the bar honest-ish here.
+            bumpProgress(buildProgressPercent(attempt, Date.now() - startedAt));
+            continue;
+          }
           setRun(ours);
+          // REAL progress from the run's actual steps. Falls back to the time estimate only if the steps
+          // are not readable yet (the run is queued, or a single poll failed).
+          let usedReal = false;
+          try {
+            const sRes = await fetch(
+              `/api/mobile-ship/run-steps?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&runId=${ours.id}`,
+              { headers: await ghHeaders() },
+            );
+            const s = await sRes.json().catch(() => null);
+            if (s && typeof s.percent === 'number' && Array.isArray(s.steps) && s.steps.length) {
+              usedReal = true;
+              bumpProgress(s.percent);
+              if (s.currentStep) setProgressNote(s.currentStep);
+              setSteps(s.steps);
+            }
+          } catch { /* fall back below */ }
+          if (!usedReal) bumpProgress(buildProgressPercent(attempt, Date.now() - startedAt));
           if (ours.status === 'completed') finished = ours;
         } catch {
           // A single failed poll is not a failed build; keep watching.
@@ -291,7 +323,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         return;
       }
       setProgressNote('Something went wrong — NavBharatAI is looking at it…');
-      let fix: { fixed?: boolean; summary?: string; code?: string } | null = null;
+      let fix: { fixed?: boolean; summary?: string; code?: string; report?: string } | null = null;
       try {
         const fRes = await fetch('/api/mobile-ship/autofix', {
           method: 'POST',
@@ -304,6 +336,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
       if (!fix?.fixed) {
         setPhase('failed');
+        if (fix?.report) setFixReport(fix.report);
         setError(
           // A missing signing key is the ONE failure that is genuinely the user's to resolve, and only
           // the Play Store path can hit it — the .apk build needs no key at all, so never say this there.
@@ -325,8 +358,10 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     setBuildKind(kind);
     setPhase('building');
     setError('');
+    setFixReport('');
     setArtifacts([]);
     setRun(null);
+    setSteps([]);
     setAttempt(0);
     setProgress(ATTEMPT_BANDS[0][0]);
     setProgressNote('Sending your app to be built…');
@@ -471,6 +506,30 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
             >
               <Rocket size={17} /> {phase === 'failed' ? 'Try again' : 'Build my APK now'}
             </button>
+
+            {/* FIX — the bridge that was missing. "Try again" only helps if the cause was transient;
+                when the build died on the app's own code, repeating it repeats the failure. This hands
+                the WHOLE problem (what stopped it + the real log) to NavBharatAI Pro v5, which is the
+                only surface that can change app code, and starts the fix on arrival — the press IS the
+                consent, so making the user hit send again would be one dead step too many. */}
+            {phase === 'failed' && fixReport && (
+              <>
+                <button
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('navbharat:navigate', {
+                      detail: { view: 'nbi_pro_chat', fixPrompt: fixReport, autoSend: true },
+                    }));
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-indigo-600 hover:bg-indigo-500 transition-colors text-white"
+                >
+                  <Wrench size={17} /> Fix this with NavBharatAI
+                </button>
+                <p className="text-[11px] text-white/45 leading-relaxed -mt-1">
+                  Opens NavBharatAI Pro with the full error and starts fixing your app&apos;s code.
+                  Come back and press &ldquo;Try again&rdquo; once it is done.
+                </p>
+              </>
+            )}
             <p className="text-[11px] text-white/45 leading-relaxed -mt-1">
               Installs straight onto any Android phone. Nothing to set up — no signing key needed.
               (This file cannot go on Google Play; for that, use the option below.)
@@ -540,7 +599,31 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
               <Loader2 size={13} className="animate-spin text-indigo-400" />
               {progressNote || 'Building your app…'}
             </p>
-            <p className="text-xs text-white/40 mt-1.5 leading-relaxed">
+            {/* The REAL steps of the build, straight from GitHub — so the user sees exactly where it is. */}
+            {steps.length > 0 && (
+              <ul className="mt-3 space-y-1 text-left max-w-xs mx-auto">
+                {steps.map((s, i) => (
+                  <li key={`${s.label}-${i}`} className="flex items-center gap-2 text-xs">
+                    {s.state === 'done' ? (
+                      <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                    ) : s.state === 'running' ? (
+                      <Loader2 size={13} className="animate-spin text-indigo-400 shrink-0" />
+                    ) : s.state === 'failed' ? (
+                      <AlertTriangle size={13} className="text-amber-400 shrink-0" />
+                    ) : (
+                      <span className="w-[13px] h-[13px] rounded-full border border-white/20 shrink-0" />
+                    )}
+                    <span className={
+                      s.state === 'done' ? 'text-white/45'
+                        : s.state === 'running' ? 'text-white/90 font-medium'
+                          : s.state === 'failed' ? 'text-amber-300'
+                            : 'text-white/40'
+                    }>{s.label}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="text-xs text-white/40 mt-3 leading-relaxed">
               This takes a few minutes and runs on its own — if anything goes wrong NavBharatAI fixes it
               and starts again. You can leave this screen open.
               {attempt > 0 && ` (Attempt ${attempt + 1} of ${MAX_AUTO_ATTEMPTS}.)`}

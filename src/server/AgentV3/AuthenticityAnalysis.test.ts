@@ -1,5 +1,60 @@
 import { describe, it, expect } from 'vitest';
-import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
+import {
+  scanAuthenticity, authenticitySummary,
+  highSeverityAuthenticityIssues, authenticityRepairInstruction,
+} from './AuthenticityAnalysis';
+
+describe('highSeverityAuthenticityIssues — only the build-breaking stubs (incomplete-code heal input)', () => {
+  it('returns HIGH-severity issues across the workspace, ignoring medium/low', () => {
+    const files = {
+      'src/game.ts': 'function loadNextLevel() {\n  throw new Error("Not implemented");\n}',
+      'src/util.ts': '// TODO: tidy this later\nexport const x = 1;', // medium/low — excluded
+    };
+    const hits = highSeverityAuthenticityIssues(files);
+    expect(hits.length).toBeGreaterThanOrEqual(1);
+    expect(hits.every((h) => h.severity === 'high')).toBe(true);
+    expect(hits.some((h) => h.file === 'src/game.ts')).toBe(true);
+  });
+
+  it('a genuinely complete app yields nothing (the heal never fires on clean code)', () => {
+    expect(highSeverityAuthenticityIssues({ 'src/App.tsx': 'export default function App(){return <div>Hi</div>;}' })).toEqual([]);
+    expect(highSeverityAuthenticityIssues({})).toEqual([]);
+  });
+});
+
+describe('authenticityRepairInstruction — completes the stub, forbids the escape hatches', () => {
+  it('names the exact file:line and bans placeholder/delete/hide', () => {
+    const msg = authenticityRepairInstruction([
+      { file: 'src/game.ts', line: 42, kind: 'not-implemented', severity: 'high', snippet: 'throw new Error("Not implemented")' },
+    ]);
+    expect(msg).toContain('src/game.ts:42');
+    expect(msg).toContain('REAL, WORKING');
+    expect(msg.toLowerCase()).toContain('do not delete');
+    expect(msg).toContain('NO placeholder');
+  });
+});
+
+describe('the incomplete-code heal is wired weak-tier-safe (admin: "free tier me claude nahi")', () => {
+  const routes = require('fs').readFileSync(require('path').join(__dirname, '../routes/agentv3.ts'), 'utf8') as string;
+
+  it('fires ONLY on a failed build with real stubs, is kill-switchable, and re-judges the full readiness gate', () => {
+    expect(routes).toContain('AGENTV3_INCOMPLETE_CODE_HEAL');
+    expect(routes).toContain('highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles))');
+    expect(routes).toContain('authenticityRepairInstruction(stubs)');
+    // Only recovers ok:true when the WHOLE readiness gate passes, not just authenticity.
+    expect(routes).toContain('READINESS_RECOVERED_AFTER_COMPLETION');
+  });
+
+  it('routes the completion through the shared tier runner — no Sonnet/Opus on a free build by construction', () => {
+    // buildTurnRunner(healRunnerOpts()) carries the same noClaude enforcement as every build turn, so the
+    // weak-module Claude ban (🔒) applies automatically — there is no separate model path to leak through.
+    const at = routes.indexOf('INCOMPLETE-CODE HEAL');
+    expect(at).toBeGreaterThan(-1);
+    const block = routes.slice(at, at + 2600);
+    expect(block).toContain('buildTurnRunner(healRunnerOpts())');
+    expect(block).toContain('resolveModel(powerLevelReqEffective)');
+  });
+});
 
 describe('scanAuthenticity', () => {
   it('flags a "not implemented" throw as high', () => {

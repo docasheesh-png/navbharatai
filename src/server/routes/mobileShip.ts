@@ -57,6 +57,31 @@ export function isDispatchableWorkflow(file: unknown): file is ShipWorkflowFile 
   return isShipWorkflow(file);
 }
 
+/**
+ * Turn a raw GitHub Actions step name into plain, white-label language for the build-progress view — or
+ * null to HIDE it (GitHub's own housekeeping steps, and trivial ones the user does not care about). The
+ * generated workflow's own step names are already user-friendly and vendor-free; this also collapses the
+ * setup steps and guards against any future technical name leaking to a user (White-Label Law).
+ */
+export function friendlyBuildStep(rawName: string): string | null {
+  const n = (rawName || '').toLowerCase().trim();
+  if (!n) return null;
+  if (/^set up job$|^complete job$|^post\b/.test(n)) return null;      // GitHub internal
+  if (/checkout/.test(n)) return null;                                  // trivial, instant
+  if (/remove the keystore|summary|explain what stopped/.test(n)) return null; // housekeeping / failure-only
+  if (/set ?up node|setup-node|set ?up java|setup-java/.test(n)) return 'Getting the build machine ready';
+  if (/install/.test(n) && /librar/.test(n)) return "Installing your app's libraries";
+  if (/build the web app|npm run build/.test(n)) return 'Building your app';
+  if (/generate and sync|android project|cap (add|sync)/.test(n)) return 'Preparing the Android project';
+  if (/signing secret|pre-?flight/.test(n)) return 'Checking your signing key';
+  if (/versioncode|stamp.*version/.test(n)) return 'Setting the app version';
+  if (/keystore|wire gradle signing/.test(n)) return 'Setting up signing';
+  if (/bundle|assemble|installable apk|compil/.test(n)) return 'Compiling your Android app';
+  if (/upload/.test(n)) return 'Packaging your download';
+  // Our step names are white-label by construction; anything unmatched is safe to show as-is.
+  return rawName.trim();
+}
+
 // Artifact fetching/unwrapping moved to lib/buildArtifact when the Nav App Store needed the SAME
 // bytes. Re-exported here so existing importers and tests are untouched — one implementation, no
 // second copy to drift (this repo has already paid for that with four copies of one path helper).
@@ -118,6 +143,73 @@ export function registerMobileShipRoutes(app: Express): void {
         error: status === 404
           ? 'No builds yet — push the build kit to GitHub and start a build first.'
           : 'Could not read the build status from GitHub.',
+      });
+    }
+  });
+
+  /**
+   * REAL step-by-step progress of a running build (the "show me where it is" view).
+   *
+   * The old panel showed a % invented from elapsed time — a guess that could sit at 40% while the build
+   * was actually done, or race ahead of a stuck one. This reads the run's ACTUAL steps from GitHub and
+   * reports which one is running, so the user sees the truth. Step names are mapped to plain, white-label
+   * language (never a vendor/tool name), and GitHub's internal housekeeping steps are hidden.
+   */
+  app.get('/api/mobile-ship/run-steps', async (req: Request, res: Response) => {
+    const token = githubToken(req);
+    if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
+    const { owner, repo, runId } = req.query as Record<string, string>;
+    if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
+    if (!/^\d{1,20}$/.test(String(runId || ''))) return res.status(400).json({ error: 'A valid build id is required.' });
+
+    try {
+      const r = await axios.get(
+        `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs`,
+        { headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' } },
+      );
+      const job = (r.data?.jobs || [])[0] as { status?: string; conclusion?: string | null; steps?: Array<Record<string, unknown>> } | undefined;
+      const rawSteps = (job?.steps || []) as Array<{ name?: string; status?: string; conclusion?: string | null }>;
+
+      const steps: Array<{ label: string; state: 'done' | 'running' | 'pending' | 'failed' }> = [];
+      for (const s of rawSteps) {
+        const label = friendlyBuildStep(String(s.name || ''));
+        if (!label) continue; // hide GitHub's own housekeeping steps
+        const state: 'done' | 'running' | 'pending' | 'failed' =
+          s.conclusion === 'failure' ? 'failed'
+            : s.status === 'completed' ? 'done'
+              : s.status === 'in_progress' ? 'running'
+                : 'pending';
+        // Collapse consecutive duplicates (e.g. setup steps that map to one friendly label).
+        const prev = steps[steps.length - 1];
+        if (prev && prev.label === label) {
+          if (state === 'failed' || state === 'running') prev.state = state;
+          else if (prev.state === 'pending' && state === 'done') prev.state = 'done';
+          continue;
+        }
+        steps.push({ label, state });
+      }
+
+      const total = steps.length || 1;
+      const done = steps.filter((s) => s.state === 'done').length;
+      const running = steps.find((s) => s.state === 'running');
+      const failedStep = steps.find((s) => s.state === 'failed');
+      // Cap below 100 until GitHub itself says completed, so the bar never claims "done" before the
+      // download is ready — the client fills the last stretch while it collects the file.
+      const percent = job?.status === 'completed'
+        ? 100
+        : Math.min(95, Math.round((done / total) * 100));
+
+      res.json({
+        status: job?.status || 'queued',
+        conclusion: job?.conclusion ?? null,
+        percent,
+        currentStep: failedStep?.label || running?.label || (job?.status === 'completed' ? 'Finishing up' : 'Getting the build machine ready'),
+        steps,
+      });
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status || 502;
+      res.status(status === 404 ? 404 : 502).json({
+        error: status === 404 ? 'That build could not be found.' : 'Could not read the build progress from GitHub.',
       });
     }
   });
@@ -303,6 +395,36 @@ export function registerMobileShipRoutes(app: Express): void {
 
     // The ONE failure that is genuinely the user's to resolve. Their signing key is their permanent
     // Play Store identity — neither tier may create or work around it.
+    /**
+     * The FULL problem, in a form NavBharatAI Pro v5 can act on.
+     *
+     * The autofix below only repairs what NavBharatAI itself SET UP — the workflow, the Capacitor
+     * project, the signing wiring. A failure inside the user's own APP CODE (the reported case: a test
+     * importing a member the component does not export) is outside its remit, so the user was left
+     * holding an error message and nothing to press. This is what the "Fix" button sends into v5, where
+     * the builder CAN change app code.
+     *
+     * The real log excerpt travels with it: a summary alone would make v5 guess at the same error the
+     * compiler already named exactly.
+     */
+    const failureReport = (): string => {
+      const step = failedStepSection(normalizeLog(log)).trim();
+      const excerpt = step.split('\n').slice(-60).join('\n').slice(0, 6000);
+      return [
+        'My Android build failed on GitHub. Please fix the app code so it builds.',
+        '',
+        `What stopped it: ${diag.summary}`,
+        ...(diag.detail ? ['', diag.detail] : []),
+        '',
+        'The build log said:',
+        '```',
+        excerpt || '(no log output was captured)',
+        '```',
+        '',
+        'Fix the cause in the app source, then tell me what you changed.',
+      ].join('\n');
+    };
+
     if (diag.code === 'MISSING_SIGNING_SECRET') {
       return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail });
     }
@@ -354,7 +476,7 @@ export function registerMobileShipRoutes(app: Express): void {
       if (!diag.autoFixable) {
         // The rules cannot fix this class — the AI pass is exactly for this case.
         if (await tryAiRepair()) return;
-        return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail });
+        return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, report: failureReport() });
       }
 
       const current = await readRepoFiles(headers, String(owner), String(repo), ref, diag.needs);
@@ -384,6 +506,7 @@ export function registerMobileShipRoutes(app: Express): void {
           fixed: false,
           code: diag.code,
           summary: `${diag.summary} NavBharatAI could not correct it automatically.`,
+          report: failureReport(),
         });
       }
       await commitAndRerun(repair.files, repair.message);

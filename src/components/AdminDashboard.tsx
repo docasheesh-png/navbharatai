@@ -5,9 +5,10 @@ import { TirangaLoader } from './ui/TirangaLoader';
 import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
 import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildReportAnalytics';
-import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../lib/firstPassQuality';
+import { firstPassHeadline, FIRST_PASS_TARGET, type FirstPassMetaStats } from '../lib/firstPassQuality';
 import { copyTextToClipboard } from '../lib/copyText';
 import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts';
+import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -28,7 +29,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
 
 type ReportTier = 'paid' | 'free' | 'admin' | 'unknown';
 
-interface AdminBuildReportRow {
+interface AdminBuildReportRow extends ReportTriage {
   /** True when the build had not finished at the moment Report was pressed — see AdminBuildReportStore. */
   inFlight?: boolean;
   /** The whole-SESSION view: the wait the user actually lived, and any workspace wipes. */
@@ -217,7 +218,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // Per the 50/50 law a self-heal is a RED FLAG, so the headline is the CLEAN rate (zero repairs
   // needed), never the delivered rate. Computed from the SAME rows already fetched — one shared
   // implementation with the server route (src/lib/firstPassQuality.ts), so the two can never drift.
-  const firstPass = useMemo(() => firstPassStatsFromMeta(buildReports), [buildReports]);
+  /**
+   * IT WAS MEASURING COMPLAINTS, NOT BUILDS (admin screenshot 2026-08-12, showing 4.3%).
+   *
+   * `buildReports` is the inbox of reports USERS SUBMITTED by pressing "Report", and people press
+   * Report when something went WRONG. Computing the engine's first-pass rate from that sample makes
+   * the headline read as an engine-wide number while describing a self-selected pile of failures.
+   *
+   * "4.3% of builds are right first time" and "4.3% of the builds people complained about were right
+   * first time" are different sentences, and only the second one was ever true.
+   *
+   * The comment this replaces said the client shares the server's implementation "so the two can never
+   * drift" — which was right about the FUNCTION and blind to the DATA. Sharing a formula while feeding
+   * it a different population is exactly how two numbers drift while looking identical. So the card now
+   * takes the server's answer, computed over every build by every user, and the local computation is
+   * gone rather than left as a second path to get this wrong again.
+   */
+  const [firstPassData, setFirstPassData] = useState<(FirstPassMetaStats & { headline?: string; reported?: FirstPassMetaStats & { headline?: string } }) | null>(null);
+  const fetchFirstPass = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/first-pass-quality?limit=500', { headers });
+      const d = await r.json();
+      setFirstPassData(d && typeof d.cleanRate !== 'undefined' ? d : null);
+    } catch (e) { console.error(e); setFirstPassData(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+  const firstPass = firstPassData;
   // M6-S6.1 — the speed signal: average / median / slowest build time across all reports.
   const buildTimeSummary = useMemo(() => summarizeBuildTimes(buildReports), [buildReports]);
   const fmtDuration = (ms: number): string => (ms >= 60_000 ? `${(ms / 60_000).toFixed(1)}m` : `${Math.round(ms / 1000)}s`);
@@ -283,6 +309,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       setBuildReports(Array.isArray(d?.reports) ? d.reports : []);
     } catch (e) { console.error(e); setBuildReports([]); }
     finally { setBuildReportsLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  /**
+   * SERVER NECESSITY (admin 2026-08-12) — the one number that decides whether the browser-native plan
+   * is worth building: how many past apps were given a Node server they never needed?
+   *
+   * It lives behind a button rather than loading with the tab because it reads up to 500 build
+   * documents. That is a real cost to pay on every visit for a number nobody is looking at most days.
+   */
+  const [necessity, setNecessity] = useState<{
+    headline: string;
+    tally: { examined: number; neededAndBuilt: number; builtButNotNeeded: number; neededButMissing: number; neitherNeededNorBuilt: number; reasonCounts: Record<string, number> };
+    sample: Array<{ workspaceId: string; prompt: string; neededServer: boolean; reasons: string[]; builtServer: boolean }>;
+  } | null>(null);
+  const [necessityLoading, setNecessityLoading] = useState(false);
+
+  const fetchNecessity = useCallback(async () => {
+    setNecessityLoading(true);
+    try {
+      const r = await fetch('/api/admin/server-necessity?limit=500', { headers });
+      const d = await r.json();
+      setNecessity(d?.tally ? d : null);
+      if (!d?.tally) toast(d?.error || 'Could not measure — no builds with enough recorded detail yet.');
+    } catch (e) { console.error(e); setNecessity(null); toast('Could not measure server necessity.'); }
+    finally { setNecessityLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
 
@@ -376,9 +428,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const selectedPartJson = useMemo(() => partJson(selectedReport, reportPart), [selectedReport, reportPart]);
   const selectedPartMeta = selectedParts.find((p) => p.key === reportPart) ?? selectedParts[0];
 
+  /**
+   * TRIAGE MARKS (admin request 2026-08-12). Sends one mark and folds the SERVER's merged answer back
+   * into the list, so a badge is only ever drawn from a mark that actually persisted — an optimistic
+   * local update would show "Fixed" on a write that silently failed, which is the one thing this
+   * feature must never do.
+   */
+  const markReport = async (id: string, mark: { downloaded?: boolean; fixed?: boolean; note?: string }) => {
+    try {
+      const r = await fetch(`/api/admin/build-reports/${encodeURIComponent(id)}/mark`, {
+        method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(mark),
+      });
+      if (!r.ok) { toast('Could not save that mark.'); return; }
+      const { triage } = await r.json() as { triage: ReportTriage };
+      setBuildReports((rows) => rows.map((row) => (row.id === id ? { ...row, ...triage } : row)));
+      setSelectedReport((s) => (s && s.meta.id === id ? { ...s, meta: { ...s.meta, ...triage } } : s));
+    } catch (e) { console.error(e); toast('Could not save that mark.'); }
+  };
+
   const downloadSelectedReport = () => {
     if (!selectedPartJson) { toast('Nothing to download.'); return; }
     saveJsonFile(selectedPartJson, `${selectedPartMeta?.filename || `build-report-${selectedReport?.meta.id}`}.json`);
+    // Downloading is a FACT about the admin's action, so it is recorded automatically. It is NOT a
+    // claim that the work is done — that is the separate "Fixed" mark, which only a person sets.
+    if (selectedReport?.meta.id) void markReport(selectedReport.meta.id, { downloaded: true });
   };
 
   const copySelectedReport = () => void copyJson(selectedPartJson, selectedPartMeta?.label || 'Report');
@@ -526,7 +599,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
   useEffect(() => { if (activeTab === 'settings') { fetchPromos(); fetchUpdateCohort(); } }, [activeTab, fetchPromos, fetchUpdateCohort]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
-  useEffect(() => { if (activeTab === 'reports') fetchBuildReports(); }, [activeTab, fetchBuildReports]);
+  useEffect(() => { if (activeTab === 'reports') { fetchBuildReports(); fetchFirstPass(); } }, [activeTab, fetchBuildReports, fetchFirstPass]);
   const fetchLatencyAnomaly = useCallback(async () => {
     setAnomalyLoading(true);
     try {
@@ -1359,16 +1432,98 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-black text-white tracking-tight">Build Reports</h3>
-                  <p className="text-[11px] text-[#8b949e] font-bold mt-0.5">Reports submitted by users via the “Report” button — admin-only.</p>
+                  <h3 className="flex items-center gap-2 text-lg font-black text-white tracking-tight">
+                    Build Reports
+                    {/* THE ONE NUMBER WORTH SEEING FIRST (admin 2026-08-12): how many still need work.
+                        Counted from the marks, so it can never disagree with the badges below it. */}
+                    {(() => {
+                      const open = openReportCount(buildReports);
+                      return open > 0 ? (
+                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-500/40 text-amber-300">{open} open</span>
+                      ) : null;
+                    })()}
+                  </h3>
+                  <p className="text-[11px] text-[#8b949e] font-bold mt-0.5">Reports submitted by users via the “Report” button — admin-only. Download marks a report sent; “Mark fixed” is yours to set once the work is merged.</p>
                 </div>
-                <button
-                  onClick={fetchBuildReports}
-                  className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${buildReportsLoading ? 'animate-spin' : ''}`} /> Refresh
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* SERVER NECESSITY (admin 2026-08-12) — see fetchNecessity. Behind a button because it
+                      reads up to 500 build documents; nobody should pay that on every tab visit. */}
+                  <button
+                    onClick={fetchNecessity}
+                    disabled={necessityLoading}
+                    title="How many past apps were given a server they never needed? Every one of those could have skipped the sandbox."
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-amber-500/40 text-amber-300 hover:text-white hover:bg-amber-600/20 disabled:opacity-40"
+                  >
+                    <Server className={`w-3.5 h-3.5 ${necessityLoading ? 'animate-pulse' : ''}`} /> Server necessity
+                  </button>
+                  <button
+                    onClick={fetchBuildReports}
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${buildReportsLoading ? 'animate-spin' : ''}`} /> Refresh
+                  </button>
+                </div>
               </div>
+
+              {/* SERVER NECESSITY RESULT (admin 2026-08-12). The number that decides whether the
+                  browser-native plan proceeds. Shown with its CAVEAT and a spot-check sample, never as a
+                  bare percentage — this drives a large decision, and a number without its limits is how
+                  a large change gets approved on a misunderstanding. */}
+              {necessity && (
+                <div className="bg-[#161b22] border border-amber-500/25 rounded-[1.25rem] p-4 space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Server className="w-4 h-4 text-amber-400" />
+                    <h4 className="text-sm font-black text-white tracking-tight">Did these apps need a server?</h4>
+                  </div>
+                  <p className="text-[12px] text-amber-200/90 font-bold leading-relaxed">{necessity.headline}</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {([
+                      ['Server built, NOT needed', necessity.tally.builtButNotNeeded, 'text-amber-300', 'could have skipped the sandbox'],
+                      ['Neither needed nor built', necessity.tally.neitherNeededNorBuilt, 'text-emerald-300', 'already browser-native'],
+                      ['Genuinely needed one', necessity.tally.neededAndBuilt, 'text-sky-300', 'E2B is required here'],
+                      ['Needed, but missing', necessity.tally.neededButMissing, 'text-red-300', 'a correctness gap, not a cost one'],
+                    ] as const).map(([label, n, cls, hint]) => (
+                      <div key={label} className="bg-[#0d1117] border border-white/10 rounded-xl p-3">
+                        <div className={`text-2xl font-black tabular-nums ${cls}`}>{n}</div>
+                        <div className="text-[10px] font-black uppercase tracking-wider text-[#8b949e] mt-1">{label}</div>
+                        <div className="text-[10px] text-[#6e7681] mt-0.5 leading-snug">{hint}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {Object.keys(necessity.tally.reasonCounts).length > 0 && (
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-wider text-[#8b949e] mb-1.5">Why a server was genuinely needed</div>
+                      <div className="space-y-1">
+                        {Object.entries(necessity.tally.reasonCounts).sort((a, b) => b[1] - a[1]).map(([reason, n]) => (
+                          <div key={reason} className="flex items-start gap-2 text-[11px] text-[#c9d1d9]">
+                            <span className="tabular-nums font-black text-sky-300 shrink-0 w-6">{n}×</span>
+                            <span className="leading-snug">{reason}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* SPOT-CHECK. A percentage produced by a classifier nobody has read is not evidence —
+                      these are real builds the admin can recognise and disagree with. */}
+                  <details className="text-[11px]">
+                    <summary className="cursor-pointer text-[#8b949e] font-bold hover:text-white">Check it against {necessity.sample.length} real builds</summary>
+                    <div className="mt-2 space-y-1.5">
+                      {necessity.sample.map((s) => (
+                        <div key={s.workspaceId} className="bg-[#0d1117] border border-white/5 rounded-lg px-2.5 py-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border ${s.neededServer ? 'border-sky-500/40 text-sky-300' : 'border-emerald-500/40 text-emerald-300'}`}>
+                              {s.neededServer ? 'needed' : 'not needed'}
+                            </span>
+                            {s.builtServer && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-amber-300">built one</span>}
+                          </div>
+                          <div className="text-[11px] text-[#c9d1d9] mt-1 leading-snug">{s.prompt || <span className="text-[#6e7681]">(no prompt recorded)</span>}</div>
+                          {s.reasons.length > 0 && <div className="text-[10px] text-[#8b949e] mt-0.5">{s.reasons.join(' · ')}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              )}
 
               {/* ALL BUILDS (admin 2026-08-06): every user's every build — 0→100% report downloadable
                   WITHOUT the user pressing Report. The engine already records every build durably;
@@ -1472,7 +1627,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   healed itself is NOT counted as a success (50/50 law: a heal is a red flag), so this
                   deliberately reads lower than the delivered rate shown beside it. Honest by
                   construction: shows nothing rather than a fake 0% when no row carries the signal. */}
-              {!buildReportsLoading && firstPass.cleanRate !== null && (
+              {firstPass && firstPass.cleanRate !== null && (
                 <div className="bg-[#161b22] border border-white/10 rounded-[1.25rem] p-4">
                   <div className="flex items-center gap-2 mb-3 flex-wrap">
                     <Target className="w-4 h-4 text-indigo-400" />
@@ -1503,10 +1658,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Failed</p>
                     </div>
                   </div>
-                  <p className="text-[11px] text-[#8b949e] leading-snug">{firstPassHeadline(firstPass)}</p>
+                  <p className="text-[11px] text-[#8b949e] leading-snug">{firstPassHeadline(firstPass)} <span className="text-[#6e7681]">Across EVERY build by every user — not only the ones someone reported.</span></p>
+                  {/* THE GAP IS THE SIGNAL (admin screenshot 2026-08-12). Complaints far below the
+                      engine-wide rate is healthy self-selection — people report what broke. The two
+                      being EQUAL would mean users are reporting a fair sample, which is much worse
+                      news, and only showing both makes that visible. */}
+                  {firstPass.reported && firstPass.reported.cleanRate !== null && (
+                    <p className="text-[10px] text-[#8b949e]/70 mt-1.5 leading-snug">
+                      Among the {firstPass.reported.total} build(s) users actually pressed “Report” on, {(firstPass.reported.cleanRate * 100).toFixed(1)}% were right first time.
+                      {firstPass.cleanRate !== null && firstPass.reported.cleanRate < firstPass.cleanRate
+                        ? ' Lower than the rate above, which is expected — people report what broke.'
+                        : ' NOT lower than the rate above — users are reporting a fair sample, so the gap is not self-selection.'}
+                    </p>
+                  )}
                   {firstPass.skippedLegacy > 0 && (
                     <p className="text-[10px] text-[#8b949e]/70 mt-1.5 leading-snug">
-                      {firstPass.skippedLegacy} older report(s) excluded — they predate this measurement and
+                      {firstPass.skippedLegacy} older build(s) excluded — they predate this measurement and
                       carry no repair count. Counting them as clean would inflate the number.
                     </p>
                   )}
@@ -1684,6 +1851,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                       {(r.sessionParts ?? 1) > 1 && (
                                         <span className="shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-indigo-500/40 text-indigo-300">{r.sessionParts} parts</span>
                                       )}
+                                      {/* TRIAGE (admin 2026-08-12) — "is report ka kaam ho chuka hai?".
+                                          Downloaded and Fixed are DIFFERENT facts and are shown as such:
+                                          a report downloaded this morning may still be shipping its bugs
+                                          tonight. See reportTriage.ts. */}
+                                      {(() => {
+                                        const st = reportStatus(r);
+                                        if (st === 'new') return null; // an untouched report needs no badge — the list is already full
+                                        return (
+                                          <span
+                                            title={reportStatusHint(r, (ms) => new Date(ms).toLocaleString())}
+                                            className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${st === 'fixed' ? 'border-emerald-500/40 text-emerald-300' : 'border-sky-500/40 text-sky-300'}`}
+                                          >{reportStatusLabel(st)}</span>
+                                        );
+                                      })()}
                                     </span>
                                     {r.rootCause && <span className="block text-[10px] text-amber-400/80 mt-0.5 truncate max-w-[240px]">{r.rootCause}</span>}
                                   </td>
@@ -1755,6 +1936,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         >
                           <Download className="w-3.5 h-3.5" /> Download JSON
                         </button>
+                        {/* THE MARK ONLY A PERSON SETS (admin 2026-08-12). Download records itself; this
+                            does not, because "I have the file" and "the bugs are gone" are different
+                            facts and only one of them can be observed by a button. Reversible on
+                            purpose — a mis-click that could not be undone would bury a real bug. */}
+                        {(() => {
+                          const id = selectedReport?.meta.id;
+                          const isFixed = reportStatus(selectedReport?.meta) === 'fixed';
+                          return (
+                            <button
+                              onClick={() => id && void markReport(id, { fixed: !isFixed })}
+                              disabled={!id}
+                              title={isFixed
+                                ? reportStatusHint(selectedReport?.meta, (ms) => new Date(ms).toLocaleString())
+                                : 'Mark this report as fixed — only after the work is actually merged'}
+                              className={`flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border disabled:opacity-40 ${isFixed
+                                ? 'border-emerald-500/60 text-emerald-200 bg-emerald-600/20 hover:bg-emerald-600/30'
+                                : 'border-white/15 text-[#8b949e] hover:text-white hover:bg-white/5'}`}
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> {isFixed ? 'Fixed' : 'Mark fixed'}
+                            </button>
+                          );
+                        })()}
                         <button onClick={() => setSelectedReport(null)} className="text-[#8b949e] hover:text-white px-2 py-2 rounded-xl hover:bg-white/5">Close</button>
                       </div>
                     </div>

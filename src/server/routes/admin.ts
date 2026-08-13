@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { needsRealServer, builtAServer, tallyServerNecessity, necessityHeadline } from '../AgentV3/serverNecessity';
 import type { Express, Request, Response, NextFunction } from 'express';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Admin panel reads/writes admin_mfa +
@@ -14,8 +15,8 @@ import { metricsStore } from '../lib/metricsStore';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
-import { listAdminBuildReports, getAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
-import { listAllDiagnostics, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
+import { listAllDiagnostics, listPromptsAndPaths, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { builderScorecard, scorecardHeadline } from '../../lib/builderMetrics';
@@ -511,9 +512,57 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.get('/api/admin/first-pass-quality', verifyAdminToken, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
-      const reports = await listAdminBuildReports(limit);
-      const stats = firstPassStatsFromMeta(reports);
-      res.json({ ...stats, headline: firstPassHeadline(stats), target: FIRST_PASS_TARGET, window: limit });
+      /**
+       * IT WAS MEASURING COMPLAINTS, NOT BUILDS (admin screenshot 2026-08-12, showing 4.3%).
+       *
+       * This endpoint's own comment above calls it "the one number that says whether the ENGINE is
+       * getting better" — and it read `listAdminBuildReports`, which is the inbox of reports USERS
+       * SUBMITTED by pressing "Report". People press Report when something went WRONG. So the sample
+       * was self-selected for failure, and the headline read as an engine-wide rate.
+       *
+       * "4.3% of builds are right first time" and "4.3% of the builds people complained about were
+       * right first time" are different sentences, and only the second one was ever true. This is the
+       * same defect class as TIME_TO_FIRST_CALL blaming setup for a model's latency: a number measured
+       * off the wrong source, presented with total confidence.
+       *
+       * ALL BUILDS is now the headline, read from the engine's own durable record of every build by
+       * every user — no submit needed. The reported-only figure is kept ALONGSIDE it rather than
+       * deleted, because the GAP between the two is itself the signal: complaints far below the
+       * engine-wide rate is healthy self-selection; the two being equal would mean users are reporting
+       * a fair sample, which is much worse news.
+       */
+      const [allBuilds, reports] = await Promise.all([
+        listAllDiagnostics(limit).catch(() => []),
+        listAdminBuildReports(limit).catch(() => []),
+      ]);
+      /**
+       * THE TWO SOURCES SPEAK DIFFERENT SHAPES, AND THE MISMATCH IS SILENT.
+       *
+       * `firstPassStatsFromMeta` reads the ADMIN-REPORT projection (`healCount` / `unresolvedCount`);
+       * the engine's own build record carries the same two numbers under `counts.autoResolved` /
+       * `counts.unresolved`. Passing the second straight in type-checks — every field is optional — and
+       * then classifies EVERY delivered build as "legacy, no counts recorded", leaving only the
+       * `ok === false` rows to be counted. The card would have read close to 100% failed.
+       *
+       * That would have been a worse lie than the one being fixed here, and it would have looked just
+       * as confident. Mapped explicitly, at the one place the two vocabularies meet.
+       */
+      const stats = firstPassStatsFromMeta(allBuilds.map((b) => ({
+        ok: b.ok,
+        healCount: b.counts?.autoResolved,
+        unresolvedCount: b.counts?.unresolved,
+      })));
+      const reported = firstPassStatsFromMeta(reports);
+      res.json({
+        ...stats,
+        headline: firstPassHeadline(stats),
+        source: 'all-builds',
+        // Named for what it is. A field called `reported` sitting beside the headline is what stops
+        // the next reader from quietly assuming the two were ever the same population.
+        reported: { ...reported, headline: firstPassHeadline(reported) },
+        target: FIRST_PASS_TARGET,
+        window: limit,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to compute first-pass quality.' });
     }
@@ -688,6 +737,68 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json(record);
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to load the build report.' });
+    }
+  });
+
+  // TRIAGE MARKS (admin request 2026-08-12: "download kar le to build report par koi tag lag jaye").
+  //
+  // TWO marks, not one — see reportTriage.ts. `downloaded` is set automatically by the panel's Download
+  // button (a fact about the admin's action); `fixed` is only ever set by a person clicking it (a fact
+  // about the work). Collapsing them would have shown this session's own report as "fixed" from the
+  // first minute, while nine of its ten defects were still shipping.
+  //
+  // It returns the MERGED marks so the panel renders what was actually persisted — a badge drawn from
+  // an optimistic local guess would show "fixed" on a write that silently failed.
+  app.post('/api/admin/build-reports/:id/mark', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as { downloaded?: unknown; fixed?: unknown; note?: unknown };
+      const triage = await markAdminBuildReport(String(req.params.id), {
+        downloaded: body.downloaded === true,
+        // Tri-state on purpose: absent leaves the mark alone, true sets it, false CLEARS it. The admin
+        // will tick one by mistake, and a mark that cannot be undone silently buries a real bug.
+        fixed: typeof body.fixed === 'boolean' ? body.fixed : undefined,
+        note: typeof body.note === 'string' ? body.note : null,
+      });
+      if (!triage) { res.status(404).json({ error: 'Build report not found (or the mark could not be saved).' }); return; }
+      res.json({ ok: true, triage });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to mark the build report.' });
+    }
+  });
+
+  /**
+   * SERVER NECESSITY (admin 2026-08-12) — the ONE number that decides whether the browser-native plan
+   * is worth building: how many past apps were given a Node server they never needed?
+   *
+   * Every such app is one that could have skipped the E2B sandbox entirely — no VM for the preview, no
+   * VM for the verification. The dukaan stock app is the example: Express + Postgres + bcrypt + multer
+   * for a login, a list, a search box, a photo and a total, every one of which a browser can do
+   * directly against a hosted database.
+   *
+   * Measured, not estimated, and read-only: it changes nothing about how builds run. If the gap turns
+   * out to be small, the plan should not proceed — which is exactly why this endpoint exists BEFORE
+   * any of it.
+   */
+  app.get('/api/admin/server-necessity', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
+      const builds = await listPromptsAndPaths(limit);
+      const tally = tallyServerNecessity(builds);
+      // The sample is returned so the admin can spot-check the classifier against builds they remember,
+      // rather than trusting a percentage produced by a regex they have never seen.
+      const sample = builds.slice(0, 25).map((b) => {
+        const n = needsRealServer(b.prompt);
+        return {
+          workspaceId: b.workspaceId,
+          prompt: (b.prompt ?? '').slice(0, 160),
+          neededServer: n.needed,
+          reasons: n.reasons,
+          builtServer: builtAServer(b.paths),
+        };
+      });
+      res.json({ headline: necessityHeadline(tally), tally, window: limit, sample });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to measure server necessity.' });
     }
   });
 

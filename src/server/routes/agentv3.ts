@@ -328,6 +328,17 @@ import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
+import {
+  startVersionPreview,
+  listLiveVersionsCommand,
+  parseLiveVersions,
+  stopVersionCommand,
+  versionsToRetire,
+  freeSlot,
+  isValidSha,
+  versionPreviewMessage,
+  type VersionPreviewDeps,
+} from '../AgentV3/versionPreview';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { recentBuildHistoryFor, etaBasisNote } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
@@ -4104,6 +4115,26 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
+  /**
+   * Bind the actuator to the version-preview module's small dependency port.
+   *
+   * `sandboxWarm` deliberately asks `getSandboxId` rather than `ensureWorkspace`: looking at an old
+   * version must never be the thing that BOOTS a sandbox. That would turn a curious click into a
+   * billed VM — the opposite of why this feature runs inside the existing one.
+   */
+  const versionPreviewDeps = (
+    actuator: ReturnType<typeof buildActuator>,
+    workspaceId: string,
+  ): VersionPreviewDeps => ({
+    run: (command: string) => actuator.runCommand(workspaceId, command),
+    portUrl: (port: number) => actuator.getPortUrl(workspaceId, port),
+    sandboxWarm: async () => {
+      if (!actuator.getSandboxId) return false;
+      const id = await raceTimeout(actuator.getSandboxId(workspaceId), 4_000, 'versionPreviewWarm').catch(() => null);
+      return Boolean(id);
+    },
+  });
+
   // ONE place that turns a restore outcome into the sentence the user reads, so the API and the UI
   // can never drift into telling different stories about the same failure.
   const restoreMessage = (reason: string): string => {
@@ -4143,6 +4174,120 @@ export function registerAgentV3Routes(app: Express): void {
     // user can act on "that version's history is gone" and cannot act on "not in this session".
     const result = await restoreSessionDetailed(workspaceId, sha, userId ?? undefined, () => buildActuator());
     res.json({ ok: result.ok, reason: result.reason, message: restoreMessage(result.reason) });
+  });
+
+  // History → PREVIEW: see an old checkpoint running, without overwriting the present.
+  //
+  // The route above is the destructive one. Until now it was the ONLY way to find out what a version
+  // looked like, so a user who merely wanted to compare had to restore, look, and restore forward
+  // again — losing their current work if anything went wrong in between. This makes looking free.
+  //
+  // It runs inside the sandbox the user already has warm (a `git worktree` + a second port on the same
+  // VM), so it adds NO E2B cost — see versionPreview.ts for why a second sandbox was rejected.
+  app.post('/api/agentv3/version-preview', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const sha = typeof req.body?.sha === 'string' ? req.body.sha : '';
+    if (!workspaceId || !sha) {
+      res.status(400).json({ error: 'workspaceId and sha are required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      const deps = versionPreviewDeps(actuator, workspaceId);
+      // Ask the SANDBOX what is running, never this instance's memory — the user's next request can
+      // land on a different Cloud Run instance, and a wrong answer here hands out a port already bound.
+      const live = parseLiveVersions(
+        await deps.run(listLiveVersionsCommand()).then((r) => r.stdout).catch(() => ''),
+      );
+      for (const old of versionsToRetire(live, sha)) {
+        await deps.run(stopVersionCommand(old.sha, old.port)).catch(() => null);
+      }
+      const remaining = live.filter((v) => !versionsToRetire(live, sha).some((r) => r.sha === v.sha));
+      const result = await startVersionPreview(sha, freeSlot(remaining), deps);
+      res.json(result);
+    } catch {
+      // A preview is a convenience; it must never surface as a broken screen on the history panel.
+      res.json({ ok: false, reason: 'worktree-failed', sha, message: versionPreviewMessage('worktree-failed') });
+    }
+  });
+
+  // Close one version preview and reclaim its port. Called when the user dismisses the preview — the
+  // sandbox reclaims it anyway when it sleeps, but a user comparing several versions should not have
+  // to wait for that to look at a third.
+  app.post('/api/agentv3/version-preview/stop', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const sha = typeof req.body?.sha === 'string' ? req.body.sha : '';
+    if (!workspaceId || !isValidSha(sha)) {
+      res.status(400).json({ error: 'workspaceId and a valid sha are required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    try {
+      const deps = versionPreviewDeps(buildActuator(), workspaceId);
+      const live = parseLiveVersions(
+        await deps.run(listLiveVersionsCommand()).then((r) => r.stdout).catch(() => ''),
+      );
+      const match = live.find((v) => v.sha.toLowerCase() === sha.slice(0, 12).toLowerCase());
+      if (match) await deps.run(stopVersionCommand(match.sha, match.port)).catch(() => null);
+      res.json({ ok: true, stopped: Boolean(match) });
+    } catch {
+      res.json({ ok: true, stopped: false });
+    }
+  });
+
+  // List the version previews currently running, so the history panel can show "open" beside a
+  // checkpoint instead of starting a second server for a version already up.
+  app.get('/api/agentv3/version-preview', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      const deps = versionPreviewDeps(actuator, workspaceId);
+      if (!(await deps.sandboxWarm())) { res.json({ versions: [] }); return; }
+      const live = parseLiveVersions(
+        await deps.run(listLiveVersionsCommand()).then((r) => r.stdout).catch(() => ''),
+      );
+      const versions = await Promise.all(live.map(async (v) => ({
+        sha: v.sha,
+        startedAt: v.startedAt,
+        url: await deps.portUrl(v.port).catch(() => ''),
+      })));
+      res.json({ versions: versions.filter((v) => v.url) });
+    } catch {
+      res.json({ versions: [] });
+    }
   });
 
   // Phase G1 — git as the third organ: return a workspace's DURABLE checkpoint history (newest first).

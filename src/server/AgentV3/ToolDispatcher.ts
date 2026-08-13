@@ -140,6 +140,7 @@ import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGene
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { planE2eScaffold, e2eScaffoldSummary } from './e2eScaffold';
+import { pickDevScript, parsePackageJson } from './devScript';
 import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
 import { generateBundleOptimization } from '../AppMakerLab/generator/BundleOptimizationGenerator';
 import { generateSeedData, type EntitySpec } from '../AppMakerLab/generator/MockDataGenerator';
@@ -3577,10 +3578,10 @@ export class ToolDispatcher {
         let pkgRaw: string | undefined;
         try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
         // Derive the dev command + a per-route smoke list from the real project (best-effort).
-        let devCommand = 'npm run dev';
-        try {
-          if (pkgRaw) { const pj = JSON.parse(pkgRaw); if (pj?.scripts?.dev) devCommand = 'npm run dev'; else if (pj?.scripts?.start) devCommand = 'npm start'; }
-        } catch { /* default */ }
+        // Shared derivation (devScript.ts) — this used to be a local copy that knew only dev/start, so
+        // a project whose only script is `preview` was told to run `npm run dev` and the generated E2E
+        // config pointed at a server that never starts.
+        const devCommand = `npm run ${pickDevScript(parsePackageJson(pkgRaw)?.scripts)}`;
         const routes = getWorkspaceMemory(this.workspaceId).graph().routes || [];
         const plan = planE2eScaffold({ appName: optStr(input, 'app_name') || undefined, devCommand, routes });
         const written: string[] = [];

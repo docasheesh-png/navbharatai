@@ -143,9 +143,16 @@ and it is the case with genuinely zero build to run.
 
 The big engineering piece, and the one that turns Gaps A + B from "needs a VM" into "runs here".
 
-**2a — `/api` interception.** A Service Worker scoped to the preview catches the app's own
-`fetch('/api/...')` and dispatches it into a worker that runs **the app's real Express route handlers**.
-The user's own code executes. This is not a mock server and must never become one.
+**2a — `/api` interception.** ⚠️ **CORRECTED WHILE BUILDING IT (2026-08-13).** This said "a Service
+Worker". It cannot be one: the preview is an `<iframe srcDoc>`, which has an **opaque origin**, and
+`navigator.serviceWorker.register()` requires a secure same-origin scope — it would throw there every
+time. The mechanism is `fetch` patched inside the preview document, which is better here anyway (no
+registration lifecycle, no scope rules, no cached worker to invalidate, nothing outliving the iframe).
+The plan is corrected rather than the mechanism forced; the record of the wrong version stays, for the
+same reason §0's does.
+
+Either way the substance is unchanged: the interceptor dispatches into **the app's real Express route
+handlers**. The user's own code executes. This is not a mock server and must never become one.
 
 **2b — A Node-compat layer** for the subset Express apps genuinely use: `http`, `path`, `fs` (over OPFS /
 in-memory), `crypto`, `buffer`, `stream`, `events`. Much of the ecosystem above it is already pure JS and
@@ -153,8 +160,14 @@ runs in a browser unchanged — `bcryptjs`, `jsonwebtoken`, `zod`, `uuid`, `dayj
 in-memory upload store. **This layer replaces the `''`-returning stub described in §2.**
 
 **2c — Real Postgres via PGlite** (ElectricSQL — Postgres compiled to WASM, Apache-2.0, so commercially
-usable, unlike WebContainer). It is a genuine Postgres: migrations run, SQL runs, and IndexedDB persistence
-means the data is still there after a reload. `pg`, Prisma and Drizzle point at it.
+usable, unlike WebContainer). It is a genuine Postgres: SQL runs, constraints bite, transactions roll
+back, and IndexedDB persistence means the data is still there after a reload.
+
+⚠️ **SCOPED DOWN WHILE BUILDING IT (2026-08-13).** This said "`pg`, Prisma and Drizzle point at it".
+Only **`pg`** does. Prisma, Drizzle, TypeORM, Sequelize and Knex generate SQL through their own engines
+and run migrations through their own CLIs, and half-supporting a migration tool produces a schema that
+is subtly not the user's — the exact "built but not really working" state rule 2 forbids. Those apps
+keep the sandbox until each one is genuinely implemented and tested.
 
 **The gate that makes this legal under the second absolute rule — the capability prover.**
 Before in-browser is *chosen*, statically resolve every backend import against a registry of modules we
@@ -208,6 +221,13 @@ as "not needed".
 ## 5. Order of work
 
 **Phase 0 → Phase 1 → Phase 3 → Phase 2 → Phase 4.**
+
+**ACTUAL ORDER TAKEN (2026-08-13):** 0 → 1 → 1b → **2** → 3 → 4. Phase 2 was pulled ahead of Phase 3 at
+the admin's direction. It turned out to be the right call for a reason the plan had not anticipated:
+Phase 1b found three REAL bugs in the import path (`import.meta` as a SyntaxError, `process` as a
+ReferenceError, and a monorepo's dependencies invisible to the importmap), all of which affected
+imported apps constantly and generated apps never — so the phase that looked like polish was the one
+carrying the outstanding defects. Phase 3 still waits on Phase 0's measurement, as §0 requires.
 
 Phase 1 before Phase 2 because the frontend-only import needs no backend runtime and is the clearest win.
 Phase 3 before Phase 2 because it is small and mostly reuses existing machinery. Phase 2 is the largest and

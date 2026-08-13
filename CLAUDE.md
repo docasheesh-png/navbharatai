@@ -458,11 +458,36 @@ the code (it is actually read somewhere) on 2026-07-11.
   no LLM call, so no cost; max 2 nudges from step 15) · `AGENTV3_VACCINE` (after a successful build the
   platform RUNS the app's own test suite and reports honest pass/fail, so a green build whose tests fail
   can never be called verified; a shell command, NOT a model call — its repair budget only opens if
-  `AGENTV3_FEATURE_HEAL` is also on, which it is not) · `AGENTV3_DEPHEALTH_GATE` (CVE + copyleft advisory
+  `AGENTV3_FEATURE_HEAL` is also on, ⚠️ **which it now IS: the admin set `AGENTV3_FEATURE_HEAL=on` with
+  `AGENTV3_FEATURE_HEAL_PCT=20` on 2026-08-13, so the vaccine's repair budget is OPEN for that same 20%
+  cohort** — see the entry below) · `AGENTV3_DEPHEALTH_GATE` (CVE + copyleft advisory
   appended to an already-successful build; cannot block or fail one).
   ⚠️ **What to watch on the first real builds:** parallel build is the only one that changes HOW a build
   runs — its speedup is unmeasured and needs a real large multi-file build to judge. The other three are
   advisory or deterministic and cannot fail a build. Any of them reverts instantly by unsetting it.
+- **Flipped ON by the admin 2026-08-13 (audited against live code the same session):**
+  `AGENTV3_FEATURE_HEAL` = `on` with `AGENTV3_FEATURE_HEAL_PCT` = `20`, and `AGENTV3_DESIGN_GATE` = `on`.
+  - **`AGENTV3_FEATURE_HEAL` — the closed loop on "the app renders but the control the user asked for is
+    not there".** Slice 1 only RECORDED a `FEATURE_COVERAGE` finding; `on` runs ONE bounded heal pass that
+    adds the missing UI and then RE-OPENS the running app to re-probe, so only a control genuinely in the
+    live DOM counts as fixed. It spends an EXTRA model pass (real cost, billed on a paid build), which is
+    exactly why it was opt-in. It can never block or fail a build, and `verifyAfterFix` wraps it: a heal
+    that adds the control but breaks the render is REVERTED to the green snapshot rather than shipped.
+    If the control still is not there afterwards, the honest pre-heal warning stands.
+  - **`AGENTV3_FEATURE_HEAL_PCT=20` is a real canary and is wired correctly.** All THREE call sites
+    (`routes/agentv3.ts` ~10931 feature heal, ~11369 the vaccine repair budget, ~11557) pass `workspaceId`
+    as the rollout key, so a workspace is entirely IN or entirely OUT — never healed on one pass and not
+    another. ⚠️ Note the middle one: turning this flag on is ALSO what opens `AGENTV3_VACCINE`'s repair
+    budget (`vaxHealMax = featureHealEnabled(workspaceId) ? 1 : 0`), for the same 20%. That is a second
+    behaviour change riding one flag, and it is intended — just not obvious from the flag's name.
+    ⚠️ An unset/malformed PCT means **100%**, not 0 — `inFlagRollout` treats a bad value as a full
+    rollout. Deleting the PCT key to "pause" the canary would ramp it to everyone instead.
+  - **`AGENTV3_DESIGN_GATE`** — see its own entry below. Detection was already running and free; `on`
+    adds ONE bounded repair pass naming only the offending pages, and reports `DESIGN_HEALED` or,
+    honestly, `DESIGN_PARTIALLY_HEALED`. It can never fail a build.
+  - **What to watch:** both new flags spend an extra model pass on the builds they fire for, so the thing
+    to compare is per-build cost and duration for the 20% cohort against the other 80% — the same
+    in-vs-out comparison `escalationCohort` exists for. Either reverts instantly by unsetting it.
 - **Android update notice (added 2026-08-11, admin sets after each Play upload):**
   `ANDROID_LATEST_VERSION_CODE` (the versionCode of the build now live on Play — the android-aab
   workflow stamps each build with the CI run number, so this is that number), `ANDROID_LATEST_VERSION_NAME`

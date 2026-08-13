@@ -45,24 +45,37 @@ afterEach(() => {
 const names = (runners: ReturnType<typeof cheapBuildFloorRunners>): string[] => runners.map((r) => r.name);
 
 describe('the weak HEAL ladder — flagship reachable, flagship LAST', () => {
-  it('drops the flash rung and ends on the flagship', () => {
+  it('drops ONLY the flash rung — exactly one, because only GLM has one', () => {
     const heal = cheapBuildFloorRunners({ free: true, healLadder: true });
     const build = cheapBuildFloorRunners({ free: true });
-    // The main weak BUILD keeps all three rungs, cheapest first — unchanged by any of this.
-    expect(build.length).toBeGreaterThan(heal.length);
-    // The heal starts one rung higher: no flash, and it still ENDS on the flagship rather than leading
-    // with it. Counting rungs is what proves "one dropped from the front", not "one added at the back".
-    expect(heal.length).toBe(build.length - 2); // one flash rung dropped per provider (GLM + Kimi)
+    // The main weak BUILD keeps every rung, flash first — unchanged by any of this.
+    expect(heal.length).toBe(build.length - 1);
   });
 
-  it('the heal never begins on the model that produced the failing app', () => {
-    // Flash is the first rung of the free BUILD ladder. If the heal began there, the model that broke
-    // the app would be the one asked to fix it — the loop this ladder exists to avoid.
-    const build = cheapBuildFloorRunners({ free: true });
-    const heal = cheapBuildFloorRunners({ free: true, healLadder: true });
-    expect(build.length).toBeGreaterThan(0);
-    expect(heal.length).toBeGreaterThan(0);
-    expect(heal.length).toBeLessThan(build.length);
+  it('KEEPS kimi-k2.5, which the routing rule names as a heal model', () => {
+    /**
+     * THE CORRECTION THIS LOCKS. The first version dropped the FIRST rung of every ladder, which is
+     * wrong for Kimi: Kimi has no flash model, so its first rung is `kimi-k2.5` — a model CLAUDE.md
+     * explicitly names as a valid heal model ("the non-flagship cheap coders (`glm-4.7` / `kimi-k2.5`)").
+     * Position was standing in for "too weak to repair"; only GLM actually has such a rung.
+     */
+    process.env.AGENTV3_CHEAP_FLOOR = 'kimi';
+    expect(cheapBuildFloorRunners({ free: true, healLadder: true }).length)
+      .toBe(cheapBuildFloorRunners({ free: true }).length);
+  });
+
+  it('the GLM heal really does lose its flash rung', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    expect(cheapBuildFloorRunners({ free: true, healLadder: true }).length)
+      .toBe(cheapBuildFloorRunners({ free: true }).length - 1);
+  });
+
+  it('a flash-ONLY ladder is left alone rather than emptied', () => {
+    // An empty floor silently disables cheapOnly and drops the weak heal through to Gemini/Haiku — the
+    // same trap fixed earlier today, re-armed from a different side.
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    process.env.AGENTV3_FREE_GLM_MODEL = 'glm-4.7-flash';
+    expect(cheapBuildFloorRunners({ free: true, healLadder: true }).length).toBeGreaterThan(0);
   });
 
   it('flagship-ONLY is still available, and is a DIFFERENT shape', () => {

@@ -1931,7 +1931,20 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: b
      * own output is the loop the 2026-08-02 amendment was reacting to. Starting one rung above keeps
      * the admin's "flagship last" AND avoids that loop, instead of trading one for the other.
      */
-    if (opts?.healLadder && opts?.free && ladder.length > 2) return ladder.slice(1);
+    if (opts?.healLadder && opts?.free) {
+      /**
+       * Drop the FLASH-class rungs by NAME, not by position.
+       *
+       * The first version of this sliced the front off every ladder, which is wrong for Kimi: Kimi has
+       * no flash model, so its first rung is `kimi-k2.5` — a model CLAUDE.md explicitly names as a valid
+       * heal model ("the non-flagship cheap coders (`glm-4.7` / `kimi-k2.5`)"). Position is a proxy for
+       * "cheapest"; the rule is about CAPABILITY, and only GLM has a rung too weak to repair with.
+       */
+      const withoutFlash = ladder.filter((m) => !/flash/i.test(m));
+      // Never empty the ladder. A floor with no rungs silently disables `cheapOnly` and drops the weak
+      // heal through to Gemini/Haiku — the same trap fixed earlier today, re-armed from a different side.
+      if (withoutFlash.length > 0) return withoutFlash;
+    }
     return ladder;
   };
   if (floor === 'glm' || floor === 'both' || floor === 'on') {

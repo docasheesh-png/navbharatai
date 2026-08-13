@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
@@ -335,6 +335,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       if (!d?.tally) toast(d?.error || 'Could not measure — no builds with enough recorded detail yet.');
     } catch (e) { console.error(e); setNecessity(null); toast('Could not measure server necessity.'); }
     finally { setNecessityLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  /**
+   * SANDBOX HANDOVER (Phase 0 of IN_BROWSER_PREVIEW_PLAN.md) — where a sandbox's billed life goes.
+   *
+   * The companion to Server necessity, and deliberately capable of returning bad news: if post-build
+   * holding turns out to be a small share, Phase 3 is a reliability change and must not be sold as a
+   * cost one. Same button-gated loading, for the same reason — it reads up to 500 build documents plus
+   * the sandbox records.
+   */
+  const [handover, setHandover] = useState<{
+    headline: string;
+    tally: { examined: number; measured: number; buildHours: number; heldAfterHours: number; frontendOnlyCount: number; recoverableHours: number; unknown: Record<string, number> };
+    projection: { spanDays: number; recoverableHoursPerDay: number; monthlyUsdEstimate: number };
+    sample: Array<{ workspaceId: string; prompt: string; known: boolean; why?: string; buildMinutes?: number; heldAfterMinutes?: number; frontendOnly?: boolean }>;
+  } | null>(null);
+  const [handoverLoading, setHandoverLoading] = useState(false);
+
+  const fetchHandover = useCallback(async () => {
+    setHandoverLoading(true);
+    try {
+      const r = await fetch('/api/admin/sandbox-handover?limit=500', { headers });
+      const d = await r.json();
+      setHandover(d?.tally ? d : null);
+      if (!d?.tally) toast(d?.error || 'Could not measure — no builds with both a settled report and a sandbox record yet.');
+    } catch (e) { console.error(e); setHandover(null); toast('Could not measure sandbox handover.'); }
+    finally { setHandoverLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
 
@@ -1456,6 +1484,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   >
                     <Server className={`w-3.5 h-3.5 ${necessityLoading ? 'animate-pulse' : ''}`} /> Server necessity
                   </button>
+                  {/* SANDBOX HANDOVER (Phase 0 of the in-browser preview plan) — see fetchHandover. */}
+                  <button
+                    onClick={fetchHandover}
+                    disabled={handoverLoading}
+                    title="After a build finished, how much longer did its sandbox stay billable — and how much of that could the browser have served?"
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-violet-500/40 text-violet-300 hover:text-white hover:bg-violet-600/20 disabled:opacity-40"
+                  >
+                    <Clock className={`w-3.5 h-3.5 ${handoverLoading ? 'animate-pulse' : ''}`} /> Sandbox handover
+                  </button>
                   <button
                     onClick={fetchBuildReports}
                     className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
@@ -1518,6 +1555,86 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           </div>
                           <div className="text-[11px] text-[#c9d1d9] mt-1 leading-snug">{s.prompt || <span className="text-[#6e7681]">(no prompt recorded)</span>}</div>
                           {s.reasons.length > 0 && <div className="text-[10px] text-[#8b949e] mt-0.5">{s.reasons.join(' · ')}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              )}
+
+              {/* SANDBOX HANDOVER RESULT (Phase 0 of IN_BROWSER_PREVIEW_PLAN.md). The measured split
+                  between real build work and post-build holding. The excluded builds are shown as
+                  loudly as the measured ones: an unmeasurable hold is not a zero-length hold, and
+                  quietly treating it as one is how a measurement turns into a flattering estimate. */}
+              {handover && (
+                <div className="bg-[#161b22] border border-violet-500/25 rounded-[1.25rem] p-4 space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Clock className="w-4 h-4 text-violet-400" />
+                    <h4 className="text-sm font-black text-white tracking-tight">Where does a sandbox's billed time go?</h4>
+                  </div>
+                  <p className="text-[12px] text-violet-200/90 font-bold leading-relaxed">{handover.headline}</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {([
+                      ['Real build work', `${handover.tally.buildHours}h`, 'text-sky-300', 'a browser can never absorb this'],
+                      ['Held after the build', `${handover.tally.heldAfterHours}h`, 'text-amber-300', 'the only window Phase 3 targets'],
+                      ['Reclaimable', `${handover.tally.recoverableHours}h`, 'text-emerald-300', `frontend-only — ${handover.tally.frontendOnlyCount} builds`],
+                      ['Could not measure', `${handover.tally.examined - handover.tally.measured}`, 'text-[#8b949e]', 'excluded, never counted as zero'],
+                    ] as const).map(([label, n, cls, hint]) => (
+                      <div key={label} className="bg-[#0d1117] border border-white/10 rounded-xl p-3">
+                        <div className={`text-2xl font-black tabular-nums ${cls}`}>{n}</div>
+                        <div className="text-[10px] font-black uppercase tracking-wider text-[#8b949e] mt-1">{label}</div>
+                        <div className="text-[10px] text-[#6e7681] mt-0.5 leading-snug">{hint}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* The extrapolation is kept visually APART from the measured numbers above, and says
+                      what it is. The two must never be read as one row of equally solid figures. */}
+                  {handover.projection.monthlyUsdEstimate > 0 && (
+                    <div className="bg-[#0d1117] border border-white/10 rounded-xl p-3">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-[#8b949e]">Extrapolation, not a bill</div>
+                      <div className="text-[12px] text-[#c9d1d9] mt-1 leading-snug">
+                        Over the sample's <span className="tabular-nums font-black text-white">{handover.projection.spanDays}</span> days that is{' '}
+                        <span className="tabular-nums font-black text-emerald-300">{handover.projection.recoverableHoursPerDay}h/day</span> reclaimable ≈{' '}
+                        <span className="tabular-nums font-black text-emerald-300">${handover.projection.monthlyUsdEstimate}/month</span>. Scaled from this
+                        window at the measured sandbox rate — the real bill moves with usage.
+                      </div>
+                    </div>
+                  )}
+                  {Object.entries(handover.tally.unknown).some(([, n]) => n > 0) && (
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-wider text-[#8b949e] mb-1.5">Why builds were excluded</div>
+                      <div className="space-y-1">
+                        {Object.entries(handover.tally.unknown).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).map(([why, n]) => (
+                          <div key={why} className="flex items-start gap-2 text-[11px] text-[#c9d1d9]">
+                            <span className="tabular-nums font-black text-[#8b949e] shrink-0 w-6">{n}×</span>
+                            <span className="leading-snug">{({
+                              'no-build-window': 'the report never recorded a start and end (unsettled or legacy build)',
+                              'no-sandbox-record': 'no durable sandbox record for that workspace',
+                              'never-paused': 'nothing ever stamped a pause — the hold is real but unmeasurable',
+                              'stale-pairing': 'the pause predates the build, so the record is about an earlier sandbox',
+                            } as Record<string, string>)[why] ?? why}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <details className="text-[11px]">
+                    <summary className="cursor-pointer text-[#8b949e] font-bold hover:text-white">Check it against {handover.sample.length} real builds</summary>
+                    <div className="mt-2 space-y-1.5">
+                      {handover.sample.map((s) => (
+                        <div key={s.workspaceId} className="bg-[#0d1117] border border-white/5 rounded-lg px-2.5 py-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {s.known ? (
+                              <>
+                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-sky-500/40 text-sky-300">{s.buildMinutes}m build</span>
+                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-amber-300">{s.heldAfterMinutes}m held</span>
+                                {s.frontendOnly && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-emerald-500/40 text-emerald-300">reclaimable</span>}
+                              </>
+                            ) : (
+                              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-white/15 text-[#8b949e]">not measurable · {s.why}</span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-[#c9d1d9] mt-1 leading-snug">{s.prompt || <span className="text-[#6e7681]">(no prompt recorded)</span>}</div>
                         </div>
                       ))}
                     </div>

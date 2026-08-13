@@ -127,6 +127,29 @@ class SandboxStore {
     } catch { /* best-effort */ }
   }
 
+  /**
+   * The most recently active sandbox records, newest first — the durable half of the Phase 0 handover
+   * measurement (sandboxHandover.ts), which needs to know when each sandbox was last used and when a
+   * pause path stopped it.
+   *
+   * ADMIN-ONLY and read-only: it feeds one admin card and touches nothing. Ordered by `updatedAt`,
+   * which `listStale` above already orders by, so it reuses that single-field index and can never
+   * FAILED_PRECONDITION on a missing composite one. Bounded like every other read here. Never throws.
+   */
+  async listRecent(limit = 200): Promise<SandboxRecord[]> {
+    const db = this.getDb();
+    if (!db) return [];
+    try {
+      const snap = await db.collection('agentv3_sandboxes')
+        .orderBy('updatedAt', 'desc')
+        .limit(Math.max(1, Math.min(500, limit)))
+        .get();
+      return snap.docs.map((d) => d.data() as SandboxRecord).filter((r) => r && r.workspaceId);
+    } catch {
+      return [];
+    }
+  }
+
   /** Forget a workspace's sandbox (e.g. after a connect that failed because it was reaped). Best-effort. */
   async clear(workspaceId: string): Promise<void> {
     const db = this.getDb();

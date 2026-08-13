@@ -23,6 +23,8 @@ import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { precompileModules } from './PreviewPrecompile';
 import { startDepWarmup, getWarmDepUrls, WARMUP_MAX_MODULES } from './PreviewDepWarmup';
 import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE, PROCESS_SHIM_SOURCE } from './previewImportMeta';
+import { proveBackendRunnable } from './browserBackend/capability';
+import { EXPRESS_SHIM_SOURCE, BACKEND_BRIDGE_SOURCE, EXPRESS_SHIM_PATH, BACKEND_BRIDGE_PATH } from './browserBackend/expressShim';
 
 // Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
@@ -305,7 +307,23 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
       ? `<script>${inlineBabel.replace(/<\/script>/gi, '<\\/script>')}</script>`
       : `<script src="${babelPrimary}"></script>`;
 
-  const payload = JSON.stringify({ entry, modules: compiled ?? modules }).replace(/<\//g, '<\\/');
+  /**
+   * PHASE 2 — can this app's own backend run here?
+   *
+   * The prover's default is NO, so an app it cannot vouch for produces a page byte-for-byte identical
+   * to today's. When it says yes, the shim + bridge are added to the module map AFTER precompilation,
+   * deliberately: they ship exactly as the tests execute them, never through a compiler pass that no
+   * test covered.
+   */
+  const backend = proveBackendRunnable(modules);
+  const shipped: Record<string, string> = { ...(compiled ?? modules) };
+  if (backend.runnable && backend.entry) {
+    shipped[EXPRESS_SHIM_PATH] = EXPRESS_SHIM_SOURCE;
+    shipped[BACKEND_BRIDGE_PATH] = BACKEND_BRIDGE_SOURCE;
+  }
+  const backendEntry = backend.runnable ? backend.entry : null;
+
+  const payload = JSON.stringify({ entry, modules: shipped, backendEntry }).replace(/<\//g, '<\\/');
   // Serve dependencies from OUR origin when we know it (the /api/esm mirror): the browser then holds
   // every version-pinned module as an immutable cache entry, so reopening an old app loads its deps
   // from disk with zero network — and a CDN outage stops being a preview outage. Without an origin
@@ -404,6 +422,9 @@ ${babelTag}
   var bundle = JSON.parse(document.getElementById('__bundle__').textContent);
   var SOURCES = bundle.modules;
   var ENTRY = bundle.entry;
+  // PHASE 2 — the app's own server, when the prover vouched for it. Null on every other page, which is
+  // what keeps this whole path invisible to apps that never had a backend.
+  var BACKEND_ENTRY = bundle.backendEntry || null;
   // True when every module arrived ALREADY COMPILED from the server — the device then runs no
   // compiler at all (no Babel download, no per-module transform on the phone's main thread).
   var PRECOMPILED = ${precompiled};
@@ -411,6 +432,8 @@ ${babelTag}
   // Path aliases (e.g. '@' -> '/client/src'): rewrite an alias-prefixed import to a root-absolute
   // LOCAL path so it resolves against the project's own files instead of being fetched from the CDN.
   var ALIASES = ${aliasesJson};
+  ${backendEntry ? `// Route the bare specifier "express" to the shim rather than to the CDN.
+  ALIASES['express'] = '/${EXPRESS_SHIM_PATH.replace(/\.js$/, '')}';` : ''}
   function applyAlias(spec) {
     for (var a in ALIASES) {
       if (spec === a) return ALIASES[a];
@@ -849,6 +872,21 @@ ${babelTag}
           nbaiPending--; nbaiPkgsDone++; nbaiProgress();
         }
       }));
+      // THE APP'S OWN SERVER RUNS FIRST. The bridge patches fetch, the server module registers its
+      // routes, and only then does the frontend mount — otherwise a component fetching on mount would
+      // race the server that is supposed to answer it. A server that throws must NOT take the frontend
+      // down with it: the app still renders, and its API calls fail honestly, which is strictly better
+      // than a blank page.
+      ${backendEntry ? `try {
+        var nbaiBridge = requireModule('${BACKEND_BRIDGE_PATH}');
+        requireModule(BACKEND_ENTRY);
+        var nbaiExpress = requireModule('${EXPRESS_SHIM_PATH}');
+        var nbaiApp = nbaiExpress && (nbaiExpress.__nbaiLastApp || (nbaiExpress.default && nbaiExpress.default.__nbaiLastApp));
+        if (nbaiApp) nbaiBridge.register(nbaiApp);
+        else console.warn('[preview] the server module ran but created no app — API calls will go to the network');
+      } catch (e) {
+        console.warn('[preview] the app server could not start:', (e && e.message) || e);
+      }` : ''}
       requireModule(ENTRY);
       // The entry executed without throwing — the app is mounting. The MutationObserver above
       // normally hides the boot overlay on the first real paint; this explicit hide covers apps

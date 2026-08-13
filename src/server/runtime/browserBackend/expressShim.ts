@@ -274,7 +274,16 @@ function createApp() {
   return app;
 }
 
-function express() { return createApp(); }
+/**
+ * The most recently created app.
+ *
+ * The bridge needs the app INSTANCE, and a generated server almost never exports one — it does
+ * "const app = express(); ... app.listen(3000)" and exports nothing at all. Reaching for a
+ * module.exports that is not there would make the common shape the unsupported one. Recording it at
+ * creation works for every shape, exported or not.
+ */
+function express() { var app = createApp(); express.__nbaiLastApp = app; return app; }
+express.__nbaiLastApp = null;
 express.Router = createRouter;
 express.json = function () {
   return function (req, res, next) {
@@ -322,7 +331,7 @@ export const BACKEND_BRIDGE_SOURCE = String.raw`
 var app = null;
 var pending = [];
 
-/** Called by the server module's own export once it has built its app. */
+/** Point the bridge at the app instance the server module created. */
 function register(a) {
   app = a;
   var q = pending; pending = [];

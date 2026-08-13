@@ -341,6 +341,12 @@ export function halfBootCause(bootLog: string | null | undefined): string | null
     const engine = unavailableDbEngine(log)?.label ?? 'its database';
     return `Your app started but could not reach ${engine}, so it stopped booting half-way — its pages were never mounted. That is why pages answer "Cannot GET". This preview can only start PostgreSQL, so connect your own ${engine} in Settings → App Settings → Database`;
   }
+  // The Replit/Heroku export shape (admin 2026-08-13): the port is up and the server 500s every page
+  // because its session secret lived in a .env we deliberately never import. Named here so the verdict
+  // stops guessing "your client routes aren't served" over a log that says exactly what is wrong.
+  if (cause === 'missing_session_secret') {
+    return 'Your app started, but its login sessions have no secret key, so every page request fails. That key normally comes from an environment file, and NavBharatAI never imports those — your secrets stay yours. Add SESSION_SECRET in Settings → App Settings → Secrets & API Keys, or ask me to give it a development fallback so it runs here';
+  }
   if (cause === 'missing_credential') {
     const key = missingCredentialFromLog(log);
     return `Your app started but stopped booting half-way because a required key${key ? ` (\`${key}\`)` : ''} is missing — its pages were never mounted. Add it in Settings → App Settings → Secrets & API Keys`;

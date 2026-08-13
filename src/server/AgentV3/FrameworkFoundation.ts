@@ -170,6 +170,31 @@ const TSCONFIG_JSON = `{
 }
 `;
 
+/**
+ * The RELEASE typecheck config — the same rules as tsconfig.json, minus the tests.
+ *
+ * ROOT CAUSE (admin report 2026-08-11, a user's APK build): the release build runs `tsc && vite build`
+ * and tsconfig includes ALL of `src`, so `src/components/Login.test.tsx` importing a member Login.tsx
+ * does not export failed the build with exit code 2 — and the APK never got built. A broken TEST
+ * stopped a RELEASE.
+ *
+ * That is the wrong shape. Tests are checked by the test runner; the release build should typecheck
+ * what actually SHIPS. Tests keep their editor and vitest typechecking (tsconfig.json is unchanged) —
+ * they simply cannot block a release any more.
+ */
+const TSCONFIG_BUILD_JSON = `{
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "**/__tests__/**",
+    "**/__mocks__/**"
+  ]
+}
+`;
+
 /** The canonical Vite React entry, synthesized only when the app has an App component but no entry at all. */
 function synthesizeEntry(present: Set<string>, hasTs: boolean): string {
   const appImport = present.has('src/App.tsx') || present.has('src/App.jsx') ? "import App from './App';" : null;
@@ -228,6 +253,10 @@ export function ensureViteReactFoundation(files: Record<string, string>, opts?: 
   // 5. tsconfig.json — only when the app actually contains TypeScript; a JS app needs none.
   if (hasTs && !hasBasename('tsconfig.json')) {
     add('tsconfig.json', TSCONFIG_JSON, 'tsconfig.json');
+  }
+  // The release typecheck config, so a broken test can never block a release build — see above.
+  if (hasTs && !hasBasename('tsconfig.build.json')) {
+    add('tsconfig.build.json', TSCONFIG_BUILD_JSON, 'tsconfig.build.json');
   }
   return result;
 }

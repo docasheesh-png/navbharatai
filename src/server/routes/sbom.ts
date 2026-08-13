@@ -1,4 +1,6 @@
 import type { Express, Request, Response } from 'express';
+import { verifyFirebaseToken } from '../lib/authMiddleware';
+import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 import { analyzeAppDependencies } from '../AppMakerLab/SBOMGenerator';
 import { workspaceRateLimiter } from '../lib/authMiddleware';
 import { validateBody, vobject, vrecord, vstring } from '../lib/validate';
@@ -32,14 +34,22 @@ export function registerSbomRoutes(app: Express): void {
       return;
     }
 
+    // PERSIST ONLY INTO A WORKSPACE THE CALLER OWNS (paid-surface audit, admin 2026-08-12). This
+    // route was unauthenticated and wrote to `sboms/{workspaceId}/{buildId}` from the request body, so
+    // anyone could plant an SBOM inside another user's workspace. The SBOM itself is still computed
+    // and returned from the lockfile the caller supplied — that reveals nothing they did not send —
+    // and only the WRITE needs an owner.
+    const ownedWorkspaceId = workspaceId && ownedByVerifiedUid(await verifyFirebaseToken(req), workspaceId)
+      ? String(workspaceId)
+      : null;
     // Best-effort persistence — a storage failure must not fail the SBOM response.
-    if (workspaceId && buildId) {
+    if (ownedWorkspaceId && buildId) {
       try {
         const { getDb } = await import('../lib/db');
         const { doc, setDoc } = await import('firebase/firestore');
         const db = getDb() as any;
         if (db) {
-          await setDoc(doc(db, 'sboms', String(workspaceId), 'builds', String(buildId)), {
+          await setDoc(doc(db, 'sboms', ownedWorkspaceId, 'builds', String(buildId)), {
             sbom: result.sbom,
             copyleft: result.copyleft,
             componentCount: result.componentCount,

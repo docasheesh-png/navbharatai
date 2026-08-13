@@ -314,7 +314,7 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
   const depBase = origin && process.env.AGENTV3_PREVIEW_DEP_PROXY !== 'off'
     ? `${origin.replace(/\/$/, '')}/api/esm/`
     : ESM;
-  const imports = buildImportmap(vfs, depBase);
+  const imports = buildImportmap(vfs, depBase, entry);
   const importmap = JSON.stringify({ imports }).replace(/<\//g, '<\\/');
   // START THE DOWNLOADS NOW, not after the compiler finishes (admin 2026-08-05: "kitne bhi din baad
   // open karo, preview pehle jaisa hi chalega").
@@ -1269,10 +1269,40 @@ export function buildWarmPreloads(urls: string[]): string {
  * origin-less static route, or kill switch `AGENTV3_PREVIEW_DEP_PROXY=off`). The URL SHAPE after the
  * base is identical either way, so the loader's sub-path surgery and esm.run fallback work unchanged.
  */
-function buildImportmap(vfs: VirtualFileSystem, depBase: string = ESM): Record<string, string> {
+/**
+ * The package.json that governs a module — the NEAREST one at or above its directory. Pure + exported
+ * for tests.
+ *
+ * MONOREPOS (Phase 1b, admin 2026-08-13: imported GitHub projects). The importmap used to read
+ * `package.json` at the ROOT only. In a workspace repo — `apps/web/`, `packages/ui/`, a pnpm workspace
+ * — the root manifest lists no runtime dependencies at all, so EVERY one of the app's packages was
+ * missing from the importmap and resolved without a version pin. The app's own manifest sits beside
+ * its source, one directory up from the entry, and that is the one that describes what it needs.
+ *
+ * Returns 'package.json' when nothing nearer exists, so a normal single-package project — every app
+ * this engine generates — takes exactly the path it took before. This can only ADD a manifest that was
+ * previously invisible; it can never take one away.
+ */
+export function nearestPackageJson(vfs: VirtualFileSystem, entry: string | null): string {
+  const parts = String(entry ?? '').split('/');
+  for (let i = parts.length - 1; i > 0; i--) {
+    const candidate = `${parts.slice(0, i).join('/')}/package.json`;
+    const raw = vfs.readText(candidate);
+    if (!raw) continue;
+    try {
+      const pkg = JSON.parse(raw);
+      // A manifest with no dependencies of its own describes nothing the importmap needs; keep walking
+      // up rather than stopping at, say, a `packages/ui/package.json` that only declares a name.
+      if (pkg && (pkg.dependencies || pkg.devDependencies)) return candidate;
+    } catch { /* unreadable manifest — keep walking up */ }
+  }
+  return 'package.json';
+}
+
+function buildImportmap(vfs: VirtualFileSystem, depBase: string = ESM, entry: string | null = null): Record<string, string> {
   const deps: Record<string, string> = {};
   try {
-    const pkg = JSON.parse(vfs.readText('package.json') || '{}');
+    const pkg = JSON.parse(vfs.readText(nearestPackageJson(vfs, entry)) || '{}');
     Object.assign(deps, pkg.dependencies || {}, pkg.devDependencies || {});
   } catch { /* ignore */ }
   const ver = (name: string): string => {

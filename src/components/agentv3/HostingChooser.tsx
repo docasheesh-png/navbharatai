@@ -21,7 +21,7 @@
 // (static = Free); it is the single place to change when the admin sets real numbers.
 
 import { useEffect, useState } from 'react';
-import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database } from 'lucide-react';
+import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
 
@@ -68,6 +68,8 @@ export interface HostingChooserProps {
   authedFetch?: (url: string, init?: RequestInit) => Promise<Response>;
   /** Open Settings → App Settings → Database, for the "connect my own" answer. */
   onOpenDatabaseSettings?: () => void;
+  /** Open the APK Builder (Other AI → APK Builder), pre-targeted to this app, to make an Android app. */
+  onOpenApkBuilder?: () => void;
 }
 
 /** What the server knows about this app's data needs — see GET /api/agentv3/database-readiness. */
@@ -83,7 +85,7 @@ const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI
 
 export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled,
-  ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings,
+  ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost'>('choose');
   // The honest reason the LAST publish attempt didn't start. Shown inline; cleared on the next try.
@@ -351,55 +353,86 @@ export function HostingChooser({
             )}
           </div>
 
-          {/* Path 2 — Host elsewhere (BYO) */}
+          {/* Path 2 — Host somewhere else: EITHER we deploy to the user's provider, OR they host it
+              themselves (we only open a PR into their repo). Both are "off NavBharatAI", so they live in
+              one card as two clear sub-choices (admin 2026-08-13). */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[13px] font-bold text-white">Host somewhere else</span>
               <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-full">Your account</span>
             </div>
             <p className="text-[11.5px] text-zinc-400 leading-relaxed">
-              Publish to your own provider. Your cloud, your bill — free from us.
+              Keep it off NavBharatAI — your cloud, your bill, free from us.
             </p>
-            {byo.length > 0 ? (
-              <div className="flex flex-col gap-1.5 mt-0.5">
-                {byo.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => publish(p.id)}
-                    disabled={busy}
-                    title={p.requirement}
-                    className="w-full py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 hover:text-white disabled:opacity-40 text-zinc-300 text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
-                  >
-                    <Globe className="w-3.5 h-3.5" />
-                    Publish to {p.name}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">
-                No other providers connected yet. Connect Vercel, Netlify, Cloudflare, or GitHub Pages to publish
-                to your own account.
+
+            {/* Sub-choice A — we deploy to the user's connected provider */}
+            <div className="mt-0.5">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1.5">We deploy to your provider</p>
+              {byo.length > 0 ? (
+                <div className="flex flex-col gap-1.5">
+                  {byo.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => publish(p.id)}
+                      disabled={busy}
+                      title={p.requirement}
+                      className="w-full py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 hover:text-white disabled:opacity-40 text-zinc-300 text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <Globe className="w-3.5 h-3.5" />
+                      Publish to {p.name}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[11px] text-zinc-500 leading-relaxed">
+                  No provider connected yet. Connect Vercel, Netlify, Cloudflare, or GitHub Pages to publish
+                  to your own account.
+                </p>
+              )}
+            </div>
+
+            {/* Sub-choice B — the user hosts it themselves; we only open a PR into their own GitHub repo */}
+            <div className="mt-1.5 pt-2.5 border-t border-zinc-800">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1.5">I host it myself</p>
+              <p className="text-[11px] text-zinc-500 leading-relaxed mb-2">
+                We only write code and open a pull request into your own GitHub repo — CI-gated. Your own
+                host&apos;s auto-deploy takes it from there. We never touch your hosting.
               </p>
-            )}
+              <button
+                onClick={() => setView('selfhost')}
+                className="w-full py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 hover:text-white text-zinc-300 text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
+              >
+                <GitBranch className="w-3.5 h-3.5" />
+                {ownRepo ? `Connected: ${ownRepo.owner}/${ownRepo.repo}` : 'Set up'}
+              </button>
+            </div>
           </div>
 
-          {/* Path 3 — I host it myself: NavBharatAI never touches deployment, only your own GitHub repo */}
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2.5">
+          {/* Path 3 — Make an Android app (APK) via the APK Builder, pre-targeted to THIS app (admin 2026-08-13). */}
+          <div className="rounded-xl border border-sky-800/50 bg-sky-950/20 p-4 flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
-              <span className="text-[13px] font-bold text-white">I host it myself</span>
-              <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-full">Your repo</span>
+              <span className="text-[13px] font-bold text-white">Make an Android app</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-sky-300 bg-sky-900/50 px-2 py-0.5 rounded-full">APK</span>
             </div>
             <p className="text-[11.5px] text-zinc-400 leading-relaxed">
-              We only write code and open a pull request into your own GitHub repo — CI-gated. Your existing
-              host&apos;s own auto-deploy takes it from there. We never touch your hosting.
+              Turn this app into a real installable Android app (.apk) — share it or upload it to the Play Store.
             </p>
+            <ul className="text-[11px] text-zinc-300 flex flex-col gap-1 mt-0.5">
+              <li>• Built on your own GitHub account</li>
+              <li>• Your app icon, name &amp; package</li>
+              <li>• Signed .apk / .aab — ready to install</li>
+            </ul>
             <button
-              onClick={() => setView('selfhost')}
-              className="mt-auto w-full py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 hover:text-white text-zinc-300 text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
+              onClick={() => onOpenApkBuilder?.()}
+              disabled={!onOpenApkBuilder}
+              className="mt-auto w-full py-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors"
             >
-              <GitBranch className="w-3.5 h-3.5" />
-              {ownRepo ? `Connected: ${ownRepo.owner}/${ownRepo.repo}` : 'Set up'}
+              <Smartphone className="w-3.5 h-3.5" />
+              Open APK Builder
             </button>
+            <p className="text-[11px] text-zinc-500 leading-relaxed">
+              Needs GitHub connected · paid step — the builder shows the price before you build.
+            </p>
           </div>
         </div>
 

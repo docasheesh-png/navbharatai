@@ -2888,6 +2888,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             setShowHostingChooser(false);
             window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'settings', settingsScreen: 'database' } }));
           }}
+          // Make an Android app → the APK Builder opens already targeted at this app (it reads the current
+          // Pro session id), so the user never re-picks their app (admin 2026-08-13).
+          onOpenApkBuilder={() => {
+            setShowHostingChooser(false);
+            window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'apk' } }));
+          }}
           onClose={() => setShowHostingChooser(false)}
           // STAYS OPEN, always. Closing on a successful start made sense while publishing streamed
           // into the chat — the user was sent somewhere that showed progress. Now the publish runs

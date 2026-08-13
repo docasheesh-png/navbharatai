@@ -32185,3 +32185,26 @@ The task was a leftover from before that revert; it is not work that was skipped
 code generator exists) · virus-scanning generated apps (note the open VirusTotal commercial-licence item
 before building on it) · daily spend-quota gauge (blocked on the admin defining the quota) · cache TTL jitter
 (explicitly "do NOT build yet" until one of its four named triggers is true).
+
+### Same day — a redundant build, caught before it merged (recorded so the cause dies, not just the symptom)
+
+While working through the remaining ROADMAP §2 items I built `storageProvision.ts` + 28 passing tests for
+"one-click object storage provisioning" — a feature that **already existed**. `supabaseStorageBucket.ts`
+shipped in **#2265, earlier in this same session**, with the same design and the same security stance I
+re-derived from scratch (bucket as a row in `storage.buckets` via the Database grant, so no new OAuth scope;
+never fetch the service-role key). The duplicate was deleted before it reached a PR, so nothing landed on
+`main` — but the credit was spent, and safeguard #6 exists precisely to prevent this.
+
+WHY IT HAPPENED, honestly: the ROADMAP line still read "🟡 HALF BUILT … the open work is provisioning a bucket
+in the USER's own account automatically", because #2265 shipped the feature and never updated the line. My
+redundant-work check was too narrow — I grepped `generate_storage` in the tool layer and the routes, but not
+the domain noun ("bucket") across `src/server/lib`, which would have found it in one command.
+
+TWO FIXES, not one:
+1. The ROADMAP line is now marked SHIPPED with its PR number.
+2. The line itself now carries the lesson — grep the DOMAIN NOUN, not the tool name, before believing any 🟡
+   in that file. This is the FOURTH time ROADMAP.md has sent a session at already-built work; the file's own
+   warning says so, and it did not save me, so the counter-measure now sits on the specific line that failed.
+
+Also worth recording: `AppKnowledgeBase.ts` line 285 already described the zero-setup storage accurately. The
+KB was RIGHT and the ROADMAP was WRONG — when the two disagree, the KB is the one tied to shipped code.

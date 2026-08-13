@@ -165,13 +165,19 @@ Ordered by what a user would actually feel.
 > we generate. Everything else in this section had already shipped.
 - ~~**Component tree panel** and **multi-element select**~~ — ✅ **BOTH SHIPPED 2026-08-11** (#2269, #2272). Do not rebuild.
 - ~~**Per-version preview URL**~~ — ✅ **SHIPPED 2026-08-13 (#2344)**: History tab → "Preview" opens that checkpoint running in a new tab while the current app stays untouched, so Restore becomes a decision made AFTER seeing. Runs as a `git worktree` + second port INSIDE the sandbox the user already has warm, so it adds NO E2B cost; `sandboxWarm` asks `getSandboxId` and never boots one. Four honest outcomes, and a URL only after a server really answered. Do not rebuild.
-- 🟡 **One-click object storage provisioning** — **HALF BUILT, and the halves matter (verified 2026-08-11).**
-  `generate_storage` EXISTS and is fully wired (catalog + dispatcher + `StorageGenerator`): it writes a real
-  presigned-upload route and an `uploadFile()` client for S3/R2/Supabase-Storage/MinIO or Cloudinary. What is
-  missing is the ZERO-SETUP half — it is **BYO keys**: the user pastes their own credentials into `.env`.
-  The open work is provisioning a bucket in the USER's own account automatically, the same shape as the
-  Supabase zero-setup DB path (and subject to the same standing rule: user apps run on the USER's account,
-  never NavBharatAI's). Do NOT rebuild the code generator.
+- ~~**One-click object storage provisioning**~~ — ✅ **SHIPPED 2026-08-11 (#2265)**, as `supabaseStorageBucket.ts`
+  + `zeroSetupStorageFiles` in `StorageGenerator.ts`. `generate_storage` with provider `"supabase"` is the
+  ZERO-SETUP path: the bucket and its RLS policies are created in the USER's own Supabase project, written as
+  a migration the provisioning flow applies. No new OAuth scope was needed (a bucket is a row in
+  `storage.buckets`, reachable through the Database grant) and **no service-role key is ever fetched** — the
+  generated app uploads with the anon key and RLS decides what a user may do. `s3`/`cloudinary` remain the
+  BYO-keys options. Do not rebuild.
+  ⚠️ **THIS LINE IS WHY THE WARNING ABOVE EXISTS.** It stayed at "🟡 HALF BUILT — the open work is provisioning
+  a bucket in the user's own account automatically" for two days AFTER #2265 shipped exactly that, and on
+  2026-08-13 it sent a session (mine) to build a second, complete implementation — `storageProvision.ts` plus
+  28 passing tests — before a wider grep found the real one and the duplicate was deleted unmerged. Nothing
+  reached `main`, but the credit was spent. **The lesson is specific: grep the whole `src/server/lib` for the
+  DOMAIN NOUN ("bucket"), not just the tool name, before believing any 🟡 in this file.**
 - ~~**Service-split generator** + named paradigms~~ — ✅ **SHIPPED 2026-08-11 (#2273)**: `analyze_service_split` PRICES each seam from the import graph and often answers "keep it as one app"; `setup_architecture` scaffolds clean/ddd/mvc/hexagonal with ESLint-ENFORCED boundaries. It deliberately does NOT auto-rewrite an app into microservices. Do not rebuild. (The original line read: "coupling is already scored; nothing turns that score into a split." It does now.)
 - ~~**Design-to-code intermediate contract** (AP-8)~~ — ✅ **SHIPPED 2026-08-13 (#2345)**: the same single vision call now also returns a typed contract (screens, sections top-to-bottom, verbatim labels), fed to the builder as requirements and VERIFIED against the written files afterwards — `DESIGN_CONTRACT_MET` / `_PARTIAL` (missing items by name) / `_ABSENT`. No extra model call. Evidence, never a gate. Do not rebuild.
 - ~~**Template-free scaffold fallback**~~ — ✅ **ALREADY BUILT (verified 2026-08-08).** There is no separate module, which is why a name-based grep missed it: the fallthrough is a BRANCH, present in all three prompts that need it — `OneShotBuilder.oneShotUserPrompt` ("The project starts empty — create all files at the project root"), `ProjectPlan.projectPlanUserPrompt`, and the manifest prompt. It is reachable: `scaffold` comes from `listFiles(...).catch(() => [])`, so an empty workspace or a listing error takes it. The roadmap line itself said "verify before building" — this is that verification, and it says do not build.

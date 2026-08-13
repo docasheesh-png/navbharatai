@@ -611,7 +611,7 @@ the code (it is actually read somewhere) on 2026-07-11.
   ("auto-focus broke", "sort ignores edits", "isAtLimit blocks Add") were all WARNINGS, which is exactly
   why C9 alone missed them. When a build feels too long, investigate the loop; never disable a
   correctness gate for a time saving that does not exist.
-- **`AGENTV3_DESIGN_GATE`** (built 2026-08-11, default OFF — admin flips on) — the fix for the admin's
+- **`AGENTV3_DESIGN_GATE`** (✅ **SET `on` in Cloud Run by the admin 2026-08-13**; built 2026-08-11) — the fix for the admin's
   report *"1st page beautiful, andar ke page bas HTML feel dete hai"*. `DesignCoverage.ts` judges EVERY
   page/screen file on its own (not the app as a whole) for four mechanical defects: bare markup, no
   heading, a raw `<table>`, and a list with no empty state. **Detection is deterministic — zero LLM cost
@@ -622,6 +622,30 @@ the code (it is actually read somewhere) on 2026-07-11.
   ships. Precision-first: skips Tailwind/CSS-module/styled-components/UI-library pages, leaf components,
   and anything under 6 elements, so it cannot nag a good app. The upstream half (a five-point per-page
   contract in the architect prompt, so the FIRST build is right) is always on and needs no flag.
+  ⚠️ **TWO THINGS A LATER SESSION MUST NOT RE-DERIVE.** (1) The repair runs INSIDE the post-answer
+  integrity pass (`routes/agentv3.ts` ~10462), which is BEFORE the green latch is set (~10773) — so
+  Green Freeze is not what governs it on the normal path, and reasoning "the freeze will refuse it" is
+  wrong (I made exactly that mistake, from checking the allowlist and the freeze default but not the
+  ORDERING). It is on the allowlist anyway so a RESUMED already-green session behaves identically
+  instead of silently doing nothing on one path. (2) Because it runs before the app is verified, it
+  CANNOT use `verifyAfterFix` — there is no green snapshot and no preview URL yet. Its net is
+  `designHealGuard.ts` instead: a page the repair leaves UNPARSEABLE is restored to its pre-repair
+  content (sandbox + durable store) while the pages it improved stand, and a file that was already
+  unparseable is deliberately NOT reverted. Narrower on purpose, and the diagnostics say so — a repair
+  that parses but breaks the app at RUNTIME is caught later by the preview check and reported, NOT
+  reverted. There is no PCT canary for this flag: it is all-or-nothing, so watch the first few builds.
+- **`AGENTV3_FEATURE_HEAL`** (✅ **SET `on` with `AGENTV3_FEATURE_HEAL_PCT=20` by the admin 2026-08-13**)
+  — the app renders but a control the user EXPLICITLY asked for is absent from the live DOM, so ONE
+  bounded repair pass adds it and the app is re-opened and re-probed (only a control genuinely in the
+  DOM now counts). ⚠️ `_PCT` is a SIEVE, not a switch — `inFlagRollout` returns false immediately when
+  the master flag is off, so `_PCT` alone does nothing. Keyed by workspaceId, so a given app is
+  consistently in or out. Safe by construction: it is on the Green-Freeze ALLOWED list on purpose (the
+  user's own request is the job, not the engine's opinion) and wrapped in `verifyAfterFix`, so a heal
+  that adds the control but breaks the render is REVERTED to the exact green snapshot. Costs one extra
+  repair pass, and only when a control is genuinely missing — a complete build costs nothing extra.
+  Detection is `checkFeaturePresence(prompt, html)` against the RUNNING app, which is a strictly
+  stronger signal than RequirementCoverage's file-name/body matching (that one feeds the honest
+  "not built" notice in the user's summary instead).
 - **`AGENTV3_ARCH_INVARIANTS`** (default ON, set `off` to disable) — before EDITING an existing app, the
   engine reads that app's OWN rules out of its code (styling system, import style, where network calls
   go, where pages live) and hands them to the builder before it writes a line; after the build it checks

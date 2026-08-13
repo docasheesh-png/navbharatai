@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateShipKit } from '../src/server/lib/mobileShipKit';
-import { isValidRepoRef, isDispatchableWorkflow, DISPATCHABLE_WORKFLOWS, registerMobileShipRoutes } from '../src/server/routes/mobileShip';
+import { isValidRepoRef, isDispatchableWorkflow, DISPATCHABLE_WORKFLOWS, registerMobileShipRoutes, friendlyBuildStep } from '../src/server/routes/mobileShip';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
 // Admin 2026-07-26: "kya hamara NavBharatAI ek real .aab/.apk/.ipa bana sakta hai? ... direct testflight
@@ -8,6 +8,33 @@ import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 // legally needs macOS), so the honest architecture is to generate a REAL GitHub Actions pipeline into
 // the user's repo and let GitHub's runners produce the genuine signed artifacts. These tests lock the
 // generated kit's correctness — especially the store-rejection traps that cost real builds on this repo.
+
+describe('friendlyBuildStep — real build progress, in plain white-label language', () => {
+  it('maps the workflow’s real steps to plain user-facing labels', () => {
+    expect(friendlyBuildStep("Install the app's libraries")).toBe("Installing your app's libraries");
+    expect(friendlyBuildStep('Build the web app')).toBe('Building your app');
+    expect(friendlyBuildStep('Generate and sync the Android project')).toBe('Preparing the Android project');
+    expect(friendlyBuildStep('Build the installable APK')).toBe('Compiling your Android app');
+    expect(friendlyBuildStep('Build the signed bundle (.aab) and installable app (.apk)')).toBe('Compiling your Android app');
+    expect(friendlyBuildStep('Upload the .apk')).toBe('Packaging your download');
+    expect(friendlyBuildStep('Set up Node.js')).toBe('Getting the build machine ready');
+  });
+
+  it('hides GitHub’s own housekeeping steps so the user only sees real progress', () => {
+    for (const noise of ['Set up job', 'Complete job', 'Post Run actions/checkout@v4', 'Checkout', 'Always remove the keystore']) {
+      expect(friendlyBuildStep(noise)).toBeNull();
+    }
+  });
+
+  it('never leaks a vendor/tool name to the user (White-Label Law)', () => {
+    const raw = ['Set up Java', 'Set up Node.js', 'Run ./gradlew bundleRelease', 'npm run build', 'npx cap sync android'];
+    for (const r of raw) {
+      const label = friendlyBuildStep(r);
+      if (label === null) continue;
+      expect(label).not.toMatch(/gradle|java|node|npm|npx|capacitor|\bcap\b|android studio|github/i);
+    }
+  });
+});
 
 describe('generateShipKit — the generated pipeline', () => {
   it('emits both workflows, the fastlane lane, the Capacitor wrapper and an honest guide', () => {

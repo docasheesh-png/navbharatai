@@ -131,6 +131,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   // What the user actually watches while everything else happens by itself.
   const [progress, setProgress] = useState(0);
   const [progressNote, setProgressNote] = useState('');
+  // The REAL steps of the running build, read from GitHub — so the user sees where it actually is, not a
+  // guess from a timer. Empty until the run appears and its steps are readable.
+  const [steps, setSteps] = useState<Array<{ label: string; state: 'done' | 'running' | 'pending' | 'failed' }>>([]);
   const [attempt, setAttempt] = useState(0);
   const [busyNote, setBusyNote] = useState('');
   const [downloading, setDownloading] = useState('');
@@ -233,10 +236,10 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
       const startedAt = Date.now();
       let finished: RunInfo | null = null;
+      const bumpProgress = (next: number) => setProgress((p) => Math.max(p, next)); // never go backward
       for (let i = 0; i < 150 && liveRef.current && !finished; i++) {
         await new Promise((r) => setTimeout(r, 5000));
         if (!liveRef.current) return;
-        setProgress(buildProgressPercent(attempt, Date.now() - startedAt));
         try {
           const res = await fetch(
             `/api/mobile-ship/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&workflow=${workflow}`,
@@ -244,8 +247,29 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           );
           const data = await res.json().catch(() => null);
           const ours = ((data?.runs || []) as RunInfo[]).find((r) => !seen.has(r.id));
-          if (!ours) continue;
+          if (!ours) {
+            // The run has not appeared yet — a brief gap; a time estimate keeps the bar honest-ish here.
+            bumpProgress(buildProgressPercent(attempt, Date.now() - startedAt));
+            continue;
+          }
           setRun(ours);
+          // REAL progress from the run's actual steps. Falls back to the time estimate only if the steps
+          // are not readable yet (the run is queued, or a single poll failed).
+          let usedReal = false;
+          try {
+            const sRes = await fetch(
+              `/api/mobile-ship/run-steps?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&runId=${ours.id}`,
+              { headers: await ghHeaders() },
+            );
+            const s = await sRes.json().catch(() => null);
+            if (s && typeof s.percent === 'number' && Array.isArray(s.steps) && s.steps.length) {
+              usedReal = true;
+              bumpProgress(s.percent);
+              if (s.currentStep) setProgressNote(s.currentStep);
+              setSteps(s.steps);
+            }
+          } catch { /* fall back below */ }
+          if (!usedReal) bumpProgress(buildProgressPercent(attempt, Date.now() - startedAt));
           if (ours.status === 'completed') finished = ours;
         } catch {
           // A single failed poll is not a failed build; keep watching.
@@ -327,6 +351,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     setError('');
     setArtifacts([]);
     setRun(null);
+    setSteps([]);
     setAttempt(0);
     setProgress(ATTEMPT_BANDS[0][0]);
     setProgressNote('Sending your app to be built…');
@@ -540,7 +565,31 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
               <Loader2 size={13} className="animate-spin text-indigo-400" />
               {progressNote || 'Building your app…'}
             </p>
-            <p className="text-xs text-white/40 mt-1.5 leading-relaxed">
+            {/* The REAL steps of the build, straight from GitHub — so the user sees exactly where it is. */}
+            {steps.length > 0 && (
+              <ul className="mt-3 space-y-1 text-left max-w-xs mx-auto">
+                {steps.map((s, i) => (
+                  <li key={`${s.label}-${i}`} className="flex items-center gap-2 text-xs">
+                    {s.state === 'done' ? (
+                      <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                    ) : s.state === 'running' ? (
+                      <Loader2 size={13} className="animate-spin text-indigo-400 shrink-0" />
+                    ) : s.state === 'failed' ? (
+                      <AlertTriangle size={13} className="text-amber-400 shrink-0" />
+                    ) : (
+                      <span className="w-[13px] h-[13px] rounded-full border border-white/20 shrink-0" />
+                    )}
+                    <span className={
+                      s.state === 'done' ? 'text-white/45'
+                        : s.state === 'running' ? 'text-white/90 font-medium'
+                          : s.state === 'failed' ? 'text-amber-300'
+                            : 'text-white/40'
+                    }>{s.label}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="text-xs text-white/40 mt-3 leading-relaxed">
               This takes a few minutes and runs on its own — if anything goes wrong NavBharatAI fixes it
               and starts again. You can leave this screen open.
               {attempt > 0 && ` (Attempt ${attempt + 1} of ${MAX_AUTO_ATTEMPTS}.)`}

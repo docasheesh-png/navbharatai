@@ -10,6 +10,11 @@ import {
 import { AppTargetPicker, useUserApps, useAppFiles } from './AppTargetPicker';
 import { StoreBuildPanel } from './StoreBuildPanel';
 import { readIconFile, readIconFromClipboard } from '../../lib/appIcon';
+// The SAME pure helpers the server uses to derive and normalise the package name (rule 4 — no drift, so
+// what the user sees here is exactly what the build will use). appId.ts / mobileProjectAssembler are pure
+// (no server-only deps), and client code already imports such pure server modules elsewhere.
+import { isValidAppId } from '../../server/lib/appId';
+import { normaliseAppId } from '../../server/lib/mobileProjectAssembler';
 
 // ─── APK BUILDER — ONE HONEST FLOW (redesigned admin 2026-08-11) ────────────────
 //
@@ -56,12 +61,27 @@ const EMOJI_OPTIONS = ['🚀', '⚡', '🎯', '💡', '🌟', '🔥', '🎨', '�
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Derive the package name through the SERVER's own helper, so a name like "New" or "Class" can never
+// produce a Java reserved-word segment the Android build would reject (G8) — the client and the build
+// agree by construction. normaliseAppId('', name) takes the derive path.
 function toPackageName(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '')
-    .slice(0, 20) || 'myapp';
-  return `com.navbharat.${slug}`;
+  return normaliseAppId('', name);
+}
+
+/**
+ * What the build will ACTUALLY use for this package name, and why — computed with the exact server
+ * normaliser so the preview never lies. Returns the effective id plus an optional reason when it differs
+ * from what the user typed, so they can fix it up front instead of being surprised after a build.
+ */
+function packageAdvisory(typed: string, appName: string): { effective: string; ok: boolean; reason?: string } {
+  const candidate = (typed || '').trim();
+  const effective = normaliseAppId(candidate, appName);
+  if (isValidAppId(candidate.toLowerCase()) && effective === candidate) return { effective, ok: true };
+  if (!candidate) return { effective, ok: false, reason: 'A package name is required — this one is generated from your app name.' };
+  // Shape is fine but a segment is a reserved word → the normaliser only tweaked that segment.
+  const shaped = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(candidate);
+  if (shaped) return { effective, ok: false, reason: 'Android does not allow a reserved word as a package part, so it will be adjusted slightly.' };
+  return { effective, ok: false, reason: 'A package name must look like com.company.app (letters, all lowercase, at least two parts).' };
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -133,6 +153,10 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetSession, apps]);
+
+  // What the build will REALLY use for the package name, computed live with the server's own normaliser
+  // (rule 4). Drives the inline preview AND is what we hand the build, so the two can never disagree.
+  const pkgAdvisory = packageAdvisory(info.packageName, info.appName);
 
   // Step-by-step publishing walkthrough, fetched from the ONE structured source that also feeds the AIs
   // and the generated SHIPPING.md — so the three can never drift. Opened from the build panel's
@@ -220,6 +244,17 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
                 value={info.packageName}
                 onChange={(e) => setInfo((p) => ({ ...p, packageName: e.target.value }))}
               />
+              {/* Live preview of the id the build will REALLY use — catch a bad package name here, not after
+                  a five-minute build. Only shown when it differs from what the user typed. */}
+              {!pkgAdvisory.ok && (
+                <p className="mt-1 text-[11px] leading-snug text-amber-300/90">
+                  Will be saved as <span className="font-mono text-amber-200">{pkgAdvisory.effective}</span>
+                  {pkgAdvisory.reason ? ` — ${pkgAdvisory.reason}` : ''}
+                </p>
+              )}
+              {pkgAdvisory.ok && (
+                <p className="mt-1 text-[11px] text-emerald-400/80">✓ Valid package name.</p>
+              )}
             </div>
           </div>
 
@@ -340,7 +375,9 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
           <StoreBuildPanel
             sessionId={targetSession}
             appName={info.appName}
-            appId={info.packageName}
+            // Hand the build the NORMALISED id — exactly the value previewed above — so what the user was
+            // shown is what ships, with no build-time surprise.
+            appId={pkgAdvisory.effective}
             iconDataUrl={iconDataUrl || undefined}
             backgroundColor={info.primaryColor}
             githubToken={githubToken}

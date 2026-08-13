@@ -5,7 +5,7 @@ import { SecretRequestCard } from './SecretRequestCard';
 import { saveSecret } from '../../lib/secretsApi';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
-  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
+  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye,
   Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
@@ -94,7 +94,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -579,6 +579,28 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // which was the request landing on a different Cloud Run instance.
     const { ok, message } = await restore(sha);
     setRestoreNote(`${ok ? '✅' : '⚠️'} ${message}`);
+  };
+  /** Which checkpoint is currently being opened — the button says so rather than looking dead. */
+  const [previewingSha, setPreviewingSha] = useState<string>('');
+  /**
+   * Look at an old checkpoint WITHOUT restoring it.
+   *
+   * Restore is destructive: until this existed, comparing against an older version meant overwriting
+   * the current one first. Opening the version in a new tab makes looking free, so restore becomes a
+   * decision the user makes AFTER seeing, not before.
+   */
+  const handlePreviewCheckpoint = async (sha: string) => {
+    setPreviewingSha(sha);
+    setRestoreNote('Opening that version…');
+    try {
+      const { ok, url, message } = await previewVersion(sha);
+      setRestoreNote(`${ok ? '✅' : '⚠️'} ${message}`);
+      // Opened only on a URL the server proved answers — never optimistically, or the user lands on a
+      // browser error page and blames their app.
+      if (ok && url) window.open(url, '_blank', 'noopener,noreferrer');
+    } finally {
+      setPreviewingSha('');
+    }
   };
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // A stable session id keeps the SAME sandbox + memory + workspace across messages,
@@ -4187,9 +4209,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                           <span className="text-zinc-500 shrink-0">{c.sha.slice(0, 7) || '—'}</span>
                           <span className="flex-1 truncate">{c.message}</span>
                           {c.sha && (
-                            <button onClick={() => handleRestoreCheckpoint(c.sha)} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 shrink-0" title="Restore to this checkpoint">
-                              <RotateCcw className="w-3 h-3" /> Restore
-                            </button>
+                            <>
+                              {/* Look before you leap: Preview is non-destructive and sits BEFORE
+                                  Restore, so the safe action is the one the thumb reaches first. */}
+                              <button
+                                onClick={() => handlePreviewCheckpoint(c.sha)}
+                                disabled={previewingSha === c.sha}
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 shrink-0 disabled:opacity-50"
+                                title="Open this version in a new tab — your current files are not changed"
+                              >
+                                <Eye className="w-3 h-3" /> {previewingSha === c.sha ? 'Opening…' : 'Preview'}
+                              </button>
+                              <button onClick={() => handleRestoreCheckpoint(c.sha)} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 shrink-0" title="Restore to this checkpoint">
+                                <RotateCcw className="w-3 h-3" /> Restore
+                              </button>
+                            </>
                           )}
                         </li>
                       ))}

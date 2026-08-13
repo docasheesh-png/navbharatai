@@ -54,6 +54,8 @@ export interface UseAgentV3Build {
   /** Restore a checkpoint. `message` is the SERVER's sentence — it is the only side that knows why a
    *  restore did not happen, and those reasons are not interchangeable. */
   restore: (sha: string) => Promise<{ ok: boolean; message: string }>;
+  /** Open a checkpoint in its own preview, leaving the current workspace untouched. */
+  previewVersion: (sha: string) => Promise<{ ok: boolean; url?: string; message: string }>;
   /** Phase G1 — load the durable git checkpoint history for a workspace (newest first, cross-session). */
   getCheckpoints: (opts: { workspaceId: string; userId?: string; email?: string }) => Promise<GitCheckpoint[]>;
   /** Phase G2 — real working-tree git status for a workspace (available:false when the sandbox is cold). */
@@ -946,6 +948,37 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
+  /**
+   * PREVIEW a checkpoint without touching the present.
+   *
+   * The non-destructive twin of `restore` above. Same honesty contract: the server owns the sentence,
+   * because only it knows whether the sandbox is asleep, the history is gone, or that version simply
+   * does not run any more — and those are three different things the user would do three different
+   * things about. A `url` comes back only when a server really answered on that port.
+   */
+  const previewVersion = useCallback(async (sha: string): Promise<{ ok: boolean; url?: string; message: string }> => {
+    const workspaceId = workspaceIdRef.current;
+    if (!workspaceId) return { ok: false, message: 'Open the app first, then preview a checkpoint.' };
+    try {
+      const res = await fetch('/api/agentv3/version-preview', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId, sha, userId: userIdRef.current, email: emailRef.current }),
+      });
+      const j = await res.json().catch(() => ({}));
+      const ok = res.ok && j?.ok === true && typeof j?.url === 'string' && j.url;
+      return {
+        ok: Boolean(ok),
+        url: ok ? j.url : undefined,
+        message: typeof j?.message === 'string' && j.message
+          ? j.message
+          : 'Could not open that version. Your current files were not touched.',
+      };
+    } catch {
+      return { ok: false, message: 'Could not reach the server. Your current files were not touched.' };
+    }
+  }, []);
+
   // "Restore all files" — calls the REAL restore endpoint (writes the user's saved project back into
   // the workspace) and reflects the actual restored file list in the UI. Returns the count + whether
   // a durable restore happened, so the panel can show honest feedback (never a fake "done").
@@ -1369,5 +1402,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

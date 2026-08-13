@@ -383,11 +383,24 @@ describe('healRunnerRoutingOpts — free heal is cheap-only (no Claude); paid/po
   const prev = process.env.AGENTV3_WEAK_FLAGSHIP_HEAL;
   afterEach(() => { if (prev === undefined) delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; else process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = prev; });
 
-  it('FREE build → cheapOnly + FLAGSHIP floor (admin 2026-08-02: weak repair uses the top GLM/Kimi), never Claude-first', () => {
-    delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; // default on
-    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, flagship: true });
+  it('FREE build → the GRADUATED heal ladder by default: flagship reachable but LAST, never Claude-first', () => {
+    /**
+     * ADMIN 2026-08-13, stated three times: "top module last me chalne, starting me nahi" /
+     * "flagship use kar sakte hai, LAST me". The default therefore no longer LEADS with the flagship —
+     * a weak repair climbs cheap coder → flagship, so the expensive rung is only paid for when the
+     * cheaper one could not fix it. The 2026-08-02 flagship-led behaviour is one env away.
+     */
+    delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; // default: graduated
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, heal: true });
+    expect(weakFlagshipHealEnabled()).toBe(false);
   });
-  it('FREE build with the kill switch OFF → the free CHEAPEST-FIRST ladder, still with a real floor', () => {
+
+  it('AGENTV3_WEAK_FLAGSHIP_HEAL=on restores the flagship-LED heal (2026-08-02 behaviour)', () => {
+    process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = 'on';
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, flagship: true });
+    expect(weakFlagshipHealEnabled()).toBe(true);
+  });
+  it('the graduated default keeps a real floor — it can never fall through to Gemini/Haiku', () => {
     /**
      * THE TRAP THIS FIXES (admin 2026-08-13). This used to assert `{ claudeFirst: false, cheapOnly: true }`
      * — no `allowCheapFloor` — and that does NOT mean "cheap coders instead of the flagship".
@@ -400,7 +413,7 @@ describe('healRunnerRoutingOpts — free heal is cheap-only (no Claude); paid/po
      * The flag now does what its name says.
      */
     process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = 'off';
-    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true });
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, heal: true });
     expect(weakFlagshipHealEnabled()).toBe(false);
   });
 

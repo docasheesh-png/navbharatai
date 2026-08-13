@@ -1015,7 +1015,18 @@ jo select kiya hai, wahi backend par provider call ho, koi aur nahi"). Enforced 
 | **Judge / Reviewer** | **Grok** | **Grok or Sonnet** | **Opus** |
 | Plan phase | Grok | Grok/Sonnet | **Opus** |
 | Vision (image describe) | Gemini/Grok (cheap) | Gemini/Grok | Claude/Opus |
-| Heal gates (integrity / preview / C9 / runtime) | **FLAGSHIP `glm-5.2`/`kimi-k2.7-code` — the TOP GLM/Kimi (admin 2026-08-02, RE-CONFIRMED 2026-08-13: "weak tier ke heal me flagship use karo"). NEVER Sonnet/Opus. A heal only runs on a FAILING build, so the flagship cost is bounded to failing weak builds; the main weak build stays cheapest-first. Kill switch `AGENTV3_WEAK_FLAGSHIP_HEAL=off` → the free cheapest-first ladder (flash → cheap coder → flagship LAST).** ⚠️ **`off` IS NOT THE CHEAPER OPTION — see the note below.** | Claude/Sonnet | Opus |
+| Heal gates (integrity / preview / C9 / runtime) | **GRADUATED: cheap coder → FLAGSHIP LAST (`glm-4.7`→`glm-5.2`, `kimi-k2.6`→`kimi-k2.7-code`). NEVER Sonnet/Opus.** The FLASH rung is skipped — it is what produced the failing app, and CLAUDE.md's own older rule already said a heal runs on the cheap CODERS, "NOT flash (too weak to repair)". `AGENTV3_WEAK_FLAGSHIP_HEAL=on` restores the 2026-08-02 flagship-LED heal. | Claude/Sonnet | Opus |
+
+**SUPERSEDED, 2026-08-13 — the flagship no longer LEADS a weak heal.** The 2026-08-02 entry above put the
+flagship FIRST in the heal ladder. The admin then said, three separate times, *"top module last me chalne,
+starting me nahi"* and *"flagship use kar sakte hai, LAST me"* — i.e. "last" means last in the LADDER, not
+merely last in the build's lifecycle (a heal already runs at the end of a build, which is how the earlier
+reading justified itself). **The DEFAULT is now the graduated ladder: cheap coder → flagship LAST**, with the
+flash rung dropped because a heal must not begin on the model that produced the failing app. Setting
+`AGENTV3_WEAK_FLAGSHIP_HEAL=on` restores the flagship-led behaviour without a deploy if a real report ever
+shows the graduated ladder looping. Test-locked in `tests/weakHealLadder.test.ts`, which asserts the real
+MODEL ORDER out of the constructed chain rather than just the options object — and that the PAID ladder is
+untouched, since dropping a rung there would silently downgrade paying users' repairs.
 
 ⚠️ **`AGENTV3_WEAK_FLAGSHIP_HEAL=off` WAS A COST TRAP (found and fixed 2026-08-13, while answering the
 admin's "mera kharcha kam ho").** The `off` branch returned `{ claudeFirst: false, cheapOnly: true }` with

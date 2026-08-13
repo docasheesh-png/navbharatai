@@ -131,6 +131,17 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // built app also has a backend its API calls fail here. The server reports this on the preview
   // response so we can show a clear "needs a Live server" banner instead of a silently-broken preview.
   const [hasBackend, setHasBackend] = useState(false);
+  /**
+   * PHASE 1 (IN_BROWSER_PREVIEW_PLAN.md) — has the server PROVEN the browser can run this project?
+   *
+   * null until the in-browser preview answers. The import-boot rule distinguishes null ("asked, still
+   * waiting") from undefined ("nobody asked"), so this state is only ever null or a real boolean, and
+   * an import can never be left waiting on an answer that is not coming.
+   */
+  const [browserRunnable, setBrowserRunnable] = useState<boolean | null>(null);
+  const [browserBlockedReason, setBrowserBlockedReason] = useState('');
+  /** Config variables the app reads that we deliberately do not hold — see the banner below. */
+  const [envVarsUsed, setEnvVarsUsed] = useState<string[]>([]);
   const [backendReason, setBackendReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>('');
@@ -314,6 +325,10 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       workspaceId,
       // null (not probed yet) is deliberately distinct from false (no backend) — see the module.
       livePreviewAvailable: sandbox ? sandbox.livePreviewAvailable : null,
+      // PHASE 1 — an imported project the browser can PROVABLY run needs no sandbox: there is no build
+      // to run, so the VM and its npm install would buy nothing. Passed only when the in-browser tab is
+      // the one that can answer; on the Live tab nobody asked, so `undefined` keeps today's behaviour.
+      browserRunnable: mode === 'inbrowser' ? browserRunnable : undefined,
     })) return;
     bootedFor.current = bootSignal as number;
     // This IS the resume, so C1 must not fire a second one at the same sandbox.
@@ -330,7 +345,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       // in-browser preview can render it right now. `diagResult` keeps the real reason on screen.
       if (!ok) setMode(previousMode);
     });
-  }, [bootSignal, workspaceId, sandbox, mode, runDiagnose]);
+  }, [bootSignal, workspaceId, sandbox, mode, browserRunnable, runDiagnose]);
 
   // C1b — auto-REBOOT a dead live preview behind an EXISTING URL. C1 above only fires when there is NO
   // url — but a preview URL is PERMANENT while the dev server behind it is EPHEMERAL (sandbox
@@ -440,6 +455,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       setKind(typeof data.kind === 'string' ? data.kind : '');
       setHasBackend(data.hasBackend === true);
       setBackendReason(typeof data.backendReason === 'string' ? data.backendReason : '');
+      // PHASE 1 — the server's proof that the browser can run this project. Only an explicit boolean
+      // is accepted: an older server that does not send the field leaves this null, which the boot
+      // rule reads as "still pending" rather than a verdict it never gave.
+      setBrowserRunnable(typeof data.browserRunnable === 'boolean' ? data.browserRunnable : null);
+      setBrowserBlockedReason(typeof data.browserBlockedReason === 'string' ? data.browserBlockedReason : '');
+      setEnvVarsUsed(Array.isArray(data.envVarsUsed) ? data.envVarsUsed.filter((v: unknown): v is string => typeof v === 'string') : []);
       return nextHtml.length > 0;
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -1006,6 +1027,28 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         <div className="px-3 py-1.5 text-[11px] text-emerald-300 bg-emerald-950/40 border-b border-emerald-900 flex items-center justify-between gap-2">
           <span>✓ Preview recovered after a deep refresh — no AI fix was needed.</span>
           <button onClick={() => setRecovered(false)} className="shrink-0 text-emerald-500 hover:text-emerald-300">Dismiss</button>
+        </div>
+      )}
+      {/* PHASE 1 — an honest refusal that names the ACTUAL blocker. `hasBackend` below already covers
+          the backend case; this covers the others the prover can now see (an unsupported framework, a
+          package that only works on a server, code reaching for Node builtins). Without it those all
+          rendered as a vaguely wrong app with no explanation, which is the state the second absolute
+          rule calls "built but not really working". */}
+      {mode === 'inbrowser' && browserRunnable === false && !hasBackend && browserBlockedReason && (
+        <div className="px-3 py-1.5 text-[11px] text-amber-200 bg-amber-950/40 border-b border-amber-900 flex items-center justify-between gap-2">
+          <span>ℹ️ Heads up — {browserBlockedReason}. What you see here may be incomplete.</span>
+          <button onClick={() => setMode('live')} className="shrink-0 px-2 py-0.5 rounded bg-amber-800 hover:bg-amber-700 text-amber-100 font-semibold">Live server</button>
+        </div>
+      )}
+      {/* CONFIG VARIABLES WE DO NOT HOLD (Phase 1b). Live .env files are excluded at the import
+          boundary on purpose — we never import somebody's secrets — so these read as undefined here,
+          exactly as they would under Vite with an empty env. Saying which ones turns "one feature
+          behaves oddly and nobody knows why" into a known, named limitation. */}
+      {mode === 'inbrowser' && envVarsUsed.length > 0 && (
+        <div className="px-3 py-1.5 text-[11px] text-zinc-300 bg-zinc-900/70 border-b border-zinc-800">
+          ⚙️ This app reads {envVarsUsed.length === 1 ? 'a setting' : `${envVarsUsed.length} settings`} we
+          don't hold ({envVarsUsed.slice(0, 3).join(', ')}{envVarsUsed.length > 3 ? `, +${envVarsUsed.length - 3} more` : ''}) —
+          your .env is never uploaded, so anything using them will be blank here.
         </div>
       )}
       {mode === 'inbrowser' && hasBackend && (

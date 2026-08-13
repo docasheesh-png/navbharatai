@@ -188,6 +188,8 @@ import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxChec
 import { designHealDecision, designHealGuardNote } from '../AgentV3/designHealGuard';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
+import { proveBrowserRunnable } from '../AgentV3/previewCapability';
+import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { pickerItems } from '../../lib/reportPicker';
@@ -1841,7 +1843,7 @@ export function balanceFloorLead(runners: NamedRunner[], kimiFirst: boolean): Na
   return [...kimi, ...glm, ...rest];
 }
 
-export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: boolean }): NamedRunner[] {
+export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: boolean; healLadder?: boolean }): NamedRunner[] {
   // DEFAULT = 'on' (admin 2026-07-12, "1st call claude nahi chahiye — jaisa CLAUDE.md me save hai"):
   // per the confirmed Model Routing Policy the FIRST build call must be the flagship cheap coder
   // (GLM glm-5.2 / Kimi), NOT Claude — Claude is only the last-resort backstop. So the cheap floor now
@@ -1934,7 +1936,34 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: b
   // its last (glm-4.7) would WEAKEN it — flagshipOnly is therefore honoured only for the free ladder.
   const pickLadder = (env: string | undefined, def: string[]): string[] => {
     const ladder = parseModelLadder(env, def);
-    return opts?.flagshipOnly && opts?.free && ladder.length > 1 ? ladder.slice(-1) : ladder;
+    if (opts?.flagshipOnly && opts?.free && ladder.length > 1) return ladder.slice(-1);
+    /**
+     * WEAK HEAL LADDER (admin 2026-08-13, said three times: "flagship use kar sakte hai, LAST me").
+     *
+     * The flagship stays REACHABLE but stops LEADING: a weak repair climbs cheap coder → flagship,
+     * so the expensive rung is only paid for when the cheaper one could not fix it.
+     *
+     * The FLASH rung is dropped, and that is not a liberty — it is this file's own older rule, which
+     * the flagship-only amendment had buried: a heal must run on the cheap CODERS, "NOT flash (too weak
+     * to repair)". Flash is what produced the failing app in the first place; asking it to repair its
+     * own output is the loop the 2026-08-02 amendment was reacting to. Starting one rung above keeps
+     * the admin's "flagship last" AND avoids that loop, instead of trading one for the other.
+     */
+    if (opts?.healLadder && opts?.free) {
+      /**
+       * Drop the FLASH-class rungs by NAME, not by position.
+       *
+       * The first version of this sliced the front off every ladder, which is wrong for Kimi: Kimi has
+       * no flash model, so its first rung is `kimi-k2.5` — a model CLAUDE.md explicitly names as a valid
+       * heal model ("the non-flagship cheap coders (`glm-4.7` / `kimi-k2.5`)"). Position is a proxy for
+       * "cheapest"; the rule is about CAPABILITY, and only GLM has a rung too weak to repair with.
+       */
+      const withoutFlash = ladder.filter((m) => !/flash/i.test(m));
+      // Never empty the ladder. A floor with no rungs silently disables `cheapOnly` and drops the weak
+      // heal through to Gemini/Haiku — the same trap fixed earlier today, re-armed from a different side.
+      if (withoutFlash.length > 0) return withoutFlash;
+    }
+    return ladder;
   };
   if (floor === 'glm' || floor === 'both' || floor === 'on') {
     // thinkingControl: the app-level thinking toggle (same one that drives Claude's adaptive
@@ -2158,7 +2187,12 @@ export function fastLaneProviderLabel(used: string | undefined): string {
 /** Kill switch for the weak-fail flagship repair (admin 2026-08-02). Default ON; `off` reverts weak heals
  *  to today's cheap/Vertex path without a deploy. */
 export function weakFlagshipHealEnabled(): boolean {
-  return (process.env.AGENTV3_WEAK_FLAGSHIP_HEAL ?? 'on').trim().toLowerCase() !== 'off';
+  // DEFAULT FLIPPED TO OFF (admin 2026-08-13, stated three times: "top module last me chalne, starting
+  // me nahi" / "flagship use kar sakte hai, LAST me"). `on` means flagship-ONLY — the flagship LEADS the
+  // heal, which is what the admin asked to stop. The default is now the graduated ladder below, where
+  // the flagship is still reachable but sits LAST. `on` restores the 2026-08-02 flagship-led behaviour
+  // without a deploy if a real report ever shows the graduated ladder looping.
+  return (process.env.AGENTV3_WEAK_FLAGSHIP_HEAL ?? 'off').trim().toLowerCase() === 'on';
 }
 
 /**
@@ -2177,11 +2211,25 @@ export function weakFlagshipHealEnabled(): boolean {
  */
 export function healRunnerRoutingOpts(
   freeTierBuildActive: boolean,
-): { claudeFirst: boolean; cheapOnly: boolean; allowCheapFloor?: boolean; free?: boolean; flagship?: boolean } {
+): { claudeFirst: boolean; cheapOnly: boolean; allowCheapFloor?: boolean; free?: boolean; flagship?: boolean; heal?: boolean } {
   if (!freeTierBuildActive) return { claudeFirst: true, cheapOnly: false };
   return weakFlagshipHealEnabled()
     ? { claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, flagship: true }
-    : { claudeFirst: false, cheapOnly: true };
+    // DEFAULT (admin 2026-08-13): the graduated heal ladder — cheap coder FIRST, flagship LAST, flash
+    // skipped as too weak to repair. `heal: true` is what selects it; see pickLadder.
+
+    // KILL-SWITCH TRAP FIXED (admin 2026-08-13). This branch used to return `{ claudeFirst: false,
+    // cheapOnly: true }` with NO `allowCheapFloor` — which does NOT mean "cheap coders instead of the
+    // flagship". `buildTurnRunner` only builds the GLM/Kimi floor when `allowCheapFloor` is set, and
+    // `cheapOnly` is then self-disabled (`cheapOnly && floorRunners.length > 0`), so the weak heal chain
+    // collapsed to VERTEX → GEMINI → Haiku with NO GLM/Kimi in it at all.
+    //
+    // That made the switch cost MORE, not less, on exactly the tier NavBharatAI pays for itself:
+    // gemini-pro is $10/MTok out and Haiku $5, against the flagship glm-5.2's $4.40 and kimi-k2.7's
+    // $4.00 (providerRates.ts). A flag named "no flagship heal" that silently routes to the most
+    // expensive rung in the stack is a trap, so it now does what its name says — the SAME free
+    // cheapest-first ladder the main weak build uses (flash → cheap coder → flagship LAST).
+    : { claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, heal: true };
 }
 
 /**
@@ -2211,7 +2259,7 @@ export function enforceNoClaude<T extends { name: string }>(chain: T[], noClaude
   return [...kept.filter((r) => r.name !== 'CLAUDE_HAIKU'), ...haiku];
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; flagship?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): TurnRunner {
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; flagship?: boolean; heal?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -2247,7 +2295,7 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // provider with its key present. Escalation / claudeFirst retries never opt in, so they stay on
   // Claude. Computed before the Claude-only early-return so the floor still applies in a Claude-only
   // env (no Vertex/Gemini configured).
-  const floorRunners = opts?.allowCheapFloor ? cheapBuildFloorRunners({ free: opts?.free, flagshipOnly: opts?.flagship }) : [];
+  const floorRunners = opts?.allowCheapFloor ? cheapBuildFloorRunners({ free: opts?.free, flagshipOnly: opts?.flagship, healLadder: opts?.heal }) : [];
   // Claude-only env shortcut — but NEVER for a weak/noClaude build (the guarded chain below handles it;
   // a weak build with no non-Claude provider was already refused upstream as WEAK_ENGINE_UNAVAILABLE).
   if (cheap.length === 0 && floorRunners.length === 0 && opts?.noClaude !== true) return makeResilientTurnRunner(new ClaudeClient(undefined, buildRetry)); // Claude-only env
@@ -5032,6 +5080,18 @@ export function registerAgentV3Routes(app: Express): void {
       // deterministically from the files so the client can show an honest "needs a Live server" banner
       // instead of a silently-broken preview. Same value whether the render is cached or fresh.
       const backend = detectBackendPresence(files);
+      // PHASE 1 (IN_BROWSER_PREVIEW_PLAN.md) — can the browser be PROVEN to cope with this project?
+      // An imported app that passes does not need a sandbox booted for it at all: there is no build to
+      // run, and the render below is the whole product. The prover's default answer is "no", so a
+      // project it cannot vouch for keeps today's behaviour exactly. Computed from the same `files`
+      // already in hand, so it costs one pass over a map we just read — no extra I/O, no model call.
+      const capability = proveBrowserRunnable(files);
+      // Config variables the app READS but that we deliberately do not hold: live .env files are
+      // excluded at the import boundary (SECRET_FILE_RE — we never import somebody's secrets), so these
+      // are undefined here exactly as they would be under Vite with an empty env. Named rather than
+      // left silent: a missing value the user can see is a known limitation, a missing value they
+      // cannot see is a feature that "looks done" and is not.
+      const envVarsUsed = viteEnvVarsUsed(files);
       // The client's own origin (sent in the body, validated to an http/https URL) is used to load
       // the self-hosted preview compiler via an absolute same-origin URL — a root-relative path
       // doesn't resolve inside the sandboxed <iframe srcDoc>, which produced "Could not load the
@@ -5053,11 +5113,11 @@ export function registerAgentV3Routes(app: Express): void {
       const fresh = req.body?.fresh === true;
       const cached = fresh ? undefined : inbrowserPreviewCache.get(cacheKey);
       if (cached && cached.hash === filesHash && Date.now() - cached.ts < INBROWSER_CACHE_TTL_MS) {
-        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason });
+        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed });
         return;
       }
       const vfs = VirtualFileSystem.fromRecord(files);
-      const html = renderPreview(vfs, previewOrigin);
+      const html = renderPreview(vfs, previewOrigin, workspaceId);
       // Detect the renderer used so the client can label the mode honestly.
       const kind = isReactProject(vfs) ? 'react' : isVueProject(vfs) ? 'vue' : 'static';
       inbrowserPreviewCache.set(cacheKey, { hash: filesHash, html, kind, ts: Date.now() });
@@ -5065,7 +5125,7 @@ export function registerAgentV3Routes(app: Express): void {
         const oldest = inbrowserPreviewCache.keys().next().value;
         if (oldest !== undefined) inbrowserPreviewCache.delete(oldest);
       }
-      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason });
+      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
     }

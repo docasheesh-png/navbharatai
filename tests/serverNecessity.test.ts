@@ -200,7 +200,10 @@ describe('WIRING — measured from real builds, and it changes nothing', () => {
   });
 
   it('the reader takes the file PATHS from the manifest — no file contents, no extra query', () => {
-    expect(store).toContain('export async function listPromptsAndPaths');
+    // Renamed to `listBuildFacts` when Phase 0 of the in-browser preview plan needed the build WINDOW
+    // from the same documents. One reader gained a field rather than a second one being added beside
+    // it — see tests/sandboxHandover.test.ts for why that matters.
+    expect(store).toContain('export async function listBuildFacts');
     expect(store).toContain('fileHashes ?? {})');
   });
 

@@ -383,14 +383,48 @@ describe('healRunnerRoutingOpts — free heal is cheap-only (no Claude); paid/po
   const prev = process.env.AGENTV3_WEAK_FLAGSHIP_HEAL;
   afterEach(() => { if (prev === undefined) delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; else process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = prev; });
 
-  it('FREE build → cheapOnly + FLAGSHIP floor (admin 2026-08-02: weak repair uses the top GLM/Kimi), never Claude-first', () => {
-    delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; // default on
-    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, flagship: true });
-  });
-  it('FREE build with the kill switch OFF → reverts to plain cheap-only (no flagship floor)', () => {
-    process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = 'off';
-    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true });
+  it('FREE build → the GRADUATED heal ladder by default: flagship reachable but LAST, never Claude-first', () => {
+    /**
+     * ADMIN 2026-08-13, stated three times: "top module last me chalne, starting me nahi" /
+     * "flagship use kar sakte hai, LAST me". The default therefore no longer LEADS with the flagship —
+     * a weak repair climbs cheap coder → flagship, so the expensive rung is only paid for when the
+     * cheaper one could not fix it. The 2026-08-02 flagship-led behaviour is one env away.
+     */
+    delete process.env.AGENTV3_WEAK_FLAGSHIP_HEAL; // default: graduated
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, heal: true });
     expect(weakFlagshipHealEnabled()).toBe(false);
+  });
+
+  it('AGENTV3_WEAK_FLAGSHIP_HEAL=on restores the flagship-LED heal (2026-08-02 behaviour)', () => {
+    process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = 'on';
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, flagship: true });
+    expect(weakFlagshipHealEnabled()).toBe(true);
+  });
+  it('the graduated default keeps a real floor — it can never fall through to Gemini/Haiku', () => {
+    /**
+     * THE TRAP THIS FIXES (admin 2026-08-13). This used to assert `{ claudeFirst: false, cheapOnly: true }`
+     * — no `allowCheapFloor` — and that does NOT mean "cheap coders instead of the flagship".
+     * `buildTurnRunner` only builds the GLM/Kimi floor when `allowCheapFloor` is set, and `cheapOnly`
+     * self-disables without one, so the weak heal chain collapsed to VERTEX → GEMINI → Haiku with no
+     * GLM/Kimi in it at all.
+     *
+     * Which made the "cheaper" switch the MOST EXPENSIVE option, on precisely the tier NavBharatAI pays
+     * for itself: gemini-pro is $10/MTok out and Haiku $5, against glm-5.2's $4.40 and kimi-k2.7's $4.00.
+     * The flag now does what its name says.
+     */
+    process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = 'off';
+    expect(healRunnerRoutingOpts(true)).toEqual({ claudeFirst: false, cheapOnly: true, allowCheapFloor: true, free: true, heal: true });
+    expect(weakFlagshipHealEnabled()).toBe(false);
+  });
+
+  it('BOTH weak-heal settings keep a real GLM/Kimi floor — neither can silently route to Gemini/Haiku', () => {
+    // The property that matters more than either branch: `allowCheapFloor` is what makes a floor exist
+    // at all, so a weak heal must never be configured without it. This is the assertion that would have
+    // caught the trap above.
+    for (const v of ['on', 'off']) {
+      process.env.AGENTV3_WEAK_FLAGSHIP_HEAL = v;
+      expect(healRunnerRoutingOpts(true), v).toMatchObject({ allowCheapFloor: true, free: true, cheapOnly: true, claudeFirst: false });
+    }
   });
   it('PAID / POWER build → Claude-first, not cheap-only (UNCHANGED — flagship weak-heal never touches paid)', () => {
     expect(healRunnerRoutingOpts(false)).toEqual({ claudeFirst: true, cheapOnly: false });

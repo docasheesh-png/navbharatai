@@ -590,19 +590,34 @@ export async function listAllDiagnostics(limit = 100): Promise<AllDiagnosticsEnt
   }
 }
 
+/** The facts a measurement needs about a past build: what was ASKED, what was WRITTEN, and when. */
+export interface BuildFacts {
+  workspaceId: string;
+  prompt?: string;
+  paths: string[];
+  /** Epoch ms the build's own work started / finished. Absent on an unsettled or legacy report. */
+  startedAt?: number;
+  endedAt?: number;
+}
+
 /**
- * The two fields the server-necessity measurement needs, and nothing else: what the user ASKED for,
- * and what the build actually WROTE.
+ * The fields the measurements need, and nothing else: what the user ASKED for, what the build actually
+ * WROTE, and the window it ran in.
  *
  * ADMIN 2026-08-12. Before changing how the builder chooses an architecture, we need to know whether
  * the change is worth making: how many past apps were given a Node server they never needed? That is
  * one number, and it decides whether a large plan proceeds — so it is measured from real builds rather
  * than estimated. See serverNecessity.ts.
  *
+ * ONE reader, not one per question (renamed from `listPromptsAndPaths` when Phase 0 of the in-browser
+ * preview plan needed the build WINDOW too). A second near-identical projection over the same documents
+ * is how two measurements quietly start disagreeing about the same builds — so the window was added
+ * here rather than in a third function beside it. See sandboxHandover.ts.
+ *
  * Reads the SAME documents `listAllDiagnostics` already reads; the manifest's file hashes carry the
  * paths, so no extra query and no file contents are needed. Never throws — [] on any failure.
  */
-export async function listPromptsAndPaths(limit = 200): Promise<Array<{ workspaceId: string; prompt?: string; paths: string[] }>> {
+export async function listBuildFacts(limit = 200): Promise<BuildFacts[]> {
   const db = getDb();
   if (!db) return [];
   try {
@@ -617,6 +632,8 @@ export async function listPromptsAndPaths(limit = 200): Promise<Array<{ workspac
         workspaceId: d.id,
         prompt: typeof r.prompt === 'string' ? r.prompt : undefined,
         paths: Object.keys((r.manifest as { fileHashes?: Record<string, string> } | undefined)?.fileHashes ?? {}),
+        startedAt: typeof r.startedAt === 'number' ? r.startedAt : undefined,
+        endedAt: typeof r.endedAt === 'number' ? r.endedAt : undefined,
       };
     });
   } catch {

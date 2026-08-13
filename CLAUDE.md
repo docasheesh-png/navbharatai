@@ -475,11 +475,36 @@ the code (it is actually read somewhere) on 2026-07-11.
   no LLM call, so no cost; max 2 nudges from step 15) · `AGENTV3_VACCINE` (after a successful build the
   platform RUNS the app's own test suite and reports honest pass/fail, so a green build whose tests fail
   can never be called verified; a shell command, NOT a model call — its repair budget only opens if
-  `AGENTV3_FEATURE_HEAL` is also on, which it is not) · `AGENTV3_DEPHEALTH_GATE` (CVE + copyleft advisory
+  `AGENTV3_FEATURE_HEAL` is also on, ⚠️ **which it now IS: the admin set `AGENTV3_FEATURE_HEAL=on` with
+  `AGENTV3_FEATURE_HEAL_PCT=20` on 2026-08-13, so the vaccine's repair budget is OPEN for that same 20%
+  cohort** — see the entry below) · `AGENTV3_DEPHEALTH_GATE` (CVE + copyleft advisory
   appended to an already-successful build; cannot block or fail one).
   ⚠️ **What to watch on the first real builds:** parallel build is the only one that changes HOW a build
   runs — its speedup is unmeasured and needs a real large multi-file build to judge. The other three are
   advisory or deterministic and cannot fail a build. Any of them reverts instantly by unsetting it.
+- **Flipped ON by the admin 2026-08-13 (audited against live code the same session):**
+  `AGENTV3_FEATURE_HEAL` = `on` with `AGENTV3_FEATURE_HEAL_PCT` = `20`, and `AGENTV3_DESIGN_GATE` = `on`.
+  - **`AGENTV3_FEATURE_HEAL` — the closed loop on "the app renders but the control the user asked for is
+    not there".** Slice 1 only RECORDED a `FEATURE_COVERAGE` finding; `on` runs ONE bounded heal pass that
+    adds the missing UI and then RE-OPENS the running app to re-probe, so only a control genuinely in the
+    live DOM counts as fixed. It spends an EXTRA model pass (real cost, billed on a paid build), which is
+    exactly why it was opt-in. It can never block or fail a build, and `verifyAfterFix` wraps it: a heal
+    that adds the control but breaks the render is REVERTED to the green snapshot rather than shipped.
+    If the control still is not there afterwards, the honest pre-heal warning stands.
+  - **`AGENTV3_FEATURE_HEAL_PCT=20` is a real canary and is wired correctly.** All THREE call sites
+    (`routes/agentv3.ts` ~10931 feature heal, ~11369 the vaccine repair budget, ~11557) pass `workspaceId`
+    as the rollout key, so a workspace is entirely IN or entirely OUT — never healed on one pass and not
+    another. ⚠️ Note the middle one: turning this flag on is ALSO what opens `AGENTV3_VACCINE`'s repair
+    budget (`vaxHealMax = featureHealEnabled(workspaceId) ? 1 : 0`), for the same 20%. That is a second
+    behaviour change riding one flag, and it is intended — just not obvious from the flag's name.
+    ⚠️ An unset/malformed PCT means **100%**, not 0 — `inFlagRollout` treats a bad value as a full
+    rollout. Deleting the PCT key to "pause" the canary would ramp it to everyone instead.
+  - **`AGENTV3_DESIGN_GATE`** — see its own entry below. Detection was already running and free; `on`
+    adds ONE bounded repair pass naming only the offending pages, and reports `DESIGN_HEALED` or,
+    honestly, `DESIGN_PARTIALLY_HEALED`. It can never fail a build.
+  - **What to watch:** both new flags spend an extra model pass on the builds they fire for, so the thing
+    to compare is per-build cost and duration for the 20% cohort against the other 80% — the same
+    in-vs-out comparison `escalationCohort` exists for. Either reverts instantly by unsetting it.
 - **Android update notice (added 2026-08-11, admin sets after each Play upload):**
   `ANDROID_LATEST_VERSION_CODE` (the versionCode of the build now live on Play — the android-aab
   workflow stamps each build with the CI run number, so this is that number), `ANDROID_LATEST_VERSION_NAME`
@@ -1031,7 +1056,34 @@ jo select kiya hai, wahi backend par provider call ho, koi aur nahi"). Enforced 
 | **Judge / Reviewer** | **Grok** | **Grok or Sonnet** | **Opus** |
 | Plan phase | Grok | Grok/Sonnet | **Opus** |
 | Vision (image describe) | Gemini/Grok (cheap) | Gemini/Grok | Claude/Opus |
-| Heal gates (integrity / preview / C9 / runtime) | **FLAGSHIP `glm-5.2`/`kimi-k2.7-code` — the TOP GLM/Kimi (admin 2026-08-02: "weak me last me GLM/Kimi ke top module"). NEVER Sonnet/Opus. A heal only runs on a FAILING build, so the flagship cost is bounded to failing weak builds; the main weak build stays cheapest-first. Kill switch `AGENTV3_WEAK_FLAGSHIP_HEAL=off` reverts to the old cheap-coder heal.** | Claude/Sonnet | Opus |
+| Heal gates (integrity / preview / C9 / runtime) | **GRADUATED: cheap coder → FLAGSHIP LAST (`glm-4.7`→`glm-5.2`, `kimi-k2.5`→`kimi-k2.6`→`kimi-k2.7-code`). NEVER Sonnet/Opus.** Only the FLASH rung is skipped, and it is matched BY NAME, not by position — Kimi has no flash model, so `kimi-k2.5` is KEPT (this rule names it as a heal model). `AGENTV3_WEAK_FLAGSHIP_HEAL=on` restores the 2026-08-02 flagship-LED heal. ⚠️ Flash is still the FIRST rung of the main weak BUILD — it is dropped from the HEAL only. | Claude/Sonnet | Opus |
+
+**SUPERSEDED, 2026-08-13 — the flagship no longer LEADS a weak heal.** The 2026-08-02 entry above put the
+flagship FIRST in the heal ladder. The admin then said, three separate times, *"top module last me chalne,
+starting me nahi"* and *"flagship use kar sakte hai, LAST me"* — i.e. "last" means last in the LADDER, not
+merely last in the build's lifecycle (a heal already runs at the end of a build, which is how the earlier
+reading justified itself). **The DEFAULT is now the graduated ladder: cheap coder → flagship LAST**, with the
+flash rung dropped because a heal must not begin on the model that produced the failing app — matched BY
+NAME, so Kimi's `kimi-k2.5` (which this file names as a heal model) is kept, and the main weak BUILD still
+leads with flash exactly as before. Setting
+`AGENTV3_WEAK_FLAGSHIP_HEAL=on` restores the flagship-led behaviour without a deploy if a real report ever
+shows the graduated ladder looping. Test-locked in `tests/weakHealLadder.test.ts`, which asserts the real
+MODEL ORDER out of the constructed chain rather than just the options object — and that the PAID ladder is
+untouched, since dropping a rung there would silently downgrade paying users' repairs.
+
+⚠️ **`AGENTV3_WEAK_FLAGSHIP_HEAL=off` WAS A COST TRAP (found and fixed 2026-08-13, while answering the
+admin's "mera kharcha kam ho").** The `off` branch returned `{ claudeFirst: false, cheapOnly: true }` with
+**no `allowCheapFloor`** — and that does NOT mean "cheap coders instead of the flagship". `buildTurnRunner`
+only builds the GLM/Kimi floor when `allowCheapFloor` is set, and `cheapOnly` self-disables without one
+(`cheapOnly && floorRunners.length > 0`), so the weak heal chain collapsed to **VERTEX → GEMINI → Haiku with
+no GLM/Kimi in it at all**. On the tier NavBharatAI pays for ITSELF, that made the "cheaper-sounding" switch
+the **most expensive** rung in the stack: gemini-pro **$10/MTok out** and Haiku **$5**, against flagship
+glm-5.2's **$4.40** and kimi-k2.7's **$4.00** (`providerRates.ts`). The branch now carries
+`allowCheapFloor: true, free: true`, so it does what its name says.
+
+**COST CONCLUSION, FOR THE RECORD: on a weak heal the FLAGSHIP GLM/Kimi IS the cheap choice — turning it off
+costs the admin MORE, not less.** Test-locked in `agentv3.test.ts`: BOTH branches must keep a real floor, so
+no future edit can silently route a weak heal to Gemini/Haiku again.
 
 ### Env model-id defaults (tune the exact ids here — the code reads these, so no redeploy to change a rung)
 - Free ladder (LIVE, Slice 3): flash-first — `AGENTV3_FREE_GLM_MODEL` (default `glm-4.7-flash,glm-4.7,glm-5.2`),

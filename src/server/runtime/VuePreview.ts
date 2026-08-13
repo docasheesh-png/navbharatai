@@ -15,6 +15,7 @@
  * Pure + dependency-free (string in → string out) → unit-testable.
  */
 import { VirtualFileSystem } from '../project/ProjectModel';
+import { PROCESS_SHIM_SOURCE } from './previewImportMeta';
 
 const VUE_CDN = 'https://unpkg.com/vue@3.4.38/dist/vue.runtime.global.prod.js';
 const SFC_LOADER_CDN = 'https://cdn.jsdelivr.net/npm/vue3-sfc-loader@0.9.5/dist/vue3-sfc-loader.js';
@@ -127,6 +128,12 @@ ${css ? `<style>\n${css}\n</style>` : ''}
 <script type="application/json" id="__bundle__">${payload}</script>
 <script>
 (function () {
+  // PROCESS SHIM — the sibling of the one in ReactPreview (rule 3: the same root cause almost always
+  // lives in more than one place). "process" is a Node global that does not exist in a browser, so a
+  // component reading process.env.NODE_ENV throws "process is not defined" and kills the preview. The
+  // SFC loader runs the user's own code in this page, so this path needs it exactly as much. Values
+  // come from the SAME exported constant, so the two previews can never disagree.
+  ${PROCESS_SHIM_SOURCE}
   var bundle = JSON.parse(document.getElementById('__bundle__').textContent);
   var SOURCES = bundle.modules;
   var ENTRY = bundle.entry;

@@ -16,7 +16,9 @@ import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTe
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
-import { listAllDiagnostics, listPromptsAndPaths, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { sandboxStore } from '../AgentV3/SandboxStore';
+import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from '../AgentV3/sandboxHandover';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { builderScorecard, scorecardHeadline } from '../../lib/builderMetrics';
@@ -782,7 +784,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.get('/api/admin/server-necessity', verifyAdminToken, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
-      const builds = await listPromptsAndPaths(limit);
+      const builds = await listBuildFacts(limit);
       const tally = tallyServerNecessity(builds);
       // The sample is returned so the admin can spot-check the classifier against builds they remember,
       // rather than trusting a percentage produced by a regex they have never seen.
@@ -799,6 +801,61 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ headline: necessityHeadline(tally), tally, window: limit, sample });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to measure server necessity.' });
+    }
+  });
+
+  /**
+   * SANDBOX HANDOVER (Phase 0 of IN_BROWSER_PREVIEW_PLAN.md) — where does a sandbox's billed life go?
+   *
+   * The plan's §0 corrects my own framing using arithmetic on a monthly total: the idle lever is nearly
+   * spent, so hardening the in-browser preview cannot be a cost project. This endpoint replaces that
+   * arithmetic with a per-build MEASUREMENT of the one window Phase 3 could reclaim — how long a
+   * sandbox stayed billable AFTER its build finished, and how much of that belonged to a frontend-only
+   * app the browser could have served itself.
+   *
+   * Joins two records that already exist, so no new telemetry and no waiting for data: the build report
+   * (start/end/paths) and the durable sandbox record (last activity / pause stamp). Read-only — it
+   * changes nothing about how builds run, exactly like the server-necessity endpoint beside it.
+   *
+   * If the reclaimable share turns out to be small, Phase 3 is a RELIABILITY change and must not be
+   * sold as a cost one. That is a real possible outcome of this endpoint, and the headline says so.
+   */
+  app.get('/api/admin/sandbox-handover', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
+      const [builds, sandboxes] = await Promise.all([listBuildFacts(limit), sandboxStore.listRecent(limit)]);
+      const byWorkspace = new Map(sandboxes.map((s) => [s.workspaceId, s]));
+      const rows = builds.map((b) => {
+        const sb = byWorkspace.get(b.workspaceId);
+        return {
+          workspaceId: b.workspaceId,
+          prompt: (b.prompt ?? '').slice(0, 160),
+          startedAt: b.startedAt,
+          endedAt: b.endedAt,
+          paths: b.paths,
+          sandboxUpdatedAt: sb?.updatedAt,
+          sandboxPausedAt: sb?.pausedAt,
+        };
+      });
+      const tally = tallyHandover(rows);
+      const projection = projectHandover(tally);
+      // The same spot-check discipline as server-necessity: a percentage the admin cannot audit against
+      // builds they remember is a percentage they have to take on trust.
+      const sample = rows.slice(0, 25).map((r) => {
+        const s = handoverSample(r);
+        return {
+          workspaceId: r.workspaceId,
+          prompt: r.prompt,
+          known: s.known,
+          why: s.known ? undefined : s.why,
+          buildMinutes: s.known ? Math.round(s.buildMs / 60_000) : undefined,
+          heldAfterMinutes: s.known ? Math.round(s.heldAfterMs / 60_000) : undefined,
+          frontendOnly: s.known ? s.frontendOnly : undefined,
+        };
+      });
+      res.json({ headline: handoverHeadline(tally, projection), tally, projection, window: limit, sample });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to measure sandbox handover.' });
     }
   });
 

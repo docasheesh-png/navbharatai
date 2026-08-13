@@ -40,6 +40,28 @@ export interface ImportedBootSignals {
    * when the probe lands), while an explicit false means there is genuinely nothing to boot.
    */
   livePreviewAvailable: boolean | null;
+  /**
+   * PHASE 1 (IN_BROWSER_PREVIEW_PLAN.md) — the server's verdict on whether the browser can be PROVEN
+   * to run this project (`proveBrowserRunnable`). true = the in-browser preview IS the preview, so no
+   * sandbox needs starting. false = it cannot be proven, boot as before. null = not answered yet.
+   *
+   * THREE states, and the difference between two of them is load-bearing:
+   *   • `true`      — the browser can serve it. No sandbox is started.
+   *   • `null`      — ASKED, not yet answered. WAIT, exactly like `livePreviewAvailable` does: the
+   *                   verdict rides the in-browser preview response, which is in flight during the
+   *                   first moments after an import. Reading "not yet" as "cannot" would boot a
+   *                   sandbox for timing reasons alone — the entire cost this phase removes.
+   *   • `undefined` — NOT ASKED AT ALL (the caller does not participate, or the user is sitting on the
+   *                   Live tab so nothing ever requested a verdict). Falls through to exactly today's
+   *                   behaviour. This is deliberately NOT merged with `null`: treating "never asked"
+   *                   as "wait" would leave such an import waiting for an answer that is never coming,
+   *                   and a preview that never boots is a worse failure than a sandbox we did not need.
+   *
+   * Skipping the boot never removes the sandbox: the Live-server tab's "Diagnose" button runs the same
+   * model-free install-and-run on demand, with its own staged progress. This changes WHEN a sandbox
+   * starts, never WHETHER the user can have one.
+   */
+  browserRunnable?: boolean | null;
 }
 
 /** Should this import trigger the model-free install-and-run? Pure. */
@@ -47,6 +69,8 @@ export function shouldBootImportedProject(s: ImportedBootSignals): boolean {
   if (!s.bootSignal) return false;                     // no import asked
   if (s.bootSignal === s.bootedFor) return false;      // already booted for this one
   if (!s.workspaceId) return false;                    // nothing to hydrate from
+  if (s.browserRunnable === true) return false;        // the browser can serve it — no VM required
+  if (s.browserRunnable === null) return false;        // asked, still pending → wait for the answer
   if (s.livePreviewAvailable !== true) return false;   // not probed yet, or no live backend at all
   return true;
 }

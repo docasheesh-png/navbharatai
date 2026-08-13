@@ -22,6 +22,10 @@ import { normalizePath } from '../project/ProjectModel';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { precompileModules } from './PreviewPrecompile';
 import { startDepWarmup, getWarmDepUrls, WARMUP_MAX_MODULES } from './PreviewDepWarmup';
+import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE, PROCESS_SHIM_SOURCE } from './previewImportMeta';
+import { proveBackendRunnable } from './browserBackend/capability';
+import { EXPRESS_SHIM_SOURCE, BACKEND_BRIDGE_SOURCE, EXPRESS_SHIM_PATH, BACKEND_BRIDGE_PATH } from './browserBackend/expressShim';
+import { pgShimSource, pgliteDataDir, PG_SHIM_PATH, PGLITE_VERSION } from './browserBackend/pgShim';
 
 // Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
@@ -264,7 +268,7 @@ function baseStyles(vfs: VirtualFileSystem): string {
  * Build a self-contained, in-browser-bundled React preview document.
  * Returns an HTML string; if no entry module is found, falls back to a clear notice.
  */
-export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): string {
+export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, workspaceId?: string): string {
   const entry = findEntry(vfs);
 
   // Gather every source + css module so the in-browser loader can resolve imports.
@@ -304,7 +308,34 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
       ? `<script>${inlineBabel.replace(/<\/script>/gi, '<\\/script>')}</script>`
       : `<script src="${babelPrimary}"></script>`;
 
-  const payload = JSON.stringify({ entry, modules: compiled ?? modules }).replace(/<\//g, '<\\/');
+  /**
+   * PHASE 2 — can this app's own backend run here?
+   *
+   * The prover's default is NO, so an app it cannot vouch for produces a page byte-for-byte identical
+   * to today's. When it says yes, the shim + bridge are added to the module map AFTER precompilation,
+   * deliberately: they ship exactly as the tests execute them, never through a compiler pass that no
+   * test covered.
+   */
+  const backend = proveBackendRunnable(modules);
+  // The database comes through the SAME same-origin mirror every other dependency uses, so it is
+  // cached immutably by the browser and a reopened app pays nothing for it a second time.
+  const mirrorBase = origin && process.env.AGENTV3_PREVIEW_DEP_PROXY !== 'off'
+    ? `${origin.replace(/\/$/, '')}/api/esm/`
+    : ESM;
+  const pgliteUrl = `${mirrorBase}@electric-sql/pglite@${PGLITE_VERSION}`;
+  const shipped: Record<string, string> = { ...(compiled ?? modules) };
+  const usesPg = backend.runnable && backend.imports.includes('pg');
+  if (backend.runnable && backend.entry) {
+    shipped[EXPRESS_SHIM_PATH] = EXPRESS_SHIM_SOURCE;
+    shipped[BACKEND_BRIDGE_PATH] = BACKEND_BRIDGE_SOURCE;
+    // The database is shipped ONLY when the server actually imports it. PGlite is a multi-megabyte
+    // WebAssembly download, and an app that never queries must never pay for it — speed is the first
+    // reason this whole preview exists.
+    if (usesPg) shipped[PG_SHIM_PATH] = pgShimSource(pgliteUrl, pgliteDataDir(workspaceId));
+  }
+  const backendEntry = backend.runnable ? backend.entry : null;
+
+  const payload = JSON.stringify({ entry, modules: shipped, backendEntry }).replace(/<\//g, '<\\/');
   // Serve dependencies from OUR origin when we know it (the /api/esm mirror): the browser then holds
   // every version-pinned module as an immutable cache entry, so reopening an old app loads its deps
   // from disk with zero network — and a CDN outage stops being a preview outage. Without an origin
@@ -313,7 +344,7 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
   const depBase = origin && process.env.AGENTV3_PREVIEW_DEP_PROXY !== 'off'
     ? `${origin.replace(/\/$/, '')}/api/esm/`
     : ESM;
-  const imports = buildImportmap(vfs, depBase);
+  const imports = buildImportmap(vfs, depBase, entry);
   const importmap = JSON.stringify({ imports }).replace(/<\//g, '<\\/');
   // START THE DOWNLOADS NOW, not after the compiler finishes (admin 2026-08-05: "kitne bhi din baad
   // open karo, preview pehle jaisa hi chalega").
@@ -403,6 +434,9 @@ ${babelTag}
   var bundle = JSON.parse(document.getElementById('__bundle__').textContent);
   var SOURCES = bundle.modules;
   var ENTRY = bundle.entry;
+  // PHASE 2 — the app's own server, when the prover vouched for it. Null on every other page, which is
+  // what keeps this whole path invisible to apps that never had a backend.
+  var BACKEND_ENTRY = bundle.backendEntry || null;
   // True when every module arrived ALREADY COMPILED from the server — the device then runs no
   // compiler at all (no Babel download, no per-module transform on the phone's main thread).
   var PRECOMPILED = ${precompiled};
@@ -410,6 +444,9 @@ ${babelTag}
   // Path aliases (e.g. '@' -> '/client/src'): rewrite an alias-prefixed import to a root-absolute
   // LOCAL path so it resolves against the project's own files instead of being fetched from the CDN.
   var ALIASES = ${aliasesJson};
+  ${backendEntry ? `// Route the bare specifiers to the shims rather than to the CDN.
+  ALIASES['express'] = '/${EXPRESS_SHIM_PATH.replace(/\.js$/, '')}';` : ''}
+  ${usesPg ? `ALIASES['pg'] = '/${PG_SHIM_PATH.replace(/\.js$/, '')}';` : ''}
   function applyAlias(spec) {
     for (var a in ALIASES) {
       if (spec === a) return ALIASES[a];
@@ -574,6 +611,17 @@ ${babelTag}
       mirror('error', ['Unhandled promise rejection: ' + (r instanceof Error ? r.message : String(r))]);
     });
   })();
+  // PROCESS SHIM (Phase 1b) — the same bug class as import.meta, one layer along. "process" is a Node
+  // global; in a browser it does not exist, so a module reading process.env.NODE_ENV throws
+  // "ReferenceError: process is not defined" and dies, taking the preview with it. That line is one of
+  // the most common in ordinary React source (dev-only logging and checks), and while packages from the
+  // dependency mirror are built with it already substituted, the USER's own code is not — and the
+  // user's own code is the entire imported project.
+  //
+  // Defined on window so a free "process" identifier inside a module resolves through the global scope
+  // chain, which covers the precompiled path and the browser-compiled path with one declaration. An
+  // existing process (a page that already polyfilled one) is left completely alone.
+  ${PROCESS_SHIM_SOURCE}
   function dirname(p) { var i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); }
   function normalize(p) {
     var parts = p.split('/'), out = [];
@@ -610,6 +658,19 @@ ${babelTag}
     }
     if (!styleEl) { styleEl = document.createElement('style'); document.head.appendChild(styleEl); }
     styleEl.appendChild(document.createTextNode('\\n' + t));
+  }
+
+  // The runtime twin of importMetaObjectSource (previewImportMeta.ts). The env literal is interpolated
+  // from the SAME exported constant the server path uses, so the two can never disagree about what an
+  // app sees. "hot" stays undefined on purpose — there is no HMR in a static render, and an app guarded
+  // with "if (import.meta.hot)" must take the false branch rather than register callbacks that never fire.
+  function nbaiImportMeta(p) {
+    // No regex on purpose: this whole loader is a template literal, where a backslash escape is
+    // consumed before the browser ever sees it — /^\\/+/ silently emitted the broken /^/+/ and the
+    // page stopped parsing. A plain loop cannot be mangled by the layer it is written inside.
+    var s = String(p);
+    while (s.charAt(0) === '/') s = s.slice(1);
+    return { url: 'file:///' + s, env: ${IMPORT_META_ENV_SOURCE}, hot: undefined };
   }
 
   function requireModule(path) {
@@ -657,10 +718,17 @@ ${babelTag}
         p.node.attributes.push(t.jsxAttribute(t.jsxIdentifier('data-nbai-src'), t.stringLiteral(v)));
       } } };
     };
+    // IMPORT.META (Phase 1b) — the browser twin of importMetaPlugin (previewImportMeta.ts). Babel's
+    // commonjs transform leaves \`import.meta\` verbatim, and \`import.meta\` inside a new Function body
+    // is a SyntaxError that kills the module and with it the whole preview — the single biggest reason
+    // an IMPORTED Vite app showed nothing. Replaced with an identifier the wrapper binds below.
+    // Hand-written here because this path builds a script as a template string and cannot import a
+    // module; previewImportMeta.test.ts locks the two together, exactly as the stamping plugin is.
+    var nbaiImportMetaPlugin = { visitor: { MetaProperty: function (p) { p.replaceWithSourceString(${JSON.stringify(IMPORT_META_IDENT)}); } } };
     // Precompiled pages: the server already ran this exact transform (PreviewPrecompile.ts) — the
     // code in SOURCES IS the compiled output, so it runs as-is. The Babel branch is the fallback
     // path and the two must stay semantically identical (locked by ReactPreview.precompile.test.ts).
-    try { transformed = PRECOMPILED ? code : Babel.transform(code, { filename: path, presets: presets, plugins: [nbaiSrcPlugin, 'transform-modules-commonjs'], sourceType: 'module' }).code; }
+    try { transformed = PRECOMPILED ? code : Babel.transform(code, { filename: path, presets: presets, plugins: [nbaiSrcPlugin, nbaiImportMetaPlugin, 'transform-modules-commonjs'], sourceType: 'module' }).code; }
     catch (e) { throw new Error('Compile ' + path + ': ' + e.message); }
     var module = { exports: {} };
     cache[path] = module;
@@ -706,7 +774,11 @@ ${babelTag}
       }
       return requireModule(resolved);
     }
-    try { (new Function('require', 'module', 'exports', transformed))(localRequire, module, module.exports); }
+    // The 4th parameter binds what the plugin substituted for \`import.meta\`. Passed as an argument
+    // rather than declared in the source so it works for BOTH paths identically: a precompiled module
+    // already carries its own \`var\` declaration (which simply shadows this), while a browser-compiled
+    // one relies on this binding.
+    try { (new Function('require', 'module', 'exports', ${JSON.stringify(IMPORT_META_IDENT)}, transformed))(localRequire, module, module.exports, nbaiImportMeta(path)); }
     catch (e) { throw new Error('Run ' + path + ': ' + e.message); }
     return module.exports;
   }
@@ -813,6 +885,21 @@ ${babelTag}
           nbaiPending--; nbaiPkgsDone++; nbaiProgress();
         }
       }));
+      // THE APP'S OWN SERVER RUNS FIRST. The bridge patches fetch, the server module registers its
+      // routes, and only then does the frontend mount — otherwise a component fetching on mount would
+      // race the server that is supposed to answer it. A server that throws must NOT take the frontend
+      // down with it: the app still renders, and its API calls fail honestly, which is strictly better
+      // than a blank page.
+      ${backendEntry ? `try {
+        var nbaiBridge = requireModule('${BACKEND_BRIDGE_PATH}');
+        requireModule(BACKEND_ENTRY);
+        var nbaiExpress = requireModule('${EXPRESS_SHIM_PATH}');
+        var nbaiApp = nbaiExpress && (nbaiExpress.__nbaiLastApp || (nbaiExpress.default && nbaiExpress.default.__nbaiLastApp));
+        if (nbaiApp) nbaiBridge.register(nbaiApp);
+        else console.warn('[preview] the server module ran but created no app — API calls will go to the network');
+      } catch (e) {
+        console.warn('[preview] the app server could not start:', (e && e.message) || e);
+      }` : ''}
       requireModule(ENTRY);
       // The entry executed without throwing — the app is mounting. The MutationObserver above
       // normally hides the boot overlay on the first real paint; this explicit hide covers apps
@@ -1244,10 +1331,40 @@ export function buildWarmPreloads(urls: string[]): string {
  * origin-less static route, or kill switch `AGENTV3_PREVIEW_DEP_PROXY=off`). The URL SHAPE after the
  * base is identical either way, so the loader's sub-path surgery and esm.run fallback work unchanged.
  */
-function buildImportmap(vfs: VirtualFileSystem, depBase: string = ESM): Record<string, string> {
+/**
+ * The package.json that governs a module — the NEAREST one at or above its directory. Pure + exported
+ * for tests.
+ *
+ * MONOREPOS (Phase 1b, admin 2026-08-13: imported GitHub projects). The importmap used to read
+ * `package.json` at the ROOT only. In a workspace repo — `apps/web/`, `packages/ui/`, a pnpm workspace
+ * — the root manifest lists no runtime dependencies at all, so EVERY one of the app's packages was
+ * missing from the importmap and resolved without a version pin. The app's own manifest sits beside
+ * its source, one directory up from the entry, and that is the one that describes what it needs.
+ *
+ * Returns 'package.json' when nothing nearer exists, so a normal single-package project — every app
+ * this engine generates — takes exactly the path it took before. This can only ADD a manifest that was
+ * previously invisible; it can never take one away.
+ */
+export function nearestPackageJson(vfs: VirtualFileSystem, entry: string | null): string {
+  const parts = String(entry ?? '').split('/');
+  for (let i = parts.length - 1; i > 0; i--) {
+    const candidate = `${parts.slice(0, i).join('/')}/package.json`;
+    const raw = vfs.readText(candidate);
+    if (!raw) continue;
+    try {
+      const pkg = JSON.parse(raw);
+      // A manifest with no dependencies of its own describes nothing the importmap needs; keep walking
+      // up rather than stopping at, say, a `packages/ui/package.json` that only declares a name.
+      if (pkg && (pkg.dependencies || pkg.devDependencies)) return candidate;
+    } catch { /* unreadable manifest — keep walking up */ }
+  }
+  return 'package.json';
+}
+
+function buildImportmap(vfs: VirtualFileSystem, depBase: string = ESM, entry: string | null = null): Record<string, string> {
   const deps: Record<string, string> = {};
   try {
-    const pkg = JSON.parse(vfs.readText('package.json') || '{}');
+    const pkg = JSON.parse(vfs.readText(nearestPackageJson(vfs, entry)) || '{}');
     Object.assign(deps, pkg.dependencies || {}, pkg.devDependencies || {});
   } catch { /* ignore */ }
   const ver = (name: string): string => {

@@ -1288,8 +1288,13 @@ export default function App() {
   // `navbharat:navigate` with { detail: { view } } instead of threading a prop through every layer.
   useEffect(() => {
     const onNavigate = (e: Event) => {
-      const detail = (e as CustomEvent<{ view?: ViewType; settingsScreen?: string }>).detail;
+      const detail = (e as CustomEvent<{ view?: ViewType; settingsScreen?: string; fixPrompt?: string; autoSend?: boolean }>).detail;
       if (detail?.view) toggleTab(detail.view);
+      // A surface that hit a wall can hand v5 the whole problem (the APK build's "Fix" button). The
+      // nonce lets the SAME text re-trigger, so pressing Fix twice is not silently ignored.
+      if (detail?.fixPrompt) {
+        setV3PendingFix({ text: detail.fixPrompt, nonce: Date.now(), autoSend: detail.autoSend === true });
+      }
       // Landing on Settings' ROOT when the caller meant a specific screen is a dead end: the user is
       // sent away mid-task and has to find their way back. Carrying the screen makes "connect my own
       // database" land on the database form itself.
@@ -2166,7 +2171,7 @@ export default function App() {
   // "Fix with AI" clicked from the SIDEBAR preview (outside the v5.0 panel's own UI) — prefills the
   // v5.0 chat input with the error and switches to it. Nonce so the SAME text re-triggers the effect
   // even if the previous fix request is still sitting in the input unsent.
-  const [v3PendingFix, setV3PendingFix] = useState<{ text: string; nonce: number } | null>(null);
+  const [v3PendingFix, setV3PendingFix] = useState<{ text: string; nonce: number; autoSend?: boolean } | null>(null);
   // A deploy requested from the Git panel for a specific real provider → v5.0 runs its real
   // build+deploy pipeline for it (see AgentV3Panel pendingDeploy).
   const [v3DeployRequest, setV3DeployRequest] = useState<{ provider: string; nonce: number } | null>(null);

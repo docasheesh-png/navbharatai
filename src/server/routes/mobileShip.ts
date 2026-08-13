@@ -395,6 +395,36 @@ export function registerMobileShipRoutes(app: Express): void {
 
     // The ONE failure that is genuinely the user's to resolve. Their signing key is their permanent
     // Play Store identity — neither tier may create or work around it.
+    /**
+     * The FULL problem, in a form NavBharatAI Pro v5 can act on.
+     *
+     * The autofix below only repairs what NavBharatAI itself SET UP — the workflow, the Capacitor
+     * project, the signing wiring. A failure inside the user's own APP CODE (the reported case: a test
+     * importing a member the component does not export) is outside its remit, so the user was left
+     * holding an error message and nothing to press. This is what the "Fix" button sends into v5, where
+     * the builder CAN change app code.
+     *
+     * The real log excerpt travels with it: a summary alone would make v5 guess at the same error the
+     * compiler already named exactly.
+     */
+    const failureReport = (): string => {
+      const step = failedStepSection(normalizeLog(log)).trim();
+      const excerpt = step.split('\n').slice(-60).join('\n').slice(0, 6000);
+      return [
+        'My Android build failed on GitHub. Please fix the app code so it builds.',
+        '',
+        `What stopped it: ${diag.summary}`,
+        ...(diag.detail ? ['', diag.detail] : []),
+        '',
+        'The build log said:',
+        '```',
+        excerpt || '(no log output was captured)',
+        '```',
+        '',
+        'Fix the cause in the app source, then tell me what you changed.',
+      ].join('\n');
+    };
+
     if (diag.code === 'MISSING_SIGNING_SECRET') {
       return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail });
     }
@@ -446,7 +476,7 @@ export function registerMobileShipRoutes(app: Express): void {
       if (!diag.autoFixable) {
         // The rules cannot fix this class — the AI pass is exactly for this case.
         if (await tryAiRepair()) return;
-        return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail });
+        return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, report: failureReport() });
       }
 
       const current = await readRepoFiles(headers, String(owner), String(repo), ref, diag.needs);
@@ -476,6 +506,7 @@ export function registerMobileShipRoutes(app: Express): void {
           fixed: false,
           code: diag.code,
           summary: `${diag.summary} NavBharatAI could not correct it automatically.`,
+          report: failureReport(),
         });
       }
       await commitAndRerun(repair.files, repair.message);

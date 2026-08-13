@@ -93,7 +93,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 // stale (never-cleared) `resume` prop re-apply an old chat on each reopen. See the resume effect below.
 let lastAppliedResumeNonce = 0;
 
-export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
+export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
   const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
@@ -2636,6 +2636,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (!pendingFix?.text) return;
     setPrompt(pendingFix.text);
     setShowWorkspace(false);
+    // AUTO-SEND, but only when the caller says the user explicitly asked for a fix.
+    //
+    // The default stays PREFILL — a request that merely arrives should never spend the user's balance
+    // on its own. But the APK panel's "Fix" button IS the consent: the user read "the build failed",
+    // pressed a button labelled Fix, and expects the fix to start. Making them press send again is
+    // the same dead-button feeling this whole path exists to remove.
+    if (pendingFix.autoSend) void send({ text: pendingFix.text, importUrl: '' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingFix?.nonce]);
 

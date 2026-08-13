@@ -3,7 +3,7 @@ import { chargeReceipt, chargeHint, readChargeHeaders, APK_PRICE_INR } from '../
 import { PublishToNavStore } from './PublishToNavStore';
 import {
   Loader2, Github, Download, CheckCircle2, AlertTriangle, ExternalLink,
-  Rocket, Key, RefreshCw,
+  Rocket, Key, RefreshCw, Wrench,
 } from 'lucide-react';
 import { authedHeaders } from '../../App';
 // The workflow filenames come from the ONE shared registry the server's dispatch allow-list also reads.
@@ -134,6 +134,14 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   // The REAL steps of the running build, read from GitHub — so the user sees where it actually is, not a
   // guess from a timer. Empty until the run appears and its steps are readable.
   const [steps, setSteps] = useState<Array<{ label: string; state: 'done' | 'running' | 'pending' | 'failed' }>>([]);
+  /**
+   * The FULL problem from the server, ready to hand to NavBharatAI Pro v5.
+   *
+   * The auto-repair above only fixes what NavBharatAI itself SET UP (the workflow, the Capacitor
+   * project, the signing wiring). When the failure is in the user's own APP CODE it is out of its
+   * remit — and until now that left the user holding an error message with nothing to press.
+   */
+  const [fixReport, setFixReport] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [busyNote, setBusyNote] = useState('');
   const [downloading, setDownloading] = useState('');
@@ -315,7 +323,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         return;
       }
       setProgressNote('Something went wrong — NavBharatAI is looking at it…');
-      let fix: { fixed?: boolean; summary?: string; code?: string } | null = null;
+      let fix: { fixed?: boolean; summary?: string; code?: string; report?: string } | null = null;
       try {
         const fRes = await fetch('/api/mobile-ship/autofix', {
           method: 'POST',
@@ -328,6 +336,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
       if (!fix?.fixed) {
         setPhase('failed');
+        if (fix?.report) setFixReport(fix.report);
         setError(
           // A missing signing key is the ONE failure that is genuinely the user's to resolve, and only
           // the Play Store path can hit it — the .apk build needs no key at all, so never say this there.
@@ -349,6 +358,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     setBuildKind(kind);
     setPhase('building');
     setError('');
+    setFixReport('');
     setArtifacts([]);
     setRun(null);
     setSteps([]);
@@ -496,6 +506,30 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
             >
               <Rocket size={17} /> {phase === 'failed' ? 'Try again' : 'Build my APK now'}
             </button>
+
+            {/* FIX — the bridge that was missing. "Try again" only helps if the cause was transient;
+                when the build died on the app's own code, repeating it repeats the failure. This hands
+                the WHOLE problem (what stopped it + the real log) to NavBharatAI Pro v5, which is the
+                only surface that can change app code, and starts the fix on arrival — the press IS the
+                consent, so making the user hit send again would be one dead step too many. */}
+            {phase === 'failed' && fixReport && (
+              <>
+                <button
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('navbharat:navigate', {
+                      detail: { view: 'nbi_pro_chat', fixPrompt: fixReport, autoSend: true },
+                    }));
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-indigo-600 hover:bg-indigo-500 transition-colors text-white"
+                >
+                  <Wrench size={17} /> Fix this with NavBharatAI
+                </button>
+                <p className="text-[11px] text-white/45 leading-relaxed -mt-1">
+                  Opens NavBharatAI Pro with the full error and starts fixing your app&apos;s code.
+                  Come back and press &ldquo;Try again&rdquo; once it is done.
+                </p>
+              </>
+            )}
             <p className="text-[11px] text-white/45 leading-relaxed -mt-1">
               Installs straight onto any Android phone. Nothing to set up — no signing key needed.
               (This file cannot go on Google Play; for that, use the option below.)

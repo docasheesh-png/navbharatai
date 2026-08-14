@@ -32558,3 +32558,64 @@ Fix (UI English only; short button):
 
 AppKnowledgeBase (APK Builder howToUse) updated with the account-shown + Switch guidance. tsc clean
 (frontend + server); full vitest suite green (15,380).
+
+---
+
+## 2026-08-14 — Dormant-feature audit: what is BUILT but NOT WIRED (admin-requested)
+
+The admin asked, after the flag question: *"dekhna aisa kya kya hai, hamare code base me hai, bana hai
+par wire nahi hai — har choti choti aisi cheez ki ek list banao, aur on/wiring karne se kya badlega."*
+
+**Method + one honest correction.** The first scan reported "349 of 373 endpoints unreferenced", which was
+GARBAGE — the client-side extraction silently matched nothing (a backtick inside a double-quoted shell
+pattern became command substitution, so the client path set was empty and every route looked orphaned).
+It was thrown away rather than reported. The corrected scan reads the files directly in Python and was
+spot-checked against six routes by hand before any of it was shown to the admin.
+
+**Measured on `main` @ 901e77e:** 340 server endpoints, 161 components.
+
+- **79 endpoints have NO reference anywhere outside `src/server/`.** A legitimate subset must be that way
+  (Cashfree webhook, Telegram/WhatsApp webhooks, the Supabase OAuth callback, the payment redirect,
+  `/api/esm/*` which the preview iframe fetches, `/api/warm` + `/api/live` probes, `/api/openapi.json`).
+  The remainder are genuinely built-but-unwired, grouped for the admin as:
+  - **Free, deterministic, zero AI cost:** `/api/design/lint` (colour/font/spacing consistency score +
+    concrete violations) and `/api/design/a11y` (WCAG: missing alt text, unlabelled fields, unnamed
+    controls, missing lang, positive tabindex). These bear directly on the admin's own standing
+    complaint that inner pages "bas HTML feel dete hai", and cost nothing to run.
+  - **A code comment that is not true:** `/api/guider/plan` and `/api/guider/grade` both document "the
+    frontend calls this" — the frontend does not. Either wire them or delete the claim.
+  - **Build quality:** `/api/pro/code-review` (OWASP + tech debt), `/api/retrospective` + `/warnings`,
+    `/api/audit/full`, `/api/build-estimate`, `/api/workspace/changelog|traceability|version`,
+    `/api/techdebt/*`, `/api/deploy-artifacts`, `/api/release-notes`.
+  - **Admin-only, nothing surfaces today:** the whole `/api/observability/*` suite (7 — live metrics,
+    errors, traces, DORA, anomaly, per-provider LLM latency percentiles), `/api/analytics/funnel`,
+    `/api/export/usage|build-history`, and ~15 `/api/admin/*` (builder scorecard, deploy risk, provider
+    status, incident analysis, logs, key rotation, Firestore backup, deployment takedown/restore).
+- **4 components are never rendered:** `ide/AppStorePublisher.tsx` (**679 lines** — a complete Play-Store
+  listing screen, unwired while the admin did the 2026-08-14 store upload by hand), `ide/AgentSelector.tsx`,
+  and `notes/NotesManager.tsx` + `notes/AuthForm.tsx` (leftover demo, recommended for deletion).
+
+Nothing was wired in this pass — the admin explicitly asked for the list first and will choose. Recorded
+here so the audit survives the session and nobody re-derives it.
+
+---
+
+## 2026-08-14 — Streaming first paint + cache prefix: tested, then enabled (PR #2366)
+
+Both flags had shipped OFF in July and had never run for one real user. `AGENTV3_STREAMING_PREVIEW`
+carried **zero tests** while writing to every build's durable store, so it was extracted out of the
+~12k-line route (`src/server/AgentV3/streamingFirstPaint.ts`) and its safety properties made executable:
+OFF returns no callback (not a no-op — the builder branches on existence); it persists exactly the batch
+handed to it, so an early write cannot clobber a file still being produced; a rejected durable write
+cannot throw at the caller, since an unhandled rejection inside a live build would let a time-saving
+feature lose an app; every written file is announced or the preview never reloads.
+
+`AGENTV3_CACHE_PREFIX`'s pure split was already covered including a round trip; the untested half was the
+WIRING, whose failure mode is silent — drop the re-application line and nothing fails while the model
+quietly stops receiving the date, preferences, ADRs and grounding on every build. Pinned by
+`tests/cachePrefixWiring.test.ts`, source-level with the trade stated (the code sits in a route closure
+that cannot be imported).
+
+Admin set BOTH `on` in Cloud Run the same day. Env vars rather than code defaults on purpose: a path that
+has never run in production deserves an instant revert with no deploy. Once real builds prove them, the
+defaults move into code and the two keys retire. tsc clean (frontend + server); 15,395/15,395 vitest.

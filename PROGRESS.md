@@ -32363,3 +32363,42 @@ step-1 → roadmap in the 💡. Built phase by phase, each its own verified/kill
   PRD→analyze (scope not length), long-small→direct, small-with-tweaks→direct, empty/junk safe.
 
 Gate: tsc clean (frontend + server); vitest full suite green.
+
+---
+
+## 2026-08-14 — Mega-app roadmap system, Phase 2: honest LLM roadmap + deterministic guardrail (FLAG-GATED, RECORD-ONLY)
+
+Phase 2 of the mega-app system. Builds on Phase 1's `appScopeAnalyzer`. Still ZERO behaviour
+change for any real build — the whole thing is behind `AGENTV3_MEGA_ROADMAP=on` (default OFF)
+and only RECORDS its result into the build report.
+
+**The 10/10 division of labour (agreed with the admin): the LLM PROPOSES, deterministic rules
+VERIFY.** The LLM understands what "an Instagram" really decomposes into (accuracy); the
+guardrail guarantees no fake/vague/hidden-ceiling step ever survives (trust). That split is the
+whole reason the roadmap can be shown to a non-tech user honestly.
+
+- **`megaRoadmap.ts`** (new, pure/no-throw):
+  - `megaRoadmapSystemPrompt()` / `megaRoadmapUserPrompt()` — instruct the planner to break a MEGA
+    ask into an honest, incremental roadmap: step 1 a small-but-REAL visible slice (fast preview),
+    every step concrete + buildable, ceilings stated not hidden, all user-facing text in the user's
+    OWN language, NO vendor/model names, strict-JSON out. The famous name is used as INSPIRATION
+    ("build an original app inspired by it"), never "copy the brand".
+  - `parseMegaRoadmap()` — balanced-brace JSON extraction that tolerates ```json fences + prose.
+  - `roadmapGuardrail()` — THE HONEST GATE (deterministic): a step needs a real title+goal+
+    substantive buildPrompt (≥12 chars, not vague filler like "etc"/"polish"/"finish it");
+    duplicates dropped; capped at MAX_ROADMAP_STEPS(6), re-numbered 1..n; `infraCeiling` set TRUE if
+    the model declared it OR the guardrail's own INFRA_RE matches (belt-and-suspenders — the model
+    cannot hide a ceiling by omitting the field); <MIN_ROADMAP_STEPS(2) survivors ⇒ null (caller
+    builds directly). An honest scope note is synthesised when a ceiling exists but the model gave
+    none (rule 6 — the truth is never silent).
+- Wired into `agentv3.ts` right after the fast-text-runner is constructed: flag on + fresh build +
+  scope=='analyze' ⇒ ONE bounded (45s-timeout) planner call, billed like every planner call
+  (blueprintUsage + buildUsage), guardrailed, then RECORDED as a `MEGA_ROADMAP` diagnostic (the
+  full roadmap + any guardrail rejections, for the admin to eyeball). It steers NOTHING yet — the
+  honest reply, the auto-build of step 1, and the 💡 roadmap UI are Phases 3-4. Fully wrapped: flag
+  off / small app / edit / any failure ⇒ build runs exactly as today.
+- 14 tests (`megaRoadmap.test.ts`): prompt shape (honest/JSON/white-label), parse (clean/fenced/
+  junk/null-safe), guardrail (accept+renumber, catch undeclared infra ceiling, reject vague+dup,
+  null when too thin, cap at MAX, null-safe, diag summary).
+
+Gate: tsc clean (frontend + server); vitest full suite green.

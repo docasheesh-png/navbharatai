@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  THE ANDROID 12+ SYSTEM SPLASH (admin 2026-08-13: "native app lage, capacitor nahi").
+
+  From Android 12 the SYSTEM draws the first frame itself, before a single line of app code runs. It
+  reads `windowSplashScreenBackground` from the launch theme — and this project never set it, so that
+  frame fell back to the AppCompat.Light window background: WHITE.
+
+  So the very first thing every user on a modern phone saw was a white sheet, then the app's own dark
+  splash, then the dark UI. capacitor.config.ts already fought exactly this flash one layer down
+  ("the single most obvious 'this is a web page loading' moment in the whole launch") — but that
+  config governs the Capacitor splash, which the system splash comes BEFORE. It could never reach here.
+
+  DELIBERATELY ONLY THE COLOUR. `postSplashScreenTheme` and `windowSplashScreenAnimatedIcon` are not
+  set: this file's own history records that a splash "optimisation" once left the app frozen on its
+  launch screen, and those two change the hand-off and the icon pipeline. A background colour is read
+  by the system before the app starts and has nothing to hang on — it cannot repeat that failure.
+
+  In values-v31 rather than values/ because the attribute exists only from API 31; older devices keep
+  today's launch untouched.
+-->
+<resources>
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="android:background">@drawable/splash</item>
+        <item name="android:windowSplashScreenBackground">@color/nbaiSurfaceDark</item>
+    </style>
+</resources>

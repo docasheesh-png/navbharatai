@@ -13,7 +13,13 @@ dependencies {
     implementation project(':capacitor-community-media')
     implementation project(':capacitor-firebase-authentication')
     implementation project(':capacitor-firebase-messaging')
+    implementation project(':capacitor-app')
+    implementation project(':capacitor-browser')
     implementation project(':capacitor-filesystem')
+    implementation project(':capacitor-haptics')
+    implementation project(':capacitor-keyboard')
+    implementation project(':capacitor-splash-screen')
+    implementation project(':capacitor-status-bar')
     implementation project(':capawesome-capacitor-app-update')
 
 }

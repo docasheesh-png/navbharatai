@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app's own surface colour, as ONE definition the native side can reach.
+
+  #0d1117 is the same value capacitor.config.ts gives the splash screen. Keeping it in a named
+  resource rather than repeating the literal is what stops the native window and the splash drifting
+  apart later — the drift would show up as a flash of the wrong colour at launch, which is the very
+  thing this was added to prevent.
+-->
+<resources>
+    <color name="nbaiSurfaceDark">#0d1117</color>
+</resources>

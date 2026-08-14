@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DARK-MODE LAUNCH (admin 2026-08-13: "native app lage, capacitor nahi").
+
+  These styles cover the moment BEFORE the WebView paints. The app's own UI already follows the
+  user's theme, and the splash is already dark (capacitor.config.ts, backgroundColor #0d1117) — but
+  the Activity window underneath had no dark variant, so a phone in dark mode could flash a light
+  window between the splash handing off and React painting. It is a fraction of a second, and it is
+  exactly the fraction that reads as "a web page is loading".
+
+  Only the WINDOW background is overridden. The splash drawable is unchanged, because it is already
+  drawn on the app's own dark surface in both themes.
+-->
+<resources>
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.DarkActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="android:windowBackground">@color/nbaiSurfaceDark</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:background">@null</item>
+        <item name="android:windowBackground">@color/nbaiSurfaceDark</item>
+    </style>
+
+    <!--
+      `AppTheme.NoActionBarLaunch` IS DELIBERATELY ABSENT, and this is the subtle part.
+
+      Android resolves a resource by eliminating candidate folders qualifier by qualifier, and NIGHT
+      MODE ranks ABOVE API VERSION in that order. So on an Android 12+ phone in dark mode, a copy of
+      this style here would match the night qualifier, eliminate values-v31/ outright, and take away
+      the `windowSplashScreenBackground` that folder exists to set — leaving the system splash white
+      in dark mode, which is the one place the flash is most obvious.
+
+      Leaving it undeclared keeps this style's candidates at values/ and values-v31/, neither of
+      which mentions night, so the version qualifier decides and v31 wins in BOTH themes. Nothing is
+      lost by omitting it: the launch theme draws @drawable/splash, which is already the app's own
+      dark surface regardless of theme.
+    -->
+</resources>

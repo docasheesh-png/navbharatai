@@ -338,6 +338,7 @@ import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
+import { makeFirstPaintHandler } from '../AgentV3/streamingFirstPaint';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
@@ -9904,13 +9905,10 @@ export function registerAgentV3Routes(app: Express): void {
         // free in-browser preview can render them, then emit file_changed events so the client's
         // filesVersion bumps and the preview re-pulls immediately — the user sees the real app tens of
         // seconds sooner. Best-effort; never blocks or fails the build. Kill: unset AGENTV3_STREAMING_PREVIEW.
-        const onFilesReady = envFlag('AGENTV3_STREAMING_PREVIEW')
-          ? (files: { path: string; content: string }[]) => {
-              const rec = Object.fromEntries(files.map((f) => [f.path, f.content]));
-              mergeWorkspaceFiles(workspaceId, rec).catch(() => { /* durable save is best-effort */ });
-              for (const f of files) events.emit({ type: 'file_changed', agent: 'architect', change: { path: f.path, kind: 'create' as const }, ts: Date.now() });
-            }
-          : undefined;
+        const onFilesReady = makeFirstPaintHandler(workspaceId, {
+          merge: mergeWorkspaceFiles,
+          emit: (e) => events.emit(e),
+        });
         const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // OBSERVABILITY (deep-test App #2, 2026-07-13): when the fast lane falls back after a verify

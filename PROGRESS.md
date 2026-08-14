@@ -32512,3 +32512,22 @@ Two admin requests:
    awake with the app backgrounded) — it keeps the screen on while the user is watching the build.
 
 AppKnowledgeBase updated (Keep-screen-on toggle). tsc clean (frontend + server); full vitest green (15,380).
+
+---
+
+## 2026-08-14 — Unsend moved from the composer onto the last sent message (Free/NBI/Vishwakarma chat)
+
+Admin: the unsend button (added 2026-08-13) was in the WRONG place — inside the input box. It should sit
+ON the last sent message and appear BEFORE the AI reply arrives (so you can take back a wrong query mid-
+flight), exactly like v5 already does. (v5/AgentV3Panel was already correct — unsend attaches to the last
+user bubble via MessageActions; that is why it was "theek hai".)
+
+Fix in `AIChat.tsx` (the shared UI for Free / NBI / Vishwakarma):
+- REMOVED the ↩ unsend button from the composer button row.
+- ADDED an "↩ Unsend" button to the last USER message's footer, shown ONLY while `isLoading` (the reply is
+  still coming). Anchored to the last user message BY ID — not array position — because streaming appends
+  an AI bubble as the last array item, so a position check would miss. It disappears the moment the reply
+  completes (then edit/delete remain for that message). Clearly visible (amber, not hover-only) because it
+  is time-sensitive. Same `onUnsend` handler (stop reply + remove the exchange + restore text to the box).
+
+tsc clean (frontend); full vitest suite green (15,380).

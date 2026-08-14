@@ -1281,6 +1281,21 @@ export const AIChat: React.FC<AIChatProps> = ({
                     <span className="text-[7px] text-[#30363d] font-mono">{formatMsgTime(msg.timestamp)}</span>
                   )}
                   {msg.sender === 'user' && <User className="w-2.5 h-2.5 text-indigo-400" />}
+                  {/* UNSEND — on the LAST sent message, shown ONLY while the reply is still coming (admin
+                      2026-08-14: "unsend last message par ho, AI response aane se pehle"). Take it back
+                      before the AI answers a wrong query: stops the reply + removes this exchange + puts the
+                      text back in the box. It disappears the moment the AI response arrives (the user
+                      message is no longer the last one). Clearly visible (not hover-only) — it is
+                      time-sensitive. */}
+                  {onUnsend && msg.sender === 'user' && isLoading && messages.filter((m: any) => m?.sender === 'user').at(-1)?.id === msg.id && (
+                    <button
+                      onClick={() => onUnsend()}
+                      title="Unsend — take this message back before the reply arrives"
+                      className="flex items-center gap-1 text-[8px] font-black uppercase tracking-widest text-amber-300 hover:text-amber-100 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 rounded px-1.5 py-0.5 transition-colors active:scale-95"
+                    >
+                      <span className="text-[11px] leading-none">↩</span> Unsend
+                    </button>
+                  )}
                   {/* EDIT + DELETE on a sent message (admin 2026-08-10: "delete kar sake, saath me
                       edit bhi — WhatsApp ke tarah").
                       The old "edit" here only COPIED the text into the composer and left the original
@@ -1744,17 +1759,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                           content: String(m.text || ''),
                         }))}
                     />
-                    {/* UNSEND — take back the last message (stops any reply + removes the last exchange).
-                        Shown whenever there is something to take back (admin 2026-08-13). */}
-                    {onUnsend && messages.some((m) => m.sender === 'user') && (
-                      <button
-                        onClick={() => onUnsend()}
-                        title="Unsend — take back the last message"
-                        className="p-3 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:border-white/25 transition-all flex items-center justify-center active:scale-95"
-                      >
-                        <span className="w-3.5 h-3.5 flex items-center justify-center text-[13px] leading-none">↩</span>
-                      </button>
-                    )}
+                    {/* UNSEND moved out of the composer (admin 2026-08-14): it now lives ON the last sent
+                        message bubble and appears only while the reply is still coming — see the message
+                        footer above. The composer keeps just Stop (while loading) and Send. */}
                     {isLoading && onStop ? (
                       // ONE-CLICK STOP (admin 2026-08-13: "galat search rukti nahi") — a running reply must
                       // end the instant this is tapped, not after a confirm dialog the user has to dismiss.

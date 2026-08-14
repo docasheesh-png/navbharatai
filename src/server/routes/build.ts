@@ -4,9 +4,6 @@ import { consumeEngineerQuota } from '../lib/engineerQuota';
 import { runBuild } from '../project/BuildPipeline';
 import { runProEngine } from '../EngineerAI/ProEngineRunner';
 import { runUnifiedBuild, isUnifiedEngineEnabled } from '../project/UnifiedBuildOrchestrator';
-import { Guider, gradeAgainstSpec } from '../Guider/Guider';
-import { shouldConfirm } from '../Guider/GuiderGate';
-import type { GuiderSpec } from '../Guider/GuiderTypes';
 import { eventBus } from '../lib/eventBus';
 import { EventType } from '../AppMakerLab/eventbus/EventTypes';
 
@@ -21,20 +18,6 @@ export function resolveAttributionUserId(verifiedUid: string | null | undefined)
   return verifiedUid || undefined;
 }
 
-/** Compact textual view of the built files for the grader (tree + budgeted snippets). */
-function buildGradeContext(files: Record<string, string>): string {
-  const paths = Object.keys(files);
-  let body = '';
-  let budget = 10_000;
-  for (const p of paths) {
-    if (budget <= 0) break;
-    const snippet = (files[p] || '').slice(0, 1500);
-    const block = `\n--- ${p} ---\n${snippet}`;
-    body += block.slice(0, budget);
-    budget -= block.length;
-  }
-  return `Files (${paths.length}):\n${paths.join('\n')}\n${body}`;
-}
 import { APP_KNOWLEDGE_BASE } from '../AppContext/AppKnowledgeBase';
 import { makeAiEditGenerator, summarizeForMemory, type ModelCall, type BuildMemory } from '../project/aiEdits';
 import { orchestrateGenerate } from '../pro/ProOrchestrator';
@@ -216,61 +199,32 @@ export function registerBuildRoutes(app: Express): void {
     res.json({ version: 1, features: APP_KNOWLEDGE_BASE });
   });
 
-  // ── Guider: propose a design + decide if user confirmation is needed (Hybrid).
-  //    Flag-gated. The frontend calls this BEFORE a build; if `confirm` is false
-  //    it builds straight away, otherwise it shows a confirmation card with the
-  //    proposal (in the user's language) and only builds after approval. Never
-  //    blocks: any failure returns `confirm:false` so the normal build proceeds.
-  app.post('/api/guider/plan', async (req: Request, res: Response) => {
-    // SECURITY (SEC Phase 5 re-audit) — this endpoint was UNAUTHENTICATED and, when a caller set
-    // `agentic:true`, ran an LLM call on NavBharatAI's OWN provider budget (a money-bleed surface,
-    // the sibling of the retired /api/pro-* routes). It has NO client caller (superseded by v5.0), so
-    // it is now a permanent no-op: the same "no confirmation" response it already returns when
-    // disabled — never touching a model. Kept as a 200 no-op (not 410) so any stale client degrades
-    // gracefully into a normal build instead of erroring.
-    return res.json({ confirm: false });
-    try {
-      const { prompt, files, userKey, isEdit, agentic } = req.body || {};
-      if (!prompt || typeof prompt !== 'string') return res.status(400).json({ error: 'prompt (string) is required' });
-      const enabled = envFlag('PRO_AGENTIC_ENGINE') || agentic === true;
-      const hasExistingFiles = !!(files && typeof files === 'object' && Object.keys(files).length > 0);
-      if (!enabled || !shouldConfirm({ prompt, hasExistingFiles, isEdit: isEdit === true })) {
-        return res.json({ confirm: false });
-      }
-      const callModel: ModelCall = makeResilientModelCall(userKey);
-      const guider = new Guider({ callModel, generate: async () => ({ ok: false, gradeContext: '' }) });
-      const plan = await guider.plan(prompt);
-      return res.json({ confirm: true, plan });
-    } catch {
-      // Planning must never block a build — fall through to a normal (no-confirm) build.
-      return res.json({ confirm: false });
-    }
+  // ── GUIDER (RETIRED) — two permanent no-ops, and the dead code below them is now gone.
+  //
+  // These were unauthenticated endpoints that, when a caller passed `agentic:true`, ran an LLM call on
+  // NavBharatAI's OWN provider budget — a money-bleed surface, sibling of the retired /api/pro-* routes.
+  // The SEC Phase 5 re-audit neutralised them by putting an early `return` at the top of each handler.
+  //
+  // WHY THE BODIES ARE DELETED RATHER THAN LEFT BEHIND THE RETURN. What sat under those returns was
+  // ~40 lines of unreachable code that still CONSTRUCTED the paid model call. Unreachable is not the
+  // same as harmless: it reads as a working feature that someone merely switched off, so the obvious
+  // "cleanup" — deleting the stray early return — silently re-arms the exact money bleed the audit
+  // closed. A guard whose removal looks like tidying is not a guard. If this capability is ever wanted
+  // again it comes back through v5.0's authenticated, billed path, not by reviving this.
+  //
+  // The old comments claimed "the frontend calls this BEFORE a build" and "the frontend uses this AFTER
+  // a build". Neither was true — v5.0 superseded both and no client has called either for months.
+  //
+  // KEPT AS 200 NO-OPS RATHER THAN DELETED OUTRIGHT, deliberately: the Android app ships BUNDLED, so an
+  // old installed copy runs its own frozen frontend forever. A 404 would surface there as a broken
+  // build; these responses are the exact "nothing to confirm" / "no grade" shapes such a client already
+  // handles, so it degrades into a normal build instead of an error.
+  app.post('/api/guider/plan', (_req: Request, res: Response) => {
+    res.json({ confirm: false });
   });
 
-  // ── Guider: grade a built app against the spec (Slice 3 — quality loop). Returns
-  //    { grade: { pass, score, gaps[] } } or { grade: null } when disabled/empty.
-  //    The frontend uses this AFTER a build fully completes to decide whether to
-  //    auto-refine. Never throws — failure returns grade:null (no refine).
-  app.post('/api/guider/grade', async (req: Request, res: Response) => {
-    // SECURITY (SEC Phase 5 re-audit) — same as /api/guider/plan: an unauthenticated owner-paid LLM
-    // surface with no client caller. Permanent no-op (the "disabled" grade:null it already returns),
-    // never touching a model. 200 no-op so a stale client degrades gracefully.
-    return res.json({ grade: null });
-    try {
-      const { spec, prompt, files, userKey, agentic } = req.body || {};
-      const enabled = envFlag('PRO_AGENTIC_ENGINE') || agentic === true;
-      if (!enabled || !files || typeof files !== 'object' || Object.keys(files).length === 0) {
-        return res.json({ grade: null });
-      }
-      const useSpec: GuiderSpec = (spec && Array.isArray(spec.acceptanceCriteria) && spec.acceptanceCriteria.length)
-        ? spec
-        : { summary: String(prompt || ''), requirements: [String(prompt || '')], acceptanceCriteria: [{ id: 'c1', text: String(prompt || '') }], outOfScope: [] };
-      const callModel: ModelCall = makeResilientModelCall(userKey);
-      const grade = await gradeAgainstSpec(callModel, useSpec, buildGradeContext(files));
-      return res.json({ grade });
-    } catch {
-      return res.json({ grade: null });
-    }
+  app.post('/api/guider/grade', (_req: Request, res: Response) => {
+    res.json({ grade: null });
   });
 
   app.post('/api/build', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {

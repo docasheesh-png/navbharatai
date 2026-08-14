@@ -491,7 +491,9 @@ export function ViewPanels({
             appName="NavBharatAI App"
             sessionId={currentProSessionId}
             githubToken={githubToken}
+            githubUser={githubUser}
             onConnectGitHub={connectGitHub}
+            onDisconnectGitHub={disconnectGitHub}
             onMakeIcon={() => toggleTab('imagegen')}
           />
         </div>

@@ -43,7 +43,11 @@ export interface APKBuilderProps {
   sessionId?: string;
   /** The connected GitHub token — the build runs on the user's own account. */
   githubToken?: string;
+  /** The connected GitHub account (so the user can SEE which account will own the build). */
+  githubUser?: { login?: string; username?: string; name?: string } | null;
   onConnectGitHub?: () => void;
+  /** Disconnect the current GitHub account (used by the "Switch" account control). */
+  onDisconnectGitHub?: () => void;
   /** Send the user to AI Image Gen to create an icon. */
   onMakeIcon?: () => void;
 }
@@ -86,7 +90,7 @@ function packageAdvisory(typed: string, appName: string): { effective: string; o
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, githubToken, onConnectGitHub, onMakeIcon }) => {
+export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, githubToken, githubUser, onConnectGitHub, onDisconnectGitHub, onMakeIcon }) => {
   // The tier the user selected in the v5.0 panel (persisted there). It routes the AI build-repair to the
   // same models the main build uses; absent ⇒ the server falls back to the weak-safe (cheap, no-Claude)
   // path by construction, so this can never accidentally spend a flagship model.
@@ -381,7 +385,9 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
             iconDataUrl={iconDataUrl || undefined}
             backgroundColor={info.primaryColor}
             githubToken={githubToken}
+            githubUser={githubUser}
             onConnectGitHub={onConnectGitHub}
+            onDisconnectGitHub={onDisconnectGitHub}
             onOpenGuide={() => void openGuide()}
             powerLevel={selectedPowerLevel}
           />

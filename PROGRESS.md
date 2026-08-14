@@ -32650,3 +32650,41 @@ scaffolder is a candidate follow-up if real reports show it recurring.
 Tests: `ArchitectureAnalysis.test.ts` +2 (client/src + frontend/src·apps/web/src alias roots);
 `mobileShipPreflight.test.ts` +1 (fullstack app's @/ imports are not falsely flagged). tsc clean (frontend
 + server); full vitest suite green (15,383).
+
+---
+
+## 2026-08-14 — APK builder hardening #1: deterministic shadcn/ui primitive scaffolder (admin: "100x strong")
+
+Admin: make the APK builder rock-solid so (as close as honestly possible to) every app builds. Framed
+honestly — literally 100% of all apps is not physically achievable — as a hardening campaign that kills the
+common "cannot compile" classes one by one. This is batch #1, targeting the #1 recurring class.
+
+**The class:** models trained on shadcn codebases write `import { Button } from "@/components/ui/button"`
+(card / input / dialog / … + `@/lib/utils`) WITHOUT generating those files, so the app cannot compile
+anywhere. The APK compile pre-flight caught it honestly but its AI repair "could not" fix it (it sees only
+the broken importer + package.json, not 20 files to create).
+
+**Fix — a deterministic scaffolder (`uiPrimitiveScaffold.ts`, pure/no-throw):** for every unresolved
+`@/components/ui/<known>` (or `@/lib/utils`), CREATE a REAL, working implementation at the app's true source
+root (client/src / frontend/src / src). Deliberately **dependency-light** — Tailwind + a local `cn`
+(clsx + tailwind-merge) + class-variance-authority only, **no @radix-ui** (which would pull ~30 packages and
+a peer-dep maze). Not pixel-perfect shadcn, but it compiles, renders and works (rule 2 — real, not a stub).
+Covers the high-frequency set: button, input, textarea, label, card(+5 parts), badge, separator, skeleton,
+alert(+2), avatar(+3), switch, checkbox, progress. Only creates a file that does not already exist; only
+touches KNOWN primitives (a bespoke `@/components/Header` is left for the AI pass — we never invent an API
+we don't know).
+
+**Wired as a new deterministic tier (0a) in `preflightAndHeal`,** before the AI pass: scaffold → re-verify →
+the existing missing-package tier then adds the scaffold's deps (clsx / tailwind-merge / cva — all already
+on the well-known allowlist) → re-verify. So a whole class of broken apps is now fixed **with zero AI cost**
+and before anything reaches GitHub. `unresolved-import` problems now carry the exact `spec` so the scaffolder
+needs no message re-parsing.
+
+Tests (`uiPrimitiveScaffold.test.ts`, 7): detection; creation at client/src root; never overwrites an
+existing file; ignores bespoke components; **EVERY generated component parses under esbuild (zero syntax
+errors)**; and an end-to-end `preflightAndHeal` with **chain=[] (no AI)** that proves the deterministic tiers
+alone turn a broken "missing @/components/ui/*" app green + add the deps. tsc clean (server); full suite green.
+
+Next hardening candidates (batch #2+, as real reports show them): Radix-based primitives (dialog/select/tabs
+via dependency-light equivalents), missing non-ui local files, capacitor config correctness for fullstack vs
+SPA, and widening the GitHub-runner repair classes.

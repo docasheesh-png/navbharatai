@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  THEMED ICON (Android 13+, admin 2026-08-13: "native app lage, capacitor nahi").
+
+  <monochrome> is what lets the launcher tint this icon with the user's wallpaper when they turn on
+  themed icons. Without it every other app on the home screen recolours and ours stays in its own
+  palette — a small thing that reads immediately as "not a real app".
+
+  The layer is DERIVED from ic_launcher_foreground (a dark logo on white): its silhouette is the
+  alpha, so this is the app's own mark rather than new artwork invented to fill a slot. The system
+  supplies the colour; the drawable supplies only the shape.
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background"/>
     <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <monochrome android:drawable="@mipmap/ic_launcher_monochrome"/>
 </adaptive-icon>

@@ -128,6 +128,46 @@ describe('the launch frame is dark in every theme', () => {
   });
 });
 
+describe('predictive back stays OPT-OUT — an admin decision, recorded so it survives a session', () => {
+  /**
+   * ADMIN 2026-08-14, unambiguous: **"predictive back = no ❌ karna hi nahi hai!!!!"**
+   *
+   * It is the single most native-feeling Android gesture and it is genuinely tempting to add later.
+   * It is also the one item on the polish list with real breakage risk, because this app's back
+   * button is not the system's — `installBackButtonHandler` (src/lib/nativeShell.ts) forwards Back
+   * into React Router and exits ONLY when the navigation stack is genuinely empty. Opting into the
+   * predictive APIs changes who owns that decision.
+   *
+   * WHAT IS ACTUALLY TRUE TODAY, verified by reading the path rather than assumed:
+   *   - targetSdkVersion is 36, and from SDK 35 the platform enables the OnBackInvoked path by
+   *     default, so this app is NOT on the legacy-only path any more.
+   *   - Capacitor's App plugin registers an *enabled* androidx `OnBackPressedCallback` on the
+   *     activity's OnBackPressedDispatcher (AppPlugin.java), and androidx.activity 1.11.0 bridges
+   *     that dispatcher to the platform dispatcher itself.
+   *   - So Back still reaches the JS `backButton` listener, and the app's own navigation still wins.
+   *
+   * The conclusion is therefore "leave it exactly as it is", NOT "add a flag to be safe". Forcing
+   * `enableOnBackInvokedCallback="false"` would push the app back onto the legacy path — a real
+   * behaviour change, untested on device, to fix nothing. This test exists so the DECISION is
+   * enforceable: a later session that opts in fails CI and has to ask the admin first.
+   */
+  const manifest = () =>
+    readFileSync(join(process.cwd(), 'android/app/src/main/AndroidManifest.xml'), 'utf8')
+      .replace(/<!--[\s\S]*?-->/g, '');
+
+  it('nothing opts the app INTO the predictive back APIs', () => {
+    expect(manifest()).not.toMatch(/enableOnBackInvokedCallback\s*=\s*"true"/);
+  });
+
+  it('the app still owns Back — the handler predictive back would take over from', () => {
+    // If this disappears, Back exits the app from any screen instead of navigating, and the
+    // predictive question becomes moot because there is nothing left to protect.
+    const shell = readFileSync(join(process.cwd(), 'src/lib/nativeShell.ts'), 'utf8');
+    expect(shell).toContain("addListener('backButton'");
+    expect(shell).toMatch(/canGoBack === false/);
+  });
+});
+
 describe('the settings this file protects are ones cap sync can erase', () => {
   it('the splash safety that once froze the app is still in place', () => {
     /**

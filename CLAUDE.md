@@ -688,6 +688,38 @@ the code (it is actually read somewhere) on 2026-07-11.
   Detection is `checkFeaturePresence(prompt, html)` against the RUNNING app, which is a strictly
   stronger signal than RequirementCoverage's file-name/body matching (that one feeds the honest
   "not built" notice in the user's summary instead).
+- **`AGENTV3_STREAMING_PREVIEW`** + **`AGENTV3_CACHE_PREFIX`** (✅ **BOTH SET `on` in Cloud Run by the
+  admin 2026-08-14**, after the dormant-flag audit below). Both had shipped gated OFF in July and had
+  **never run for a single real user** until this date — so the first real builds after this are the
+  first evidence either has ever produced. Treat them as new, not as settled.
+  - **`AGENTV3_STREAMING_PREVIEW` — the user sees their app 30–155 s sooner.** On the fast lane the
+    generated files are final long before the verify+repair loop and the dev-server install/boot
+    finish; for that whole window the user watches a spinner while their finished app sits on the
+    server. On, the files are persisted the instant they are ready and a `file_changed` event fires per
+    file, which the preview already debounces into one reload. Safe by construction, and now by test
+    (`streamingFirstPaint.test.ts`, PR #2366): the durable write is an UPSERT of only that batch, so an
+    early write cannot clobber a file the build has not produced yet; a rejected write is swallowed
+    because this is a HEAD START, never the build's save path; and OFF returns **no callback at all**
+    rather than a no-op, since the builder branches on the callback existing. ⚠️ Logic lives in
+    `src/server/AgentV3/streamingFirstPaint.ts` — it was extracted OUT of the 12k-line route precisely
+    so it could be tested; do not inline it back.
+  - **`AGENTV3_CACHE_PREFIX` — every build gets cheaper.** ~12 volatile context blocks (today's date,
+    user prefs, ADRs, grounding) were prepended to the HEAD of the ~46KB static architect prompt, and
+    Anthropic's cache matches by PREFIX — so a head that changes daily busted the cache for the entire
+    static body on every build. On, that prefix moves into the per-turn USER message and the static body
+    becomes a stable cache prefix (cache reads ≈ 0.1× input). The model sees identical content, only
+    relocated, so quality is unchanged. `splitCachedSystem` no-ops on an unrecognised prompt shape, so it
+    can only ever preserve content.
+    ⚠️ **THE ONE THING A LATER SESSION MUST NOT BREAK:** the split is only half the move — the route
+    RE-APPLIES the preamble to `buildPrompt` (`if (cachePrefixPreamble) buildPrompt = …`). If that line is
+    ever dropped, **nothing fails**: no error, no failing build, the model just silently stops receiving
+    the date, preferences, ADRs and grounding on every build and answers quietly get worse. Pinned by
+    `tests/cachePrefixWiring.test.ts`.
+  - **Why env vars and not code defaults:** for a path that has never run in production, an env var is
+    the safer switch — instant revert with no deploy. Once real builds prove them, the defaults move
+    into the code and these two keys RETIRE (which is also what shrinks the flag surface the admin
+    objected to). **What to watch:** the preview appearing early and correct (not a half-rendered app),
+    and per-build cost dropping on repeat builds of the same workspace.
 - **`AGENTV3_ARCH_INVARIANTS`** (default ON, set `off` to disable) — before EDITING an existing app, the
   engine reads that app's OWN rules out of its code (styling system, import style, where network calls
   go, where pages live) and hands them to the builder before it writes a line; after the build it checks

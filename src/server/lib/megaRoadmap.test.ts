@@ -5,9 +5,11 @@ import {
   parseMegaRoadmap,
   roadmapGuardrail,
   summarizeRoadmapForDiag,
+  publicRoadmapView,
   MIN_ROADMAP_STEPS,
   MAX_ROADMAP_STEPS,
 } from './megaRoadmap';
+import type { MegaRoadmap } from './megaRoadmap';
 
 const goodJson = JSON.stringify({
   userMessage: 'This is a big app, so I will build the working core first — a real preview in a few minutes — then the rest arrives as simple next steps you can tap one at a time.',
@@ -155,5 +157,45 @@ describe('megaRoadmap — guardrail (the honest gate)', () => {
     const line = summarizeRoadmapForDiag(roadmap!);
     expect(line).toMatch(/3 checkpoint/);
     expect(line).toMatch(/\[infra\]/);
+  });
+});
+
+describe('megaRoadmap — publicRoadmapView (the 💡 guided-roadmap client shape)', () => {
+  const roadmap: MegaRoadmap = roadmapGuardrail(parseMegaRoadmap(goodJson, 'Instagram'), 'Instagram').roadmap!;
+
+  it('withholds the internal buildPrompt and exposes only user-facing fields', () => {
+    const v = publicRoadmapView(roadmap, 1);
+    expect(v.steps.every((s) => !('buildPrompt' in s))).toBe(true);
+    expect(v.steps[0]).toHaveProperty('title');
+    expect(v.steps[0]).toHaveProperty('goal');
+    expect(v.userMessage).toMatch(/big app/i);
+  });
+
+  it('marks statuses relative to the milestone reached', () => {
+    const v = publicRoadmapView(roadmap, 1); // reached step 1
+    expect(v.steps.map((s) => s.status)).toEqual(['current', 'next', 'upcoming']);
+    expect(v.nextStep).toBe(2);
+    expect(v.complete).toBe(false);
+  });
+
+  it('the next-fill prompt is the user-language title+goal, never the internal English buildPrompt', () => {
+    const v = publicRoadmapView(roadmap, 1);
+    // step 2 in goodJson: title "Upload a photo", goal "Pick and post a photo that appears in the feed"
+    expect(v.nextFillPrompt).toBe('Upload a photo. Pick and post a photo that appears in the feed');
+    expect(v.nextFillPrompt).not.toMatch(/client-side/); // that phrase is only in the internal buildPrompt
+  });
+
+  it('reports completion when the last milestone is reached', () => {
+    const v = publicRoadmapView(roadmap, 3);
+    expect(v.complete).toBe(true);
+    expect(v.nextStep).toBeNull();
+    expect(v.nextFillPrompt).toBeNull();
+    expect(v.steps.map((s) => s.status)).toEqual(['done', 'done', 'current']);
+  });
+
+  it('clamps a garbage currentStep into range', () => {
+    expect(publicRoadmapView(roadmap, 0).currentStep).toBe(1);
+    expect(publicRoadmapView(roadmap, 999).currentStep).toBe(3);
+    expect(publicRoadmapView(roadmap, -5).currentStep).toBe(1);
   });
 });

@@ -238,6 +238,67 @@ export function roadmapGuardrail(
   return { roadmap: { famousApp, userMessage, achievableSummary: summary, steps: kept, note }, rejected };
 }
 
+// ── PUBLIC (USER-FACING) VIEW — Phase 4, the 💡 guided roadmap ────────────────────────────────────────
+
+export type PublicRoadmapStepStatus = 'done' | 'current' | 'next' | 'upcoming';
+
+export interface PublicRoadmapStep {
+  n: number;
+  title: string;
+  goal: string;
+  infraCeiling: boolean;
+  status: PublicRoadmapStepStatus;
+}
+
+export interface PublicRoadmap {
+  famousApp: string | null;
+  userMessage: string;
+  note: string | null;
+  /** The milestone the user has reached (1-based). Step `currentStep` is "current", earlier are "done". */
+  currentStep: number;
+  totalSteps: number;
+  /** True once every checkpoint has been reached — the journey is finished. */
+  complete: boolean;
+  /** The step number to build next (currentStep+1), or null when complete. */
+  nextStep: number | null;
+  /** The ready-to-send instruction for the next step, IN THE USER'S OWN LANGUAGE (title + goal), or null.
+   *  Deliberately NOT the internal English `buildPrompt`: sending English here would build the next step in
+   *  English, breaking the user-language rule. The user reviews/edits this before sending. */
+  nextFillPrompt: string | null;
+  steps: PublicRoadmapStep[];
+}
+
+/**
+ * Shape a stored roadmap for the client. `currentStep` = the milestone reached (never marks a step "done"
+ * that has not been passed). The internal per-step `buildPrompt` is intentionally withheld — the client
+ * only ever needs the user-language title/goal to fill the composer. Pure; clamps a bad currentStep.
+ */
+export function publicRoadmapView(roadmap: MegaRoadmap, currentStepRaw: number): PublicRoadmap {
+  const total = roadmap.steps.length;
+  const currentStep = Math.min(Math.max(1, Math.floor(currentStepRaw || 1)), Math.max(1, total));
+  const complete = currentStep >= total;
+  const nextStep = complete ? null : currentStep + 1;
+  const nextStepObj = nextStep ? roadmap.steps[nextStep - 1] : null;
+  const steps: PublicRoadmapStep[] = roadmap.steps.map((s) => ({
+    n: s.n,
+    title: s.title,
+    goal: s.goal,
+    infraCeiling: s.infraCeiling,
+    status: s.n < currentStep ? 'done' : s.n === currentStep ? 'current' : s.n === currentStep + 1 ? 'next' : 'upcoming',
+  }));
+  return {
+    famousApp: roadmap.famousApp,
+    userMessage: roadmap.userMessage,
+    note: roadmap.note,
+    currentStep,
+    totalSteps: total,
+    complete,
+    nextStep,
+    nextFillPrompt: nextStepObj ? `${nextStepObj.title}. ${nextStepObj.goal}` : null,
+    steps,
+  };
+}
+
 /** A compact, admin-facing one-liner summary of a roadmap for the build diagnostics report. */
 export function summarizeRoadmapForDiag(roadmap: MegaRoadmap): string {
   const ceils = roadmap.steps.filter((s) => s.infraCeiling).length;

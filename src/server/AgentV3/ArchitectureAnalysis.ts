@@ -72,9 +72,18 @@ export function resolveLocalImport(fromFile: string, spec: string, files: Set<st
   } else {
     const alias = /^(?:@|~)\/(.+)$/.exec(spec);
     if (!alias) return null; // an npm package or unknown bare specifier — not a local file
-    // Try both `src/`-rooted and bare, so it works whether the workspace stores `src/components/X`
-    // or `components/X`.
-    bases.push(path.posix.normalize('src/' + alias[1]), path.posix.normalize(alias[1]));
+    const rest = alias[1];
+    // Derive the alias root from the IMPORTING file, so `@/` maps to the app's REAL source dir. A
+    // FULLSTACK app keeps its frontend under `client/src/` (or `frontend/src/`, `apps/web/src/`, …), and
+    // Vite/Next alias `@/` to THAT dir — not a top-level `src/`. Resolving only against `src/`/bare made
+    // every `@/…` import in such an app falsely "unresolved" (e.g. `@/components/ui/button` from
+    // `client/src/components/BackButton.tsx`), which blocked apps that build perfectly on the real bundler
+    // — a false compile-failure. Take the importing file's own `…/src` prefix as the first base to try.
+    const srcRoot = /^(.*?(?:^|\/)src)\//.exec(fromFile);
+    if (srcRoot) bases.push(path.posix.normalize(srcRoot[1] + '/' + rest));
+    // Then the top-level `src/`-rooted and bare forms, so it still works whether the workspace stores
+    // `src/components/X` or `components/X`.
+    bases.push(path.posix.normalize('src/' + rest), path.posix.normalize(rest));
   }
   for (const base of bases) {
     const candidates = [

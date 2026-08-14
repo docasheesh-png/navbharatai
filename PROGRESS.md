@@ -32332,3 +32332,34 @@ AbortSignal, so a wrong query ran to the end. Fixed across all conversational su
   deliberate stop is silent (no "service unavailable" bubble).
 
 AppKnowledgeBase gets a STOP & UNSEND entry (mandatory sync). tsc clean both.
+
+---
+
+## 2026-08-14 — Mega-app roadmap system, Phase 1: app-scope pre-screen (RECORD-ONLY)
+
+The admin's big ask: when a non-tech user one-shots a huge app ("PUBG jaisa", "WhatsApp
+jaisa", "Claude jaisa AI banao"), the engine should recognise the scope, tell the user
+honestly it's big, build a real working step-1 preview in 5-7 min for the hook, and surface a
+step-by-step roadmap for one-tap next steps. Small apps must keep building DIRECTLY (no
+friction). Agreed 10/10 design: deterministic pre-screen (cost-saver) → LLM sizing+roadmap
+(accuracy) with a deterministic guardrail → honest reply IN THE USER'S LANGUAGE → auto-build
+step-1 → roadmap in the 💡. Built phase by phase, each its own verified/kill-switchable PR.
+
+**Phase 1 (this PR) — detection only, ZERO behaviour change:**
+- **`appScopeAnalyzer.ts`** (new, pure/no-throw): `analyzeAppScope(prompt)` → `{decision:
+  'direct'|'analyze', size, famousApp, signals}`. Default is ALWAYS 'direct' (today's
+  behaviour, no cost, no friction). Escalates to 'analyze' ONLY on a STRONG mega-signal: a
+  famous AAA product to clone (PUBG/Instagram/WhatsApp/Uber/"an AI like Claude"…), a
+  heavy-infra requirement (real-time messaging between users, multiplayer, video calls, a
+  trained model of our own), or a genuinely huge multi-feature spec (~8+ distinct features and
+  no clearly-small hint). Length is deliberately NOT scope — a wordy prompt for a todo app
+  stays 'direct'; an AI-written PRD with 10 numbered features reads 'analyze'.
+- Wired into `agentv3.ts` as a RECORD-ONLY `APP_SCOPE` info diagnostic (right after
+  REQUIREMENT_GAPS). It steers NOTHING yet — it only writes the honest classification into the
+  build report so the small-vs-large threshold can be eyeballed against real prompts before any
+  later phase acts on it. Error cost is bounded: a mega app that slips through builds exactly as
+  today; false friction on a small app is minimised because only STRONG signals escalate.
+- 7 tests (`appScopeAnalyzer.test.ts`): ordinary→direct, famous→analyze, heavy-infra→analyze,
+  PRD→analyze (scope not length), long-small→direct, small-with-tweaks→direct, empty/junk safe.
+
+Gate: tsc clean (frontend + server); vitest full suite green.

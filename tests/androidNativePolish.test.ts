@@ -6,11 +6,21 @@ import { join } from 'path';
  * ANDROID NATIVE POLISH (admin 2026-08-13: "capacitor ko aur jyada polish karo, jisse yeh native app
  * lage, capacitor nahi").
  *
- * THESE TESTS EXIST BECAUSE `npx cap sync` REWRITES THE ANDROID PROJECT. Everything asserted here
- * lives in files Capacitor regenerates or overwrites, and the CI workflow runs `cap sync` on every
- * build. A silent revert would not fail anything, would not show up in a diff anyone reads, and would
- * only surface as "the app looks a bit off again" months later — which is precisely how the splash
- * white-flash recorded in capacitor.config.ts came back the first time.
+ * WHY THESE TESTS EXIST — corrected after actually checking, because the first version of this
+ * header gave a reason that turned out to be false.
+ *
+ * It claimed `npx cap sync` rewrites these files. It does not: running it against this project
+ * regenerates `capacitor.build.gradle` and `capacitor.settings.gradle` and leaves `res/` completely
+ * untouched. A wrong reason in a comment is worse than no comment, because the next session inherits
+ * it and reasons from it.
+ *
+ * The real reason is that NOTHING ELSE CHECKS THIS. These are XML resources: a wrong one does not
+ * fail a build, does not fail a typecheck, and does not throw at runtime — it just renders slightly
+ * wrong, on some devices, in some themes. The night-mode shadowing case below is the proof: two
+ * folders, both individually correct, and the fix silently inert in dark mode with nothing anywhere
+ * reporting a problem. That class of defect is invisible until someone looks at a phone and says
+ * "the app looks a bit off again" — which is precisely how the splash white-flash recorded in
+ * capacitor.config.ts came back the first time.
  *
  * WHAT WAS ALREADY DONE, and is deliberately NOT re-litigated here: keyboard native resize, splash
  * background, status-bar theming, safe areas, haptics, the back-button handler, overscroll, tap
@@ -125,6 +135,50 @@ describe('the launch frame is dark in every theme', () => {
     // Only the named resource may carry the literal on the native side.
     expect(markup('values-v31/styles.xml')).not.toContain(SURFACE);
     expect(markup('values-night/styles.xml')).not.toContain(SURFACE);
+  });
+});
+
+describe('the checked-in android project lists the plugins the app actually uses', () => {
+  /**
+   * FOUND BY RUNNING `npx cap sync android` TO TEST THIS FILE'S OWN CLAIM, which is the only reason
+   * it was found at all.
+   *
+   * The committed `capacitor.build.gradle` was missing SIX plugins — app, browser, haptics, keyboard,
+   * splash-screen, status-bar — which is to say every one of the native-polish plugins this whole
+   * effort is about. It was not a shipping bug: the release workflow runs `cap sync` before
+   * `bundleRelease`, so the real .aab always had them. But the checked-in project described an app
+   * that does not exist, and anyone reading it to answer "is the keyboard plugin wired in?" would
+   * have got the wrong answer from the file that looks authoritative.
+   *
+   * Regenerating it makes the repo agree with what actually builds. This test keeps them in
+   * agreement, driven off package.json so a NEWLY added plugin is covered without editing a list
+   * here — a hardcoded list would go stale in exactly the way this is fixing.
+   */
+  const gradle = readFileSync(join(process.cwd(), 'android/app/capacitor.build.gradle'), 'utf8');
+  const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>;
+  };
+
+  /** `@capacitor/status-bar` → `capacitor-status-bar`, the gradle project name cap sync emits. */
+  const gradleProject = (dep: string) => dep.replace(/^@/, '').replace(/\//g, '-');
+
+  it('every installed Capacitor plugin is declared', () => {
+    const plugins = Object.keys(pkg.dependencies ?? {}).filter(
+      (d) =>
+        /^@(capacitor|capacitor-community|capacitor-firebase|capawesome)\//.test(d) &&
+        // The core runtime and the PLATFORM packages are not plugins and have no gradle project.
+        // `@capacitor/ios` belongs here for the same reason `@capacitor/android` does, and leaving
+        // it out is how the first run of this test failed — on itself, not on the project.
+        !['@capacitor/core', '@capacitor/android', '@capacitor/ios', '@capacitor/cli'].includes(d),
+    );
+    // A guard on the guard: if the filter ever matches nothing, this test would pass vacuously and
+    // protect nothing at all.
+    expect(plugins.length, 'no plugins detected — the filter is wrong, not the project').toBeGreaterThan(5);
+    for (const p of plugins) {
+      expect(gradle, `${p} is installed but missing from capacitor.build.gradle`).toContain(
+        `implementation project(':${gradleProject(p)}')`,
+      );
+    }
   });
 });
 

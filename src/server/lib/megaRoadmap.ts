@@ -35,6 +35,10 @@ export interface RoadmapStep {
 export interface MegaRoadmap {
   /** The famous product this clones, if any (from the scope pre-screen). */
   famousApp: string | null;
+  /** A short, warm, HONEST message shown to the user in THEIR OWN language: this is a big app, I'll build
+   *  the working core first (fast preview), and the rest arrives as guided next steps. Model-authored so
+   *  it is never a hardcoded-English line shown to a Hindi user. Falls back to achievableSummary if blank. */
+  userMessage: string;
   /** One honest line: what we CAN genuinely build (the achievable core), in the user's language. */
   achievableSummary: string;
   /** The validated checkpoints, in order. Always ≥ MIN_STEPS after the guardrail, or the roadmap is null. */
@@ -77,6 +81,7 @@ export function megaRoadmapSystemPrompt(): string {
     '',
     'Return ONLY strict JSON, no prose, in exactly this shape:',
     '{',
+    '  "userMessage": "2-3 warm, honest sentences to the user IN THEIR OWN LANGUAGE: this is a big app, so I will build the working core first (a real preview in a few minutes) and the rest will come as simple next steps you can tap one at a time",',
     '  "achievableSummary": "one honest sentence: what we can really build",',
     '  "note": "one honest sentence about anything beyond a normal build, or null",',
     '  "steps": [',
@@ -103,7 +108,7 @@ export function megaRoadmapUserPrompt(prompt: string, famousApp: string | null, 
 // ── PARSING ─────────────────────────────────────────────────────────────────────────────────────────
 
 interface RawStep { title?: unknown; goal?: unknown; buildPrompt?: unknown; needsInfra?: unknown }
-interface RawRoadmap { achievableSummary?: unknown; note?: unknown; steps?: unknown }
+interface RawRoadmap { userMessage?: unknown; achievableSummary?: unknown; note?: unknown; steps?: unknown }
 
 /** Pull the first balanced JSON object out of a model reply (tolerates ```json fences / stray prose). */
 function extractJsonObject(text: string): string | null {
@@ -138,6 +143,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
  * Parsing is deliberately permissive; the GUARDRAIL is where correctness is enforced.
  */
 export function parseMegaRoadmap(text: string, famousApp: string | null): {
+  userMessage: string;
   achievableSummary: string;
   note: string | null;
   steps: Array<{ title: string; goal: string; buildPrompt: string; needsInfra: string | null }>;
@@ -158,6 +164,7 @@ export function parseMegaRoadmap(text: string, famousApp: string | null): {
     needsInfra: str(s?.needsInfra) || null,
   }));
   return {
+    userMessage: str(raw.userMessage),
     achievableSummary: str(raw.achievableSummary),
     note: str(raw.note) || null,
     steps,
@@ -186,7 +193,7 @@ const normTitle = (t: string): string => t.toLowerCase().replace(/[^a-z0-9]+/g, 
  * Pure; never throws.
  */
 export function roadmapGuardrail(
-  parsed: { achievableSummary: string; note: string | null; steps: Array<{ title: string; goal: string; buildPrompt: string; needsInfra: string | null }> } | null,
+  parsed: { userMessage?: string; achievableSummary: string; note: string | null; steps: Array<{ title: string; goal: string; buildPrompt: string; needsInfra: string | null }> } | null,
   famousApp: string | null,
 ): { roadmap: MegaRoadmap | null; rejected: string[] } {
   const rejected: string[] = [];
@@ -224,7 +231,11 @@ export function roadmapGuardrail(
     note = 'Some parts (like real-time or server-heavy features) need extra infrastructure and will be built as honest, separate steps.';
   }
 
-  return { roadmap: { famousApp, achievableSummary: summary, steps: kept, note }, rejected };
+  // The user-facing message falls back to the (also user's-language) achievableSummary if the model
+  // omitted it — never a hardcoded-English default that a non-English user could be shown.
+  const userMessage = (parsed.userMessage && parsed.userMessage.trim()) || summary;
+
+  return { roadmap: { famousApp, userMessage, achievableSummary: summary, steps: kept, note }, rejected };
 }
 
 /** A compact, admin-facing one-liner summary of a roadmap for the build diagnostics report. */

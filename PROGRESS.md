@@ -32472,3 +32472,22 @@ honest LLM roadmap + deterministic guardrail → honest reply in the user's lang
 preview → guided one-tap next-step roadmap in the 💡. Ordinary apps are untouched (build directly); big
 apps get an honest, engaging, step-by-step journey. Turn on with `AGENTV3_MEGA_ROADMAP=on` (observe roadmaps
 in reports) then `AGENTV3_MEGA_ROADMAP_ACTIVE=on` (go live).
+
+---
+
+## 2026-08-14 — Mega-app roadmap: default-ON, ONE kill switch (admin: "flag on/off ka chakkar kyu")
+
+The admin asked why the feature shipped behind flags at all, and rightly flagged that Cloud Run already
+carries 60+ on/off flags — real operational debt (flags get added, never retired). Honest response:
+- A gate is only justified as the "never break the app" insurance for a NEW behaviour that touches real
+  users. TWO flags (observe + active) here was over-engineering.
+- Collapsed to ONE flag, `AGENTV3_MEGA_ROADMAP`, now **default ON** (`envFlag('AGENTV3_MEGA_ROADMAP', true)`).
+  Removed `AGENTV3_MEGA_ROADMAP_ACTIVE` entirely. The admin sets NOTHING in Cloud Run — it just works.
+- The one remaining flag is a pure KILL SWITCH: `AGENTV3_MEGA_ROADMAP=off` reverts to today's behaviour
+  without a deploy, retained only for the one absolute rule. It is not an enable dial.
+- Rationale it is safe default-ON: it fires ONLY for prompts the deterministic pre-screen flags as
+  genuinely large (PUBG/WhatsApp/Instagram-class), where today's one-shot already produces a weak whole-app
+  attempt — so the focused step-1 + honesty is almost always better, not a risk to stage. Ordinary apps are
+  untouched (build directly). The roadmap planner call runs only on large-app builds.
+Server tsc clean; frontend tsc clean; full vitest suite green. (Follow-up worth doing separately: an audit
+that RETIRES proven-stable flags to shrink the Cloud Run flag surface — the real fix for the 60+ problem.)

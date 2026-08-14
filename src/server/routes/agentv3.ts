@@ -3096,7 +3096,7 @@ export function registerAgentV3Routes(app: Express): void {
       // MEGA-APP ROADMAP (Phase 4): if this workspace is on a guided step-by-step journey, surface it in
       // the 💡 too. User-facing, so every string is provider-redacted (White-Label law) and the internal
       // per-step buildPrompt is withheld by publicRoadmapView. Best-effort — a roadmap read failure just
-      // omits the roadmap. Only meaningful once AGENTV3_MEGA_ROADMAP_ACTIVE built one; otherwise null.
+      // omits the roadmap. Non-null only once the mega-app roadmap has built one for this workspace.
       let roadmap: ReturnType<typeof publicRoadmapView> | null = null;
       try {
         const stored = await loadMegaRoadmap(workspaceId);
@@ -7636,21 +7636,24 @@ export function registerAgentV3Routes(app: Express): void {
         onTurnComplete: captureTurnUsage,
       });
 
-      // MEGA-APP ROADMAP (admin 2026-08-14, Phases 2-3 of the mega-app system) — two-stage, flag-gated.
-      // When the deterministic pre-screen (Phase 1) reads a fresh build as a LARGE app AND the operator
-      // has turned this on (`AGENTV3_MEGA_ROADMAP=on`, default OFF), ask the planner for an HONEST,
-      // step-by-step roadmap and run it through the deterministic guardrail (LLM proposes → rules verify,
-      // so a fake/vague/hidden-ceiling step can never survive).
-      //   • `AGENTV3_MEGA_ROADMAP=on` alone  → RECORD-ONLY (Phase 2): the roadmap is only written into the
-      //     build report for the admin to eyeball; the build is UNCHANGED.
-      //   • + `AGENTV3_MEGA_ROADMAP_ACTIVE=on` → ACTIVE (Phase 3): the roadmap is persisted, an honest
-      //     message is shown to the user IN THEIR OWN LANGUAGE, and the build target is swapped to step 1
-      //     (a small-but-real core → fast preview) further below, just before the language prepend.
-      // Staging the two flags lets the admin observe real roadmaps before any behaviour changes. Fully
-      // wrapped: a flag off, a small app, an edit, or ANY failure ⇒ the build runs exactly as today.
-      // Billed like every other planner call (blueprintUsage + buildUsage) when it does fire.
+      // MEGA-APP ROADMAP (admin 2026-08-14) — ON by default; ONE emergency kill switch, no staging dials.
+      // When the deterministic pre-screen (Phase 1) reads a fresh build as a LARGE app, ask the planner for
+      // an HONEST, step-by-step roadmap and run it through the deterministic guardrail (LLM proposes → rules
+      // verify, so a fake/vague/hidden-ceiling step can never survive). If a real roadmap survives, it
+      // STEERS the build: the roadmap is persisted, an honest message is shown to the user IN THEIR OWN
+      // LANGUAGE, and the build target is swapped to step 1 (a small-but-real core → fast preview) further
+      // below, just before the language prepend.
+      //
+      // WHY DEFAULT-ON WITH JUST A KILL SWITCH (admin 2026-08-14, "flag on/off ka chakkar kyu"): this only
+      // fires for prompts the pre-screen flags as genuinely large (PUBG/WhatsApp/Instagram-class), where
+      // today's one-shot already produces a weak whole-app attempt — so the focused step-1 + honesty is
+      // almost always BETTER, not a risk to stage behind observe-first dials. The single kill switch
+      // `AGENTV3_MEGA_ROADMAP=off` is retained ONLY as the "never break the app" insurance (revert without a
+      // deploy if a real report ever shows trouble); it is not an enable switch the admin must set.
+      // Fully wrapped: a small app, an edit, or ANY failure ⇒ the build runs exactly as today. Billed like
+      // every other planner call (blueprintUsage + buildUsage) when it fires, and only on large-app builds.
       let megaRoadmapActive: MegaRoadmap | null = null;
-      if (envFlag('AGENTV3_MEGA_ROADMAP') && intent === 'new_build' && !isEditMode) {
+      if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode) {
         try {
           const scope = analyzeAppScope(prompt);
           if (scope.decision === 'analyze') {
@@ -7675,14 +7678,11 @@ export function registerAgentV3Routes(app: Express): void {
 
             const { roadmap, rejected } = roadmapGuardrail(parseMegaRoadmap(rmT.text, scope.famousApp), scope.famousApp);
             if (roadmap) {
-              const active = envFlag('AGENTV3_MEGA_ROADMAP_ACTIVE');
               buildDiag.record({
                 phase: 'plan',
                 severity: 'info',
-                code: active ? 'MEGA_ROADMAP_ACTIVE' : 'MEGA_ROADMAP',
-                message: active
-                  ? `Mega-app roadmap ACTIVE — building step 1 for a fast preview: ${summarizeRoadmapForDiag(roadmap)}`
-                  : `Mega-app roadmap (record only — not steering the build): ${summarizeRoadmapForDiag(roadmap)}`,
+                code: 'MEGA_ROADMAP_ACTIVE',
+                message: `Mega-app roadmap ACTIVE — building step 1 for a fast preview: ${summarizeRoadmapForDiag(roadmap)}`,
                 detail: [
                   `Achievable now: ${roadmap.achievableSummary}`,
                   roadmap.note ? `Honest scope note: ${roadmap.note}` : '',
@@ -7691,19 +7691,17 @@ export function registerAgentV3Routes(app: Express): void {
                 ].filter(Boolean).join('\n'),
                 autoResolved: true,
               });
-              if (active) {
-                // Persist the roadmap so the user's next visit / the 💡 guided-next-step UI (Phase 4) can
-                // resume it. Best-effort — a save failure must never block the build.
-                try {
-                  const record: StoredMegaRoadmap = { roadmap, currentStep: 1, sourcePrompt: prompt, createdAt: Date.now(), updatedAt: Date.now() };
-                  await saveMegaRoadmap(workspaceId, record);
-                } catch { /* persistence is best-effort */ }
-                // Honest, on-brand, user-language message (model-authored userMessage, provider-redacted).
-                try {
-                  events.emit({ type: 'narration', agent: 'architect', text: redactProvidersText(roadmap.userMessage), ts: Date.now() });
-                } catch { /* narration best-effort */ }
-                megaRoadmapActive = roadmap; // the build target is swapped to step 1 just before the lang prepend
-              }
+              // Persist the roadmap so the user's next visit / the 💡 guided-next-step UI can resume it.
+              // Best-effort — a save failure must never block the build.
+              try {
+                const record: StoredMegaRoadmap = { roadmap, currentStep: 1, sourcePrompt: prompt, createdAt: Date.now(), updatedAt: Date.now() };
+                await saveMegaRoadmap(workspaceId, record);
+              } catch { /* persistence is best-effort */ }
+              // Honest, on-brand, user-language message (model-authored userMessage, provider-redacted).
+              try {
+                events.emit({ type: 'narration', agent: 'architect', text: redactProvidersText(roadmap.userMessage), ts: Date.now() });
+              } catch { /* narration best-effort */ }
+              megaRoadmapActive = roadmap; // the build target is swapped to step 1 just before the lang prepend
             } else {
               buildDiag.record({
                 phase: 'plan',

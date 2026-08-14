@@ -1732,7 +1732,7 @@ export default function App() {
   // P3.1 — free (NBI) chat engine extracted into useChatEngine (behavior-preserving). Placed here so
   // every dep (state, setters, updatePreview, handleGHConfirmPush, learnFromMessage, payment hook) is
   // defined above, and the retry/Enter consumers below still resolve handleSend/handleSendForTab.
-  const { handleSendForTab, handleSend } = useChatEngine({
+  const { handleSendForTab, handleSend, stop: stopChat, unsend: unsendChat } = useChatEngine({
     input, messages, isLoading, sessions, currentSessionId, activeAgent, mode, activeView, activeIntent,
     errorContext, preferredLanguage, user, keys, invalidKeys, selectedModel, apnapanProfile,
     hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files, FREE_DAILY_MESSAGES, isFreeLimitReached,
@@ -2823,6 +2823,8 @@ export default function App() {
               input={input}
               setInput={setInput}
               onSend={(files) => handleSendForTab('nbi_chat', undefined, files)}
+              onStop={stopChat}
+              onUnsend={unsendChat}
               isLoading={isLoading}
               activeIntent={activeIntent}
               togglePin={togglePin}

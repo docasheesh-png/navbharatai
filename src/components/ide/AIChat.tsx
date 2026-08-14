@@ -311,6 +311,8 @@ interface AIChatProps {
    */
   onMessagesChange?: (next: Message[]) => void;
   onStop?: () => void;
+  /** Take back the last message: stops any in-flight reply and removes the last exchange (admin 2026-08-13). */
+  onUnsend?: () => void;
   // Guider (Hybrid) confirmation card: a proposed design awaiting Approve / Edit / Answer.
   guiderPlan?: { language?: string; designProposal?: string; clarifyingQuestions?: string[] } | null;
   guiderReplanning?: boolean;
@@ -354,6 +356,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   onSendSuggestion,
   onMessagesChange,
   onStop,
+  onUnsend,
   guiderPlan,
   guiderReplanning,
   onGuiderApprove,
@@ -1741,12 +1744,23 @@ export const AIChat: React.FC<AIChatProps> = ({
                           content: String(m.text || ''),
                         }))}
                     />
-                    {isLoading && onStop ? (
+                    {/* UNSEND — take back the last message (stops any reply + removes the last exchange).
+                        Shown whenever there is something to take back (admin 2026-08-13). */}
+                    {onUnsend && messages.some((m) => m.sender === 'user') && (
                       <button
-                        onClick={() => {
-                          if (window.confirm('Stop the current AI generation?')) onStop?.();
-                        }}
-                        title="Stop generation"
+                        onClick={() => onUnsend()}
+                        title="Unsend — take back the last message"
+                        className="p-3 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:border-white/25 transition-all flex items-center justify-center active:scale-95"
+                      >
+                        <span className="w-3.5 h-3.5 flex items-center justify-center text-[13px] leading-none">↩</span>
+                      </button>
+                    )}
+                    {isLoading && onStop ? (
+                      // ONE-CLICK STOP (admin 2026-08-13: "galat search rukti nahi") — a running reply must
+                      // end the instant this is tapped, not after a confirm dialog the user has to dismiss.
+                      <button
+                        onClick={() => onStop?.()}
+                        title="Stop"
                         className="p-3 bg-red-600 text-white rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95"
                       >
                         <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[11px]">■</span>

@@ -201,8 +201,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   }, [powerLevel]);
   // Derived for the existing boolean call sites (start/telemetry) — any Opus power level.
   const onlyOpus = powerLevel === 'mini' || powerLevel === 'medium' || powerLevel === 'max';
-  const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
-  const [thinking, setThinking] = useState(false); // adaptive thinking, off by default
+  // Planning + Thinking toggles removed from the Build-options popover (admin 2026-08-14: "no need now").
+  // Kept as constants so the build contract is unchanged: plan-first stays OFF (Plan is still available as
+  // its own chat MODE in the Build/Plan/Advise selector), and thinking stays adaptive/auto — the engine
+  // already switches on deeper reasoning for complex builds server-side, so the manual override is gone.
+  const planFirst = false;
+  const thinking = false;
   const [tab, setTab] = useState<SurfaceTab>('preview');
   // Workspace is collapsed by default so the chat takes the full width; opening a
   // header tab pill surfaces it. On mobile an open workspace takes over the area.
@@ -2093,7 +2097,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setShowWorkspace(false);
     setTimeout(() => composerRef.current?.focus(), 0);
   };
-  const anyToggleOn = planFirst || thinking || onlyOpus;
+  const anyToggleOn = onlyOpus; // Planning/Thinking toggles removed; the dot now reflects the Opus tier only
 
 
   // Download the LAST build's diagnostics report (every issue v5.0 hit — provider fallbacks,
@@ -3771,8 +3775,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     {/* outside-click catcher */}
                     <div className="fixed inset-0 z-10" onClick={() => setSettingsOpen(false)} />
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
-                      <ToggleRow label="Planning" hint="Plan-first: the AI writes a step-by-step plan and waits for your approval before building" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
-                      <ToggleRow label="Thinking" hint="Deeper reasoning on build/edit/plan turns — a live reasoning summary streams in the chat (plain chat replies stay instant)" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
+                      {/* Planning + Thinking toggles removed (admin 2026-08-14: "no need now"). Plan is
+                          still available as its own chat mode; thinking is automatic for complex builds. */}
                       {/* KEEP SCREEN ON (admin 2026-08-14): stop the phone auto-locking mid-build and cutting
                           the connection. Toggleable ANYTIME (not disabled while running) so the user can turn
                           it on the moment they realise a long build is going. */}

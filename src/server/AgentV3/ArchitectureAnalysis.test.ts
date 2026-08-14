@@ -27,6 +27,28 @@ describe('resolveLocalImport', () => {
     expect(resolveLocalImport('src/App.tsx', '@/Missing', files)).toBeNull(); // alias to a missing file → still null
   });
 
+  it('resolves `@/` to a FULLSTACK app\'s client/src root, not just a top-level src (APK-preflight autopsy 2026-08-14)', () => {
+    // A fullstack app keeps its frontend under client/src/, and Vite aliases `@/` -> client/src/. The old
+    // resolver only tried `src/` + bare, so EVERY `@/…` import here was falsely "unresolved" and the APK
+    // compile pre-flight blocked an app that builds fine (real report: @/components/ui/button + 19 more).
+    const fs = new Set([
+      'client/src/components/BackButton.tsx',
+      'client/src/components/ui/button.tsx',
+      'client/src/lib/utils.ts',
+      'client/src/App.tsx',
+    ]);
+    expect(resolveLocalImport('client/src/components/BackButton.tsx', '@/components/ui/button', fs)).toBe('client/src/components/ui/button.tsx');
+    expect(resolveLocalImport('client/src/App.tsx', '@/lib/utils', fs)).toBe('client/src/lib/utils.ts');
+    // A genuinely missing alias target is still unresolved (no over-reach).
+    expect(resolveLocalImport('client/src/App.tsx', '@/components/ui/missing', fs)).toBeNull();
+  });
+
+  it('resolves `@/` for other nested source roots (frontend/src, apps/web/src)', () => {
+    const fe = new Set(['frontend/src/x.ts', 'apps/web/src/y.ts']);
+    expect(resolveLocalImport('frontend/src/pages/Home.tsx', '@/x', fe)).toBe('frontend/src/x.ts');
+    expect(resolveLocalImport('apps/web/src/pages/Home.tsx', '@/y', fe)).toBe('apps/web/src/y.ts');
+  });
+
   it('resolves a NodeNext/ESM `.js`-extension import to its `.ts` source (SvelteKit — CollabDesk autopsy)', () => {
     // `import { Card } from './types.js'` in a `"type":"module"` TS project resolves to `./types.ts`.
     const ts = new Set(['src/lib/types.ts', 'src/lib/permissions.ts', 'src/lib/cards.ts', 'src/lib/Comp.tsx']);

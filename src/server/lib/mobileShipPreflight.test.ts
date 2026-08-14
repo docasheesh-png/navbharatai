@@ -64,6 +64,21 @@ describe('preflightVerify — the three runner deaths, found in seconds instead 
     expect(r.problems).toEqual([]);
   });
 
+  it('does NOT falsely flag a FULLSTACK app\'s @/ imports rooted at client/src (APK-preflight autopsy 2026-08-14)', async () => {
+    // Real report: `client/src/components/BackButton.tsx imports "@/components/ui/button", but no such
+    // file exists` (+19 more) — even though the file existed under client/src. The resolver mapped `@/`
+    // only to a top-level `src/`, so every alias import in a fullstack app was a false "unresolved" and
+    // the APK build was blocked on an app that compiles fine. With client/src understood, it is clean.
+    const r = await preflightVerify({
+      'package.json': JSON.stringify({ scripts: { build: 'vite build' }, dependencies: { react: '^19.0.0', 'react-dom': '^19.0.0' }, devDependencies: { vite: '^5.0.0' } }),
+      'index.html': '<div id="root"></div>',
+      'client/src/main.tsx': "import { App } from './App';\nexport const boot = () => App;",
+      'client/src/App.tsx': "import { Button } from '@/components/ui/button';\nexport const App = () => Button;",
+      'client/src/components/ui/button.tsx': "export const Button = () => 'b';",
+    });
+    expect(r.problems.filter((p) => p.kind === 'unresolved-import')).toEqual([]);
+  });
+
   it('a type-only import of a missing file is NOT a failure — the bundler erases it', async () => {
     const r = await preflightVerify({
       ...CLEAN_APP,

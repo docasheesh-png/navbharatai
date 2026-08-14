@@ -32619,3 +32619,34 @@ that cannot be imported).
 Admin set BOTH `on` in Cloud Run the same day. Env vars rather than code defaults on purpose: a path that
 has never run in production deserves an instant revert with no deploy. Once real builds prove them, the
 defaults move into code and the two keys retire. tsc clean (frontend + server); 15,395/15,395 vitest.
+## 2026-08-14 — Autopsy: APK build falsely blocked a working FULLSTACK app ("@/components/ui/button … no such file")
+
+Real build report (admin): the APK builder's compile pre-flight refused an app with *"client/src/components/
+BackButton.tsx imports @/components/ui/button, but no such file exists in the app (and 19 more problems)"*,
+and its auto-repair "could not" fix it.
+
+**Root cause (found by reading the resolver, not guessing):** `resolveLocalImport` mapped the `@/` (and
+`~/`) alias ONLY to a top-level `src/` (and bare). This app is FULLSTACK (client/ + a Node/Express server),
+so its frontend lives under `client/src/` and Vite aliases `@/` → `client/src/`. Our resolver tried
+`src/components/ui/button` and `components/ui/button` — never `client/src/…` — so EVERY `@/…` import was a
+false "unresolved", 20 of them, and the pre-flight blocked an app that compiles fine on the real bundler.
+The AI repair then "could not fix" files that were never actually broken. A false compile-failure.
+
+**Fix (`ArchitectureAnalysis.ts` `resolveLocalImport`, the ONE shared resolver every structural check +
+the APK pre-flight use):** derive the alias root from the IMPORTING file's own `…/src` prefix, so `@/` maps
+to `client/src/` (also `frontend/src/`, `apps/web/src/`, …), then fall back to the old `src/`/bare forms.
+Deterministic, no new deps. Fixes the whole class everywhere the resolver is used.
+
+Sibling hunt (rule 3): `ProjectImport.ts` has a similar narrow `@/`→`src/` mapping but fails SAFE — it
+gates on `hasSrc` (a top-level `src/`), so for a client/src repo it simply skips `@/` (no false "missing"
+report). Not the bug; left as-is.
+
+Honest boundary (rule 6): this un-blocks apps whose `@/` targets EXIST under client/src (the likely case).
+If a specific app's shadcn `@/components/ui/*` files were genuinely never generated, that is a separate
+class (the builder writing shadcn imports without scaffolding the primitives) — the pre-flight now reports
+it truthfully and the "open in Pro chat, fix this error" path handles it; a deterministic shadcn-primitive
+scaffolder is a candidate follow-up if real reports show it recurring.
+
+Tests: `ArchitectureAnalysis.test.ts` +2 (client/src + frontend/src·apps/web/src alias roots);
+`mobileShipPreflight.test.ts` +1 (fullstack app's @/ imports are not falsely flagged). tsc clean (frontend
++ server); full vitest suite green (15,383).

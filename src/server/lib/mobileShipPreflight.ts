@@ -28,6 +28,7 @@ import { findSyntaxErrors } from '../AgentV3/SyntaxCheck';
 import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { resolveLocalImport } from '../AgentV3/ArchitectureAnalysis';
+import { scaffoldMissingUiPrimitives } from './uiPrimitiveScaffold';
 import { detectProjectKind } from './mobileProjectAssembler';
 import {
   AI_REPAIR_MAX_FILES, runAiRepair,
@@ -39,6 +40,9 @@ export interface PreflightProblem {
   path: string;
   message: string;
   line?: number;
+  /** For 'unresolved-import': the exact import specifier (e.g. "@/components/ui/button") — lets the
+   *  deterministic UI-primitive scaffolder create the missing file without re-parsing the message. */
+  spec?: string;
 }
 
 export interface PreflightReport {
@@ -106,6 +110,7 @@ export async function preflightVerify(files: Record<string, string>): Promise<Pr
             kind: 'unresolved-import',
             path,
             message: `imports "${spec}", but no such file exists in the app`,
+            spec,
           });
           if (problems.length >= 20) return { ok: false, problems };
         }
@@ -177,6 +182,26 @@ export async function preflightAndHeal(
 
   let report = await preflightVerify(files);
   if (report.ok) return { ok: true, files, changed, problems: [], notes, aiRounds };
+
+  // Tier 0a — deterministic: CREATE the shadcn/ui primitives the app imports but never wrote
+  // (`@/components/ui/button` etc. + `@/lib/utils`). The #1 "cannot compile" class for generated apps.
+  // Real, dependency-light implementations; the missing-package tier below then adds their deps
+  // (clsx / tailwind-merge / class-variance-authority — all allowlisted). Re-verified like every tier.
+  {
+    const unresolved = report.problems
+      .filter((p) => p.kind === 'unresolved-import' && typeof p.spec === 'string')
+      .map((p) => ({ path: p.path, spec: p.spec as string }));
+    if (unresolved.length > 0) {
+      const scaf = scaffoldMissingUiPrimitives(files, unresolved);
+      if (Object.keys(scaf.files).length > 0) {
+        files = { ...files, ...scaf.files };
+        Object.assign(changed, scaf.files);
+        notes.push(`Created ${scaf.created.length} missing UI component${scaf.created.length === 1 ? '' : 's'} your app referenced (${scaf.created.join(', ')}).`);
+        report = await preflightVerify(files);
+        if (report.ok) return { ok: true, files, changed, problems: [], notes, aiRounds };
+      }
+    }
+  }
 
   // Tier 0 — deterministic: add the allowlisted missing packages with their pinned, known-good ranges.
   if (report.problems.some((p) => p.kind === 'missing-package')) {

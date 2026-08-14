@@ -165,10 +165,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     workspaceId: string; savedAt: number; ownerUid: string | null;
     id: string; startedAt?: number; endedAt?: number; ok?: boolean;
     summary?: string; rootCause?: string; prompt?: string;
+    /** Resolved server-side from the SAME wallet records the Users tab reads (adminUserLookup.ts). */
+    owner?: { label: string; email: string; name: string; shortUid: string; anonymous: boolean };
   }
   const [allBuilds, setAllBuilds] = useState<AllBuildRow[]>([]);
   const [allBuildsLoading, setAllBuildsLoading] = useState(false);
   const [allBuildsSearch, setAllBuildsSearch] = useState('');
+  // Four filters, deliberately (see server/lib/buildListFilter.ts for why not more).
+  const [allBuildsStatus, setAllBuildsStatus] = useState<'all' | 'failed' | 'succeeded'>('all');
+  const [allBuildsDate, setAllBuildsDate] = useState<'all' | 'today' | '7d' | '30d'>('all');
+  const [allBuildsUid, setAllBuildsUid] = useState('');
+  const [allBuildsCounts, setAllBuildsCounts] = useState<{ all: number; failed: number; succeeded: number; unknown: number } | null>(null);
+  const [allBuildsUsers, setAllBuildsUsers] = useState<Array<{ uid: string; count: number; label: string }>>([]);
+  const [allBuildsFetched, setAllBuildsFetched] = useState<{ fetched: number; limit: number } | null>(null);
   const [expandedWorkspace, setExpandedWorkspace] = useState<string | null>(null);
   const [expandedHistory, setExpandedHistory] = useState<Array<{ id: string; startedAt: number; endedAt?: number; ok?: boolean; summary?: string; prompt?: string }>>([]);
   const [expandedLoading, setExpandedLoading] = useState(false);
@@ -383,14 +392,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const fetchAllBuilds = useCallback(async () => {
     setAllBuildsLoading(true);
     try {
-      const qs = allBuildsSearch.trim() ? `?q=${encodeURIComponent(allBuildsSearch.trim())}` : '';
+      const params = new URLSearchParams();
+      if (allBuildsSearch.trim()) params.set('q', allBuildsSearch.trim());
+      if (allBuildsStatus !== 'all') params.set('status', allBuildsStatus);
+      if (allBuildsDate !== 'all') params.set('date', allBuildsDate);
+      if (allBuildsUid) params.set('uid', allBuildsUid);
+      const qs = params.toString() ? `?${params}` : '';
       const r = await fetch(`/api/admin/all-builds${qs}`, { headers });
       const d = await r.json();
       setAllBuilds(Array.isArray(d?.builds) ? d.builds : []);
-    } catch (e) { console.error(e); setAllBuilds([]); }
+      setAllBuildsCounts(d?.counts ?? null);
+      setAllBuildsUsers(Array.isArray(d?.users) ? d.users : []);
+      setAllBuildsFetched(typeof d?.fetched === 'number' ? { fetched: d.fetched, limit: d.limit ?? 0 } : null);
+    } catch (e) { console.error(e); setAllBuilds([]); setAllBuildsCounts(null); setAllBuildsUsers([]); }
     finally { setAllBuildsLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminToken, allBuildsSearch]);
+  }, [adminToken, allBuildsSearch, allBuildsStatus, allBuildsDate, allBuildsUid]);
 
   const expandWorkspaceBuilds = useCallback(async (workspaceId: string) => {
     if (expandedWorkspace === workspaceId) { setExpandedWorkspace(null); setExpandedHistory([]); return; }
@@ -1656,7 +1673,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     value={allBuildsSearch}
                     onChange={(e) => setAllBuildsSearch(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') void fetchAllBuilds(); }}
-                    placeholder="Search: user id, workspace, prompt words…"
+                    placeholder="Search: name, email, workspace, prompt words…"
                     className="flex-1 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white focus:outline-none focus:border-indigo-500"
                   />
                   <button
@@ -1666,6 +1683,77 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <RefreshCw className={`w-3.5 h-3.5 ${allBuildsLoading ? 'animate-spin' : ''}`} /> Load
                   </button>
                 </div>
+                {/* FOUR filters, and no more. Status answers "what needs work", date answers "is it
+                    still happening", user answers "is it one account", and search covers the rest.
+                    Tier/model/duration filters were considered and left out: an admin who needs those
+                    is already opening the full report, and a ten-control bar costs more attention than
+                    it saves on a screen opened to move fast. */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {([
+                    ['all', 'All', allBuildsCounts?.all],
+                    ['failed', 'Failed', allBuildsCounts?.failed],
+                    ['succeeded', 'Worked', allBuildsCounts?.succeeded],
+                  ] as const).map(([value, label, count]) => (
+                    <button
+                      key={value}
+                      onClick={() => { setAllBuildsStatus(value); }}
+                      className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border ${
+                        allBuildsStatus === value
+                          ? value === 'failed' ? 'border-rose-500/60 bg-rose-500/15 text-rose-200'
+                            : value === 'succeeded' ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200'
+                            : 'border-indigo-500/60 bg-indigo-500/15 text-indigo-200'
+                          : 'border-white/10 text-[#8b949e] hover:text-white hover:border-white/20'
+                      }`}
+                    >
+                      {label}{typeof count === 'number' ? ` ${count}` : ''}
+                    </button>
+                  ))}
+
+                  <span className="w-px h-5 bg-white/10 mx-1" aria-hidden="true" />
+
+                  <select
+                    value={allBuildsDate}
+                    onChange={(e) => setAllBuildsDate(e.target.value as typeof allBuildsDate)}
+                    className="bg-[#0d1117] border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-indigo-500"
+                    aria-label="Filter by date"
+                  >
+                    <option value="all">Any time</option>
+                    <option value="today">Last 24 hours</option>
+                    <option value="7d">Last 7 days</option>
+                    <option value="30d">Last 30 days</option>
+                  </select>
+
+                  <select
+                    value={allBuildsUid}
+                    onChange={(e) => setAllBuildsUid(e.target.value)}
+                    className="bg-[#0d1117] border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white max-w-[16rem] focus:outline-none focus:border-indigo-500"
+                    aria-label="Filter by user"
+                  >
+                    <option value="">Every user</option>
+                    {allBuildsUsers.map((u) => (
+                      <option key={u.uid} value={u.uid}>{u.label} ({u.count})</option>
+                    ))}
+                  </select>
+
+                  {(allBuildsStatus !== 'all' || allBuildsDate !== 'all' || allBuildsUid || allBuildsSearch) && (
+                    <button
+                      onClick={() => { setAllBuildsStatus('all'); setAllBuildsDate('all'); setAllBuildsUid(''); setAllBuildsSearch(''); }}
+                      className="text-[10px] font-bold px-2 py-1.5 rounded-lg text-[#8b949e] hover:text-white underline"
+                    >
+                      Clear
+                    </button>
+                  )}
+
+                  <span className="text-[10px] text-[#8b949e] ml-auto">
+                    Showing {allBuilds.length}
+                    {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
+                      /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
+                         list has not looked at, so "0 failed" must not read as "none exist". */
+                      ? ` of the ${allBuildsFetched.fetched} most recent — narrow the date to see further back`
+                      : allBuildsFetched ? ` of ${allBuildsFetched.fetched} loaded` : ''}
+                  </span>
+                </div>
+
                 {allBuilds.length === 0 && !allBuildsLoading && (
                   <p className="text-[11px] text-[#8b949e]">Press Load to list the most recently active builds across all users.</p>
                 )}
@@ -1679,9 +1767,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <span className={`shrink-0 w-2 h-2 rounded-full ${b.ok === true ? 'bg-emerald-400' : b.ok === false ? 'bg-rose-400' : 'bg-zinc-500'}`} />
                         <span className="flex-1 min-w-0">
                           <span className="block text-[12px] font-bold text-white truncate">{b.prompt || b.summary || b.workspaceId}</span>
-                          <span className="block text-[10px] text-[#8b949e] font-mono truncate">
-                            {b.ownerUid ? `user ${b.ownerUid}` : 'anon'} · {b.savedAt ? new Date(b.savedAt).toLocaleString() : ''} · {b.workspaceId}
+                          {/* The person first, in words. This line used to read `user RyN1xjbfr…`,
+                              which is the Firebase UID -- correct, unreadable, and impossible to act
+                              on. The uid stays available (title + workspace id) for matching against
+                              logs, but it is no longer the only thing shown. */}
+                          <span className="block text-[10px] truncate">
+                            <span
+                              className={b.owner?.anonymous ? 'text-amber-300/80' : 'text-sky-300/90'}
+                              title={b.ownerUid || 'no user id'}
+                            >
+                              {b.owner?.label || (b.ownerUid ? `id ${b.ownerUid.slice(0, 8)}…` : 'Signed-out user')}
+                            </span>
+                            <span className="text-[#8b949e]">
+                              {' · '}{b.savedAt ? new Date(b.savedAt).toLocaleString() : ''}
+                            </span>
                           </span>
+                          <span className="block text-[9px] text-[#6e7681] font-mono truncate">{b.workspaceId}</span>
                         </span>
                         <span
                           role="button"

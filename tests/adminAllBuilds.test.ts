@@ -44,13 +44,25 @@ describe('all-builds admin routes', () => {
     expect(seg).toContain('Content-Disposition');
   });
 
-  it('the global listing uses ONE auto-indexed orderBy — no composite/collection-group index to silently fail on', () => {
+  it('the global listing needs NO composite or collection-group index — it can never FAILED_PRECONDITION', () => {
+    // WHAT THIS PROTECTS: a query needing an index that was never created fails at RUNTIME with
+    // FAILED_PRECONDITION, so the admin panel would show an empty list and no reason. That risk is
+    // the point of this test and has not changed.
+    //
+    // ⚠️ NARROWED 2026-08-13, deliberately. It used to ban `.where(` outright, which also banned the
+    // one filter that is provably safe. Firestore's actual rule is that a RANGE filter's field must
+    // be the FIRST orderBy — so `where('savedAt','>=',x)` beside `orderBy('savedAt')` is served by
+    // the SAME automatic single-field index and needs nothing created. A `where` on any OTHER field
+    // is what would demand a composite index, and that is what is banned now.
     const code = stripComments(store);
     const at = code.indexOf('export async function listAllDiagnostics');
-    const seg = code.slice(at, at + 900);
+    const seg = code.slice(at, at + 1200);
     expect(seg).toContain(".orderBy('savedAt', 'desc')");
-    expect(seg).not.toContain('.where(');
     expect(seg).not.toContain('collectionGroup');
+
+    for (const m of seg.matchAll(/\.where\(\s*'([^']+)'/g)) {
+      expect(m[1], `where('${m[1]}') is not the orderBy field — that needs a composite index`).toBe('savedAt');
+    }
   });
 });
 

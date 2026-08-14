@@ -5,6 +5,7 @@ import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { analyzeAppScope } from '../lib/appScopeAnalyzer';
+import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag } from '../lib/megaRoadmap';
 import { requestedFeatureLabels, renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -7575,6 +7576,67 @@ export function registerAgentV3Routes(app: Express): void {
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
       });
+
+      // MEGA-APP ROADMAP (admin 2026-08-14, Phase 2 of the mega-app system) — flag-gated, RECORD-ONLY.
+      // When the deterministic pre-screen (Phase 1) reads a fresh build as a LARGE app AND the operator
+      // has turned this on (`AGENTV3_MEGA_ROADMAP=on`, default OFF), ask the planner for an HONEST,
+      // step-by-step roadmap and run it through the deterministic guardrail (LLM proposes → rules verify,
+      // so a fake/vague/hidden-ceiling step can never survive). Phase 2 only RECORDS the result into the
+      // build report (for the admin to eyeball) and DOES NOT change the build in any way — the honest
+      // reply + auto-build of step 1 + the 💡 roadmap UI arrive in Phases 3-4. Best-effort, hard-timed,
+      // fully wrapped: a flag that is off, a small app, an edit, or ANY failure ⇒ the build runs exactly
+      // as today. Billed like every other planner call (blueprintUsage + buildUsage) when it does fire.
+      if (envFlag('AGENTV3_MEGA_ROADMAP') && intent === 'new_build' && !isEditMode) {
+        try {
+          const scope = analyzeAppScope(prompt);
+          if (scope.decision === 'analyze') {
+            const rmStartedAt = Date.now();
+            let rmProvider = 'CLAUDE';
+            const rmCall = makeFastTextRunner((used) => { rmProvider = used; }).runTurn({
+              model: fastBuildModel(),
+              system: megaRoadmapSystemPrompt(),
+              messages: [{ role: 'user', content: megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals) }],
+              tools: [],
+              maxTokens: 4000,
+            });
+            const rmTimeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('roadmap planner timed out')), 45_000));
+            const rmT = await Promise.race([rmCall, rmTimeout]);
+            try {
+              const lbl = fastLaneProviderLabel(rmProvider);
+              buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : rmProvider.toLowerCase(), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: rmT.text.length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ok: true });
+            } catch { /* diagnostics best-effort */ }
+            blueprintUsage.inputTokens += rmT.usage.inputTokens;
+            blueprintUsage.outputTokens += rmT.usage.outputTokens;
+            buildUsage.add({ inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens });
+
+            const { roadmap, rejected } = roadmapGuardrail(parseMegaRoadmap(rmT.text, scope.famousApp), scope.famousApp);
+            if (roadmap) {
+              buildDiag.record({
+                phase: 'plan',
+                severity: 'info',
+                code: 'MEGA_ROADMAP',
+                message: `Mega-app roadmap (not yet active — record only): ${summarizeRoadmapForDiag(roadmap)}`,
+                detail: [
+                  `Achievable now: ${roadmap.achievableSummary}`,
+                  roadmap.note ? `Honest scope note: ${roadmap.note}` : '',
+                  ...roadmap.steps.map((s) => `Step ${s.n} — ${s.title}${s.infraCeiling ? ' [infra ceiling]' : ''}\n  goal: ${s.goal}\n  build: ${s.buildPrompt}`),
+                  rejected.length ? `Guardrail rejected: ${rejected.join('; ')}` : '',
+                ].filter(Boolean).join('\n'),
+                autoResolved: true,
+              });
+            } else {
+              buildDiag.record({
+                phase: 'plan',
+                severity: 'info',
+                code: 'MEGA_ROADMAP',
+                message: `Mega-app roadmap: no usable roadmap survived the guardrail — the build proceeds directly (honest fallback). ${rejected.join('; ')}`,
+                autoResolved: true,
+              });
+            }
+          }
+        } catch { /* roadmap generation is flag-gated + record-only — it must NEVER affect a build */ }
+      }
+
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
       billingCtx.buildStartedAt = buildStartedAt; // Fix 67 — the finalizer debits with this exact ref

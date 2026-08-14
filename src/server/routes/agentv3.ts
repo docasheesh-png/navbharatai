@@ -339,6 +339,7 @@ import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWork
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { makeFirstPaintHandler } from '../AgentV3/streamingFirstPaint';
+import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
@@ -10919,6 +10920,35 @@ export function registerAgentV3Routes(app: Express): void {
               });
             } catch { /* the design check is advisory — it can never affect a build */ }
           }
+
+          // DESIGN CONSISTENCY + ACCESSIBILITY — two finished linters nothing had ever called.
+          //
+          // Both are pure, deterministic and unit-tested, and have sat behind HTTP routes no client
+          // ever hit, so neither had run on a single real build. They ask questions the rest of the
+          // stack does not: DesignCoverage below asks "is this page designed AT ALL", while these ask
+          // "is the design CONSISTENT" (one-off colours, five fonts, off-grid spacing) and "can anyone
+          // actually USE it" (alt text, form labels, icon-only buttons with no name) — and nothing in
+          // tsc, ESLint, the CSS check or the reviewer looks at accessibility whatsoever.
+          //
+          // EVIDENCE, NEVER A GATE, and no flag: it spends nothing, calls no model, and only appends to
+          // a build that already succeeded. Wrapped like its neighbours so it can never reach the build.
+          try {
+            const quality = lintBuiltApp(Object.fromEntries(writtenFiles));
+            // `null` means nothing lintable was found. Recording a perfect score there would claim we
+            // checked when we did not — the same lie in the other direction.
+            if (quality) {
+              if (quality.design.violations.length > 0) {
+                buildDiag.record({ phase: 'build', severity: 'warning', code: 'DESIGN_CONSISTENCY', ...obs(designLintSummary(quality)) });
+              }
+              if (quality.a11y.violations.length > 0) {
+                buildDiag.record({ phase: 'build', severity: 'warning', code: 'ACCESSIBILITY', ...obs(a11yLintSummary(quality)) });
+              } else {
+                // A clean pass is recorded too. A check that is only ever visible when it complains
+                // cannot be told apart from a check that never ran.
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'ACCESSIBILITY', message: a11yLintSummary(quality), autoResolved: true });
+              }
+            }
+          } catch { /* the quality lint is advisory — it can never affect a build */ }
 
           const designFiles = Object.fromEntries(writtenFiles);
           const design = analyzeDesignCoverage(designFiles);

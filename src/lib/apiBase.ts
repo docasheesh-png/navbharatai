@@ -62,6 +62,41 @@ export function rewriteApiUrl(url: string, apiOrigin: string = NATIVE_API_ORIGIN
 }
 
 /**
+ * The absolute WebSocket URL for an `/api/…` path — the ONE transport the rewrite above cannot reach.
+ *
+ * ADMIN REPORT 2026-08-13: "sonic voice apps (aab-apk, ipa) dono me kaam nahi karta hai." Sonic built
+ * its socket from `window.location.host`, which on the web is the site and in the BUNDLED app is
+ * `localhost` — so the app opened a socket to itself, where nothing is listening, and voice chat could
+ * never connect on a phone.
+ *
+ * 🔑 WHY IT ESCAPED THE FIX ABOVE. `installNativeApiRewrite` patches `fetch` and `XMLHttpRequest`,
+ * which is every ordinary API call — and `new WebSocket()` is neither. So the one guarantee this file
+ * exists to give ("relative /api paths reach the real server") silently did not apply to sockets. That
+ * is not a Sonic bug so much as a hole in this module, which is why the fix lives here: the next
+ * feature that opens a socket gets it for free instead of rediscovering the same failure.
+ *
+ * Pure and dependency-injected, so the native case is testable without a device.
+ */
+export function resolveWebSocketUrl(
+  path: string,
+  w: Pick<ShellWindow, 'Capacitor'> & { location: { origin: string; protocol?: string; host?: string } },
+  apiOrigin: string = NATIVE_API_ORIGIN,
+): string {
+  // An absolute URL is the caller's own decision — never second-guess it.
+  if (/^wss?:\/\//i.test(path)) return path;
+
+  const base = needsApiRewrite(isNativeShell(w), w.location.origin, apiOrigin)
+    ? apiOrigin
+    : w.location.origin;
+
+  // http→ws, https→wss. Deriving the scheme from the ORIGIN rather than from `location.protocol`
+  // matters in the app: the page is served over the local shell's scheme while the socket must use
+  // whatever the API origin speaks.
+  const wsBase = base.replace(/^http/i, 'ws');
+  return wsBase.replace(/\/+$/, '') + (path.startsWith('/') ? path : `/${path}`);
+}
+
+/**
  * Install the transport-layer rewrite on a window-like object. Returns true only when actually
  * installed (bundled native shell); false = no-op (web / hosted shell). Patches:
  *   • fetch — string, URL, and Request inputs (a Request's absolute local-origin /api URL is

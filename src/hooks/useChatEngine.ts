@@ -7,6 +7,7 @@
 // destructures the SAME handleSendForTab/handleSend identifiers back, so every call site is unchanged.
 
 import axios from 'axios';
+import { useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import type { Message, ErrorContext, ViewType, FileSystem } from '../types';
@@ -77,6 +78,13 @@ export function useChatEngine(deps: ChatEngineDeps) {
     setFiles, setHasGeneratedCode, setIsDeployed, setIsAppBuilt,
     addLog, addToast, incrementDailyUsage, handleGHConfirmPush, learnFromMessage, updatePreview,
   } = deps;
+
+  // STOP support (admin 2026-08-13: "koi galat search rukti nahi"). Every AI here streams a reply over one
+  // fetch; without a user-controllable AbortController the only way to end it was the 90s timeout. These
+  // refs give the UI a real Stop: `abortRef` aborts the in-flight fetch, and `stoppedRef` marks it a
+  // DELIBERATE stop so the catch keeps the partial reply instead of showing a scary "connection failed".
+  const abortRef = useRef<AbortController | null>(null);
+  const stoppedRef = useRef(false);
 
   const callGeminiFrontend = async (
     prompt: string, 
@@ -344,6 +352,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
     addLog(isBasicGreeting ? 'Responding to greeting...' : 'Detecting intent...', 'info');
     setInputForTab('');
     setIsLoadingForTab(true);
+    stoppedRef.current = false; // a fresh turn — clear any previous Stop
     setErrorContext(null);
 
     const isRealTime = /today|current|latest|now|news|weather|time|date|day|aaj|samachar|update/i.test(messageToSend);
@@ -445,6 +454,9 @@ export function useChatEngine(deps: ChatEngineDeps) {
           endpoint = '/api/chat/vip';
         }
 
+        // A fresh controller per attempt, exposed via abortRef so the Stop button can cancel this fetch.
+        const userAbort = new AbortController();
+        abortRef.current = userAbort;
         const response = await fetch(endpoint, {
           method: 'POST',
           headers,
@@ -466,7 +478,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
             userProfile: isNbi ? apnapanProfile : undefined,
             stream: true,
           }),
-          signal: AbortSignal.timeout(90000),
+          // The user can Stop this (abortRef) OR it self-cancels after 90s — whichever fires first.
+          signal: AbortSignal.any([userAbort.signal, AbortSignal.timeout(90000)]),
         });
 
         if (!response.ok) {
@@ -661,6 +674,19 @@ export function useChatEngine(deps: ChatEngineDeps) {
       }
 
     } catch (error: any) {
+      // The user pressed Stop — this is NOT an error. Keep whatever streamed so far (marked stopped) and
+      // stay silent: showing "connection failed" for a deliberate cancel is exactly the confusing behaviour
+      // the Stop button exists to fix.
+      if (stoppedRef.current || error?.name === 'AbortError') {
+        // Clean the cursor off the partially-streamed reply (the last AI bubble) and mark it stopped.
+        setMessagesForTab((prev) => {
+          if (!prev.length || prev[prev.length - 1].sender !== 'ai') return prev;
+          const last = prev[prev.length - 1];
+          const cleaned = `${String(last.text || '').replace(/▋$/, '').trimEnd()} ⏹ (stopped)`.trim();
+          return prev.map((m, i) => (i === prev.length - 1 ? { ...m, text: cleaned } : m));
+        });
+        return; // finally still clears the loading state
+      }
       console.error('Chat error:', error);
       const errType = classifyError(error);
       setErrorContext({
@@ -689,6 +715,30 @@ export function useChatEngine(deps: ChatEngineDeps) {
   const handleSend = async (overrideMessage?: string) => {
     const tabId = 'nbi_chat';
     await handleSendForTab(tabId, overrideMessage);
+  };
+
+  // STOP — cancel the reply that is streaming right now (admin 2026-08-13). Marks it a deliberate stop so
+  // the partial reply is kept (not replaced by an error), aborts the fetch, and clears the busy state.
+  const stop = () => {
+    stoppedRef.current = true;
+    try { abortRef.current?.abort(); } catch { /* already settled — nothing to abort */ }
+    setIsLoading(false);
+    setIsSearching(false);
+  };
+
+  // UNSEND — take back the last message: stop any in-flight reply, drop the last exchange (the AI reply and
+  // the user message that triggered it), and drop that message's text back into the box to edit or discard.
+  const unsend = () => {
+    stop();
+    const msgs = [...messages];
+    while (msgs.length && msgs[msgs.length - 1].sender === 'ai') msgs.pop(); // remove the AI reply/replies
+    let restored = '';
+    if (msgs.length && msgs[msgs.length - 1].sender === 'user') {
+      restored = String(msgs[msgs.length - 1].text || '');
+      msgs.pop();
+    }
+    setMessages(msgs);
+    if (restored) setInput(restored);
   };
 
   // Read a file as raw base64 (no transformation)
@@ -737,5 +787,5 @@ export function useChatEngine(deps: ChatEngineDeps) {
         ? downscaleImage(file)
         : readFileRaw(file)
     ));
-  return { handleSendForTab, handleSend };
+  return { handleSendForTab, handleSend, stop, unsend };
 }

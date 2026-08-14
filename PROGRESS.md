@@ -32314,3 +32314,21 @@ Built end-to-end, deterministic + FREE (no AI call per build):
   (`setPrompt`) — never auto-runs. 2 render tests.
 
 AppKnowledgeBase gets a NEXT-BUILD SUGGESTIONS entry (mandatory sync). Gate: tsc clean both; vitest 15,087.
+
+---
+
+## 2026-08-13 — Stop & Unsend across every AI (admin: "koi galat search rukti nahi")
+
+Every non-v5 AI streamed/awaited a full reply with NO way to cancel — the fetch used a timeout-only
+AbortSignal, so a wrong query ran to the end. Fixed across all conversational surfaces:
+- **Free/NBI + Vishwakarma tiers** (`useChatEngine` → `AIChat`): the shared streaming fetch now uses
+  `AbortSignal.any([userAbort, timeout(90s)])`; a `stop()` aborts it, keeps the partial reply (marked "⏹
+  stopped"), and a user-abort is NOT shown as an error (a `stoppedRef` distinguishes deliberate stop from a
+  real failure). `AIChat` already had a Stop button gated on `onStop` but it was never wired AND used a
+  window.confirm — now wired through NBIChatPanel and made ONE-CLICK. New `unsend()` (+ ↩ button) takes back
+  the last message: stops the reply, removes the last exchange, restores the text to the box.
+- **Doctor AI** (`SDAChat`) and **all Professionals** (`ProfessionalChat`): single-shot fetches made
+  abortable (real `AbortController` signal); the Send button becomes a one-tap ■ Stop while loading; a
+  deliberate stop is silent (no "service unavailable" bubble).
+
+AppKnowledgeBase gets a STOP & UNSEND entry (mandatory sync). tsc clean both.

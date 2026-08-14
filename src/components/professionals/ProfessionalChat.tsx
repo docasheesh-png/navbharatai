@@ -102,6 +102,11 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
   // Composer auto-grow (admin 2026-07-20): starts at 1 line, grows while typing (max-h-32 = 128px),
   // snaps back to 1 line when send() clears the input.
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // STOP support (admin 2026-08-13): every professional AI waits for one full reply; without an abortable
+  // request a wrong query could not be cancelled. abortRef cancels the fetch; stoppedRef keeps the catch
+  // silent on a deliberate stop.
+  const abortRef = useRef<AbortController | null>(null);
+  const stoppedRef = useRef(false);
   useEffect(() => { if (!input && composerRef.current) resetGrow(composerRef.current); }, [input]);
 
   // ADMIN 2026-08-10 — "pass system hata do". The Professional Pass is gone, so there is no purchase
@@ -153,6 +158,9 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
     const next: Msg[] = resendOf ?? [...messages, { role: 'user', content: shownContent }];
     setMessages(next);
     setLoading(true);
+    stoppedRef.current = false;
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const fileAttachments = await Promise.all(sendFiles.map(fileToAttachment));
       const history = next.filter((m) => m.content !== config.welcome).slice(-20);
@@ -166,6 +174,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
       const res = await fetch(config.endpoint || `/api/professional/${config.id}/chat`, {
         method: 'POST',
         headers,
+        signal: controller.signal,
         body: JSON.stringify({
           message: content,
           history,
@@ -182,10 +191,20 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
       setMessages((m) => [...m, { role: 'assistant', content: data.reply || '(no reply)' }]);
       refreshPass(); // update the "X/limit free today" counter
     } catch (e: any) {
-      setMessages((m) => [...m, { role: 'assistant', content: `⚠️ ${e?.message || 'Something went wrong — please try again.'}` }]);
+      // A deliberate Stop is not an error — stay silent (no reply bubble).
+      if (!stoppedRef.current && e?.name !== 'AbortError') {
+        setMessages((m) => [...m, { role: 'assistant', content: `⚠️ ${e?.message || 'Something went wrong — please try again.'}` }]);
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  // STOP the in-flight reply (admin 2026-08-13) — one tap cancels a wrong query instead of waiting it out.
+  const stop = () => {
+    stoppedRef.current = true;
+    try { abortRef.current?.abort(); } catch { /* already settled */ }
+    setLoading(false);
   };
 
   const showQuick = config.quickPrompts && messages.filter((m) => m.role === 'user').length === 0;
@@ -330,9 +349,16 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
             .slice(-12)
             .map((m) => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.content }))}
         />
-        <button onClick={() => send()} disabled={(!input.trim() && files.length === 0) || loading} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white flex items-center justify-center shrink-0">
-          {loading ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-        </button>
+        {/* Send → one-tap STOP while a reply loads (admin 2026-08-13), so a wrong query can be cancelled. */}
+        {loading ? (
+          <button onClick={stop} title="Stop" className="w-9 h-9 rounded-xl bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shrink-0">
+            <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[12px]">■</span>
+          </button>
+        ) : (
+          <button onClick={() => send()} disabled={!input.trim() && files.length === 0} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white flex items-center justify-center shrink-0">
+            <Send className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* Paywall / login card — shown when the gate blocks a turn (or the user taps the quota chip). */}

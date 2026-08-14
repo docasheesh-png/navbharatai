@@ -296,6 +296,11 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   // case (the server's clinical store survives); rotated in startNewCase() so a new patient never
   // inherits the previous patient's clinical context under the same doctor's userId.
   const caseIdRef = useRef<string>('');
+  // STOP support (admin 2026-08-13) — Doctor AI waits for one full reply; without an abortable request the
+  // user could not cancel a wrong query. abortRef cancels the in-flight fetch; stoppedRef marks a
+  // deliberate stop so the catch stays silent instead of showing "service unavailable".
+  const abortRef = useRef<AbortController | null>(null);
+  const stoppedRef = useRef(false);
   if (!caseIdRef.current) {
     let id = '';
     try { id = localStorage.getItem('sda_case_id') || ''; } catch { /* ignore */ }
@@ -589,6 +594,9 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
     if (baseTranscript) setMessages([...base, userMsg]);
     else setMessages(prev => [...prev, userMsg]);
     setLoading(true);
+    stoppedRef.current = false;
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
       const history = base.map(m => ({
@@ -598,6 +606,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
       const res = await fetch('/api/sda-chat', {
         method: 'POST',
+        signal: controller.signal,
         // Send the verified Firebase ID token so the server resolves a REAL identity for the Professional
         // Pass gate. Without it (the bug: this fetch sent only Content-Type), a SIGNED-IN doctor was seen
         // as anonymous → "Please sign in to use the Professionals" even though they were logged in.
@@ -657,17 +666,27 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
       if (data.suggestPDF) {
         setSuggestPDF(true);
       }
-    } catch {
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 2).toString(),
-        text: '⚠️ Service temporarily unavailable. Please try again.',
-        sender: 'sda',
-        timestamp: new Date(),
-      }]);
+    } catch (err: any) {
+      // A deliberate Stop is not an error — stay silent (the reply is simply not shown).
+      if (!stoppedRef.current && err?.name !== 'AbortError') {
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 2).toString(),
+          text: '⚠️ Service temporarily unavailable. Please try again.',
+          sender: 'sda',
+          timestamp: new Date(),
+        }]);
+      }
     } finally {
       setLoading(false);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
+  };
+
+  // STOP the in-flight reply (admin 2026-08-13) — one tap ends a wrong query instead of waiting it out.
+  const stop = () => {
+    stoppedRef.current = true;
+    try { abortRef.current?.abort(); } catch { /* already settled */ }
+    setLoading(false);
   };
 
   const requestSummary = () => handleSend('Please generate a complete structured case summary based on all information collected so far.');
@@ -1159,14 +1178,25 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               }
             />
 
-            {/* Send button */}
-            <button
-              onClick={() => handleSend()}
-              disabled={(!input.trim() && !attachedFile) || loading}
-              className="w-10 h-10 flex items-center justify-center bg-emerald-700 hover:bg-emerald-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all shrink-0 shadow-lg shadow-emerald-900/40"
-            >
-              {loading ? <TirangaLoader className="w-4 h-4 text-white" /> : <Send className="w-4 h-4 text-white" />}
-            </button>
+            {/* Send button — becomes a one-tap STOP while a reply is loading (admin 2026-08-13), so a wrong
+                query can be cancelled instead of waited out. */}
+            {loading ? (
+              <button
+                onClick={stop}
+                title="Stop"
+                className="w-10 h-10 flex items-center justify-center bg-red-600 hover:bg-red-500 active:scale-95 rounded-xl transition-all shrink-0 shadow-lg shadow-red-900/40"
+              >
+                <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[12px] text-white">■</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => handleSend()}
+                disabled={!input.trim() && !attachedFile}
+                className="w-10 h-10 flex items-center justify-center bg-emerald-700 hover:bg-emerald-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all shrink-0 shadow-lg shadow-emerald-900/40"
+              >
+                <Send className="w-4 h-4 text-white" />
+              </button>
+            )}
           </div>
 
           {/* The emoji legend row that sat here (Docs / Dictate / Talk-to-SDA / Clinical-Tools) was

@@ -29,6 +29,7 @@ import type { ReportPickerItem } from '../../lib/reportPicker';
 import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { NextSuggestionsBulb } from './NextSuggestionsBulb';
+import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
@@ -272,6 +273,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Shared composer toolbar state (admin 2026-08-10). The Enter preference is the ONE key every AI
   // reads — set it here and Doctor AI, the professionals and the free chat all follow.
   const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => readSendOnEnter((k) => localStorage.getItem(k)));
+  // KEEP SCREEN ON while a build runs (admin 2026-08-14): a phone auto-locking mid-build cut the
+  // connection and killed the build. Default ON — the build finishing matters more than a little battery,
+  // and the lock only holds while this tab is visible and releases the moment the build ends. 'off' opts
+  // out. Persisted so the choice sticks across sessions.
+  const [keepScreenOn, setKeepScreenOn] = useState<boolean>(() => {
+    try { return localStorage.getItem('nbai_keep_screen_on') !== 'off'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('nbai_keep_screen_on', keepScreenOn ? 'on' : 'off'); } catch { /* storage may be unavailable */ }
+  }, [keepScreenOn]);
+  // Hold a screen wake lock ONLY while a build is actually running and the user has kept it on — so the
+  // screen can't sleep and cut the build (like a video keeps the screen awake). Releases automatically the
+  // moment the build ends or the toggle is turned off; no-op on browsers without the Wake Lock API.
+  useScreenWakeLock(keepScreenOn && running);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [showChatSearch, setShowChatSearch] = useState(false);
   // INLINE voice dictation (admin 2026-07-22): the mic types speech straight into the composer on this
@@ -3758,6 +3773,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
                       <ToggleRow label="Planning" hint="Plan-first: the AI writes a step-by-step plan and waits for your approval before building" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
                       <ToggleRow label="Thinking" hint="Deeper reasoning on build/edit/plan turns — a live reasoning summary streams in the chat (plain chat replies stay instant)" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
+                      {/* KEEP SCREEN ON (admin 2026-08-14): stop the phone auto-locking mid-build and cutting
+                          the connection. Toggleable ANYTIME (not disabled while running) so the user can turn
+                          it on the moment they realise a long build is going. */}
+                      <ToggleRow label="Keep screen on" hint="Stops your screen from sleeping while a build runs, so it can't be interrupted (like a video keeps the screen on). Works while this tab is open." checked={keepScreenOn} onClick={() => setKeepScreenOn((v) => !v)} />
                       {/* Power tiers (admin tier→model redefinition 2026-07-13): Weak (free — GLM/Kimi, never
                           Claude) / Normal (Sonnet, adaptive) / Strong (Sonnet 100%) / Powerful (Opus medium
                           effort) / Full Team (Opus max — ultracode). ALL FIVE are
@@ -3886,7 +3905,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   it opens the photo gallery/library. */}
               <input ref={screenshotInputRef} type="file" accept="image/*" className="hidden" onChange={handleScreenshotPicked} />
               </div>{/* /settings + attach row */}
-              </div>{/* /toolbar row (order-2): mode selector + settings + attach — below the input */}
+              {/* NEXT-BUILD SUGGESTIONS 💡 (admin 2026-08-14: "ek line me karo") — now lives on the SAME
+                  toolbar row, pushed to the far right with ml-auto, instead of its own second line below
+                  the input. After a build finishes it lights up with tailored "what to add next" ideas for
+                  THIS app (and the mega-app roadmap); tapping one fills the box for the user to review/send.
+                  Only a suggestion — nothing auto-runs. */}
+              <div className="ml-auto shrink-0">
+                <NextSuggestionsBulb
+                  workspaceId={expectedWorkspaceId()}
+                  ready={!!state.done && !running}
+                  onPick={(text) => { setPrompt(text); setTimeout(() => composerRef.current?.focus(), 0); }}
+                />
+              </div>
+              </div>{/* /toolbar row (order-2): mode selector + settings + attach + 💡 — below the input */}
               {/* LIVE IMPORT PROGRESS (admin report 2026-08-04). A 161 MB project takes minutes to
                   transfer, and the panel tracked `zipProgress` in state but rendered it NOWHERE — so the
                   screen showed one static "Importing…" line for minutes, which is indistinguishable from
@@ -4008,16 +4039,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     <Send className="w-4 h-4" />
                   </button>
                 )}
-              </div>
-              {/* NEXT-BUILD SUGGESTIONS 💡 (admin 2026-08-13) — below the input, right side. After a build
-                  finishes it lights up with tailored "what to add next" ideas for THIS app; tapping one
-                  fills the box for the user to review/edit/send. Only a suggestion — nothing auto-runs. */}
-              <div className="order-2 w-full flex justify-end mt-1">
-                <NextSuggestionsBulb
-                  workspaceId={expectedWorkspaceId()}
-                  ready={!!state.done && !running}
-                  onPick={(text) => { setPrompt(text); setTimeout(() => composerRef.current?.focus(), 0); }}
-                />
               </div>
             </div>
           </div>

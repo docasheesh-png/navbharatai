@@ -32491,3 +32491,24 @@ carries 60+ on/off flags — real operational debt (flags get added, never retir
   untouched (build directly). The roadmap planner call runs only on large-app builds.
 Server tsc clean; frontend tsc clean; full vitest suite green. (Follow-up worth doing separately: an audit
 that RETIRES proven-stable flags to shrink the Cloud Run flag surface — the real fix for the 60+ problem.)
+
+---
+
+## 2026-08-14 — v5 composer: 💡 onto one line; "Keep screen on" during builds
+
+Two admin requests:
+1. **Composer to ONE line.** The 💡 next-build/roadmap suggestions bulb lived on its own second row
+   below the input. Moved it INTO the existing toolbar row (mode selector + settings + attach + voice +
+   sonic), pushed to the far right with `ml-auto`. Deleted the separate `order-2` row. Pure layout move —
+   same component, same handlers.
+2. **"Keep screen on" while a build runs** (a phone auto-locking mid-build cut the connection and killed
+   the build). New `useScreenWakeLock` (`src/lib/useScreenWakeLock.ts`) using the standard Screen Wake Lock
+   API — the same mechanism a video player uses. React-free testable core (`createScreenWakeLock`, DI'd
+   nav/doc), re-acquires on tab re-visibility, in-flight guard so rapid visibility toggles never stack
+   locks, silent no-op where unsupported, never throws. Held only while `keepScreenOn && running`; releases
+   the instant the build ends. New "Keep screen on" toggle in the ⚙ Build-options popover (default ON,
+   persisted `nbai_keep_screen_on`, toggleable even mid-build). 6 tests.
+   Honest boundary documented: the lock only holds while the tab is VISIBLE (no web API can keep a phone
+   awake with the app backgrounded) — it keeps the screen on while the user is watching the build.
+
+AppKnowledgeBase updated (Keep-screen-on toggle). tsc clean (frontend + server); full vitest green (15,380).

@@ -10,6 +10,7 @@ import {
 } from './megaRoadmap';
 
 const goodJson = JSON.stringify({
+  userMessage: 'This is a big app, so I will build the working core first — a real preview in a few minutes — then the rest arrives as simple next steps you can tap one at a time.',
   achievableSummary: 'A working photo-sharing app you can use right away.',
   note: null,
   steps: [
@@ -20,12 +21,14 @@ const goodJson = JSON.stringify({
 });
 
 describe('megaRoadmap — prompts', () => {
-  it('system prompt is honest, JSON-strict, and white-label', () => {
+  it('system prompt is honest, JSON-strict, white-label, and asks for a user-language message', () => {
     const s = megaRoadmapSystemPrompt();
     expect(s).toMatch(/strict JSON/i);
     expect(s).toMatch(/honest/i);
     expect(s).toMatch(/NEVER mention any AI vendor/i);
     expect(s).toMatch(/same[\s\S]*language/i);
+    expect(s).toMatch(/userMessage/);
+    expect(s).toMatch(/THEIR OWN LANGUAGE/i);
   });
   it('user prompt carries the request, the famous name (as inspiration, not copy), and signals', () => {
     const u = megaRoadmapUserPrompt('make an app like Instagram', 'Instagram', ['asks to clone Instagram']);
@@ -71,6 +74,19 @@ describe('megaRoadmap — guardrail (the honest gate)', () => {
     expect(roadmap).not.toBeNull();
     expect(roadmap!.steps.map((s) => s.n)).toEqual([1, 2, 3]);
     expect(roadmap!.famousApp).toBe('Instagram');
+    expect(roadmap!.userMessage).toMatch(/big app/i); // model-authored user-facing intro carried through
+  });
+
+  it('falls back userMessage to achievableSummary when the model omits it (never a hardcoded English default)', () => {
+    const noMsg = JSON.stringify({
+      achievableSummary: 'Ek chalti-phirti photo app.', note: null,
+      steps: [
+        { title: 'Feed', goal: 'posts dikhein', buildPrompt: 'Build a photo feed with sample posts.', needsInfra: null },
+        { title: 'Upload', goal: 'photo daalein', buildPrompt: 'Add an upload screen that adds to the feed.', needsInfra: null },
+      ],
+    });
+    const { roadmap } = roadmapGuardrail(parseMegaRoadmap(noMsg, null), null);
+    expect(roadmap!.userMessage).toBe('Ek chalti-phirti photo app.'); // user's language preserved, no English injected
   });
 
   it('flags an infra ceiling even when the model did NOT declare needsInfra', () => {

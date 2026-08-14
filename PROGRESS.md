@@ -32402,3 +32402,37 @@ whole reason the roadmap can be shown to a non-tech user honestly.
   null when too thin, cap at MAX, null-safe, diag summary).
 
 Gate: tsc clean (frontend + server); vitest full suite green.
+
+---
+
+## 2026-08-14 — Mega-app roadmap system, Phase 3: honest reply (user's language) + auto-build step-1 (ACTIVE path, second flag)
+
+Phase 3 — the FIRST phase that changes real build behaviour, and it is gated behind a SECOND flag so
+the rollout stays staged:
+- `AGENTV3_MEGA_ROADMAP=on` alone  → Phase 2 RECORD-ONLY (roadmap only written to the report).
+- `+ AGENTV3_MEGA_ROADMAP_ACTIVE=on` → Phase 3 ACTIVE: the roadmap actually steers a big-app build.
+Both default OFF. This lets the admin observe real roadmaps in reports first, then flip active.
+
+**What ACTIVE does, for a fresh LARGE-app build:**
+1. **Persists the roadmap durably** — new `MegaRoadmapStore.ts` (mirrors `ProjectPlanStore`: firebase-admin,
+   VITEST-skip, in-process cache, bounded retries, never throws; own collection `mega_roadmaps_v3`;
+   strict `parseStoredMegaRoadmap`). Stores `{roadmap, currentStep, sourcePrompt, createdAt}` so the
+   user's next visit / the Phase-4 💡 guided-next-step UI can resume the journey.
+2. **Shows an HONEST message in the USER'S OWN LANGUAGE** — the roadmap call now also returns a
+   model-authored `userMessage` (2-3 warm sentences: this is a big app, I'll build the working core first
+   for a fast preview, the rest comes as simple next steps). Emitted as an architect narration through
+   `redactProvidersText` (White-Label law). Falls back to `achievableSummary` (also user's language) if the
+   model omits it — NEVER a hardcoded-English line shown to a Hindi user.
+3. **Auto-builds a REAL step 1** — the build target is swapped to the roadmap's step-1 `buildPrompt` (a
+   small-but-real core → ~5-7 min preview), replacing the BASE request just before the language/attachment
+   prepends so the app is still built in the user's language. The original `prompt` is untouched (language
+   detection, scope, telemetry all still read it) — only WHAT is built changes. The swap tells the builder
+   to make milestone 1 complete + standalone and NOT to stub/attempt the later milestones.
+- Mutual exclusion: SPM project mode is skipped when the roadmap owns the build (`!megaRoadmapActive`), so
+  two "big-app" strategies can never both steer one build.
+- Report code `MEGA_ROADMAP_ACTIVE` when steering, `MEGA_ROADMAP` when record-only.
+
+Tests: `megaRoadmap.test.ts` +2 (userMessage carry-through + user-language fallback), 15 total;
+`MegaRoadmapStore.test.ts` new (8 — parse strictness + cache round-trip + never-throws). Gate: tsc clean
+(frontend + server); full vitest suite green (15,369). Not user-facing until BOTH flags on, so no
+AppKnowledgeBase entry yet — that lands with the Phase-4 visible 💡 roadmap UI.

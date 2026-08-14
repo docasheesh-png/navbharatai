@@ -1,11 +1,12 @@
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
-import { redactProviderError } from '../lib/providerRedaction';
+import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { analyzeAppScope } from '../lib/appScopeAnalyzer';
-import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag } from '../lib/megaRoadmap';
+import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, type MegaRoadmap } from '../lib/megaRoadmap';
+import { saveMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { requestedFeatureLabels, renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -7577,15 +7578,20 @@ export function registerAgentV3Routes(app: Express): void {
         onTurnComplete: captureTurnUsage,
       });
 
-      // MEGA-APP ROADMAP (admin 2026-08-14, Phase 2 of the mega-app system) — flag-gated, RECORD-ONLY.
+      // MEGA-APP ROADMAP (admin 2026-08-14, Phases 2-3 of the mega-app system) — two-stage, flag-gated.
       // When the deterministic pre-screen (Phase 1) reads a fresh build as a LARGE app AND the operator
       // has turned this on (`AGENTV3_MEGA_ROADMAP=on`, default OFF), ask the planner for an HONEST,
       // step-by-step roadmap and run it through the deterministic guardrail (LLM proposes → rules verify,
-      // so a fake/vague/hidden-ceiling step can never survive). Phase 2 only RECORDS the result into the
-      // build report (for the admin to eyeball) and DOES NOT change the build in any way — the honest
-      // reply + auto-build of step 1 + the 💡 roadmap UI arrive in Phases 3-4. Best-effort, hard-timed,
-      // fully wrapped: a flag that is off, a small app, an edit, or ANY failure ⇒ the build runs exactly
-      // as today. Billed like every other planner call (blueprintUsage + buildUsage) when it does fire.
+      // so a fake/vague/hidden-ceiling step can never survive).
+      //   • `AGENTV3_MEGA_ROADMAP=on` alone  → RECORD-ONLY (Phase 2): the roadmap is only written into the
+      //     build report for the admin to eyeball; the build is UNCHANGED.
+      //   • + `AGENTV3_MEGA_ROADMAP_ACTIVE=on` → ACTIVE (Phase 3): the roadmap is persisted, an honest
+      //     message is shown to the user IN THEIR OWN LANGUAGE, and the build target is swapped to step 1
+      //     (a small-but-real core → fast preview) further below, just before the language prepend.
+      // Staging the two flags lets the admin observe real roadmaps before any behaviour changes. Fully
+      // wrapped: a flag off, a small app, an edit, or ANY failure ⇒ the build runs exactly as today.
+      // Billed like every other planner call (blueprintUsage + buildUsage) when it does fire.
+      let megaRoadmapActive: MegaRoadmap | null = null;
       if (envFlag('AGENTV3_MEGA_ROADMAP') && intent === 'new_build' && !isEditMode) {
         try {
           const scope = analyzeAppScope(prompt);
@@ -7611,11 +7617,14 @@ export function registerAgentV3Routes(app: Express): void {
 
             const { roadmap, rejected } = roadmapGuardrail(parseMegaRoadmap(rmT.text, scope.famousApp), scope.famousApp);
             if (roadmap) {
+              const active = envFlag('AGENTV3_MEGA_ROADMAP_ACTIVE');
               buildDiag.record({
                 phase: 'plan',
                 severity: 'info',
-                code: 'MEGA_ROADMAP',
-                message: `Mega-app roadmap (not yet active — record only): ${summarizeRoadmapForDiag(roadmap)}`,
+                code: active ? 'MEGA_ROADMAP_ACTIVE' : 'MEGA_ROADMAP',
+                message: active
+                  ? `Mega-app roadmap ACTIVE — building step 1 for a fast preview: ${summarizeRoadmapForDiag(roadmap)}`
+                  : `Mega-app roadmap (record only — not steering the build): ${summarizeRoadmapForDiag(roadmap)}`,
                 detail: [
                   `Achievable now: ${roadmap.achievableSummary}`,
                   roadmap.note ? `Honest scope note: ${roadmap.note}` : '',
@@ -7624,6 +7633,19 @@ export function registerAgentV3Routes(app: Express): void {
                 ].filter(Boolean).join('\n'),
                 autoResolved: true,
               });
+              if (active) {
+                // Persist the roadmap so the user's next visit / the 💡 guided-next-step UI (Phase 4) can
+                // resume it. Best-effort — a save failure must never block the build.
+                try {
+                  const record: StoredMegaRoadmap = { roadmap, currentStep: 1, sourcePrompt: prompt, createdAt: Date.now(), updatedAt: Date.now() };
+                  await saveMegaRoadmap(workspaceId, record);
+                } catch { /* persistence is best-effort */ }
+                // Honest, on-brand, user-language message (model-authored userMessage, provider-redacted).
+                try {
+                  events.emit({ type: 'narration', agent: 'architect', text: redactProvidersText(roadmap.userMessage), ts: Date.now() });
+                } catch { /* narration best-effort */ }
+                megaRoadmapActive = roadmap; // the build target is swapped to step 1 just before the lang prepend
+              }
             } else {
               buildDiag.record({
                 phase: 'plan',
@@ -7634,7 +7656,7 @@ export function registerAgentV3Routes(app: Express): void {
               });
             }
           }
-        } catch { /* roadmap generation is flag-gated + record-only — it must NEVER affect a build */ }
+        } catch { /* roadmap generation is flag-gated + fully wrapped — it must NEVER affect a build */ }
       }
 
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
@@ -9170,6 +9192,18 @@ export function registerAgentV3Routes(app: Express): void {
       // watermark — i.e. what THIS build actually produced.
       const brainBaselineTs = Date.now();
 
+      // MEGA-APP ROADMAP (Phase 3, ACTIVE path): swap the build target to the roadmap's step 1 — a small
+      // but REAL, working core the user can preview in a few minutes. We replace the BASE request here,
+      // BEFORE the language + attachment prepends below, so the app is still built in the user's language.
+      // The original `prompt` is untouched (language detection, telemetry and scope all read it), so only
+      // WHAT gets built changes, never the user's identity/intent signals. `megaRoadmapActive` is only ever
+      // set when both mega-roadmap flags are on and a guardrailed roadmap exists (see the block above).
+      if (megaRoadmapActive && megaRoadmapActive.steps.length > 0) {
+        const step1 = megaRoadmapActive.steps[0];
+        const total = megaRoadmapActive.steps.length;
+        buildPrompt = `${step1.buildPrompt}\n\n(This is milestone 1 of ${total} for a larger app the user is building step by step: "${step1.title}". Build THIS milestone as a complete, standalone, fully-working and polished app on its own — do NOT stub the later milestones, and do NOT try to build them now. Later milestones will be added in their own separate builds.)`;
+      }
+
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
       // language explicitly; otherwise we instruct Claude to mirror whatever
@@ -9291,7 +9325,10 @@ export function registerAgentV3Routes(app: Express): void {
       // markup as every other v5.0 call).
       let projectPlanRef: ProjectPlan | null = null;
       let projectModuleRef: ProjectModule | null = null;
-      if (projectModeEnabled(process.env, { userId, email }) && !planFirst) {
+      // Mutually exclusive with the mega-app roadmap (Phase 3): both are "big app" strategies and must
+      // never both steer one build. When the roadmap owns this build (step-1 target already set), SPM
+      // project mode stays out.
+      if (projectModeEnabled(process.env, { userId, email }) && !planFirst && !megaRoadmapActive) {
         try {
           let pPlan = await loadProjectPlan(workspaceId);
           const planPreExisted = !!pPlan;

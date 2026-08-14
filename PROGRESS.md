@@ -32531,3 +32531,30 @@ Fix in `AIChat.tsx` (the shared UI for Free / NBI / Vishwakarma):
   is time-sensitive. Same `onUnsend` handler (stop reply + remove the exchange + restore text to the box).
 
 tsc clean (frontend); full vitest suite green (15,380).
+
+---
+
+## 2026-08-14 — APK Builder: show the connected GitHub account + a short "Switch" control
+
+Admin report: they have two GitHub accounts; the app was built under account-1 but the APK build was
+connected as account-2, with NO way to see which account was active or to switch it — so the build went to
+the wrong place and couldn't be fixed.
+
+Root cause: `StoreBuildPanel` only knew there WAS a token, never showed WHICH account, and once connected
+there was no reconnect path (the "Connect GitHub" button only rendered when no token existed).
+
+Fix (UI English only; short button):
+- Thread `githubUser` (already in app state) + `onDisconnectGitHub` down: ViewPanels → APKBuilder →
+  StoreBuildPanel.
+- In the connected build card, a plain line: **"Connected as @account"** with a short **"Switch"** button
+  (disconnect + reconnect), and one honest helper line: *"This account will own the build. Wrong one? Log
+  out of GitHub first, then tap Switch."* The logout link is the ACTUAL mechanism — GitHub silently
+  re-uses whichever account is signed in, so reconnect alone can't switch; the user must log out of the
+  wrong account first. Stated plainly rather than pretending a button alone fixes it (rule 3).
+- Did NOT add an auto "wrong account" mismatch warning: the APK builder creates its own repo under whatever
+  account is connected, so the app's "home" account isn't reliably known before the build — an auto-detect
+  would risk FALSE warnings (rule 2). The always-visible account name + Switch solve the reported confusion
+  reliably instead.
+
+AppKnowledgeBase (APK Builder howToUse) updated with the account-shown + Switch guidance. tsc clean
+(frontend + server); full vitest suite green (15,380).

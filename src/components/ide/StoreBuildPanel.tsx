@@ -76,7 +76,11 @@ export interface StoreBuildPanelProps {
   backgroundColor?: string;
   /** The connected GitHub token; without one the panel explains what to do instead of failing. */
   githubToken?: string;
+  /** The connected GitHub account — shown so the user always knows which account will own the build. */
+  githubUser?: { login?: string; username?: string; name?: string } | null;
   onConnectGitHub?: () => void;
+  /** Disconnect the current GitHub account (used by the "Switch" account control). */
+  onDisconnectGitHub?: () => void;
   /** Open the step-by-step publishing guide. */
   onOpenGuide?: () => void;
   /**
@@ -128,7 +132,7 @@ function fmtSize(bytes: number): string {
 }
 
 export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
-  sessionId, appName, appId, iconDataUrl, backgroundColor, githubToken, onConnectGitHub, onOpenGuide, powerLevel,
+  sessionId, appName, appId, iconDataUrl, backgroundColor, githubToken, githubUser, onConnectGitHub, onDisconnectGitHub, onOpenGuide, powerLevel,
 }) => {
   const [phase, setPhase] = useState<Phase>('idle');
   const [setup, setSetup] = useState<SetupResult | null>(null);
@@ -440,6 +444,10 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     }
   }, [setup, ghHeaders]);
 
+  // The connected GitHub account's handle (login), shown so the user always knows which account owns the
+  // build. `githubUser` shape varies by provider, so accept the common fields.
+  const connectedLogin = githubUser?.login || githubUser?.username || githubUser?.name || null;
+
   // ── Not connected: say what is needed and why, rather than showing a dead button ──
   if (!githubToken) {
     return (
@@ -473,6 +481,34 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           finished file comes back here.
         </p>
       </div>
+
+      {/* WHICH GITHUB ACCOUNT will own this build (admin 2026-08-14: built under one account, connected as
+          another, with no way to see or switch). Show the account plainly and give a short "Switch". The
+          real mechanism to change accounts is logging out of GitHub first — GitHub otherwise silently
+          re-uses whichever account is signed in — so that link is spelled out honestly. */}
+      <div className="mx-4 sm:mx-5 mb-3 flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-white/10"
+           style={{ background: 'rgba(255,255,255,0.03)' }}>
+        <div className="min-w-0 flex items-center gap-2">
+          <Github size={14} className="text-white/60 flex-shrink-0" />
+          <span className="text-xs text-white/70 truncate">
+            {connectedLogin
+              ? <>Connected as <span className="font-semibold text-white">@{connectedLogin}</span></>
+              : 'GitHub connected'}
+          </span>
+        </div>
+        <button
+          onClick={() => { try { onDisconnectGitHub?.(); } catch { /* best-effort */ } onConnectGitHub?.(); }}
+          title="Connect a different GitHub account"
+          className="flex-shrink-0 text-[11px] font-semibold text-indigo-300 hover:text-indigo-200 px-2.5 py-1 rounded-md border border-indigo-500/40 hover:border-indigo-400/70 transition-colors"
+        >
+          Switch
+        </button>
+      </div>
+      <p className="mx-4 sm:mx-5 -mt-1 mb-3 text-[10.5px] text-white/40 leading-snug">
+        This account will own the build. Wrong one?{' '}
+        <a href="https://github.com/logout" target="_blank" rel="noreferrer" className="text-indigo-300 hover:underline">Log out of GitHub</a>
+        {' '}first, then tap Switch.
+      </p>
 
       {error && (
         <div className="mx-4 sm:mx-5 mb-4 flex gap-2 px-3 py-2.5 rounded-lg text-xs leading-relaxed text-amber-300"

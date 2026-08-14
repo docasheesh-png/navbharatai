@@ -4,6 +4,7 @@ import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/i
 import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
+import { analyzeAppScope } from '../lib/appScopeAnalyzer';
 import { requestedFeatureLabels, renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -7359,6 +7360,27 @@ export function registerAgentV3Routes(app: Express): void {
         }
       } catch {
         /* requirement analysis is best-effort — never let it affect the build */
+      }
+
+      // APP SCOPE (admin 2026-08-14, Phase 1 of the mega-app roadmap system) — RECORD ONLY for now: is this
+      // an ordinary one-shot app (build directly, today's behaviour) or a MEGA app a later phase will break
+      // into a step-by-step roadmap? This changes NOTHING about the build yet — it only writes an honest
+      // signal into the report so the classification can be reviewed against real prompts before it steers
+      // anything. Default is always 'direct'; only a strong mega-signal (famous product / heavy infra /
+      // huge feature spec) reads as 'analyze'.
+      try {
+        const scope = analyzeAppScope(prompt);
+        buildDiag.record({
+          phase: 'plan',
+          severity: 'info',
+          code: 'APP_SCOPE',
+          message: scope.decision === 'analyze'
+            ? `Scope: LARGE — ${scope.famousApp ? `clone of ${scope.famousApp}; ` : ''}a later phase will offer a step-by-step roadmap (not yet active). Signals: ${scope.signals.join('; ')}.`
+            : `Scope: ordinary one-shot app — built directly (today's behaviour). ${scope.signals.join('; ')}.`,
+          autoResolved: true,
+        });
+      } catch {
+        /* scope analysis is advisory + record-only — it must never affect a build */
       }
 
       // UNBREAKABLE weak-module no-Claude chokepoint (admin absolute rule, 2026-07-13). Bind a no-Claude

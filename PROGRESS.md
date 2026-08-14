@@ -32436,3 +32436,39 @@ Tests: `megaRoadmap.test.ts` +2 (userMessage carry-through + user-language fallb
 `MegaRoadmapStore.test.ts` new (8 — parse strictness + cache round-trip + never-throws). Gate: tsc clean
 (frontend + server); full vitest suite green (15,369). Not user-facing until BOTH flags on, so no
 AppKnowledgeBase entry yet — that lands with the Phase-4 visible 💡 roadmap UI.
+
+---
+
+## 2026-08-14 — Mega-app roadmap system, Phase 4: the 💡 guided roadmap UI (one-tap next step)
+
+The final phase — the roadmap becomes VISIBLE and interactive in the existing 💡 (NextSuggestionsBulb),
+so a non-tech user grows a big app one working milestone at a time.
+
+- **`publicRoadmapView(roadmap, currentStep)`** (pure, in `megaRoadmap.ts`, tested) — the client-facing
+  shape: per-step status (`done`/`current`/`next`/`upcoming`) relative to the milestone REACHED (never
+  marks a step done that has not been passed), `complete`, `nextStep`, and `nextFillPrompt`. The internal
+  English `buildPrompt` is WITHHELD; the next-step fill is the user-language `title + goal` (sending English
+  would build the next step in English — the user-language rule stays intact).
+- **Endpoint** `GET /api/agentv3/next-suggestions` now also returns `roadmap` (the public view, every
+  user-facing string provider-redacted per the White-Label law) when a workspace is on a journey — one
+  fetch powers both the ideas and the roadmap. **New** `POST /api/agentv3/mega-roadmap/advance`
+  (owner-scoped, clamped, forward-only, idempotent) marks a step REACHED — called by the 💡 only AFTER a
+  step's build actually completes, so a step is never marked done before it is built.
+- **`NextSuggestionsBulb.tsx`** now renders a roadmap section above the generic ideas: the honest
+  user-language message, the checkpoint list (✓ done / ● current / ▶ next / ○ upcoming, with a "needs
+  setup" tag on infra-ceiling steps), and a "Build next step" button that drops the next step's
+  instruction into the composer (never auto-runs). When the resulting build finishes, the bulb advances
+  the journey server-side and re-reads it; on the last step it shows "🎉 All steps done!". The bulb still
+  renders nothing when there is neither a roadmap nor an idea.
+- AppKnowledgeBase: the 💡 entry now documents the guided roadmap (so every NavBharatAI AI can explain it),
+  stressing it appears ONLY for genuinely large apps and ordinary apps build directly.
+
+Still gated by the same two flags (`AGENTV3_MEGA_ROADMAP` + `AGENTV3_MEGA_ROADMAP_ACTIVE`, both default
+OFF) — a roadmap only exists to surface once the ACTIVE path has built one. Tests: `megaRoadmap.test.ts`
++5 (publicRoadmapView). Gate: tsc clean (frontend + server); full vitest suite green.
+
+**The mega-app roadmap system is now complete end to end (Phases 1-4):** deterministic scope pre-screen →
+honest LLM roadmap + deterministic guardrail → honest reply in the user's language + auto-built real step-1
+preview → guided one-tap next-step roadmap in the 💡. Ordinary apps are untouched (build directly); big
+apps get an honest, engaging, step-by-step journey. Turn on with `AGENTV3_MEGA_ROADMAP=on` (observe roadmaps
+in reports) then `AGENTV3_MEGA_ROADMAP_ACTIVE=on` (go live).

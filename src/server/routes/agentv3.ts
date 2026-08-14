@@ -5,8 +5,8 @@ import { redactProviderError, redactProvidersText } from '../lib/providerRedacti
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { analyzeAppScope } from '../lib/appScopeAnalyzer';
-import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, type MegaRoadmap } from '../lib/megaRoadmap';
-import { saveMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
+import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, type MegaRoadmap } from '../lib/megaRoadmap';
+import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { requestedFeatureLabels, renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -3092,10 +3092,68 @@ export function registerAgentV3Routes(app: Express): void {
       // lookup needed. Cap the text so a huge app can't blow the regex work up.
       const appText = `${Object.keys(files).join(' ')}\n${source}`.slice(0, 20000);
       const suggestions = nextBuildSuggestions({ appText, source, max: 5 });
-      res.json({ suggestions });
+
+      // MEGA-APP ROADMAP (Phase 4): if this workspace is on a guided step-by-step journey, surface it in
+      // the 💡 too. User-facing, so every string is provider-redacted (White-Label law) and the internal
+      // per-step buildPrompt is withheld by publicRoadmapView. Best-effort — a roadmap read failure just
+      // omits the roadmap. Only meaningful once AGENTV3_MEGA_ROADMAP_ACTIVE built one; otherwise null.
+      let roadmap: ReturnType<typeof publicRoadmapView> | null = null;
+      try {
+        const stored = await loadMegaRoadmap(workspaceId);
+        if (stored) {
+          const view = publicRoadmapView(stored.roadmap, stored.currentStep);
+          roadmap = {
+            ...view,
+            userMessage: redactProvidersText(view.userMessage),
+            note: view.note ? redactProvidersText(view.note) : null,
+            nextFillPrompt: view.nextFillPrompt ? redactProvidersText(view.nextFillPrompt) : null,
+            steps: view.steps.map((s) => ({ ...s, title: redactProvidersText(s.title), goal: redactProvidersText(s.goal) })),
+          };
+        }
+      } catch { /* roadmap surface is best-effort — never blocks the suggestions */ }
+
+      res.json({ suggestions, roadmap });
     } catch {
       // A suggestion surface must never error the app — an empty list is the honest fallback.
-      res.json({ suggestions: [] });
+      res.json({ suggestions: [], roadmap: null });
+    }
+  });
+
+  // MEGA-APP ROADMAP (Phase 4): advance the guided journey to the step the user just built. Called by the
+  // 💡 AFTER a roadmap-step build completes successfully, so a step is only ever marked reached once its
+  // build has actually run (honest — never advanced on an unbuilt step). Owner-scoped; clamped; idempotent
+  // (advancing to a step already reached is a no-op). Returns the refreshed public view.
+  app.post('/api/agentv3/mega-roadmap/advance', async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const step = typeof req.body?.step === 'number' ? Math.floor(req.body.step) : NaN;
+    if (!workspaceId || !Number.isFinite(step)) { res.status(400).json({ error: 'workspaceId and numeric step are required' }); return; }
+    if (!await assertVerifiedWorkspaceOwner(req, workspaceId)) {
+      res.status(403).json({ error: 'Not your workspace.' });
+      return;
+    }
+    try {
+      const stored = await loadMegaRoadmap(workspaceId);
+      if (!stored) { res.status(404).json({ error: 'No roadmap for this workspace.' }); return; }
+      const total = stored.roadmap.steps.length;
+      const target = Math.min(Math.max(1, step), total);
+      // Only ever move FORWARD — never rewind a journey the user has already progressed past.
+      if (target > stored.currentStep) {
+        stored.currentStep = target;
+        stored.updatedAt = Date.now();
+        await saveMegaRoadmap(workspaceId, stored);
+      }
+      const view = publicRoadmapView(stored.roadmap, stored.currentStep);
+      res.json({
+        roadmap: {
+          ...view,
+          userMessage: redactProvidersText(view.userMessage),
+          note: view.note ? redactProvidersText(view.note) : null,
+          nextFillPrompt: view.nextFillPrompt ? redactProvidersText(view.nextFillPrompt) : null,
+          steps: view.steps.map((s) => ({ ...s, title: redactProvidersText(s.title), goal: redactProvidersText(s.goal) })),
+        },
+      });
+    } catch {
+      res.status(500).json({ error: 'Could not advance the roadmap.' });
     }
   });
 

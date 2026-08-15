@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { navFor } from '../src/lib/offlineAssistant';
 import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
 import type { SettingsScreen } from '../src/types';
@@ -65,12 +67,21 @@ describe('Settings Terminal — KB entry + Offline AI navigation', () => {
     expect(nav!.settingsScreen).toBe(screen);
   });
 
-  it('Git moved from the sidebar INTO App Settings (admin 2026-08-01)', () => {
+  it('🔒 Git is in App Settings AND the tile really exists (it did not, for two weeks)', () => {
+    // The 2026-08-01 move took Git OFF the sidebar and into a Settings screen -- but that screen
+    // (`modules`) was never made reachable: nothing in the app ever set settingsScreen to it. So the
+    // whole DevOps surface had no doorway at all while this KB entry confidently gave directions to
+    // it. Asserting the PATH alone is what let that survive, so the tile is asserted too.
     const entry = kb('settings_git');
     expect(entry).toBeTruthy();
-    // No longer on the sidebar rail — it now opens from App Settings.
     expect(entry!.path).not.toContain('Sidebar → Git');
     expect(entry!.path).toContain('App Settings');
     expect(entry!.path).toMatch(/Git & Deployment/i);
+
+    const panel = readFileSync(join(__dirname, '../src/components/panels/SettingsPanel.tsx'), 'utf8');
+    const appSettings = panel.slice(panel.indexOf("title: 'App Settings'"), panel.indexOf("title: 'Legal & Trust'"));
+    expect(appSettings, 'the Git tile is missing from App Settings').toContain("id: 'git'");
+    // And the dead screen that hid it is gone, not merely bypassed.
+    expect(panel).not.toContain("settingsScreen === 'modules'");
   });
 });

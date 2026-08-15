@@ -25,20 +25,26 @@ describe('App Settings — Your Website hub', () => {
     expect(block).toContain("id: 'auth'");
     expect(block).toContain("id: 'storage'");
     expect(block).toContain("id: 'secrets'");
-    // The section carries the honest one-line purpose.
-    expect(block).toContain('Everything your app needs');
+    // The section carries the honest one-line purpose. Reworded 2026-08-14 to say "BUILT APP" —
+    // once General Settings became its own group, "your app" was ambiguous between the app the user
+    // built and NavBharatAI itself, which is the exact confusion the split exists to end.
+    expect(block).toContain('Everything your BUILT APP needs');
     // No duplicate publish surface: the old standalone "Hosting & Publish" tile/screen is gone,
     // merged into Hosting & Deploy (admin 2026-07-29).
     expect(block).not.toContain("id: 'hosting'");
     expect(src).not.toContain("settingsScreen === 'hosting'");
   });
 
-  it('Logs and General stay INSIDE App Settings (admin 2026-07-29: do not remove them)', () => {
+  it('🔒 LOGS stays inside App Settings (admin 2026-07-29: "hatana mat") — and General no longer does', () => {
+    // The 2026-07-29 instruction named TERMINAL and LOGS, and it still holds for Logs. General was
+    // never covered by it, and on 2026-08-14 the admin moved General into its own group: App Settings
+    // is about the app the USER BUILT, while theme/view-mode/text-size are about NavBharatAI itself.
     const start = src.indexOf("title: 'App Settings'");
-    const block = src.slice(start, start + 2400);
-    expect(block).toContain("id: 'general'");
+    const block = src.slice(start, src.indexOf("title: 'Legal & Trust'", start));
     expect(block).toContain("id: 'logs'");
-    // They were not spun out into a separate group.
+    expect(block).not.toContain("id: 'general'");
+    // It went to a named group of its own, not into some invented catch-all.
+    expect(src).toContain("title: 'General Settings'");
     expect(src).not.toContain("title: 'Build & Debug'");
   });
 

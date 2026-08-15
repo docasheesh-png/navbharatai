@@ -563,3 +563,28 @@ describe('write-it-right-the-first-time prevention list', () => {
     expect(p).toContain('KEEP the `import ErrorBoundary` line');
   });
 });
+
+describe('the scaffold port is guidance, not an order (admin 2026-08-15)', () => {
+  /**
+   * THE BUILD THIS COMES FROM. The framework was read as `vite-react` for an app that is actually a
+   * fullstack client/ + server/ + shared/ project, so the hint told the model "PORT 5173". The dev
+   * server came up correctly on 3000, and the model spent the last ten minutes of a 35.8-minute build
+   * trying to MOVE the working server to 5173 — in its own words, "Server port 3000 par chal raha hai,
+   * lekin preview 5173 expect kar raha hai."
+   *
+   * The platform now sweeps for the live port, but a sweep cannot help if the model has already
+   * restarted the server onto the port it thought was mandatory. Both halves are needed.
+   */
+  it('every framework hint carries the rule, not just one of them', () => {
+    for (const fw of ['vite-react', 'nextjs', 'node-express', 'static', 'go', 'flask', undefined]) {
+      const p = architectSystemPrompt(fw);
+      expect(p, String(fw)).toContain('call update_preview with the port it ACTUALLY bound');
+      expect(p, String(fw)).toContain("Never change your server's port to match");
+    }
+  });
+
+  it('it says the scaffold number is a DEFAULT', () => {
+    // Without this word the two sentences read as contradictory instructions and the model picks one.
+    expect(architectSystemPrompt('vite-react')).toMatch(/DEFAULT, not a requirement/);
+  });
+});

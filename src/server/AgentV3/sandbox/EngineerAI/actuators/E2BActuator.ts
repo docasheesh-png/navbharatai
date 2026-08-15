@@ -8,6 +8,7 @@ import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand } from './devServerHost';
+import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
 import { dbProvisionScript, parseDbProvision, provisionOutcomeNote, provisionDiagnostics, CANONICAL_DB_URL, type DbProvisionOutcome } from '../../dbProvisionVerify';
@@ -1199,8 +1200,37 @@ export class E2BActuator implements IEngineerActuator {
           lastDiagnosis = { cause: 'missing_module', recovery: 'code_fix', detail: `The dev-server runner (e.g. vite) was "not found" and nothing is serving real HTTP on port ${boundPort} — the port was only held by a stale/unrelated process. The app's dependencies did not install correctly (ensure the framework CLI is in devDependencies and the install completed).` };
         }
       }
+      // SMART PORT SWITCH — before declaring the server dead, look where else it might be.
+      //
+      // Everything above needs the server to cooperate: pinning needs the launch to go through the
+      // managed path, and detectDevPort needs a recognisable announcement in the log. When neither
+      // holds, `boundPort` is just the port we ASSUMED, and one failed probe of it condemns a server
+      // that may be perfectly healthy one port away.
+      //
+      // That is the 2026-08-15 report exactly: the model launched the server itself with a piped
+      // command (so pinning correctly skipped it), the app came up on 3000, the framework had been
+      // read as `vite-react` so the platform watched 5173, and a working app was reported dead — after
+      // which the model spent ten minutes trying to move the working server to the port we wanted.
+      //
+      // It runs ONLY when the expected port is already down, so a healthy build pays nothing, and it
+      // is ONE command for all candidates because a bare `ls` on that build's degraded sandbox took
+      // 116 seconds — a probe per port could outlast the build itself.
+      let livePort = boundPort;
+      if (shouldSweep(portUp)) {
+        const found = await sandbox.commands
+          .run(buildPortSweepCommand(portCandidates(boundPort)), { timeoutMs: 30_000 })
+          .then((r) => parsePortSweep(r.stdout))
+          .catch(() => null);
+        if (found !== null) {
+          // A REAL HTTP responder — the same standard the Fix-42 guard demands, so a stale TCP holder
+          // cannot promote itself here either.
+          portUp = true;
+          livePort = found;
+          stdout += `\n${sweepFoundSummary(boundPort, found)}`;
+        }
+      }
       // Honest health line: the verified port when UP, the REAL root cause when DOWN.
-      stdout += `\n${devServerHealthLine(portUp, boundPort, portUp ? undefined : (lastDiagnosis ?? classifyDevServerFailure(devLog)))}`;
+      stdout += `\n${devServerHealthLine(portUp, livePort, portUp ? undefined : (lastDiagnosis ?? classifyDevServerFailure(devLog)))}`;
 
       return { exitCode: 0, stdout, stderr };
     }

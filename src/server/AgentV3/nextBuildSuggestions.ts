@@ -89,6 +89,60 @@ const UNIVERSAL: Array<{ id: string; title: string; detail: string; prompt: stri
   },
 ];
 
+/**
+ * CONTEXTUAL suggestions — derived from what the app's REAL code actually contains, so they feel like
+ * "the next step for THIS build" rather than a generic list. Each has `applies` (a signal the feature is
+ * present in the app) AND `present` (the follow-up is already done → never suggest). Included only when the
+ * signal matches and the follow-up is missing. This is the layer that makes the 💡 feel build-specific.
+ */
+const CONTEXTUAL: Array<{ id: string; title: string; detail: string; prompt: string; applies: RegExp; present: RegExp }> = [
+  {
+    id: 'ctx-pagination', title: 'Add pagination', detail: 'Keep long lists fast and easy to browse.',
+    prompt: 'Add pagination or infinite scroll to the main list so long lists stay fast and easy to browse.',
+    applies: /\.map\(|\.foreach\(|v-for|\{items\.|\blist\b/i, present: /pagination|infinite.?scroll|load.?more|per.?page|page\s*\d/i,
+  },
+  {
+    id: 'ctx-validation', title: 'Add form validation', detail: 'Catch mistakes with clear inline errors.',
+    prompt: 'Add inline validation and clear error messages to the forms — required fields, format checks, and a helpful message under each field.',
+    applies: /<form|<input|<textarea|useform|handlesubmit/i, present: /required|validat|\bzod\b|\byup\b|error.?message|aria-invalid/i,
+  },
+  {
+    id: 'ctx-edit-delete', title: 'Add edit & delete', detail: 'Let users change or remove what they created.',
+    prompt: 'Let users edit and delete the items they created, with a quick confirm before deleting.',
+    applies: /\badd\b|create|new (item|task|note|entry|record)|\.push\(/i, present: /\bdelete\b|\bremove\b|\bedit\b|onupdate|onedit|ondelete/i,
+  },
+  {
+    id: 'ctx-net-states', title: 'Add loading & error states', detail: 'Show progress and friendly errors on network calls.',
+    prompt: 'Show loading spinners and friendly error messages while data is loading or if a request fails, everywhere the app talks to the network.',
+    applies: /fetch\(|axios|usequery|supabase|firebase/i, present: /isloading|loading state|spinner|skeleton|error.?state|catch\s*\(/i,
+  },
+  {
+    id: 'ctx-cloud-sync', title: 'Add sign-in & cloud sync', detail: 'Save each user\'s data to the cloud, not just this browser.',
+    prompt: 'Add sign-in so each user\'s data is saved to the cloud and synced across their devices, instead of only this browser.',
+    applies: /localstorage|sessionstorage|indexeddb/i, present: /supabase|firebase|\/api\/|mongodb|prisma|sign.?in|\blogin\b|auth/i,
+  },
+  {
+    id: 'ctx-404', title: 'Add a 404 page', detail: 'A friendly screen for unknown links.',
+    prompt: 'Add a friendly 404 "page not found" screen for unknown routes, with a link back home.',
+    applies: /react-router|<routes|createbrowserrouter|<route\b/i, present: /404|not.?found|path=["']\*|catch.?all/i,
+  },
+  {
+    id: 'ctx-images', title: 'Improve images', detail: 'Lazy-load and never break the layout.',
+    prompt: 'Add lazy-loading and a graceful fallback for images so they load fast and never break the layout.',
+    applies: /<img\b/i, present: /loading=["']lazy|lazyload|onerror=|object-fit/i,
+  },
+  {
+    id: 'ctx-game-sound', title: 'Add sound effects', detail: 'Sound and music with a mute toggle.',
+    prompt: 'Add sound effects and background music with a mute toggle.',
+    applies: /requestanimationframe|<canvas|game.?loop|\bsprite\b/i, present: /new audio|\.play\(\)|howler|<audio|web.?audio/i,
+  },
+  {
+    id: 'ctx-highscore', title: 'Save high scores', detail: 'Remember the best score next time.',
+    prompt: 'Save the player\'s best score so it is remembered next time, and show a high-scores list.',
+    applies: /\bscore\b/i, present: /high.?score|best.?score|leaderboard/i,
+  },
+];
+
 /** Sentence-case a domain label ("cart & checkout" → "Add cart & checkout"). */
 function domainTitle(label: string): string {
   const short = label.length > 42 ? label.slice(0, 40).replace(/[,;].*$/, '') + '…' : label;
@@ -132,7 +186,18 @@ export function nextBuildSuggestions(input: { appText: string; source: string; m
     if (out.length >= max) return out;
   }
 
-  // 2) Universal enhancements the app does not already have.
+  // 2) CONTEXTUAL — next steps derived from what THIS app's code actually contains (list → pagination,
+  //    form → validation, game → sound, localStorage → cloud sync). These make the 💡 feel build-specific.
+  for (const c of CONTEXTUAL) {
+    if (seen.has(c.id)) continue;
+    if (!c.applies.test(haystack)) continue;   // the app doesn't have the thing this builds on
+    if (c.present.test(haystack)) continue;      // the follow-up is already done → never suggest
+    seen.add(c.id);
+    out.push({ id: c.id, title: c.title, detail: c.detail, prompt: c.prompt, kind: 'domain' });
+    if (out.length >= max) return out;
+  }
+
+  // 3) Universal enhancements the app does not already have (the fallback / general polish).
   for (const u of UNIVERSAL) {
     if (u.present.test(haystack)) continue; // already there → never suggest
     if (seen.has(u.id)) continue;

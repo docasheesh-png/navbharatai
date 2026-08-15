@@ -32742,3 +32742,24 @@ node_modules` failed with "Directory not empty" (an overlayfs quirk), leaving a 
 every subsequent install layered onto, and the model improvised sysadmin recovery for ~25 minutes with
 no playbook. And escalation never fired: 36 minutes of failure on `kimi-k2.5` (36 of 36 calls) with
 `plannedModel: claude-sonnet-4-6` never triggered an upgrade.
+## 2026-08-14 — 💡 next-build suggestions: ♻️ refresh + genuinely build-specific (contextual) ideas
+
+Admin: the 💡 felt "random" and wanted a ♻️ to show other ideas + suggestions tied to the CURRENT build.
+Investigated first — the engine was never random (deterministic: domain gaps → universal). The "random"
+feel came from the universal fallback (dark mode / mobile / search…) dominating whenever no domain gap was
+found, so different apps saw the same generic list.
+
+Two real fixes:
+- **Contextual layer (`nextBuildSuggestions.ts`):** a new middle tier derived from what the app's REAL code
+  contains — a rendered list → "add pagination"; a form → "add validation"; fetch/supabase → "loading &
+  error states"; localStorage → "sign-in & cloud sync"; react-router → "404 page"; `<img>` → lazy-load;
+  canvas/game-loop → "sound effects"; a score → "save high scores". Each has an `applies` signal AND a
+  `present` guard (never suggested if already done). Ranked domain → contextual → universal, so the top
+  ideas are build-specific and the generic polish falls to the end.
+- **♻️ refresh (`NextSuggestionsBulb.tsx`):** the endpoint now returns a larger pool (max 12); the bulb
+  shows a 4-wide window and a ♻️ button rotates the window through the pool (wrapping), so each press
+  reveals genuinely different, still-app-relevant ideas — no re-fetch, no invented filler. ♻️ only appears
+  when the pool exceeds the window; the window resets to the most-relevant ideas on each new build.
+
+Tests: `nextBuildSuggestions.test.ts` +4 (list→pagination ranks ahead of universal; game→sound+highscore;
+no follow-up already present; pool > window). tsc clean (frontend + server); full suite green.

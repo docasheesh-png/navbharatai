@@ -3094,7 +3094,9 @@ export function registerAgentV3Routes(app: Express): void {
       // The app's own files ARE its intent signal (title, game.ts, product page, …) — no conversation
       // lookup needed. Cap the text so a huge app can't blow the regex work up.
       const appText = `${Object.keys(files).join(' ')}\n${source}`.slice(0, 20000);
-      const suggestions = nextBuildSuggestions({ appText, source, max: 5 });
+      // A larger pool than the ~4 shown at once, so the 💡's ♻️ refresh can rotate through genuinely
+      // different, still-app-relevant ideas (domain gaps + code-derived contextual + universal polish).
+      const suggestions = nextBuildSuggestions({ appText, source, max: 12 });
 
       // MEGA-APP ROADMAP (Phase 4): if this workspace is on a guided step-by-step journey, surface it in
       // the 💡 too. User-facing, so every string is provider-redacted (White-Label law) and the internal

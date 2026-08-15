@@ -190,6 +190,12 @@ export const STORAGE_SHIM_SOURCE = [
 ].join('\n');
 
 /**
+ * The class the host adds to <html> to turn game mode OFF (i.e. restore normal document selection).
+ * Named for what it does, and prefixed so it cannot collide with an app's own class names.
+ */
+export const APP_FEEL_OFF_CLASS = '__nbai-text-ok';
+
+/**
  * APP-FEEL TOUCH CSS — the store's second real-use report (admin, 2026-08-15): long-pressing the
  * screen mid-game selected text and popped the copy menu; double-tap zoomed. A published app must
  * feel like an app, not a document. Selection is disabled by default with the two honest carve-outs
@@ -200,8 +206,34 @@ export const STORAGE_SHIM_SOURCE = [
  * with \`user-select: text\`.
  */
 export const APP_TOUCH_CSS = [
-  `html, body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }`,
-  `input, textarea, select, [contenteditable]:not([contenteditable="false"]) { -webkit-user-select: text; user-select: text; }`,
+  `html:not(.${APP_FEEL_OFF_CLASS}), html:not(.${APP_FEEL_OFF_CLASS}) body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }`,
+  `html:not(.${APP_FEEL_OFF_CLASS}) input, html:not(.${APP_FEEL_OFF_CLASS}) textarea, html:not(.${APP_FEEL_OFF_CLASS}) select, html:not(.${APP_FEEL_OFF_CLASS}) [contenteditable]:not([contenteditable="false"]) { -webkit-user-select: text; user-select: text; }`,
+].join('\n');
+
+/**
+ * GAME MODE, the viewer's own switch (admin 2026-08-15: "ek toggle on/off bana do — game mode").
+ *
+ * The CSS above is a DEFAULT, not a verdict: a game wants selection off, a recipe app's reader wants
+ * to copy the ingredients. Only the person holding the phone knows which, so the player UI carries a
+ * switch and tells the frame about it through this listener.
+ *
+ * postMessage is the ONLY channel available: the store player's iframe is deliberately opaque-origin
+ * (no `allow-same-origin`), so the host cannot reach into its DOM — but postMessage crosses that
+ * line by design. Re-rendering the page with a different flag would also work and is exactly what we
+ * must NOT do: it reloads the app and throws away the game the viewer is in the middle of. Toggling
+ * a class costs one repaint and keeps the run alive.
+ *
+ * It accepts one message shape and does one thing — add or remove a class. An app could send itself
+ * the same message, which changes nothing: code already running in that frame can set its own class
+ * anyway. Default (no message, no class) is game mode ON, so the app-like behaviour is what a viewer
+ * gets before touching anything.
+ */
+export const APP_FEEL_LISTENER_SOURCE = [
+  `window.addEventListener('message', function (e) {`,
+  `    var d = e && e.data;`,
+  `    if (!d || d.__nbaiAppFeel === undefined) return;`,
+  `    try { document.documentElement.classList[d.__nbaiAppFeel ? 'remove' : 'add'](${JSON.stringify(APP_FEEL_OFF_CLASS)}); } catch (err) {}`,
+  `  });`,
 ].join('\n');
 
 /**

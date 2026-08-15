@@ -15,7 +15,7 @@
  * Pure + dependency-free (string in → string out) → unit-testable.
  */
 import { VirtualFileSystem } from '../project/ProjectModel';
-import { PROCESS_SHIM_SOURCE, NAVDATA_RUNTIME_SOURCE, STORAGE_SHIM_SOURCE, APP_TOUCH_CSS } from './previewImportMeta';
+import { PROCESS_SHIM_SOURCE, NAVDATA_RUNTIME_SOURCE, STORAGE_SHIM_SOURCE, APP_TOUCH_CSS, APP_FEEL_LISTENER_SOURCE } from './previewImportMeta';
 
 const VUE_CDN = 'https://unpkg.com/vue@3.4.38/dist/vue.runtime.global.prod.js';
 const SFC_LOADER_CDN = 'https://cdn.jsdelivr.net/npm/vue3-sfc-loader@0.9.5/dist/vue3-sfc-loader.js';
@@ -120,7 +120,8 @@ export function buildVuePreview(vfs: VirtualFileSystem, _origin?: string): strin
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Preview</title>
 <style>${APP_TOUCH_CSS}</style>
-<script>${STORAGE_SHIM_SOURCE}</script>
+<script>${STORAGE_SHIM_SOURCE}
+${APP_FEEL_LISTENER_SOURCE}</script>
 ${css ? `<style>\n${css}\n</style>` : ''}
 <script src="${VUE_CDN}"></script>
 <script src="${SFC_LOADER_CDN}"></script>

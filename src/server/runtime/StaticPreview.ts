@@ -14,7 +14,7 @@
  */
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { normalizePath } from '../project/ProjectModel';
-import { STORAGE_SHIM_SOURCE, APP_TOUCH_CSS, NAVDATA_RUNTIME_SOURCE } from './previewImportMeta';
+import { STORAGE_SHIM_SOURCE, APP_TOUCH_CSS, NAVDATA_RUNTIME_SOURCE, APP_FEEL_LISTENER_SOURCE } from './previewImportMeta';
 
 const ASSET_MIME: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
@@ -119,7 +119,7 @@ export function buildStaticPreview(vfs: VirtualFileSystem, entry?: string): stri
   //   • NavData — the builder prompt promises window.NavData on every generated page; static pages
   //     were the one shell where that promise was silently broken.
   // Injected at the TOP of <head> so the shim runs before any app script and the CSS is overridable.
-  const platformTag = `<style>${APP_TOUCH_CSS}</style>\n<script>\n${STORAGE_SHIM_SOURCE}\n${NAVDATA_RUNTIME_SOURCE}\n</script>`;
+  const platformTag = `<style>${APP_TOUCH_CSS}</style>\n<script>\n${STORAGE_SHIM_SOURCE}\n${APP_FEEL_LISTENER_SOURCE}\n${NAVDATA_RUNTIME_SOURCE}\n</script>`;
   html = /<head[^>]*>/i.test(html)
     ? html.replace(/<head[^>]*>/i, (m) => `${m}\n${platformTag}`)
     : platformTag + '\n' + html;

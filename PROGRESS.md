@@ -32883,3 +32883,27 @@ Both were platform-level, both fixed in all three preview shells (React / Vue / 
 - **Locked by `previewAppFeel.test.ts` (14 tests):** every shell carries both shims, the storage
   shim runs BEFORE any app script, the touch CSS lands early enough to be overridable, and the
   painted-guard is the first statement of `showError` in both dynamic shells.
+
+### Game mode — the viewer's own switch (admin 2026-08-15, same session as the crash fix)
+
+The admin's answer to the forced app-feel CSS: *"isse behtar hota hai ek toggle on/off bana do (game
+mode) — on hone par select and zoom band, off hone par kar sakte hai."* Correct, with one honest
+amendment kept: **the default stays ON**. The report that produced the feature was someone playing a
+GAME; a default of OFF would hand every new viewer the bad experience first and make them hunt for a
+setting. The switch serves the minority case, the default serves the majority.
+
+- `APP_TOUCH_CSS` is now gated on a single class (`__nbai-text-ok`), so one class flips every rule —
+  and a document with NO class is already game-mode-ON, which is what a freshly loaded frame is.
+- `APP_FEEL_LISTENER_SOURCE` (all three shells) accepts ONE message shape and does ONE thing: add or
+  remove that class. postMessage is the only channel into the player's deliberately opaque-origin
+  iframe, and it is enough. Re-rendering with a different flag would also work and is exactly what we
+  must NOT do — it reloads the app and throws away the game in progress. Test-pinned: `srcDoc` must
+  never depend on the toggle.
+- The player's top bar carries the switch (controller icon ON / text icon OFF), remembered PER APP on
+  the platform's own origin — "let me copy from this recipe app" must not turn selection on inside the
+  next game — and re-sent on every frame load, because a fresh document starts at the default.
+- ⚠️ `lucide-react@0.546.0` does NOT export `TextCursor`/`TextCursorInput` at the top level even
+  though its .d.ts declares them (they live in the `index` namespace only). `Type` and
+  `MousePointerClick` are exported. A wrong icon import fails with a confusing cascade of
+  "X cannot be used as a JSX component" errors on UNRELATED icons in the same file — the real error
+  is the first line, the TS2305.

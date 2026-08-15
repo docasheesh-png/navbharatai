@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { buildReactPreview } from './ReactPreview';
 import { buildVuePreview } from './VuePreview';
 import { buildStaticPreview } from './StaticPreview';
-import { STORAGE_SHIM_SOURCE, APP_TOUCH_CSS, NAVDATA_RUNTIME_SOURCE } from './previewImportMeta';
+import { STORAGE_SHIM_SOURCE, APP_TOUCH_CSS, NAVDATA_RUNTIME_SOURCE, APP_FEEL_LISTENER_SOURCE, APP_FEEL_OFF_CLASS } from './previewImportMeta';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { VirtualFileSystem } from '../project/ProjectModel';
 
 /**
@@ -76,7 +78,7 @@ describe('every shell ships the app-feel CSS (no long-press selection, inputs st
     expect(APP_TOUCH_CSS).toContain('user-select: none');
     expect(APP_TOUCH_CSS).toContain('-webkit-touch-callout: none');
     expect(APP_TOUCH_CSS).toContain('touch-action: manipulation');
-    expect(APP_TOUCH_CSS).toMatch(/input, textarea, select, \[contenteditable\][^{]*\{[^}]*user-select: text/);
+    expect(APP_TOUCH_CSS).toMatch(/input[^{]*textarea[^{]*\{[^}]*user-select: text/);
   });
 
   it('the CSS is a DEFAULT the app can override — injected before the app\'s own styles', () => {
@@ -118,5 +120,63 @@ describe('the static shell finally keeps the NavData promise', () => {
     const html = buildStaticPreview(VirtualFileSystem.fromRecord({ 'index.html': '<body><h1>x</h1></body>' }));
     expect(html).toContain(STORAGE_SHIM_SOURCE);
     expect(html).toContain(APP_TOUCH_CSS);
+  });
+});
+
+describe('GAME MODE — the viewer\'s own on/off switch (admin 2026-08-15)', () => {
+  it('every rule is gated on the off-class, so one class flips the whole behaviour', () => {
+    // Both halves must be gated: if the input carve-out were ungated it would keep overriding an
+    // app's own `user-select` rules even after the viewer turned game mode off.
+    for (const line of APP_TOUCH_CSS.split('\n')) {
+      expect(line, line).toContain(`:not(.${APP_FEEL_OFF_CLASS})`);
+    }
+  });
+
+  it('game mode ON is what a document with NO class gets — the default needs no message', () => {
+    // The frame starts clean, so "no one has spoken yet" must already be the app-like behaviour.
+    expect(APP_TOUCH_CSS).toContain(`html:not(.${APP_FEEL_OFF_CLASS})`);
+    expect(APP_TOUCH_CSS).not.toContain(`html.${APP_FEEL_OFF_CLASS} `);
+  });
+
+  it.each(shells)('%s shell listens for the host\'s switch', (_name, html) => {
+    expect(html).toContain(APP_FEEL_LISTENER_SOURCE);
+  });
+
+  it('the listener does exactly one thing and ignores everything else', () => {
+    // A message handler inside a page running a stranger's app is a door; this one only toggles a
+    // class, and only for its own message shape.
+    expect(APP_FEEL_LISTENER_SOURCE).toContain('d.__nbaiAppFeel === undefined) return');
+    expect(APP_FEEL_LISTENER_SOURCE).toContain('classList');
+    expect(APP_FEEL_LISTENER_SOURCE).not.toMatch(/eval|innerHTML|Function\(/);
+  });
+});
+
+describe('the player wires the switch honestly', () => {
+  const player = readFileSync(join(process.cwd(), 'src/components/ide/WebAppPlayer.tsx'), 'utf8');
+
+  it('defaults to ON — only an explicit stored "off" turns it off', () => {
+    // The bug that created this feature was hit while playing a game, so a new viewer must never
+    // meet the document-like behaviour first.
+    expect(player).toContain("localStorage.getItem(GAME_MODE_KEY(appId)) !== 'off'");
+  });
+
+  it('remembers the choice PER APP, not globally', () => {
+    expect(player).toContain('nbai_store_gamemode_${appId}');
+  });
+
+  it('re-tells the frame on every load, because a fresh document starts at the default', () => {
+    expect(player).toContain('onLoad=');
+    expect(player).toMatch(/postMessage\(\{ __nbaiAppFeel: gameMode \}/);
+  });
+
+  it('toggling never reloads the app — a mid-game switch keeps the run alive', () => {
+    // srcDoc must depend ONLY on the fetched html; if gameMode reached it, flipping the switch
+    // would remount the iframe and throw away the game in progress.
+    expect(player).toContain('srcDoc={html}');
+    expect(player).not.toMatch(/srcDoc=\{[^}]*gameMode/);
+  });
+
+  it('a blocked localStorage (private browsing) still leaves a working switch', () => {
+    expect(player).toMatch(/catch \{ return true; \}/);
   });
 });

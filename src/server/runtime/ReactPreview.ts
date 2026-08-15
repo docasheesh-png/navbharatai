@@ -22,7 +22,7 @@ import { normalizePath } from '../project/ProjectModel';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { precompileModules } from './PreviewPrecompile';
 import { startDepWarmup, getWarmDepUrls, WARMUP_MAX_MODULES } from './PreviewDepWarmup';
-import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE, PROCESS_SHIM_SOURCE, NAVDATA_RUNTIME_SOURCE, STORAGE_SHIM_SOURCE, APP_TOUCH_CSS } from './previewImportMeta';
+import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE, PROCESS_SHIM_SOURCE, NAVDATA_RUNTIME_SOURCE, STORAGE_SHIM_SOURCE, APP_TOUCH_CSS, APP_FEEL_LISTENER_SOURCE } from './previewImportMeta';
 import { proveBackendRunnable } from './browserBackend/capability';
 import { EXPRESS_SHIM_SOURCE, BACKEND_BRIDGE_SOURCE, EXPRESS_SHIM_PATH, BACKEND_BRIDGE_PATH } from './browserBackend/expressShim';
 import { pgShimSource, pgliteDataDir, PG_SHIM_PATH, PGLITE_VERSION } from './browserBackend/pgShim';
@@ -412,7 +412,8 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, works
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Preview</title>
 <style>${APP_TOUCH_CSS}</style>
-<script>${STORAGE_SHIM_SOURCE}</script>
+<script>${STORAGE_SHIM_SOURCE}
+${APP_FEEL_LISTENER_SOURCE}</script>
 ${tailwindCdn}
 ${styleTag}
 <script type="importmap">${importmap}</script>

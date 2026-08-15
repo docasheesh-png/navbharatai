@@ -17,6 +17,8 @@ import { downsampleFloat32, float32ToBase64PCM16, base64PCM16ToFloat32 } from '.
 import { BOLI_OPTIONS, type SonicBoli } from '../../server/sonic/sonicBoli';
 import { auth } from '../../lib/firebase';
 import { voiceRunningCostLabel, resolveVoiceLang } from '../../lib/voiceChatBilling';
+import { resolveWebSocketUrl, isNativeShell } from '../../lib/apiBase';
+import { requestMic, micMessage, micSupported } from '../../lib/micCapability';
 
 type Status = 'loading' | 'disabled' | 'idle' | 'connecting' | 'live' | 'error';
 interface Line { role: string; text: string }
@@ -44,6 +46,8 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
   const [muted, setMuted] = useState(false); // mic muted mid-call — mic audio stops leaving the device
 
   const wsRef = useRef<WebSocket | null>(null);
+  /** Whether this runtime can record at all. Read once — it cannot change while the screen is open. */
+  const [micAvailable] = useState(micSupported);
   const micCtxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const procRef = useRef<ScriptProcessorNode | null>(null);
@@ -175,7 +179,17 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
       const token = await auth.currentUser?.getIdToken().catch(() => null);
       if (!token) { setError('Please sign in to use voice.'); setStatus('error'); return; }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      // Ask through the shared helper so a refusal becomes an ACTION the user can take ("allow the
+      // Microphone in Settings") instead of one flat "voice failed" for six different causes. On iOS
+      // this is also the moment the OS reads NSMicrophoneUsageDescription from Info.plist — without
+      // that key the system terminates the app outright rather than showing a prompt.
+      const mic = await requestMic();
+      if (mic.outcome !== 'ok' || !mic.stream) {
+        setError(micMessage(mic.outcome, isNativeShell(window as never)));
+        setStatus('error');
+        return;
+      }
+      const stream = mic.stream;
       streamRef.current = stream;
       const micCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       micCtxRef.current = micCtx;
@@ -183,8 +197,14 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
       const proc = micCtx.createScriptProcessor(4096, 1, 1);
       procRef.current = proc;
 
-      const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${wsProto}://${window.location.host}/api/sonic/stream?token=${encodeURIComponent(token)}&voice=${voice}&boli=${boli}`);
+      // THE APP BUG (admin report 2026-08-13): this used to build the socket from
+      // `window.location.host`, which in the BUNDLED native app is `localhost` — so the phone opened a
+      // socket to itself and voice could never connect. The shared resolver aims it at the real API
+      // origin in the app and at the current host on the web. See lib/apiBase.resolveWebSocketUrl.
+      const ws = new WebSocket(resolveWebSocketUrl(
+        `/api/sonic/stream?token=${encodeURIComponent(token)}&voice=${voice}&boli=${boli}`,
+        window as never,
+      ));
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -397,15 +417,25 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
                   <span style={{ fontSize: 22 }}>{muted ? '🔇' : '🎙'}</span>
                 </button>
               )}
-              <button
-                onClick={live ? stop : start}
-                aria-label={live ? 'Stop' : 'Start talking'}
-                style={{ ...micBtn, background: live ? '#dc2626' : 'linear-gradient(135deg,#6d28d9,#7c3aed)' }}
-              >
-                {status === 'connecting'
-                  ? <span style={{ fontSize: 15, fontWeight: 700 }}>…</span>
-                  : live ? <span style={{ fontSize: 20 }}>◼</span> : <span style={{ fontSize: 26 }}>🎤</span>}
-              </button>
+              {/* A device with no getUserMedia at all can never do this, so the control is ABSENT rather
+                  than dead — the exact shape Apple rejected this app for once ("The microphone button
+                  is unresponsive", Guideline 2.1(a), 2026-08-02). A phone that simply has not been
+                  ASKED yet still shows the button: supported is not the same as permitted. */}
+              {!micAvailable ? (
+                <div style={{ fontSize: 13, opacity: 0.75, maxWidth: 260, textAlign: 'center' }}>
+                  {micMessage('unsupported')}
+                </div>
+              ) : (
+                <button
+                  onClick={live ? stop : start}
+                  aria-label={live ? 'Stop' : 'Start talking'}
+                  style={{ ...micBtn, background: live ? '#dc2626' : 'linear-gradient(135deg,#6d28d9,#7c3aed)' }}
+                >
+                  {status === 'connecting'
+                    ? <span style={{ fontSize: 15, fontWeight: 700 }}>…</span>
+                    : live ? <span style={{ fontSize: 20 }}>◼</span> : <span style={{ fontSize: 26 }}>🎤</span>}
+                </button>
+              )}
               {/* Spacer keeps the main mic button centred when the mute button is present. */}
               {status === 'live' && <div style={{ width: 56, height: 56 }} aria-hidden="true" />}
             </div>

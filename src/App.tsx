@@ -419,7 +419,10 @@ export default function App() {
   const readStoreRoute = (): boolean => {
     try {
       if (typeof window === 'undefined') return false;
-      if (window.location.pathname.replace(/\/+$/, '') === '/store') return true;
+      // `/store` opens the store; `/store/app/<id>` is a SHARE LINK to one web app — it must land in
+      // the store too (NavAppStore reads the id itself and opens the player directly).
+      const path = window.location.pathname.replace(/\/+$/, '');
+      if (path === '/store' || path.startsWith('/store/app/')) return true;
       return new URLSearchParams(window.location.search).get('view') === 'appstore';
     } catch { return false; }
   };

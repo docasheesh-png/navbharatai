@@ -162,3 +162,27 @@ describe('resalePriceCheck — the pure heart of the undercut rule', () => {
     expect(resalePriceCheck(resalePriceFloor(99), 99).ok).toBe(true);
   });
 });
+
+describe('the key rule — "api sell nahi hogi, api user B ko deni hogi" (admin 2026-08-15)', () => {
+  const routes = readFileSync(join(process.cwd(), 'src/server/routes/navStore.ts'), 'utf8');
+
+  it('the remix delivery writes an .env.example naming the keys B must bring', () => {
+    /**
+     * The creator's keys were never in the snapshot (the scan gate + .env drop make that physical).
+     * This is the OTHER half: without it, B's copy fails its first build mysteriously. The example
+     * file is the platform's own convention — v5's secret preflight reads it and asks B for THEIR
+     * OWN keys at the right moment.
+     */
+    const remix = routes.slice(routes.indexOf('app/:id/remix'), routes.indexOf('app/:id/report'));
+    expect(remix).toContain('keyShapedEnvVars(');
+    expect(remix).toContain('generateEnvExample(');
+    expect(remix).toContain('apiKeysNeeded');
+  });
+
+  it('the listing records the key-shaped vars at publish — disclosure BEFORE money', () => {
+    const publish = routes.slice(routes.indexOf('web/publish'), routes.indexOf('web/app/:id'));
+    expect(publish).toContain('apiVarsUsed: keyShapedEnvVars(');
+    const player = readFileSync(join(process.cwd(), 'src/components/ide/WebAppPlayer.tsx'), 'utf8');
+    expect(player).toContain('not included');
+  });
+});

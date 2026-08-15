@@ -47,9 +47,10 @@ import {
   evaluateWebPublish, hashAppPassword, verifyAppPassword, toPublicWebApp, newWebAppId,
   saveWebApp, getWebApp, getWebAppFiles, listListedWebApps, listMyWebApps, listUnlistedWebApps,
   updateWebApp, makeWebAppPublic, bumpWebAppCounter, removeWebApp, reportWebApp,
-  recordRemixOrigin, getRemixOrigin,
+  recordRemixOrigin, getRemixOrigin, keyShapedEnvVars,
   type WebStoreApp,
 } from '../lib/navStoreWeb';
+import { generateEnvExample } from '../AgentV3/EnvExampleGenerator';
 import { loadWorkspaceFiles, saveWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { validateRemixPrice, hasPurchased, canAffordRemix, settleRemixPurchase, resalePriceCheck, resalePriceFloor, MAX_REMIX_PRICE_INR } from '../lib/navStoreRemixPurchase';
 import { addDataRow, listDataRows, isValidDataCollection } from '../lib/navStoreWebData';
@@ -570,6 +571,9 @@ export function registerNavStoreRoutes(app: Express): void {
         ...((existing?.parentAppId || await getRemixOrigin(workspaceId)) ? { parentAppId: existing?.parentAppId || (await getRemixOrigin(workspaceId))! } : {}),
         fileCount: Object.keys(gate.files).length,
         sizeBytes: Object.values(gate.files).reduce((n, c) => n + Buffer.byteLength(c, 'utf8'), 0),
+        // "api sell nahi hogi" — the vars a remixer will have to bring, known at publish and shown
+        // BEFORE anyone pays. The creator's own keys are already physically absent (scan + .env drop).
+        apiVarsUsed: keyShapedEnvVars(gate.files),
         runs: existing?.runs ?? 0,
         remixes: existing?.remixes ?? 0,
         // RE-PUBLISH MUST NOT WIPE MONEY OR QUOTA STATE (found while adding the undercut rule): the
@@ -773,14 +777,24 @@ export function registerNavStoreRoutes(app: Express): void {
       if (Object.keys(files).length === 0) return res.status(404).json({ error: 'This app has no published files.' });
       // DELIVER FIRST, CHARGE AFTER — the platform's "working result or free" order. A debit failure
       // after delivery means the buyer got it free; the reverse order could take money for nothing.
-      await saveWorkspaceFiles(target, files);
+      // THE ADMIN'S KEY RULE ("api user B ko deni hogi"): the creator's keys were never in the
+      // snapshot — but B's copy must SAY what it needs, or B's first build fails mysteriously. An
+      // .env.example listing the key-shaped vars is the platform's own convention: v5's existing
+      // secret-preflight reads it and asks B for THEIR OWN keys at the right moment. Merged over the
+      // snapshot's own example if one shipped, so nothing the creator wrote is lost.
+      const neededVars = keyShapedEnvVars(files);
+      const delivered: Record<string, string> = { ...files };
+      if (neededVars.length > 0) {
+        delivered['.env.example'] = generateEnvExample(neededVars, files['.env.example'] ?? null);
+      }
+      await saveWorkspaceFiles(target, delivered);
       await recordRemixOrigin(target, found.id);
       if (price > 0 && buyerUid && buyerUid !== found.uid) {
         const settled = await settleRemixPurchase({ appId: found.id, appName: found.name, buyerUid, creatorUid: found.uid, priceInr: price });
         settlementNote = settled.note;
       }
       bumpWebAppCounter(found.id, 'remixes');
-      res.json({ ok: true, fileCount: Object.keys(files).length, name: found.name, ...(settlementNote ? { settlementNote } : {}) });
+      res.json({ ok: true, fileCount: Object.keys(files).length, name: found.name, apiKeysNeeded: neededVars, ...(settlementNote ? { settlementNote } : {}) });
     } catch {
       res.status(502).json({ error: 'The remix failed — nothing was copied.' });
     }

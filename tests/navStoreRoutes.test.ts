@@ -24,6 +24,10 @@ const state = {
 vi.mock('../src/server/lib/authMiddleware', () => ({
   verifyFirebaseIdentity: async () => (state.uid ? { uid: state.uid, email: state.email } : null),
   verifyFirebaseToken: async () => state.uid,
+  // The shared-data routes register through the real rateLimiter; a mock module missing an export the
+  // route imports crashes REGISTRATION (undefined is not a function) and takes the whole suite red
+  // while production is fine. Pass-through here — the limiter has its own tests.
+  rateLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
 vi.mock('../src/server/lib/malwareScan', () => ({

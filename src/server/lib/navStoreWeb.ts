@@ -34,6 +34,7 @@ import { getServerDb } from './serverDb';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { scanTextForSecrets, type EnvTemplateSecretIssue } from '../AgentV3/EnvSecretValueAnalysis';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
+import { PAID_REMIX_ENABLED } from './navStoreRemixPurchase';
 
 /** Lifecycle: live-via-link → admin lists it → or an admin/owner takes it down. */
 export type WebAppStatus = 'unlisted' | 'listed' | 'removed';
@@ -90,7 +91,10 @@ export function toPublicWebApp(a: WebStoreApp): PublicWebStoreApp {
     visibility: a.visibility, fileCount: a.fileCount, runs: a.runs, remixes: a.remixes,
     publishedAt: a.publishedAt, version: a.version,
     requiresPassword: a.visibility === 'private',
-    priceInr: a.priceInr ?? 0,
+    // While paid remix is parked, a stored price is not merely hidden — it is not SENT. A price the
+    // client never receives cannot be rendered by any screen, present or future, so "free for now"
+    // holds even for listings that were priced before the pause.
+    priceInr: PAID_REMIX_ENABLED ? (a.priceInr ?? 0) : 0,
     apiVarsUsed: Array.isArray(a.apiVarsUsed) ? a.apiVarsUsed : [],
   };
 }

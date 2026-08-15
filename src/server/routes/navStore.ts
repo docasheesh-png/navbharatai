@@ -52,7 +52,7 @@ import {
 } from '../lib/navStoreWeb';
 import { generateEnvExample } from '../AgentV3/EnvExampleGenerator';
 import { loadWorkspaceFiles, saveWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
-import { validateRemixPrice, hasPurchased, canAffordRemix, settleRemixPurchase, resalePriceCheck, resalePriceFloor, MAX_REMIX_PRICE_INR } from '../lib/navStoreRemixPurchase';
+import { validateRemixPrice, hasPurchased, canAffordRemix, settleRemixPurchase, resalePriceCheck, resalePriceFloor, MAX_REMIX_PRICE_INR, PAID_REMIX_ENABLED } from '../lib/navStoreRemixPurchase';
 import { addDataRow, listDataRows, isValidDataCollection } from '../lib/navStoreWebData';
 import { rateLimiter } from '../lib/authMiddleware';
 import { verifiedWorkspaceReadOk } from '../lib/workspaceIdentity';
@@ -546,7 +546,10 @@ export function registerNavStoreRoutes(app: Express): void {
       // number that is simultaneously lawful, minimal, and not our invention (the rule fixes it).
       const remixParent = await getRemixOrigin(workspaceId);
       let resaleFloorPrice: number | undefined;
-      if (remixParent) {
+      // PAID REMIX PARKED — with every remix free, there is no original price to undercut, so
+      // auto-pricing a resale would invent a charge nobody asked for. The rule itself is untouched
+      // and returns with the money.
+      if (PAID_REMIX_ENABLED && remixParent) {
         const parentApp = await getWebApp(remixParent);
         if (parentApp && parentApp.status !== 'removed' && (parentApp.priceInr ?? 0) > 0) {
           const floor = resalePriceFloor(parentApp.priceInr ?? 0);
@@ -711,6 +714,11 @@ export function registerNavStoreRoutes(app: Express): void {
         return res.json({ ok: true, status: 'removed' });
       }
       if (req.body?.priceInr !== undefined) {
+        // Refused HERE, not just hidden in the UI: a price that cannot be stored cannot later be
+        // charged by any path. Honest about what it is — parked, not broken.
+        if (!PAID_REMIX_ENABLED) {
+          return res.status(503).json({ error: 'Selling apps is coming soon — every app on the store is free to remix right now. Publish and share it; you will be able to set a price when it opens.' });
+        }
         const price = validateRemixPrice(req.body.priceInr);
         if (!price.ok) return res.status(400).json({ error: price.reason });
         // The undercut rule, at the second place a price is ever set. The floor is the parent's
@@ -778,7 +786,11 @@ export function registerNavStoreRoutes(app: Express): void {
       // Non-refundable by decision, fair by construction (the app is free to RUN before buying).
       // Owners and past buyers pay nothing; an anonymous viewer has no wallet, so a paid remix
       // needs sign-in — said plainly, never a dead button.
-      const price = found.priceInr ?? 0;
+      // The single place a remix's price is READ. Parked ⇒ 0, so every branch below (sign-in demand,
+      // wallet check, debit, creator credit) is skipped by the same condition that already handled a
+      // free app — no separate "disabled" code path to keep in sync, and no way for a stored price
+      // on an old listing to charge anyone.
+      const price = PAID_REMIX_ENABLED ? (found.priceInr ?? 0) : 0;
       const buyerUid = await verifyFirebaseToken(req);
       let settlementNote: string | undefined;
       if (price > 0 && buyerUid !== found.uid) {

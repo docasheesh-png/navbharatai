@@ -61,6 +61,39 @@ export function scanEnvTemplateSecrets(file: string, content: string): EnvTempla
   return issues;
 }
 
+/**
+ * Scan ANY text for real secret-format values — the generalized sibling of the env-template scan.
+ *
+ * WHY THIS EXISTS (Nav App Store web publishing, 2026-08-15): a published web app ships its code to
+ * every viewer's browser. A hardcoded `sk-…` key in that code is not a style problem — it hands the
+ * creator's paid credential to every person who opens the app, and the bill lands on the creator.
+ * The publish gate therefore needs to ask of EVERY published file the question this module already
+ * answered for env templates. Same patterns, same placeholder filter — one source of truth, so a new
+ * secret format added to SECRET_PATTERNS covers both callers.
+ *
+ * Line-based like the template scan, so a finding carries the exact location the creator has to fix.
+ * PURE.
+ */
+export function scanTextForSecrets(file: string, content: string): EnvTemplateSecretIssue[] {
+  if (!content) return [];
+  const issues: EnvTemplateSecretIssue[] = [];
+  const lines = content.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line || PLACEHOLDER.test(line)) continue;
+    for (const p of SECRET_PATTERNS) {
+      const m = p.re.exec(line);
+      if (m) {
+        // `key` here is the matched value's first characters — enough for the creator to find it,
+        // deliberately not the whole secret (the report itself must not become a second leak).
+        issues.push({ file, line: i + 1, key: m[0].slice(0, 12) + '…', kind: p.kind });
+        break;
+      }
+    }
+  }
+  return issues;
+}
+
 /** A short, honest env-template-secret block for the `evaluate` output. */
 export function envTemplateSecretSummary(issues: EnvTemplateSecretIssue[]): string {
   if (issues.length === 0) return 'Env template secrets: ✓ no real secrets in committed env templates.';

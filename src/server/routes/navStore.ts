@@ -51,7 +51,7 @@ import {
   type WebStoreApp,
 } from '../lib/navStoreWeb';
 import { loadWorkspaceFiles, saveWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
-import { validateRemixPrice, hasPurchased, canAffordRemix, settleRemixPurchase } from '../lib/navStoreRemixPurchase';
+import { validateRemixPrice, hasPurchased, canAffordRemix, settleRemixPurchase, resalePriceCheck, resalePriceFloor, MAX_REMIX_PRICE_INR } from '../lib/navStoreRemixPurchase';
 import { addDataRow, listDataRows, isValidDataCollection } from '../lib/navStoreWebData';
 import { rateLimiter } from '../lib/authMiddleware';
 import { verifiedWorkspaceReadOk } from '../lib/workspaceIdentity';
@@ -524,15 +524,25 @@ export function registerNavStoreRoutes(app: Express): void {
     }
 
     try {
-      // THE RE-LIST RULE (Kadam 3, admin-locked): a remix of a PAID app cannot be published back to
-      // the store — bought code re-appearing as a listing (free or priced) is the resale the seller
-      // never agreed to. A FREE app's remix may publish (that loop is the store's growth engine).
-      // Checked BEFORE any gate work: the refusal is about provenance, not content.
+      // THE UNDERCUT RULE (admin 2026-08-15, superseding the flat re-list ban of the same day): a
+      // paid remix MAY be re-listed — but never at or below the original creator's price, and never
+      // free, however much it was edited ("chahe woh kitna bhi edit kar le"). Lineage makes editing
+      // irrelevant: the parent travels with the workspace from the moment of remix.
+      //
+      // Publish carries no price field, so a paid remix LISTS AT THE FLOOR (one rupee above the
+      // original) and the owner may raise it later — settings enforce the same floor. Refusing
+      // publish until a price was typed would be a dead end; auto-pricing AT the floor is the only
+      // number that is simultaneously lawful, minimal, and not our invention (the rule fixes it).
       const remixParent = await getRemixOrigin(workspaceId);
+      let resaleFloorPrice: number | undefined;
       if (remixParent) {
         const parentApp = await getWebApp(remixParent);
-        if (parentApp && (parentApp.priceInr ?? 0) > 0) {
-          return res.status(403).json({ error: 'This app started as a PAID remix, so it can\'t be listed on the store. It is fully yours to build on — publish it with hosting or as an Android app instead.' });
+        if (parentApp && parentApp.status !== 'removed' && (parentApp.priceInr ?? 0) > 0) {
+          const floor = resalePriceFloor(parentApp.priceInr ?? 0);
+          if (floor > MAX_REMIX_PRICE_INR) {
+            return res.status(403).json({ error: 'The original app is at the store\'s maximum price, so a resale above it isn\'t possible. The app is fully yours to build on — publish it with hosting or as an Android app instead.' });
+          }
+          resaleFloorPrice = floor;
         }
       }
       const workspaceFiles = await loadWorkspaceFiles(workspaceId);
@@ -562,12 +572,31 @@ export function registerNavStoreRoutes(app: Express): void {
         sizeBytes: Object.values(gate.files).reduce((n, c) => n + Buffer.byteLength(c, 'utf8'), 0),
         runs: existing?.runs ?? 0,
         remixes: existing?.remixes ?? 0,
+        // RE-PUBLISH MUST NOT WIPE MONEY OR QUOTA STATE (found while adding the undercut rule): the
+        // record replaces the doc wholesale, so any field not carried here is silently reset. The
+        // price resetting to free on every update would undercut the CREATOR THEMSELVES; the data-row
+        // counter resetting would let an app evade its storage quota by republishing.
+        ...((): Record<string, number> => {
+          const carried: Record<string, number> = {};
+          const keptPrice = existing?.priceInr ?? 0;
+          const price = resaleFloorPrice !== undefined ? Math.max(keptPrice, resaleFloorPrice) : keptPrice;
+          if (price > 0) carried.priceInr = price;
+          const rows = (existing as unknown as { dataRows?: number } | undefined)?.dataRows;
+          if (typeof rows === 'number' && rows > 0) carried.dataRows = rows;
+          return carried;
+        })(),
         publishedAt: Date.now(),
         version: (existing?.version ?? 0) + 1,
       };
       await saveWebApp(record, gate.files);
       webPlayerCache.delete(id); // the old version's compiled page must not survive the update
-      res.json({ ok: true, id, status: record.status, version: record.version, shareUrl: `/store/app/${id}` });
+      res.json({
+        ok: true, id, status: record.status, version: record.version, shareUrl: `/store/app/${id}`,
+        ...(resaleFloorPrice !== undefined && record.priceInr ? {
+          priceInr: record.priceInr,
+          priceNote: `This is a paid remix, so it lists at ₹${record.priceInr} — the rule is that a remix always costs more than the original. You can raise the price (never lower it below the original) under Nav App Store → My apps.`,
+        } : {}),
+      });
     } catch (e) {
       res.status(502).json({ error: 'Publishing failed — nothing was published. Try again.' });
     }
@@ -665,6 +694,15 @@ export function registerNavStoreRoutes(app: Express): void {
       if (req.body?.priceInr !== undefined) {
         const price = validateRemixPrice(req.body.priceInr);
         if (!price.ok) return res.status(400).json({ error: price.reason });
+        // The undercut rule, at the second place a price is ever set. The floor is the parent's
+        // price AT THIS MOMENT — the original creator's current ask is what must not be undercut.
+        if (found.parentAppId) {
+          const parent = await getWebApp(found.parentAppId);
+          if (parent && parent.status !== 'removed') {
+            const check = resalePriceCheck(price.priceInr, parent.priceInr ?? 0);
+            if (!check.ok) return res.status(403).json({ error: check.reason });
+          }
+        }
         await updateWebApp(found.id, { priceInr: price.priceInr });
         return res.json({ ok: true, priceInr: price.priceInr });
       }

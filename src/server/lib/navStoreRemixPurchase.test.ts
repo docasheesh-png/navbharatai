@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  validateRemixPrice, splitRemixPrice, purchaseDocId,
+  validateRemixPrice, splitRemixPrice, purchaseDocId, resalePriceCheck, resalePriceFloor,
   MIN_REMIX_PRICE_INR, MAX_REMIX_PRICE_INR, CREATOR_SHARE,
 } from './navStoreRemixPurchase';
 import { readFileSync } from 'fs';
@@ -107,10 +107,27 @@ describe('the settlement order is the billing law (source pins — the order is 
     expect(remixRoute).toMatch(/non-refundable/i);
   });
 
-  it('a PAID remix cannot be re-listed on the store', () => {
+  it('a PAID remix re-lists only ABOVE the original price — the undercut rule', () => {
+    /**
+     * ADMIN 2026-08-15, superseding the same day's flat ban: "user B ka selling price hamesha user A
+     * se jyada hoga, chahe woh kitna bhi edit kar le." A publish of a paid remix auto-lists at the
+     * floor (one rupee above the original) and every later price change re-checks against the
+     * parent's CURRENT price. Free would be the ultimate undercut, so it is refused too.
+     */
     const publish = route.slice(route.indexOf('web/publish'), route.indexOf('web/app/:id'));
     expect(publish).toContain('getRemixOrigin(workspaceId)');
-    expect(publish).toMatch(/can\\?'t be listed on the store/);
+    expect(publish).toContain('resalePriceFloor(');
+    const settings = route.slice(route.indexOf('app/:id/settings'), route.indexOf('app/:id/remix'));
+    expect(settings).toContain('resalePriceCheck(');
+  });
+
+  it('re-publishing never wipes the price or the data-quota counter', () => {
+    // Found while wiring the undercut rule: the publish record replaces the doc wholesale, so a
+    // field not carried forward silently resets — a free-on-every-update price would undercut the
+    // creator THEMSELVES, and a reset row counter would let an app evade its storage quota.
+    const publish = route.slice(route.indexOf('web/publish'), route.indexOf('web/app/:id'));
+    expect(publish).toContain('existing?.priceInr');
+    expect(publish).toContain('dataRows');
   });
 
   it('the confirm sheet shows the price AND non-refundable BEFORE purchase', () => {
@@ -119,5 +136,29 @@ describe('the settlement order is the billing law (source pins — the order is 
     expect(player).toMatch(/Buy for ₹/);
     // …and the free path never shows a price it doesn't have.
     expect(player).toContain("price > 0 ? setConfirmingBuy(true) : void remix()");
+  });
+});
+
+describe('resalePriceCheck — the pure heart of the undercut rule', () => {
+  it('a remix of a FREE app may price freely (that loop is the growth engine)', () => {
+    expect(resalePriceCheck(0, 0).ok).toBe(true);
+    expect(resalePriceCheck(499, 0).ok).toBe(true);
+  });
+
+  it('equal, lower and FREE are all undercuts against a paid original', () => {
+    for (const candidate of [0, 50, 98, 99]) {
+      const r = resalePriceCheck(candidate, 99);
+      expect(r.ok, `₹${candidate} vs ₹99`).toBe(false);
+      expect(r.reason).toContain('₹99');
+    }
+  });
+
+  it('strictly above the original passes', () => {
+    expect(resalePriceCheck(100, 99).ok).toBe(true);
+  });
+
+  it('the floor is one rupee above — the minimal lawful listing', () => {
+    expect(resalePriceFloor(99)).toBe(100);
+    expect(resalePriceCheck(resalePriceFloor(99), 99).ok).toBe(true);
   });
 });

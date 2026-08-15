@@ -18,6 +18,7 @@ import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarrati
 import { newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
+import { abortCauseOf, abortSummary } from './buildAbortCause';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -439,9 +440,25 @@ export class AgentRunner {
       while (steps < stepCap) {
         steps++;
 
-        // User pressed Stop (or the build was cancelled) — end honestly between turns.
+        // The build was aborted — end between turns, and say WHY it really stopped.
+        //
+        // This branch used to answer "Build stopped by the user." for all SIX causes that fire an
+        // abort, and the old comment ("User pressed Stop (or the build was cancelled)") shows it knew
+        // there was more than one. A real 35.8-minute build that hit the 30-minute watchdog therefore
+        // told the user they had stopped it — admin, verbatim: "maine nahi roki, khud ruki hai bhai".
+        //
+        // Worse than the false blame: because this branch sits ABOVE the watchdog branch below, the
+        // watchdog's own message — *your files so far are saved, send another message and I'll continue
+        // from here* — was unreachable. The user was blamed AND not told the work had survived.
+        // `abortSummary` now carries that recovery line for every cause where it is TRUE, which is what
+        // `totalToolUses > 0` decides: claiming saved work when none was written would be the same
+        // dishonesty pointing the other way.
         if (this.opts.signal?.aborted) {
-          const summary = 'Build stopped by the user.';
+          const cause = abortCauseOf(this.opts.signal);
+          const summary = abortSummary(cause, {
+            minutes: maxBuildMs ? Math.round(maxBuildMs / 60000) : undefined,
+            builtSomething: totalToolUses > 0,
+          });
           await persist('stopped');
           events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
           return { ok: false, summary, steps, usage, billedUsd: billed() };

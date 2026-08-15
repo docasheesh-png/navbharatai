@@ -340,6 +340,7 @@ import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { makeFirstPaintHandler } from '../AgentV3/streamingFirstPaint';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
+import { abortBuild } from '../AgentV3/buildAbortCause';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
@@ -1497,7 +1498,7 @@ export function drainRunningBuilds(): number {
     try {
       broadcastBuild(rb, { type: 'narration', agent: 'architect', text: '⚙️ The server is restarting (a deploy) — your build will resume automatically in a moment. Your files are safe.', ts: Date.now() });
     } catch { /* best-effort — a dead subscriber never blocks the drain */ }
-    try { rb.abort.abort(); } catch { /* the build's own finally still saves durably */ }
+    try { abortBuild(rb.abort, 'deploy-drain'); } catch { /* the build's own finally still saves durably */ }
   }
   return drained;
 }
@@ -1527,7 +1528,7 @@ export function sweepZombieBuilds(now: number = Date.now()): number {
   for (const key of selectZombieBuilds(runningBuilds.entries(), now, hardMaxMs)) {
     const rb = runningBuilds.get(key);
     if (!rb) continue;
-    try { rb.abort.abort(); } catch { /* best-effort */ }
+    try { abortBuild(rb.abort, 'reaper'); } catch { /* best-effort */ }
     try { endBuild(rb); } catch { /* best-effort */ }
     if (runningBuilds.get(key) === rb) runningBuilds.delete(key);
     activeBuilds.delete(key);
@@ -3818,7 +3819,7 @@ export function registerAgentV3Routes(app: Express): void {
       // its workspaceId (post-reload), allow — any anonymous caller could always reach this bucket, so
       // a signed-in caller stopping it adds no new exposure.
       if (key === 'anon' && userId && stopWorkspaceId && rb.workspaceId && !workspaceSessionsMatch(rb.workspaceId, stopWorkspaceId)) continue;
-      rb.abort.abort();                                       // loop stops between turns
+      abortBuild(rb.abort, 'user-stop');                      // loop stops between turns
       endBuild(rb);                                           // close all attached streams now
       if (runningBuilds.get(key) === rb) runningBuilds.delete(key);
       activeBuilds.delete(key);                               // free the lock the build actually held
@@ -3861,7 +3862,7 @@ export function registerAgentV3Routes(app: Express): void {
       const rb = runningBuilds.get(key);
       if (!rb || rb.ended) continue;
       if (key === 'anon' && userId && rb.workspaceId && !workspaceSessionsMatch(rb.workspaceId, workspaceId)) continue;
-      rb.abort.abort();
+      abortBuild(rb.abort, 'user-stop');
       endBuild(rb);
       if (runningBuilds.get(key) === rb) runningBuilds.delete(key);
       activeBuilds.delete(key);
@@ -5694,7 +5695,7 @@ export function registerAgentV3Routes(app: Express): void {
         // without clearing the lock) — RECLAIM it so the account is never trapped until the wall-clock
         // deadline. Tear the old build down cleanly, then fall through to start the fresh one.
         if (existing) {
-          try { existing.abort.abort(); } catch { /* best-effort */ }
+          try { abortBuild(existing.abort, 'lock-reclaimed'); } catch { /* best-effort */ }
           try { endBuild(existing); } catch { /* best-effort */ }
           if (runningBuilds.get(buildKey) === existing) runningBuilds.delete(buildKey);
         }
@@ -7070,7 +7071,33 @@ export function registerAgentV3Routes(app: Express): void {
     // share one implementation. Guarded by rb.ended so it can never double-emit after a clean finish.
     const finalizeOnDeadline = async () => {
       if (rb.ended) return;
-      try { abort.abort(); } catch { /* best-effort */ }
+      // WHICH cap fired, recorded on the signal so the runner stops blaming the user for it.
+      //
+      // This one function serves both deadlines, and they mean opposite things to the person waiting:
+      // before a result exists it is the wall-clock watchdog (the build never converged), and after one
+      // exists it is the short advisory cap (the app is BUILT and only the post-build extras ran long).
+      // `buildResultRef` is the same signal this finalizer already uses to emit a success rather than a
+      // "paused", so the distinction costs nothing new.
+      const deadlineCause = buildResultRef ? 'advisory-cap' as const : 'watchdog' as const;
+      try { abortBuild({ abort: (r?: unknown) => abort.abort(r) }, deadlineCause); } catch { /* best-effort */ }
+      // …and record it as the build's OUTCOME, which is what makes the REPORT honest too.
+      //
+      // `deriveRootCause` takes the last OUTCOME_* before anything else, and with no outcome recorded a
+      // timed-out build fell through to "pick the most severe unresolved issue" — which on the report
+      // that prompted this fix named `npm audit fix → exit 1` as the root cause of a 35.8-minute build
+      // that had actually hit the 30-minute cap. A failed advisory command was blamed for a deadline.
+      // The cause is known exactly here, so there is no reason for anything downstream to infer it.
+      try {
+        buildDiagRef?.record({
+          phase: 'build',
+          severity: deadlineCause === 'advisory-cap' ? 'warning' : 'error',
+          code: 'OUTCOME_STOPPED',
+          message: deadlineCause === 'advisory-cap'
+            ? 'Build outcome: STOPPED — the app was built; the post-build advisory pass was cut short by its 2-minute cap.'
+            : `Build outcome: STOPPED — the wall-clock cap (${Math.round((deadlineMs || 0) / 60000)} min) was reached before the build converged. NOT stopped by the user.`,
+          autoResolved: false,
+        });
+      } catch { /* the report must never be able to break the finalizer */ }
       // GUARANTEE the durable file save actually happens BEFORE claiming "your files are saved" below
       // (real build report evidence: a build cut off by this exact deadline left its just-written files
       // NEVER durably saved — only the fire-and-forget 3s onFileWrite debounce had a chance to run, and
@@ -10933,7 +10960,19 @@ export function registerAgentV3Routes(app: Express): void {
           // EVIDENCE, NEVER A GATE, and no flag: it spends nothing, calls no model, and only appends to
           // a build that already succeeded. Wrapped like its neighbours so it can never reach the build.
           try {
-            const quality = lintBuiltApp(Object.fromEntries(writtenFiles));
+            // THE WHOLE APP, not just this build's writes.
+            //
+            // MY OWN DEFECT, caught by the very first real report after shipping this (2026-08-15). It
+            // was passing `writtenFiles`, so a CONTINUE build that touched 4 files reported
+            // "Accessibility 100/100 (A) — no failures found across 4 file(s)" for an app of 149 —
+            // a clean bill of health issued after looking at 3% of it. That is precisely the
+            // "we checked nothing but the number looks fine" dishonesty the module's own null-return
+            // was written to prevent, arriving through the caller instead.
+            //
+            // `integrityFiles` is the durable project ∪ this build's writes, and it is ALREADY loaded
+            // right here — POST_ANSWER_TIMING on that same report measured the load at 0s for 149
+            // files, so whole-app coverage costs nothing.
+            const quality = lintBuiltApp(integrityFiles);
             // `null` means nothing lintable was found. Recording a perfect score there would claim we
             // checked when we did not — the same lie in the other direction.
             if (quality) {

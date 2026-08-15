@@ -8,7 +8,7 @@
 // the moment a build completes. When there is nothing to show, it renders nothing (no clutter).
 
 import { useEffect, useRef, useState } from 'react';
-import { Lightbulb, X, Check, MapPin } from 'lucide-react';
+import { Lightbulb, X, Check, MapPin, RefreshCw } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
 
 interface Suggestion {
@@ -47,6 +47,10 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick }: Props) {
   const [roadmap, setRoadmap] = useState<PublicRoadmap | null>(null);
   const [open, setOpen] = useState(false);
   const [seenKey, setSeenKey] = useState<string>('');
+  // ♻️ refresh rotates a window through the (larger) suggestion pool, so each press shows genuinely
+  // different, still-app-relevant ideas rather than re-fetching the same top few (admin 2026-08-14).
+  const [offset, setOffset] = useState(0);
+  const VISIBLE = 4;
   const boxRef = useRef<HTMLDivElement | null>(null);
   // The roadmap step the user chose to build this turn. When the build finishes, we tell the server the
   // step is REACHED — never before, so a step is only ever marked done once its build actually ran.
@@ -74,6 +78,7 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick }: Props) {
         const d = r.ok ? await r.json() : null;
         if (!live) return;
         setSuggestions(Array.isArray(d?.suggestions) ? (d.suggestions as Suggestion[]) : []);
+        setOffset(0); // a fresh build starts the rotation from the most relevant ideas
         setRoadmap(d?.roadmap && Array.isArray(d.roadmap.steps) ? (d.roadmap as PublicRoadmap) : null);
       } catch { /* a suggestion surface must never disrupt the app */ }
     };
@@ -100,6 +105,13 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick }: Props) {
   // "Seen" set signature — includes the roadmap's current milestone so reaching a new step re-lights it.
   const setKey = `${hasRoadmap ? `r${roadmap!.currentStep}` : ''}|${suggestions.map((s) => s.id).join('|')}`;
   const unseen = seenKey !== setKey && count > 0;
+
+  // The rotating window shown at once. ♻️ is only meaningful when the pool is larger than the window.
+  const canRotate = suggestions.length > VISIBLE;
+  const visibleSuggestions = canRotate
+    ? Array.from({ length: VISIBLE }, (_, i) => suggestions[(offset + i) % suggestions.length])
+    : suggestions;
+  const refreshSuggestions = () => { if (canRotate) setOffset((o) => (o + VISIBLE) % suggestions.length); };
 
   const toggle = () => {
     setOpen((v) => !v);
@@ -199,15 +211,22 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick }: Props) {
                   <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
                   <span className="text-[12px] font-bold text-white">What to build next</span>
                 </div>
-                <button onClick={() => setOpen(false)} title="Close" className="p-0.5 rounded hover:bg-zinc-800 text-zinc-400">
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-0.5">
+                  {canRotate && (
+                    <button onClick={refreshSuggestions} title="Show other ideas" className="p-1 rounded hover:bg-zinc-800 text-amber-300/80 hover:text-amber-200 active:scale-90 transition-transform">
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button onClick={() => setOpen(false)} title="Close" className="p-0.5 rounded hover:bg-zinc-800 text-zinc-400">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
               <p className="px-3 pt-2 pb-1 text-[10.5px] text-zinc-500 leading-relaxed">
-                Only ideas for your app — tap one to drop it into the box, then edit or send it.
+                Only ideas for your app — tap one to drop it into the box, then edit or send it.{canRotate ? ' Tap ♻ for more.' : ''}
               </p>
               <div className="flex flex-col p-1.5 gap-1">
-                {suggestions.map((s) => (
+                {visibleSuggestions.map((s) => (
                   <button
                     key={s.id}
                     onClick={() => { onPick(s.prompt); setOpen(false); }}

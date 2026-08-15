@@ -52,19 +52,23 @@ describe('AI Tools tiles are reachable via Other AI', () => {
   });
 });
 
-describe('Developer Tools + Design & Build tiles match real labels', () => {
-  it('API Tester / Versioning / Minifier are in Developer Tools', () => {
-    expect(groups).toContain("title: 'Developer Tools'");
+describe('Other-AI tiles match the labels the knowledge base states', () => {
+  // REGROUPED by the admin 2026-08-14. These assertions pin the tile↔KB agreement, which is the thing
+  // that actually matters; the GROUP each tool sits in is a product decision and moved with it.
+  // tests/homeToolGroupsKbSync.test.ts now enforces that agreement for every tool mechanically, so
+  // this file no longer has to be edited each time the menu is rearranged.
+  it('API Tester / Versioning / Minifier moved into AI Tools, and the KB says so', () => {
+    expect(groups).toContain("title: 'AI Tools'");
     for (const label of ["label: 'API Tester'", "label: 'Versioning'", "label: 'Minifier'"]) {
       expect(groups).toContain(label);
     }
-    expect(kb('api-tester')!.path).toMatch(/Developer Tools → API Tester/);
-    expect(kb('code_versioning')!.path).toMatch(/Developer Tools → Versioning/);
+    expect(kb('api-tester')!.path).toMatch(/AI Tools → API Tester/);
+    expect(kb('code_versioning')!.path).toMatch(/AI Tools → Versioning/);
   });
-  it('Figma Import is in Design & Build', () => {
-    expect(groups).toContain("title: 'Design & Build'");
+  it('Figma Import moved into Developer Tools — "Design & Build" no longer exists', () => {
+    expect(groups).not.toContain("title: 'Design & Build'");
     expect(groups).toContain("label: 'Figma Import'");
-    expect(kb('figma_importer')!.path).toMatch(/Design & Build → Figma Import/);
+    expect(kb('figma_importer')!.path).toMatch(/Developer Tools → Figma Import/);
   });
 });
 

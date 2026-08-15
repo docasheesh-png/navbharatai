@@ -342,7 +342,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '- Tell them NavBharatAI does it for them: it checks the app compiles, fixes anything broken,',
     '  sends it to their own GitHub, builds it there on a real machine, and hands the file back.',
     '- Where to go: the "More" tab at the bottom → "Download APK". (It is also under',
-    '  Home → Other AI → Publish & Deploy → APK Builder.)',
+    '  Home → Other AI → AI Tools → APK Builder.)',
     '- What to press there: "Get my app ready to build", then "Build my APK now". It takes a few',
     '  minutes and shows a percentage; if anything fails NavBharatAI repairs it and retries by itself.',
     '- The .apk installs straight onto any Android phone and needs NO signing key. Only the Google',

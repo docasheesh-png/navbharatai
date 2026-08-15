@@ -12,7 +12,7 @@ const cv = APP_KNOWLEDGE_BASE.find(f => f.id === 'code_versioning');
 describe('Code Versioning — intent-based undo awareness', () => {
   it('exists as a first-class KB feature with a current path + one-tap nav', () => {
     expect(cv).toBeTruthy();
-    expect(cv!.path).toContain('Other AI → Developer Tools → Versioning');
+    expect(cv!.path).toContain('Other AI → AI Tools → Versioning');
     expect(navFor(cv!)).toEqual({ view: 'versioning' });
   });
 

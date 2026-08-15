@@ -164,7 +164,7 @@ export function apiTesterHintFor(texts: string[]): string {
   const apiGroups = groupRuntimeErrors(texts).filter((g) => API_PROBLEM_CATEGORY_IDS.has(g.category.id));
   if (apiGroups.length === 0) return '';
   const labels = apiGroups.map((g) => g.category.label).join(', ');
-  return `🔌 It looks like an API call in your app is failing (${labels}). You can test that exact endpoint yourself in the API Tester — open Home → Other AI → Developer Tools → API Tester, paste the URL (keep "Route via NavBharatAI" on to bypass CORS), and Send to see the real status and response.`;
+  return `🔌 It looks like an API call in your app is failing (${labels}). You can test that exact endpoint yourself in the API Tester — open Home → Other AI → AI Tools → API Tester, paste the URL (keep "Route via NavBharatAI" on to bypass CORS), and Send to see the real status and response.`;
 }
 
 /**

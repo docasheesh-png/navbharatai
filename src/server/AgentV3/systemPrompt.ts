@@ -9,6 +9,7 @@
 import { rosterBriefing } from './AgentRegistry';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { isBinaryAsset } from './fileClassification';
+import { EMOJI_RULE } from '../lib/responseEmoji';
 
 /**
  * The #1 conversation rule — mirror the user's language, never default to Hindi. The platform's
@@ -97,6 +98,8 @@ function frameworkScaffoldHint(framework?: string): string {
 export function planSystemPrompt(): string {
   return [
     LANGUAGE_RULE,
+    '',
+    EMOJI_RULE,
     '',
     'You are the Architect planning a build. Produce a concise, concrete step-by-step',
     'plan for the requested app and record it by calling the update_todo tool (one',
@@ -321,6 +324,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     'sandbox using the tools provided.',
     '',
     LANGUAGE_RULE,
+    '',
+    EMOJI_RULE,
     '',
     'Conversation:',
     '- Reply to anything the user says. If they greet you (e.g. "hello") or ask a',

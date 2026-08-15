@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
+import { honestResultEvent } from '../lib/responseEmoji';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { analyzeAppScope } from '../lib/appScopeAnalyzer';
@@ -5624,7 +5625,7 @@ export function registerAgentV3Routes(app: Express): void {
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders();
-      const sendLine = (e: unknown) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); };
+      const sendLine = (e: unknown) => { if (!res.writableEnded) res.write(JSON.stringify(honestResultEvent(e)) + '\n'); };
       const roleWorkspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
       try {
         // Ground the role in the REAL project: durable files → tree + relevance-picked contents.
@@ -6259,7 +6260,11 @@ export function registerAgentV3Routes(app: Express): void {
     // and replayed on reopen, so a restored session shows the SAME Claude-style action rows,
     // Diff/Terminal tabs and done-footer it showed live — not a bare prose transcript.
     const sessionTimeline = createTimelineRecorder();
-    const emit = (e: unknown): void => { sessionTimeline.record(e); broadcastBuild(rb, e); };
+    // `honestResultEvent` applies the emoji-outcome guarantee to the FINAL `result` event, which travels
+    // on this raw stream instead of through AgentEventStream (where every other event is covered). Done
+    // at the choke point so none of the ~15 `emit({type:'result'})` call sites has to remember, and the
+    // timeline records exactly the text the user saw.
+    const emit = (e: unknown): void => { const ev = honestResultEvent(e); sessionTimeline.record(ev); broadcastBuild(rb, ev); };
     // Exposed to the finally so the LAST background checkpoint is flushed on every exit path
     // (success, error, abort). Held outside the try because `dispatcher` is block-scoped to it.
     let dispatcherForFlush: { flushCheckpoints: () => Promise<void>; markBuildActive: (active: boolean) => void } | undefined;

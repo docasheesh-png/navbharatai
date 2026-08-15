@@ -5,6 +5,7 @@ import { redactProviderError, redactProvidersText } from '../lib/providerRedacti
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { analyzeAppScope } from '../lib/appScopeAnalyzer';
+import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { requestedFeatureLabels, renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
@@ -9197,6 +9198,12 @@ export function registerAgentV3Routes(app: Express): void {
           ?.text.replace(/^PLAN_STATE\n?/, '');
         const projectCtx = buildProjectContext({ files: tree, projectMap: ctxMem.projectMap(), recentRequests, lastPlan });
         if (projectCtx) buildPrompt = `${projectCtx}\n\n---\n\n${buildPrompt}`;
+        // FULLSTACK LAYOUT (admin 2026-08-15): if this app keeps its frontend under client/src (or
+        // frontend/src, apps/web/src, …) instead of a top-level src/, say so up front — the builder was
+        // guessing `src/App.tsx` on such apps and wasting steps on wrong-path errors. Deterministic,
+        // null for an ordinary top-level-src app (no false noise).
+        const layoutHint = frontendLayoutHint(tree);
+        if (layoutHint) buildPrompt = `${layoutHint}\n\n${buildPrompt}`;
       } catch { /* project context is best-effort — never blocks a build */ }
 
       // MEMORY FIX 2 (Claude-level conversation memory): load the most recent PRIOR build transcript

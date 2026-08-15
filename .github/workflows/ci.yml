@@ -7,6 +7,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual escape hatch (added 2026-08-15): during a GitHub incident, event-triggered runs (push /
+  # pull_request) silently stopped being created while workflow_dispatch kept working — leaving no
+  # way to run the merge gate at all. Dispatching against a PR branch runs the SAME gate on the same
+  # code; it just isn't attached to the PR's checks tab.
+  workflow_dispatch:
 
 jobs:
   build-and-test:

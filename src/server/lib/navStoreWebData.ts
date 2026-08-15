@@ -64,8 +64,22 @@ export function dayBucket(now: Date = new Date()): string {
 }
 
 const APPS = 'nav_store_web_apps';
-const DATA_SUB = 'data';
+/**
+ * Rows live in a PER-COLLECTION subcollection (`data_<name>`) rather than one `data` subcollection
+ * with a `collection` field. Not a style choice — the flat shape forced the read to be
+ * `.where('collection','==',…).orderBy('at','desc')`, a composite-index query that throws
+ * FAILED_PRECONDITION in production until an index is hand-created in a console no session can
+ * reach (the exact failure class behind the store's first real publish, 2026-08-15). One
+ * subcollection per app-collection makes the read a single-field orderBy, which Firestore
+ * auto-indexes — the index requirement is gone by construction. Safe as a path segment because
+ * every caller validates the name against COLLECTION_NAME first (and the functions re-check).
+ */
+const DATA_SUB_PREFIX = 'data_';
 const META_SUB = 'data_meta';
+
+function dataSub(collection: string): string {
+  return DATA_SUB_PREFIX + collection;
+}
 
 function db(): admin.firestore.Firestore | null {
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return null;
@@ -88,12 +102,13 @@ export type AddRowResult =
 export async function addDataRow(appId: string, collection: string, data: unknown): Promise<AddRowResult> {
   const d = db();
   if (!d) return { ok: false, status: 503, reason: 'The data store is unavailable right now.' };
+  if (!isValidDataCollection(collection)) return { ok: false, status: 400, reason: 'Invalid collection name.' };
   const valid = validateRow(data);
   if (!valid.ok) return { ok: false, status: 400, reason: valid.reason! };
 
   const appRef = d.collection(APPS).doc(appId);
   const dayRef = appRef.collection(META_SUB).doc(dayBucket());
-  const rowRef = appRef.collection(DATA_SUB).doc();
+  const rowRef = appRef.collection(dataSub(collection)).doc();
   const at = Date.now();
   try {
     const verdict = await d.runTransaction(async (t) => {
@@ -103,7 +118,7 @@ export async function addDataRow(appId: string, collection: string, data: unknow
       if (total >= MAX_ROWS_PER_APP) return 'total' as const;
       const today = daySnap.exists ? ((daySnap.data() as { writes?: number }).writes ?? 0) : 0;
       if (today >= MAX_WRITES_PER_APP_PER_DAY) return 'daily' as const;
-      t.set(rowRef, { collection, data: JSON.parse(valid.json!), at });
+      t.set(rowRef, { data: JSON.parse(valid.json!), at });
       t.update(appRef, { dataRows: admin.firestore.FieldValue.increment(1) });
       t.set(dayRef, { writes: admin.firestore.FieldValue.increment(1) }, { merge: true });
       return 'ok' as const;
@@ -124,9 +139,10 @@ export async function addDataRow(appId: string, collection: string, data: unknow
 export async function listDataRows(appId: string, collection: string, limit: number): Promise<Array<{ id: string; data: unknown; at: number }>> {
   const d = db();
   if (!d) return [];
+  if (!isValidDataCollection(collection)) return [];
   const n = Math.max(1, Math.min(MAX_LIST_LIMIT, Math.floor(limit) || 50));
-  const snap = await d.collection(APPS).doc(appId).collection(DATA_SUB)
-    .where('collection', '==', collection)
+  // Single-field orderBy on a per-collection subcollection — auto-indexed, no composite index ever.
+  const snap = await d.collection(APPS).doc(appId).collection(dataSub(collection))
     .orderBy('at', 'desc')
     .limit(n)
     .get();

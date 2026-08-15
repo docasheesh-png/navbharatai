@@ -503,6 +503,16 @@ export function registerNavStoreRoutes(app: Express): void {
   const WEB_PLAYER_CACHE_MAX = 40;
 
   /** One-click publish: snapshot the workspace, gate it, and hand back the share link. */
+  /**
+   * Server-side forensics for every web-store catch. The USER-facing reply stays generic (the
+   * white-label law — no provider or infra detail ever reaches a user), but the REAL error must
+   * land in the Cloud Run logs: the store's first live publish failed and this catch swallowed the
+   * cause without a trace, turning a one-grep diagnosis into an autopsy. Logging is the fix's other
+   * half — the query-shape fix kills this instance; the log line kills the silence for the class.
+   */
+  const logStoreError = (where: string, e: unknown) =>
+    console.error(`[nav-store] ${where} failed:`, e instanceof Error ? e.stack || e.message : e);
+
   app.post('/api/nav-store/web/publish', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
     if (!me?.uid) return res.status(401).json({ error: 'Sign in to publish to the store.' });
@@ -602,6 +612,7 @@ export function registerNavStoreRoutes(app: Express): void {
         } : {}),
       });
     } catch (e) {
+      logStoreError('web/publish', e);
       res.status(502).json({ error: 'Publishing failed — nothing was published. Try again.' });
     }
   });
@@ -612,7 +623,8 @@ export function registerNavStoreRoutes(app: Express): void {
       const found = await getWebApp(String(req.params.id || ''));
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
       res.json({ app: toPublicWebApp(found) });
-    } catch {
+    } catch (e) {
+      logStoreError('web/app meta', e);
       res.status(502).json({ error: 'Could not load that app.' });
     }
   });
@@ -658,7 +670,8 @@ export function registerNavStoreRoutes(app: Express): void {
       }
       bumpWebAppCounter(found.id, 'runs');
       res.json({ html: compiled.html, name: found.name });
-    } catch {
+    } catch (e) {
+      logStoreError('web/open', e);
       res.status(502).json({ error: 'Could not open that app.' });
     }
   });
@@ -667,7 +680,8 @@ export function registerNavStoreRoutes(app: Express): void {
   app.get('/api/nav-store/web/apps', async (_req: Request, res: Response) => {
     try {
       res.json({ apps: (await listListedWebApps()).map(toPublicWebApp) });
-    } catch {
+    } catch (e) {
+      logStoreError('web/apps list', e);
       res.status(502).json({ error: 'Could not load the store.' });
     }
   });
@@ -679,7 +693,8 @@ export function registerNavStoreRoutes(app: Express): void {
     try {
       const mine = await listMyWebApps(me.uid);
       res.json({ apps: mine.map((a) => ({ ...toPublicWebApp(a), status: a.status, workspaceId: a.workspaceId })) });
-    } catch {
+    } catch (e) {
+      logStoreError('web/mine', e);
       res.status(502).json({ error: 'Could not load your apps.' });
     }
   });
@@ -721,7 +736,8 @@ export function registerNavStoreRoutes(app: Express): void {
         await makeWebAppPublic(found.id);
       }
       res.json({ ok: true, visibility });
-    } catch {
+    } catch (e) {
+      logStoreError('web/settings', e);
       res.status(502).json({ error: 'Could not save that change.' });
     }
   });
@@ -795,7 +811,8 @@ export function registerNavStoreRoutes(app: Express): void {
       }
       bumpWebAppCounter(found.id, 'remixes');
       res.json({ ok: true, fileCount: Object.keys(files).length, name: found.name, apiKeysNeeded: neededVars, ...(settlementNote ? { settlementNote } : {}) });
-    } catch {
+    } catch (e) {
+      logStoreError('web/remix', e);
       res.status(502).json({ error: 'The remix failed — nothing was copied.' });
     }
   });
@@ -811,7 +828,8 @@ export function registerNavStoreRoutes(app: Express): void {
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
       await reportWebApp(found.id, me.uid, reason);
       res.json({ ok: true });
-    } catch {
+    } catch (e) {
+      logStoreError('web/report', e);
       res.status(502).json({ error: 'Could not send the report.' });
     }
   });
@@ -845,7 +863,8 @@ export function registerNavStoreRoutes(app: Express): void {
       const result = await addDataRow(found.id, collection, req.body?.data);
       if (!result.ok) return res.status(result.status).json({ error: result.reason });
       res.json({ ok: true, row: result.row });
-    } catch {
+    } catch (e) {
+      logStoreError('web/data write', e);
       res.status(502).json({ error: 'The row could not be saved — nothing was stored.' });
     }
   });
@@ -858,7 +877,8 @@ export function registerNavStoreRoutes(app: Express): void {
       const found = await getWebApp(String(req.params.id || ''));
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
       res.json({ rows: await listDataRows(found.id, collection, Number(req.query.limit) || 50) });
-    } catch {
+    } catch (e) {
+      logStoreError('web/data read', e);
       res.status(502).json({ error: 'Could not load the rows.' });
     }
   });
@@ -869,7 +889,8 @@ export function registerNavStoreRoutes(app: Express): void {
     if (!isStoreAdmin(me?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
     try {
       res.json({ apps: await listUnlistedWebApps() });
-    } catch {
+    } catch (e) {
+      logStoreError('web/admin queue', e);
       res.status(502).json({ error: 'Could not load the queue.' });
     }
   });
@@ -891,7 +912,8 @@ export function registerNavStoreRoutes(app: Express): void {
         await updateWebApp(id, { status: 'listed', reviewedAt: Date.now(), reviewedBy: me?.email || 'admin' });
       }
       res.json({ ok: true, id, status: decision });
-    } catch {
+    } catch (e) {
+      logStoreError('web/admin review', e);
       res.status(502).json({ error: 'Could not save that decision.' });
     }
   });

@@ -268,26 +268,43 @@ export async function getWebAppFiles(id: string): Promise<Record<string, string>
   return out;
 }
 
+/**
+ * LIST QUERIES ARE EQUALITY-ONLY, BY LAW (root cause of the store's first real publish failure,
+ * 2026-08-15): `.where(X).orderBy(Y)` on DIFFERENT fields is a composite-index query — Firestore
+ * throws FAILED_PRECONDITION on its first production use until someone creates the index by hand in
+ * the console, and no session has console access. A single-field filter is auto-indexed and can
+ * never demand an index, so the shape itself is the fix: filter on one field, sort in memory.
+ * The in-memory sort is bounded by FETCH_CAP; these collections are small by construction (one doc
+ * per listing, not per row). Pinned by a source test — do not reintroduce a where+orderBy chain.
+ */
+const FETCH_CAP = 500;
+
+function newestFirst(docs: admin.firestore.QueryDocumentSnapshot[], limit: number): WebStoreApp[] {
+  return docs.map((x) => x.data() as WebStoreApp)
+    .sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
+    .slice(0, limit);
+}
+
 export async function listListedWebApps(limit = 60): Promise<WebStoreApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION).where('status', '==', 'listed').orderBy('publishedAt', 'desc').limit(limit).get();
-  return snap.docs.map((x) => x.data() as WebStoreApp);
+  const snap = await d.collection(COLLECTION).where('status', '==', 'listed').limit(FETCH_CAP).get();
+  return newestFirst(snap.docs, limit);
 }
 
 export async function listMyWebApps(uid: string, limit = 50): Promise<WebStoreApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION).where('uid', '==', uid).orderBy('publishedAt', 'desc').limit(limit).get();
-  return snap.docs.map((x) => x.data() as WebStoreApp);
+  const snap = await d.collection(COLLECTION).where('uid', '==', uid).limit(FETCH_CAP).get();
+  return newestFirst(snap.docs, limit);
 }
 
 /** Web apps awaiting listing review — the admin queue, same discipline as the APK store. */
 export async function listUnlistedWebApps(limit = 50): Promise<WebStoreApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION).where('status', '==', 'unlisted').orderBy('publishedAt', 'desc').limit(limit).get();
-  return snap.docs.map((x) => x.data() as WebStoreApp);
+  const snap = await d.collection(COLLECTION).where('status', '==', 'unlisted').limit(FETCH_CAP).get();
+  return newestFirst(snap.docs, limit);
 }
 
 export async function updateWebApp(id: string, patch: Partial<WebStoreApp>): Promise<void> {

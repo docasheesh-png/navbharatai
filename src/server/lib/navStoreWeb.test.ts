@@ -171,3 +171,27 @@ describe('scanTextForSecrets (the generalized scanner both gates share)', () => 
     expect(hits[0].key).not.toContain('ijkl9012');
   });
 });
+
+describe('Firestore query shapes — composite indexes are forbidden by construction', () => {
+  /**
+   * ROOT CAUSE of the store's FIRST real publish failure (admin's "fail" screenshot, 2026-08-15):
+   * `.where(X).orderBy(Y)` on different fields is a composite-index query — Firestore throws
+   * FAILED_PRECONDITION on its first production use until the index is created BY HAND in a console
+   * no session can reach. `listMyWebApps` ran inside the publish route, so the very first publish
+   * hit it and the catch-all turned the real error into "Publishing failed". The fix is the shape:
+   * single-field filters (auto-indexed) + in-memory sort. This pin makes the class unshippable —
+   * a reintroduced where+orderBy chain in the store's data layer fails CI, not a real user.
+   */
+  it('no .where(...).orderBy(...) chain in the store data layer', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    for (const f of ['src/server/lib/navStoreWeb.ts', 'src/server/lib/navStoreWebData.ts']) {
+      // Comments are stripped first: the files honestly DESCRIBE the forbidden shape in prose
+      // (that is how the rule is taught), and prose must never trip the pin — only real code.
+      const src = readFileSync(join(process.cwd(), f), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+      expect(/\.where\([\s\S]{0,300}?\.orderBy\(/.test(src), `${f} contains a composite-index query shape`).toBe(false);
+    }
+  });
+});

@@ -1176,7 +1176,26 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-500 text-sm">
           {/* Ashok Chakra loader (admin 2026-07-07) — same spinner the in-iframe boot overlay uses. */}
           <div className="w-12 h-12 animate-spin" style={{ animationDuration: '1.6s' }} dangerouslySetInnerHTML={{ __html: ashokChakraSvg(48, '#4f6ef7') }} />
-          <div className="flex items-center">Loading files &amp; compiling preview…{loadSeconds > 0 ? <span className="ml-1.5 font-mono text-zinc-600">{loadSeconds}s</span> : null}</div>
+          {/**
+            * WARM HEADLINE + HONEST DETAIL — both, on purpose (admin 2026-08-14 asked whether this
+            * should just read "waiting for preview" / "waiting for magic").
+            *
+            * The old copy — "Loading files & compiling preview" — was accurate and read like a build
+            * log, and since the fix above this loader is now FIRST-LOAD ONLY, it is the first thing a
+            * user sees of their app. That argues for warmth.
+            *
+            * But a bare "waiting for magic" was declined and the reason is worth keeping: it tells the
+            * user NOTHING. Charming at three seconds, irritating at forty, when the only question they
+            * have is what is actually happening. So the headline carries the warmth and the line under
+            * it keeps the truth — which is also why the seconds counter sits with the DETAIL and not
+            * the headline. ("Getting your app ready" is deliberately about what WE are doing, not what
+            * the user is waiting for.)
+            */}
+          <div className="text-zinc-300 text-[15px] font-medium">Getting your app ready…</div>
+          <div className="flex items-center text-[12px] text-zinc-500">
+            Loading your files and compiling the preview
+            {loadSeconds > 0 ? <span className="ml-1.5 font-mono text-zinc-600">{loadSeconds}s</span> : null}
+          </div>
           {loadSeconds >= 8 && (
             <p className="text-[11px] text-zinc-600 max-w-xs text-center">Still working — the first load after a long gap fetches your saved files from storage, which can take a few extra seconds. Repeat opens are much faster.</p>
           )}

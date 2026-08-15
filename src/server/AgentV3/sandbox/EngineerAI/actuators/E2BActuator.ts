@@ -14,7 +14,7 @@ import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, d
 import { dbProvisionScript, parseDbProvision, provisionOutcomeNote, provisionDiagnostics, CANONICAL_DB_URL, type DbProvisionOutcome } from '../../dbProvisionVerify';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
-import { isDeadSandboxSignal, isDeadSandboxError, resolveThrownCommandExit } from './sandboxHealth';
+import { isDeadSandboxSignal, isDeadSandboxError, resolveThrownCommandExit, recordCommandLatency, newSandboxLatencyState } from './sandboxHealth';
 import { postgresWatchdogCommand, mergeEnvVar } from '../../../postgresProvision';
 import { resolveTemplateId } from './fullstackRouting';
 import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
@@ -336,6 +336,15 @@ export class E2BActuator implements IEngineerActuator {
   // instead of coming back empty. Source only — node_modules / big / binary writes are skipped (they
   // re-install), so the cache stays small (<~1 MB for a normal app).
   private _fileCache = new Map<string, Map<string, string>>();
+
+  /**
+   * Trivial-command latency, for the DEGRADED-sandbox check in runCommand.
+   *
+   * Per-actuator rather than per-workspace on purpose: the evidence is about the MACHINE, and one
+   * actuator serves one build's sandbox. Reset whenever a sandbox is dropped, so a fresh machine is
+   * never judged on the last one's record.
+   */
+  private _latency = newSandboxLatencyState();
   private static readonly FILE_CACHE_MAX_FILES = 500;
   private static readonly FILE_CACHE_MAX_BYTES = 256 * 1024; // per file
   // Scaffold files the last ensureWorkspace() seeded into a fresh sandbox, per workspace. These bypass
@@ -1251,6 +1260,21 @@ export class E2BActuator implements IEngineerActuator {
       const t0 = Date.now();
       try {
         const result = await sb.commands.run(command, { cwd: WORKSPACE_ROOT, timeoutMs: cmdTimeoutMs });
+        // DEGRADED-SANDBOX CHECK — the failure mode the dead-sandbox detector cannot see.
+        //
+        // Everything in the catch block below answers "did this FAIL like a dead sandbox?". The
+        // 2026-08-15 report failed in the opposite way: every command SUCCEEDED, and `ls -la` took 97
+        // and 116 seconds while a `timeout 10` command took 129. Nothing errored, so nothing was
+        // evicted, and 36 minutes were spent on a machine where listing a directory cost two minutes.
+        //
+        // Only TRIVIAL commands are measured, and only on SUCCESS: their runtime is evidence about the
+        // machine rather than the work, which is what makes this safe to act on. The sandbox is then
+        // dropped exactly as a dead one is — the next getSandbox creates a fresh one and replays the
+        // cached files, a path in production since 2026-07-05 rather than a new one invented here.
+        if (recordCommandLatency(this._latency, command, Date.now() - t0) && this.sandboxes.get(workspaceId) === sb) {
+          this.sandboxes.delete(workspaceId);
+          this._latency = newSandboxLatencyState(); // the fresh sandbox starts with a clean record
+        }
         return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
       } catch (err: any) {
         // A non-zero exit REJECTS here (E2B CommandExitError) — recover the REAL exit code so a genuine

@@ -32854,3 +32854,32 @@ card) failed with "Publishing failed — nothing was published." Autopsy, per th
   working stores' query shapes in a hotfix risks breaking what works. OPEN ROOT CAUSE: either those
   indexes' existence should be verified by the admin (Firestore console → Indexes) or those stores
   migrated to index-free shapes in a dedicated, tested change.
+
+## 2026-08-15 — Store player, first real PLAY: game-over "hang" + long-press text selection (both root-caused)
+
+The admin played a published game on the store and hit two things a world-best player must never do.
+Both were platform-level, both fixed in all three preview shells (React / Vue / Static):
+
+- **❌ "Game over hone par hang jaisa crash"** — TWO root causes stacked, both killed:
+  1. The player runs apps in an OPAQUE-ORIGIN sandboxed iframe (no `allow-same-origin` — the thing
+     that makes a stranger's app safe). In an opaque origin the `localStorage` GETTER itself throws
+     SecurityError. A game saving its high score AT GAME OVER therefore threw at exactly the moment
+     it finished. Fixed by `STORAGE_SHIM_SOURCE`: if native storage throws, window.localStorage /
+     sessionStorage are replaced with an in-memory Storage lookalike — honest (data lasts the
+     session, not a reload), and a no-op wherever native storage works. NavData already wrapped its
+     OWN storage for this reason; the app's own code had no such protection.
+  2. The shell's `showError` wiped `#root` on EVERY uncaught error, forever — correct during boot (a
+     blank screen is the lie), catastrophic after paint: a mid-game throw replaced the running app
+     with a red banner, which reads as a hang. Now a PAINTED app is never destroyed; the error is
+     still reported to the host through the console mirror.
+- **❌ Long-press selected text / double-tap zoomed** — `APP_TOUCH_CSS` now ships in every shell:
+  selection and callout off by default, `touch-action: manipulation` (no double-tap zoom), with
+  inputs/textareas/contenteditable explicitly keeping selection. Injected FIRST in `<head>` so it is
+  a DEFAULT the app's own CSS can override (a notes app can opt its content back in).
+- **Sibling found (rule 3):** the STATIC shell had none of the platform runtime — no storage shim,
+  no touch CSS, and no `window.NavData`, even though the builder prompt promises NavData on every
+  generated page. Plain-HTML games are exactly the kind of app the store is for, so all three are
+  now injected there too.
+- **Locked by `previewAppFeel.test.ts` (14 tests):** every shell carries both shims, the storage
+  shim runs BEFORE any app script, the touch CSS lands early enough to be overridable, and the
+  painted-guard is the first statement of `showError` in both dynamic shells.

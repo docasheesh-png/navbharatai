@@ -152,6 +152,59 @@ export const PROCESS_SHIM_SOURCE = [
 ].join('\n');
 
 /**
+ * STORAGE SHIM — kills the class behind the store's first real crash report (admin, 2026-08-15):
+ * a game played fine until game over, then hung with "Script error."
+ *
+ * The store player (and any future opaque-origin embed) runs the app in a sandboxed iframe WITHOUT
+ * allow-same-origin, and in an opaque origin the localStorage/sessionStorage GETTERS themselves
+ * throw a SecurityError. Generated apps use localStorage constantly — a game saving its high score
+ * at game over is the canonical case — so the app's first storage touch became an uncaught throw at
+ * the exact moment it "finished". NavData already wrapped its OWN storage calls for this reason;
+ * this shim protects the APP's own code the same way, one layer down: when native storage throws,
+ * window.localStorage/sessionStorage are redefined as an in-memory Storage lookalike. Honest
+ * behavior, not a fake: the data genuinely persists for the session and genuinely does not survive
+ * a reload — exactly what an opaque origin can offer. Where native storage works (the same-origin
+ * creator preview), the shim touches nothing.
+ */
+export const STORAGE_SHIM_SOURCE = [
+  `(function () {`,
+  `    function memStorage() {`,
+  `      var m = {};`,
+  `      var s = {`,
+  `        getItem: function (k) { return Object.prototype.hasOwnProperty.call(m, String(k)) ? m[String(k)] : null; },`,
+  `        setItem: function (k, v) { m[String(k)] = String(v); },`,
+  `        removeItem: function (k) { delete m[String(k)]; },`,
+  `        clear: function () { m = {}; },`,
+  `        key: function (i) { var ks = Object.keys(m); return i >= 0 && i < ks.length ? ks[i] : null; }`,
+  `      };`,
+  `      Object.defineProperty(s, 'length', { get: function () { return Object.keys(m).length; } });`,
+  `      return s;`,
+  `    }`,
+  `    function ensure(name) {`,
+  `      try { window[name].getItem(''); }`,
+  `      catch (e) { try { Object.defineProperty(window, name, { value: memStorage(), configurable: true }); } catch (e2) {} }`,
+  `    }`,
+  `    ensure('localStorage');`,
+  `    ensure('sessionStorage');`,
+  `  })();`,
+].join('\n');
+
+/**
+ * APP-FEEL TOUCH CSS — the store's second real-use report (admin, 2026-08-15): long-pressing the
+ * screen mid-game selected text and popped the copy menu; double-tap zoomed. A published app must
+ * feel like an app, not a document. Selection is disabled by default with the two honest carve-outs
+ * where selection IS the feature (inputs, textareas, contenteditable), plus `touch-action:
+ * manipulation` to drop double-tap-zoom (pan/pinch stay available to apps that want them). Injected
+ * FIRST in <head> on purpose: it is a default, so any app's own stylesheet (loaded later, equal
+ * specificity) can deliberately re-enable selection — e.g. a notes app opting its content back in
+ * with \`user-select: text\`.
+ */
+export const APP_TOUCH_CSS = [
+  `html, body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }`,
+  `input, textarea, select, [contenteditable]:not([contenteditable="false"]) { -webkit-user-select: text; user-select: text; }`,
+].join('\n');
+
+/**
  * The Babel plugin, for the SERVER precompile path.
  *
  * ⚠️ The browser fallback path in ReactPreview.ts carries a hand-written twin of this, for the same

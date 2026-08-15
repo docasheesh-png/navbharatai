@@ -15,7 +15,7 @@
  * Pure + dependency-free (string in → string out) → unit-testable.
  */
 import { VirtualFileSystem } from '../project/ProjectModel';
-import { PROCESS_SHIM_SOURCE, NAVDATA_RUNTIME_SOURCE } from './previewImportMeta';
+import { PROCESS_SHIM_SOURCE, NAVDATA_RUNTIME_SOURCE, STORAGE_SHIM_SOURCE, APP_TOUCH_CSS } from './previewImportMeta';
 
 const VUE_CDN = 'https://unpkg.com/vue@3.4.38/dist/vue.runtime.global.prod.js';
 const SFC_LOADER_CDN = 'https://cdn.jsdelivr.net/npm/vue3-sfc-loader@0.9.5/dist/vue3-sfc-loader.js';
@@ -119,6 +119,8 @@ export function buildVuePreview(vfs: VirtualFileSystem, _origin?: string): strin
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Preview</title>
+<style>${APP_TOUCH_CSS}</style>
+<script>${STORAGE_SHIM_SOURCE}</script>
 ${css ? `<style>\n${css}\n</style>` : ''}
 <script src="${VUE_CDN}"></script>
 <script src="${SFC_LOADER_CDN}"></script>
@@ -141,7 +143,11 @@ ${css ? `<style>\n${css}\n</style>` : ''}
   var DEP_URLS = bundle.depUrls || {};
   var EXT = ['', '.vue', '.js', '.ts', '.mjs', '.jsx', '.tsx', '.json', '.css', '/index.js', '/index.ts', '/index.vue'];
 
+  // Same painted-vs-boot split as ReactPreview (the store's game-over crash, 2026-08-15): a boot
+  // failure must be shown; an uncaught error AFTER the app is on screen must never wipe it.
+  var nbaiPainted = false;
   function showError(msg) {
+    if (nbaiPainted) return;
     var el = document.getElementById('${mountId}') || document.body;
     el.innerHTML = '<pre style="white-space:pre-wrap;color:#b00;padding:16px;font:13px/1.5 monospace">Preview error:\\n' +
       String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</pre>';
@@ -197,6 +203,9 @@ ${css ? `<style>\n${css}\n</style>` : ''}
       }));
       // Running the entry module executes createApp(App).mount('#${mountId}').
       await loadModule('/' + ENTRY, options);
+      // The entry ran without throwing — the app is on screen (or mounting). From here, runtime
+      // errors are reported, never allowed to replace a running app's DOM.
+      setTimeout(function () { nbaiPainted = true; }, 300);
     } catch (err) {
       showError((err && (err.stack || err.message)) || err);
     }

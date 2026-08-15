@@ -14,6 +14,7 @@
  */
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { normalizePath } from '../project/ProjectModel';
+import { STORAGE_SHIM_SOURCE, APP_TOUCH_CSS, NAVDATA_RUNTIME_SOURCE } from './previewImportMeta';
 
 const ASSET_MIME: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
@@ -108,6 +109,20 @@ export function buildStaticPreview(vfs: VirtualFileSystem, entry?: string): stri
     const dataUrl = assetDataUrl(vfs, resolveRef(entryPath, url));
     return dataUrl ? `${attr}="${dataUrl}"` : full;
   });
+
+  // The platform runtime the other two shells already carry, applied to plain-HTML apps too
+  // (rule 3 — the static path had NONE of it, found while fixing the store's game-over crash):
+  //   • storage shim — an opaque-origin iframe (the store player) throws on localStorage, and a
+  //     plain-JS game saving its high score dies at game over without this;
+  //   • app-feel CSS — long-press text selection / double-tap zoom off by default (app's own CSS,
+  //     loaded later, can opt back in);
+  //   • NavData — the builder prompt promises window.NavData on every generated page; static pages
+  //     were the one shell where that promise was silently broken.
+  // Injected at the TOP of <head> so the shim runs before any app script and the CSS is overridable.
+  const platformTag = `<style>${APP_TOUCH_CSS}</style>\n<script>\n${STORAGE_SHIM_SOURCE}\n${NAVDATA_RUNTIME_SOURCE}\n</script>`;
+  html = /<head[^>]*>/i.test(html)
+    ? html.replace(/<head[^>]*>/i, (m) => `${m}\n${platformTag}`)
+    : platformTag + '\n' + html;
 
   return html;
 }

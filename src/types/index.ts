@@ -82,7 +82,9 @@ export type ViewType =
   | 'engineer_ai' | 'connect_domain' | 'teacher_ai' | 'mentor_ai' | 'thesis_ai' | 'accountant_ai' | 'lawyer_ai' | 'finance_ai' | 'astrologer_ai' | 'govt_schemes_ai' | 'kisan_ai' | 'nutritionist_ai' | 'wellness_ai' | 'fitness_ai' | 'vet_ai' | 'parenting_ai' | 'cybersafety_ai' | 'insurance_ai' | 'chef_ai' | 'travel_ai' | 'vastu_ai' | 'yoga_ai' | 'english_ai' | 'resume_ai' | 'gardening_ai' | 'pharmacist_ai' | 'business_ai' | 'homerepair_ai' | 'realestate_ai' | 'driving_ai' | 'petcare_ai' | 'beauty_ai' | 'music_ai' | 'sports_ai' | 'photography_ai' | 'speaking_ai' | 'events_ai' | 'eldercare_ai' | 'interior_ai' | 'studyabroad_ai' | 'disability_ai' | 'fashion_ai' | 'productivity_ai' | 'relationship_ai' | 'vehicle_ai' | 'stocks_ai' | 'techhelp_ai' | 'mathscience_ai' | 'coding_ai' | 'maternity_ai' | 'firstaid_ai' | 'environment_ai' | 'gk_ai' | 'safety_ai' | 'translate_ai' | 'civic_ai' | 'sarkari_ai' | 'spiritual_ai' | 'crafts_ai' | 'festival_ai' | 'writing_ai' | 'aptitude_ai' | 'disaster_ai' | 'nature_ai' | 'freelance_ai' | 'babynames_ai' | 'hygiene_ai' | 'volunteer_ai' | 'astronomy_ai' | 'calligraphy_ai' | 'dance_ai' | 'games_ai' | 'techbuy_ai' | 'adventure_ai' | 'budget_ai' | 'repo_analyst';
 
 export type SettingsScreen =
-  | 'root' | 'general' | 'modules' | 'secrets' | 'database' | 'connections'
+  // 'modules' REMOVED 2026-08-14 — an unreachable screen (nothing ever set it) that hid the only
+  // Git & Deployment button. Keeping a member nothing can navigate to invites the same bug back.
+  | 'root' | 'general' | 'secrets' | 'database' | 'connections'
   | 'github_repos' | 'sharing' | 'deploy' | 'access'
   | 'git' | 'logs' | 'report' | 'metrics' | 'profile'
   // "Your Website" hub (admin 2026-07-29): the real-website essentials, brought into App Settings.

@@ -379,29 +379,10 @@ export function SettingsPanel({
                   </div>
                 )}
 
-                {/* View Mode */}
-                <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
-                  <div className="flex items-center gap-3 mb-3">
-                    <Monitor className="w-4 h-4 text-indigo-400" />
-                    <h4 className="text-xs font-bold text-white uppercase tracking-widest">View Mode</h4>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { id: 'auto', label: '🖥️ Auto' },
-                      { id: 'mobile', label: '📱 Mobile' },
-                      { id: 'tablet', label: '📟 Tablet' },
-                      { id: 'desktop', label: '💻 Desktop' },
-                    ].map(m => (
-                      <button key={m.id} onClick={() => setDeviceMode(m.id as any)}
-                        className={`py-2.5 min-h-[44px] rounded-xl text-xs font-bold transition-all border ${deviceMode === m.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20 active:bg-white/5'}`}>
-                        {m.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-[10px] text-[#586069] mt-2 leading-relaxed">
-                    Auto follows your screen size. Mobile shows the compact layout (menu + bottom bar); Tablet & Desktop show the side rail.
-                  </p>
-                </div>
+                {/* View Mode MOVED into Settings → General Settings (admin 2026-08-14). It used to
+                    float here as a loose card belonging to no group, which is why it was hard to
+                    find: it is a preference about how NavBharatAI looks, so it belongs beside Theme
+                    and Font size rather than above the group list. */}
                 {/* Grouped settings sections.
                     "App Settings" holds EVERYTHING a real, working website needs, in ONE place
                     (admin 2026-07-29): Domain (+ DNS + SSL), Hosting & Deploy (Multi-Cloud — the single
@@ -435,10 +416,27 @@ export function SettingsPanel({
                     ],
                   },
                   {
+                    // GENERAL SETTINGS — its own group (admin 2026-08-14). "General" used to be a single
+                    // tile INSIDE App Settings, which put two unrelated things in one box: App Settings
+                    // is about the app the USER BUILT (its domain, its database, its hosting), while
+                    // theme, view mode, font size and chat language are about how NAVBHARATAI ITSELF
+                    // looks and behaves. Above App Settings because it is reached far more often.
+                    title: 'General Settings',
+                    color: 'text-indigo-400',
+                    icon: LayoutDashboard,
+                    desc: 'How NavBharatAI looks and behaves — view mode, theme, text size, language',
+                    items: [
+                      // ⚠️ The id stays 'general'. It is a SCREEN id, not just a tile id, and other
+                      // surfaces (and the knowledge base) navigate to it by name — renaming it would
+                      // open a blank page from every one of them. The doorway moved; the room did not.
+                      { id: 'general', label: 'General', icon: LayoutDashboard },
+                    ],
+                  },
+                  {
                     title: 'App Settings',
                     color: 'text-blue-400',
                     icon: Settings,
-                    desc: 'Everything your app needs — website, data & tools',
+                    desc: 'Everything your BUILT APP needs — website, data & tools',
                     items: [
                       // The real-website essentials, in one hub. Domain covers DNS + SSL (auto). Database
                       // also provides login + storage when you connect Firebase/Supabase; the dedicated
@@ -456,7 +454,18 @@ export function SettingsPanel({
                       // so it was a second doorway to one room, exactly like the 'database' tile that
                       // was removed from Home for making users think there were two databases. LOGS
                       // stays: the 2026-07-29 instruction still holds for it, and it has no IDE twin.
-                      { id: 'general', label: 'General', icon: LayoutDashboard },
+                      // 🔒 GIT & DEPLOYMENT — RESCUED FROM A DEAD SCREEN (found 2026-08-14 while
+                      // regrouping). Its only button lived inside the `modules` screen, and NOTHING in
+                      // the entire app ever set settingsScreen to 'modules' — so the screen could not
+                      // be opened, and since Git had already been taken off the sidebar (2026-08-01,
+                      // "moved into Settings"), the whole DevOps surface — GitHub connect, commit/push,
+                      // ZIP export, deploy — was unreachable by any route. Meanwhile the knowledge base
+                      // confidently told users where to find it. `tab: true` routes through the SAME
+                      // toggleTab('git') the dead button used, so this is the one real surface, now with
+                      // a doorway. It belongs in App Settings: Git is about the app the user BUILT.
+                      { id: 'git', label: 'Git & Deployment', icon: GitBranch as any, tab: true },
+                      // 'General' MOVED OUT to its own "General Settings" group above (admin
+                      // 2026-08-14) — it was never an app setting.
                       { id: 'logs', label: 'Logs', icon: Activity },
                     ],
                   },
@@ -579,8 +588,11 @@ export function SettingsPanel({
                 className="space-y-6"
               >
                 <div className="px-1 py-4">
-                   <h2 className="text-2xl font-black text-white tracking-tight">General</h2>
-                   <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Application Identity & Preferences</p>
+                   <h2 className="text-2xl font-black text-white tracking-tight">General Settings</h2>
+                   {/* Was "Application Identity & Preferences" — the identity half (app name and
+                       description) was a dead field and has been removed, so the subtitle now
+                       describes what this screen actually does. */}
+                   <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">How NavBharatAI looks &amp; behaves</p>
                 </div>
 
                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 shadow-2xl space-y-6 sm:space-y-8">
@@ -598,6 +610,31 @@ export function SettingsPanel({
                   </div>
 
                   <div className="space-y-6 pt-4">
+                {/* View Mode — the FIRST control in General Settings. It decides the whole layout, so a
+                          user who came here to change how the app looks is looking for exactly this. */}
+                     <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">
+                       <div className="flex items-center gap-3 mb-3">
+                         <Monitor className="w-4 h-4 text-indigo-400" />
+                         <h4 className="text-xs font-bold text-white uppercase tracking-widest">View Mode</h4>
+                       </div>
+                       <div className="grid grid-cols-2 gap-2">
+                         {[
+                           { id: 'auto', label: '🖥️ Auto' },
+                           { id: 'mobile', label: '📱 Mobile' },
+                           { id: 'tablet', label: '📟 Tablet' },
+                           { id: 'desktop', label: '💻 Desktop' },
+                         ].map(m => (
+                           <button key={m.id} onClick={() => setDeviceMode(m.id as any)}
+                             className={`py-2.5 min-h-[44px] rounded-xl text-xs font-bold transition-all border ${deviceMode === m.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20 active:bg-white/5'}`}>
+                             {m.label}
+                           </button>
+                         ))}
+                       </div>
+                       <p className="text-[10px] text-[#586069] mt-2 leading-relaxed">
+                         Auto follows your screen size. Mobile shows the compact layout (menu + bottom bar); Tablet & Desktop show the side rail.
+                       </p>
+                     </div>
+
                      {/* Theme — moved here from the sidebar (admin 2026-07-16). Lives in Settings →
                          General so it is reachable and working in ALL view modes (mobile, tablet,
                          desktop), not only the sidebar rail/drawer. Drives the same setTheme as before. */}
@@ -638,30 +675,16 @@ export function SettingsPanel({
                         <FontScaleControl />
                      </div>
 
-                     <div className="space-y-3 pt-6 border-t border-white/10">
-                       <label htmlFor="settings-app-desc" className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1 block pl-1">Description</label>
-                       <textarea
-                         id="settings-app-desc"
-                         defaultValue="The ultimate specialized AI developer workspace for Bharat."
-                         className="w-full bg-[#0d1117] border border-white/10 rounded-2xl sm:rounded-[1.5rem] px-4 sm:px-6 py-4 sm:py-5 text-sm font-medium text-[#8b949e] outline-none focus:border-indigo-500 transition-all min-h-[120px] resize-none shadow-inner"
-                       />
-                     </div>
-                     <div className="flex items-center justify-between gap-3 p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
-                       <div className="flex items-center gap-3 min-w-0">
-                         <div className="w-10 h-10 shrink-0 bg-indigo-600/10 rounded-xl flex items-center justify-center">
-                           <Terminal className="w-5 h-5 text-indigo-400" />
-                         </div>
-                         <div>
-                           <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Developer Mode</h4>
-                           <p className="text-[9px] text-[#484f58] font-bold uppercase">Advanced debug tools</p>
-                         </div>
-                       </div>
-                       <button className="w-12 h-6 bg-indigo-600 rounded-full p-1 flex items-center justify-end transition-all">
-                         <div className="w-4 h-4 bg-white rounded-full shadow-lg"></div>
-                       </button>
-                     </div>
+                     {/* The "Description" textarea was REMOVED here (admin 2026-08-14). It was
+                         uncontrolled (`defaultValue`, no onChange, no save) and nothing anywhere read
+                         it — a user could type into it and every word was discarded on navigation,
+                         while the box looked like a setting they had configured. */}
+                     {/* "Developer Mode" was REMOVED here (admin 2026-08-14). It was a toggle with no onClick,
+                         no state and a hardcoded ON appearance — it advertised "advanced debug tools"
+                         and did nothing at all. A control that cannot be switched is not a setting;
+                         per rule 2 there are only two valid states, working or not built. */}
 
-                     {/* "Made by NavBharatAI" signature toggle — badge on every built app (admin 2026-07-16). */}
+                                          {/* "Made by NavBharatAI" signature toggle — badge on every built app (admin 2026-07-16). */}
                      <AppSignatureToggle />
 
                      <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner space-y-3">
@@ -741,131 +764,12 @@ export function SettingsPanel({
               </motion.div>
             )}
 
-            {settingsScreen === 'modules' && (
-              <motion.div
-                key="modules"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="space-y-6"
-              >
-                {/* Section Header */}
-                <div className="px-1 py-4">
-                   <h2 className="text-2xl font-black text-white tracking-tight">Active Modules</h2>
-                   <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Control Navbharat's Core Intelligence</p>
-                </div>
-
-                {/* Brain Engine Card */}
-                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl overflow-hidden relative">
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className="w-12 h-12 bg-indigo-600/10 rounded-2xl flex items-center justify-center">
-                       <Cpu className="w-6 h-6 text-indigo-400" />
-                    </div>
-                    <div>
-                       <h3 className="font-black text-white text-sm uppercase tracking-wider">Brain Engine</h3>
-                       <p className="text-[10px] text-[#8b949e] font-medium italic">Internal reasoning & generation engine</p>
-                    </div>
-                  </div>
-
-                  <div className="bg-[#0d1117]/60 border border-white/5 rounded-3xl p-5 flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 flex items-center justify-center flex-shrink-0">
-                      <Sparkles className="w-5 h-5 text-indigo-400" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-1.5">Sovereign Autopilot Engaged</h4>
-                      <p className="text-[11px] text-[#8b949e] leading-relaxed">
-                        Navbharat AI incorporates a fully autonomous routing core. API requests are dynamically optimized, balanced, and auto-routed over resilient premium cognitive channels based on complexity, security profile, and operational load to ensure maximum up-times and absolute privacy.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-8 pt-8 border-t border-white/5">
-                    <h4 className="text-[10px] font-black text-white uppercase tracking-widest mb-4">Brain API Credentials</h4>
-                    <div className="space-y-4">
-                      {Object.entries(PROVIDER_CONFIG).map(([id, provider]) => (
-                        <div key={id} className="space-y-2">
-                          <div className="flex items-center justify-between px-1">
-                            <span className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">{provider.label}</span>
-                            <a href={provider.link} target="_blank" rel="noreferrer" className="text-[9px] text-indigo-400 font-black uppercase hover:text-white transition-colors">Get API Key</a>
-                          </div>
-                          <div className="relative group">
-                            <input
-                              type={showKeyStates[id] ? "text" : "password"}
-                              value={(keys as any)[id] || ''}
-                              onChange={(e) => setKeys(prev => ({ ...prev, [id]: e.target.value }))}
-                              placeholder={`Enter ${id} key...`}
-                              className="w-full bg-black/40 border border-white/5 rounded-2xl px-5 py-4 text-xs font-mono text-indigo-400 outline-none focus:border-indigo-500/50 transition-all"
-                            />
-                            <button
-                              onClick={() => setShowKeyStates(prev => ({ ...prev, [id]: !prev[id] }))}
-                              className="absolute right-4 top-1/2 -translate-y-1/2 text-[#484f58] hover:text-white transition-colors"
-                            >
-                              {showKeyStates[id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                          </div>
-                          {/* G14: Show masked last-4 chars when key is saved and hidden */}
-                          {!showKeyStates[id] && (keys as any)[id] && (keys as any)[id].length > 4 && (
-                            <p className="text-[8px] font-mono text-[#484f58] px-1 mt-1">
-                              Saved: ••••••••{((keys as any)[id] as string).slice(-4)}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Git & Deployment — moved here from the sidebar (admin 2026-08-01). Opens the real Git /
-                    DevOps engine view (GitHub connect, commit/push, ZIP export, deploy targets). */}
-                <button
-                  onClick={() => toggleTab('git' as ViewType)}
-                  className="w-full text-left bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl hover:border-indigo-500/40 transition-colors active:scale-[0.99]"
-                >
-                   <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-indigo-600/10 rounded-2xl flex items-center justify-center">
-                         <GitBranch className="w-6 h-6 text-indigo-400" />
-                      </div>
-                      <div className="flex-1">
-                         <h3 className="font-black text-white text-sm uppercase tracking-wider">Git &amp; Deployment</h3>
-                         <p className="text-[10px] text-[#8b949e] font-medium italic">Connect GitHub, commit &amp; push, export a ZIP, and deploy — open the DevOps engine</p>
-                      </div>
-                      <ChevronRight className="w-5 h-5 text-[#484f58]" />
-                   </div>
-                </button>
-
-                {/* Workspace Panels Toggle */}
-                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl">
-                   <div className="flex items-center gap-4 mb-6">
-                      <div className="w-12 h-12 bg-emerald-600/10 rounded-2xl flex items-center justify-center">
-                         <Monitor className="w-6 h-6 text-emerald-400" />
-                      </div>
-                      <div>
-                         <h3 className="font-black text-white text-sm uppercase tracking-wider">Workspace Panels</h3>
-                         <p className="text-[10px] text-[#8b949e] font-medium italic">Toggle active navigation modules</p>
-                      </div>
-                   </div>
-
-                   <div className="grid gap-2">
-                      {menuItems.filter(item => item.id !== 'git').map(item => (
-                        <button
-                          key={item.id}
-                          onClick={() => setEnabledModules(prev => ({ ...prev, [item.id]: !prev[item.id] }))}
-                          className={`flex items-center gap-4 p-4 rounded-[1.5rem] border transition-all active:scale-[0.97] ${enabledModules[item.id] !== false ? 'bg-[#0d1117] border-white/10' : 'bg-transparent border-white/5 opacity-50'}`}
-                        >
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${enabledModules[item.id] !== false ? 'bg-indigo-500/20 text-indigo-400' : 'bg-white/5 text-[#484f58]'}`}>
-                            <item.icon className="w-5 h-5" />
-                          </div>
-                          <span className="flex-1 text-[11px] font-black uppercase tracking-widest text-left text-white">{item.label}</span>
-                          <div className={`w-12 h-6 rounded-full p-1 flex items-center transition-all ${enabledModules[item.id] !== false ? 'bg-emerald-500/20 justify-end border border-emerald-500/30' : 'bg-black/40 justify-start border border-white/5'}`}>
-                            <div className={`w-4 h-4 rounded-full shadow-lg transition-transform ${enabledModules[item.id] !== false ? 'bg-emerald-400' : 'bg-[#484f58]'}`}></div>
-                          </div>
-                        </button>
-                      ))}
-                   </div>
-                </div>
-              </motion.div>
-            )}
-
+            {/* The `modules` screen was REMOVED here (2026-08-14). NOTHING in the app ever set
+                settingsScreen to 'modules', so it could not be opened — and it was the only home of
+                the Git & Deployment button, which is why that whole surface was unreachable. Git now
+                has a real tile in App Settings; the rest of this screen was a static "Brain Engine"
+                blurb with no controls, so nothing else was lost. Unreachable UI is how the bug
+                happened, so the screen goes rather than staying as a trap for the next reader. */}
             {settingsScreen === 'secrets' && (
               <motion.div
                 key="secrets"

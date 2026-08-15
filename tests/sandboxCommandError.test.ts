@@ -97,8 +97,12 @@ describe('the SWEEP — no call site may re-invent the lossy version (rule 3)', 
      * command, and it uses the shared helper. That matters here specifically — if that command fails,
      * its stdout is the ONLY evidence of why npm could not apply the fixes, and a lossy handler would
      * leave the build reporting "the result could not be re-read" with nothing to explain it.
+     *
+     * 10 → 11 on 2026-08-15: the transient-fs-race install retry (`_npmInstall` step 2.5, from the
+     * Mitrify ENOTEMPTY report a876b7bb) runs `npm install` once more — through the shared helper,
+     * because if the RETRY also fails, its log is the only proof the failure was not transient after all.
      */
     const total = FILES.reduce((n, f) => n + (read(f).match(/commandFailureResult\(err\)/g) || []).length, 0);
-    expect(total).toBe(10);
+    expect(total).toBe(11);
   });
 });

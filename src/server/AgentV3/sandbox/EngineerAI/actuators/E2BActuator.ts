@@ -7,7 +7,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure } from './devServerHost';
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
@@ -464,6 +464,21 @@ export class E2BActuator implements IEngineerActuator {
     }).catch((err: any) => commandFailureResult(err));
     const installLog = install.stdout + install.stderr;
     if (install.exitCode === 0) return { success: true, log: await withAuditFix(installLog) };
+
+    // Step 2.5: TRANSIENT FS RACE (Mitrify report a876b7bb — `ENOTEMPTY … rmdir node_modules/yargs/…`,
+    // exit 217, on overlayfs, with nothing wrong in the project; the identical install succeeded
+    // seconds later). One plain retry, only for the fs-race errno classes the pure predicate names —
+    // a deterministic failure (ERESOLVE/404/EINTEGRITY) is never retried here, it falls through to its
+    // own handling. This is the upstream half of the migration-skip heal: with the install no longer
+    // failing on the race, the migration never gets skipped in the first place.
+    if (isTransientNpmFsFailure(installLog)) {
+      const again = await sandbox.commands.run('npm install', {
+        cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
+      }).catch((err: any) => commandFailureResult(err));
+      const againLog = installLog + '\n[transient fs-race retry]\n' + again.stdout + again.stderr;
+      if (again.exitCode === 0) return { success: true, log: await withAuditFix(againLog) };
+      // Fell through: let the ERESOLVE branch below look at the ORIGINAL log too.
+    }
 
     // Step 3: ERESOLVE peer-dep conflict — retry with --legacy-peer-deps
     if (/ERESOLVE|peer dep(endenc)?/i.test(installLog)) {

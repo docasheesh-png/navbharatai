@@ -69,9 +69,25 @@ const PORT_IS_A_DEFAULT_NOT_A_RULE =
   + ' DIFFERENT port, that is fine — call update_preview with the port it ACTUALLY bound. Never change'
   + ' your server\'s port to match the number above: the preview follows your server, not the reverse.';
 
+/**
+ * SHARED DATA for browser-only apps (store ecosystem Kadam 4). Every generated page carries a tiny
+ * `window.NavData` helper (previewImportMeta.ts). Telling the model it exists is what makes "build me
+ * a chat app" produce something that genuinely works with NO backend — in preview the rows are
+ * per-device, and the moment the app is published to the Nav App Store the SAME code shares rows
+ * between every viewer. One paragraph, appended to every framework hint: the capability is
+ * framework-independent and a longer contract would spend prompt budget the build needs elsewhere.
+ */
+const NAVDATA_HINT =
+  ' SHARED DATA: `window.NavData` is available on every page — `NavData.add(collection, obj)` and'
+  + ' `NavData.list(collection, limit)` (both return Promises; rows come newest-first as'
+  + ' {id, data, at}). Use it for small shared rows (chat messages, guestbook entries, scores,'
+  + ' bookings) instead of building a server. In the preview the rows are per-device; published on'
+  + ' the Nav App Store the same code shares rows between all viewers. Rows are small (≤2KB) and'
+  + ' quota-bound — for real databases, auth or relations use the user\'s own database instead.';
+
 function frameworkScaffoldHint(framework?: string): string {
   const hint = FRAMEWORK_HINTS[framework ?? 'vite-react'] ?? FRAMEWORK_HINTS['vite-react'];
-  return hint + PORT_IS_A_DEFAULT_NOT_A_RULE;
+  return hint + PORT_IS_A_DEFAULT_NOT_A_RULE + NAVDATA_HINT;
 }
 
 /**

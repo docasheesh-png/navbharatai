@@ -980,6 +980,15 @@ follow this standard from the start.
   (`gen-lang-client-0866594388`) is NEVER used for end-user app databases,
   auth, or storage — that would charge NavBharatAI's billing account.
   Users bring their own credentials (Supabase, Firebase, or other providers).
+  **ONE ADMIN-AUTHORIZED, QUOTA-BOUND EXCEPTION (2026-08-15, the instant-app store plan):** Nav App
+  Store instant apps may keep SMALL SHARED ROWS (chat messages, guestbook entries, scores, bookings)
+  on NavBharatAI's Firestore via the `window.NavData` API (`navStoreWebData.ts`), because demanding a
+  Supabase account before a shared guestbook works would lose 90% of creators at the door. The
+  exception's TERMS are the hard quotas in that module (per-app row cap, per-day write cap, per-row
+  size cap, rate-limited routes) — an over-quota app gets an honest 429, never NavBharatAI's
+  overdraft. Anything bigger (auth, relations, files, real volume) stays on the USER'S OWN database —
+  the one-click Supabase path. Do NOT widen these quotas or add collections/capabilities to NavData
+  without fresh admin sign-off; the quotas ARE the authorization's boundary.
 - **Sandbox:** E2B real cloud VM. LocalActuator is for dev/CI only.
 
 ### NavBharatAI Pro v3.0 (AgentV3) — admin-authorized billing override (2026-06-22)

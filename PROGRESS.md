@@ -32763,3 +32763,57 @@ Two real fixes:
 
 Tests: `nextBuildSuggestions.test.ts` +4 (list→pagination ranks ahead of universal; game→sound+highscore;
 no follow-up already present; pool > window). tsc clean (frontend + server); full suite green.
+
+---
+
+## 2026-08-15 — THE INSTANT-APP ECOSYSTEM: build → publish → run → remix → earn (Kadam 0–4 shipped)
+
+The admin's ask, verbatim: *"user navbharat par app banaye, yahi release kare, user navbharatai ke nav
+app store me direct use kare — pura ecosystem banana hai … bina apk banaye, bina kahi deploy kiye"*,
+then *"ab banao, ek ek kar ke, jab tak pura na ban jaye rukna mat."* The economics that make it work:
+apps run on the IN-BROWSER preview engine in the VIEWER'S browser — 1 viewer or 10,000 cost the
+platform the same, no E2B anywhere in the loop.
+
+Shipped as five PRs, each CI-green and merged the same day:
+- **#2383 Kadam 0 — the security foundation.** Publish = immutable SNAPSHOT (re-publish = same
+  listing/link, new version). Sanitize-then-scan: the creator's own `.env` is dropped silently; a
+  hardcoded real-format API key REFUSES publish with its exact file:line (`scanTextForSecrets`, one
+  source of truth with the env-template scanner). `proveBrowserRunnable` decides publishability
+  (default NO). Private = scrypt password checked SERVER-side; going public deletes the password
+  material. Quotas from day 1. Lifecycle: live-via-link immediately (`unlisted`), browsable store
+  after admin review (APK-store discipline), takedown deletes bytes.
+- **#2384 Kadam 1 — player + UI + the 1-click button.** Full-screen player whose iframe sandbox OMITS
+  `allow-same-origin` — **proven in a real Chromium first** (an allow-scripts srcdoc iframe CAN
+  dynamic-import a module served with ACAO:*, which /api/esm sends; the preview's old "modules break
+  without it" comment is stale for this path). Pinned by test because adding the flag back breaks
+  nothing visible while handing every store app the viewer's Firebase session. Share links
+  `/store/app/<id>` deep-link into the player. The publish card sits beside "Make an Android app"
+  (admin's placement), shows gate refusals VERBATIM, and follows the no-dead-buttons rule.
+- **#2385 Kadam 2 — remix + lineage.** "Make it yours" copies the snapshot into the viewer's own
+  fresh v5 workspace (sticky-session handoff, no new machinery) — the viewer becomes a creator.
+  Private apps demand their password for remix exactly as for open; the target must be the caller's
+  own AND empty; lineage recorded AT REMIX TIME (the only knowable moment) and stamped as
+  `parentAppId` on publish.
+- **#2386 Kadam 3 — paid remix.** Wallet-to-wallet (top-up = existing Cashfree recharge; earnings
+  one-way into the creator's wallet = closed system, NO KYC/payout rails/licence — bank payouts stay
+  Kadam 5 with CA counsel). 80/20 split, whole-rupee prices ₹19–₹10,000 (refused, not rounded).
+  NON-REFUNDABLE (admin verbatim: "ya likh de non refundable, baat khatam") — fair because the app is
+  free to RUN before buying, and the confirm sheet says so BEFORE money moves. Billing law pinned by
+  test: files DELIVERED first, debit AFTER ("working result or free"); one purchase per buyer per app
+  forever (transactional-create idempotency); failed creator credits land in a reconciliation ledger.
+  THE RE-LIST RULE: a paid app's remix cannot be published back to the store; a free app's can.
+- **Kadam 4 (this change) — shared data.** `window.NavData` (add/list) on every generated page: in
+  PREVIEW rows are per-device (localStorage, honest — "not published yet" means unshared); on the
+  STORE the player bakes `__NBAI_STORE_APP_ID` in and the SAME code shares rows between all viewers
+  via `/api/nav-store/web/app/:id/data/:collection` (CORS-open BY DESIGN — the caller is an
+  opaque-origin iframe). Hard quotas ARE the terms of the admin's authorization to bend the
+  "user apps never touch our accounts" rule (amended in CLAUDE.md with the boundary stated): 5,000
+  rows/app, 2,000 writes/day, 2KB/row, transactional enforcement so a racing write cannot slip the
+  cap, honest 429s, rate-limited routes. Builder prompt now names the capability (an API nobody
+  generates against is dead code) with the preview-vs-store difference stated.
+
+**Open, deliberately (rule 6):** Kadam 5 (bank payouts via Cashfree vendor split + CA counsel) waits
+for real store volume. The store player runs on the platform origin inside an opaque-origin iframe —
+a dedicated player subdomain (VITE_PREVIEW_ORIGIN-style) remains the belt-and-braces upgrade and
+needs the admin's DNS. Store terms/abuse policy text for the listing page is copy, not code, and
+still to be written.

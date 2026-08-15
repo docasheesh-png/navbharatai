@@ -52,6 +52,8 @@ import {
 } from '../lib/navStoreWeb';
 import { loadWorkspaceFiles, saveWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { validateRemixPrice, hasPurchased, canAffordRemix, settleRemixPurchase } from '../lib/navStoreRemixPurchase';
+import { addDataRow, listDataRows, isValidDataCollection } from '../lib/navStoreWebData';
+import { rateLimiter } from '../lib/authMiddleware';
 import { verifiedWorkspaceReadOk } from '../lib/workspaceIdentity';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { renderPreview } from '../runtime/renderPreview';
@@ -608,7 +610,12 @@ export function registerNavStoreRoutes(app: Express): void {
         // The SAME compiler the in-browser preview uses — one engine, one set of guarantees. The
         // client renders this html in a sandboxed iframe WITHOUT allow-same-origin (opaque origin),
         // so a store app can never read the platform's storage or tokens.
-        const html = renderPreview(vfs, origin, `store-${found.id}`);
+        let html = renderPreview(vfs, origin, `store-${found.id}`);
+        // Bake the store app id in, which flips window.NavData from its per-device preview backend to
+        // the REAL shared rows — the difference between "a chat app that talks to yourself" and one
+        // that talks to everyone. Injected at serve time because only the store knows the id.
+        const idTag = `<script>window.__NBAI_STORE_APP_ID=${JSON.stringify(found.id)};</script>`;
+        html = html.includes('<body>') ? html.replace('<body>', `<body>${idTag}`) : idTag + html;
         compiled = { html, kind: 'web' };
         webPlayerCache.set(cacheKey, compiled);
         if (webPlayerCache.size > WEB_PLAYER_CACHE_MAX) {
@@ -754,6 +761,53 @@ export function registerNavStoreRoutes(app: Express): void {
       res.json({ ok: true });
     } catch {
       res.status(502).json({ error: 'Could not send the report.' });
+    }
+  });
+
+  // ═══ SHARED DATA (Kadam 4) — append + list, hard-quota'd; see navStoreWebData.ts ═══
+  //
+  // CORS IS THE POINT, not an oversight: the caller is the app itself, running in the player's
+  // OPAQUE-ORIGIN iframe, so every one of its fetches is cross-origin. Anonymous by design (viewers
+  // have no session inside the sandbox); protection is quotas + the platform's rate limiter — the
+  // same trade /api/esm/* already makes for the same iframe.
+  const dataCors = (res: Response) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  };
+  app.options('/api/nav-store/web/app/:id/data/:collection', (_req: Request, res: Response) => {
+    dataCors(res);
+    res.status(204).end();
+  });
+
+  const dataWriteLimiter = rateLimiter({ name: 'store-data-write', authed: 600, anon: 300, noun: 'writes', durable: false, anonGlobalPerHour: 20_000 });
+  const dataReadLimiter = rateLimiter({ name: 'store-data-read', authed: 2_000, anon: 1_000, noun: 'reads', durable: false });
+
+  app.post('/api/nav-store/web/app/:id/data/:collection', dataWriteLimiter, async (req: Request, res: Response) => {
+    dataCors(res);
+    const collection = String(req.params.collection || '');
+    if (!isValidDataCollection(collection)) return res.status(400).json({ error: 'Collection names are short lowercase words (letters, digits, - or _).' });
+    try {
+      const found = await getWebApp(String(req.params.id || ''));
+      if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      const result = await addDataRow(found.id, collection, req.body?.data);
+      if (!result.ok) return res.status(result.status).json({ error: result.reason });
+      res.json({ ok: true, row: result.row });
+    } catch {
+      res.status(502).json({ error: 'The row could not be saved — nothing was stored.' });
+    }
+  });
+
+  app.get('/api/nav-store/web/app/:id/data/:collection', dataReadLimiter, async (req: Request, res: Response) => {
+    dataCors(res);
+    const collection = String(req.params.collection || '');
+    if (!isValidDataCollection(collection)) return res.status(400).json({ error: 'Collection names are short lowercase words (letters, digits, - or _).' });
+    try {
+      const found = await getWebApp(String(req.params.id || ''));
+      if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      res.json({ rows: await listDataRows(found.id, collection, Number(req.query.limit) || 50) });
+    } catch {
+      res.status(502).json({ error: 'Could not load the rows.' });
     }
   });
 

@@ -15,7 +15,7 @@
  * Pure + dependency-free (string in → string out) → unit-testable.
  */
 import { VirtualFileSystem } from '../project/ProjectModel';
-import { PROCESS_SHIM_SOURCE } from './previewImportMeta';
+import { PROCESS_SHIM_SOURCE, NAVDATA_RUNTIME_SOURCE } from './previewImportMeta';
 
 const VUE_CDN = 'https://unpkg.com/vue@3.4.38/dist/vue.runtime.global.prod.js';
 const SFC_LOADER_CDN = 'https://cdn.jsdelivr.net/npm/vue3-sfc-loader@0.9.5/dist/vue3-sfc-loader.js';
@@ -134,6 +134,7 @@ ${css ? `<style>\n${css}\n</style>` : ''}
   // SFC loader runs the user's own code in this page, so this path needs it exactly as much. Values
   // come from the SAME exported constant, so the two previews can never disagree.
   ${PROCESS_SHIM_SOURCE}
+  ${NAVDATA_RUNTIME_SOURCE}
   var bundle = JSON.parse(document.getElementById('__bundle__').textContent);
   var SOURCES = bundle.modules;
   var ENTRY = bundle.entry;

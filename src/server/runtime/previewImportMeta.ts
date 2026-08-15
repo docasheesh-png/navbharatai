@@ -92,6 +92,58 @@ export const PROCESS_ENV_SOURCE = '{NODE_ENV:"development"}';
  * provided a real `process`, overwriting it with this minimal stand-in would turn a fix into a
  * regression for the app that had it right.
  */
+/**
+ * NAVDATA — the shared-data helper every generated page carries (store ecosystem Kadam 4).
+ *
+ * THE PROBLEM IT SOLVES: a chat, a leaderboard, a booking sheet need data SHARED between viewers —
+ * and a browser-run app has nowhere shared to put it. The platform now provides a tiny per-app row
+ * store (append + list, hard-quota'd server-side); this helper is how an app reaches it.
+ *
+ * TWO BACKENDS, one honest split:
+ *   • On the NAV APP STORE the player injects `window.__NBAI_STORE_APP_ID`, and rows go to the real
+ *     API — genuinely shared between every viewer of that app.
+ *   • In the creator's own PREVIEW no app id exists yet (the app is not published), so rows go to
+ *     localStorage — the app WORKS end-to-end, with the one difference that the data is per-device.
+ *     That difference is the truth, not a downgrade: unshared data before publishing is what
+ *     "not published yet" means.
+ *
+ * The API calls are relative ('/api/…') on purpose: a srcdoc iframe inherits its parent's base URL,
+ * so the same page works in the same-origin preview AND the opaque-origin store player (where the
+ * fetch is cross-origin and the data routes answer with ACAO:*). localStorage access THROWS in an
+ * opaque origin — wrapped, with an in-memory fallback, so no environment can crash an app over it.
+ */
+export const NAVDATA_RUNTIME_SOURCE = [
+  `if (typeof window.NavData === 'undefined') {`,
+  `    (function () {`,
+  `      var mem = {};`,
+  `      function lsGet(k) { try { return JSON.parse(localStorage.getItem(k) || '[]'); } catch (e) { return mem[k] || []; } }`,
+  `      function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { mem[k] = v; } }`,
+  `      window.NavData = {`,
+  `        add: function (collection, data) {`,
+  `          var id = window.__NBAI_STORE_APP_ID;`,
+  `          if (id) {`,
+  `            return fetch('/api/nav-store/web/app/' + encodeURIComponent(id) + '/data/' + encodeURIComponent(collection), {`,
+  `              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: data })`,
+  `            }).then(function (r) { return r.json(); });`,
+  `          }`,
+  `          var k = 'navdata_' + collection; var rows = lsGet(k);`,
+  `          var row = { id: 'r' + Date.now() + Math.random().toString(36).slice(2, 6), data: data, at: Date.now() };`,
+  `          rows.unshift(row); lsSet(k, rows.slice(0, 500));`,
+  `          return Promise.resolve({ ok: true, row: row });`,
+  `        },`,
+  `        list: function (collection, limit) {`,
+  `          var id = window.__NBAI_STORE_APP_ID;`,
+  `          if (id) {`,
+  `            return fetch('/api/nav-store/web/app/' + encodeURIComponent(id) + '/data/' + encodeURIComponent(collection) + '?limit=' + (limit || 50))`,
+  `              .then(function (r) { return r.json(); }).then(function (d) { return d.rows || []; });`,
+  `          }`,
+  `          return Promise.resolve(lsGet('navdata_' + collection).slice(0, limit || 50));`,
+  `        }`,
+  `      };`,
+  `    })();`,
+  `  }`,
+].join('\n');
+
 export const PROCESS_SHIM_SOURCE = [
   `if (typeof window.process === 'undefined') {`,
   `    window.process = { env: ${PROCESS_ENV_SOURCE}, platform: 'browser', version: '', browser: true,`,

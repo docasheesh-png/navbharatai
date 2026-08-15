@@ -79,7 +79,8 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
       // 'APK Builder' MOVED to AI Tools (admin 2026-08-14).
       { id: 'domain', label: 'Custom Domain', icon: Globe },
       { id: 'seo', label: 'SEO Optimizer', icon: Search },
-      { id: 'appstore', label: 'Nav App Store', icon: Package },
+      // 'Nav App Store' MOVED to Monetization & Team (admin 2026-08-14): publishing there is about
+      // reaching users and earning, not about shipping a build.
     ],
   },
   {
@@ -94,6 +95,7 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
       { id: 'analytics', label: 'Analytics', icon: TrendingUp },
       { id: 'insights', label: 'Insights & Webhooks', icon: TrendingUp },
       { id: 'gallery', label: 'Community Gallery', icon: Globe },
+      { id: 'appstore', label: 'Nav App Store', icon: Package },
       // 'database' was REMOVED here (admin 2026-07-27). It opened a screen whose only real content was
       // a link to Settings → App Settings → Database — a second doorway to the same place, which made
       // users think there were two different databases to configure. The real screen stays in Settings.

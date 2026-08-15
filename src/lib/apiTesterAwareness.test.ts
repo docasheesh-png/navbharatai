@@ -15,7 +15,7 @@ const runner = APP_KNOWLEDGE_BASE.find(f => f.id === 'code-testing-panel');
 describe('API Tester — AI awareness (Free · Pro · Offline)', () => {
   it('lives in the shared KB with the CURRENT path (moved out of Code Studio)', () => {
     expect(api).toBeTruthy();
-    expect(api!.path).toContain('Other AI → Developer Tools → API Tester');
+    expect(api!.path).toContain('Other AI → AI Tools → API Tester');
     expect(api!.path).not.toContain('Code Studio');
   });
 
@@ -57,7 +57,7 @@ describe('v5 proactively suggests the API Tester when an API call fails', () => 
     ]) {
       const hint = apiTesterHintFor([err]);
       expect(hint, err).toContain('API Tester');
-      expect(hint, err).toContain('Other AI → Developer Tools → API Tester');
+      expect(hint, err).toContain('Other AI → AI Tools → API Tester');
     }
   });
 

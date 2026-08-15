@@ -22,7 +22,7 @@ describe('v5 can answer "how do I get my app as an Android file?"', () => {
   it('knows the destination — the More tab, and the longer Other AI route', () => {
     expect(prompt).toMatch(/"More" tab/);
     expect(prompt).toMatch(/Download APK/);
-    expect(prompt).toMatch(/Other AI → Publish & Deploy → APK Builder/);
+    expect(prompt).toMatch(/Other AI → AI Tools → APK Builder/);
   });
 
   it('knows which buttons to press, in order', () => {

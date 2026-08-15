@@ -35,6 +35,9 @@ export interface HomeToolGroup {
 
 export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
   {
+    // REGROUPED (admin 2026-08-14). The old split was by what a tool IS; this one is by what the user
+    // is DOING, which is why non-AI utilities (Versioning, Minifier, APK Builder) sit here: they are
+    // the things reached while iterating on an app, next to the AI helpers used in the same breath.
     title: 'AI Tools',
     color: 'text-violet-400',
     icon: Bot,
@@ -43,30 +46,27 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
       { id: 'imagegen', label: 'AI Image Gen', icon: Wand2 },
       { id: 'debugger', label: 'AI Debugger', icon: Bug },
       { id: 'codereview', label: 'Code Review', icon: Code },
+      { id: 'api', label: 'API Tester', icon: Globe },
+      { id: 'versioning', label: 'Versioning', icon: GitBranch },
+      { id: 'minifier', label: 'Minifier', icon: Minimize2 },
+      { id: 'apk', label: 'APK Builder', icon: Smartphone },
     ],
   },
   {
+    // ⚠️ ABSORBED the whole "Design & Build" group (admin 2026-08-14). That group is GONE, not empty:
+    // every one of its five items was moved here by name, so leaving an empty heading behind would be
+    // a dead section on the home page.
     title: 'Developer Tools',
     color: 'text-emerald-400',
     icon: Code,
     items: [
       { id: 'testing', label: 'Test Runner', icon: TestTube },
-      { id: 'api', label: 'API Tester', icon: Globe },
-      { id: 'versioning', label: 'Versioning', icon: GitBranch },
       { id: 'performance', label: 'Performance', icon: Gauge },
-      { id: 'minifier', label: 'Minifier', icon: Minimize2 },
-    ],
-  },
-  {
-    title: 'Design & Build',
-    color: 'text-pink-400',
-    icon: Palette,
-    items: [
       { id: 'multipages', label: 'Multi-Page', icon: Layout },
       { id: 'components', label: 'Components', icon: Puzzle },
       { id: 'designsys', label: 'Design System', icon: LayoutTemplate },
-      { id: 'darkmode', label: 'Dark Mode Gen', icon: Moon },
       { id: 'figma', label: 'Figma Import', icon: Figma },
+      { id: 'darkmode', label: 'Dark Mode Gen', icon: Moon },
     ],
   },
   {
@@ -74,9 +74,9 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
     color: 'text-cyan-400',
     icon: Rocket,
     items: [
-      { id: 'apk', label: 'APK Builder', icon: Smartphone },
       { id: 'cicd', label: 'CI/CD Pipeline', icon: Rocket },
       // 'Multi-Cloud' MOVED to Settings → App Settings → Multi-Cloud Deploy (admin 2026-07-29).
+      // 'APK Builder' MOVED to AI Tools (admin 2026-08-14).
       { id: 'domain', label: 'Custom Domain', icon: Globe },
       { id: 'seo', label: 'SEO Optimizer', icon: Search },
       { id: 'appstore', label: 'Nav App Store', icon: Package },

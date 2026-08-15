@@ -44,7 +44,7 @@ describe('APK Builder + CI/CD Pipeline are real Publish & Deploy tiles', () => {
     expect(groups).toContain("label: 'CI/CD Pipeline'");
   });
   it('their KB paths match', () => {
-    expect(kb('apk_builder')!.path).toMatch(/Publish & Deploy → APK Builder/);
+    expect(kb('apk_builder')!.path).toMatch(/AI Tools → APK Builder/);
     expect(kb('cicd_pipeline')!.path).toMatch(/Publish & Deploy → CI\/CD Pipeline/);
   });
 });

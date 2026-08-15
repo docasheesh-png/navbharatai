@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AgentRunner, isParallelSafeToolUse, buildTimedOut, type AgentRunnerOptions } from './AgentRunner';
+import { abortBuild } from './buildAbortCause';
 
 describe('buildTimedOut (watchdog wall-clock cap)', () => {
   it('is false when no cap is set', () => {
@@ -153,7 +154,11 @@ describe('AgentRunner (native tool-use loop)', () => {
       usage: { input_tokens: 1, output_tokens: 1 },
     }];
     const controller = new AbortController();
-    controller.abort(); // already aborted → the loop stops on its first turn
+    // Aborted WITH its cause, which is what the /stop endpoint really does now. The bare `abort()`
+    // this used to call is exactly the state the abort-cause work removed: it cannot say who stopped
+    // the build, and answering "the user" by default is what told a real user they had cancelled a
+    // build the 30-minute watchdog had actually ended (admin 2026-08-15).
+    abortBuild(controller, 'user-stop');
     const { runner, events } = buildRunner(
       Array.from({ length: 10 }, () => looping[0]),
       { signal: controller.signal },
@@ -162,6 +167,29 @@ describe('AgentRunner (native tool-use loop)', () => {
     expect(result.ok).toBe(false);
     expect(result.summary).toMatch(/stopped by the user/i);
     expect(events.some((e) => e.type === 'done')).toBe(true);
+  });
+
+  it('an abort with NO recorded cause never blames the user', async () => {
+    /**
+     * The guard for every abort path that might forget to record a cause — including one added later.
+     * "We do not know why this stopped" is an acceptable answer; accusing the user is not, and it is
+     * the accusation that made a 36-minute build look like the user's own doing.
+     */
+    const looping = [{
+      content: [{ type: 'tool_use', id: 'tu', name: 'write_file', input: { path: 'a.ts', content: 'x' } }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    }];
+    const controller = new AbortController();
+    controller.abort(); // the old, causeless abort
+    const { runner } = buildRunner(
+      Array.from({ length: 10 }, () => looping[0]),
+      { signal: controller.signal },
+    );
+    const result = await runner.run('build something big');
+    expect(result.ok).toBe(false);
+    expect(result.summary).not.toMatch(/by the user/i);
+    expect(result.summary).toMatch(/stopped before it finished/i);
   });
 
   it('stops honestly when the budget cap is reached', async () => {

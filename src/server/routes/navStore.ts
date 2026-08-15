@@ -51,6 +51,7 @@ import {
   type WebStoreApp,
 } from '../lib/navStoreWeb';
 import { loadWorkspaceFiles, saveWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { validateRemixPrice, hasPurchased, canAffordRemix, settleRemixPurchase } from '../lib/navStoreRemixPurchase';
 import { verifiedWorkspaceReadOk } from '../lib/workspaceIdentity';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { renderPreview } from '../runtime/renderPreview';
@@ -521,6 +522,17 @@ export function registerNavStoreRoutes(app: Express): void {
     }
 
     try {
+      // THE RE-LIST RULE (Kadam 3, admin-locked): a remix of a PAID app cannot be published back to
+      // the store — bought code re-appearing as a listing (free or priced) is the resale the seller
+      // never agreed to. A FREE app's remix may publish (that loop is the store's growth engine).
+      // Checked BEFORE any gate work: the refusal is about provenance, not content.
+      const remixParent = await getRemixOrigin(workspaceId);
+      if (remixParent) {
+        const parentApp = await getWebApp(remixParent);
+        if (parentApp && (parentApp.priceInr ?? 0) > 0) {
+          return res.status(403).json({ error: 'This app started as a PAID remix, so it can\'t be listed on the store. It is fully yours to build on — publish it with hosting or as an Android app instead.' });
+        }
+      }
       const workspaceFiles = await loadWorkspaceFiles(workspaceId);
       const gate = evaluateWebPublish(workspaceFiles);
       if (!gate.ok) return res.status(422).json({ error: gate.reason });
@@ -643,6 +655,12 @@ export function registerNavStoreRoutes(app: Express): void {
         await removeWebApp(found.id, 'unpublished by the owner', me.email || me.uid);
         return res.json({ ok: true, status: 'removed' });
       }
+      if (req.body?.priceInr !== undefined) {
+        const price = validateRemixPrice(req.body.priceInr);
+        if (!price.ok) return res.status(400).json({ error: price.reason });
+        await updateWebApp(found.id, { priceInr: price.priceInr });
+        return res.json({ ok: true, priceInr: price.priceInr });
+      }
       const visibility = req.body?.visibility === 'private' ? 'private' as const : req.body?.visibility === 'public' ? 'public' as const : null;
       if (!visibility) return res.status(400).json({ error: 'Nothing to change.' });
       if (visibility === 'private') {
@@ -691,12 +709,33 @@ export function registerNavStoreRoutes(app: Express): void {
       if (Object.keys(already).length > 0) {
         return res.status(409).json({ error: 'That workspace already has files — remix into a fresh app instead.' });
       }
+      // ── PAID REMIX (Kadam 3) ──────────────────────────────────────────────────────────────────
+      // Non-refundable by decision, fair by construction (the app is free to RUN before buying).
+      // Owners and past buyers pay nothing; an anonymous viewer has no wallet, so a paid remix
+      // needs sign-in — said plainly, never a dead button.
+      const price = found.priceInr ?? 0;
+      const buyerUid = await verifyFirebaseToken(req);
+      let settlementNote: string | undefined;
+      if (price > 0 && buyerUid !== found.uid) {
+        if (!buyerUid) return res.status(401).json({ error: `This remix costs ₹${price} — sign in to buy it (it's non-refundable; you can use the app free first).` });
+        const owned = await hasPurchased(found.id, buyerUid);
+        if (!owned) {
+          const afford = await canAffordRemix(buyerUid, price);
+          if (!afford.ok) return res.status(402).json({ error: afford.reason });
+        }
+      }
       const files = await getWebAppFiles(found.id);
       if (Object.keys(files).length === 0) return res.status(404).json({ error: 'This app has no published files.' });
+      // DELIVER FIRST, CHARGE AFTER — the platform's "working result or free" order. A debit failure
+      // after delivery means the buyer got it free; the reverse order could take money for nothing.
       await saveWorkspaceFiles(target, files);
       await recordRemixOrigin(target, found.id);
+      if (price > 0 && buyerUid && buyerUid !== found.uid) {
+        const settled = await settleRemixPurchase({ appId: found.id, appName: found.name, buyerUid, creatorUid: found.uid, priceInr: price });
+        settlementNote = settled.note;
+      }
       bumpWebAppCounter(found.id, 'remixes');
-      res.json({ ok: true, fileCount: Object.keys(files).length, name: found.name });
+      res.json({ ok: true, fileCount: Object.keys(files).length, name: found.name, ...(settlementNote ? { settlementNote } : {}) });
     } catch {
       res.status(502).json({ error: 'The remix failed — nothing was copied.' });
     }

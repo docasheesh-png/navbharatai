@@ -47,11 +47,14 @@ import {
   evaluateWebPublish, hashAppPassword, verifyAppPassword, toPublicWebApp, newWebAppId,
   saveWebApp, getWebApp, getWebAppFiles, listListedWebApps, listMyWebApps, listUnlistedWebApps,
   updateWebApp, makeWebAppPublic, bumpWebAppCounter, removeWebApp, reportWebApp,
-  recordRemixOrigin, getRemixOrigin,
+  recordRemixOrigin, getRemixOrigin, keyShapedEnvVars,
   type WebStoreApp,
 } from '../lib/navStoreWeb';
+import { generateEnvExample } from '../AgentV3/EnvExampleGenerator';
 import { loadWorkspaceFiles, saveWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
-import { validateRemixPrice, hasPurchased, canAffordRemix, settleRemixPurchase } from '../lib/navStoreRemixPurchase';
+import { validateRemixPrice, hasPurchased, canAffordRemix, settleRemixPurchase, resalePriceCheck, resalePriceFloor, MAX_REMIX_PRICE_INR } from '../lib/navStoreRemixPurchase';
+import { addDataRow, listDataRows, isValidDataCollection } from '../lib/navStoreWebData';
+import { rateLimiter } from '../lib/authMiddleware';
 import { verifiedWorkspaceReadOk } from '../lib/workspaceIdentity';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { renderPreview } from '../runtime/renderPreview';
@@ -522,15 +525,25 @@ export function registerNavStoreRoutes(app: Express): void {
     }
 
     try {
-      // THE RE-LIST RULE (Kadam 3, admin-locked): a remix of a PAID app cannot be published back to
-      // the store — bought code re-appearing as a listing (free or priced) is the resale the seller
-      // never agreed to. A FREE app's remix may publish (that loop is the store's growth engine).
-      // Checked BEFORE any gate work: the refusal is about provenance, not content.
+      // THE UNDERCUT RULE (admin 2026-08-15, superseding the flat re-list ban of the same day): a
+      // paid remix MAY be re-listed — but never at or below the original creator's price, and never
+      // free, however much it was edited ("chahe woh kitna bhi edit kar le"). Lineage makes editing
+      // irrelevant: the parent travels with the workspace from the moment of remix.
+      //
+      // Publish carries no price field, so a paid remix LISTS AT THE FLOOR (one rupee above the
+      // original) and the owner may raise it later — settings enforce the same floor. Refusing
+      // publish until a price was typed would be a dead end; auto-pricing AT the floor is the only
+      // number that is simultaneously lawful, minimal, and not our invention (the rule fixes it).
       const remixParent = await getRemixOrigin(workspaceId);
+      let resaleFloorPrice: number | undefined;
       if (remixParent) {
         const parentApp = await getWebApp(remixParent);
-        if (parentApp && (parentApp.priceInr ?? 0) > 0) {
-          return res.status(403).json({ error: 'This app started as a PAID remix, so it can\'t be listed on the store. It is fully yours to build on — publish it with hosting or as an Android app instead.' });
+        if (parentApp && parentApp.status !== 'removed' && (parentApp.priceInr ?? 0) > 0) {
+          const floor = resalePriceFloor(parentApp.priceInr ?? 0);
+          if (floor > MAX_REMIX_PRICE_INR) {
+            return res.status(403).json({ error: 'The original app is at the store\'s maximum price, so a resale above it isn\'t possible. The app is fully yours to build on — publish it with hosting or as an Android app instead.' });
+          }
+          resaleFloorPrice = floor;
         }
       }
       const workspaceFiles = await loadWorkspaceFiles(workspaceId);
@@ -558,14 +571,36 @@ export function registerNavStoreRoutes(app: Express): void {
         ...((existing?.parentAppId || await getRemixOrigin(workspaceId)) ? { parentAppId: existing?.parentAppId || (await getRemixOrigin(workspaceId))! } : {}),
         fileCount: Object.keys(gate.files).length,
         sizeBytes: Object.values(gate.files).reduce((n, c) => n + Buffer.byteLength(c, 'utf8'), 0),
+        // "api sell nahi hogi" — the vars a remixer will have to bring, known at publish and shown
+        // BEFORE anyone pays. The creator's own keys are already physically absent (scan + .env drop).
+        apiVarsUsed: keyShapedEnvVars(gate.files),
         runs: existing?.runs ?? 0,
         remixes: existing?.remixes ?? 0,
+        // RE-PUBLISH MUST NOT WIPE MONEY OR QUOTA STATE (found while adding the undercut rule): the
+        // record replaces the doc wholesale, so any field not carried here is silently reset. The
+        // price resetting to free on every update would undercut the CREATOR THEMSELVES; the data-row
+        // counter resetting would let an app evade its storage quota by republishing.
+        ...((): Record<string, number> => {
+          const carried: Record<string, number> = {};
+          const keptPrice = existing?.priceInr ?? 0;
+          const price = resaleFloorPrice !== undefined ? Math.max(keptPrice, resaleFloorPrice) : keptPrice;
+          if (price > 0) carried.priceInr = price;
+          const rows = (existing as unknown as { dataRows?: number } | undefined)?.dataRows;
+          if (typeof rows === 'number' && rows > 0) carried.dataRows = rows;
+          return carried;
+        })(),
         publishedAt: Date.now(),
         version: (existing?.version ?? 0) + 1,
       };
       await saveWebApp(record, gate.files);
       webPlayerCache.delete(id); // the old version's compiled page must not survive the update
-      res.json({ ok: true, id, status: record.status, version: record.version, shareUrl: `/store/app/${id}` });
+      res.json({
+        ok: true, id, status: record.status, version: record.version, shareUrl: `/store/app/${id}`,
+        ...(resaleFloorPrice !== undefined && record.priceInr ? {
+          priceInr: record.priceInr,
+          priceNote: `This is a paid remix, so it lists at ₹${record.priceInr} — the rule is that a remix always costs more than the original. You can raise the price (never lower it below the original) under Nav App Store → My apps.`,
+        } : {}),
+      });
     } catch (e) {
       res.status(502).json({ error: 'Publishing failed — nothing was published. Try again.' });
     }
@@ -608,7 +643,12 @@ export function registerNavStoreRoutes(app: Express): void {
         // The SAME compiler the in-browser preview uses — one engine, one set of guarantees. The
         // client renders this html in a sandboxed iframe WITHOUT allow-same-origin (opaque origin),
         // so a store app can never read the platform's storage or tokens.
-        const html = renderPreview(vfs, origin, `store-${found.id}`);
+        let html = renderPreview(vfs, origin, `store-${found.id}`);
+        // Bake the store app id in, which flips window.NavData from its per-device preview backend to
+        // the REAL shared rows — the difference between "a chat app that talks to yourself" and one
+        // that talks to everyone. Injected at serve time because only the store knows the id.
+        const idTag = `<script>window.__NBAI_STORE_APP_ID=${JSON.stringify(found.id)};</script>`;
+        html = html.includes('<body>') ? html.replace('<body>', `<body>${idTag}`) : idTag + html;
         compiled = { html, kind: 'web' };
         webPlayerCache.set(cacheKey, compiled);
         if (webPlayerCache.size > WEB_PLAYER_CACHE_MAX) {
@@ -658,6 +698,15 @@ export function registerNavStoreRoutes(app: Express): void {
       if (req.body?.priceInr !== undefined) {
         const price = validateRemixPrice(req.body.priceInr);
         if (!price.ok) return res.status(400).json({ error: price.reason });
+        // The undercut rule, at the second place a price is ever set. The floor is the parent's
+        // price AT THIS MOMENT — the original creator's current ask is what must not be undercut.
+        if (found.parentAppId) {
+          const parent = await getWebApp(found.parentAppId);
+          if (parent && parent.status !== 'removed') {
+            const check = resalePriceCheck(price.priceInr, parent.priceInr ?? 0);
+            if (!check.ok) return res.status(403).json({ error: check.reason });
+          }
+        }
         await updateWebApp(found.id, { priceInr: price.priceInr });
         return res.json({ ok: true, priceInr: price.priceInr });
       }
@@ -728,14 +777,24 @@ export function registerNavStoreRoutes(app: Express): void {
       if (Object.keys(files).length === 0) return res.status(404).json({ error: 'This app has no published files.' });
       // DELIVER FIRST, CHARGE AFTER — the platform's "working result or free" order. A debit failure
       // after delivery means the buyer got it free; the reverse order could take money for nothing.
-      await saveWorkspaceFiles(target, files);
+      // THE ADMIN'S KEY RULE ("api user B ko deni hogi"): the creator's keys were never in the
+      // snapshot — but B's copy must SAY what it needs, or B's first build fails mysteriously. An
+      // .env.example listing the key-shaped vars is the platform's own convention: v5's existing
+      // secret-preflight reads it and asks B for THEIR OWN keys at the right moment. Merged over the
+      // snapshot's own example if one shipped, so nothing the creator wrote is lost.
+      const neededVars = keyShapedEnvVars(files);
+      const delivered: Record<string, string> = { ...files };
+      if (neededVars.length > 0) {
+        delivered['.env.example'] = generateEnvExample(neededVars, files['.env.example'] ?? null);
+      }
+      await saveWorkspaceFiles(target, delivered);
       await recordRemixOrigin(target, found.id);
       if (price > 0 && buyerUid && buyerUid !== found.uid) {
         const settled = await settleRemixPurchase({ appId: found.id, appName: found.name, buyerUid, creatorUid: found.uid, priceInr: price });
         settlementNote = settled.note;
       }
       bumpWebAppCounter(found.id, 'remixes');
-      res.json({ ok: true, fileCount: Object.keys(files).length, name: found.name, ...(settlementNote ? { settlementNote } : {}) });
+      res.json({ ok: true, fileCount: Object.keys(files).length, name: found.name, apiKeysNeeded: neededVars, ...(settlementNote ? { settlementNote } : {}) });
     } catch {
       res.status(502).json({ error: 'The remix failed — nothing was copied.' });
     }
@@ -754,6 +813,53 @@ export function registerNavStoreRoutes(app: Express): void {
       res.json({ ok: true });
     } catch {
       res.status(502).json({ error: 'Could not send the report.' });
+    }
+  });
+
+  // ═══ SHARED DATA (Kadam 4) — append + list, hard-quota'd; see navStoreWebData.ts ═══
+  //
+  // CORS IS THE POINT, not an oversight: the caller is the app itself, running in the player's
+  // OPAQUE-ORIGIN iframe, so every one of its fetches is cross-origin. Anonymous by design (viewers
+  // have no session inside the sandbox); protection is quotas + the platform's rate limiter — the
+  // same trade /api/esm/* already makes for the same iframe.
+  const dataCors = (res: Response) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  };
+  app.options('/api/nav-store/web/app/:id/data/:collection', (_req: Request, res: Response) => {
+    dataCors(res);
+    res.status(204).end();
+  });
+
+  const dataWriteLimiter = rateLimiter({ name: 'store-data-write', authed: 600, anon: 300, noun: 'writes', durable: false, anonGlobalPerHour: 20_000 });
+  const dataReadLimiter = rateLimiter({ name: 'store-data-read', authed: 2_000, anon: 1_000, noun: 'reads', durable: false });
+
+  app.post('/api/nav-store/web/app/:id/data/:collection', dataWriteLimiter, async (req: Request, res: Response) => {
+    dataCors(res);
+    const collection = String(req.params.collection || '');
+    if (!isValidDataCollection(collection)) return res.status(400).json({ error: 'Collection names are short lowercase words (letters, digits, - or _).' });
+    try {
+      const found = await getWebApp(String(req.params.id || ''));
+      if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      const result = await addDataRow(found.id, collection, req.body?.data);
+      if (!result.ok) return res.status(result.status).json({ error: result.reason });
+      res.json({ ok: true, row: result.row });
+    } catch {
+      res.status(502).json({ error: 'The row could not be saved — nothing was stored.' });
+    }
+  });
+
+  app.get('/api/nav-store/web/app/:id/data/:collection', dataReadLimiter, async (req: Request, res: Response) => {
+    dataCors(res);
+    const collection = String(req.params.collection || '');
+    if (!isValidDataCollection(collection)) return res.status(400).json({ error: 'Collection names are short lowercase words (letters, digits, - or _).' });
+    try {
+      const found = await getWebApp(String(req.params.id || ''));
+      if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      res.json({ rows: await listDataRows(found.id, collection, Number(req.query.limit) || 50) });
+    } catch {
+      res.status(502).json({ error: 'Could not load the rows.' });
     }
   });
 

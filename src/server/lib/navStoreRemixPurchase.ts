@@ -59,6 +59,37 @@ export function splitRemixPrice(priceInr: number): { creatorInr: number; platfor
   return { creatorInr, platformInr: Math.round((priceInr - creatorInr) * 100) / 100 };
 }
 
+/**
+ * THE UNDERCUT RULE (admin, 2026-08-15, replacing the flat re-list ban): a buyer MAY re-list a paid
+ * remix — but NEVER at or below the original creator's price, however much they edited it. Admin
+ * verbatim: "user B ka selling price hamesha user A se jyada hoga, chahe woh kitna bhi edit kar le."
+ *
+ * WHY a floor instead of a ban: a ban kills legitimate value-add (B buys A's billing app, builds a
+ * pharmacy edition on it, sells the BIGGER thing) — while the floor kills exactly the abuse (B buys
+ * A's ₹99 app and re-lists it at ₹49, or free, gutting A's market with A's own work). The floor is
+ * the parent's CURRENT price, checked at every moment B sets a price — and "free" is the ultimate
+ * undercut, so a paid remix can never be listed free either.
+ *
+ * Lineage makes this unavoidable rather than advisory: the parent travels with the workspace from
+ * the moment of remix (recordRemixOrigin), so no amount of editing detaches it. Chains compose — C's
+ * remix of B's listing floors against B, whose price already floors against A.
+ */
+export function resalePriceCheck(candidateInr: number, parentPriceInr: number): { ok: boolean; reason?: string } {
+  if (parentPriceInr <= 0) return { ok: true }; // a FREE app's remix may price freely — that loop is the store's engine
+  if (candidateInr <= parentPriceInr) {
+    return {
+      ok: false,
+      reason: `This app is a paid remix — its price must be HIGHER than the original creator's current ₹${parentPriceInr} (that includes free). Selling someone's work cheaper than they do isn't allowed, however much you've changed it.`,
+    };
+  }
+  return { ok: true };
+}
+
+/** The lowest lawful listing price for a paid remix: one rupee above the original. */
+export function resalePriceFloor(parentPriceInr: number): number {
+  return parentPriceInr + 1;
+}
+
 /** One purchase per buyer per app, forever — the doc id IS the idempotency. */
 export function purchaseDocId(appId: string, buyerUid: string): string {
   return `${appId}__${buyerUid}`;

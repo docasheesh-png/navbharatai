@@ -18,6 +18,7 @@ export interface CapturedApp {
   put(path: string, ...h: Handler[]): void;
   delete(path: string, ...h: Handler[]): void;
   all(path: string, ...h: Handler[]): void;
+  options(path: string, ...h: Handler[]): void;
   use(...args: any[]): void;
 }
 
@@ -35,6 +36,11 @@ export function captureRoutes(register: (app: any, ...rest: any[]) => void, ...r
     put: record('PUT'),
     delete: record('DELETE'),
     all: record('ALL'),
+    // OPTIONS exists because real routes register CORS preflights (the store's shared-data API — its
+    // caller is an opaque-origin iframe whose JSON POSTs always preflight). A fake app that lacks a
+    // verb the real express has makes route REGISTRATION crash in tests while production is fine —
+    // which is how this line was added: `app.options` took down the whole navStoreRoutes suite.
+    options: record('OPTIONS'),
     use: () => { /* middleware ignored in unit tests */ },
   };
   register(app, ...rest);

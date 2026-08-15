@@ -33,6 +33,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { getServerDb } from './serverDb';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { scanTextForSecrets, type EnvTemplateSecretIssue } from '../AgentV3/EnvSecretValueAnalysis';
+import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 
 /** Lifecycle: live-via-link → admin lists it → or an admin/owner takes it down. */
 export type WebAppStatus = 'unlisted' | 'listed' | 'removed';
@@ -57,6 +58,14 @@ export interface WebStoreApp {
   parentAppId?: string;
   /** Remix price in whole rupees. 0/absent = free (the default and the growth engine). */
   priceInr?: number;
+  /**
+   * Key-shaped env vars the app's own code reads (VITE_/REACT_APP_/NEXT_PUBLIC_ names containing
+   * KEY/TOKEN/SECRET/API/AUTH). THE ADMIN'S RULE (2026-08-15): "api sell nahi hogi — api user B ko
+   * deni hogi." The original creator's keys never ship (the scan gate + .env exclusion make that
+   * physically true); this field is the OTHER half — telling a buyer BEFORE money moves that the
+   * app's API features will need THEIR OWN key, and telling a viewer why an AI button may not work.
+   */
+  apiVarsUsed?: string[];
   fileCount: number;
   sizeBytes: number;
   /** Honest usage counters. `runs` increments on a served open, never on a page view of the listing. */
@@ -73,7 +82,7 @@ export interface WebStoreApp {
 /** What a viewer may see. No uid, no password material, no internals. */
 export type PublicWebStoreApp = Pick<WebStoreApp,
   'id' | 'name' | 'description' | 'iconDataUrl' | 'visibility' | 'fileCount' | 'runs' | 'remixes' | 'publishedAt' | 'version'
-> & { requiresPassword: boolean; priceInr: number };
+> & { requiresPassword: boolean; priceInr: number; apiVarsUsed: string[] };
 
 export function toPublicWebApp(a: WebStoreApp): PublicWebStoreApp {
   return {
@@ -82,6 +91,7 @@ export function toPublicWebApp(a: WebStoreApp): PublicWebStoreApp {
     publishedAt: a.publishedAt, version: a.version,
     requiresPassword: a.visibility === 'private',
     priceInr: a.priceInr ?? 0,
+    apiVarsUsed: Array.isArray(a.apiVarsUsed) ? a.apiVarsUsed : [],
   };
 }
 
@@ -164,6 +174,11 @@ export function evaluateWebPublish(input: Record<string, string> | null | undefi
   }
 
   return { ok: true, files };
+}
+
+/** The env vars in this snapshot whose NAME says "credential" — the ones a remixer must bring. */
+export function keyShapedEnvVars(files: Record<string, string>): string[] {
+  return viteEnvVarsUsed(files).filter((v) => /KEY|TOKEN|SECRET|API|AUTH/i.test(v));
 }
 
 // ─── Private-app password (server-side by construction) ───────────────────────────────────────────

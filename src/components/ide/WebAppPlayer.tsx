@@ -35,6 +35,8 @@ interface PlayerMeta {
   requiresPassword: boolean;
   /** Remix price in whole rupees; 0 = free. */
   priceInr?: number;
+  /** Key-shaped env vars the app reads — the APIs a buyer must bring their own keys for. */
+  apiVarsUsed?: string[];
 }
 
 export interface WebAppPlayerProps {
@@ -270,6 +272,14 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
               <p className="text-xs font-semibold text-amber-300 bg-amber-950/30 rounded-lg px-2.5 py-2 mb-3">
                 Non-refundable. You can keep using the app right here for free — buy only if you want it as your own.
               </p>
+              {(meta?.apiVarsUsed?.length ?? 0) > 0 && (
+                /* "api sell nahi hogi" (admin): the creator's keys never ship — said BEFORE money
+                   moves, because finding out after paying is how trust dies. */
+                <p className="text-[11px] text-white/50 bg-white/5 rounded-lg px-2.5 py-2 mb-3">
+                  This app uses external APIs. The creator&apos;s API keys are <b>not included</b> — after buying,
+                  you add your own (NavBharatAI will ask for them when you build).
+                </p>
+              )}
               {error && <p className="text-xs text-rose-400 mb-2">{error}</p>}
               <div className="flex gap-2 justify-end">
                 <button onClick={() => setConfirmingBuy(false)} className="px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white transition-colors">Not now</button>

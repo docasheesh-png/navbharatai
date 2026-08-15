@@ -22,7 +22,7 @@ import { normalizePath } from '../project/ProjectModel';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { precompileModules } from './PreviewPrecompile';
 import { startDepWarmup, getWarmDepUrls, WARMUP_MAX_MODULES } from './PreviewDepWarmup';
-import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE, PROCESS_SHIM_SOURCE } from './previewImportMeta';
+import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE, PROCESS_SHIM_SOURCE, NAVDATA_RUNTIME_SOURCE } from './previewImportMeta';
 import { proveBackendRunnable } from './browserBackend/capability';
 import { EXPRESS_SHIM_SOURCE, BACKEND_BRIDGE_SOURCE, EXPRESS_SHIM_PATH, BACKEND_BRIDGE_PATH } from './browserBackend/expressShim';
 import { pgShimSource, pgliteDataDir, PG_SHIM_PATH, PGLITE_VERSION } from './browserBackend/pgShim';
@@ -622,6 +622,7 @@ ${babelTag}
   // chain, which covers the precompiled path and the browser-compiled path with one declaration. An
   // existing process (a page that already polyfilled one) is left completely alone.
   ${PROCESS_SHIM_SOURCE}
+  ${NAVDATA_RUNTIME_SOURCE}
   function dirname(p) { var i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); }
   function normalize(p) {
     var parts = p.split('/'), out = [];

@@ -1152,7 +1152,27 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             {effectiveUrl ? '● ' : ''}Open Live server
           </button>
         </div>
-      ) : loading ? (
+      ) : loading && !html ? (
+        /**
+         * FIRST LOAD ONLY — `&& !html` is the whole fix for the flicker (admin 2026-08-14: "2 tarah ki
+         * loading hoti hai, pehle dark background phir white, aur dono alternative aate rehte hain").
+         *
+         * There are two loaders by design and each is right where it lives: this panel-level one covers
+         * the wait before ANY page exists, and the in-iframe boot overlay (white, ReactPreview.ts) covers
+         * the wait from a page's first paint until the app mounts. Both carry a seconds counter.
+         *
+         * The bug was the ORDER, not the loaders. `loadInBrowser` deliberately keeps the previous `html`
+         * while it fetches the next one — but this branch sat ABOVE the iframe branch and tested only
+         * `loading`, so every re-compile tore the working preview off screen, showed the dark spinner,
+         * then re-mounted the iframe, which ran the white overlay again. A build that writes files in
+         * several batches reloads several times, so the user watched dark→white→dark→white for the whole
+         * build. (Streaming first paint, enabled the same day, emits per batch and makes it far more
+         * frequent — it exposed this, it did not create it.)
+         *
+         * With the guard, a re-compile leaves the current app on screen and the white overlay handles
+         * the changeover — one loading screen, as asked. The toolbar's refresh button already spins
+         * during a reload, so "something is happening" is still visible.
+         */
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-500 text-sm">
           {/* Ashok Chakra loader (admin 2026-07-07) — same spinner the in-iframe boot overlay uses. */}
           <div className="w-12 h-12 animate-spin" style={{ animationDuration: '1.6s' }} dangerouslySetInnerHTML={{ __html: ashokChakraSvg(48, '#4f6ef7') }} />

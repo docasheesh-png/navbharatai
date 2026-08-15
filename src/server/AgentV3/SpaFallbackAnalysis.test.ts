@@ -52,6 +52,18 @@ describe('it stays silent when the code is already right', () => {
     const commented = SERVER.replace('app.listen', "// app.get('*', (req, res) => res.sendFile('index.html'));\napp.listen");
     expect(withClient(commented)).not.toBeNull();
   });
+
+  it('accepts the rest-express Vite-middleware bridge (setupVite / serveStatic) — the client IS served', () => {
+    // A rest-express (Replit-style) fullstack server serves the client via Vite middleware, NOT an
+    // express.static + catch-all. It has no "Cannot GET" bug; auto-healing it would inject a conflicting,
+    // ESM-crashing __dirname catch-all into a correct app. Must stay silent.
+    for (const serve of [
+      'if (app.get("env") === "development") { await setupVite(app, server); } else { serveStatic(app); }',
+      'const vite = await createViteServer({ server: { middlewareMode: true } }); app.use(vite.middlewares);',
+    ]) {
+      expect(withClient(SERVER.replace('app.listen', `${serve}\napp.listen`)), serve).toBeNull();
+    }
+  });
 });
 
 describe('it never fires where the bug cannot happen', () => {

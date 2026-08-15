@@ -49,6 +49,16 @@ const HASH_ROUTER_RE = /\b(?:HashRouter|createHashRouter|createWebHashHistory)\b
 const STATIC_RE = /express\.static\s*\(/;
 
 /**
+ * The client is ALREADY served by a Vite-middleware / static bridge — the exact wiring the "rest-express"
+ * (Replit-style) fullstack template uses: `setupVite(app, server)` in dev, `serveStatic(app)` in prod,
+ * or a raw `vite.middlewares` / `createViteServer({ middlewareMode })`. These serve every non-API path to
+ * the client, so the "Cannot GET" bug does NOT exist — flagging (or auto-healing) such a server would add
+ * a conflicting `express.static('../dist')` + `__dirname` catch-all (which even CRASHES an ESM server), i.e.
+ * break an app that was correct. This is the same "serving is mounted" signal DbCoupledBootAnalysis uses.
+ */
+const VITE_SERVE_RE = /\b(?:setupVite|serveStatic|createViteServer|createServer)\b|vite\.middlewares|middlewareMode/;
+
+/**
  * A catch-all that returns the client's index.html.
  *
  * Covers the shapes people actually write — `app.get('*')`, the Express 5 `'/*splat'` and named
@@ -94,6 +104,10 @@ export function analyzeSpaFallback(files: Record<string, string>): SpaFallbackFi
     const src = stripComments(raw);
     if (!EXPRESS_RE.test(src) || !LISTEN_RE.test(src)) continue;
     if (hasFallback(src)) return null;   // already correct — say nothing
+    // The rest-express template serves the client through a Vite-middleware / static bridge (setupVite /
+    // serveStatic / vite.middlewares). That IS the client-serving; there is no "Cannot GET" bug and no
+    // repair to make — healing here would inject a conflicting, ESM-crashing catch-all into a correct app.
+    if (VITE_SERVE_RE.test(src)) return null;
     const servesStatic = STATIC_RE.test(src);
     return {
       file: path,

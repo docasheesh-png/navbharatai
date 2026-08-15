@@ -32965,3 +32965,30 @@ Recorded uncertainties rather than guesses: Cashfree's split product may need fu
 or lighter vendor onboarding (read their docs); TDS/GST is a CA's call; and the current India position
 on in-app external purchase links could not be verified from a session — which is why the chosen
 design does not depend on the answer.
+---
+
+## 2026-08-15 — Fullstack-preview batch (part 1): the SPA-fallback analyzer must not false-heal a rest-express app
+
+Investigated the fullstack PREVIEW-404 class deeply (subagent map). Finding: `analyzeSpaFallback` already
+detects the "Express serves only /api → Cannot GET /route" bug and produces a catch-all fix snippet, and
+there was a plan to promote it from advisory to an enforced auto-heal. BUT a critical safety hole surfaced
+on the way: the rest-express (Replit-style) fullstack template serves its client through a **Vite-middleware
+bridge** (`setupVite(app, server)` in dev, `serveStatic(app)` in prod, `vite.middlewares`) — which the
+analyzer did NOT recognize. So an enforced heal would have injected a conflicting `express.static('../dist')`
++ `__dirname` catch-all into a CORRECT server — and `__dirname` even **crashes an ESM server** — breaking an
+app that worked (rule 1/2 violation).
+
+Part 1 (this PR) — the safe foundation: teach `analyzeSpaFallback` to recognize the Vite-middleware/static
+bridge (`setupVite|serveStatic|createViteServer|vite.middlewares|middlewareMode`) and return null when it is
+present — the same "serving is mounted" signal DbCoupledBootAnalysis already uses. Now the analyzer fires
+ONLY for a genuinely-broken hand-written express+router server (no serving of any kind, no catch-all), which
+is the only case an enforced heal could ever be applied to safely. +1 test (accepts the rest-express bridge).
+tsc clean (server); full suite green.
+
+OPEN (part 2, deliberately NOT rushed — safeguard #3): promoting the finding to an ENFORCED heal that
+actually edits the server. It must be ESM/CJS-aware (an ESM server needs `fileURLToPath(import.meta.url)`,
+not `__dirname`), insert the catch-all AFTER the last `/api` route, and be wrapped in verify-after-fix
+(re-open the preview, confirm no "Cannot GET"). Editing arbitrary user server code deterministically carries
+real breakage risk, so it needs careful implementation + real end-to-end testing, not a tail-of-session rush.
+Also OPEN: the report's specific rest-express server crash (`tsx server/index.ts → exit 7`) — its actual
+error output was not in the report, so it can't be root-caused from what we have.

@@ -10,6 +10,7 @@
 import path from 'path';
 import type { ProjectGraph } from './WorkspaceMemory';
 import { isComponentName } from './WorkspaceMemory';
+import { isBinaryAssetSpecifier } from './fileClassification';
 
 export interface ArchitectureReport {
   fileCount: number;
@@ -181,6 +182,11 @@ export function analyzeArchitecture(graph: ProjectGraph): ArchitectureReport {
         }
         continue;
       }
+      // 🔒 SAME BLINDNESS, SAME ANSWER (2026-08-15). Binary assets are never in the graph's file set
+      // (the durable store is text-only), so counting `./logo.png` as an unresolved import reports a
+      // defect that is not there and drags the readiness score down on a perfectly good app. Advisory
+      // here rather than build-blocking as it was in the mobile preflight, but wrong is wrong.
+      if (isBinaryAssetSpecifier(spec)) continue;
       const resolved = resolveLocalImport(file, spec, files);
       if (!resolved) {
         unresolvedImports.push(`${file} -> ${spec}`);

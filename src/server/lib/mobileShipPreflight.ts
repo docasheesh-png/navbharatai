@@ -28,6 +28,7 @@ import { findSyntaxErrors } from '../AgentV3/SyntaxCheck';
 import { findMissingDependencies, isLocalFileSpecifier } from '../AgentV3/DependencyReconciler';
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { resolveLocalImport } from '../AgentV3/ArchitectureAnalysis';
+import { isBinaryAssetSpecifier } from '../AgentV3/fileClassification';
 import { scaffoldMissingUiPrimitives } from './uiPrimitiveScaffold';
 import { detectProjectKind } from './mobileProjectAssembler';
 import {
@@ -101,6 +102,13 @@ export async function preflightVerify(files: Record<string, string>): Promise<Pr
         const spec = m[1] || m[2] || m[3];
         if (!spec || (!spec.startsWith('.') && !/^[@~]\//.test(spec))) continue; // npm package — check 3's job
         if (TYPE_ONLY_RE.test(m[0])) continue;
+        // 🔒 A BINARY ASSET CANNOT BE CHECKED HERE, SO IT IS NOT CLAIMED MISSING. The durable store is
+        // text-only (see isBinaryAssetSpecifier), so no `.png` is ever in `files` — this check said
+        // "no such file exists in the app" for EVERY image, present or not, and refused the ship.
+        // `import logo from './logo.png'` blocked an APK build. `.svg`/`.css` are text, are persisted,
+        // and stay checked. A genuinely missing image now surfaces on the real bundler with a real
+        // message instead of here with a guaranteed-wrong one.
+        if (isBinaryAssetSpecifier(spec)) continue;
         // Code files resolve through the shared resolver (extensions, index files, aliases, .js→.ts);
         // an asset import (./styles.css, ./logo.svg) resolves by exact path.
         const resolved = resolveLocalImport(path, spec, fileSet)

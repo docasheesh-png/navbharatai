@@ -33,6 +33,29 @@ import { getServerDb } from './serverDb';
 import { TOKENS_PER_RUPEE } from './payments';
 import { debitWalletForBuild } from './walletDebit';
 
+/**
+ * 🔴 PAID REMIX IS PARKED — every remix is FREE (admin 2026-08-15: "abhi app remix free rakho, paid
+ * service coming soon kar do").
+ *
+ * This is a deliberate product decision taken AFTER the design above shipped, and the reason matters
+ * because it changes what "turning it on" will mean:
+ *
+ * The wallet-to-wallet model above answered "how does the buyer pay?" but never "how does the
+ * creator's money reach their BANK?" — wallet earnings are one-way by design, so they can only be
+ * spent on builds. Calling that "earning" while a creator cannot withdraw it would be the platform
+ * profiting from a misunderstanding. The agreed future model is different: the buyer makes a FRESH
+ * payment on the WEB, and Cashfree splits it at that moment — the creator's share going straight to
+ * their own bank, never through NavBharatAI. See NAV_STORE_MASTER_PLAN.md.
+ *
+ * So this is NOT an env flag: flipping a switch would revive a superseded design. Turning paid
+ * remix on requires the split-payment work, which is a deploy anyway. A constant keeps the flag
+ * surface small (the admin's standing objection) and makes accidental enabling impossible.
+ *
+ * What stays live and tested underneath, because the future model reuses it: the undercut rule,
+ * one-purchase-per-buyer idempotency, remix lineage, and the .env.example key delivery.
+ */
+export const PAID_REMIX_ENABLED = false;
+
 /** ₹19 minimum (admin-locked): below this, ledger noise outweighs the money. 0 = free. */
 export const MIN_REMIX_PRICE_INR = 19;
 export const MAX_REMIX_PRICE_INR = 10_000;

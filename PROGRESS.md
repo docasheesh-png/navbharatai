@@ -32926,3 +32926,42 @@ Fix (the small, safe half the admin picked; the preview-404 root cause is the se
 The user-visible failure (fullstack PREVIEW 404 — the express server serves only the API, client pages 404)
 remains the OPEN root cause for the next focused batch: a robust fullstack-preview subsystem (build client →
 serve it → correct port → verify the pages actually load, not just the API). Recorded per rule 6.
+
+## 2026-08-15 — Paid remix PARKED (free for all) + the store's future written down
+
+Admin decision after a long design discussion: *"abhi app remix free rakho, paid service coming soon
+kar do, aur pura plan bana kar rakh do — future me jab app chalne lagegi tab apply kar denge."*
+
+**What changed in code (parking, not deletion):** `PAID_REMIX_ENABLED = false` — a CONSTANT, not an
+env flag, and deliberately so: flipping a switch would revive a design the admin has now superseded.
+Enforced SERVER-side at every money touchpoint, never merely hidden in the UI:
+- a price can no longer be STORED (settings route refuses with an honest "coming soon", before the write);
+- `toPublicWebApp` does not even SEND `priceInr`, so an already-priced listing from before the pause
+  is free for every client, including ones not written yet;
+- the remix route reads the price THROUGH the switch (`PAID_REMIX_ENABLED ? … : 0`), so the sign-in
+  demand, wallet check, debit and creator credit are all skipped by the branch that already handled a
+  free app — no parallel "disabled" code path to drift;
+- publishing a remix no longer auto-prices it at the undercut floor.
+Test-pinned in `navStoreRemixPurchase.test.ts` (7 new tests), including that the money machinery
+itself is intact — the future model reuses `resalePriceCheck`, `purchaseDocId`, lineage and the
+deliver-before-charge order, and rewriting tested billing code later is how subtle money bugs are born.
+
+**Why parked at all (the honest reason, worth keeping):** the wallet-to-wallet model answered "how
+does the buyer pay?" but never "how does the creator's money reach their BANK?" Wallet earnings are
+one-way by design — that one-way-ness is exactly what keeps the wallet a closed system and out of
+payment-regulation territory. Calling it "earning" while nobody can withdraw it would be the platform
+profiting from a misunderstanding.
+
+**`NAV_STORE_MASTER_PLAN.md` (new) — the agreed future, written so no session re-derives or
+re-litigates it.** Covers: the store redesign and the APK-vs-instant split; publish-immediately with
+post-moderation (and the honest risk that these apps wear our domain); the mobile-app rule (no
+purchase, no link, no steering text — with the rejected alternatives and WHY each was rejected,
+including the rename trick and the +30% Google/Apple idea); paid remix via Cashfree split straight
+into the creator's own bank; the monetize-credentials doors (already ~80% built — the wizard already
+writes to the encrypted vault; only the App Settings tile is missing); and a build order whose rule is
+that the expensive payment work waits for demand that does not exist yet (₹0 of remix revenue to date).
+
+Recorded uncertainties rather than guesses: Cashfree's split product may need full merchant accounts
+or lighter vendor onboarding (read their docs); TDS/GST is a CA's call; and the current India position
+on in-app external purchase links could not be verified from a session — which is why the chosen
+design does not depend on the answer.

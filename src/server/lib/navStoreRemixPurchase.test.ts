@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateRemixPrice, splitRemixPrice, purchaseDocId, resalePriceCheck, resalePriceFloor,
-  MIN_REMIX_PRICE_INR, MAX_REMIX_PRICE_INR, CREATOR_SHARE,
+  MIN_REMIX_PRICE_INR, MAX_REMIX_PRICE_INR, CREATOR_SHARE, PAID_REMIX_ENABLED,
 } from './navStoreRemixPurchase';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -184,5 +184,66 @@ describe('the key rule — "api sell nahi hogi, api user B ko deni hogi" (admin 
     expect(publish).toContain('apiVarsUsed: keyShapedEnvVars(');
     const player = readFileSync(join(process.cwd(), 'src/components/ide/WebAppPlayer.tsx'), 'utf8');
     expect(player).toContain('not included');
+  });
+});
+
+describe('PAID REMIX IS PARKED — free for everyone, and unchargeable by construction (admin 2026-08-15)', () => {
+  const routes = readFileSync(join(process.cwd(), 'src/server/routes/navStore.ts'), 'utf8');
+  const web = readFileSync(join(process.cwd(), 'src/server/lib/navStoreWeb.ts'), 'utf8');
+
+  it('the switch is a CONSTANT, not an env flag — a superseded design cannot be revived by accident', () => {
+    /**
+     * The wallet-to-wallet model never answered "how does the creator's money reach their BANK?"
+     * (wallet earnings are one-way). The agreed future model is a FRESH payment split by Cashfree on
+     * the web, straight into the creator's own account — a different architecture, not a flag flip.
+     * An env var would let someone turn the old one back on; a constant makes that a code change.
+     */
+    expect(PAID_REMIX_ENABLED).toBe(false);
+    const module_ = readFileSync(join(process.cwd(), 'src/server/lib/navStoreRemixPurchase.ts'), 'utf8');
+    expect(module_).toContain('export const PAID_REMIX_ENABLED = false');
+    expect(module_).not.toMatch(/PAID_REMIX_ENABLED\s*=\s*[^;]*process\.env/);
+  });
+
+  it('a price can no longer be STORED — so no later path can charge for one', () => {
+    const settings = routes.slice(routes.indexOf('app/:id/settings'), routes.indexOf('app/:id/remix'));
+    const gate = settings.indexOf('!PAID_REMIX_ENABLED');
+    const write = settings.indexOf('updateWebApp(found.id, { priceInr');
+    expect(gate).toBeGreaterThan(0);
+    expect(gate, 'the refusal must come BEFORE the write').toBeLessThan(write);
+    expect(settings).toContain('coming soon');
+  });
+
+  it('the remix route reads the price through the switch, so every money branch is skipped at once', () => {
+    // One read, not a second "disabled" code path — the free-app branches that already existed do
+    // the work, so there is nothing to keep in sync when the money returns.
+    const remix = routes.slice(routes.indexOf('app/:id/remix'), routes.indexOf('app/:id/report'));
+    expect(remix).toContain('const price = PAID_REMIX_ENABLED ? (found.priceInr ?? 0) : 0');
+    // and the charge is still behind price > 0, which is now unreachable
+    expect(remix).toMatch(/if \(price > 0 && buyerUid[^)]*\) \{/);
+  });
+
+  it('an ALREADY-PRICED listing from before the pause is free too — the price is not even sent', () => {
+    // Hiding a price in the UI would leave it live in the API; not sending it makes "free for now"
+    // true for every client, including ones not written yet.
+    expect(web).toContain('priceInr: PAID_REMIX_ENABLED ? (a.priceInr ?? 0) : 0');
+  });
+
+  it('publishing a remix no longer auto-prices it at the undercut floor', () => {
+    const publish = routes.slice(routes.indexOf('web/publish'), routes.indexOf('web/app/:id'));
+    expect(publish).toContain('if (PAID_REMIX_ENABLED && remixParent)');
+  });
+
+  it('the store UI offers no way to set a price, and says what is coming instead', () => {
+    const store = readFileSync(join(process.cwd(), 'src/components/ide/NavAppStore.tsx'), 'utf8');
+    expect(store).toContain('Selling — coming soon');
+    expect(store).not.toContain("window.prompt('Remix price");
+  });
+
+  it('the money machinery itself is intact — it is parked, not deleted', () => {
+    // The future model reuses these; deleting tested money code and rewriting it later is how
+    // subtle billing bugs get born.
+    expect(typeof validateRemixPrice).toBe('function');
+    expect(typeof resalePriceCheck).toBe('function');
+    expect(splitRemixPrice(19)).toEqual({ creatorInr: 15.2, platformInr: 3.8 });
   });
 });

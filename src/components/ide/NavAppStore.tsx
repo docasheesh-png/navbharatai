@@ -563,16 +563,14 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                           className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-[11px] text-white/70 transition-colors"
                         ><Lock size={11} /> Make private</button>
                       )}
-                      <button
-                        onClick={() => {
-                          const raw = window.prompt('Remix price in whole rupees (0 = free, minimum ₹19). Buyers pay from their wallet; 80% comes to your wallet. Sales are non-refundable.', String(a.priceInr ?? 0));
-                          if (raw === null) return;
-                          const n = Number(raw.trim());
-                          if (Number.isInteger(n) && (n === 0 || n >= 19)) void webAppAction(a.id, { priceInr: n });
-                        }}
-                        disabled={webBusy === a.id}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-[11px] text-white/70 transition-colors"
-                      >{(a.priceInr ?? 0) > 0 ? `Price: ₹${a.priceInr}` : 'Set a price'}</button>
+                      {/* SELLING IS PARKED (admin 2026-08-15) — every app is free to remix for now.
+                          Shown as a plain label rather than a disabled button: a button that cannot
+                          do anything is a promise the screen cannot keep, and the tooltip says what
+                          is actually coming rather than pretending something is broken. */}
+                      <span
+                        title="Every app on the store is free to remix right now. Selling your app — with the money going straight to your own bank — is being built."
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/[0.03] text-[11px] text-white/35"
+                      >Selling — coming soon</span>
                       <button
                         onClick={() => { if (window.confirm('Unpublish this app? Its link stops working and its published files are deleted. Your workspace is untouched.')) void webAppAction(a.id, { action: 'unpublish' }); }}
                         disabled={webBusy === a.id}

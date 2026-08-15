@@ -32992,3 +32992,23 @@ not `__dirname`), insert the catch-all AFTER the last `/api` route, and be wrapp
 real breakage risk, so it needs careful implementation + real end-to-end testing, not a tail-of-session rush.
 Also OPEN: the report's specific rest-express server crash (`tsx server/index.ts → exit 7`) — its actual
 error output was not in the report, so it can't be root-caused from what we have.
+
+## 2026-08-15 — Fullstack-preview batch (part 2): the active "Cannot GET" heal (targeted, self-verifying)
+
+Built on part 1 (the hardened analyzer). When the build's preview-verify loop opens the app and it does NOT
+render because of a "Cannot GET" 404 (the fullstack routing bug), and the hardened `analyzeSpaFallback` pins
+a genuinely-broken server (serves only /api, no catch-all, no setupVite/serveStatic bridge), the existing
+bounded preview-repair heal is now given the EXACT fix instead of the generic prompt:
+- New `spaFallbackRepairInstruction(finding)` — an ESM/CJS-aware instruction that names the two things a
+  deterministic splice can't get right: `__dirname` does not exist in an ESM server (use
+  `fileURLToPath(import.meta.url)` / `import.meta.dirname`), and the client's real build-output dir must be
+  read from its vite/build config (dist vs dist/public vs build). Registers the catch-all AFTER the /api
+  routes; forbids touching working code.
+- Wired at the preview-repair point (agentv3.ts ~11621): only when the not-rendered problems contain
+  "Cannot GET"/404 AND `analyzeSpaFallback` finds a fixable server. SAFE BY CONSTRUCTION — it does NOT add a
+  new write/revert net because the loop already re-browses and re-checks `rendered` on its next iteration; a
+  heal that doesn't fix it is reported honestly (OUTCOME_PREVIEW_FAILED), never a fake success. The analyzer
+  hardening (part 1) is what makes it safe to fire — it can never nudge a correct setupVite/serveStatic app.
+No new flag (it only specialises an existing heal's prompt, adds no new pass). +1 test
+(spaFallbackRepairInstruction names both hazards + preserves the ordering rule + forbids touching working
+code). tsc clean (server); full suite green (15,638).

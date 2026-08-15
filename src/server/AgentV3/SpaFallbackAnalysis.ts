@@ -141,3 +141,24 @@ export function spaFallbackSnippet(finding: SpaFallbackFinding): string {
     '});',
   ].join('\n');
 }
+
+/**
+ * A precise, ESM/CJS-aware repair INSTRUCTION for the bounded preview heal — used when the live preview
+ * returned "Cannot GET" and this analyzer pinned the cause to a server that serves only its API. The heal
+ * runs on the model (not a deterministic edit) precisely because the two things that vary — the module
+ * system and the client's real build-output directory — must be gotten right, and a text splice cannot:
+ * `__dirname` does not exist in an ESM (`"type":"module"`) server, and the output dir depends on the
+ * client's own vite/build config. So the instruction names both hazards and hands over the exact shape.
+ */
+export function spaFallbackRepairInstruction(finding: SpaFallbackFinding): string {
+  return [
+    `FULL-STACK ROUTING FIX (this is why the live preview shows "Cannot GET"): the server \`${finding.file}\` runs the API but ${finding.servesStatic ? 'has no catch-all, so' : 'never serves the built client, so'} every page other than the entry URL 404s.`,
+    `In \`${finding.file}\`, ${finding.servesStatic ? '' : 'serve the client\'s built files and '}add a catch-all that returns the client\'s \`index.html\`, registered AFTER every \`app.use('/api', …)\` route (a catch-all placed first would answer the app's own API calls with HTML — a worse bug).`,
+    'Two things you MUST get right for THIS project:',
+    "1. Module system: if the server is ESM (package.json \"type\":\"module\", or it uses `import`), `__dirname` does NOT exist — derive it with `import { fileURLToPath } from 'url'; const __dirname = path.dirname(fileURLToPath(import.meta.url));` (or use `import.meta.dirname`). If it is CommonJS (`require`), `__dirname` is already available.",
+    "2. The client's REAL build-output directory: read the client's vite/build config (outDir) and package.json build script — a Vite client usually builds to `dist` (or `dist/public` in the rest-express layout), a CRA client to `build`. Point `express.static(...)` and `sendFile('.../index.html')` at that exact folder, not a guessed one.",
+    'Reference shape (adapt the paths + module system to this project):',
+    spaFallbackSnippet(finding),
+    'Do NOT change any working API route or client code — only add the static-serve + catch-all. Keep everything that already works.',
+  ].join('\n');
+}

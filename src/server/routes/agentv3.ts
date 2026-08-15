@@ -6509,7 +6509,21 @@ export function registerAgentV3Routes(app: Express): void {
         });
       }
       if (validation.hasPackageJson && sandboxDiag().livePreviewAvailable) {
-        const emitLive = (e: unknown): void => { if (!rb.ended) emit(e); };
+        // 🔒 THROUGH `events`, NEVER STRAIGHT TO THE RAW STREAM (Mitrify report a876b7bb, 2026-08-15 —
+        // the split-brain preview). This used to call `emit(e)` directly, which reaches the CLIENT but
+        // bypasses the AgentEventStream that `lastPreviewUrl` subscribes to. So the import path's
+        // `{type:'preview'}` set the user's Preview tab while the BUILD's own state still said "no
+        // preview exists". Three lies grew from that one missing wire, all in the same report:
+        //   1. the summary told the user "The live preview didn't start automatically — click Diagnose"
+        //      while the preview was up and verified on port 3000;
+        //   2. RELEASE_GATE swore "no live preview was ever available" — false;
+        //   3. EVERY post-build runtime check (preview verify, route smoke, page check, journey) is
+        //      gated on `lastPreviewUrl` and silently skipped — including the deterministic
+        //      dev-server-restart net, which is exactly what would have caught the dev server that died
+        //      minutes later and left the user staring at a Closed Port Error.
+        // Routing through `events` (whose subscriber forwards to `emit`) keeps delivery identical for
+        // the client and makes the build's own state see what the user sees. One truth, one wire.
+        const emitLive = (e: unknown): void => { if (!rb.ended) events.emit(e as AgentEvent); };
         opts.diag?.record({
           phase: 'preview', severity: 'info', code: 'IMPORT_PREVIEW_BOOT_STARTED',
           message: 'Background live-preview boot started (npm install + dev server). Its verdict is recorded here even if it lands after the reply stream closes.',
@@ -6865,6 +6879,11 @@ export function registerAgentV3Routes(app: Express): void {
                 message: (dbNote || 'Dev server did not come up within the boot window.').slice(0, 400), autoResolved: false,
               });
             }
+            // PHASE LEAK (Mitrify report a876b7bb): 'checking the live preview' was entered above and
+            // never exited, so the heartbeat told the user "checking the live preview, 293s" for five
+            // straight minutes while the build was actually running model calls. exitPhase() is a safe
+            // no-op when no phase is active, so both branches can share this one call.
+            opts.diag?.exitPhase?.();
           } catch {
             const dbNote = previewBootFailureAdvisory({
               needsDb,
@@ -6880,6 +6899,7 @@ export function registerAgentV3Routes(app: Express): void {
               phase: 'preview', severity: 'warning', code: 'IMPORT_PREVIEW_BOOT_FAILED',
               message: (dbNote || 'Preview boot timed out or threw before a verdict could be read.').slice(0, 400), autoResolved: false,
             });
+            opts.diag?.exitPhase?.(); // the throw path must not leak the phase either (safe no-op if none)
           }
         })();
       }

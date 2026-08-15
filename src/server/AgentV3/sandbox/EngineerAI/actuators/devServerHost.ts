@@ -713,3 +713,25 @@ export function buildPortWaitCommand(port: number, maxSeconds: number): string {
   const check = `nc -z 127.0.0.1 ${port} 2>/dev/null || curl -s -o /dev/null --max-time 2 http://127.0.0.1:${port} 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null`;
   return `for i in $(seq 1 ${iterations}); do if ${check}; then echo PORT_UP; exit 0; fi; sleep 1; done; echo PORT_DOWN`;
 }
+
+/**
+ * True when an npm install failed on a TRANSIENT filesystem race, not on anything about the project.
+ *
+ * THE REAL CASE (Mitrify report a876b7bb, 2026-08-15): the pre-migration install died with
+ * `ENOTEMPTY: directory not empty, rmdir node_modules/yargs/build/lib/utils` (exit 217) — a classic
+ * npm-on-overlayfs race with nothing wrong in package.json — so the migration step was SKIPPED, the
+ * dev server booted against an empty database, and only a later retry healed it. The identical
+ * install then succeeded seconds later, which is the signature of this class: the failure belongs to
+ * the moment, not to the tree.
+ *
+ * 🔒 NARROW BY DESIGN. Only the specific fs-race errno classes are listed. A dependency-resolution
+ * failure (ERESOLVE, 404, EINTEGRITY) is DETERMINISTIC — retrying it burns a minute to fail
+ * identically, and this predicate must never send one around again. That is the "retry loop around
+ * code that deterministically fails" the engineering rules forbid.
+ */
+export function isTransientNpmFsFailure(log: string): boolean {
+  const text = String(log || '');
+  // Deterministic failures win even when an fs errno also appears in the log.
+  if (/ERESOLVE|EINTEGRITY|E404|ETARGET|EBADPLATFORM|EUNSUPPORTEDPROTOCOL/i.test(text)) return false;
+  return /\bENOTEMPTY\b|\bEBUSY\b|\bEEXIST\b.*\bnode_modules\b|\bENOTDIR\b.*\bnode_modules\b/.test(text);
+}

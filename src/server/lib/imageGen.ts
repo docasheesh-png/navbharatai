@@ -14,6 +14,15 @@ export interface ImageGenRequest {
   prompt: string;
   style?: string;
   size?: string;
+  /**
+   * The selected image type ("App Icon", "Website banner", …), as a REAL field.
+   *
+   * The client used to fold this into `prompt` ("App Icon — coffee shop"), which left the server
+   * unable to tell the chosen type from the user's own words — and therefore unable to apply the
+   * per-purpose art direction that decides whether an icon reads at 48px. Optional, because that
+   * older shape still arrives and `detectPurpose` falls back to reading the prompt.
+   */
+  type?: string;
 }
 
 export interface GeneratedImage {

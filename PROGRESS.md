@@ -32817,3 +32817,40 @@ for real store volume. The store player runs on the platform origin inside an op
 a dedicated player subdomain (VITE_PREVIEW_ORIGIN-style) remains the belt-and-braces upgrade and
 needs the admin's DNS. Store terms/abuse policy text for the listing page is copy, not code, and
 still to be written.
+
+## 2026-08-15 — FIRST REAL PUBLISH FAILED → root cause: composite-index Firestore queries (fixed same day)
+
+The admin's first real use of the instant-app store ("coin collector" via the new HostingChooser
+card) failed with "Publishing failed — nothing was published." Autopsy, per the fifth absolute rule:
+
+- **Root cause (❌, one class, four sites):** `.where(X).orderBy(Y)` on DIFFERENT fields is a
+  Firestore composite-index query — it throws FAILED_PRECONDITION on first production use until the
+  index is created BY HAND in a console no session can reach. `listMyWebApps` (uid + publishedAt)
+  runs INSIDE the publish route (re-publish detection), so the very first publish hit it. Same shape
+  in `listListedWebApps`, `listUnlistedWebApps`, and `listDataRows`.
+- **Why it survived to production (the 50/50 half):** tests stub Firestore (db() returns null under
+  VITEST), so a query-shape error is invisible to the whole gate — it only exists against the real
+  database. And the publish catch-all swallowed the real error WITHOUT LOGGING, so the first failure
+  carried zero evidence.
+- **The fix is the SHAPE, not an index:** `firestore.indexes.json` exists in the repo but is wired to
+  NO deploy pipeline (firebase.json doesn't reference it; cloudbuild.yaml deploys Cloud Run only), so
+  shipping index definitions would be a fix that requires a manual admin step forever. Instead the
+  queries were restructured so no index can ever be demanded: the three app lists are single-field
+  equality filters (auto-indexed) + bounded in-memory sort (FETCH_CAP 500; one doc per listing, small
+  by construction); data rows moved into PER-COLLECTION subcollections (`data_<name>`, name already
+  validated `/^[a-z][a-z0-9_-]{0,30}$/`) so the read is a single-field orderBy. Zero real rows
+  existed, so no migration.
+- **Honesty fix (rule 5 of the fourth law):** every web-store catch now `console.error`s the REAL
+  error server-side (`logStoreError`) — Cloud Run logs carry the cause; the user-facing reply stays
+  generic per the white-label law.
+- **Regression lock:** source-pin test in `navStoreWeb.test.ts` fails CI if a `.where(...).orderBy(...)`
+  chain (comments stripped) ever returns to the store data layer.
+- **Sibling audit (recorded, NOT changed — never-break):** the same shape exists in older, live
+  features: `navStoreStore.ts` (APK store), `galleryStore.ts`, `eventStore.ts`,
+  `UserBuildHistoryStore.ts`, `FirestoreJobStore.ts` (idempotencyKey+createdAt),
+  `FirestoreConversationStore.ts` (covered by `firestore.indexes.json`'s `agentv3_conversations`
+  entry — IF that file was ever deployed). These features appear to work in prod, implying their
+  indexes were created historically via console links. Left untouched deliberately: refactoring five
+  working stores' query shapes in a hotfix risks breaking what works. OPEN ROOT CAUSE: either those
+  indexes' existence should be verified by the admin (Firestore console → Indexes) or those stores
+  migrated to index-free shapes in a dedicated, tested change.

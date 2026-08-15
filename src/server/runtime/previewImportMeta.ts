@@ -152,6 +152,91 @@ export const PROCESS_SHIM_SOURCE = [
 ].join('\n');
 
 /**
+ * STORAGE SHIM — kills the class behind the store's first real crash report (admin, 2026-08-15):
+ * a game played fine until game over, then hung with "Script error."
+ *
+ * The store player (and any future opaque-origin embed) runs the app in a sandboxed iframe WITHOUT
+ * allow-same-origin, and in an opaque origin the localStorage/sessionStorage GETTERS themselves
+ * throw a SecurityError. Generated apps use localStorage constantly — a game saving its high score
+ * at game over is the canonical case — so the app's first storage touch became an uncaught throw at
+ * the exact moment it "finished". NavData already wrapped its OWN storage calls for this reason;
+ * this shim protects the APP's own code the same way, one layer down: when native storage throws,
+ * window.localStorage/sessionStorage are redefined as an in-memory Storage lookalike. Honest
+ * behavior, not a fake: the data genuinely persists for the session and genuinely does not survive
+ * a reload — exactly what an opaque origin can offer. Where native storage works (the same-origin
+ * creator preview), the shim touches nothing.
+ */
+export const STORAGE_SHIM_SOURCE = [
+  `(function () {`,
+  `    function memStorage() {`,
+  `      var m = {};`,
+  `      var s = {`,
+  `        getItem: function (k) { return Object.prototype.hasOwnProperty.call(m, String(k)) ? m[String(k)] : null; },`,
+  `        setItem: function (k, v) { m[String(k)] = String(v); },`,
+  `        removeItem: function (k) { delete m[String(k)]; },`,
+  `        clear: function () { m = {}; },`,
+  `        key: function (i) { var ks = Object.keys(m); return i >= 0 && i < ks.length ? ks[i] : null; }`,
+  `      };`,
+  `      Object.defineProperty(s, 'length', { get: function () { return Object.keys(m).length; } });`,
+  `      return s;`,
+  `    }`,
+  `    function ensure(name) {`,
+  `      try { window[name].getItem(''); }`,
+  `      catch (e) { try { Object.defineProperty(window, name, { value: memStorage(), configurable: true }); } catch (e2) {} }`,
+  `    }`,
+  `    ensure('localStorage');`,
+  `    ensure('sessionStorage');`,
+  `  })();`,
+].join('\n');
+
+/**
+ * The class the host adds to <html> to turn game mode OFF (i.e. restore normal document selection).
+ * Named for what it does, and prefixed so it cannot collide with an app's own class names.
+ */
+export const APP_FEEL_OFF_CLASS = '__nbai-text-ok';
+
+/**
+ * APP-FEEL TOUCH CSS — the store's second real-use report (admin, 2026-08-15): long-pressing the
+ * screen mid-game selected text and popped the copy menu; double-tap zoomed. A published app must
+ * feel like an app, not a document. Selection is disabled by default with the two honest carve-outs
+ * where selection IS the feature (inputs, textareas, contenteditable), plus `touch-action:
+ * manipulation` to drop double-tap-zoom (pan/pinch stay available to apps that want them). Injected
+ * FIRST in <head> on purpose: it is a default, so any app's own stylesheet (loaded later, equal
+ * specificity) can deliberately re-enable selection — e.g. a notes app opting its content back in
+ * with \`user-select: text\`.
+ */
+export const APP_TOUCH_CSS = [
+  `html:not(.${APP_FEEL_OFF_CLASS}), html:not(.${APP_FEEL_OFF_CLASS}) body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }`,
+  `html:not(.${APP_FEEL_OFF_CLASS}) input, html:not(.${APP_FEEL_OFF_CLASS}) textarea, html:not(.${APP_FEEL_OFF_CLASS}) select, html:not(.${APP_FEEL_OFF_CLASS}) [contenteditable]:not([contenteditable="false"]) { -webkit-user-select: text; user-select: text; }`,
+].join('\n');
+
+/**
+ * GAME MODE, the viewer's own switch (admin 2026-08-15: "ek toggle on/off bana do — game mode").
+ *
+ * The CSS above is a DEFAULT, not a verdict: a game wants selection off, a recipe app's reader wants
+ * to copy the ingredients. Only the person holding the phone knows which, so the player UI carries a
+ * switch and tells the frame about it through this listener.
+ *
+ * postMessage is the ONLY channel available: the store player's iframe is deliberately opaque-origin
+ * (no `allow-same-origin`), so the host cannot reach into its DOM — but postMessage crosses that
+ * line by design. Re-rendering the page with a different flag would also work and is exactly what we
+ * must NOT do: it reloads the app and throws away the game the viewer is in the middle of. Toggling
+ * a class costs one repaint and keeps the run alive.
+ *
+ * It accepts one message shape and does one thing — add or remove a class. An app could send itself
+ * the same message, which changes nothing: code already running in that frame can set its own class
+ * anyway. Default (no message, no class) is game mode ON, so the app-like behaviour is what a viewer
+ * gets before touching anything.
+ */
+export const APP_FEEL_LISTENER_SOURCE = [
+  `window.addEventListener('message', function (e) {`,
+  `    var d = e && e.data;`,
+  `    if (!d || d.__nbaiAppFeel === undefined) return;`,
+  `    try { document.documentElement.classList[d.__nbaiAppFeel ? 'remove' : 'add'](${JSON.stringify(APP_FEEL_OFF_CLASS)}); } catch (err) {}`,
+  `  });`,
+].join('\n');
+
+/**
  * The Babel plugin, for the SERVER precompile path.
  *
  * ⚠️ The browser fallback path in ReactPreview.ts carries a hand-written twin of this, for the same

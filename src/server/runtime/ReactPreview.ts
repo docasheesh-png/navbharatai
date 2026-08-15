@@ -22,7 +22,7 @@ import { normalizePath } from '../project/ProjectModel';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { precompileModules } from './PreviewPrecompile';
 import { startDepWarmup, getWarmDepUrls, WARMUP_MAX_MODULES } from './PreviewDepWarmup';
-import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE, PROCESS_SHIM_SOURCE, NAVDATA_RUNTIME_SOURCE } from './previewImportMeta';
+import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE, PROCESS_SHIM_SOURCE, NAVDATA_RUNTIME_SOURCE, STORAGE_SHIM_SOURCE, APP_TOUCH_CSS, APP_FEEL_LISTENER_SOURCE } from './previewImportMeta';
 import { proveBackendRunnable } from './browserBackend/capability';
 import { EXPRESS_SHIM_SOURCE, BACKEND_BRIDGE_SOURCE, EXPRESS_SHIM_PATH, BACKEND_BRIDGE_PATH } from './browserBackend/expressShim';
 import { pgShimSource, pgliteDataDir, PG_SHIM_PATH, PGLITE_VERSION } from './browserBackend/pgShim';
@@ -411,6 +411,9 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, works
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Preview</title>
+<style>${APP_TOUCH_CSS}</style>
+<script>${STORAGE_SHIM_SOURCE}
+${APP_FEEL_LISTENER_SOURCE}</script>
 ${tailwindCdn}
 ${styleTag}
 <script type="importmap">${importmap}</script>
@@ -567,13 +570,23 @@ ${babelTag}
     clearInterval(bootTick);
     clearInterval(bootWatchdog);   // an interval now, not a timeout — see the watchdog above
   }
+  // PAINTED = the app genuinely reached the screen. Everything before this moment is a boot, where a
+  // failure must be SHOWN (a blank screen is the lie); everything after is a RUNNING app, where an
+  // uncaught error must NOT be allowed to destroy it — see showError.
+  var nbaiPainted = false;
   try {
     new MutationObserver(function () {
-      if (document.getElementById('root').childNodes.length > 0) hideBoot();
+      if (document.getElementById('root').childNodes.length > 0) { nbaiPainted = true; hideBoot(); }
     }).observe(document.getElementById('root'), { childList: true });
   } catch (e) { /* observer unavailable — the explicit post-mount hide below still fires */ }
 
   function showError(msg) {
+    // THE GAME-OVER CRASH (store's first real play report, 2026-08-15): this handler used to wipe
+    // #root on EVERY uncaught error, forever. Right during boot — a failed boot must show its reason.
+    // Wrong after the app painted: a mid-game throw (a storage write at game over) replaced the
+    // running app's DOM with a red banner, which the player experienced as a hang. After paint the
+    // error still reaches the host via the console mirror's own listeners; the app keeps its DOM.
+    if (nbaiPainted) return;
     hideBoot(); // an explicit reason always replaces the loading chakra — never both, never neither
     var el = document.getElementById('root');
     el.innerHTML = '<pre style="white-space:pre-wrap;color:#b00;padding:16px;font:13px/1.5 monospace">Preview error:\\n' +
@@ -904,8 +917,10 @@ ${babelTag}
       requireModule(ENTRY);
       // The entry executed without throwing — the app is mounting. The MutationObserver above
       // normally hides the boot overlay on the first real paint; this explicit hide covers apps
-      // that render outside #root (portals) so the chakra can never sit over a working app.
-      setTimeout(hideBoot, 300);
+      // that render outside #root (portals, canvas appended to body — the coin-collector case) so
+      // the chakra can never sit over a working app. It marks PAINTED for the same apps, so a later
+      // runtime error cannot paint the boot-failure banner over an app that is visibly running.
+      setTimeout(function () { nbaiPainted = true; hideBoot(); }, 300);
       // If any local file was missing, the app still rendered (stubbed) — show an honest, non-blocking
       // banner naming the missing files and report them to the host so the build report captures them.
       var miss = Object.keys(missingLocal);

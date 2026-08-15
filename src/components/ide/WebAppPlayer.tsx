@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { X, Share2, Flag, Lock, Check, Sparkles } from 'lucide-react';
+import { X, Share2, Flag, Lock, Check, Sparkles, Gamepad2, Type } from 'lucide-react';
 import { authedHeaders } from '../../App';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { auth } from '../../lib/firebase';
@@ -27,6 +27,24 @@ import { clientWorkspaceId, v3SessionStorageKey } from '../agentv3/v3SessionCont
 // the header. The player page inlines its compiler and loads dependencies only from that mirror, so
 // the opaque origin costs nothing.
 const PLAYER_SANDBOX = 'allow-scripts allow-forms allow-popups allow-modals';
+
+/**
+ * GAME MODE — the viewer's own switch (admin 2026-08-15: "ek toggle on/off bana do").
+ *
+ * ON (the default): long-press selection, the copy menu and double-tap zoom are off, so a game plays
+ * like a game instead of like a web page you keep accidentally highlighting. OFF: the app behaves
+ * like an ordinary document and text can be selected and copied — which a recipe, a story or a
+ * reference app genuinely needs.
+ *
+ * DEFAULT ON is deliberate, not laziness: the report that produced this feature was someone playing
+ * a GAME, and a default of OFF would hand every new viewer the bad experience first and make them
+ * find a setting to fix it. The switch exists for the minority case; the default serves the majority.
+ *
+ * The choice is remembered PER APP: "let me copy from this recipe app" should not silently turn
+ * selection on inside the next game. Stored on the platform's own origin (this component), never
+ * inside the app's opaque-origin frame — the frame cannot keep anything anyway.
+ */
+const GAME_MODE_KEY = (appId: string) => `nbai_store_gamemode_${appId}`;
 
 interface PlayerMeta {
   id: string;
@@ -57,6 +75,26 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
   const [reportDone, setReportDone] = useState(false);
   const liveRef = useRef(true);
   useEffect(() => () => { liveRef.current = false; }, []);
+
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const [gameMode, setGameMode] = useState<boolean>(() => {
+    try { return localStorage.getItem(GAME_MODE_KEY(appId)) !== 'off'; } catch { return true; }
+  });
+  // Tell the frame. postMessage is the only channel into an opaque origin, and it is enough: the
+  // shell toggles ONE class, so switching mid-game costs a repaint instead of reloading the app and
+  // losing the run. Re-sent whenever the app (re)loads, because a fresh document starts at default.
+  useEffect(() => {
+    const win = frameRef.current?.contentWindow;
+    if (!win) return;
+    try { win.postMessage({ __nbaiAppFeel: gameMode }, '*'); } catch { /* frame not ready yet */ }
+  }, [gameMode, html]);
+  const toggleGameMode = useCallback(() => {
+    setGameMode((on) => {
+      const next = !on;
+      try { localStorage.setItem(GAME_MODE_KEY(appId), next ? 'on' : 'off'); } catch { /* private mode — the session still works */ }
+      return next;
+    });
+  }, [appId]);
 
   const open = useCallback(async (pw?: string) => {
     setOpening(true);
@@ -201,6 +239,18 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
             <Sparkles size={12} /> {remixing ? 'Copying…' : price > 0 ? `₹${price} · Make it yours` : 'Make it yours'}
           </button>
         )}
+        {html && (
+          <button
+            onClick={toggleGameMode}
+            title={gameMode
+              ? 'Game mode is ON — long-press and double-tap zoom are off so playing feels like an app. Tap to allow selecting and copying text.'
+              : 'Game mode is OFF — you can select and copy text. Tap to go back to app-like play.'}
+            aria-pressed={gameMode}
+            className={`p-2 rounded-lg transition-colors ${gameMode ? 'text-emerald-400 hover:bg-white/10' : 'text-white/60 hover:text-white hover:bg-white/10'}`}
+          >
+            {gameMode ? <Gamepad2 size={15} /> : <Type size={15} />}
+          </button>
+        )}
         <button onClick={share} title="Copy the app's link" className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors">
           {shared ? <Check size={15} className="text-emerald-400" /> : <Share2 size={15} />}
         </button>
@@ -216,10 +266,14 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
       <div className="flex-1 min-h-0 relative">
         {html ? (
           <iframe
+            ref={frameRef}
             title={meta?.name || 'App'}
             srcDoc={html}
             className="w-full h-full border-0 bg-white"
             sandbox={PLAYER_SANDBOX}
+            // A fresh document starts at the default (game mode on), so a viewer who chose OFF gets
+            // their choice re-applied the moment the app is ready — including after a reload.
+            onLoad={() => { try { frameRef.current?.contentWindow?.postMessage({ __nbaiAppFeel: gameMode }, '*'); } catch { /* nothing to tell */ } }}
           />
         ) : needsPassword ? (
           <div className="h-full flex items-center justify-center p-6">

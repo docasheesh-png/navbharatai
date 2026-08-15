@@ -32907,3 +32907,22 @@ setting. The switch serves the minority case, the default serves the majority.
   `MousePointerClick` are exported. A wrong icon import fails with a confusing cascade of
   "X cannot be used as a JSX component" errors on UNRELATED icons in the same file — the real error
   is the first line, the TS2305.
+## 2026-08-15 — Autopsy fix B: tell the builder where a fullstack app's frontend lives (client/src)
+
+From the to-do build report (fullstack rest-express app, 165 files). One of several struggle points: the
+builder guessed a top-level `src/` and tried to read/write `src/App.tsx` and `src/index.css` when they were
+at `client/src/…`, burning steps on TOOL_ERRORs until the "did you mean client/src/…?" hint corrected each
+one. Root cause: the build prompt never STATED the frontend source root for a nested (fullstack) layout.
+
+Fix (the small, safe half the admin picked; the preview-404 root cause is the separate next batch):
+- **`frontendLayoutHint.ts`** (pure/no-throw): from the workspace file list, if the frontend source is under
+  a NESTED root (`client/src`, `frontend/src`, `apps/web/src`, …) rather than a bare top-level `src/`, return
+  a one-paragraph instruction naming that root (and the backend dir when a `server/`|`backend/`|`api/` folder
+  is present). Returns null for an ordinary top-level-`src` app — no false noise.
+- Injected in `agentv3.ts` right where the project context is assembled (reusing the already-listed file
+  `tree`, so no extra I/O), prepended to the build prompt. Best-effort; self-gating (only fires for a real
+  nested-layout app). 6 tests. tsc clean (server); full suite green.
+
+The user-visible failure (fullstack PREVIEW 404 — the express server serves only the API, client pages 404)
+remains the OPEN root cause for the next focused batch: a robust fullstack-preview subsystem (build client →
+serve it → correct port → verify the pages actually load, not just the API). Recorded per rule 6.

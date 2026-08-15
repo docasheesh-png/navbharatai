@@ -17,6 +17,8 @@ import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
 import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
+import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, statusCounts, usersInBuilds } from '../lib/buildListFilter';
 import { sandboxStore } from '../AgentV3/SandboxStore';
 import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from '../AgentV3/sandboxHandover';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
@@ -673,16 +675,45 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.get('/api/admin/all-builds', verifyAdminToken, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 500);
-      const q = String(req.query.q ?? '').trim().toLowerCase();
-      let builds = await listAllDiagnostics(limit);
-      if (q) {
-        builds = builds.filter((b) =>
-          b.workspaceId.toLowerCase().includes(q) ||
-          (b.ownerUid ?? '').toLowerCase().includes(q) ||
-          (b.prompt ?? '').toLowerCase().includes(q) ||
-          (b.summary ?? '').toLowerCase().includes(q));
-      }
-      res.json({ builds });
+      const q = String(req.query.q ?? '').trim();
+      const status = parseStatusFilter(req.query.status);
+      const dateFilter = parseDateFilter(req.query.date);
+      const uid = String(req.query.uid ?? '').trim() || null;
+
+      // The date bound goes into the QUERY (see listAllDiagnostics) so a "last 30 days" view is not
+      // secretly "the newest 500 rows". Status and user are applied below, in memory, because `ok`
+      // and the owner live inside the stored report and cannot be queried.
+      const all = await listAllDiagnostics(limit, sinceMsFor(dateFilter));
+
+      // Names in ONE round trip. A per-row lookup would be 100 sequential reads on a screen the admin
+      // refreshes constantly; a failure here degrades to ids rather than emptying the list.
+      const identities = await resolveUserIdentities(all.map((b) => b.ownerUid), getDb() as never);
+
+      const builds = all
+        .filter((b) => buildMatchesFilters(b, {
+          status, uid, query: q,
+          identity: b.ownerUid ? identities.get(String(b.ownerUid).trim()) ?? null : null,
+        }))
+        .map((b) => {
+          const identity = b.ownerUid ? identities.get(String(b.ownerUid).trim()) ?? null : null;
+          const resolved = identity ?? identityFrom(b.ownerUid, null);
+          return { ...b, owner: { ...resolved, label: identityLabel(resolved) } };
+        });
+
+      // The counts describe the FETCHED set (before status/user narrowing), so the chips can show how
+      // much each choice would hide -- and `total` is stated separately so the panel never implies it
+      // is looking at more than the fetch limit.
+      res.json({
+        builds,
+        counts: statusCounts(all),
+        users: usersInBuilds(all, identities).map((u) => ({
+          uid: u.uid,
+          count: u.count,
+          label: identityLabel(u.identity ?? identityFrom(u.uid, null)),
+        })),
+        fetched: all.length,
+        limit,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to list builds.' });
     }

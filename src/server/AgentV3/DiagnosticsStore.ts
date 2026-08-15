@@ -559,15 +559,17 @@ export interface AllDiagnosticsEntry extends DiagnosticsHistoryEntry {
  * scope — no composite, no collection-group index, so it can never FAILED_PRECONDITION). Metadata
  * only; the full payloads stay behind the per-workspace loaders. Never throws.
  */
-export async function listAllDiagnostics(limit = 100): Promise<AllDiagnosticsEntry[]> {
+export async function listAllDiagnostics(limit = 100, sinceMs?: number | null): Promise<AllDiagnosticsEntry[]> {
   const db = getDb();
   if (!db) return [];
   try {
-    const snap = await db
-      .collection(COLLECTION)
-      .orderBy('savedAt', 'desc')
-      .limit(Math.max(1, Math.min(500, limit)))
-      .get();
+    // A date bound belongs in the QUERY, not in a later .filter(). Applied afterwards, a "last 30
+    // days" view would really mean "the newest 500 rows, of which some are within 30 days" — and it
+    // would say nothing about the older ones it never looked at. `savedAt` is already the sort key,
+    // so this range stays on the same single-field index and can never FAILED_PRECONDITION.
+    let q = db.collection(COLLECTION).orderBy('savedAt', 'desc') as FirebaseFirestore.Query;
+    if (typeof sinceMs === 'number' && sinceMs > 0) q = q.where('savedAt', '>=', sinceMs);
+    const snap = await q.limit(Math.max(1, Math.min(500, limit))).get();
     return snap.docs.map((d) => {
       const r = (d.data()?.report ?? {}) as BuildDiagnosticsReport;
       return {

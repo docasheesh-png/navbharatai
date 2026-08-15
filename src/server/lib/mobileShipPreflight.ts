@@ -25,7 +25,7 @@
 // success. Reuses runAiRepair/parse gates from mobileBuildAiRepair (one repair engine, no drift).
 
 import { findSyntaxErrors } from '../AgentV3/SyntaxCheck';
-import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
+import { findMissingDependencies, isLocalFileSpecifier } from '../AgentV3/DependencyReconciler';
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { resolveLocalImport } from '../AgentV3/ArchitectureAnalysis';
 import { scaffoldMissingUiPrimitives } from './uiPrimitiveScaffold';
@@ -137,12 +137,25 @@ export function preflightProblemsText(problems: readonly PreflightProblem[]): st
     .join('\n');
 }
 
+/** Does this name a file (an image, a font, an alias path) rather than an npm package? */
+function isAssetSpecifier(name: string): boolean {
+  return Boolean(name) && isLocalFileSpecifier(name);
+}
+
 /** One plain-language sentence for the user about why the ship stopped. Never a raw compiler line alone. */
 export function preflightUserMessage(problems: readonly PreflightProblem[]): string {
   const first = problems[0];
   if (!first) return 'Your app has a code problem that stopped it from compiling.';
+  const named = first.message.match(/"([^"]+)"/)?.[1] || '';
   const what = first.kind === 'missing-package'
-    ? `it uses a library ("${first.message.match(/"([^"]+)"/)?.[1] || 'unknown'}") that is not set up`
+    // ⚠️ SAY WHICH KIND OF MISSING THING IT IS. An import of a picture that was never created is not
+    // "a library that is not set up" — that phrasing sent the user (and the repair pass) hunting for
+    // an npm package that cannot exist, which is why an APK build stayed blocked (admin 2026-08-14).
+    // The classifier no longer mistakes an asset for a package, and the sentence no longer mistakes
+    // one for the other either.
+    ? isAssetSpecifier(named)
+      ? `it uses an image or file ("${named}") that is not in the app`
+      : `it uses a library ("${named || 'unknown'}") that is not set up`
     : first.kind === 'unresolved-import'
       ? `${first.path} ${first.message}`
       : `${first.path}${first.line ? ` (line ${first.line})` : ''} has a code error: ${first.message}`;

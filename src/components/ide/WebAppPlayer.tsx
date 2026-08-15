@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { X, Share2, Flag, Loader2, Lock, Check } from 'lucide-react';
+import { X, Share2, Flag, Lock, Check, Sparkles } from 'lucide-react';
 import { authedHeaders } from '../../App';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
+import { auth } from '../../lib/firebase';
+import { clientWorkspaceId, v3SessionStorageKey } from '../agentv3/v3SessionContinuity';
 
 // WEB APP PLAYER — a store app running FULL SCREEN in the viewer's own browser (Kadam 1).
 //
@@ -115,6 +117,49 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
     }).catch(() => { /* clipboard denied — the URL bar still has it via the deep link */ });
   }, [appId]);
 
+  /**
+   * REMIX — the viewer becomes a creator in one tap (Kadam 2).
+   *
+   * A fresh v5 session id is minted HERE, the server copies the published snapshot into the derived
+   * workspace, the sticky-session key is pointed at it, and the page reloads into v5 — which then
+   * opens exactly as if the user had been working on this app all along (the durable files are the
+   * same store every v5 surface reads). Works signed-out too: an anon workspace is owned by its
+   * unguessable sid, the same capability model v5 itself uses.
+   */
+  const [remixing, setRemixing] = useState(false);
+  const remix = useCallback(async () => {
+    if (remixing) return;
+    setRemixing(true);
+    try {
+      const sid = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `s-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const uid = auth.currentUser?.uid;
+      const target = clientWorkspaceId(uid, sid);
+      const res = await fetch(`/api/nav-store/web/app/${encodeURIComponent(appId)}/remix`, {
+        method: 'POST',
+        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
+        // A private app's remix needs the same password its open did — reuse what the viewer typed.
+        body: JSON.stringify({ targetWorkspaceId: target, ...(password ? { password } : {}) }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || 'The remix failed — nothing was copied.');
+        return;
+      }
+      // Point the sticky session at the new workspace (same fallback order the panel itself uses),
+      // then reload into v5. The files are already durably there; v5 simply opens "their" app.
+      const key = v3SessionStorageKey(uid);
+      try { localStorage.setItem(key, sid); } catch { try { sessionStorage.setItem(key, sid); } catch { /* both blocked */ } }
+      try { sessionStorage.setItem('nbi_v3_open', '1'); } catch { /* view falls back to home */ }
+      window.location.href = '/';
+    } catch {
+      if (liveRef.current) setError('Could not reach the store. Check your connection and try again.');
+    } finally {
+      if (liveRef.current) setRemixing(false);
+    }
+  }, [appId, password, remixing]);
+
   const sendReport = useCallback(async () => {
     if (reportText.trim().length < 5) return;
     try {
@@ -135,6 +180,16 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
       {/* Slim bar — the only NavBharatAI chrome. The app owns the rest of the screen. */}
       <div className="flex items-center gap-2 px-3 h-11 border-b border-white/10 bg-[#0d1117] flex-shrink-0">
         <span className="text-sm font-semibold text-white truncate flex-1">{meta?.name || 'Loading…'}</span>
+        {html && (
+          <button
+            onClick={() => void remix()}
+            disabled={remixing}
+            title="Copy this app into your own NavBharatAI and change it however you like"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[11px] font-bold transition-colors"
+          >
+            <Sparkles size={12} /> {remixing ? 'Copying…' : 'Make it yours'}
+          </button>
+        )}
         <button onClick={share} title="Copy the app's link" className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors">
           {shared ? <Check size={15} className="text-emerald-400" /> : <Share2 size={15} />}
         </button>

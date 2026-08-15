@@ -333,3 +333,36 @@ export async function makeWebAppPublic(id: string): Promise<void> {
     passwordSalt: admin.firestore.FieldValue.delete(),
   });
 }
+
+// ─── Remix (Kadam 2) — "make it yours" ────────────────────────────────────────────────────────────
+
+const REMIX_ORIGINS = 'nav_store_remix_origins';
+
+/**
+ * Remember that a WORKSPACE was born as a remix of a store app.
+ *
+ * This is the lineage anchor. It is recorded at remix time (not publish time) because that is the
+ * only moment the fact is knowable — by the time the user publishes the workspace, nothing else in
+ * the system remembers where its files came from. The publish route reads this and stamps
+ * `parentAppId`, which is what later makes rules like "a paid remix cannot be re-listed" (Kadam 3)
+ * enforceable rather than aspirational.
+ */
+export async function recordRemixOrigin(workspaceId: string, parentAppId: string): Promise<void> {
+  const d = db();
+  if (!d) return;
+  try {
+    await d.collection(REMIX_ORIGINS).doc(workspaceId).set({ parentAppId, at: Date.now() });
+  } catch { /* lineage is metadata — losing it must never fail the remix itself */ }
+}
+
+export async function getRemixOrigin(workspaceId: string): Promise<string | null> {
+  const d = db();
+  if (!d) return null;
+  try {
+    const doc = await d.collection(REMIX_ORIGINS).doc(workspaceId).get();
+    const parent = doc.exists ? (doc.data() as { parentAppId?: unknown }).parentAppId : null;
+    return typeof parent === 'string' ? parent : null;
+  } catch {
+    return null;
+  }
+}

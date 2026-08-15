@@ -47,9 +47,10 @@ import {
   evaluateWebPublish, hashAppPassword, verifyAppPassword, toPublicWebApp, newWebAppId,
   saveWebApp, getWebApp, getWebAppFiles, listListedWebApps, listMyWebApps, listUnlistedWebApps,
   updateWebApp, makeWebAppPublic, bumpWebAppCounter, removeWebApp, reportWebApp,
+  recordRemixOrigin, getRemixOrigin,
   type WebStoreApp,
 } from '../lib/navStoreWeb';
-import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { loadWorkspaceFiles, saveWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { verifiedWorkspaceReadOk } from '../lib/workspaceIdentity';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { renderPreview } from '../runtime/renderPreview';
@@ -540,7 +541,9 @@ export function registerNavStoreRoutes(app: Express): void {
         visibility,
         ...(pw ? { passwordHash: pw.hash, passwordSalt: pw.salt } : {}),
         workspaceId,
-        ...(existing?.parentAppId ? { parentAppId: existing.parentAppId } : {}),
+        // LINEAGE: a workspace born as a remix carries its parent onto everything it publishes. The
+        // fact was recorded at remix time — the only moment it is knowable — and survives here.
+        ...((existing?.parentAppId || await getRemixOrigin(workspaceId)) ? { parentAppId: existing?.parentAppId || (await getRemixOrigin(workspaceId))! } : {}),
         fileCount: Object.keys(gate.files).length,
         sizeBytes: Object.values(gate.files).reduce((n, c) => n + Buffer.byteLength(c, 'utf8'), 0),
         runs: existing?.runs ?? 0,
@@ -653,6 +656,49 @@ export function registerNavStoreRoutes(app: Express): void {
       res.json({ ok: true, visibility });
     } catch {
       res.status(502).json({ error: 'Could not save that change.' });
+    }
+  });
+
+  /**
+   * REMIX — "make it yours" (Kadam 2). Copies the published snapshot into the CALLER'S OWN fresh
+   * workspace, so the store's viewer becomes a creator in one tap.
+   *
+   * The trust rules, in order:
+   *   • A PRIVATE app demands its password here exactly as /open does — remix is a stronger read
+   *     than viewing (it hands over the code), so it can never require less.
+   *   • The TARGET workspace must belong to the caller (verified owner, or an anon workspace by its
+   *     unguessable sid — the same capability model v5 itself uses, so signed-out remix works).
+   *   • The target must be EMPTY. Remixing into a workspace that has files would silently bury
+   *     someone's real work under a stranger's app — refused, never merged.
+   *   • What is copied is the published SNAPSHOT — never the creator's live workspace.
+   */
+  app.post('/api/nav-store/web/app/:id/remix', async (req: Request, res: Response) => {
+    try {
+      const found = await getWebApp(String(req.params.id || ''));
+      if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      if (found.visibility === 'private') {
+        const pw = typeof req.body?.password === 'string' ? req.body.password : '';
+        if (!verifyAppPassword(pw, found.passwordHash, found.passwordSalt)) {
+          return res.status(401).json({ error: 'This app is private — the password is wrong or missing.', requiresPassword: true });
+        }
+      }
+      const target = typeof req.body?.targetWorkspaceId === 'string' ? req.body.targetWorkspaceId : '';
+      if (!target) return res.status(400).json({ error: 'targetWorkspaceId is required.' });
+      if (!verifiedWorkspaceReadOk(await verifyFirebaseToken(req), target)) {
+        return res.status(403).json({ error: 'That workspace does not belong to you.' });
+      }
+      const already = await loadWorkspaceFiles(target);
+      if (Object.keys(already).length > 0) {
+        return res.status(409).json({ error: 'That workspace already has files — remix into a fresh app instead.' });
+      }
+      const files = await getWebAppFiles(found.id);
+      if (Object.keys(files).length === 0) return res.status(404).json({ error: 'This app has no published files.' });
+      await saveWorkspaceFiles(target, files);
+      await recordRemixOrigin(target, found.id);
+      bumpWebAppCounter(found.id, 'remixes');
+      res.json({ ok: true, fileCount: Object.keys(files).length, name: found.name });
+    } catch {
+      res.status(502).json({ error: 'The remix failed — nothing was copied.' });
     }
   });
 

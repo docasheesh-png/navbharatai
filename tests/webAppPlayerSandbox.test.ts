@@ -77,3 +77,30 @@ describe('the share deep link stays wired end to end', () => {
     expect(fallback).toContain("'/api/'");
   });
 });
+
+describe('remix holds the same trust lines as open (Kadam 2)', () => {
+  const routes = readFileSync(join(process.cwd(), 'src/server/routes/navStore.ts'), 'utf8');
+  const remixRoute = routes.slice(routes.indexOf("app/:id/remix"), routes.indexOf("app/:id/report"));
+
+  it('a private app demands its password for remix exactly as for open', () => {
+    /**
+     * Remix is a STRONGER read than viewing — it hands over the code — so it can never require less.
+     * Without this, "private" would mean "private to watch, public to take".
+     */
+    expect(remixRoute).toContain('verifyAppPassword');
+    expect(remixRoute).toContain('requiresPassword: true');
+  });
+
+  it('the target workspace must be the caller\'s own', () => {
+    expect(remixRoute).toContain('verifiedWorkspaceReadOk');
+  });
+
+  it('remix REFUSES a non-empty target — it must never bury someone\'s real work', () => {
+    expect(remixRoute).toContain('already has files');
+  });
+
+  it('what ships is the published snapshot, never the creator\'s live workspace', () => {
+    expect(remixRoute).toContain('getWebAppFiles');
+    expect(remixRoute).not.toContain('loadWorkspaceFiles(found.workspaceId)');
+  });
+});

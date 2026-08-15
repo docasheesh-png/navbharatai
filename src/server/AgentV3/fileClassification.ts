@@ -39,3 +39,29 @@ export function countEditableSourceFiles(paths: readonly string[]): number {
   for (const p of paths) if (isEditableSourceFile(p)) n++;
   return n;
 }
+
+/**
+ * True when an IMPORT SPECIFIER names a binary asset — `./logo.png`, `@/assets/hero.jpg`,
+ * `@assets/IMG_1.png`, `../fonts/Inter.woff2?url`.
+ *
+ * 🔒 WHY THIS EXISTS, AND WHY IT MUST STAY THE ONLY ANSWER TO THE QUESTION (2026-08-15):
+ *
+ * The durable workspace store is TEXT ONLY — `saveWorkspaceFiles` keeps `typeof content === 'string'`,
+ * so a `.png` is never in the file map that later checks run against. Any check that reads "not in the
+ * map" as "does not exist in the app" therefore reports EVERY image as missing, whether it is there or
+ * not — a verdict that is wrong 100% of the time and carries no information at all.
+ *
+ * That is not theoretical. It BLOCKED APK builds: `import logo from './logo.png'` — the most ordinary
+ * line in any app with a logo — was reported as "imports './logo.png', but no such file exists in the
+ * app" and the ship was refused. A check we cannot perform must say NOTHING, not "missing".
+ *
+ * `.svg` and `.css` are deliberately NOT covered: they are text, they ARE persisted, so they can be
+ * checked honestly and still are. The distinction is exactly `isBinaryAsset`, which is why this reuses
+ * it rather than growing a second extension list to drift against.
+ */
+export function isBinaryAssetSpecifier(spec: string): boolean {
+  if (typeof spec !== 'string') return false;
+  // Bundlers routinely decorate an asset import: `./logo.png?url`, `./f.woff2#iefix`, `./a.png?w=800`.
+  const bare = spec.trim().split(/[?#]/)[0];
+  return bare.length > 0 && isBinaryAsset(bare);
+}

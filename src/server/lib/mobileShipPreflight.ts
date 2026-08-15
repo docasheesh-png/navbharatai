@@ -25,9 +25,10 @@
 // success. Reuses runAiRepair/parse gates from mobileBuildAiRepair (one repair engine, no drift).
 
 import { findSyntaxErrors } from '../AgentV3/SyntaxCheck';
-import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
+import { findMissingDependencies, isLocalFileSpecifier } from '../AgentV3/DependencyReconciler';
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { resolveLocalImport } from '../AgentV3/ArchitectureAnalysis';
+import { isBinaryAssetSpecifier } from '../AgentV3/fileClassification';
 import { scaffoldMissingUiPrimitives } from './uiPrimitiveScaffold';
 import { detectProjectKind } from './mobileProjectAssembler';
 import {
@@ -101,6 +102,13 @@ export async function preflightVerify(files: Record<string, string>): Promise<Pr
         const spec = m[1] || m[2] || m[3];
         if (!spec || (!spec.startsWith('.') && !/^[@~]\//.test(spec))) continue; // npm package — check 3's job
         if (TYPE_ONLY_RE.test(m[0])) continue;
+        // 🔒 A BINARY ASSET CANNOT BE CHECKED HERE, SO IT IS NOT CLAIMED MISSING. The durable store is
+        // text-only (see isBinaryAssetSpecifier), so no `.png` is ever in `files` — this check said
+        // "no such file exists in the app" for EVERY image, present or not, and refused the ship.
+        // `import logo from './logo.png'` blocked an APK build. `.svg`/`.css` are text, are persisted,
+        // and stay checked. A genuinely missing image now surfaces on the real bundler with a real
+        // message instead of here with a guaranteed-wrong one.
+        if (isBinaryAssetSpecifier(spec)) continue;
         // Code files resolve through the shared resolver (extensions, index files, aliases, .js→.ts);
         // an asset import (./styles.css, ./logo.svg) resolves by exact path.
         const resolved = resolveLocalImport(path, spec, fileSet)
@@ -137,12 +145,25 @@ export function preflightProblemsText(problems: readonly PreflightProblem[]): st
     .join('\n');
 }
 
+/** Does this name a file (an image, a font, an alias path) rather than an npm package? */
+function isAssetSpecifier(name: string): boolean {
+  return Boolean(name) && isLocalFileSpecifier(name);
+}
+
 /** One plain-language sentence for the user about why the ship stopped. Never a raw compiler line alone. */
 export function preflightUserMessage(problems: readonly PreflightProblem[]): string {
   const first = problems[0];
   if (!first) return 'Your app has a code problem that stopped it from compiling.';
+  const named = first.message.match(/"([^"]+)"/)?.[1] || '';
   const what = first.kind === 'missing-package'
-    ? `it uses a library ("${first.message.match(/"([^"]+)"/)?.[1] || 'unknown'}") that is not set up`
+    // ⚠️ SAY WHICH KIND OF MISSING THING IT IS. An import of a picture that was never created is not
+    // "a library that is not set up" — that phrasing sent the user (and the repair pass) hunting for
+    // an npm package that cannot exist, which is why an APK build stayed blocked (admin 2026-08-14).
+    // The classifier no longer mistakes an asset for a package, and the sentence no longer mistakes
+    // one for the other either.
+    ? isAssetSpecifier(named)
+      ? `it uses an image or file ("${named}") that is not in the app`
+      : `it uses a library ("${named || 'unknown'}") that is not set up`
     : first.kind === 'unresolved-import'
       ? `${first.path} ${first.message}`
       : `${first.path}${first.line ? ` (line ${first.line})` : ''} has a code error: ${first.message}`;

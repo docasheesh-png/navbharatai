@@ -31,11 +31,52 @@ const NODE_BUILTINS = new Set([
  *   `./Foo`, `../x`, `@/lib/y`  → null
  * PURE.
  */
+/**
+ * File types that are ASSETS, not code. A specifier ending in one of these names a FILE — never a
+ * package to install.
+ *
+ * ADMIN REPORT 2026-08-14 (APK build blocked): an app importing
+ * `@assets/772B17C5-…_1773842365564.png` was told "it uses a library that is not set up". It is not a
+ * library, it is a picture. `@assets/` is a Vite path alias, and a scoped package (`@scope/name`) has
+ * exactly the same shape — so the alias was read as an npm package, the repair tried to install
+ * something that cannot exist, and the build stayed blocked while the message pointed the user (and
+ * the AI) at entirely the wrong problem.
+ */
+const ASSET_EXT_RE = /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|mp4|webm|mp3|wav|ogg|pdf|woff2?|ttf|otf|eot|csv|txt|md)(\?.*)?$/i;
+
+/**
+ * Path-alias prefixes that are NOT packages, whatever they look like.
+ *
+ * ⚠️ Only `@/` used to be excluded here — one member of a whole family. `@assets/`, `@components/`,
+ * `@lib/`, `~/` and friends are the ordinary Vite/tsconfig aliases every generated app uses, and each
+ * one was being reported as a missing npm dependency.
+ */
+// ⚠️ `@types/` is DELIBERATELY ABSENT, and must stay absent. It is the single most common scoped
+// package family in TypeScript (`@types/react`, `@types/node`), not a path alias — including it here
+// made every one of them invisible to the reconciler, which the existing devDependencies test caught
+// immediately. A prefix goes in this list only if it is far more likely to be an alias than a real
+// scope; when the two are genuinely ambiguous, treating it as a package is the safer error, because
+// a missed alias is one confusing message while a missed dependency is a broken build.
+const ALIAS_PREFIX_RE = /^(?:~\/|@\/|@(?:assets?|images?|img|components?|component|lib|libs|utils?|src|styles?|pages?|hooks?|config|public|static|fonts?|media|shared|features?|layouts?|store|data)\/)/i;
+
+/** True when a specifier names a FILE in this project rather than an installable package. */
+export function isLocalFileSpecifier(spec: string): boolean {
+  const s = (spec || '').trim();
+  if (!s) return false;
+  return ALIAS_PREFIX_RE.test(s) || ASSET_EXT_RE.test(s);
+}
+
 export function packageNameFromSpecifier(spec: string): string | null {
   const s = (spec || '').trim();
   if (!s) return null;
   if (s.startsWith('.') || s.startsWith('/')) return null;   // relative / absolute path
-  if (s.startsWith('@/')) return null;                        // the vite/tsconfig `@ → src` path alias
+  // A path ALIAS or an ASSET file — never something to npm-install. See isLocalFileSpecifier.
+  //
+  // The asset rule also covers `real-package/dist/logo.png`: the worst case there is that we do not
+  // learn about that package from THIS import, and any other import of it still declares it. Missing
+  // a dependency we would have caught elsewhere is a far smaller failure than blocking a build and
+  // telling the user a picture is a library.
+  if (isLocalFileSpecifier(s)) return null;
   if (s.includes(':')) return null;                           // node:, virtual:, data:, http:, etc.
   const parts = s.split('/');
   let pkg: string;

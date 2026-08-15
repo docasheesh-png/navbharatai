@@ -32688,3 +32688,57 @@ alone turn a broken "missing @/components/ui/*" app green + add the deps. tsc cl
 Next hardening candidates (batch #2+, as real reports show them): Radix-based primitives (dialog/select/tabs
 via dependency-light equivalents), missing non-ui local files, capacitor config correctness for fullstack vs
 SPA, and widening the GitHub-runner repair classes.
+
+---
+
+## 2026-08-15 — Build-report autopsy: a 35.8-min build, a blank preview, and three lies
+
+Admin uploaded the report for a "continue and finish the build" turn that ran 35.8 minutes, never
+produced a preview, and ended with the user being told they had stopped it. Admin, verbatim: **"maine
+nahi roki, khud ruki hai bhai"** and **"ye zip upload hone ke bad 40 min lage aur fir bhi preview nahi
+chala kyu?"**
+
+**The five-bucket ledger.** ✅ 1 self-heal (the sandbox had lost 149 of 149 files; all restored from the
+durable store). 🔀 4 workarounds (`--legacy-peer-deps`, `npm cache clean --force`, `mv node_modules &`
+after `rm -rf` failed, a bare `npm install express`). ⏭️ 4 skips (typecheck, page-render check, user
+journey, test suite — all blocked on a preview that never came up). ❌ 12 unresolved (3 failed commands,
+6 unused deps, 25 vulnerabilities, RELEASE_GATE RED). 🥵 The struggle IS the story: **311s before the
+first model call**, ~10 dependency-install attempts, and trivial commands measured at **97s, 116s and
+129s** (the last for a command with a 10-second timeout).
+
+**Where the 40 minutes went, and why the preview stayed blank.** At 29.9 min the engine's own narration
+reads: *"Server port 3000 par chal raha hai, lekin preview 5173 expect kar raha hai."* The app was
+RUNNING. The framework had been detected as `vite-react` for what is actually a fullstack
+`client/` + `server/` + `shared/` project, so the platform watched Vite's port while an Express server
+served on 3000 — and the model then spent its last ten minutes trying to MOVE the working server.
+
+**Fixes shipped (all merged the same day):**
+- **#2376 — the abort lie.** SIX callers fire a build's abort; all six printed "Build stopped by the
+  user." This one hit the 30-minute watchdog. Worse, the abort branch sits ABOVE the watchdog branch,
+  so the watchdog's own message — *your files are saved, send another message and I'll continue* — was
+  unreachable: the user was blamed AND never told the work survived. `buildAbortCause.ts` records the
+  cause on `AbortSignal.reason`; a cause-less abort degrades to 'unknown' and can never reach "the
+  user" by omission (test-locked). The finalizer now also records `OUTCOME_STOPPED`, so
+  `deriveRootCause` stops blaming `npm audit fix → exit 1` for a deadline.
+- **#2376 — my own defect from the day before.** The new accessibility lint was passing `writtenFiles`,
+  so a continue build that touched 4 files reported "Accessibility 100/100 across 4 file(s)" for an app
+  of 149 — a clean bill of health after looking at 3% of it. Now lints the whole project, which the
+  same report measured as already loaded in 0s.
+- **#2377 — the smart port switch** (admin: *"ek port par hard fix nahi rakho"*). `pinDevServerPort` and
+  `detectDevPort` are untouched and good; both need the server to cooperate, and when neither applies a
+  single probe of an ASSUMED port condemns a healthy server. `portSweep.ts` runs ONLY on a failed probe,
+  in ONE command (a bare `ls` measured 116s here — a round trip per port could outlast the build), and
+  demands a REAL HTTP response. Part 2 is the half a sweep cannot fix: all 19 framework hints ended
+  "→ PORT N. Call update_preview(N)", which a model reads as a requirement — one appended rule now says
+  the number is the scaffold's DEFAULT and that `update_preview` takes the port actually bound.
+- **Degraded-sandbox detection** (this change). `sandboxHealth.ts` answered only "is it DEAD?" — fails
+  fast, recognisable error. Here every command SUCCEEDED on a machine taking two minutes to list a
+  directory, so nothing was evicted. Trivial commands (`ls`/`pwd`/`cat`, never `npm`/`git`/`curl`, never
+  a pipe or chain) are now timed, and two strikes over 30s evict the sandbox exactly as a dead one is —
+  reusing the recreate-and-replay path in production since 2026-07-05 rather than inventing one.
+
+**Open root causes, NOT fixed here (rule 6).** The `npm install` doom loop is still unsolved: `rm -rf
+node_modules` failed with "Directory not empty" (an overlayfs quirk), leaving a half-installed tree that
+every subsequent install layered onto, and the model improvised sysadmin recovery for ~25 minutes with
+no playbook. And escalation never fired: 36 minutes of failure on `kimi-k2.5` (36 of 36 calls) with
+`plannedModel: claude-sonnet-4-6` never triggered an upgrade.

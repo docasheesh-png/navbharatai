@@ -148,3 +148,91 @@ export function isDeadSandboxSignal(sig: CommandFailureSignal): boolean {
   const instant = (sig.durationMs ?? 0) <= 250;
   return sig.exitCode < 0 && instant && noOutput;
 }
+
+// ─── DEGRADED (alive, but pathologically slow) ────────────────────────────────────────────────────
+//
+// Everything above answers "is this sandbox DEAD?" — it fails fast, with a recognisable error. The
+// 2026-08-15 report showed the other failure mode entirely, and nothing was watching for it:
+//
+//     $ ls -la client/src/  → exit 0 (97s)
+//     $ ls -la server/      → exit 0 (116s)
+//     $ timeout 10 npm run dev  → exit 0 (129s)      ← a 10-SECOND timeout took 129 seconds
+//
+// Every command SUCCEEDED. Nothing errored, nothing matched a dead-sandbox pattern, so the corpse
+// detector correctly said "healthy" — and the build spent 36 minutes on a machine where listing a
+// directory cost two minutes. It had also lost 149 of 149 files at startup. The user gave up.
+//
+// A directory listing is O(directory) work with no project, network or dependency involvement: if it
+// takes longer than a coffee sip, the machine is the problem, not the command. That makes trivial
+// commands a clean, false-positive-resistant probe — which is exactly why they are the ONLY ones
+// measured here. An `npm install` legitimately takes minutes, so its slowness proves nothing.
+//
+// The remedy reuses the proven path rather than inventing one: a degraded sandbox is treated like a
+// dead one — evicted, so the next `getSandbox` creates a fresh sandbox and replays the cached files.
+// That machinery already exists for the dead case and has been in production since 2026-07-05.
+
+/**
+ * Commands whose runtime says something about the MACHINE rather than the work.
+ *
+ * Deliberately tiny. Every entry must be O(1)-ish, dependency-free and network-free, so a slow one
+ * can only mean the sandbox itself. `npm`, `git`, `curl`, builds and tests are all excluded on
+ * purpose: they are legitimately slow, and judging them would produce exactly the false positives
+ * that make a health check untrustworthy.
+ */
+const TRIVIAL_COMMAND = /^\s*(ls|pwd|echo|cat|true|whoami|which|test|stat|head|tail|wc|basename|dirname)\b/;
+
+/** True when this command's duration is evidence about the sandbox, not about the work. Pure. */
+export function isTrivialCommand(command: string | null | undefined): boolean {
+  if (!command) return false;
+  // A pipe or chain can hide real work behind a trivial-looking head (`ls | xargs npm view`), so only
+  // a genuinely simple invocation qualifies as a probe.
+  if (/[|;&]|\$\(|`/.test(command)) return false;
+  return TRIVIAL_COMMAND.test(command);
+}
+
+/**
+ * How slow a trivial command has to be before it is evidence of a sick machine.
+ *
+ * 30s is far above any healthy value (these normally return in well under a second, and even a
+ * contended sandbox answers within a few) and far below what the report actually measured (97s, 116s).
+ * The gap between "normal" and "broken" here is two orders of magnitude, so the exact threshold is not
+ * delicate — it only has to sit inside that gap.
+ */
+export const SLOW_TRIVIAL_MS = 30_000;
+
+/**
+ * How many slow trivial commands before acting.
+ *
+ * One could be a genuine one-off (a cold page cache, a noisy neighbour). Two is a pattern. Requiring
+ * two costs at most one extra slow command and removes the entire class of single-blip false
+ * positives — worth it, because the action is throwing away a machine mid-build.
+ */
+export const SLOW_TRIVIAL_STRIKES = 2;
+
+export interface SandboxLatencyState { strikes: number }
+
+export function newSandboxLatencyState(): SandboxLatencyState {
+  return { strikes: 0 };
+}
+
+/**
+ * Record one command's latency; returns true the moment the sandbox should be considered DEGRADED.
+ *
+ * Returns true only on the transition, so a caller can act once instead of on every subsequent
+ * command — evicting a sandbox repeatedly would be its own kind of thrash.
+ */
+export function recordCommandLatency(
+  state: SandboxLatencyState,
+  command: string | null | undefined,
+  durationMs: number,
+): boolean {
+  if (!isTrivialCommand(command)) return false;
+  if (!(typeof durationMs === 'number' && durationMs >= SLOW_TRIVIAL_MS)) return false;
+  state.strikes++;
+  return state.strikes === SLOW_TRIVIAL_STRIKES;
+}
+
+/** The honest report line — it names the evidence, so the verdict can be checked rather than believed. */
+export function degradedSandboxSummary(command: string, durationMs: number): string {
+  return `The build machine was running abnormally slowly — \`${command.trim().slice(0, 60)}\` took ${Math.round(durationMs / 1000)}s, which should be instant. Switched to a fresh machine and restored your files.`;
+}

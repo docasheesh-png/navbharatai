@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { isTrivialCommand, recordCommandLatency, newSandboxLatencyState, SLOW_TRIVIAL_MS, degradedSandboxSummary } from './sandboxHealth';
 import { isDeadSandboxError, isDeadSandboxSignal, resolveThrownCommandExit, detectSilentDbFailure, looksLikeDbUnreachable } from './sandboxHealth';
 
 describe('resolveThrownCommandExit — a rejected command keeps its REAL exit code (PaisaTrack autopsy)', () => {
@@ -163,5 +164,68 @@ describe('looksLikeDbUnreachable — triggers a mid-build Postgres re-provision 
     expect(looksLikeDbUnreachable('Your database is now in sync')).toBe(false);
     expect(looksLikeDbUnreachable('')).toBe(false);
     expect(looksLikeDbUnreachable(null)).toBe(false);
+  });
+});
+
+describe('DEGRADED sandbox — alive, but the machine is the problem', () => {
+  /**
+   * THE REPORT (2026-08-15). Every command SUCCEEDED, so the dead-sandbox detector correctly said
+   * "healthy", while the machine took 97s and 116s to list a directory and 129s to run a command with
+   * a 10-SECOND timeout. The build spent 36 minutes there and the user gave up.
+   */
+  it('a trivial command is a probe of the MACHINE', () => {
+    for (const c of ['ls -la', 'pwd', 'cat package.json', 'echo hi', 'which node', 'stat .']) {
+      expect(isTrivialCommand(c), c).toBe(true);
+    }
+  });
+
+  it('legitimately slow work is NEVER judged — the false positives that would kill trust', () => {
+    // An npm install taking three minutes is normal. Treating it as evidence would throw away healthy
+    // sandboxes mid-build, which is far worse than the problem being solved.
+    for (const c of ['npm install', 'npm run build', 'git clone x', 'curl https://x', 'npx tsc --noEmit', 'vitest run']) {
+      expect(isTrivialCommand(c), c).toBe(false);
+    }
+  });
+
+  it('a pipe or chain disqualifies it, because real work can hide behind a trivial head', () => {
+    // `ls | xargs npm view` starts with `ls` and is not remotely trivial.
+    for (const c of ['ls | xargs npm view', 'ls && npm install', 'echo $(npm root -g)', 'cat a; npm i']) {
+      expect(isTrivialCommand(c), c).toBe(false);
+    }
+  });
+
+  it('needs TWO slow strikes, so one blip cannot evict a healthy sandbox', () => {
+    const st = newSandboxLatencyState();
+    expect(recordCommandLatency(st, 'ls -la', 97_000)).toBe(false); // strike 1 — could be a cold cache
+    expect(recordCommandLatency(st, 'ls -la', 116_000)).toBe(true); // strike 2 — a pattern
+  });
+
+  it('fires exactly ONCE, on the transition', () => {
+    // Acting on every later command would evict repeatedly — thrash of its own.
+    const st = newSandboxLatencyState();
+    recordCommandLatency(st, 'ls', 40_000);
+    expect(recordCommandLatency(st, 'ls', 40_000)).toBe(true);
+    expect(recordCommandLatency(st, 'ls', 40_000)).toBe(false);
+    expect(recordCommandLatency(st, 'ls', 40_000)).toBe(false);
+  });
+
+  it('a healthy sandbox never accumulates a strike', () => {
+    const st = newSandboxLatencyState();
+    for (let i = 0; i < 50; i++) expect(recordCommandLatency(st, 'ls -la', 120)).toBe(false);
+    expect(st.strikes).toBe(0);
+  });
+
+  it('the threshold sits inside the gap between normal and broken', () => {
+    // Trivial commands normally return in well under a second; the report measured 97–116s. The
+    // threshold only has to fall between those two orders of magnitude.
+    expect(SLOW_TRIVIAL_MS).toBeGreaterThan(5_000);
+    expect(SLOW_TRIVIAL_MS).toBeLessThan(90_000);
+  });
+
+  it('the report line names its evidence instead of asking to be believed', () => {
+    const s = degradedSandboxSummary('ls -la client/src/', 116_000);
+    expect(s).toContain('116s');
+    expect(s).toContain('ls -la client/src/');
+    expect(s).toMatch(/fresh machine/i);
   });
 });

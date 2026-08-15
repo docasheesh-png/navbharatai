@@ -43,6 +43,17 @@ import {
   listApps, listAppsByUid, toPublic,
   type StoreApp, type SubmissionStatus,
 } from '../lib/navStoreStore';
+import {
+  evaluateWebPublish, hashAppPassword, verifyAppPassword, toPublicWebApp, newWebAppId,
+  saveWebApp, getWebApp, getWebAppFiles, listListedWebApps, listMyWebApps, listUnlistedWebApps,
+  updateWebApp, makeWebAppPublic, bumpWebAppCounter, removeWebApp, reportWebApp,
+  type WebStoreApp,
+} from '../lib/navStoreWeb';
+import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { verifiedWorkspaceReadOk } from '../lib/workspaceIdentity';
+import { verifyFirebaseToken } from '../lib/authMiddleware';
+import { renderPreview } from '../runtime/renderPreview';
+import { VirtualFileSystem } from '../project/ProjectModel';
 
 /** What an upload costs today. One value, so raising it later is a one-line change. */
 export const UPLOAD_FEE_INR = 0;
@@ -467,6 +478,228 @@ export function registerNavStoreRoutes(app: Express): void {
       if (status === 'removed' || status === 'rejected') await deleteApk(found.storagePath);
 
       res.json({ ok: true, id: appId, status });
+    } catch {
+      res.status(502).json({ error: 'Could not save that decision.' });
+    }
+  });
+
+  // ═══ WEB APPS — the browser-run store (Kadam 0/1 of the ecosystem plan, admin 2026-08-15) ═══
+  //
+  // See src/server/lib/navStoreWeb.ts for the full safety model. Shape of the lifecycle:
+  // publish (gated) → live via direct link (`unlisted`) → admin lists it (`listed`) → takedown
+  // (`removed`, snapshot deleted). Private apps demand their password SERVER-side on every open.
+
+  /**
+   * Compiled-player cache. A snapshot is immutable (re-publish bumps `version`), so a compiled page
+   * can be reused for every viewer of that version — the compile cost is paid once per version per
+   * instance, and 10,000 viewers of one app cost the same CPU as one. Keyed by id+version; bounded.
+   */
+  const webPlayerCache = new Map<string, { html: string; kind: string }>();
+  const WEB_PLAYER_CACHE_MAX = 40;
+
+  /** One-click publish: snapshot the workspace, gate it, and hand back the share link. */
+  app.post('/api/nav-store/web/publish', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.status(401).json({ error: 'Sign in to publish to the store.' });
+
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required.' });
+    // Publishing DISTRIBUTES code — strict gate: the verified account must own the workspace.
+    if (!verifiedWorkspaceReadOk(await verifyFirebaseToken(req), workspaceId)) {
+      return res.status(403).json({ error: 'This workspace does not belong to you.' });
+    }
+
+    const name = (typeof req.body?.name === 'string' ? req.body.name : '').trim().slice(0, 60);
+    const description = (typeof req.body?.description === 'string' ? req.body.description : '').trim().slice(0, 600);
+    const iconDataUrl = typeof req.body?.iconDataUrl === 'string' && req.body.iconDataUrl.startsWith('data:image/') && req.body.iconDataUrl.length < 200_000 ? req.body.iconDataUrl : undefined;
+    const visibility = req.body?.visibility === 'private' ? 'private' as const : 'public' as const;
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (!name) return res.status(400).json({ error: 'Give your app a name.' });
+    if (visibility === 'private' && password.length < 4) {
+      return res.status(400).json({ error: 'A private app needs a password of at least 4 characters.' });
+    }
+
+    try {
+      const workspaceFiles = await loadWorkspaceFiles(workspaceId);
+      const gate = evaluateWebPublish(workspaceFiles);
+      if (!gate.ok) return res.status(422).json({ error: gate.reason });
+
+      // RE-PUBLISH = same listing, new version — one app id per (owner, workspace), so updating
+      // never spawns a duplicate listing and the share link the creator already sent keeps working.
+      const mine = await listMyWebApps(me.uid);
+      const existing = mine.find((a) => a.workspaceId === workspaceId && a.status !== 'removed');
+      const id = existing?.id ?? newWebAppId();
+      const pw = visibility === 'private' ? hashAppPassword(password) : undefined;
+      const record: WebStoreApp = {
+        id,
+        // A re-publish keeps its earned place: a listed app stays listed (same owner, same listing —
+        // the admin reviewed the LISTING; content updates are the point of re-publishing).
+        status: existing?.status === 'listed' ? 'listed' : 'unlisted',
+        uid: me.uid,
+        name, description, iconDataUrl,
+        visibility,
+        ...(pw ? { passwordHash: pw.hash, passwordSalt: pw.salt } : {}),
+        workspaceId,
+        ...(existing?.parentAppId ? { parentAppId: existing.parentAppId } : {}),
+        fileCount: Object.keys(gate.files).length,
+        sizeBytes: Object.values(gate.files).reduce((n, c) => n + Buffer.byteLength(c, 'utf8'), 0),
+        runs: existing?.runs ?? 0,
+        remixes: existing?.remixes ?? 0,
+        publishedAt: Date.now(),
+        version: (existing?.version ?? 0) + 1,
+      };
+      await saveWebApp(record, gate.files);
+      webPlayerCache.delete(id); // the old version's compiled page must not survive the update
+      res.json({ ok: true, id, status: record.status, version: record.version, shareUrl: `/store/app/${id}` });
+    } catch (e) {
+      res.status(502).json({ error: 'Publishing failed — nothing was published. Try again.' });
+    }
+  });
+
+  /** Public listing metadata. A removed app is gone for viewers, honestly 404. */
+  app.get('/api/nav-store/web/app/:id', async (req: Request, res: Response) => {
+    try {
+      const found = await getWebApp(String(req.params.id || ''));
+      if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      res.json({ app: toPublicWebApp(found) });
+    } catch {
+      res.status(502).json({ error: 'Could not load that app.' });
+    }
+  });
+
+  /**
+   * OPEN = serve the compiled player page. The one place a private password is checked — and it is
+   * checked HERE, before any file leaves the server, which is what makes "private" true rather than
+   * decorative. POST so the password travels in a body, never in a URL that lands in logs/history.
+   */
+  app.post('/api/nav-store/web/app/:id/open', async (req: Request, res: Response) => {
+    try {
+      const found = await getWebApp(String(req.params.id || ''));
+      if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      if (found.visibility === 'private') {
+        const pw = typeof req.body?.password === 'string' ? req.body.password : '';
+        if (!verifyAppPassword(pw, found.passwordHash, found.passwordSalt)) {
+          return res.status(401).json({ error: 'This app is private — the password is wrong or missing.', requiresPassword: true });
+        }
+      }
+      const cacheKey = `${found.id}@${found.version}`;
+      let compiled = webPlayerCache.get(cacheKey);
+      if (!compiled) {
+        const files = await getWebAppFiles(found.id);
+        if (Object.keys(files).length === 0) return res.status(404).json({ error: 'This app has no published files.' });
+        const hdrHost = req.get('host');
+        const origin = hdrHost ? `${(req.headers['x-forwarded-proto'] as string) || req.protocol || 'https'}://${hdrHost}` : undefined;
+        const vfs = VirtualFileSystem.fromRecord(files);
+        // The SAME compiler the in-browser preview uses — one engine, one set of guarantees. The
+        // client renders this html in a sandboxed iframe WITHOUT allow-same-origin (opaque origin),
+        // so a store app can never read the platform's storage or tokens.
+        const html = renderPreview(vfs, origin, `store-${found.id}`);
+        compiled = { html, kind: 'web' };
+        webPlayerCache.set(cacheKey, compiled);
+        if (webPlayerCache.size > WEB_PLAYER_CACHE_MAX) {
+          const oldest = webPlayerCache.keys().next().value;
+          if (oldest !== undefined) webPlayerCache.delete(oldest);
+        }
+      }
+      bumpWebAppCounter(found.id, 'runs');
+      res.json({ html: compiled.html, name: found.name });
+    } catch {
+      res.status(502).json({ error: 'Could not open that app.' });
+    }
+  });
+
+  /** The browsable store — LISTED apps only (admin-curated discovery; links work from `unlisted`). */
+  app.get('/api/nav-store/web/apps', async (_req: Request, res: Response) => {
+    try {
+      res.json({ apps: (await listListedWebApps()).map(toPublicWebApp) });
+    } catch {
+      res.status(502).json({ error: 'Could not load the store.' });
+    }
+  });
+
+  /** The creator's own web apps — includes unlisted/removed, because they are the owner. */
+  app.get('/api/nav-store/web/mine', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.status(401).json({ error: 'Sign in first.' });
+    try {
+      const mine = await listMyWebApps(me.uid);
+      res.json({ apps: mine.map((a) => ({ ...toPublicWebApp(a), status: a.status, workspaceId: a.workspaceId })) });
+    } catch {
+      res.status(502).json({ error: 'Could not load your apps.' });
+    }
+  });
+
+  /** Owner controls: visibility/password, or unpublish (a real removal — snapshot deleted). */
+  app.post('/api/nav-store/web/app/:id/settings', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.status(401).json({ error: 'Sign in first.' });
+    try {
+      const found = await getWebApp(String(req.params.id || ''));
+      if (!found || found.uid !== me.uid) return res.status(404).json({ error: 'No such app of yours.' });
+      if (req.body?.action === 'unpublish') {
+        await removeWebApp(found.id, 'unpublished by the owner', me.email || me.uid);
+        return res.json({ ok: true, status: 'removed' });
+      }
+      const visibility = req.body?.visibility === 'private' ? 'private' as const : req.body?.visibility === 'public' ? 'public' as const : null;
+      if (!visibility) return res.status(400).json({ error: 'Nothing to change.' });
+      if (visibility === 'private') {
+        const password = typeof req.body?.password === 'string' ? req.body.password : '';
+        if (password.length < 4) return res.status(400).json({ error: 'A private app needs a password of at least 4 characters.' });
+        const pw = hashAppPassword(password);
+        await updateWebApp(found.id, { visibility, passwordHash: pw.hash, passwordSalt: pw.salt });
+      } else {
+        await makeWebAppPublic(found.id);
+      }
+      res.json({ ok: true, visibility });
+    } catch {
+      res.status(502).json({ error: 'Could not save that change.' });
+    }
+  });
+
+  /** Viewer report — the store's immune system. Requires sign-in so reports carry accountability. */
+  app.post('/api/nav-store/web/app/:id/report', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.status(401).json({ error: 'Sign in to report an app.' });
+    const reason = (typeof req.body?.reason === 'string' ? req.body.reason : '').trim();
+    if (reason.length < 5) return res.status(400).json({ error: 'Say briefly what is wrong with this app.' });
+    try {
+      const found = await getWebApp(String(req.params.id || ''));
+      if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      await reportWebApp(found.id, me.uid, reason);
+      res.json({ ok: true });
+    } catch {
+      res.status(502).json({ error: 'Could not send the report.' });
+    }
+  });
+
+  /** Admin: the listing queue + decisions. Same review discipline as the APK store. */
+  app.get('/api/nav-store/web/admin/queue', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!isStoreAdmin(me?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
+    try {
+      res.json({ apps: await listUnlistedWebApps() });
+    } catch {
+      res.status(502).json({ error: 'Could not load the queue.' });
+    }
+  });
+
+  app.post('/api/nav-store/web/admin/review', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!isStoreAdmin(me?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
+    const id = String(req.body?.id || '');
+    const decision = String(req.body?.decision || '');
+    if (!id || !['listed', 'removed'].includes(decision)) {
+      return res.status(400).json({ error: 'An app id and a decision (listed or removed) are required.' });
+    }
+    try {
+      const found = await getWebApp(id);
+      if (!found) return res.status(404).json({ error: 'No such app.' });
+      if (decision === 'removed') {
+        await removeWebApp(id, typeof req.body?.note === 'string' ? req.body.note : 'removed by admin', me?.email || 'admin');
+      } else {
+        await updateWebApp(id, { status: 'listed', reviewedAt: Date.now(), reviewedBy: me?.email || 'admin' });
+      }
+      res.json({ ok: true, id, status: decision });
     } catch {
       res.status(502).json({ error: 'Could not save that decision.' });
     }

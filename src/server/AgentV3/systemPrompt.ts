@@ -47,8 +47,31 @@ const FRAMEWORK_HINTS: Record<string, string> = {
   'static': 'SCAFFOLDING — a plain HTML/CSS/JS site is scaffolded (index.html, style.css, script.js, package.json). No build step. Run: `npm run dev` → PORT 3000. Call update_preview(3000). Write plain HTML/CSS/JS only.',
 };
 
+/**
+ * THE PORT IN EVERY HINT IS THE SCAFFOLD'S DEFAULT — NOT A REQUIREMENT.
+ *
+ * All 19 hints above end with "→ PORT N. Call update_preview(N)", and a model reads that as the port
+ * the platform DEMANDS. When reality disagreed it therefore changed reality: in the 35.8-minute build
+ * of 2026-08-15 the framework had been read as `vite-react` (the app was actually a fullstack
+ * client/ + server/ + shared/ project whose dev script runs Express), the server came up correctly on
+ * 3000, and the model spent its last ten minutes trying to MOVE that working server onto 5173 —
+ * "Server port 3000 par chal raha hai, lekin preview 5173 expect kar raha hai", in its own words.
+ *
+ * Appended once here rather than edited into all 19 strings: the rule is about how to read ANY of
+ * them, and nineteen copies would be nineteen chances to drift.
+ *
+ * It is also the half that must not be forgotten now that the platform sweeps for the live port
+ * (portSweep.ts). The sweep finds a server on an unexpected port; this stops the model from moving the
+ * server before the sweep ever gets to look.
+ */
+const PORT_IS_A_DEFAULT_NOT_A_RULE =
+  ' PORT NOTE: that port is this scaffold\'s DEFAULT, not a requirement. If your dev server binds a'
+  + ' DIFFERENT port, that is fine — call update_preview with the port it ACTUALLY bound. Never change'
+  + ' your server\'s port to match the number above: the preview follows your server, not the reverse.';
+
 function frameworkScaffoldHint(framework?: string): string {
-  return FRAMEWORK_HINTS[framework ?? 'vite-react'] ?? FRAMEWORK_HINTS['vite-react'];
+  const hint = FRAMEWORK_HINTS[framework ?? 'vite-react'] ?? FRAMEWORK_HINTS['vite-react'];
+  return hint + PORT_IS_A_DEFAULT_NOT_A_RULE;
 }
 
 /**

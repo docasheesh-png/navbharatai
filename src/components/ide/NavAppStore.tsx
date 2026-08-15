@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { uploadFileChunked } from '../../lib/zipProjectUpload';
 import {
   Store, Upload, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
-  CheckCircle2, X, Clock, ExternalLink, Info,
+  CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock,
 } from 'lucide-react';
+import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../App';
 
 // Nav App Store — publish your Android app, and install other people's.
@@ -60,13 +61,32 @@ function fmtSize(b: number): string {
   return `${(b / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** A browser-run store app (Kadam 1 of the web-app ecosystem — see navStoreWeb.ts). */
+interface WebApp {
+  id: string;
+  name: string;
+  description: string;
+  iconDataUrl?: string;
+  requiresPassword: boolean;
+  runs: number;
+  remixes: number;
+  publishedAt: number;
+  /** Owner/admin views only. */
+  status?: 'unlisted' | 'listed' | 'removed';
+}
+
 const EMPTY_FORM = {
   developerName: '', developerEmail: '', developerPhone: '', developerWebsite: '',
   appName: '', versionName: '1.0.0', shortDescription: '', description: '',
   category: '', acceptedTerms: false,
 };
 
-export const NavAppStore: React.FC = () => {
+export interface NavAppStoreProps {
+  /** Deep link (`/store/app/<id>`): open this web app's player immediately. */
+  initialWebAppId?: string | null;
+}
+
+export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => {
   const [tab, setTab] = useState<Tab>('browse');
   const [status, setStatus] = useState<StoreStatus | null>(null);
   const [apps, setApps] = useState<PublicApp[]>([]);
@@ -75,6 +95,20 @@ export const NavAppStore: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [openApp, setOpenApp] = useState<PublicApp | null>(null);
+  // WEB APPS — run in the viewer's browser, nothing to install. Deep link opens the player directly.
+  const [webApps, setWebApps] = useState<WebApp[]>([]);
+  const [webMine, setWebMine] = useState<WebApp[]>([]);
+  const [webQueue, setWebQueue] = useState<WebApp[]>([]);
+  // A share link (`/store/app/<id>`) opens the player IMMEDIATELY — the receiver tapped an app,
+  // not a store; the store is what they see when they close it. Read once at mount.
+  const [playingId, setPlayingId] = useState<string | null>(() => {
+    if (initialWebAppId) return initialWebAppId;
+    try {
+      const m = window.location.pathname.match(/^\/store\/app\/([A-Za-z0-9_-]+)/);
+      return m ? m[1] : null;
+    } catch { return null; }
+  });
+  const [webBusy, setWebBusy] = useState('');
 
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [apkName, setApkName] = useState('');
@@ -124,8 +158,66 @@ export const NavAppStore: React.FC = () => {
     } catch { /* shown as an empty queue */ }
   }, []);
 
-  useEffect(() => { void loadStatus(); void loadApps(); }, [loadStatus, loadApps]);
-  useEffect(() => { if (tab === 'mine') void loadMine(); if (tab === 'review') void loadQueue(); }, [tab, loadMine, loadQueue]);
+  const loadWebApps = useCallback(async () => {
+    try {
+      const res = await fetch('/api/nav-store/web/apps');
+      const data = await res.json().catch(() => null);
+      if (liveRef.current) setWebApps(Array.isArray(data?.apps) ? data.apps : []);
+    } catch { /* the APK list still renders */ }
+  }, []);
+
+  const loadWebMine = useCallback(async () => {
+    try {
+      const res = await fetch('/api/nav-store/web/mine', { headers: await authedHeaders() });
+      const data = await res.json().catch(() => null);
+      if (liveRef.current) setWebMine(Array.isArray(data?.apps) ? data.apps : []);
+    } catch { /* shown as an empty list */ }
+  }, []);
+
+  const loadWebQueue = useCallback(async () => {
+    try {
+      const res = await fetch('/api/nav-store/web/admin/queue', { headers: await authedHeaders() });
+      const data = await res.json().catch(() => null);
+      if (liveRef.current) setWebQueue(Array.isArray(data?.apps) ? data.apps : []);
+    } catch { /* shown as an empty queue */ }
+  }, []);
+
+  /** Owner action on one of MY web apps; the store reloads so the change is visibly real. */
+  const webAppAction = useCallback(async (id: string, body: Record<string, unknown>) => {
+    setWebBusy(id);
+    try {
+      await fetch(`/api/nav-store/web/app/${encodeURIComponent(id)}/settings`, {
+        method: 'POST',
+        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
+      });
+      void loadWebMine();
+      void loadWebApps();
+    } finally {
+      if (liveRef.current) setWebBusy('');
+    }
+  }, [loadWebMine, loadWebApps]);
+
+  const decideWeb = useCallback(async (id: string, decision: 'listed' | 'removed') => {
+    setWebBusy(id);
+    try {
+      await fetch('/api/nav-store/web/admin/review', {
+        method: 'POST',
+        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ id, decision }),
+      });
+      void loadWebQueue();
+      void loadWebApps();
+    } finally {
+      if (liveRef.current) setWebBusy('');
+    }
+  }, [loadWebQueue, loadWebApps]);
+
+  useEffect(() => { void loadStatus(); void loadApps(); void loadWebApps(); }, [loadStatus, loadApps, loadWebApps]);
+  useEffect(() => {
+    if (tab === 'mine') { void loadMine(); void loadWebMine(); }
+    if (tab === 'review') { void loadQueue(); void loadWebQueue(); }
+  }, [tab, loadMine, loadQueue, loadWebMine, loadWebQueue]);
 
   // KEEP THE FILE, don't base64 it (2026-07-28). Reading a 50 MB APK into a base64 string only to
   // post it inside JSON is what capped the store at ~24 MB against the platform's request limit —
@@ -247,6 +339,38 @@ export const NavAppStore: React.FC = () => {
           <p className="mb-4 flex gap-2 px-3 py-2.5 rounded-lg text-xs text-amber-300 bg-amber-500/10">
             <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />{error}
           </p>
+        )}
+
+        {/* ── Browse: INSTANT (web) apps — tap and it runs, nothing to install ── */}
+        {tab === 'browse' && webApps.length > 0 && (
+          <div className="mb-6">
+            <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
+              <Globe size={12} /> Instant apps — run in your browser, nothing to install
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {webApps.map((a) => (
+                <div key={a.id} className="flex gap-3 p-3 rounded-xl bg-[#161b22] border border-white/10 hover:border-white/25 transition-colors">
+                  <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
+                    {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={18} className="text-white/30" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold truncate flex items-center gap-1.5">
+                      {a.name}
+                      {a.requiresPassword && <Lock size={11} className="text-white/40 flex-shrink-0" />}
+                    </p>
+                    <p className="text-xs text-white/50 truncate">{a.description || 'A NavBharatAI-built app'}</p>
+                    <p className="text-[11px] text-white/30 mt-1">{a.runs} run{a.runs === 1 ? '' : 's'}</p>
+                  </div>
+                  <button
+                    onClick={() => setPlayingId(a.id)}
+                    className="self-center flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex-shrink-0 transition-colors"
+                  >
+                    <Play size={12} /> Open
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* ── Browse ── */}
@@ -390,8 +514,69 @@ export const NavAppStore: React.FC = () => {
         )}
 
         {/* ── My apps ── */}
+        {tab === 'mine' && webMine.length > 0 && (
+          <div className="mb-5">
+            <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
+              <Globe size={12} /> My instant apps
+            </p>
+            <div className="space-y-2">
+              {webMine.map((a) => (
+                <div key={a.id} className="p-3 rounded-xl bg-[#161b22] border border-white/10">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold">{a.name}</p>
+                    <span className={`ml-auto flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full ${
+                      a.status === 'listed' ? 'bg-emerald-500/15 text-emerald-300'
+                        : a.status === 'unlisted' ? 'bg-sky-500/15 text-sky-300'
+                        : 'bg-white/10 text-white/50'
+                    }`}>
+                      {a.status === 'listed' ? <CheckCircle2 size={10} /> : a.status === 'unlisted' ? <Link2 size={10} /> : <X size={10} />}
+                      {/* 'unlisted' is a REAL state, said honestly: the link works now; the store
+                          listing needs a person's review — same discipline as the APK store. */}
+                      {a.status === 'listed' ? 'On the store' : a.status === 'unlisted' ? 'Live via link · store listing under review' : 'Removed'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-white/40 mt-1">{a.runs} run{a.runs === 1 ? '' : 's'} · {a.requiresPassword ? 'private (password)' : 'public'}</p>
+                  {a.status !== 'removed' && (
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                      <button
+                        onClick={() => { void navigator.clipboard?.writeText(`${window.location.origin}/store/app/${a.id}`); }}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-white/70 transition-colors"
+                      ><Link2 size={11} /> Copy link</button>
+                      <button
+                        onClick={() => setPlayingId(a.id)}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-white/70 transition-colors"
+                      ><Play size={11} /> Open</button>
+                      {a.requiresPassword ? (
+                        <button
+                          onClick={() => void webAppAction(a.id, { visibility: 'public' })}
+                          disabled={webBusy === a.id}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-[11px] text-white/70 transition-colors"
+                        >Make public</button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            const pw = window.prompt('Set a password for this app (at least 4 characters):');
+                            if (pw && pw.length >= 4) void webAppAction(a.id, { visibility: 'private', password: pw });
+                          }}
+                          disabled={webBusy === a.id}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-[11px] text-white/70 transition-colors"
+                        ><Lock size={11} /> Make private</button>
+                      )}
+                      <button
+                        onClick={() => { if (window.confirm('Unpublish this app? Its link stops working and its published files are deleted. Your workspace is untouched.')) void webAppAction(a.id, { action: 'unpublish' }); }}
+                        disabled={webBusy === a.id}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/40 disabled:opacity-40 text-[11px] text-rose-300 transition-colors"
+                      ><Trash2 size={11} /> Unpublish</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {tab === 'mine' && (
-          mine.length === 0 ? (
+          mine.length === 0 && webMine.length === 0 ? (
             <p className="text-center text-sm text-white/40 py-12">You have not submitted any apps yet.</p>
           ) : (
             <div className="space-y-2">
@@ -417,9 +602,42 @@ export const NavAppStore: React.FC = () => {
           )
         )}
 
+        {/* ── Admin review: instant apps waiting for a STORE LISTING (their links already work) ── */}
+        {tab === 'review' && status?.isAdmin && webQueue.length > 0 && (
+          <div className="mb-5">
+            <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
+              <Globe size={12} /> Instant apps — listing requests
+            </p>
+            <div className="space-y-3">
+              {webQueue.map((a) => (
+                <div key={a.id} className="p-3 rounded-xl bg-[#161b22] border border-white/10">
+                  <p className="text-sm font-semibold">{a.name}</p>
+                  <p className="text-xs text-white/50 mt-0.5">{a.description || '—'}</p>
+                  <div className="flex gap-2 mt-2.5">
+                    <button
+                      onClick={() => setPlayingId(a.id)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-white/70 transition-colors"
+                    ><Play size={11} /> Try it</button>
+                    <button
+                      onClick={() => void decideWeb(a.id, 'listed')}
+                      disabled={webBusy === a.id}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-[11px] text-white font-semibold transition-colors"
+                    >List on the store</button>
+                    <button
+                      onClick={() => void decideWeb(a.id, 'removed')}
+                      disabled={webBusy === a.id}
+                      className="px-3 py-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-500 disabled:opacity-40 text-[11px] text-white font-semibold transition-colors"
+                    >Remove</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ── Admin review ── */}
         {tab === 'review' && status?.isAdmin && (
-          queue.length === 0 ? (
+          queue.length === 0 && webQueue.length === 0 ? (
             <p className="text-center text-sm text-white/40 py-12">Nothing waiting for review.</p>
           ) : (
             <div className="space-y-3">
@@ -525,6 +743,7 @@ export const NavAppStore: React.FC = () => {
           </div>
         </div>
       )}
+      {playingId && <WebAppPlayer appId={playingId} onClose={() => setPlayingId(null)} />}
     </div>
   );
 };

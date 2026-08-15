@@ -21,7 +21,7 @@
 // (static = Free); it is the single place to change when the admin sets real numbers.
 
 import { useEffect, useState } from 'react';
-import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone } from 'lucide-react';
+import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, Store } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
 
@@ -88,6 +88,50 @@ export function HostingChooser({
   ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost'>('choose');
+  // ── Nav App Store one-click publish (Kadam 1, admin: "1 click release/publish … v5 ke publish ke
+  // 'Make an Android app' me kahi adjust kar dena"). The button lives HERE because this modal IS the
+  // publish surface — the store is a fourth destination for the same app, beside hosting and APK.
+  const [storeName, setStoreName] = useState('');
+  const [storeBusy, setStoreBusy] = useState(false);
+  const [storeResult, setStoreResult] = useState<{ ok: boolean; message: string; shareUrl?: string } | null>(null);
+
+  const publishToStore = async () => {
+    if (storeBusy) return;
+    // The chooser's own standing rule (and its test): NO DEAD BUTTONS. A publish that cannot start
+    // says WHY inline instead of sitting disabled with no explanation.
+    if (!workspaceId || !authedFetch) {
+      setStoreResult({ ok: false, message: 'Build an app first — there is nothing to publish yet.' });
+      return;
+    }
+    const name = storeName.trim();
+    if (!name) { setStoreResult({ ok: false, message: 'Give your app a name first.' }); return; }
+    setStoreBusy(true);
+    setStoreResult(null);
+    try {
+      const res = await authedFetch('/api/nav-store/web/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId, name, visibility: 'public' }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        // The gate's refusals are REAL and specific (a hardcoded key with its file:line, "needs a
+        // server", a size cap) — show them verbatim; a generic failure line would hide the one
+        // sentence the user needs.
+        setStoreResult({ ok: false, message: data?.error || 'Publishing failed — nothing was published.' });
+        return;
+      }
+      const shareUrl = `${window.location.origin}${data.shareUrl}`;
+      try { await navigator.clipboard?.writeText(shareUrl); } catch { /* the link is shown anyway */ }
+      setStoreResult({ ok: true, shareUrl, message: data.status === 'listed'
+        ? 'Published! Your app is live on the store.'
+        : 'Published! Your link works right now (copied) — the store listing goes live after a quick human review.' });
+    } catch {
+      setStoreResult({ ok: false, message: 'Could not reach the server — nothing was published.' });
+    } finally {
+      setStoreBusy(false);
+    }
+  };
   // The honest reason the LAST publish attempt didn't start. Shown inline; cleared on the next try.
   // A publish that cannot run must SAY SO here — never a button that silently does nothing.
   const [blocked, setBlocked] = useState<string | null>(null);
@@ -312,7 +356,7 @@ export function HostingChooser({
             )}
           </div>
         )}
-        <div className="p-4 grid gap-3 sm:grid-cols-3">
+        <div className="p-4 grid gap-3 sm:grid-cols-2">
           {/* Path 1 — Host on NavBharatAI */}
           <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4 flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
@@ -433,6 +477,45 @@ export function HostingChooser({
             <p className="text-[11px] text-zinc-500 leading-relaxed">
               Needs GitHub connected · paid step — the builder shows the price before you build.
             </p>
+          </div>
+
+          {/* Path 4 — Nav App Store (instant web app). One click; runs in every viewer's browser. */}
+          <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] font-bold text-white">Put it on the Nav App Store</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-emerald-300 bg-emerald-900/50 px-2 py-0.5 rounded-full">Instant</span>
+            </div>
+            <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+              One click — others run your app instantly in their browser. No APK, no hosting, no install.
+            </p>
+            <ul className="text-[11px] text-zinc-300 flex flex-col gap-1 mt-0.5">
+              <li>• Share link works immediately</li>
+              <li>• Free — for you and for them</li>
+              <li>• Your keys &amp; source stay private</li>
+            </ul>
+            <input
+              value={storeName}
+              onChange={(e) => setStoreName(e.target.value)}
+              placeholder="App name on the store"
+              maxLength={60}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-emerald-600"
+            />
+            <button
+              onClick={() => void publishToStore()}
+              disabled={storeBusy || busy}
+              className="mt-auto w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+            >
+              <Store className="w-3.5 h-3.5" />
+              {storeBusy ? 'Publishing…' : 'Publish to the store'}
+            </button>
+            {storeResult && (
+              <div className={`text-[11px] leading-relaxed rounded-lg px-2.5 py-2 ${storeResult.ok ? 'text-emerald-300 bg-emerald-950/40' : 'text-amber-300 bg-amber-950/30'}`}>
+                {storeResult.message}
+                {storeResult.shareUrl && (
+                  <a href={storeResult.shareUrl} target="_blank" rel="noreferrer" className="block mt-1 underline break-all text-emerald-200">{storeResult.shareUrl}</a>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

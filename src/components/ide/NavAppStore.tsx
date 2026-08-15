@@ -71,6 +71,7 @@ interface WebApp {
   runs: number;
   remixes: number;
   publishedAt: number;
+  priceInr?: number;
   /** Owner/admin views only. */
   status?: 'unlisted' | 'listed' | 'removed';
 }
@@ -359,7 +360,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                       {a.requiresPassword && <Lock size={11} className="text-white/40 flex-shrink-0" />}
                     </p>
                     <p className="text-xs text-white/50 truncate">{a.description || 'A NavBharatAI-built app'}</p>
-                    <p className="text-[11px] text-white/30 mt-1">{a.runs} run{a.runs === 1 ? '' : 's'}</p>
+                    <p className="text-[11px] text-white/30 mt-1">{a.runs} run{a.runs === 1 ? '' : 's'}{(a.priceInr ?? 0) > 0 && <span className="text-emerald-300"> · remix ₹{a.priceInr}</span>}</p>
                   </div>
                   <button
                     onClick={() => setPlayingId(a.id)}
@@ -562,6 +563,16 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                           className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-[11px] text-white/70 transition-colors"
                         ><Lock size={11} /> Make private</button>
                       )}
+                      <button
+                        onClick={() => {
+                          const raw = window.prompt('Remix price in whole rupees (0 = free, minimum ₹19). Buyers pay from their wallet; 80% comes to your wallet. Sales are non-refundable.', String(a.priceInr ?? 0));
+                          if (raw === null) return;
+                          const n = Number(raw.trim());
+                          if (Number.isInteger(n) && (n === 0 || n >= 19)) void webAppAction(a.id, { priceInr: n });
+                        }}
+                        disabled={webBusy === a.id}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-[11px] text-white/70 transition-colors"
+                      >{(a.priceInr ?? 0) > 0 ? `Price: ₹${a.priceInr}` : 'Set a price'}</button>
                       <button
                         onClick={() => { if (window.confirm('Unpublish this app? Its link stops working and its published files are deleted. Your workspace is untouched.')) void webAppAction(a.id, { action: 'unpublish' }); }}
                         disabled={webBusy === a.id}

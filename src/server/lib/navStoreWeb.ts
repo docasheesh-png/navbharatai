@@ -55,6 +55,8 @@ export interface WebStoreApp {
   workspaceId: string;
   /** Remix lineage: the store app this one was remixed from, when it was. */
   parentAppId?: string;
+  /** Remix price in whole rupees. 0/absent = free (the default and the growth engine). */
+  priceInr?: number;
   fileCount: number;
   sizeBytes: number;
   /** Honest usage counters. `runs` increments on a served open, never on a page view of the listing. */
@@ -71,7 +73,7 @@ export interface WebStoreApp {
 /** What a viewer may see. No uid, no password material, no internals. */
 export type PublicWebStoreApp = Pick<WebStoreApp,
   'id' | 'name' | 'description' | 'iconDataUrl' | 'visibility' | 'fileCount' | 'runs' | 'remixes' | 'publishedAt' | 'version'
-> & { requiresPassword: boolean };
+> & { requiresPassword: boolean; priceInr: number };
 
 export function toPublicWebApp(a: WebStoreApp): PublicWebStoreApp {
   return {
@@ -79,6 +81,7 @@ export function toPublicWebApp(a: WebStoreApp): PublicWebStoreApp {
     visibility: a.visibility, fileCount: a.fileCount, runs: a.runs, remixes: a.remixes,
     publishedAt: a.publishedAt, version: a.version,
     requiresPassword: a.visibility === 'private',
+    priceInr: a.priceInr ?? 0,
   };
 }
 

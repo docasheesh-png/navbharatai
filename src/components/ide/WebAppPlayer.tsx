@@ -33,6 +33,8 @@ interface PlayerMeta {
   name: string;
   description: string;
   requiresPassword: boolean;
+  /** Remix price in whole rupees; 0 = free. */
+  priceInr?: number;
 }
 
 export interface WebAppPlayerProps {
@@ -127,6 +129,13 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
    * unguessable sid, the same capability model v5 itself uses.
    */
   const [remixing, setRemixing] = useState(false);
+  /**
+   * PAID REMIX (Kadam 3): the price and NON-REFUNDABLE are shown BEFORE any money moves — on the
+   * confirm sheet, not in fine print after. The fairness that makes non-refundable honest is stated
+   * right there: the viewer has the whole app free to use before deciding.
+   */
+  const [confirmingBuy, setConfirmingBuy] = useState(false);
+  const price = meta?.priceInr ?? 0;
   const remix = useCallback(async () => {
     if (remixing) return;
     setRemixing(true);
@@ -182,12 +191,12 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
         <span className="text-sm font-semibold text-white truncate flex-1">{meta?.name || 'Loading…'}</span>
         {html && (
           <button
-            onClick={() => void remix()}
+            onClick={() => (price > 0 ? setConfirmingBuy(true) : void remix())}
             disabled={remixing}
             title="Copy this app into your own NavBharatAI and change it however you like"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[11px] font-bold transition-colors"
           >
-            <Sparkles size={12} /> {remixing ? 'Copying…' : 'Make it yours'}
+            <Sparkles size={12} /> {remixing ? 'Copying…' : price > 0 ? `₹${price} · Make it yours` : 'Make it yours'}
           </button>
         )}
         <button onClick={share} title="Copy the app's link" className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors">
@@ -246,6 +255,31 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
           <div className="h-full flex flex-col items-center justify-center gap-3">
             <div className="w-10 h-10 animate-spin" style={{ animationDuration: '1.6s' }} dangerouslySetInnerHTML={{ __html: ashokChakraSvg(40, '#4f6ef7') }} />
             <p className="text-xs text-white/40">Opening the app…</p>
+          </div>
+        )}
+
+        {/* Paid-remix confirm — price and NON-REFUNDABLE stated BEFORE the purchase, never after. */}
+        {confirmingBuy && (
+          <div className="absolute inset-0 bg-black/60 flex items-center justify-center p-6" onClick={() => setConfirmingBuy(false)}>
+            <div className="w-full max-w-sm bg-[#161b22] border border-white/10 rounded-2xl p-4" onClick={(e) => e.stopPropagation()}>
+              <p className="text-sm font-semibold text-white mb-1">Make “{meta?.name}” yours — ₹{price}</p>
+              <p className="text-xs text-white/60 leading-relaxed mb-2">
+                You get the full app in your own NavBharatAI, to change and build on however you like.
+                Paid from your wallet; most of it goes to the app&apos;s creator.
+              </p>
+              <p className="text-xs font-semibold text-amber-300 bg-amber-950/30 rounded-lg px-2.5 py-2 mb-3">
+                Non-refundable. You can keep using the app right here for free — buy only if you want it as your own.
+              </p>
+              {error && <p className="text-xs text-rose-400 mb-2">{error}</p>}
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setConfirmingBuy(false)} className="px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white transition-colors">Not now</button>
+                <button
+                  onClick={() => void remix()}
+                  disabled={remixing}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs text-white font-bold transition-colors"
+                >{remixing ? 'Buying…' : `Buy for ₹${price}`}</button>
+              </div>
+            </div>
           </div>
         )}
 

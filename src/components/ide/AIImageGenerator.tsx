@@ -70,6 +70,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
   const [errorMsg, setErrorMsg] = useState('');
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const [copied, setCopied] = useState(false);
+  const [craftNotes, setCraftNotes] = useState<string[]>([]);
   const [actionNote, setActionNote] = useState(''); // honest fallback message for copy/download
 
   // REAL generation (admin autopsy 2026-07-20): images come from NavBharatAI's own server route
@@ -97,6 +98,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
     setGeneratedUrl('');
     setImageError(false);
     setErrorMsg('');
+    setCraftNotes([]);
     setIsLoading(true);
     try {
       // Send the Firebase auth token — /api/image/generate requires a real account (per-image billing),
@@ -110,7 +112,11 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
       const res = await fetch('/api/image/generate', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ prompt: effectivePrompt, style, size }),
+        // `type` goes as its OWN field (2026-08-14). It used to survive only as a prefix inside the
+        // prompt string, so the server could not tell the selected type from the user's own words —
+        // and that is precisely the signal the art-direction layer needs to know whether this must
+        // read at 48px, leave room for a headline, or survive a circular crop.
+        body: JSON.stringify({ prompt: effectivePrompt, style, size, type: imageType }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || typeof data.image !== 'string') {
@@ -118,6 +124,10 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
           || 'Image generation failed — please try again.');
       }
       setGeneratedUrl(data.image);
+      // Honest caveats from the server — a style chip that was overruled, or the warning that image
+      // engines cannot spell. Shown, never swallowed: a user who knows their shop name may come out
+      // garbled can shorten it, where a silent misspelling just wastes a generation.
+      setCraftNotes(Array.isArray(data.notes) ? data.notes.filter((n: unknown) => typeof n === 'string') : []);
       const newItem: GeneratedImage = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         url: data.image,
@@ -499,6 +509,19 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
             {/* Honest fallback note (e.g. device can't copy the raw image, or save needs a long-press). */}
             {actionNote && (
               <p className="mt-2 text-[11px] text-amber-300/80 leading-relaxed">{actionNote}</p>
+            )}
+            {/* Art-direction notes from the server: a style chip that was overruled by the user's own
+                wording, or the warning that no image engine spells reliably. These are shown BESIDE
+                the finished image, where the user can act on them — a spelling warning after the fact
+                is what saves the next generation, not a silent bad result. */}
+            {craftNotes.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {craftNotes.map((n, i) => (
+                  <li key={i} className="text-[11px] text-sky-300/80 leading-relaxed flex gap-1.5">
+                    <span aria-hidden="true">•</span><span>{n}</span>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
 

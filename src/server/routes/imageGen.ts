@@ -9,6 +9,7 @@ import {
   geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
   pollinationsEnabled, fetchPollinationsImage,
 } from '../lib/imageGen';
+import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 
 /**
@@ -30,6 +31,10 @@ const schema = vobject({
   prompt: vstring({ max: 2_000 }),
   style: vstring({ optional: true, max: 40 }),
   size: vstring({ optional: true, max: 40 }),
+  // The image TYPE as a real field. The client historically mashed it into the prompt string
+  // ("App Icon — coffee shop"), which left the server unable to tell the selected type from the
+  // user's own words — and therefore unable to apply the per-purpose art direction.
+  type: vstring({ optional: true, max: 60 }),
 });
 
 // Image generation is costlier than text — its own tighter bucket, separate from the workspace one.
@@ -76,7 +81,22 @@ export function registerImageGenRoutes(app: Express): void {
     }
 
     try {
-      const prompt = buildImagePrompt(req.body);
+      // ART DIRECTION (2026-08-14). The prompt was the ceiling, not the model: what a user typed went
+      // to the image engine almost unchanged, leaving composition, framing, margins and background to
+      // the model's guess. craftImagePrompt applies the rules a designer would — per PURPOSE, since an
+      // icon (must read at 48px), a banner (needs empty space for a headline) and an avatar (must
+      // survive a circular crop) are three different briefs. Same model, same call, same price.
+      // buildImagePrompt is still used as the base so the India-map directive and every existing
+      // behaviour is preserved; the craft layer adds direction on top of it.
+      const crafted = craftImagePrompt({
+        prompt: buildImagePrompt(req.body),
+        style: typeof req.body?.style === 'string' ? req.body.style : undefined,
+        size: typeof req.body?.size === 'string' ? req.body.size : undefined,
+        type: typeof req.body?.type === 'string' ? req.body.type : undefined,
+      });
+      // Providers here take a single string, so the negatives ride inline — phrased as "Avoid:", never
+      // a bare list, which some models read as a request FOR those things.
+      const prompt = withInlineNegative(crafted);
       const timeout = <T,>(p: Promise<T>): Promise<T> => Promise.race([
         p,
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('image-generation timeout')), ROUTE_TIMEOUT_MS)),
@@ -86,7 +106,14 @@ export function registerImageGenRoutes(app: Express): void {
       // counts against a quota. A failed rung never spends anything.
       const deliver = (img: { mimeType: string; base64: string }) => {
         if (gate && gate.allow && gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
-        res.json({ image: `data:${img.mimeType};base64,${img.base64}`, mimeType: img.mimeType });
+        // `notes` carries the honest caveats (a style chip that was overruled, or the warning that
+        // image engines cannot spell). Surfacing them is the point: a user who knows their shop name
+        // may come out garbled can shorten it, where a silent bad spelling just wastes their time.
+        res.json({
+          image: `data:${img.mimeType};base64,${img.base64}`,
+          mimeType: img.mimeType,
+          ...(crafted.notes.length > 0 ? { notes: crafted.notes } : {}),
+        });
       };
       // Track WHY every rung failed so the final error is HONEST (rule 5): a content refusal (the model
       // declined a real brand / public figure / copyrighted character — e.g. "spiderman") must tell the

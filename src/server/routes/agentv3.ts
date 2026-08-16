@@ -199,7 +199,7 @@ import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { pickerItems } from '../../lib/reportPicker';
-import { analyzeSpaFallback, spaFallbackSnippet } from '../AgentV3/SpaFallbackAnalysis';
+import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } from '../AgentV3/SpaFallbackAnalysis';
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
@@ -11644,6 +11644,23 @@ export function registerAgentV3Routes(app: Express): void {
             break;
           }
           events.emit({ type: 'narration', agent: 'architect', text: `🔍 I opened the preview and it didn't render correctly (${problems[0]}). Fixing it now…`, ts: Date.now() });
+          // FULL-STACK "Cannot GET" (admin 2026-08-15, part 2): if the preview 404s because the Express
+          // server serves only its API, hand the heal the EXACT, ESM/CJS-aware catch-all instruction
+          // instead of the generic preview-repair prompt — the reliable fix for this class. Only fires when
+          // the analyzer (hardened to skip a correct setupVite/serveStatic bridge) pins a genuinely-broken
+          // server, so it can never nudge a correct app. The loop's next iteration re-browses and re-checks
+          // `rendered`, so this needs no separate revert net — an unfixed preview is reported honestly below.
+          let repairPrompt = buildPreviewRepairPrompt(verdict.problems, consoleErrs);
+          try {
+            if (/cannot get|not serving the app|404/i.test(problems.join(' '))) {
+              const curFiles = (await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string> }))).files;
+              const spa = analyzeSpaFallback(curFiles);
+              if (spa) {
+                repairPrompt = `${spaFallbackRepairInstruction(spa)}\n\n---\n\n${repairPrompt}`;
+                events.emit({ type: 'narration', agent: 'architect', text: '🧩 This looks like a full-stack routing gap — I\'ll make the server serve the app\'s own pages, not just the API.', ts: Date.now() });
+              }
+            }
+          } catch { /* prompt-specialisation is best-effort — falls back to the generic repair prompt */ }
           try {
             const healRunner = new AgentRunner({
               ...baseRunnerOpts,
@@ -11651,7 +11668,7 @@ export function registerAgentV3Routes(app: Express): void {
               model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
-            const healed = await healRunner.run(buildPreviewRepairPrompt(verdict.problems, consoleErrs));
+            const healed = await healRunner.run(repairPrompt);
             if (healed.ok) result = healed;
           } catch (e) {
             console.log(`[AGENTV3] preview heal attempt ${attempt + 1} failed: ${e instanceof Error ? e.message : String(e)}`);

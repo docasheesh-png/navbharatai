@@ -5681,7 +5681,9 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* persistence is best-effort */ }
       } catch (roleErr) {
         const msg = roleErr instanceof Error ? roleErr.message : String(roleErr);
-        sendLine({ type: 'error', message: `The ${chatRole} could not reply (${msg}). Please try again.`, ts: Date.now() });
+        // Redacted: `msg` is the raw thrown error, which on a provider failure is the vendor's own
+        // wording and would name the AI behind NavBharatAI. See the white-label law in CLAUDE.md.
+        sendLine({ type: 'error', message: `The ${chatRole} could not reply (${redactProvidersText(msg)}). Please try again.`, ts: Date.now() });
         sendLine({ type: 'result', ok: false, summary: `${chatRole} turn failed.`, steps: 0, billedUsd: 0, billedInr: 0 });
       }
       if (!res.writableEnded) res.end();
@@ -13645,7 +13647,19 @@ export function registerAgentV3Routes(app: Express): void {
         buildDiagRef?.finish(false);
         const crashReport = buildDiagRef?.report();
         if (crashReport) {
-          crashReportForClient = crashReport;
+          // 🔒 THE CLIENT GETS THE ANONYMIZED REPORT — NEVER THE RAW ONE (white-label law, 2026-08-16).
+          //
+          // This crash path used to attach `crashReport` verbatim, which is the ADMIN-ONLY forensic
+          // report: it carries lines like "Provider GLM failed", `deliveredVia`, model ids, and our
+          // internal cost/markup. `GET /api/agentv3/diagnostics` guards that report carefully
+          // (`showProviderDetail`, failing CLOSED) — and this stream walked straight around the guard,
+          // handing every crashing user the exact document CLAUDE.md says must never reach one:
+          // "no admin-only diagnostic … may ever be surfaced to an end user".
+          //
+          // `userFacingReport` is the SAME function the gated endpoint uses, so there is one definition
+          // of "what a user may see" rather than a second one that can drift. The admin loses nothing:
+          // the full report is durably saved two lines below and served, with detail, by that endpoint.
+          crashReportForClient = userFacingReport(crashReport);
           lastDiagnostics.set(buildKey, crashReport);
           saveDiagnostics(workspaceId, crashReport).catch(() => {});
           saveDiagnosticsHistory(workspaceId, crashReport).catch(() => {});
@@ -13690,7 +13704,11 @@ export function registerAgentV3Routes(app: Express): void {
       // Surface the crash report to the client so the user SEES what happened. The report was already
       // durable-saved above; attaching it here (same shape the success path emits) makes the failure
       // card / "Build report" render immediately instead of a bare error with no detail.
-      emit({ type: 'error', message: errMsg, ts: Date.now(), ...(crashReportForClient ? { diagnostics: crashReportForClient } : {}) });
+      // The MESSAGE is redacted for the same reason as the report above: a crash message is very often
+      // the provider's own words ("429 from …", "anthropic: rate_limit_error"), and a user reading a
+      // vendor's name in our error learns which AI we run — the one thing the white-label law exists to
+      // prevent. The admin-side record keeps the raw text (buildDiagRef recorded errMsg verbatim).
+      emit({ type: 'error', message: redactProvidersText(errMsg), ts: Date.now(), ...(crashReportForClient ? { diagnostics: crashReportForClient } : {}) });
       void notifyBuildComplete(userId, false);
     } finally {
       // GREEN FREEZE — clear this workspace's green latch no matter how the build ended, so a stale

@@ -141,3 +141,33 @@ describe('the phone layout the admin drew: 2-up squares, App Mart 2x1 across the
     expect(home).toMatch(/phoneTagline: 'Games & apps by other creators[^']*'/);
   });
 });
+
+describe('the WHOLE card is the button (admin 2026-08-16: "pure card me kahi bhi tap karne par open ho jaye")', () => {
+  const home = read('src/components/home/HomeView.tsx');
+
+  it('the card element itself is a button and carries the handler', () => {
+    expect(home).toContain('<motion.button');
+    expect(home).toContain('onClick={comingSoon ? undefined : (handler || onShowLogin)}');
+  });
+
+  it('the CTA is a LOOK, not a second click target', () => {
+    /**
+     * A <button> inside a <button> is invalid HTML and the click fires TWICE — the inner handler,
+     * then the card's. So the CTA became a styled <span>. Verified in a real browser: zero nested
+     * buttons on the page, and a tap on a DEAD area of the card (the empty space beside the icon)
+     * opens the destination — which is the only proof that "anywhere on the card" is true.
+     */
+    expect(home).toContain('a LOOK, not a second click target');
+    expect(home).not.toMatch(/<button\n\s+onClick=\{comingSoon/);
+  });
+
+  it('a button centres its text, so the card re-asserts text-left', () => {
+    // Without this every card's contents would jump to the middle the moment it became a button.
+    expect(home).toContain("'text-left w-full'");
+  });
+
+  it('the press feedback moved to the card, and a coming-soon card cannot be tapped', () => {
+    expect(home).toContain("comingSoon ? 'cursor-not-allowed' : 'cursor-pointer active:scale-[0.98]'");
+    expect(home).toContain('disabled={comingSoon}');
+  });
+});

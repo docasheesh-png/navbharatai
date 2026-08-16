@@ -269,12 +269,18 @@ export const HomeView = ({
             const comingSoon = (card as { comingSoon?: boolean }).comingSoon === true;
 
             return (
-              <motion.div
+              <motion.button
                 key={card.id}
+                type="button"
+                onClick={comingSoon ? undefined : (handler || onShowLogin)}
+                disabled={comingSoon}
+                aria-label={`${card.title} — ${card.subtitle}`}
                 initial={{ opacity: 0, y: 24 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.45, delay: 0.15 + i * 0.1 }}
                 className={cn(
+                  'text-left w-full',
+                  comingSoon ? 'cursor-not-allowed' : 'cursor-pointer active:scale-[0.98]',
                   'relative flex flex-col rounded-2xl sm:rounded-3xl border bg-[#0d1117] overflow-hidden',
                   'shadow-xl transition-all duration-300',
                   // PHONE LAYOUT (admin 2026-08-16, given as a drawing): a 2-up grid of SQUARE tiles
@@ -339,15 +345,13 @@ export const HomeView = ({
                     </div>
                   )}
 
-                  {/* CTA Button */}
-                  <button
-                    onClick={comingSoon ? undefined : (handler || onShowLogin)}
-                    disabled={comingSoon}
+                  {/* CTA — a LOOK, not a second click target: the whole card is the button. */}
+                  <span
                     className={cn(
                       'w-full flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 sm:py-3 rounded-lg sm:rounded-2xl',
                       'font-black text-[10px] sm:text-xs uppercase tracking-wider sm:tracking-widest transition-all duration-200',
                       'select-none mt-auto',
-                      comingSoon ? 'opacity-70 cursor-not-allowed' : 'active:scale-95',
+                      comingSoon && 'opacity-70',
                       card.btnClass
                     )}
                   >
@@ -355,9 +359,9 @@ export const HomeView = ({
                     <span className="truncate sm:hidden">{(card as { btnLabelShort?: string }).btnLabelShort ?? card.btnLabel}</span>
                     <span className="truncate hidden sm:inline">{card.btnLabel}</span>
                     {!comingSoon && <ArrowRight className="hidden sm:block w-3.5 h-3.5 shrink-0 ml-auto" />}
-                  </button>
+                  </span>
                 </div>
-              </motion.div>
+              </motion.button>
             );
           })}
         </div>

@@ -33404,3 +33404,34 @@ viewer time on a phone. That is the creator's call — a slow first paint is a w
 publish is no app at all.
 
 Gate: tsc ✓ tsc -p server ✓ vitest **1275 files / 15787 tests** ✓ build ✓
+
+## 2026-08-16 — Publish caps derived from the real Firestore ceiling (950 KB / file, 10 MB / app)
+
+The store's publish gate refused a genuinely normal app at ~300 KB, and the earlier fix raised the
+per-file cap to 700 KB by feel. The admin asked "990kb ??" — a fair question, and the honest answer is
+that neither number should be picked by feel. So the cap is now DERIVED and the derivation is written
+into the code:
+
+- Each snapshot file is stored as its own Firestore document (`{ content }`). Google's hard limit is
+  **1 MiB per document** — not a policy we set, and not one we can raise.
+- The document costs a few hundred bytes beyond the content (field name, doc path, metadata).
+- **`MAX_SNAPSHOT_FILE_BYTES = 950 * 1024`** leaves ~75 KB of headroom — roughly a hundred times what
+  that overhead actually needs. 990 KB would buy 4% more room in exchange for nearly all of the safety
+  margin, and no real file lives in that 4%.
+- A module-load guard throws if a future edit pushes the constant to or past 1 MiB, so the margin
+  cannot be silently erased by someone who does not know why it exists.
+- **`MAX_SNAPSHOT_TOTAL_BYTES` 3 MB → 10 MB.** Without this the per-file raise would have been theatre:
+  four large files would have hit the old total anyway.
+
+Also kept from the same fix: `describeOversizeFile()` measures embedded `data:` URLs, so an oversize
+file that is mostly a pasted image is told to save the image as a real file, while an oversize file
+that is mostly code is told to split the page — instead of one generic message that fits neither.
+
+**What this deliberately does NOT solve (open, by design):** a 50 MB app is images/audio/video, and
+those belong in object storage served by URL, not inside a code document. That is a real feature, but
+its per-viewer bandwidth would break the store's economics as they stand today (1 viewer or 10,000
+currently cost us the same), so it needs a per-app asset quota designed with it — to be built when a
+real app needs it, not pre-emptively.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` **1275
+files / 15788 tests passed** · `npm run build` OK.

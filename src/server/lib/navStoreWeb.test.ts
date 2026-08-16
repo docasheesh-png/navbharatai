@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   evaluateWebPublish, hashAppPassword, verifyAppPassword, toPublicWebApp,
-  MAX_SNAPSHOT_FILES, MAX_SNAPSHOT_FILE_BYTES, describeOversizeFile,
+  MAX_SNAPSHOT_FILES, MAX_SNAPSHOT_FILE_BYTES, MAX_SNAPSHOT_TOTAL_BYTES, describeOversizeFile,
   type WebStoreApp,
 } from './navStoreWeb';
 import { scanTextForSecrets } from '../AgentV3/EnvSecretValueAnalysis';
@@ -203,15 +203,29 @@ describe('the oversize refusal must DIAGNOSE, not guess (admin report 2026-08-16
    * own builder generated: there was nothing to move out, so the advice was unactionable and the cap
    * was refusing the very apps the store exists to carry.
    */
-  it('the cap is set by the REAL ceiling (Firestore ~1 MiB per file doc), not by habit', () => {
-    expect(MAX_SNAPSHOT_FILE_BYTES).toBe(700 * 1024);
+  it('the cap is DERIVED from the real ceiling (Firestore 1 MiB per file doc), not chosen by feel', () => {
+    /**
+     * Each file is its own Firestore document, and a document may not exceed 1 MiB — Google's wall,
+     * not our setting. 950 KB leaves ~75 KB of headroom for the document path, the field name and
+     * per-document overhead, which together cost a few HUNDRED bytes. 990 KB would also fit; it buys
+     * 4% more room for most of the margin, and no real file lives in that 4%.
+     */
+    expect(MAX_SNAPSHOT_FILE_BYTES).toBe(950 * 1024);
     expect(MAX_SNAPSHOT_FILE_BYTES, 'must stay clear of the 1 MiB document limit').toBeLessThan(1024 * 1024);
+    expect(1024 * 1024 - MAX_SNAPSHOT_FILE_BYTES, 'the margin must dwarf the real overhead').toBeGreaterThan(64 * 1024);
+  });
+
+  it('the TOTAL rose with it, or the per-file raise would be theatre', () => {
+    // At 3 MB, four large files hit the ceiling anyway and the bigger per-file cap would never be
+    // reachable in a real app.
+    expect(MAX_SNAPSHOT_TOTAL_BYTES).toBe(10 * 1024 * 1024);
+    expect(MAX_SNAPSHOT_TOTAL_BYTES / MAX_SNAPSHOT_FILE_BYTES, 'several large files must fit').toBeGreaterThan(8);
   });
 
   it('an app with a big-but-legitimate page now publishes', () => {
     const app = cleanApp();
-    app['src/AdminDashboard.tsx'] = `export default function D(){ return <div>${'x'.repeat(400 * 1024)}</div>; }`;
-    expect(evaluateWebPublish(app).ok, 'a 400 KB page used to be refused').toBe(true);
+    app['src/AdminDashboard.tsx'] = `export default function D(){ return <div>${'x'.repeat(800 * 1024)}</div>; }`;
+    expect(evaluateWebPublish(app).ok, 'a page this size used to be refused three times over').toBe(true);
   });
 
   it('an EMBEDDED IMAGE is named as the cause, with advice that fits it', () => {

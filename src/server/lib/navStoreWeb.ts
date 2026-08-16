@@ -109,23 +109,40 @@ const ENV_TEMPLATE = /\.env\.(example|sample|template|dist|defaults?)$/i;
 /** Caps — quotas exist from day 1, because one runaway app must never become our bill. */
 export const MAX_SNAPSHOT_FILES = 400;
 /**
- * PER-FILE CAP — 300 KB → 700 KB (raised 2026-08-16, after it refused a real app).
+ * THE CAPS ARE DERIVED FROM THE REAL CEILING, not chosen by feel (reworked 2026-08-16).
  *
- * A user's own `admin-dashboard.tsx` was blocked at 300 KB with "large assets don't belong in
- * published source — move it out". For an ASSET that advice is right; for a PAGE COMPONENT our own
- * builder generated it is unactionable — there is nothing to move out, it IS the app. The cap was
- * refusing the very apps the store exists to carry.
+ * A live publish was refused at 300 KB for a page component OUR OWN BUILDER generated. The admin
+ * asked the right question — "990 KB nahi ho sakta?" — so here is the actual arithmetic, written
+ * down once so nobody has to re-derive it or guess again.
  *
- * 700 KB is not a new guess either. The REAL ceiling is Firestore's ~1 MiB per document, and each
- * file is stored as its own doc (`{ content }`), so 700 KB leaves comfortable room for encoding and
- * field overhead while roughly doubling what a legitimate generated page may be.
+ * Every file is stored as its OWN Firestore document (`{ content }`), and a Firestore document may
+ * not exceed 1 MiB = 1,048,576 bytes. That is Google's wall, not a setting of ours. The document
+ * costs, on top of the content: its path, the field name, and a small per-document overhead — a few
+ * hundred bytes in total, not kilobytes.
  *
- * The honest trade-off, stated rather than hidden: the store player compiles the app in the VIEWER'S
- * browser, so a 700 KB module costs real time on a phone. That is the creator's call to make — a slow
- * first paint is a worse app; a refused publish is no app at all.
+ * So the honest maximum is "1 MiB minus a margin that cannot plausibly be exceeded". 950 KB leaves
+ * ~75 KB of headroom — roughly a hundred times the overhead it needs to cover. Going to 990 KB would
+ * also fit; it buys 4% more room in exchange for most of the safety margin, and no real file lives
+ * in that 4%. A cap that is provably safe is worth more than a cap that is maximally tight.
+ *
+ * TOTAL had to rise with it, or the per-file raise would be theatre: at 3 MB, four large files hit
+ * the ceiling anyway. 10 MB is our own storage budget (Firestore storage is cheap; the per-open read
+ * cost is bounded by the file COUNT, which is capped separately and unchanged).
+ *
+ * ⚠️ WHAT THIS DOES NOT SOLVE, and must not be mistaken for solving: an app is never 50 MB because of
+ * CODE — it is images, audio, video. Those do not belong in source at any cap, and the right home for
+ * them is object storage served by URL. That is a real feature with a real cost the store's economics
+ * do not currently carry: the whole model is "1 viewer or 10,000 cost us the same" because the app
+ * runs on the VIEWER'S machine, and per-viewer bandwidth breaks exactly that property. Build it when
+ * an app actually needs it, with a per-app asset quota — never as a quiet cap bump.
  */
-export const MAX_SNAPSHOT_FILE_BYTES = 700 * 1024;
-export const MAX_SNAPSHOT_TOTAL_BYTES = 3 * 1024 * 1024;
+const FIRESTORE_DOC_LIMIT_BYTES = 1024 * 1024;
+export const MAX_SNAPSHOT_FILE_BYTES = 950 * 1024;
+export const MAX_SNAPSHOT_TOTAL_BYTES = 10 * 1024 * 1024;
+/** The margin above is only meaningful if it is checked — a future edit cannot quietly erase it. */
+if (MAX_SNAPSHOT_FILE_BYTES >= FIRESTORE_DOC_LIMIT_BYTES) {
+  throw new Error('MAX_SNAPSHOT_FILE_BYTES must stay under the 1 MiB Firestore document limit');
+}
 
 /**
  * WHY is this file too big, and what can the user actually DO about it?

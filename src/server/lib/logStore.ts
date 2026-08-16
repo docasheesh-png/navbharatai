@@ -10,6 +10,16 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
 import { randomUUID } from 'crypto';
+import { listEqNewestFirst, type EqFilter } from './firestoreIndexSafe';
+
+/**
+ * Documents read for one log query before filtering and sorting in memory.
+ *
+ * Higher than the default index-safe cap because `server_logs` is the one collection here that
+ * genuinely grows per EVENT rather than per user or per app — a narrow filter still has to reach
+ * far enough back to find matches worth reading.
+ */
+const LOG_FETCH_CAP = 500;
 
 export interface LogEntry {
   id: string;
@@ -79,17 +89,30 @@ class LogStore {
     }
   }
 
+  /**
+   * Query the durable log.
+   *
+   * Equality filters go to Firestore (a conjunction of equality filters is served by merging the
+   * automatic single-field indexes, so it needs nothing deployed); the `ts` range and the
+   * newest-first ordering are applied in memory. The previous version chained `.orderBy('ts')` onto
+   * those filters, which is a composite-index query — and this project has no deployed composite
+   * indexes. It threw, the `catch` returned `[]`, and the admin log viewer reported "no logs match"
+   * for every filtered search. An empty result is indistinguishable from a working search that
+   * found nothing, which is why this went unnoticed: the failure looked like an answer.
+   */
   async query({ level, event, workspaceId, since, limit = 100 }: LogQuery = {}): Promise<LogEntry[]> {
     const db = this.getDb();
     if (!db) return [];
     try {
-      let q: admin.firestore.Query = db.collection('server_logs').orderBy('ts', 'desc');
-      if (since) q = q.where('ts', '>=', since);
-      if (level) q = q.where('level', '==', level);
-      if (event) q = q.where('event', '==', event);
-      if (workspaceId) q = q.where('workspaceId', '==', workspaceId);
-      const snap = await q.limit(Math.min(limit, 500)).get();
-      return snap.docs.map(d => d.data() as LogEntry);
+      const filters: EqFilter[] = [];
+      if (level) filters.push(['level', level]);
+      if (event) filters.push(['event', event]);
+      if (workspaceId) filters.push(['workspaceId', workspaceId]);
+      const rows = await listEqNewestFirst<LogEntry>(
+        db.collection('server_logs'), filters, 'ts', LOG_FETCH_CAP, LOG_FETCH_CAP,
+      );
+      const inRange = since ? rows.filter((r) => (r.ts ?? 0) >= since) : rows;
+      return inRange.slice(0, Math.min(limit, 500));
     } catch {
       return [];
     }

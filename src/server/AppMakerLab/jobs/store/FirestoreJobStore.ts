@@ -3,6 +3,7 @@ import { BuildJob, JobStatus } from '../BuildJobManager';
 import { JobStore } from './JobStore';
 import { firestoreDatabaseId } from '../../../lib/firestoreDb';
 import { getServerDb } from '../../../lib/serverDb';
+import { listEqNewestFirst } from '../../../lib/firestoreIndexSafe';
 
 export class FirestoreJobStore implements JobStore {
     private db: admin.firestore.Firestore;
@@ -41,16 +42,20 @@ export class FirestoreJobStore implements JobStore {
         }
     }
 
-    // P1.4 — look up the most recent job carrying this idempotency key via an indexed
-    // Firestore query, so a duplicate/retried request reuses the existing build.
+    // P1.4 — look up the most recent job carrying this idempotency key, so a duplicate/retried
+    // request reuses the existing build instead of starting a second one.
+    //
+    // Equality filter only, newest-first in memory. The previous `.where(idempotencyKey)
+    // .orderBy(createdAt)` chain required a composite index that is not deployed to this project,
+    // and the throw propagated to the caller — which is the worst possible place for this
+    // particular query to fail, because "I could not check for a duplicate" then looks exactly
+    // like "there is no duplicate", and the user is billed for the same build twice.
     async findJobByIdempotencyKey(key: string): Promise<BuildJob | null> {
         if (!key) return null;
-        const snap = await this.db.collection(this.collection)
-            .where('idempotencyKey', '==', key)
-            .orderBy('createdAt', 'desc')
-            .limit(1)
-            .get();
-        return snap.empty ? null : (snap.docs[0].data() as BuildJob);
+        const rows = await listEqNewestFirst<BuildJob>(
+            this.db.collection(this.collection), [['idempotencyKey', key]], 'createdAt', 1,
+        );
+        return rows[0] ?? null;
     }
 
     // P-BRE.8 — most recent jobs (newest first) via an indexed query, for analytics aggregation.

@@ -33380,3 +33380,112 @@ un-publishing does not revoke a purchase — the row says so.
 
 Locked by `tests/remixHandoff.test.ts` (12 tests). Gate: tsc ✓ tsc -p server ✓ vitest
 **1275 files / 15782 tests** ✓ build ✓
+
+### The publish gate refused a real app with advice that did not fit it (admin report 2026-08-16)
+
+A live publish was refused: *"client/src/pages/admin-dashboard.tsx is larger than 300 KB. Large
+assets don't belong in published source — move it out and publish again."* The gate behaved
+correctly — an honest refusal, not a crash — but it was **wrong twice**:
+
+1. **The cap was our habit, not a constraint.** The REAL ceiling is Firestore's ~1 MiB per document,
+   and each file is one doc (`{ content }`). 300 KB was a third of what is actually safe, so the
+   store was refusing the very apps it exists to carry — a page component **our own builder
+   generated**. Raised to **700 KB**, which leaves clear room under the document limit.
+2. **The advice was a guess wearing the clothes of a diagnosis.** "Large assets don't belong in
+   published source — move it out" is right for an embedded image and meaningless for a page
+   component: there is nothing to move out, it IS the app. `describeOversizeFile` now MEASURES the
+   file: when `data:` URLs are more than half of it, it says an image was pasted into the code and
+   names the fix; otherwise it says the file is large CODE, suggests splitting the page, and gives
+   the reason that makes the limit make sense — *every viewer's browser has to compile this file*.
+   Either way it states the file and its real size, which the old message never did.
+
+The trade-off is recorded rather than hidden: at 700 KB the in-browser compile genuinely costs the
+viewer time on a phone. That is the creator's call — a slow first paint is a worse app; a refused
+publish is no app at all.
+
+Gate: tsc ✓ tsc -p server ✓ vitest **1275 files / 15787 tests** ✓ build ✓
+
+## 2026-08-16 — Publish caps derived from the real Firestore ceiling (950 KB / file, 10 MB / app)
+
+The store's publish gate refused a genuinely normal app at ~300 KB, and the earlier fix raised the
+per-file cap to 700 KB by feel. The admin asked "990kb ??" — a fair question, and the honest answer is
+that neither number should be picked by feel. So the cap is now DERIVED and the derivation is written
+into the code:
+
+- Each snapshot file is stored as its own Firestore document (`{ content }`). Google's hard limit is
+  **1 MiB per document** — not a policy we set, and not one we can raise.
+- The document costs a few hundred bytes beyond the content (field name, doc path, metadata).
+- **`MAX_SNAPSHOT_FILE_BYTES = 950 * 1024`** leaves ~75 KB of headroom — roughly a hundred times what
+  that overhead actually needs. 990 KB would buy 4% more room in exchange for nearly all of the safety
+  margin, and no real file lives in that 4%.
+- A module-load guard throws if a future edit pushes the constant to or past 1 MiB, so the margin
+  cannot be silently erased by someone who does not know why it exists.
+- **`MAX_SNAPSHOT_TOTAL_BYTES` 3 MB → 10 MB.** Without this the per-file raise would have been theatre:
+  four large files would have hit the old total anyway.
+
+Also kept from the same fix: `describeOversizeFile()` measures embedded `data:` URLs, so an oversize
+file that is mostly a pasted image is told to save the image as a real file, while an oversize file
+that is mostly code is told to split the page — instead of one generic message that fits neither.
+
+**What this deliberately does NOT solve (open, by design):** a 50 MB app is images/audio/video, and
+those belong in object storage served by URL, not inside a code document. That is a real feature, but
+its per-viewer bandwidth would break the store's economics as they stand today (1 viewer or 10,000
+currently cost us the same), so it needs a per-app asset quota designed with it — to be built when a
+real app needs it, not pre-emptively.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` **1275
+files / 15788 tests passed** · `npm run build` OK.
+
+## 2026-08-16 — The composite-index bug class, killed repo-wide (sibling sweep of the publish failure)
+
+The store's first real publish failed on a `.where(X).orderBy(Y)` composite-index query. That was
+fixed in place. This is the sweep the fourth absolute rule requires — hunt the siblings — and it
+found the same shape alive in six more places, two of them failing SILENTLY:
+
+| Where | What a user saw |
+|---|---|
+| `galleryStore.listGalleryApps` / `…ByUid` | gallery listing throws → 500 |
+| `navStoreStore.listApps` / `…ByUid` | APK store listing throws → 500 |
+| `UserBuildHistoryStore.list` | **caught → empty**: "you have no builds", while they did |
+| `logStore.query` | **caught → empty**: every filtered admin log search found "nothing" |
+| `FirestoreJobStore.findJobByIdempotencyKey` | throws → duplicate-build check fails → the same build can run and bill twice |
+| `FirestoreConversationStore.listByUser` | had a fallback, so it worked — by paying for a doomed round-trip on **every** history load |
+
+The two silent ones are the worst of the set. A `catch` that returns `[]` converts a failure into an
+answer, and nobody reports an answer as a bug.
+
+**The deeper cause — a file that looked like configuration and was not.** `firestore.indexes.json`
+declared six composite indexes. `firebase.json` had no `indexes` key, and no pipeline ran
+`firebase deploy --only firestore:indexes`, so it had **never been applied to anything**. One of its
+six entries did not even match the query it claimed to serve (`ai_usage_logs` declared `timestamp`;
+the query orders by `createdAt`). Three separate call sites reasoned from it as if it were live —
+one fallback comment read *"once the index is live the fast path above is used"*, describing a fast
+path that had never once succeeded.
+
+It could not simply be wired up either: `.firebaserc` names `navbharatai-3395f`, the **Hosting**
+project, while Firestore lives in `gen-lang-client-0866594388` / `navbharat-prod`. Deploying indexes
+from this repo would have targeted the wrong project and appeared to succeed. The file is deleted,
+and the reason is recorded in `firestoreIndexSafe.ts` where the next person will actually look.
+
+**The fix is a shape, not six patches.** `src/server/lib/firestoreIndexSafe.ts` holds one
+implementation of "equality filter in Firestore, sort in memory", and its signature has **no
+`orderBy` parameter** — a call site written against it cannot express the broken query. All eight
+sites now use it, including the two that had hand-rolled their own copy of the loop (four copies of
+a rule is how a rule drifts).
+
+**Locked shut:** `firestoreIndexSafe.test.ts` scans every non-test server source file for the
+`.where(A,'==').orderBy(B)` chain and fails on any occurrence — in files written after this one,
+too. It strips comments first (every file that fixed this bug describes the broken shape in prose,
+and a guard that fires on the documentation of a fix gets deleted within a week) and ignores the
+legal same-field range+order used deliberately in `DiagnosticsStore` and `SandboxStore`. A second
+test refuses to let an unwired indexes file exist again.
+
+**Honest limit:** in-memory sorting is correct only while one filter value matches fewer documents
+than the fetch cap (500, or 1000 where a summary depends on the whole period). That holds for every
+collection here today — one document per app, per purchase, per build — and the cap enforces it
+rather than assuming it. When a collection genuinely outgrows it, the answer is a real index created
+in the correct project's console FIRST, not a quietly raised cap, which would turn "the newest 50"
+into "50 arbitrary ones".
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1276 files / 15798 tests passed** · `npm run build` OK.

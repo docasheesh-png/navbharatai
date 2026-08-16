@@ -19,6 +19,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
+import { listEqNewestFirst } from './firestoreIndexSafe';
 
 const COLLECTION = 'gallery_apps';
 
@@ -107,28 +108,28 @@ export async function updateGalleryApp(id: string, patch: Partial<GalleryApp>): 
   await d.collection(COLLECTION).doc(id).update(patch);
 }
 
-/** Apps in a given state, newest first. Serves both the admin queue and the public listing. */
+/**
+ * Apps in a given state, newest first. Serves both the admin queue and the public listing.
+ *
+ * Filtered in Firestore, sorted in memory, via `listEqNewestFirst` — a `.where(status).orderBy(
+ * publishedAt)` chain needs a composite index that has never been deployed to this project, and
+ * would therefore THROW here rather than return rows. See `firestoreIndexSafe.ts`.
+ */
 export async function listGalleryApps(status: GalleryStatus, limit = 50): Promise<GalleryApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION)
-    .where('status', '==', status)
-    .orderBy('publishedAt', 'desc')
-    .limit(Math.max(1, Math.min(limit, 200)))
-    .get();
-  return snap.docs.map((doc) => doc.data() as GalleryApp);
+  return listEqNewestFirst<GalleryApp>(
+    d.collection(COLLECTION), [['status', status]], 'publishedAt', Math.max(1, Math.min(limit, 200)),
+  );
 }
 
 /** One publisher's own entries, whatever their state, so they can see where each one stands. */
 export async function listGalleryAppsByUid(uid: string, limit = 50): Promise<GalleryApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION)
-    .where('uid', '==', uid)
-    .orderBy('publishedAt', 'desc')
-    .limit(Math.max(1, Math.min(limit, 200)))
-    .get();
-  return snap.docs.map((doc) => doc.data() as GalleryApp);
+  return listEqNewestFirst<GalleryApp>(
+    d.collection(COLLECTION), [['uid', uid]], 'publishedAt', Math.max(1, Math.min(limit, 200)),
+  );
 }
 
 /**

@@ -18,6 +18,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
+import { listEqNewestFirst } from './firestoreIndexSafe';
 
 const COLLECTION = 'nav_store_apps';
 
@@ -162,28 +163,28 @@ export async function updateApp(id: string, patch: Partial<StoreApp>): Promise<v
   await d.collection(COLLECTION).doc(id).update(patch);
 }
 
-/** Apps in a given state, newest first. Used by both the admin queue and the public listing. */
+/**
+ * Apps in a given state, newest first. Used by both the admin queue and the public listing.
+ *
+ * Filtered in Firestore, sorted in memory, via `listEqNewestFirst` — a `.where(status).orderBy(
+ * submittedAt)` chain needs a composite index that has never been deployed to this project, and
+ * would therefore THROW here rather than return rows. See `firestoreIndexSafe.ts`.
+ */
 export async function listApps(status: SubmissionStatus, limit = 50): Promise<StoreApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION)
-    .where('status', '==', status)
-    .orderBy('submittedAt', 'desc')
-    .limit(Math.max(1, Math.min(limit, 200)))
-    .get();
-  return snap.docs.map((doc) => doc.data() as StoreApp);
+  return listEqNewestFirst<StoreApp>(
+    d.collection(COLLECTION), [['status', status]], 'submittedAt', Math.max(1, Math.min(limit, 200)),
+  );
 }
 
 /** One developer's own submissions, whatever their state, so they can see where each one stands. */
 export async function listAppsByUid(uid: string, limit = 50): Promise<StoreApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION)
-    .where('uid', '==', uid)
-    .orderBy('submittedAt', 'desc')
-    .limit(Math.max(1, Math.min(limit, 200)))
-    .get();
-  return snap.docs.map((doc) => doc.data() as StoreApp);
+  return listEqNewestFirst<StoreApp>(
+    d.collection(COLLECTION), [['uid', uid]], 'submittedAt', Math.max(1, Math.min(limit, 200)),
+  );
 }
 
 /**

@@ -31,6 +31,7 @@
 import * as admin from 'firebase-admin';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { getServerDb } from './serverDb';
+import { listEqNewestFirst } from './firestoreIndexSafe';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { scanTextForSecrets, type EnvTemplateSecretIssue } from '../AgentV3/EnvSecretValueAnalysis';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
@@ -108,8 +109,65 @@ const ENV_TEMPLATE = /\.env\.(example|sample|template|dist|defaults?)$/i;
 
 /** Caps — quotas exist from day 1, because one runaway app must never become our bill. */
 export const MAX_SNAPSHOT_FILES = 400;
-export const MAX_SNAPSHOT_FILE_BYTES = 300 * 1024;
-export const MAX_SNAPSHOT_TOTAL_BYTES = 3 * 1024 * 1024;
+/**
+ * THE CAPS ARE DERIVED FROM THE REAL CEILING, not chosen by feel (reworked 2026-08-16).
+ *
+ * A live publish was refused at 300 KB for a page component OUR OWN BUILDER generated. The admin
+ * asked the right question — "990 KB nahi ho sakta?" — so here is the actual arithmetic, written
+ * down once so nobody has to re-derive it or guess again.
+ *
+ * Every file is stored as its OWN Firestore document (`{ content }`), and a Firestore document may
+ * not exceed 1 MiB = 1,048,576 bytes. That is Google's wall, not a setting of ours. The document
+ * costs, on top of the content: its path, the field name, and a small per-document overhead — a few
+ * hundred bytes in total, not kilobytes.
+ *
+ * So the honest maximum is "1 MiB minus a margin that cannot plausibly be exceeded". 950 KB leaves
+ * ~75 KB of headroom — roughly a hundred times the overhead it needs to cover. Going to 990 KB would
+ * also fit; it buys 4% more room in exchange for most of the safety margin, and no real file lives
+ * in that 4%. A cap that is provably safe is worth more than a cap that is maximally tight.
+ *
+ * TOTAL had to rise with it, or the per-file raise would be theatre: at 3 MB, four large files hit
+ * the ceiling anyway. 10 MB is our own storage budget (Firestore storage is cheap; the per-open read
+ * cost is bounded by the file COUNT, which is capped separately and unchanged).
+ *
+ * ⚠️ WHAT THIS DOES NOT SOLVE, and must not be mistaken for solving: an app is never 50 MB because of
+ * CODE — it is images, audio, video. Those do not belong in source at any cap, and the right home for
+ * them is object storage served by URL. That is a real feature with a real cost the store's economics
+ * do not currently carry: the whole model is "1 viewer or 10,000 cost us the same" because the app
+ * runs on the VIEWER'S machine, and per-viewer bandwidth breaks exactly that property. Build it when
+ * an app actually needs it, with a per-app asset quota — never as a quiet cap bump.
+ */
+const FIRESTORE_DOC_LIMIT_BYTES = 1024 * 1024;
+export const MAX_SNAPSHOT_FILE_BYTES = 950 * 1024;
+export const MAX_SNAPSHOT_TOTAL_BYTES = 10 * 1024 * 1024;
+/** The margin above is only meaningful if it is checked — a future edit cannot quietly erase it. */
+if (MAX_SNAPSHOT_FILE_BYTES >= FIRESTORE_DOC_LIMIT_BYTES) {
+  throw new Error('MAX_SNAPSHOT_FILE_BYTES must stay under the 1 MiB Firestore document limit');
+}
+
+/**
+ * WHY is this file too big, and what can the user actually DO about it?
+ *
+ * The old refusal asserted "large assets don't belong in published source" for every oversized file,
+ * which is a guess wearing the clothes of a diagnosis — and the wrong guess for a source file. This
+ * measures the file instead: an embedded `data:` URL is a real asset the user CAN move out, and
+ * saying so names the fix; otherwise it is genuinely large code, and the honest advice is different.
+ * Pure, so both branches are testable.
+ */
+export function describeOversizeFile(path: string, content: string): string {
+  const bytes = Buffer.byteLength(content, 'utf8');
+  const kb = (n: number) => `${Math.round(n / 1024)} KB`;
+  let embedded = 0;
+  for (const m of content.matchAll(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi)) {
+    embedded += m[0].length;
+  }
+  if (embedded > bytes / 2) {
+    return `"${path}" is ${kb(bytes)}, and about ${kb(embedded)} of that is an image (or other file) pasted directly into the code. `
+      + `Save it as a real file in your project — or point at a URL — and publish again; the store limit is ${kb(MAX_SNAPSHOT_FILE_BYTES)} per file.`;
+  }
+  return `"${path}" is ${kb(bytes)} of code, over the store's ${kb(MAX_SNAPSHOT_FILE_BYTES)} per-file limit. `
+    + `Ask NavBharatAI to split this page into smaller components and publish again — every viewer's browser has to compile this file, so a huge one is slow for them too.`;
+}
 
 export interface PublishGateResult {
   ok: boolean;
@@ -147,7 +205,7 @@ export function evaluateWebPublish(input: Record<string, string> | null | undefi
   }
   for (const [path, content] of Object.entries(files)) {
     if (Buffer.byteLength(content, 'utf8') > MAX_SNAPSHOT_FILE_BYTES) {
-      return { ok: false, files: {}, reason: `"${path}" is larger than ${Math.round(MAX_SNAPSHOT_FILE_BYTES / 1024)} KB. Large assets don't belong in published source — move it out and publish again.` };
+      return { ok: false, files: {}, reason: describeOversizeFile(path, content) };
     }
   }
   if (total > MAX_SNAPSHOT_TOTAL_BYTES) {
@@ -278,37 +336,29 @@ export async function getWebAppFiles(id: string): Promise<Record<string, string>
  * throws FAILED_PRECONDITION on its first production use until someone creates the index by hand in
  * the console, and no session has console access. A single-field filter is auto-indexed and can
  * never demand an index, so the shape itself is the fix: filter on one field, sort in memory.
- * The in-memory sort is bounded by FETCH_CAP; these collections are small by construction (one doc
- * per listing, not per row). Pinned by a source test — do not reintroduce a where+orderBy chain.
+ *
+ * The mechanics now live in `firestoreIndexSafe.ts` — this file was the first of what became four
+ * hand-written copies of the same loop, and four copies of a rule is how a rule drifts. That helper
+ * takes no `orderBy` parameter, so a call site written against it cannot express the broken shape.
+ * Pinned by a source test — do not reintroduce a where+orderBy chain here or anywhere else.
  */
-const FETCH_CAP = 500;
-
-function newestFirst(docs: admin.firestore.QueryDocumentSnapshot[], limit: number): WebStoreApp[] {
-  return docs.map((x) => x.data() as WebStoreApp)
-    .sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
-    .slice(0, limit);
-}
-
 export async function listListedWebApps(limit = 60): Promise<WebStoreApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION).where('status', '==', 'listed').limit(FETCH_CAP).get();
-  return newestFirst(snap.docs, limit);
+  return listEqNewestFirst<WebStoreApp>(d.collection(COLLECTION), [['status', 'listed']], 'publishedAt', limit);
 }
 
 export async function listMyWebApps(uid: string, limit = 50): Promise<WebStoreApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION).where('uid', '==', uid).limit(FETCH_CAP).get();
-  return newestFirst(snap.docs, limit);
+  return listEqNewestFirst<WebStoreApp>(d.collection(COLLECTION), [['uid', uid]], 'publishedAt', limit);
 }
 
 /** Web apps awaiting listing review — the admin queue, same discipline as the APK store. */
 export async function listUnlistedWebApps(limit = 50): Promise<WebStoreApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION).where('status', '==', 'unlisted').limit(FETCH_CAP).get();
-  return newestFirst(snap.docs, limit);
+  return listEqNewestFirst<WebStoreApp>(d.collection(COLLECTION), [['status', 'unlisted']], 'publishedAt', limit);
 }
 
 export async function updateWebApp(id: string, patch: Partial<WebStoreApp>): Promise<void> {

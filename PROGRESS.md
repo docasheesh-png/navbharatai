@@ -33716,3 +33716,43 @@ that looked like noise.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1277 files / 15840 tests passed** · `npm run build` OK.
+
+## 2026-08-16 — The 5173-vs-5000 cascade: an env PREFIX is not a flag, and the guard confused the two
+
+The debc468c autopsy recorded the port disagreement as an open root cause, on the grounds that it
+was broad build-loop plumbing. Probing the real functions with the report's verbatim command showed
+it is not broad at all — it is one guard answering the wrong question:
+
+```
+pipesOrChains        : true
+isNodeServer(script) : true                        ← the app IS a Node server
+pinned(w/ script)    : npm run dev 2>&1 | head -60 ← UNCHANGED: no PORT= was injected
+detectDevPort('serving on port 5000') : 5000
+```
+
+**Appending a flag and prefixing an env var fail in opposite directions on a pipeline.**
+
+| | |
+|---|---|
+| `npm run dev \| head -60` + ` --port 5173` | the flag lands on **head** ✗ (report 7773b4b0) |
+| `PORT=5173 ` + `npm run dev \| head -60` | applies to **npm run dev** ✓ |
+
+A shell env prefix binds to the FIRST simple command of a pipeline — exactly the dev server. The
+guard was written for the append case, was correct there, and ran FIRST, so the Node-server branch
+(which prefixes rather than appends) never executed for a piped command. Consequence, straight from
+the report: no `PORT=` injected → the app bound its own 5000 → the health-check waited on 5173 →
+"did not come up on port 5173" → two restarts → `EADDRINUSE: address already in use 0.0.0.0:5000`
+against its own still-running first server.
+
+**Fix:** `canPrefixEnv()` answers the prefix question separately. A pipeline allows the prefix; a
+CHAIN still refuses it, because in `cd app && npm run dev` the prefix would attach to `cd` — that
+half is what keeps the fix from being a different bug. A pipeline whose FIRST segment feeds the
+server (`cat seed.txt | npm run dev`) is also refused. The append branches are untouched and report
+7773b4b0 stays fixed, pinned by its own test.
+
+Applied to both `pinDevServerPort` (PORT=) and `ensureHostBinding` (HOST=0.0.0.0) — the same
+asymmetry existed in each, one function apart, exactly as the previous drift between these two was
+recorded on 2026-08-06.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1277 files / 15845 tests passed** · `npm run build` OK.

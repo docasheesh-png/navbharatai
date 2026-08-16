@@ -379,3 +379,49 @@ export async function getAdminBuildReport(id: string): Promise<AdminBuildReportR
     return null;
   }
 }
+
+/**
+ * Delete ONE reported build from the inbox (admin 2026-08-16: "build report delete karne ka option do —
+ * agar space kha rahi ho"). Each record can be up to ~1 MB (it carries the whole session), so a handled
+ * report is pure stored cost once its bug is fixed. Returns true only when the doc genuinely went away.
+ * Never throws.
+ */
+export async function deleteAdminBuildReport(id: string): Promise<boolean> {
+  const db = getDb();
+  if (!db || !id) return false;
+  try {
+    await db.collection(COLLECTION).doc(id).delete();
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[ADMIN_BUILD_REPORT] DELETE FAILED (${id}): ${message}`);
+    return false;
+  }
+}
+
+/**
+ * Clear the WHOLE inbox — every reported build (admin 2026-08-16). For reclaiming space in one action
+ * when many handled reports have piled up; one-by-one is impractical at scale. Deletes in batches so a
+ * large inbox cannot exceed Firestore's 500-writes-per-batch limit, and is bounded by a hard guard so a
+ * pathological loop can never run away. Returns how many were deleted. Never throws.
+ */
+export async function deleteAllAdminBuildReports(): Promise<number> {
+  const db = getDb();
+  if (!db) return 0;
+  let deleted = 0;
+  try {
+    for (let guard = 0; guard < 10000; guard++) {
+      const snap = await db.collection(COLLECTION).limit(300).get();
+      if (snap.empty) break;
+      const batch = db.batch();
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+      deleted += snap.size;
+      if (snap.size < 300) break;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[ADMIN_BUILD_REPORT] CLEAR FAILED after ${deleted} deleted: ${message}`);
+  }
+  return deleted;
+}

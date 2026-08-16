@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2 } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
@@ -489,6 +489,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       setBuildReports((rows) => rows.map((row) => (row.id === id ? { ...row, ...triage } : row)));
       setSelectedReport((s) => (s && s.meta.id === id ? { ...s, meta: { ...s.meta, ...triage } } : s));
     } catch (e) { console.error(e); toast('Could not save that mark.'); }
+  };
+
+  // DELETE a report from the inbox (admin 2026-08-16: "delete karne ka option do — agar space kha rahi
+  // ho"). Each record can be ~1 MB, so a handled report is pure stored cost once its bug is fixed.
+  const deleteReport = async (id: string) => {
+    if (!window.confirm('Delete this build report permanently? This frees its storage and cannot be undone.')) return;
+    try {
+      const r = await fetch(`/api/admin/build-reports/${encodeURIComponent(id)}`, { method: 'DELETE', headers });
+      if (!r.ok) { toast('Could not delete that report.'); return; }
+      setBuildReports((rows) => rows.filter((row) => row.id !== id));
+      setSelectedReport((s) => (s && s.meta.id === id ? null : s));
+      toast('Report deleted.');
+    } catch (e) { console.error(e); toast('Could not delete that report.'); }
+  };
+
+  const clearAllReports = async () => {
+    if (buildReports.length === 0) { toast('The inbox is already empty.'); return; }
+    if (!window.confirm(`Delete ALL ${buildReports.length} build reports permanently? This frees their storage and cannot be undone.`)) return;
+    try {
+      const r = await fetch('/api/admin/build-reports/clear', {
+        method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true }),
+      });
+      if (!r.ok) { toast('Could not clear the reports.'); return; }
+      const { deleted } = await r.json() as { deleted: number };
+      setBuildReports([]);
+      setSelectedReport(null);
+      toast(`Deleted ${deleted} report(s).`);
+    } catch (e) { console.error(e); toast('Could not clear the reports.'); }
   };
 
   const downloadSelectedReport = () => {
@@ -1516,6 +1544,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${buildReportsLoading ? 'animate-spin' : ''}`} /> Refresh
                   </button>
+                  {/* Reclaim storage in one action (admin 2026-08-16). Each record can be ~1 MB; a cleared
+                      inbox is real space back. Disabled when empty; confirms before it wipes. */}
+                  <button
+                    onClick={clearAllReports}
+                    disabled={buildReports.length === 0}
+                    title="Delete ALL build reports — frees their storage (cannot be undone)"
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-red-500/40 text-red-300 hover:text-white hover:bg-red-600/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete all
+                  </button>
                 </div>
               </div>
 
@@ -2103,7 +2141,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                       {r.ok === true ? 'Success' : r.ok === false ? 'Failed' : r.inFlight ? 'Still running' : '—'}
                                     </span>
                                   </td>
-                                  <td className="px-3 py-2.5"><Eye className="w-4 h-4 text-[#8b949e]" /></td>
+                                  <td className="px-3 py-2.5">
+                                    <span className="flex items-center gap-2">
+                                      <Eye className="w-4 h-4 text-[#8b949e]" />
+                                      {/* Delete this report (admin 2026-08-16) — stopPropagation so it never
+                                          opens the report it is removing. Confirmed before it deletes. */}
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); void deleteReport(r.id); }}
+                                        title="Delete this report (frees its storage)"
+                                        className="text-[#8b949e] hover:text-red-400 transition-colors"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </span>
+                                  </td>
                                 </tr>
                               );
                             })}
@@ -2176,6 +2227,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             </button>
                           );
                         })()}
+                        {/* Delete this report from the detail view too (admin 2026-08-16) — same confirm,
+                            same storage reclaim; closes the panel on success. */}
+                        <button
+                          onClick={() => selectedReport?.meta.id && void deleteReport(selectedReport.meta.id)}
+                          disabled={!selectedReport?.meta.id}
+                          title="Delete this report permanently (frees its storage)"
+                          className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-red-500/40 text-red-300 hover:text-white hover:bg-red-600/20 disabled:opacity-40"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Delete
+                        </button>
                         <button onClick={() => setSelectedReport(null)} className="text-[#8b949e] hover:text-white px-2 py-2 rounded-xl hover:bg-white/5">Close</button>
                       </div>
                     </div>

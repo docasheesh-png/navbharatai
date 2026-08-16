@@ -196,14 +196,14 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
 
   const modeBtn = (m: 'single' | 'app') => ({
     background: mode === m ? 'rgba(129,140,248,0.15)' : 'rgba(255,255,255,0.04)',
-    color: mode === m ? '#818cf8' : '#8b949e',
+    color: mode === m ? '#818cf8' : 'var(--text-muted)',
     border: `1px solid ${mode === m ? 'rgba(129,140,248,0.4)' : 'rgba(255,255,255,0.08)'}`,
   });
 
   return (
     <div
       className="flex flex-col h-full w-full overflow-hidden"
-      style={{ background: '#0d1117', color: '#e6edf3' }}
+      style={{ background: 'var(--surface-base)', color: 'var(--text-body)' }}
     >
       {/* Mode toggle: paste a single error, or scan a whole app */}
       <div className="flex items-center gap-2 px-4 py-2 border-b shrink-0" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
@@ -239,7 +239,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                 onClick={() => setActiveTab(tab)}
                 className="px-3 py-2 text-xs font-medium transition-colors relative"
                 style={{
-                  color: activeTab === tab ? '#818cf8' : '#8b949e',
+                  color: activeTab === tab ? '#818cf8' : 'var(--text-muted)',
                 }}
               >
                 {tab}
@@ -275,7 +275,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
               <button
                 onClick={() => setCodeContextOpen((o) => !o)}
                 className="flex items-center gap-1 text-xs mb-1"
-                style={{ color: '#8b949e' }}
+                style={{ color: 'var(--text-muted)' }}
               >
                 {codeContextOpen ? (
                   <ChevronDown className="w-3 h-3" />
@@ -293,8 +293,8 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                   rows={3}
                   className="w-full resize-none text-xs font-mono rounded p-2 outline-none"
                   style={{
-                    background: '#161b22',
-                    color: '#c9d1d9',
+                    background: 'var(--surface-card)',
+                    color: 'var(--text-body)',
                     border: '1px solid rgba(255,255,255,0.1)',
                   }}
                   spellCheck={false}
@@ -322,7 +322,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
             <button
               onClick={handleClear}
               className="px-3 py-1.5 rounded text-xs transition-colors"
-              style={{ color: '#8b949e', border: '1px solid rgba(255,255,255,0.1)' }}
+              style={{ color: 'var(--text-muted)', border: '1px solid rgba(255,255,255,0.1)' }}
             >
               Clear
             </button>
@@ -347,7 +347,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                   className="px-2 py-0.5 rounded text-xs transition-colors"
                   style={{
                     background: 'rgba(255,255,255,0.05)',
-                    color: '#8b949e',
+                    color: 'var(--text-muted)',
                     border: '1px solid rgba(255,255,255,0.08)',
                   }}
                 >
@@ -366,8 +366,8 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
           {/* Empty state */}
           {!isLoading && !result && (
             <div className="flex flex-col items-center justify-center h-full gap-3 opacity-40">
-              <Bug className="w-12 h-12" style={{ color: '#8b949e' }} />
-              <p className="text-sm" style={{ color: '#8b949e' }}>
+              <Bug className="w-12 h-12" style={{ color: 'var(--text-muted)' }} />
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
                 Paste an error and AI will instantly suggest a fix
               </p>
             </div>
@@ -407,8 +407,8 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                           loadingStep > i
                             ? '#22c55e'
                             : loadingStep === i
-                            ? '#c9d1d9'
-                            : '#8b949e',
+                            ? 'var(--text-body)'
+                            : 'var(--text-muted)',
                       }}
                     >
                       {label}
@@ -434,7 +434,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
               <div
                 className="rounded-lg p-4"
                 style={{
-                  background: '#161b22',
+                  background: 'var(--surface-card)',
                   borderLeft: '3px solid #ef4444',
                   border: '1px solid rgba(255,255,255,0.07)',
                   borderLeftWidth: '3px',
@@ -447,7 +447,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                     Root Cause
                   </span>
                 </div>
-                <p className="text-sm leading-relaxed" style={{ color: '#c9d1d9' }}>
+                <p className="text-sm leading-relaxed" style={{ color: 'var(--text-body)' }}>
                   {result.rootCause}
                 </p>
               </div>
@@ -456,7 +456,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
               <div
                 className="rounded-lg p-4"
                 style={{
-                  background: '#161b22',
+                  background: 'var(--surface-card)',
                   border: '1px solid rgba(255,255,255,0.07)',
                   borderLeftWidth: '3px',
                   borderLeftColor: '#22c55e',
@@ -475,7 +475,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                       className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors"
                       style={{
                         background: 'rgba(255,255,255,0.05)',
-                        color: '#8b949e',
+                        color: 'var(--text-muted)',
                         border: '1px solid rgba(255,255,255,0.1)',
                       }}
                     >
@@ -503,7 +503,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                 <pre
                   className="text-xs rounded p-3 overflow-x-auto"
                   style={{
-                    background: '#0d1117',
+                    background: 'var(--surface-base)',
                     color: '#7ee787',
                     border: '1px solid rgba(255,255,255,0.06)',
                     fontFamily: 'monospace',
@@ -519,7 +519,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
               <div
                 className="rounded-lg p-4"
                 style={{
-                  background: '#161b22',
+                  background: 'var(--surface-card)',
                   border: '1px solid rgba(255,255,255,0.07)',
                   borderLeftWidth: '3px',
                   borderLeftColor: '#3b82f6',
@@ -540,7 +540,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                       >
                         {i + 1}
                       </span>
-                      <span style={{ color: '#c9d1d9' }}>{step}</span>
+                      <span style={{ color: 'var(--text-body)' }}>{step}</span>
                     </li>
                   ))}
                 </ol>
@@ -550,7 +550,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
               <div
                 className="rounded-lg p-4"
                 style={{
-                  background: '#161b22',
+                  background: 'var(--surface-card)',
                   border: '1px solid rgba(255,255,255,0.07)',
                   borderLeftWidth: '3px',
                   borderLeftColor: '#f59e0b',
@@ -568,7 +568,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                       <span className="mt-1 shrink-0" style={{ color: '#f59e0b' }}>
                         •
                       </span>
-                      <span style={{ color: '#c9d1d9' }}>{tip}</span>
+                      <span style={{ color: 'var(--text-body)' }}>{tip}</span>
                     </li>
                   ))}
                 </ul>
@@ -584,7 +584,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
         style={{
           width: historyOpen ? 240 : 36,
           borderColor: 'rgba(255,255,255,0.1)',
-          background: '#161b22',
+          background: 'var(--surface-card)',
           transition: 'width 0.2s ease',
           overflow: 'hidden',
         }}
@@ -593,7 +593,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
         <button
           onClick={() => setHistoryOpen((o) => !o)}
           className="flex items-center gap-2 px-2 py-3 border-b shrink-0"
-          style={{ borderColor: 'rgba(255,255,255,0.1)', color: '#8b949e' }}
+          style={{ borderColor: 'rgba(255,255,255,0.1)', color: 'var(--text-muted)' }}
         >
           <History className="w-4 h-4 shrink-0" />
           {historyOpen && (
@@ -607,7 +607,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
             style={{ scrollbarWidth: 'thin', scrollbarColor: '#30363d transparent' }}
           >
             {history.length === 0 && (
-              <p className="text-xs text-center mt-4" style={{ color: '#8b949e' }}>
+              <p className="text-xs text-center mt-4" style={{ color: 'var(--text-muted)' }}>
                 No history yet
               </p>
             )}
@@ -631,18 +631,18 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                   <button
                     onClick={(e) => handleDeleteHistory(entry.id, e)}
                     className="opacity-0 group-hover:opacity-100 transition-opacity"
-                    style={{ color: '#8b949e' }}
+                    style={{ color: 'var(--text-muted)' }}
                   >
                     <X className="w-3 h-3" />
                   </button>
                 </div>
                 <p
                   className="text-xs truncate"
-                  style={{ color: '#8b949e', maxWidth: 200 }}
+                  style={{ color: 'var(--text-muted)', maxWidth: 200 }}
                 >
                   {entry.errorSnippet}
                 </p>
-                <div className="flex items-center gap-1" style={{ color: '#6e7681' }}>
+                <div className="flex items-center gap-1" style={{ color: 'var(--text-faint)' }}>
                   <Clock className="w-3 h-3" />
                   <span style={{ fontSize: 10 }}>{formatTime(entry.timestamp)}</span>
                 </div>

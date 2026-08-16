@@ -451,7 +451,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   // ── Not connected: say what is needed and why, rather than showing a dead button ──
   if (!githubToken) {
     return (
-      <div className="rounded-xl border border-white/10 p-4 sm:p-5" style={{ background: '#161b22' }}>
+      <div className="rounded-xl border border-white/10 p-4 sm:p-5" style={{ background: 'var(--surface-card)' }}>
         <h3 className="flex items-center gap-2 text-base font-bold text-white mb-2">
           <Rocket size={17} className="text-indigo-400" /> Build a real Android app
         </h3>
@@ -471,7 +471,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   }
 
   return (
-    <div className="rounded-xl border border-white/10 overflow-hidden" style={{ background: '#161b22' }}>
+    <div className="rounded-xl border border-white/10 overflow-hidden" style={{ background: 'var(--surface-card)' }}>
       <div className="p-4 sm:p-5">
         <h3 className="flex items-center gap-2 text-base font-bold text-white mb-1">
           <Rocket size={17} className="text-indigo-400" /> Build a real Android app
@@ -545,7 +545,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
         {/* Step 2 — prepared, waiting for the signing key */}
         {setup && phase !== 'idle' && phase !== 'preparing' && (
-          <div className="rounded-lg border border-white/10 p-3 text-xs" style={{ background: '#0d1117' }}>
+          <div className="rounded-lg border border-white/10 p-3 text-xs" style={{ background: 'var(--surface-base)' }}>
             <p className="flex items-center gap-1.5 text-green-400 font-semibold mb-1.5">
               <CheckCircle2 size={13} />
               {setup.createdRepo ? 'Created' : 'Updated'} {setup.owner}/{setup.repo}
@@ -695,7 +695,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
         {/* Step 3 — building. One number, one line of plain language, and nothing to do. */}
         {phase === 'building' && (
-          <div className="rounded-lg border border-white/10 p-4 text-center" style={{ background: '#0d1117' }}>
+          <div className="rounded-lg border border-white/10 p-4 text-center" style={{ background: 'var(--surface-base)' }}>
             <p className="text-3xl font-bold text-white tabular-nums">{progress}%</p>
             <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden my-3">
               <div

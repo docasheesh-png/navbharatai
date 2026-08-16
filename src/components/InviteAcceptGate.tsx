@@ -135,28 +135,28 @@ export function InviteAcceptGate() {
         background: 'rgba(1,4,9,0.72)', fontFamily: 'system-ui, sans-serif',
       }}
     >
-      <div style={{ maxWidth: 420, width: '100%', background: '#161b22', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 18, padding: 24, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
+      <div style={{ maxWidth: 420, width: '100%', background: 'var(--surface-card)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 18, padding: 24, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
         <div style={{ fontSize: 30, textAlign: 'center' }}>🤝</div>
-        <h2 style={{ color: '#fff', fontSize: 16, fontWeight: 800, textAlign: 'center', marginTop: 10 }}>
+        <h2 style={{ color: 'var(--text-primary)', fontSize: 16, fontWeight: 800, textAlign: 'center', marginTop: 10 }}>
           {phase === 'done' ? 'Welcome to the team' : 'Team invitation'}
         </h2>
 
         {phase === 'ready' && invite && (
-          <p style={{ color: '#c9d1d9', fontSize: 13, lineHeight: 1.5, textAlign: 'center', marginTop: 10 }}>
-            You've been invited to join a NavBharatAI team as <strong style={{ color: '#fff' }}>{roleLabel}</strong>
-            {invite.email ? <> (for <span style={{ color: '#8b949e' }}>{invite.email}</span>)</> : null}. Accept to
+          <p style={{ color: 'var(--text-body)', fontSize: 13, lineHeight: 1.5, textAlign: 'center', marginTop: 10 }}>
+            You've been invited to join a NavBharatAI team as <strong style={{ color: 'var(--text-primary)' }}>{roleLabel}</strong>
+            {invite.email ? <> (for <span style={{ color: 'var(--text-muted)' }}>{invite.email}</span>)</> : null}. Accept to
             get access.
           </p>
         )}
 
         {(phase === 'loading' || phase === 'accepting') && (
-          <p style={{ color: '#8b949e', fontSize: 13, textAlign: 'center', marginTop: 12 }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', marginTop: 12 }}>
             {phase === 'loading' ? 'Loading invitation…' : 'Joining the team…'}
           </p>
         )}
 
         {(phase === 'invalid' || phase === 'error' || phase === 'signin' || phase === 'done') && (
-          <p style={{ color: phase === 'done' ? '#3fb950' : phase === 'signin' ? '#c9d1d9' : '#f0883e', fontSize: 13, lineHeight: 1.5, textAlign: 'center', marginTop: 12 }}>
+          <p style={{ color: phase === 'done' ? '#3fb950' : phase === 'signin' ? 'var(--text-body)' : '#f0883e', fontSize: 13, lineHeight: 1.5, textAlign: 'center', marginTop: 12 }}>
             {message}
           </p>
         )}
@@ -177,7 +177,7 @@ export function InviteAcceptGate() {
               type="button"
               onClick={dismiss}
               disabled={busy}
-              style={{ padding: '10px 18px', background: 'transparent', color: '#8b949e', fontSize: 12, fontWeight: 700, border: '1px solid rgba(255,255,255,0.16)', borderRadius: 12, cursor: 'pointer' }}
+              style={{ padding: '10px 18px', background: 'transparent', color: 'var(--text-muted)', fontSize: 12, fontWeight: 700, border: '1px solid rgba(255,255,255,0.16)', borderRadius: 12, cursor: 'pointer' }}
             >
               {phase === 'ready' ? 'Not now' : 'Close'}
             </button>

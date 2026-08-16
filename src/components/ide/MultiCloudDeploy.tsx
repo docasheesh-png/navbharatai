@@ -242,7 +242,7 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
 
   const cfg = PLATFORMS[selectedPlatform];
 
-  const containerStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', height: '100%', background: '#0f172a', color: '#e2e8f0', fontFamily: 'sans-serif' };
+  const containerStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', height: '100%', background: '#0f172a', color: 'var(--text-body)', fontFamily: 'sans-serif' };
   const cardStyle: React.CSSProperties = { background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '12px' };
 
   return (
@@ -252,13 +252,13 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <CloudUpload size={20} color="#3b82f6" />
           <div>
-            <div style={{ fontWeight: 600, fontSize: 15, color: '#f1f5f9' }}>Multi-Cloud Deploy</div>
-            <div style={{ color: '#64748b', fontSize: 11 }}>Instant NavBharat Hosting · CLI guides for Vercel, Netlify &amp; more</div>
+            <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-body)' }}>Multi-Cloud Deploy</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>Instant NavBharat Hosting · CLI guides for Vercel, Netlify &amp; more</div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6, overflowX: 'auto', maxWidth: '100%' }}>
           {(['deploy', 'history', 'config'] as const).map(t => (
-            <button key={t} onClick={() => setActiveTab(t)} style={{ padding: '8px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500, flexShrink: 0, background: activeTab === t ? '#3b82f6' : '#334155', color: activeTab === t ? '#fff' : '#94a3b8' }}>
+            <button key={t} onClick={() => setActiveTab(t)} style={{ padding: '8px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500, flexShrink: 0, background: activeTab === t ? '#3b82f6' : '#334155', color: activeTab === t ? '#fff' : 'var(--text-muted)' }}>
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
@@ -276,10 +276,10 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
                 <button key={id} onClick={() => setSelectedPlatform(id)} style={{ padding: '12px', borderRadius: 8, border: `2px solid ${selectedPlatform === id ? p.color : '#334155'}`, background: selectedPlatform === id ? `${p.color}15` : '#1e293b', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                     <span style={{ fontSize: 16 }}>{p.icon}</span>
-                    <span style={{ fontWeight: 600, fontSize: 13, color: selectedPlatform === id ? p.color : '#e2e8f0' }}>{p.name}</span>
+                    <span style={{ fontWeight: 600, fontSize: 13, color: selectedPlatform === id ? p.color : 'var(--text-body)' }}>{p.name}</span>
                     {p.free && <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#052e16', color: '#4ade80' }}>FREE</span>}
                   </div>
-                  <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.45 }}>{p.description}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>{p.description}</div>
                 </button>
               ))}
             </div>
@@ -292,11 +292,11 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 10 }}>
                 <div>
-                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Build Command</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Build Command</div>
                   <div style={{ background: '#0f172a', borderRadius: 4, padding: '7px 9px', fontSize: 12, color: '#a5f3fc', fontFamily: 'monospace', wordBreak: 'break-all' }}>{cfg.buildCmd}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Output Directory</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Output Directory</div>
                   <div style={{ background: '#0f172a', borderRadius: 4, padding: '7px 9px', fontSize: 12, color: '#a5f3fc', fontFamily: 'monospace', wordBreak: 'break-all' }}>{cfg.outputDir}</div>
                 </div>
               </div>
@@ -334,9 +334,9 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
 
             {/* Build Logs */}
             {logs.length > 0 && (
-              <div style={{ background: '#020617', border: '1px solid #1e293b', borderRadius: 6, padding: '10px 12px', fontFamily: 'monospace', fontSize: 11, color: '#94a3b8', maxHeight: 200, overflow: 'auto' }}>
+              <div style={{ background: '#020617', border: '1px solid #1e293b', borderRadius: 6, padding: '10px 12px', fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)', maxHeight: 200, overflow: 'auto' }}>
                 {logs.map((log, i) => (
-                  <div key={i} style={{ color: log.startsWith('> ✅') || log.startsWith('> 🌍') ? '#4ade80' : log.startsWith('> ❌') ? '#f87171' : log.startsWith('> URL') ? '#60a5fa' : '#94a3b8', marginBottom: 1 }}>{log}</div>
+                  <div key={i} style={{ color: log.startsWith('> ✅') || log.startsWith('> 🌍') ? '#4ade80' : log.startsWith('> ❌') ? '#f87171' : log.startsWith('> URL') ? '#60a5fa' : 'var(--text-muted)', marginBottom: 1 }}>{log}</div>
                 ))}
                 {(deployStatus === 'building' || deployStatus === 'deploying') && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#f59e0b' }}>
@@ -355,7 +355,7 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
         {activeTab === 'history' && (
           <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {deployments.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '60px 20px', color: '#475569' }}>
+              <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-faint)' }}>
                 <CloudUpload size={32} style={{ margin: '0 auto 12px' }} />
                 <div>No deployments yet. Deploy your first app!</div>
               </div>
@@ -371,9 +371,9 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 11, color: dep.status === 'live' ? '#4ade80' : '#f87171' }}>{dep.status === 'live' ? '● Live' : '● Failed'}</div>
-                    <div style={{ fontSize: 11, color: '#64748b' }}>{dep.duration}s · {new Date(dep.timestamp).toLocaleDateString()}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{dep.duration}s · {new Date(dep.timestamp).toLocaleDateString()}</div>
                   </div>
-                  <a href={dep.url} target="_blank" rel="noopener noreferrer" style={{ color: '#94a3b8', textDecoration: 'none' }}><ExternalLink size={14} /></a>
+                  <a href={dep.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}><ExternalLink size={14} /></a>
                 </div>
               </div>
             ))}
@@ -389,13 +389,13 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
               </div>
               {cfg.envVars.map(v => (
                 <div key={v} style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>{v}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{v}</div>
                   <input
                     type="password"
                     value={envVars[v] || ''}
                     onChange={e => setEnvVars(prev => ({ ...prev, [v]: e.target.value }))}
                     placeholder={`Enter ${v}...`}
-                    style={{ width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#e2e8f0', padding: '8px 10px', fontSize: 12, boxSizing: 'border-box', outline: 'none', fontFamily: 'monospace' }}
+                    style={{ width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'var(--text-body)', padding: '8px 10px', fontSize: 12, boxSizing: 'border-box', outline: 'none', fontFamily: 'monospace' }}
                   />
                 </div>
               ))}
@@ -412,10 +412,10 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
               ].map(item => (
                 <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #1e293b' }}>
                   {item.done ? <CheckCircle2 size={14} color="#4ade80" /> : <AlertCircle size={14} color="#f59e0b" />}
-                  <span style={{ fontSize: 12, color: item.done ? '#e2e8f0' : '#94a3b8' }}>{item.label}</span>
+                  <span style={{ fontSize: 12, color: item.done ? '#e2e8f0' : 'var(--text-muted)' }}>{item.label}</span>
                 </div>
               ))}
-              <p style={{ fontSize: 11, color: '#64748b', marginTop: 10, lineHeight: 1.5 }}>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.5 }}>
                 HTTPS/SSL and CDN are provided automatically by your chosen host (Vercel, Netlify, Cloudflare, Firebase, …).
               </p>
             </div>

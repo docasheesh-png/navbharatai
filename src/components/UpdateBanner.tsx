@@ -104,7 +104,7 @@ export function UpdateBanner({ apiBase = '' }: { apiBase?: string }) {
         left: 12, right: 12, zIndex: 60,
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '12px 14px', borderRadius: 12,
-        background: '#161b22', color: '#e6edf3',
+        background: 'var(--surface-card)', color: 'var(--text-body)',
         border: '1px solid #30363d', boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
       }}
     >
@@ -115,7 +115,7 @@ export function UpdateBanner({ apiBase = '' }: { apiBase?: string }) {
           onClick={dismiss}
           aria-label="Dismiss update notice"
           style={{
-            background: 'transparent', color: '#8b949e', border: 'none',
+            background: 'transparent', color: 'var(--text-muted)', border: 'none',
             fontSize: 14, cursor: 'pointer', minWidth: 44, minHeight: 44,
           }}
         >

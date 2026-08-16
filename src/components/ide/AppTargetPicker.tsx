@@ -163,8 +163,8 @@ export async function readAppFile(sessionId: string, path: string): Promise<stri
 }
 
 const selectStyle: React.CSSProperties = {
-  background: '#0d1117',
-  color: '#e6edf3',
+  background: 'var(--surface-base)',
+  color: 'var(--text-body)',
   border: '1px solid rgba(255,255,255,0.12)',
   borderRadius: 8,
   padding: '10px 12px',

@@ -250,7 +250,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
   return (
     <div
       className="flex flex-col lg:flex-row gap-4 p-4 h-full overflow-y-auto overscroll-contain"
-      style={{ backgroundColor: '#0d1117', color: 'rgb(209 213 219)' }}
+      style={{ backgroundColor: 'var(--surface-base)', color: 'rgb(209 213 219)' }}
     >
       {/* LEFT COLUMN */}
       <div className="flex flex-col gap-4 lg:w-1/2 w-full">
@@ -261,7 +261,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
               ? 'border-indigo-500 bg-indigo-950/30'
               : 'border-white/10 hover:border-white/25'
           }`}
-          style={{ backgroundColor: '#161b22' }}
+          style={{ backgroundColor: 'var(--surface-card)' }}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -289,7 +289,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
           <button
             onClick={(e) => { e.stopPropagation(); handleClipboardRead(); }}
             className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg border border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/20 transition-colors w-fit"
-            style={{ backgroundColor: '#161b22' }}
+            style={{ backgroundColor: 'var(--surface-card)' }}
           >
             <Clipboard className="w-4 h-4" />
             Paste from clipboard
@@ -300,7 +300,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
         {imageFile && imageUrl && (
           <div
             className="rounded-xl border border-white/10 p-4 flex flex-col gap-3"
-            style={{ backgroundColor: '#161b22' }}
+            style={{ backgroundColor: 'var(--surface-card)' }}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="flex flex-col gap-1 min-w-0">
@@ -326,7 +326,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
         {/* Style Options */}
         <div
           className="rounded-xl border border-white/10 p-4 flex flex-col gap-4"
-          style={{ backgroundColor: '#161b22' }}
+          style={{ backgroundColor: 'var(--surface-card)' }}
         >
           <div className="flex flex-col gap-2">
             <p className="text-xs text-gray-500 uppercase tracking-wide">Output Style</p>
@@ -383,7 +383,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
         {/* Code Output Card */}
         <div
           className="rounded-xl border border-white/10 flex flex-col flex-1"
-          style={{ backgroundColor: '#161b22', minHeight: '320px' }}
+          style={{ backgroundColor: 'var(--surface-card)', minHeight: '320px' }}
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
@@ -477,7 +477,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
         {history.length > 0 && (
           <div
             className="rounded-xl border border-white/10 overflow-hidden"
-            style={{ backgroundColor: '#161b22' }}
+            style={{ backgroundColor: 'var(--surface-card)' }}
           >
             <button
               onClick={() => setHistoryOpen((v) => !v)}

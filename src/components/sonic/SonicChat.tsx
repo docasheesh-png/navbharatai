@@ -341,7 +341,7 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
                 so it can never display a cost that has not actually been charged. Time AND money
                 together — a number on its own tells the user nothing about whether to keep talking. */}
             {status === 'live' && billedSeconds !== null && billedSeconds > 0 && (
-              <span style={{ marginTop: 6, fontSize: 11, color: '#8b949e', fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ marginTop: 6, fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
                 {voiceRunningCostLabel(billedSeconds, resolveVoiceLang((k) => localStorage.getItem(k)))}
               </span>
             )}

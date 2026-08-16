@@ -24,6 +24,8 @@ interface BrandConfig {
 const DEFAULT_CONFIG: BrandConfig = {
   appName: 'NavBharat AI', tagline: 'World-class AI app maker', logoUrl: '', faviconUrl: '',
   primaryColor: '#6366f1', secondaryColor: '#10b981', accentColor: '#f59e0b',
+  // ⚠️ THE USER'S BRANDING, not ours — exported into their app and their assets, so these stay
+  // literal colours. Deliberately outside the 2026-08-16 theme-variable sweep.
   bgColor: '#0d1117', textColor: '#ffffff', fontFamily: 'Inter',
   borderRadius: '12', ogTitle: 'NavBharat AI — Build apps with AI',
   ogDescription: 'India ka pehla AI-powered app maker — build, deploy, scale.', ogImageUrl: '',

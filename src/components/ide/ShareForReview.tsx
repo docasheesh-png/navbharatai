@@ -20,7 +20,7 @@ const RATING_META: Record<Feedback['rating'], { label: string; color: string }> 
   reject: { label: 'Rejected', color: '#f87171' },
 };
 
-const card: React.CSSProperties = { background: '#0d1117', border: '1px solid #1e293b', borderRadius: 8, padding: 12 };
+const card: React.CSSProperties = { background: 'var(--surface-base)', border: '1px solid #1e293b', borderRadius: 8, padding: 12 };
 
 export function ShareForReview({ generatedCode }: ShareForReviewProps) {
   const [creating, setCreating] = useState(false);
@@ -81,8 +81,8 @@ export function ShareForReview({ generatedCode }: ShareForReviewProps) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 14 }}>🤝</span>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 12, color: '#e6edf3', fontWeight: 700 }}>Share for review</div>
-          <div style={{ fontSize: 10, color: '#8b949e' }}>Send a read-only link to a client and collect feedback — no account needed.</div>
+          <div style={{ fontSize: 12, color: 'var(--text-body)', fontWeight: 700 }}>Share for review</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Send a read-only link to a client and collect feedback — no account needed.</div>
         </div>
         {!reviewUrl && (
           <button onClick={create} disabled={creating} style={{ padding: '7px 12px', borderRadius: 7, border: 'none', cursor: creating ? 'default' : 'pointer', background: '#4f46e5', color: '#fff', fontSize: 11, fontWeight: 700, opacity: creating ? 0.6 : 1 }}>
@@ -100,7 +100,7 @@ export function ShareForReview({ generatedCode }: ShareForReviewProps) {
             <button onClick={copy} style={{ padding: '7px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#065f46', color: '#4ade80', fontSize: 11, fontWeight: 700 }}>{copied ? 'Copied!' : 'Copy'}</button>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            <button onClick={loadFeedback} disabled={loadingFb} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.14)', cursor: 'pointer', background: 'transparent', color: '#8b949e', fontSize: 11 }}>
+            <button onClick={loadFeedback} disabled={loadingFb} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.14)', cursor: 'pointer', background: 'transparent', color: 'var(--text-muted)', fontSize: 11 }}>
               {loadingFb ? 'Loading…' : `View feedback${feedback.length ? ` (${feedback.length})` : ''}`}
             </button>
             <button onClick={revoke} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(248,113,113,0.3)', cursor: 'pointer', background: 'transparent', color: '#f87171', fontSize: 11 }}>Revoke link</button>
@@ -111,9 +111,9 @@ export function ShareForReview({ generatedCode }: ShareForReviewProps) {
                 <div key={i} style={{ ...card, padding: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 10, fontWeight: 800, color: RATING_META[f.rating].color }}>{RATING_META[f.rating].label}</span>
-                    <span style={{ fontSize: 9, color: '#6e7681' }}>{f.name}</span>
+                    <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>{f.name}</span>
                   </div>
-                  {f.comment && <div style={{ fontSize: 11, color: '#c9d1d9', marginTop: 3 }}>{f.comment}</div>}
+                  {f.comment && <div style={{ fontSize: 11, color: 'var(--text-body)', marginTop: 3 }}>{f.comment}</div>}
                 </div>
               ))}
             </div>

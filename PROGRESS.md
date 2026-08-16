@@ -33309,3 +33309,34 @@ than the disease. They need per-component edits (read the colour from the theme 
 literal). Recorded here rather than half-fixed; the admin has been told plainly.
 
 Gate: tsc ✓ tsc -p server ✓ vitest **1272 files / 15750 tests** ✓ build ✓
+
+### The other half: inline style colours (admin: "jo jo fix kar sakte ho karo")
+
+The previous entry recorded 229 inline `style={{ background: '#0d1117' }}` colours as an OPEN root
+cause, because CSS cannot override an inline style. It can be fixed — just not from a stylesheet:
+read the colour from the theme VARIABLE instead of hardcoding the hex. **332 replacements across
+~25 files**, and a no-op on dark by construction — `:root` defines `--surface-card: #161b22`, the
+exact hex the code used to hardcode (verified in Chromium: dark computes `rgb(22,27,34)`).
+
+**Three traps, every one of which actually bit during the sweep. Recorded because each one is
+invisible until it breaks something:**
+
+1. **A LIBRARY CONFIG IS NOT A DOM STYLE.** The first pass rewrote xterm's `theme: { background }` —
+   xterm parses colours itself and has no idea what `var(...)` means, so the terminal would have
+   rendered wrong. Backed out and commented. An inline style goes to the browser; a library's config
+   goes to the library. Same reason `.ts` files were excluded entirely: `pwa.ts` writes a PWA
+   manifest `background_color` and `nativeShell.ts` sets the native status bar — neither accepts a
+   CSS variable.
+2. **THE USER'S COLOURS ARE NOT OURS.** `MultiPageBuilder` generates HTML for the user's own page,
+   `DarkModeGenerator` holds theme PRESETS the user applies to their app, and `WhitelabelBranding`
+   holds their branding. A theme var there would leak our palette into their product and resolve to
+   nothing outside our page. All three are now guarded with a comment naming this sweep.
+3. **THEMING A SURFACE WITHOUT ITS TEXT IS WORSE THAN THEMING NEITHER.** Caught by looking: after
+   the backgrounds became theme-aware, the consent banner was a WHITE card with near-white text —
+   briefly *less* readable than before the fix. Text colours had to move with their surfaces (119
+   more replacements). But a white label on a brand-coloured button must STAY white, or the sweep
+   puts dark text on an indigo button — so `#fff` was reviewed site by site, not swept: 4 plain
+   headings on themed surfaces became `var(--text-primary)`; every button label kept its white.
+
+Locked by `tests/inlineThemeColours.test.ts`, which pins all three traps as well as the sweep itself.
+Gate: tsc ✓ tsc -p server ✓ vitest **1274 files / 15770 tests** ✓ build ✓

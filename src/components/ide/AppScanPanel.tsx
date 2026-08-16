@@ -77,7 +77,7 @@ const SEV_STYLE: Record<Severity, { bg: string; fg: string; label: string }> = {
   critical: { bg: 'rgba(220,38,38,0.15)', fg: '#f87171', label: 'CRITICAL' },
   high: { bg: 'rgba(239,68,68,0.12)', fg: '#fb923c', label: 'HIGH' },
   medium: { bg: 'rgba(245,158,11,0.12)', fg: '#fcd34d', label: 'MEDIUM' },
-  low: { bg: 'rgba(148,163,184,0.12)', fg: '#94a3b8', label: 'LOW' },
+  low: { bg: 'rgba(148,163,184,0.12)', fg: 'var(--text-muted)', label: 'LOW' },
 };
 
 export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5 }) => {
@@ -279,7 +279,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
     : '';
 
   return (
-    <div className="flex flex-col h-full w-full overflow-hidden" style={{ background: '#0d1117', color: '#e6edf3' }}>
+    <div className="flex flex-col h-full w-full overflow-hidden" style={{ background: 'var(--surface-base)', color: 'var(--text-body)' }}>
       {/* Source picker */}
       <div className="shrink-0 border-b px-4 py-3" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
         <div className="flex items-center gap-2 mb-3">
@@ -290,7 +290,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
             disabled={loadingSources || running}
             title="Reload sources"
             className="ml-auto flex items-center gap-1 text-xs px-2 py-1 rounded"
-            style={{ color: '#8b949e', border: '1px solid rgba(255,255,255,0.1)', opacity: loadingSources ? 0.5 : 1 }}
+            style={{ color: 'var(--text-muted)', border: '1px solid rgba(255,255,255,0.1)', opacity: loadingSources ? 0.5 : 1 }}
           >
             <RefreshCw className={`w-3 h-3 ${loadingSources ? 'animate-spin' : ''}`} /> Reload
           </button>
@@ -351,9 +351,9 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
               <Loader2 className="w-4 h-4 animate-spin" /> {phase || 'Scanning…'}
             </div>
             {progress && (
-              <div className="text-xs" style={{ color: '#8b949e' }}>
+              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
                 Batch {progress.batch}/{progress.total} · reading{' '}
-                <span style={{ color: '#c9d1d9' }}>{progress.files.slice(0, 3).join(', ')}{progress.files.length > 3 ? ` +${progress.files.length - 3} more` : ''}</span>
+                <span style={{ color: 'var(--text-body)' }}>{progress.files.slice(0, 3).join(', ')}{progress.files.length > 3 ? ` +${progress.files.length - 3} more` : ''}</span>
               </div>
             )}
           </div>
@@ -369,7 +369,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
 
         {/* Health header */}
         {summary && (
-          <div className="mb-3 flex items-center gap-3 rounded-lg p-3" style={{ background: '#161b22', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <div className="mb-3 flex items-center gap-3 rounded-lg p-3" style={{ background: 'var(--surface-card)', border: '1px solid rgba(255,255,255,0.07)' }}>
             {(() => {
               const s = summary.health.score;
               const col = s >= 75 ? '#22c55e' : s >= 50 ? '#fcd34d' : s >= 25 ? '#fb923c' : '#f87171';
@@ -380,12 +380,12 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
               );
             })()}
             <div className="min-w-0">
-              <div className="text-sm font-semibold" style={{ color: '#e6edf3' }}>App health {summary.health.score}/100</div>
-              <div className="text-xs" style={{ color: '#8b949e' }}>{summary.health.verdict}</div>
+              <div className="text-sm font-semibold" style={{ color: 'var(--text-body)' }}>App health {summary.health.score}/100</div>
+              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{summary.health.verdict}</div>
               {summary.health.topCategories.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">
                   {summary.health.topCategories.map((c) => (
-                    <span key={c.category} className="px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(255,255,255,0.05)', color: '#8b949e', fontSize: 10 }}>
+                    <span key={c.category} className="px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', fontSize: 10 }}>
                       {c.category} · {c.count}
                     </span>
                   ))}
@@ -417,9 +417,9 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
                   {summary.counts[s]} {SEV_STYLE[s].label}
                 </span>
               ))}
-              <span className="text-xs" style={{ color: '#8b949e' }}>· {summary.total} total</span>
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>· {summary.total} total</span>
             </div>
-            {scannedLine && <div className="text-xs" style={{ color: '#6e7681' }}>{scannedLine}</div>}
+            {scannedLine && <div className="text-xs" style={{ color: 'var(--text-faint)' }}>{scannedLine}</div>}
           </div>
         )}
 
@@ -442,13 +442,13 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
           const st = SEV_STYLE[f.severity] || SEV_STYLE.low;
           const open = expanded[i] ?? (f.severity === 'critical' || f.severity === 'high');
           return (
-            <div key={i} className="rounded-lg mb-2" style={{ background: '#161b22', border: '1px solid rgba(255,255,255,0.07)', borderLeft: `3px solid ${st.fg}` }}>
+            <div key={i} className="rounded-lg mb-2" style={{ background: 'var(--surface-card)', border: '1px solid rgba(255,255,255,0.07)', borderLeft: `3px solid ${st.fg}` }}>
               <button onClick={() => setExpanded((e) => ({ ...e, [i]: !open }))} className="w-full flex items-start gap-2 px-3 py-2 text-left">
-                {open ? <ChevronDown className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: '#8b949e' }} /> : <ChevronRight className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: '#8b949e' }} />}
+                {open ? <ChevronDown className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: 'var(--text-muted)' }} /> : <ChevronRight className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: 'var(--text-muted)' }} />}
                 <span className="px-1.5 py-0.5 rounded text-xs font-semibold shrink-0" style={{ background: st.bg, color: st.fg, fontSize: 10 }}>{st.label}</span>
                 <span className="flex-1 min-w-0">
-                  <span className="text-sm" style={{ color: '#c9d1d9' }}>{f.problem}</span>
-                  <span className="flex items-center gap-2 mt-0.5 text-xs" style={{ color: '#6e7681' }}>
+                  <span className="text-sm" style={{ color: 'var(--text-body)' }}>{f.problem}</span>
+                  <span className="flex items-center gap-2 mt-0.5 text-xs" style={{ color: 'var(--text-faint)' }}>
                     <span className="font-mono truncate">{f.file}{f.line ? `:${f.line}` : ''}</span>
                     <span className="px-1 rounded" style={{ background: 'rgba(255,255,255,0.05)' }}>{f.category}</span>
                     {f.source !== 'ai' && (
@@ -462,7 +462,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
               {open && (
                 <div className="px-3 pb-3 pl-8 flex flex-col gap-2">
                   {f.suggestion && (
-                    <div className="rounded p-2 text-xs" style={{ background: '#0d1117', color: '#7ee787', border: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    <div className="rounded p-2 text-xs" style={{ background: 'var(--surface-base)', color: '#7ee787', border: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                       <span style={{ color: '#86efac', fontWeight: 600 }}>Suggested fix: </span>{f.suggestion}
                     </div>
                   )}
@@ -472,20 +472,20 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
                     if (dd?.result) {
                       const r = dd.result;
                       return (
-                        <div className="rounded p-2.5 text-xs flex flex-col gap-2" style={{ background: '#0d1117', border: '1px solid rgba(59,130,246,0.25)' }}>
-                          {r.rootCause && <div><span style={{ color: '#93c5fd', fontWeight: 600 }}>Root cause: </span><span style={{ color: '#c9d1d9' }}>{r.rootCause}</span></div>}
+                        <div className="rounded p-2.5 text-xs flex flex-col gap-2" style={{ background: 'var(--surface-base)', border: '1px solid rgba(59,130,246,0.25)' }}>
+                          {r.rootCause && <div><span style={{ color: '#93c5fd', fontWeight: 600 }}>Root cause: </span><span style={{ color: 'var(--text-body)' }}>{r.rootCause}</span></div>}
                           {r.fix && (
-                            <pre className="rounded p-2 overflow-x-auto" style={{ background: '#161b22', color: '#7ee787', border: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{r.fix}</pre>
+                            <pre className="rounded p-2 overflow-x-auto" style={{ background: 'var(--surface-card)', color: '#7ee787', border: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{r.fix}</pre>
                           )}
                           {r.explanation.length > 0 && (
                             <ol className="flex flex-col gap-1 list-none">
                               {r.explanation.map((s, k) => (
-                                <li key={k} className="flex items-start gap-1.5"><span style={{ color: '#60a5fa' }}>{k + 1}.</span><span style={{ color: '#c9d1d9' }}>{s}</span></li>
+                                <li key={k} className="flex items-start gap-1.5"><span style={{ color: '#60a5fa' }}>{k + 1}.</span><span style={{ color: 'var(--text-body)' }}>{s}</span></li>
                               ))}
                             </ol>
                           )}
                           {r.prevention.length > 0 && (
-                            <div style={{ color: '#8b949e' }}>
+                            <div style={{ color: 'var(--text-muted)' }}>
                               <span style={{ color: '#fcd34d', fontWeight: 600 }}>Prevent it: </span>{r.prevention.join(' ')}
                             </div>
                           )}
@@ -514,8 +514,8 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
         {/* Empty initial state */}
         {!running && !summary && !runError && (
           <div className="flex flex-col items-center justify-center h-full gap-3 opacity-40">
-            <FileSearch className="w-12 h-12" style={{ color: '#8b949e' }} />
-            <p className="text-sm text-center" style={{ color: '#8b949e' }}>
+            <FileSearch className="w-12 h-12" style={{ color: 'var(--text-muted)' }} />
+            <p className="text-sm text-center" style={{ color: 'var(--text-muted)' }}>
               Pick an app or repository above and NavBharatAI will read every file<br />and list the real problems it finds, with fixes.
             </p>
           </div>
@@ -527,7 +527,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
 
 const SourceTab: React.FC<{ active: boolean; onClick: () => void; icon: React.ReactNode; label: string }> = ({ active, onClick, icon, label }) => (
   <button onClick={onClick} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium"
-    style={{ background: active ? 'rgba(129,140,248,0.15)' : 'rgba(255,255,255,0.04)', color: active ? '#818cf8' : '#8b949e', border: `1px solid ${active ? 'rgba(129,140,248,0.4)' : 'rgba(255,255,255,0.08)'}` }}>
+    style={{ background: active ? 'rgba(129,140,248,0.15)' : 'rgba(255,255,255,0.04)', color: active ? '#818cf8' : 'var(--text-muted)', border: `1px solid ${active ? 'rgba(129,140,248,0.4)' : 'rgba(255,255,255,0.08)'}` }}>
     {icon}{label}
   </button>
 );
@@ -535,14 +535,14 @@ const SourceTab: React.FC<{ active: boolean; onClick: () => void; icon: React.Re
 const Choice: React.FC<{ selected: boolean; onClick: () => void; title: string; sub: string }> = ({ selected, onClick, title, sub }) => (
   <button onClick={onClick} className="w-full flex items-center gap-2 px-3 py-2 text-left rounded transition-colors"
     style={{ background: selected ? 'rgba(129,140,248,0.12)' : 'transparent' }}>
-    <span className="w-3 h-3 rounded-full shrink-0" style={{ border: `2px solid ${selected ? '#818cf8' : '#484f58'}`, background: selected ? '#818cf8' : 'transparent' }} />
+    <span className="w-3 h-3 rounded-full shrink-0" style={{ border: `2px solid ${selected ? '#818cf8' : 'var(--text-faint)'}`, background: selected ? '#818cf8' : 'transparent' }} />
     <span className="flex-1 min-w-0">
-      <span className="block text-sm truncate" style={{ color: '#c9d1d9' }}>{title}</span>
-      <span className="block text-xs truncate font-mono" style={{ color: '#6e7681' }}>{sub}</span>
+      <span className="block text-sm truncate" style={{ color: 'var(--text-body)' }}>{title}</span>
+      <span className="block text-xs truncate font-mono" style={{ color: 'var(--text-faint)' }}>{sub}</span>
     </span>
   </button>
 );
 
 const Empty: React.FC<{ text: string }> = ({ text }) => (
-  <p className="text-xs px-3 py-4 text-center" style={{ color: '#8b949e' }}>{text}</p>
+  <p className="text-xs px-3 py-4 text-center" style={{ color: 'var(--text-muted)' }}>{text}</p>
 );

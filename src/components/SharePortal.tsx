@@ -85,14 +85,14 @@ export function SharePortal() {
   if (phase === 'hidden') return null;
 
   const shell: React.CSSProperties = {
-    position: 'fixed', inset: 0, zIndex: 2147483602, background: '#0d1117',
+    position: 'fixed', inset: 0, zIndex: 2147483602, background: 'var(--surface-base)',
     display: 'flex', flexDirection: 'column', fontFamily: 'system-ui, sans-serif',
   };
 
   if (phase === 'loading' || phase === 'invalid' || phase === 'error') {
     return (
       <div style={{ ...shell, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <div style={{ maxWidth: 380, textAlign: 'center', color: '#c9d1d9' }}>
+        <div style={{ maxWidth: 380, textAlign: 'center', color: 'var(--text-body)' }}>
           <div style={{ fontSize: 30 }}>{phase === 'loading' ? '⏳' : '🔗'}</div>
           <p style={{ marginTop: 12, fontSize: 14 }}>{phase === 'loading' ? 'Loading shared app…' : message}</p>
         </div>
@@ -103,13 +103,13 @@ export function SharePortal() {
   return (
     <div style={shell} role="dialog" aria-label="Shared app review">
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', background: '#161b22', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', background: 'var(--surface-card)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
         <span style={{ fontSize: 16 }}>👀</span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ color: '#fff', fontSize: 13, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>
-          <div style={{ color: '#8b949e', fontSize: 10 }}>Read-only preview · shared for your review</div>
+          <div style={{ color: 'var(--text-primary)', fontSize: 13, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>Read-only preview · shared for your review</div>
         </div>
-        <span style={{ color: '#8b949e', fontSize: 10, border: '1px solid rgba(255,255,255,0.16)', borderRadius: 8, padding: '3px 8px' }}>Read-only</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 10, border: '1px solid rgba(255,255,255,0.16)', borderRadius: 8, padding: '3px 8px' }}>Read-only</span>
       </div>
 
       {/* Sandboxed app preview (no same-origin → cannot access the platform) */}
@@ -121,7 +121,7 @@ export function SharePortal() {
       />
 
       {/* Feedback bar */}
-      <div style={{ background: '#161b22', borderTop: '1px solid rgba(255,255,255,0.1)', padding: 12 }}>
+      <div style={{ background: 'var(--surface-card)', borderTop: '1px solid rgba(255,255,255,0.1)', padding: 12 }}>
         {phase === 'done' ? (
           <p style={{ color: '#3fb950', fontSize: 13, textAlign: 'center', margin: 0 }}>{message}</p>
         ) : (
@@ -147,14 +147,14 @@ export function SharePortal() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your name (optional)"
-                style={{ width: 180, background: '#0d1117', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 9, padding: '8px 10px', color: '#e6edf3', fontSize: 12 }}
+                style={{ width: 180, background: 'var(--surface-base)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 9, padding: '8px 10px', color: 'var(--text-body)', fontSize: 12 }}
               />
               <input
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 placeholder="Add a comment…"
                 onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
-                style={{ flex: 1, minWidth: 160, background: '#0d1117', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 9, padding: '8px 10px', color: '#e6edf3', fontSize: 12 }}
+                style={{ flex: 1, minWidth: 160, background: 'var(--surface-base)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 9, padding: '8px 10px', color: 'var(--text-body)', fontSize: 12 }}
               />
               <button
                 type="button"

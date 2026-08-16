@@ -832,6 +832,48 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // brand-new resumeBuild() call moments later, silently re-attaching that old build's stream —
   // this was a real path for a just-abandoned build to reappear after "+ New chat".
   const autoResumedRef = useRef(false);
+
+  /**
+   * 🔒 THE ONLY WAY TO RE-ATTACH TO A BUILD. Every Resume / Connect / auto-resume path goes through
+   * this, so none of them can be missing the recovery half.
+   *
+   * ADMIN REPORT 2026-08-16: *"app ban gayi thi — resume par click kiya — pura app wapas banne laga,
+   * sara data gayab, sari files gayab, sara preview gayab."*
+   *
+   * ROOT CAUSE, and it is a shape worth naming: the recovery below existed ALREADY (the "SAB CHALA
+   * GAYA" fix, IMG_5822/5823, 2026-07-12) — but it was bolted onto the AUTO-resume effect only. The
+   * two BUTTONS a user actually presses called `resumeBuild(...)` bare. So the exact failure that fix
+   * was written for came straight back through a different door, five weeks later.
+   *
+   * A fix attached to one call site is not a fix; it is a coincidence that holds until someone adds
+   * the next caller. Hence one function, and the buttons call THIS.
+   *
+   * What it does: attach to the build. If the attach comes back `gone-notice` — the build FINISHED
+   * (there is nothing left to attach to, which is exactly what pressing Resume on a completed app
+   * means) — restore the durable transcript, the same restore opening the chat from History performs.
+   * The transcript is PEEKED first and restored only when it genuinely has content, so a transcript
+   * that has not finished saving never blanks the banner.
+   *
+   * Note this is now the SECOND line of defence, not the first: `resume()` no longer discards the
+   * files, preview and checkpoints, so even if every restore below fails, the user's app stays on
+   * their screen. This layer puts the CONVERSATION back too.
+   */
+  const attachToBuild = useCallback(async (opts?: { workspaceId?: string; notice?: string }) => {
+    const outcome = await resumeBuild({
+      userId, email,
+      workspaceId: opts?.workspaceId ?? expectedWorkspaceId(),
+      ...(opts?.notice ? { notice: opts.notice } : {}),
+    });
+    if (shouldRestoreFinishedBuild(outcome) && sessionIdRef.current) {
+      const sid = sessionIdRef.current;
+      const restored = await loadConversation({ userId, email, id: `v3_${sid}` }).catch(() => null);
+      if (restored && restored.messages.length > 0 && sessionIdRef.current === sid) {
+        await openConversation(`v3_${sid}`, { silent: true });
+      }
+    }
+    return outcome;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, email, resumeBuild, loadConversation]);
   // Layer 3 — how many times a paused (time-limit) build has been auto-continued this turn.
   // SPM-3: in project mode the decision lives in decideAutoContinue (progress-monotone on
   // planRemaining); these refs are its inputs. autoContinueRef counts deadline pauses (reset on
@@ -849,23 +891,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     if (serverBuildRunning && !running && !autoResumedRef.current) {
       autoResumedRef.current = true;
-      void (async () => {
-        const outcome = await resumeBuild({ userId, email, workspaceId: expectedWorkspaceId() });
-        // "SAB CHALA GAYA" FIX (admin IMG_5822/5823, 2026-07-12): a build that FINISHED during the
-        // stream drop comes back 'gone-notice' — resume() wiped the live state and left only a "that
-        // build isn't running anymore" banner, so the chat showed just the prompt + banner and the
-        // preview was blank, even though the whole build is durable server-side. Auto-run the SAME
-        // durable restore the user gets by opening this chat from History — but PEEK the transcript
-        // first and only restore when it genuinely has content, so we never blank the banner on a
-        // transcript that hasn't finished saving yet.
-        if (shouldRestoreFinishedBuild(outcome) && sessionIdRef.current) {
-          const sid = sessionIdRef.current;
-          const restored = await loadConversation({ userId, email, id: `v3_${sid}` }).catch(() => null);
-          if (restored && restored.messages.length > 0 && sessionIdRef.current === sid) {
-            await openConversation(`v3_${sid}`, { silent: true });
-          }
-        }
-      })();
+      void attachToBuild();
     }
     if (!serverBuildRunning && !running) autoResumedRef.current = false; // re-arm only once genuinely idle again
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1989,7 +2015,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           persistSessionId(sessionId);
           autoRestoredSessionRef.current = sessionId;
           rehydratedWsRef.current = '';
-          await resumeBuild({ userId, email, workspaceId: row?.workspaceId, notice: 'This build is still running — re-attached to it live below.' });
+          await attachToBuild({ workspaceId: row?.workspaceId, notice: 'This build is still running — re-attached to it live below.' });
           return;
         }
         if (silent) return; // sticky auto-restore of a chat with nothing saved yet (resume-live already returned above) → quietly stay a blank new chat, never brand
@@ -3047,7 +3073,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             // A build is running server-side but this UI isn't attached → Resume + Stop.
             <div className="ml-auto flex items-center gap-1.5">
               <button
-                onClick={() => resumeBuild({ userId, email, workspaceId: expectedWorkspaceId() })}
+                onClick={() => { void attachToBuild(); }}
                 title="Open the running build — resume where it left off"
                 className="flex items-center gap-1 text-xs text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2 py-1"
               >
@@ -3429,7 +3455,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                         <Square className="w-3.5 h-3.5" /> Stop
                       </button>
                       <button
-                        onClick={() => resumeBuild({ userId, email, workspaceId: expectedWorkspaceId() })}
+                        onClick={() => { void attachToBuild(); }}
                         title="Connect to the build that's already running — attach and watch it live"
                         className="inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
                       >

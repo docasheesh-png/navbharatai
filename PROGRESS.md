@@ -33012,3 +33012,116 @@ bounded preview-repair heal is now given the EXACT fix instead of the generic pr
 No new flag (it only specialises an existing heal's prompt, adds no new pass). +1 test
 (spaFallbackRepairInstruction names both hazards + preserves the ordering rule + forbids touching working
 code). tsc clean (server); full suite green (15,638).
+
+## 2026-08-16 — Mitrify import autopsy (report a876b7bb): the split-brain preview, and three fixes that came out of it
+
+Admin sent the APK screen from a Mitrify GitHub import plus the build report, with two questions:
+*"preview port 5000 par tha, navbharat still stuck on 3000"* and *"isko aap kayi bar fix kar chuke ho"*.
+Both premises turned out to be wrong in an interesting way, and the real defect underneath was worse
+than the one reported.
+
+**FIRST, THE PREMISE, CORRECTED (rule 3).** The port was NOT wrong. The report proves the preview was
+genuinely serving on **3000** — we visited it and read rendered HTML, so the verdict was earned, not
+guessed. The repo's README says 5000, but the app reads `PORT` from the environment and we supplied
+3000, which it honoured. The old "wrong port" bug class (fixed by the flip system on both the Diagnose
+and import paths) did not recur here. Telling the admin "haan wahi purana bug hai" would have been
+agreeable and false.
+
+**THE ACTUAL ROOT CAUSE — a split brain (PR #2392).** The import path's background preview boot
+published its events through `emitLive`, which wrote STRAIGHT to the raw HTTP stream. The client saw
+them; the `AgentEventStream` that `lastPreviewUrl` subscribes to never did. So the user's Preview tab
+showed a working app while the build's own state believed no preview existed. From that ONE missing
+wire, three lies in a single report:
+1. the summary told the user *"The live preview didn't start automatically — click Diagnose"* while it
+   was up and verified;
+2. `RELEASE_GATE` swore *"no live preview was ever available"* — false, in the feature whose only job
+   is honesty;
+3. **the expensive one:** every post-build runtime check is gated on `lastPreviewUrl` — preview verify,
+   route smoke, page check, journey check, and the deterministic dev-server-restart net. All of them
+   silently skipped. The blindness did not merely misreport the build; it DISARMED the recovery built
+   for exactly the failure the user then hit 22 seconds later (E2B "Closed Port Error"). `emitLive` now
+   routes through `events.emit`, whose subscriber forwards to the raw stream — client delivery
+   byte-identical, and the build's own state finally sees what the user sees.
+
+**SIBLINGS FOUND IN THE SAME AUTOPSY:**
+- **Phase leak (#2392):** `'checking the live preview'` was entered and never exited, so heartbeats told
+  the user *"checking the live preview, 293s"* for five minutes while the build ran model calls.
+- **npm ENOTEMPTY race (#2392):** the pre-migration install died with
+  `ENOTEMPTY … rmdir node_modules/yargs/build/lib/utils` (exit 217) — an npm-on-overlayfs race with
+  nothing wrong in the project — so the migration was SKIPPED and the dev server booted against an empty
+  database. The identical install succeeded 19s later, which is this class's signature. The reactive heal
+  (retry the migration after boot) already existed; this is the UPSTREAM half per the 50/50 law:
+  `_npmInstall` now retries ONCE on the narrow fs-race errnos named by `isTransientNpmFsFailure`.
+  Deterministic failures (ERESOLVE / E404 / EINTEGRITY / ETARGET) are pinned as never-retried, even when
+  fs noise appears in the same log.
+- **The 226-second hole (#2394) — the biggest win, and it was not in the reported symptom at all.**
+  The report had 226s of main-thread silence between "import SUCCEEDED" and the first model call, with
+  no entry recorded in it. Cause: `listFiles` called `sb.files.list(root, { depth: 10 })`, enumerating
+  EVERYTHING including `node_modules`, and only then dropped the ignored dirs with a client-side filter —
+  paying to transfer a tree it was about to discard, while the background boot's `npm install` was
+  filling it. ⚠️ **This is a per-TURN tax on every large app**, not an import cost: the File Guardian
+  calls `collectWorkspaceFiles` → `listFiles` before the agent edits anything. **FOURTH instance of one
+  bug class** (after the 648s sandbox landing, the Firestore merge, and the 790s serial reads in
+  `WorkspaceFiles.ts`) — per-file work over a network for files we do not want, fixed the same way every
+  time: move the work OFF the wire. `find` now prunes inside the sandbox (~170 paths cross instead of
+  ~100,000), with the prune list derived from `IGNORED_LIST_DIRS` so it cannot drift from the filter it
+  mirrors, and a fall-through to the original enumeration on any failure or empty result.
+
+**THE META-FIX (#2396) — the report now names its own silent minutes.** Finding that 226s took diffing
+timestamps by hand a week after the report was filed, even though the report CONTAINED the answer.
+`TIME_TO_FIRST_CALL` now appends the longest unrecorded stretch and what preceded it. Deliberately
+DERIVED from the already-stamped timeline rather than from new timers: hand-placed timers only measure
+stretches somebody already suspected, and the whole problem was one nobody suspected — this finds the
+next one on code paths that do not exist yet, with nothing to maintain. It names WHEN, never WHY, and a
+test pins that wording; this same line was previously fixed for blaming setup for a model call's latency,
+and a diagnostic that implies blame sends the next reader to the wrong subsystem.
+
+**OPEN ROOT CAUSE (rule 6) — why the dev server DIED cannot be proven from this report.** The sandbox and
+its process table are gone. Two independent nets now cover it: the dev-server watchdog (armed at boot,
+15s interval, 5 revivals) and the now-unblinded advisory restart. If a future report shows the server
+still dying with BOTH armed, that report will name the killer. Not claimed as fixed.
+
+**Ledger:** ✅ 2 self-healed (dev-server restart; migration retry) · 🔀 0 workarounds · ⏭️ 1 skip
+(migration, later healed) · ❌ 3 shipped imperfect (all three fixed above) · 🥵 3 struggles
+(330s time-to-first-call, the ENOTEMPTY race, the lying heartbeat).
+
+## 2026-08-15/16 — Same session, earlier: APK alias misdiagnosis, honest emoji, Android bundle
+
+- **PR #2382 — "a picture is not a library".** An APK build was blocked with *"it uses a library
+  (`@assets/…png`) that is not set up"*. It is a picture. `packageNameFromSpecifier` excluded exactly ONE
+  path alias (`@/`) out of a whole family, so every other Vite alias was read as a scoped npm package,
+  reported missing, and the auto-repair went to install something that cannot exist. Fixed by
+  `isLocalFileSpecifier` (alias prefixes + asset extensions), which both the build-time installer and the
+  APK gate share. `@types/` is deliberately NOT in the alias list and the code says why — including it was
+  the first attempt and it made every `@types/*` invisible; the existing devDependencies test caught it.
+  The user-facing sentence now distinguishes an image from a library, because classifying correctly is
+  worthless if the message still points the user (and the repair pass) at the wrong problem.
+  **Sibling in the same PR:** `import logo from './logo.png'` — the most ordinary line in any app — was
+  ALSO blocking APK builds, because the durable store is text-only so no `.png` is ever in the file map
+  these checks run against. A verdict that is wrong 100% of the time carries no information;
+  `isBinaryAssetSpecifier` makes both the mobile preflight and the architecture report say nothing rather
+  than "missing". `.svg`/`.css` are text, ARE persisted, and are still checked.
+  ⚠️ **OPEN ROOT CAUSE:** there is still no durable index of binary asset PATHS, so the platform cannot
+  tell a present image from an absent one — only that it must not claim. The complete fix is to persist
+  asset paths (no content) at save time; deliberately not bundled into a build-unblocking change.
+
+- **PR #2390 — emoji that cannot mock the user.** Admin asked for emoji in every v5 reply, naming the
+  danger in the same breath: *"app bani nahi aur emoji 😂😍😁 aa gaye to user ka majak banane jaisa
+  lagega"*. A prompt cannot promise that, so it shipped in two halves: `EMOJI_RULE` teaches placement and
+  a subject vocabulary (one at the start of a step, matched to the thing), and `sanitizeResponseEmoji`
+  is the guarantee — celebration emoji are REMOVED from any message whose real outcome is not a success.
+  Applied inside `AgentEventStream.emit` (one choke point, same discipline as the white-label redaction)
+  plus `honestResultEvent` for the final `result` event on the raw stream, and sanitized BEFORE buffering
+  so a late-mounting surface replays the same honest text. The outcome comes from the event's own `ok`
+  flag, never from the words — pinned by a test where *"🎉 Successfully built your app!"* emitted with
+  `ok:false` loses its emoji. Narrow on purpose: ✅⚠️❌📄🗄️🔐 survive a failure untouched, a genuine
+  success keeps its 🎉, and emoji RUNS collapse to the first on every outcome.
+  ⚠️ **Deliberate deviation, stated to the admin:** the ask was *"jitne bhi ho sake"* (as many as
+  possible). Built as one emoji per meaningful anchor instead — maximum density reads as cheap and fights
+  the "meaningful" half of the same sentence. One line to loosen if real builds read too plain.
+
+- **Android bundle:** `.aab` workflow run **#71** green on `main` (signed `.aab` + universal `.apk`
+  artifacts). The Play upload step is SKIPPED — no Play service-account secret — so the upload remains the
+  admin's manual step (rule 6 boundary, unchanged). This bundle is what carries the session's FRONTEND
+  work (voice typing, zip import, Sonic, Settings regroup, Other-AI regroup, image gen) to installed
+  Android users; server-side fixes reached them on merge via Cloud Run.

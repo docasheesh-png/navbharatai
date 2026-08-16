@@ -18,6 +18,7 @@ import {
   type MotionMode, getStoredMotionMode, applyMotionMode,
   getStoredFontScale, applyFontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_STEP, FONT_SCALE_DEFAULT,
 } from '../../lib/a11y';
+import { readTapFeedbackPrefs, writeTapFeedbackPrefs, type TapFeedbackPrefs } from '../../lib/tapFeedbackPrefs';
 import { SettingsScreen, ViewType, ApiKeys, PROVIDER_CONFIG } from '../../types';
 import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { THEME_MODES } from '../../lib/theme';
@@ -169,6 +170,67 @@ function MotionModeControl() {
             className={`p-3 rounded-xl border font-black text-[10px] uppercase tracking-widest transition-colors ${mode === o.id ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-[#161b22] text-[#8b949e] border-white/5 hover:text-white'}`}
           >
             {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Touch feedback — the click sound and the vibration (Settings → General Settings).
+ *
+ * ADMIN REQUEST 2026-08-16: "har touch par click sound ya vibration hota hai — user jab chahe on/off
+ * kar sake. default: sound=on, vibration=off."
+ *
+ * Two independent switches, not one three-way choice, because they are genuinely independent: a user
+ * on a train may want silence AND a buzz; a user in a meeting may want neither. Forcing "one or the
+ * other" would make a real combination unreachable.
+ *
+ * The change takes effect on the VERY NEXT TAP — `installTapHaptics` reads the preference per tap
+ * rather than at boot — so this control can never become a switch that does nothing until restart.
+ * Self-contained state, same pattern as MotionModeControl above.
+ */
+function TouchFeedbackControl() {
+  const [prefs, setPrefs] = React.useState<TapFeedbackPrefs>(() => readTapFeedbackPrefs());
+  const set = (patch: Partial<TapFeedbackPrefs>) => setPrefs(writeTapFeedbackPrefs({ ...prefs, ...patch }));
+  const rows: { key: keyof TapFeedbackPrefs; icon: string; label: string; hint: string }[] = [
+    { key: 'sound', icon: '🔊', label: 'Click sound', hint: 'A soft tick when you tap. Follows your phone\'s silent mode.' },
+    { key: 'vibration', icon: '📳', label: 'Vibration', hint: 'A short buzz when you tap. Off by default — it can feel heavy on some phones.' },
+  ];
+  return (
+    <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
+      <div className="flex items-center gap-4 mb-4">
+        <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">👆</div>
+        <div>
+          <div className="text-sm font-bold text-white">Touch feedback</div>
+          <div className="text-[11px] text-[#8b949e] mt-0.5 max-w-xs">What the app does when you tap something. Changes apply straight away.</div>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {rows.map((r) => (
+          <button
+            key={r.key}
+            type="button"
+            role="switch"
+            aria-checked={prefs[r.key]}
+            aria-label={r.label}
+            onClick={() => set({ [r.key]: !prefs[r.key] } as Partial<TapFeedbackPrefs>)}
+            className="w-full flex items-center gap-3 p-3 min-h-[44px] rounded-xl border bg-[#161b22] border-white/5 hover:border-white/20 transition-colors text-left"
+          >
+            <span className="text-base shrink-0" aria-hidden="true">{r.icon}</span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-[11px] font-black text-white uppercase tracking-widest">{r.label}</span>
+              <span className="block text-[10px] text-[#586069] leading-relaxed mt-0.5">{r.hint}</span>
+            </span>
+            {/* The switch itself. aria-checked above carries the state for a screen reader, so this
+                is decoration — hence aria-hidden, not a second announcement of the same fact. */}
+            <span
+              aria-hidden="true"
+              className={`w-10 h-6 rounded-full shrink-0 p-0.5 transition-colors ${prefs[r.key] ? 'bg-indigo-600' : 'bg-[#30363d]'}`}
+            >
+              <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${prefs[r.key] ? 'translate-x-4' : ''}`} />
+            </span>
           </button>
         ))}
       </div>
@@ -673,6 +735,9 @@ export function SettingsPanel({
                         <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">Accessibility</label>
                         <MotionModeControl />
                         <FontScaleControl />
+                        {/* Touch feedback sits under Accessibility deliberately: for a user who finds
+                            the tick or the buzz distracting, this IS an accessibility control. */}
+                        <TouchFeedbackControl />
                      </div>
 
                      {/* The "Description" textarea was REMOVED here (admin 2026-08-14). It was

@@ -33687,3 +33687,32 @@ the "Killed right after ready" failure this module exists to prevent.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1277 files / 15838 tests passed** · `npm run build` OK.
+
+## 2026-08-16 — The 76 MB prompt: two copies in memory, and a headline that read as a glitch
+
+Follow-on from the debc468c autopsy. That report carried `promptChars: 76,543,256` beside
+`inputTokens: 24,853`, and on first pass I wrote it off as "telemetry corruption". That was wrong,
+and being wrong about it is the interesting part: **both numbers were true.** `promptChars` is the
+system prompt plus the last message BEFORE the transcript compactor trims it; `inputTokens` is what
+the provider actually received after. Printed side by side with no explanation, a true pair reads as
+a broken one — and a reader who concludes "glitch" stops investigating, which is what I did.
+
+The number was in fact the loudest signal in the whole file: **one step produced a ~76 MB tool
+result** — a file read far larger than anything a build should read — which the compactor then threw
+away. Nothing charged the user for it, so no cost line showed it, and its only trace was a field
+that looked like noise.
+
+**Two real defects, both fixed:**
+
+1. **Memory.** `AgentRunner` built `promptPreview` by CONCATENATING the whole system prompt with the
+   whole last message — a second 76 MB string — purely to store ~800 characters of its head. Two
+   copies of 76 MB, every turn, in a container with a fixed memory ceiling. The size is now SUMMED
+   (still exact) and the preview built from bounded slices, so the giant string is never created.
+2. **Honesty.** `recordLlmCall` now raises `HUGE_PROMPT_DISCARDED` past 8 MB, stating the size, what
+   the model actually received, and the likely cause (a lockfile / bundle / minified asset read).
+   The threshold sits far above a legitimately large build — a big real prompt is a few hundred KB,
+   and the compactor exists because ~233 KB once timed the cheap floor out — so it cannot become
+   noise the reader learns to skip.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1277 files / 15840 tests passed** · `npm run build` OK.

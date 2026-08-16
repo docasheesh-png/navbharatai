@@ -1477,3 +1477,31 @@ describe('counts — an OBSERVATION is neither a self-heal nor an unresolved def
     expect(c.unresolved).toBe(0);   // and excluding info from heals must not turn it into "unresolved"
   });
 });
+
+describe('HUGE_PROMPT_DISCARDED — the buried headline', () => {
+  it('flags a prompt built at MB scale that the model never received', () => {
+    // Autopsy debc468c: the report carried promptChars 76,543,256 beside inputTokens 24,853. Both
+    // true, measuring different things (pre- vs post-compaction), and side by side with no
+    // explanation the pair reads as broken telemetry — which is what stopped the first pass at it.
+    const d = new BuildDiagnostics();
+    d.recordLlmCall({
+      model: 'kimi-k2.5', promptChars: 76_543_256, responseChars: 0, finishReason: 'tool_use',
+      toolCalls: 2, inputTokens: 24_853, outputTokens: 98, latencyMs: 3787, ok: true,
+    });
+    const found = d.report().issues.filter((i) => i.code === 'HUGE_PROMPT_DISCARDED');
+    expect(found).toHaveLength(1);
+    expect(found[0].severity).toBe('warning');
+    expect(found[0].message).toContain('73 MB');
+    expect(found[0].detail).toContain('inputTokens=24853');
+  });
+
+  it('stays silent for an ordinary large prompt', () => {
+    // A few hundred KB is a normal big build. Firing here would train the reader to ignore the code.
+    const d = new BuildDiagnostics();
+    d.recordLlmCall({
+      model: 'kimi-k2.5', promptChars: 400_000, responseChars: 10, finishReason: 'tool_use',
+      toolCalls: 1, inputTokens: 90_000, outputTokens: 50, latencyMs: 100, ok: true,
+    });
+    expect(d.report().issues.some((i) => i.code === 'HUGE_PROMPT_DISCARDED')).toBe(false);
+  });
+});

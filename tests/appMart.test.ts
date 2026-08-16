@@ -124,4 +124,20 @@ describe('the phone layout the admin drew: 2-up squares, App Mart 2x1 across the
     expect(home).toContain("btnLabelShort: 'Free Chat'");
     expect(home).toContain('btnLabelShort ?? card.btnLabel');
   });
+
+  it('ONLY the 2x1 tile carries an extra line — a square has no room for one', () => {
+    /**
+     * Admin: "poora description nahi chahiye, bas main main 1 ya 2 line kafi hai." Tried it on all
+     * five and MEASURED: in a 158px square the line was clipped mid-word behind the button. On a
+     * square the two lines are the title and the SUBTITLE, which already says what the card is
+     * ("Free AI Chat", "Agentic App Builder") — a tagline there was both a duplicate and an
+     * overflow. The wide tile has the room, so it alone gets the third line.
+     *
+     * Clean at 360, 390 and 430px, checked by asserting every element sits inside its tile and no
+     * text is cut — the check that catches what `scrollHeight` on the container misses.
+     */
+    const taglines = home.match(/phoneTagline:/g) ?? [];
+    expect(taglines, 'exactly one tile may carry a phone tagline').toHaveLength(1);
+    expect(home).toMatch(/phoneTagline: 'Games & apps by other creators[^']*'/);
+  });
 });

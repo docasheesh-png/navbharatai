@@ -151,7 +151,7 @@ const PRODUCT_CARDS = [
     featureIcon: CheckCircle2,
     featureColor: 'text-emerald-400',
     btnClass: 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white',
-    phoneTagline: 'Games & apps by other creators — play free, nothing to install',
+    phoneTagline: 'Games & apps by other creators — free to play',
     btnLabel: 'Open App Mart',
     btnLabelShort: 'Open App Mart',
     btnIcon: Play,
@@ -308,7 +308,7 @@ export const HomeView = ({
                   </div>
 
                   {(card as { phoneTagline?: string }).phoneTagline && (
-                    <p className="sm:hidden text-[#8b949e] text-[11px] leading-snug">
+                    <p className="sm:hidden text-[#8b949e] text-[10px] leading-snug shrink-0 truncate">
                       {(card as { phoneTagline?: string }).phoneTagline}
                     </p>
                   )}

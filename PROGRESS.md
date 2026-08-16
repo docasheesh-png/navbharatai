@@ -33223,3 +33223,16 @@ and App Mart **358×179**, exactly the spec.
   bullets). This is a phone layout, not a downgrade.
 
 Pinned by 5 more tests in `tests/appMart.test.ts` (18 total).
+
+**Correction the same session (admin: "poora description nahi chahiye, bas main main 1 ya 2 line"):**
+tried a short line on ALL five tiles and MEASURED the result — in a 158px square (360px phone) the
+line was clipped mid-word behind the button. So only the 2x1 tile carries an extra line; on a square
+the two lines ARE the title and the subtitle, which already say what the card is ("Free AI Chat",
+"Agentic App Builder") — a tagline there was both a duplicate and an overflow. The wide tile's line
+was shortened until it fits on one line rather than being cut at "nothing to".
+
+⚠️ **The measurement that mattered, for whoever tunes these tiles next:** checking
+`scrollHeight > clientHeight` on the CARD reported zero problems while text was visibly cut — a flex
+column squeezes its children instead of growing, so the container never overflows. The check that
+actually catches it walks every child (`h2, p, button, ul`) and asserts its box sits inside the
+card's box AND that the element's own text is not clipped. Clean at 360, 390 and 430px.

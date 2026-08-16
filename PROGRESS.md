@@ -33808,3 +33808,48 @@ did not pick it, so it stays unbuilt rather than half-built.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1278 files / 15855 tests passed** · `npm run build` OK.
+
+## 2026-08-16 — The three-screen contract: phone | tablet | desktop (admin: "sabhi 3 cheezo ke liye sikhao")
+
+The HUD rule shipped an hour earlier only distinguished touch from desktop. The admin asked for all
+three explicitly, and that turned out to be the more important request: **the per-page contract had
+five points and said nothing about form factors at all**, so "works on a phone" was left to luck, and
+tablet was named nowhere in the entire architect prompt.
+
+**Tablet is the one that gets skipped AND the one that breaks**, for a reason worth writing down: it
+is the only device that is wide like a desktop and touch like a phone at the same time. A width-only
+breakpoint therefore gives it one of two obviously-wrong results — the desktop's three or four columns
+squeezed narrower, or the phone's single column stretched into a lonely strip between huge empty
+margins. Both are immediately visible to whoever is holding it.
+
+So the rule taught is not "add a tablet breakpoint". It is:
+
+> **SIZE decides the LAYOUT. INPUT decides the CONTROLS.**
+
+Two separate questions, and collapsing them into one is precisely what breaks tablets. Layout goes by
+width (phone = one column, tablet = two, desktop = full with a max-width); controls go by CAPABILITY
+— `@media (pointer: coarse)` for 44×44px targets, `@media (hover: hover)` for hover effects, with the
+hard rule that **hover may never be the only route to an action** (a hover-only menu is not degraded
+on touch, it is unreachable). Width cannot answer that question: a tablet is wide and touch, a
+touchscreen laptop is both.
+
+Added alongside it, because each is a real failure and none was stated anywhere:
+- **Height is a screen size too.** A phone in LANDSCAPE — how most people hold a game — is wide but
+  very short, and a header sized for portrait eats a third of it. Tablets are rotated constantly, so
+  BOTH orientations must work.
+- `100dvh` not `100vh`, `env(safe-area-inset-*)` on anything pinned to an edge, and no fixed pixel
+  width beyond ~320px on content (the cause of a phone page scrolling sideways).
+
+The game HUD rule was extended to the same three machines with the specifics that differ per device:
+phone-portrait (controls in the bottom corners where thumbs rest), phone-landscape (the HUD must
+SHRINK, not stack into more rows), **tablet** (keep touch controls and keep them near the bottom
+corners — do not stretch them to the far edges of a 12-inch screen where no thumb reaches; scale the
+playfield up, not the controls), and desktop (hide the joystick, support keys properly, cap the
+playfield with a max-width rather than sprawling across an ultrawide).
+
+Test-locked, including that the sixth point travels to EVERY framework — the five-point contract
+explicitly still applies on Remix/Astro/Lit where the CSS kit classes do not exist, so the sixth had
+to as well or those scaffolds would silently lose it.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1281 files / 15886 tests passed** · `npm run build` OK.

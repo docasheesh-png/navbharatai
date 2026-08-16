@@ -33853,3 +33853,47 @@ to as well or those scaffolds would silently lose it.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1281 files / 15886 tests passed** · `npm run build` OK.
+---
+
+## 2026-08-16 — App Mart: publish ONLY apps NavBharatAI built — device-upload hole closed (admin)
+
+**Admin report.** In App Mart → Publish, the "Your app file" button let a user upload ANY `.apk` from
+their device (`POST /api/nav-store/submit`). Admin: *"nahi mujhe yeh nahi chahiye — wahi app publish kar
+sakta hai jo navbharatai ne banayi hai. only wahi. na github na .zip na kuch aur! … kisi aur ka banaya
+virus nahi!! (haan navbharatai dwara banayi app github par hai to bhi publish ho sakti hai)."*
+
+**The galgi (root cause).** The device-upload route ingested an untrusted SOURCE — the malware scan +
+admin review sat DOWNSTREAM of "whose app is this at all". It also contradicted the store's own stated
+rule (`navStore.ts`: "the store carries only apps NavBharatAI built"). The legit path already existed:
+`PublishToNavStore.tsx` → `/api/nav-store/publish-from-build`, which pulls a NavBharatAI build artifact
+from the user's OWN GitHub Actions server-side — so the "NavBharatAI app on GitHub" case is exactly this
+path, no device file.
+
+**Fix.**
+- **Server (`navStore.ts`):** removed `POST /api/nav-store/submit` entirely, plus its now-dead helpers
+  (`decodeUpload`, the `fs`/`claimUpload` imports). Made `ingestApkSubmission`'s `provenance` param
+  REQUIRED (`{ source: 'navbharatai-build'; repo; artifactId }`) — so NO code path, today or future, can
+  ingest device/arbitrary bytes. The invariant is enforced at the data-entry point (rule 4), not by
+  deleting one route.
+- **App Mart Publish tab (`NavAppStore.tsx`):** removed the file input + manual submit + all its dead
+  state/imports. It now honestly explains publishing is only from a finished NavBharatAI build ("no app
+  file to upload — a device file could be anyone's app") with the 3-step how-to (open your app → build
+  APK → "Publish to Nav App Store" beside Download).
+- **Made the now-ONLY path actually work (rule 2 — found 3 real pre-existing contract bugs in
+  `PublishToNavStore.tsx` vs `validateSubmission`):** (1) it never sent `acceptedTerms` (server requires
+  it) → would 400 every time; (2) its category list offered `Health`/`Other` (not in `STORE_CATEGORIES`)
+  and omitted `Food & Drink`/`Games`/… → a category pick could 400; (3) `description` was optional in UI
+  but required ≥30 chars server-side. Added the consent checkbox, aligned the category list to
+  `STORE_CATEGORIES` exactly, and made `ready` mirror `validateSubmission` so the button is only enabled
+  when the submit will pass. Source-contract tests lock the category lists together and assert the
+  consent is collected.
+- **Tests:** migrated `navStoreRoutes.test.ts` to drive `publish-from-build` (mocked `fetchBuildArtifact`)
+  — every ingest guarantee (signed-apk, malicious refused + never stored, unavailable = no publish,
+  suspicious = pending+flagged, not-an-app 422, pending-only, provenance recorded, expired-artifact 404)
+  now tested through the surviving door; `navStorePublishFromBuild.test.ts` updated (1 ingest call not 2;
+  `/submit` gone; provenance required; button collects consent; categories match); pruned the removed
+  `/submit` transport assertions from `zipUpload.test.ts`/`apkInspect.test.ts`.
+- **AppKnowledgeBase:** `nav_app_store` description + howToUse rewritten — publishing is build-only, no
+  file upload.
+
+Gate: `tsc --noEmit` + `tsc -p tsconfig.server.json` clean; full `vitest` green (15,721).

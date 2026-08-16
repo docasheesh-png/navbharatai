@@ -39,6 +39,7 @@ describe('the store advertises and enforces the SAME derived limit', () => {
 
   it('the 413 refusal uses the same derived cap, so it can never contradict the promise', () => {
     expect(STORE).toContain('const publishCap = publishableApkLimitBytes(MAX_APK_BYTES, MAX_SCANNABLE_BYTES)');
-    expect(STORE).toContain('if (bytes.length > publishCap)');
+    // publish-from-build is the only ingest door now; the bytes come from the fetched build artifact.
+    expect(STORE).toContain('if (got.bytes.length > publishCap)');
   });
 });

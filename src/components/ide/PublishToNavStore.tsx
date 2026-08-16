@@ -26,7 +26,14 @@ interface Props {
   defaultAppName?: string;
 }
 
-const CATEGORIES = ['Productivity', 'Education', 'Business', 'Health', 'Finance', 'Social', 'Entertainment', 'Tools', 'Other'];
+// MUST match STORE_CATEGORIES in src/server/routes/navStore.ts exactly — validateSubmission rejects any
+// category not on the server's list, and this is now the ONLY way to publish, so a mismatch is a real
+// 400 the user cannot get past. A source-contract test (navStorePublishFromBuild.test.ts) locks the two
+// lists together so they can never drift apart again.
+const CATEGORIES = [
+  'Business', 'Education', 'Entertainment', 'Finance', 'Food & Drink', 'Games',
+  'Health & Fitness', 'Lifestyle', 'News', 'Productivity', 'Shopping', 'Social', 'Tools', 'Travel',
+];
 
 export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultAppName }: Props) {
   const [open, setOpen] = useState(false);
@@ -41,10 +48,13 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
     versionName: '1.0.0',
     developerName: '',
     developerEmail: '',
+    // The server REQUIRES this consent (validateSubmission) — it is what makes a takedown enforceable.
+    acceptedTerms: false,
   });
 
-  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
+  const set = (k: 'appName' | 'shortDescription' | 'description' | 'category' | 'versionName' | 'developerName' | 'developerEmail') =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+      setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const submit = async (): Promise<void> => {
     setBusy(true); setError(''); setDone('');
@@ -95,7 +105,16 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
     );
   }
 
-  const ready = form.appName.trim() && form.shortDescription.trim() && form.developerName.trim() && form.developerEmail.trim();
+  // Mirror the server's validateSubmission so the button is only enabled when the submit will actually
+  // pass — otherwise the user meets a silent 400. (Server stays the source of truth; this only prevents
+  // a doomed request.)
+  const ready =
+    form.appName.trim().length >= 2 &&
+    form.shortDescription.trim().length >= 10 &&
+    form.description.trim().length >= 30 &&
+    form.developerName.trim().length >= 2 &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(form.developerEmail.trim()) &&
+    form.acceptedTerms;
 
   return (
     <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.04] p-4 space-y-3">
@@ -117,7 +136,7 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
           className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
         <input value={form.shortDescription} onChange={set('shortDescription')} placeholder="One line about your app"
           className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
-        <textarea value={form.description} onChange={set('description')} placeholder="Longer description (optional)" rows={3}
+        <textarea value={form.description} onChange={set('description')} placeholder="What does your app do? (at least 30 characters)" rows={3}
           className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
         <div className="grid grid-cols-2 gap-2">
           <select value={form.category} onChange={set('category')}
@@ -134,6 +153,19 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
             className="bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
         </div>
       </div>
+
+      <label className="flex items-start gap-2.5 text-[11px] text-white/60 leading-relaxed cursor-pointer">
+        <input
+          type="checkbox"
+          checked={form.acceptedTerms}
+          onChange={(e) => setForm((f) => ({ ...f, acceptedTerms: e.target.checked }))}
+          className="mt-0.5 accent-emerald-500 flex-shrink-0"
+        />
+        <span>
+          I made this app with NavBharatAI or have the right to publish it, it contains no malware, and I
+          understand it will be removed if it harms users.
+        </span>
+      </label>
 
       <button
         onClick={() => void submit()}

@@ -82,10 +82,12 @@ describe('zip-upload route contract', () => {
   });
 });
 
-// claimUpload — the seam that let the Nav App Store stop base64-ing a 150 MB APK into a JSON body.
+// claimUpload — the chunked-upload seam. It hands a fully-assembled temp file to a caller ONCE, only to
+// the user who uploaded it. It powers the large-zip IMPORT path (routes/zip.ts). (The Nav App Store no
+// longer uses it: its device-upload route was removed on 2026-08-16 — the store now carries only apps
+// NavBharatAI built, published straight from the build with no file to upload.)
 describe('claimUpload contract', () => {
   const SRC = readFileSync(fileURLToPath(new URL('./zipUpload.ts', import.meta.url)), 'utf8');
-  const STORE = readFileSync(fileURLToPath(new URL('./navStore.ts', import.meta.url)), 'utf8');
 
   it('transfers ownership so the temp file cannot be claimed twice', () => {
     expect(SRC).toContain('pending.delete(uploadId); // ownership transfers to the caller');
@@ -93,49 +95,6 @@ describe('claimUpload contract', () => {
 
   it('only the uploading user can claim (reuses the same ownership check)', () => {
     expect(SRC).toContain('if (!uploadOwnedBy(u, uid)) return null;');
-  });
-
-  it('the store prefers the chunked upload and still deletes the temp file on every path', () => {
-    expect(STORE).toContain('claimUpload(body.uploadId, me?.uid ?? null)');
-    // Every early return AFTER the upload is claimed must delete the temp file first. Scoped to the
-    // post-claim region on purpose: returns BEFORE the claim (e.g. form validation) have no temp file
-    // to clean, and the 30-minute sweep covers an upload the client never submits.
-    // Asserted STRUCTURALLY, not as an exact string — an earlier version of this test pinned literal
-    // whitespace and broke when the 413 branch was reformatted, flagging formatting rather than a defect.
-    // Scope starts where cleanup becomes POSSIBLE (the helper's definition), not at the claim: the
-    // returns above it either predate any temp file (form validation) or fire because the claim
-    // itself failed, so there is nothing to delete. Bounding it correctly is the difference between
-    // testing the invariant and testing an accident of line order.
-    const claimAt = STORE.indexOf('const cleanupUpload =');
-    expect(claimAt).toBeGreaterThan(-1);
-    // The region ends where the temp file provably stops mattering: the handoff to the shared ingest
-    // pipeline, which runs on bytes already in memory. This used to be bounded by `inspectApk`, which
-    // moved into that shared function when publish-from-build needed the same pipeline — the
-    // invariant did not change, only where the boundary lives. (Verified by reading the route: every
-    // return between the claim and the handoff calls cleanupUpload, and the unconditional cleanup is
-    // now the LAST statement before the handoff, so nothing after it can leak a temp file.)
-    const scanEnd = STORE.indexOf('await ingestApkSubmission(bytes');
-    expect(scanEnd).toBeGreaterThan(claimAt);
-    const postClaim = STORE.slice(claimAt, scanEnd);
-    const earlyReturns = [...postClaim.matchAll(/return res\.status\((\d{3})\)/g)];
-    expect(earlyReturns.length).toBeGreaterThan(1); // both the 400 and the 413 paths
-    for (const m of earlyReturns) {
-      // Check the SAME BLOCK, not "anywhere earlier in the function". Verified by deleting the 413
-      // branch's cleanup: the looser version still passed, because the 400 branch's cleanup sat
-      // earlier in the string and satisfied it — a test that proved nothing.
-      const blockStart = postClaim.lastIndexOf('{', m.index);
-      const block = postClaim.slice(blockStart, m.index);
-      expect(block).toContain('cleanupUpload()');
-    }
-  });
-
-  it('the legacy base64 path is kept, so small submissions that worked still work', () => {
-    expect(STORE).toContain('decodeUpload(body.apkBase64)');
-  });
-
-  it('the APK still passes the real inspection + malware scan (transport changed, safety did not)', () => {
-    expect(STORE).toContain('await inspectApk(bytes)');
-    expect(STORE).toContain('await scanFile(bytes, facts.sha256)');
   });
 });
 

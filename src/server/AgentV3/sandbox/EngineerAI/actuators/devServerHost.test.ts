@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, pipesOrChainsToAnotherCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH , buildHttpLivenessCommand, devServerWatchdogCommand, parseDevServerWatchdogLog, DEV_SERVER_WATCHDOG_MARKER, DEV_SERVER_WATCHDOG_LOG } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, pipesOrChainsToAnotherCommand, runsUnderMultiplexer, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH , buildHttpLivenessCommand, devServerWatchdogCommand, parseDevServerWatchdogLog, DEV_SERVER_WATCHDOG_MARKER, DEV_SERVER_WATCHDOG_LOG } from './devServerHost';
 
 describe('isNodeServerCommand (Mitrify node-express import fix 2026-07-24)', () => {
   it('detects a direct Node server launcher (tsx/ts-node/node/nodemon on a server entry)', () => {
@@ -1014,5 +1014,42 @@ describe('env prefixes survive a pipeline (autopsy debc468c — the 5173-vs-5000
   it('respects a port the command already pins', () => {
     expect(pinDevServerPort('PORT=8080 npm run dev | head -5', 5173, undefined, NODE_SCRIPT))
       .toBe('PORT=8080 npm run dev | head -5');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// THE FLAG LANDED ON `concurrently` (admin report 2026-08-16, build 4b744bef).
+//
+// We launch a clean `npm run dev`, so pipesOrChainsToAnotherCommand sees nothing wrong — but npm
+// forwards trailing arguments to the SCRIPT, and that script was `concurrently "npm run server" "vite"`.
+// The launch line came out as `concurrently "npm run server" "vite" --host 0.0.0.0 --port 5173
+// --strictPort`, so the multiplexer got the flags and vite — the process that needed them — got none.
+describe('runsUnderMultiplexer — the pipe bug, one level down', () => {
+  const SCRIPT = 'concurrently "npm run server" "vite"';
+
+  it('recognises the reported script and every common sibling', () => {
+    expect(runsUnderMultiplexer(SCRIPT)).toBe(true);
+    expect(runsUnderMultiplexer('npm-run-all --parallel server client')).toBe(true);
+    expect(runsUnderMultiplexer('run-p server client')).toBe(true);
+    expect(runsUnderMultiplexer('run-s build start')).toBe(true);
+    expect(runsUnderMultiplexer('turbo run dev')).toBe(true);
+  });
+
+  it('says no for an ordinary single-process script, and for no script at all', () => {
+    expect(runsUnderMultiplexer('vite')).toBe(false);
+    expect(runsUnderMultiplexer('next dev')).toBe(false);
+    expect(runsUnderMultiplexer('tsx server/index.ts')).toBe(false);
+    expect(runsUnderMultiplexer(undefined)).toBe(false);
+    expect(runsUnderMultiplexer('')).toBe(false);
+  });
+
+  it('neither injector appends anything a multiplexer would swallow', () => {
+    expect(ensureHostBinding('npm run dev', undefined, SCRIPT)).toBe('npm run dev');
+    expect(pinDevServerPort('npm run dev', 5173, undefined, SCRIPT)).toBe('npm run dev');
+  });
+
+  it('an ordinary Vite script is still pinned exactly as before', () => {
+    expect(pinDevServerPort('npm run dev', 5173, 'vite', 'vite')).toContain('--port 5173');
+    expect(ensureHostBinding('npm run dev', 'vite', 'vite')).toContain('0.0.0.0');
   });
 });

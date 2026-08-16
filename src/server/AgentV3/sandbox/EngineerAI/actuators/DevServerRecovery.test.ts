@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog, terminalDetail, userFacingPreviewFailure, cleanPreviewLogForUser, stripAnsi, unresolvedImportFromLog, conflictingPortFromLog, unavailableDbEngine } from './DevServerRecovery';
+import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing, missingCredentialFromLog, terminalDetail, userFacingPreviewFailure, cleanPreviewLogForUser, stripAnsi, unresolvedImportFromLog, conflictingPortFromLog, unavailableDbEngine, missingBinaryFromLog } from './DevServerRecovery';
 
 // MITRIFY AUTOPSY 2026-08-04 — "The app didn't finish starting… its log had no recognisable error."
 // The log was FULL of recognisable errors; two defects hid them:
@@ -759,5 +759,84 @@ describe('db_client_missing — one right answer instead of three wrong ones', (
 
   it('the terminal line does not claim an exhausted recovery', () => {
     expect(terminalDetail(classifyDevServerFailure('sh: 1: psql: not found'))).not.toContain('Automatic recovery is exhausted');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// "sh: 1: concurrently: not found" (admin report 2026-08-16, build 4b744bef).
+//
+// The app's start script is `concurrently "npm run server" "vite"`. concurrently was not installed and
+// the log said exactly that, on its fourth line. The platform replied "The dev server did not start and
+// the log had no recognisable error", restarted the identical command twice, and gave up. A missing
+// binary cannot appear by itself, so both recovery attempts were spent on a certainty.
+//
+// Two reasons it was invisible, both the same class: the catch-all tested for BASH's "command not found"
+// while this sandbox's shell is dash ("sh: 1: NAME: not found"); and its only other test was a hardcoded
+// list of six tool names. `devServerRunnerMissing` in the SAME FILE already matched dash. Now one shared.
+describe('missingBinaryFromLog — any missing executable, named', () => {
+  it('reads the reported line and names the binary', () => {
+    expect(missingBinaryFromLog('sh: 1: concurrently: not found')).toBe('concurrently');
+  });
+
+  it('handles every shell phrasing, not just bash', () => {
+    expect(missingBinaryFromLog('sh: 1: nodemon: not found')).toBe('nodemon');
+    expect(missingBinaryFromLog('bash: vite: command not found')).toBe('vite');
+    expect(missingBinaryFromLog('/bin/sh: 1: ts-node: not found')).toBe('ts-node');
+    expect(missingBinaryFromLog('turbo: command not found')).toBe('turbo');
+  });
+
+  it('is not limited to a list of known tools — that was half the bug', () => {
+    for (const name of ['concurrently', 'wait-on', 'pm2', 'cross-env', 'rimraf', 'nx']) {
+      expect(missingBinaryFromLog(`sh: 1: ${name}: not found`), name).toBe(name);
+    }
+  });
+
+  it('never returns the shell or the line number as the answer', () => {
+    expect(missingBinaryFromLog('sh: 1: concurrently: not found')).not.toBe('sh');
+    expect(missingBinaryFromLog('sh: 1: concurrently: not found')).not.toBe('1');
+  });
+
+  it('reads through ANSI colour, like every other rule here', () => {
+    expect(missingBinaryFromLog('[31msh: 1: concurrently: not found[0m')).toBe('concurrently');
+  });
+
+  it('says nothing about a clean log or prose that merely contains "not found"', () => {
+    expect(missingBinaryFromLog('VITE v5.0.0  ready in 300 ms')).toBeNull();
+    expect(missingBinaryFromLog('warning: the config file was not found, using defaults')).toBeNull();
+    expect(missingBinaryFromLog('')).toBeNull();
+  });
+});
+
+describe('the reported failure is now diagnosed instead of retried blindly', () => {
+  const REPORTED_LOG = [
+    '> project@0.1.0 dev',
+    '> concurrently "npm run server" "vite" --host 0.0.0.0 --port 5173 --strictPort',
+    '',
+    'sh: 1: concurrently: not found',
+  ].join('\n');
+
+  it('classifies it as a missing module and REINSTALLS instead of restarting', () => {
+    const d = classifyDevServerFailure(REPORTED_LOG);
+    expect(d.cause).toBe('missing_module');
+    expect(d.recovery).toBe('reinstall');
+  });
+
+  it('names the binary, so the message is actionable rather than generic', () => {
+    expect(classifyDevServerFailure(REPORTED_LOG).detail).toContain('concurrently');
+  });
+
+  it('never again reports "no recognisable error" for a log that names one', () => {
+    expect(classifyDevServerFailure(REPORTED_LOG).detail).not.toMatch(/no recognisable error/i);
+  });
+
+  it('the two siblings now agree — both see the same missing binary', () => {
+    expect(devServerRunnerMissing(REPORTED_LOG)).toBe(true);
+    expect(classifyDevServerFailure(REPORTED_LOG).cause).toBe('missing_module');
+  });
+
+  it('a database client tool still short-circuits ahead of it (npm cannot deliver an OS binary)', () => {
+    const d = classifyDevServerFailure('sh: 1: psql: not found');
+    expect(d.cause).toBe('db_client_missing');
+    expect(d.recovery).toBe('code_fix');
   });
 });

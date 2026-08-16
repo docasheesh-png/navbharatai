@@ -12318,6 +12318,11 @@ export function registerAgentV3Routes(app: Express): void {
           previewVerified: previewVerifiedRendered,
           // The app's real source — a label it does not contain cannot have been on the screen.
           sourceText: Array.from(writtenFiles.values()).join('\n'),
+          // …but ONLY when those written files ARE the app. An import/survey turn writes nothing (the
+          // user asked us not to), so judging a correct survey of their repo against `.env` and
+          // `.gitignore` produced "17 of the 19 things it described appear nowhere in this app's source"
+          // — about files that plainly exist (build 4b744bef).
+          sourceIsWholeApp: !isImportTurn,
           // "Your to-do list app is complete and ready" over ZERO written files (build 5b4f9b63). The
           // cheapest honest check in the engine: a claim of delivery, weighed against what was written.
           // It needs no preview and no browser, which is exactly why it is the one that still works on

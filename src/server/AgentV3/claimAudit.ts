@@ -37,6 +37,23 @@ export interface MeasuredFacts {
   /** The app's own source, for checking a described UI against what exists. */
   sourceText?: string;
   /**
+   * Is `sourceText` actually THE APP — or only the handful of files this turn happened to write?
+   *
+   * ROOT CAUSE (admin report 2026-08-16, build 4b744bef). The user asked to IMPORT a repo and survey
+   * it, explicitly saying "do not change any files yet". The engine obeyed, read the project, and wrote
+   * a correct survey naming `src/main.tsx`, `AuthContext`, `ProductList`, `server/db.ts` — all real
+   * files in the imported repo. But `sourceText` is built from the files this turn WROTE, and an
+   * import/survey turn writes almost nothing (here: `.env` and `.gitignore`). So the fabrication check
+   * compared a TRUE description of the app against two config files, found 17 of 19 labels "absent", and
+   * told the user the platform had caught its own AI inventing things — which became the build's
+   * headline rootCause.
+   *
+   * This module's own header says it: "a false accusation of lying is worse than a missed one." The
+   * check needs the app; when what we hold is not the app, the honest verdict is that we cannot judge.
+   * Defaults to true, so a normal build — where the written files ARE the app — is unchanged.
+   */
+  sourceIsWholeApp?: boolean;
+  /**
    * How many files this turn actually created or changed.
    *
    * ROOT CAUSE (admin report 2026-08-16, build 5b4f9b63 — "ab to choti moti apps bhi nahi ban rahi").
@@ -186,8 +203,11 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
     });
   }
 
-  // A described UI that exists nowhere in the app.
-  const source = facts.sourceText;
+  // A described UI that exists nowhere in the app — judged ONLY against the app itself. When what we
+  // hold is not the project (an import/survey turn writes nothing, so `sourceText` is a couple of
+  // config files), every label reads as "absent" and the check becomes an accusation generator (build
+  // 4b744bef). Defaults to judging: an omitted flag must not silently disable a real check.
+  const source = facts.sourceIsWholeApp === false ? undefined : facts.sourceText;
   if (source && source.trim()) {
     const labels = describedUiLabels(text);
     if (labels.length >= MIN_LABELS_FOR_FABRICATION) {

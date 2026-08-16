@@ -18,7 +18,6 @@
 
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
-import * as fs from 'node:fs';
 import { inspectApk, MAX_APK_BYTES, publishableApkLimitBytes } from '../lib/apkInspect';
 import axios from 'axios';
 import { fetchBuildArtifact, type ArtifactFetcher } from '../lib/buildArtifact';
@@ -36,7 +35,6 @@ const jsZipLoader = async (buf: Buffer) => {
   const JSZip = (await import('jszip')).default;
   return await JSZip.loadAsync(buf) as unknown as { files: Record<string, { async: (t: 'nodebuffer') => Promise<Buffer> }> };
 };
-import { claimUpload } from './zipUpload';
 import { scanFile, isScanningConfigured, MAX_SCANNABLE_BYTES} from '../lib/malwareScan';
 import {
   isStorageConfigured, putApk, getApk, deleteApk, saveApp, getApp, updateApp,
@@ -138,23 +136,16 @@ export function validateSubmission(form: Partial<SubmissionForm>): { ok: true; v
 }
 
 /** Base64 payload → bytes, refusing anything that is not plausibly a file. */
-function decodeUpload(base64: unknown): Buffer | null {
-  if (typeof base64 !== 'string' || !base64) return null;
-  const raw = base64.includes(',') ? base64.slice(base64.indexOf(',') + 1) : base64;
-  if (!/^[A-Za-z0-9+/=\s]+$/.test(raw)) return null;
-  try {
-    const buf = Buffer.from(raw, 'base64');
-    return buf.length > 0 ? buf : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * The ONE path from "we have APK bytes" to "a pending store record exists".
  *
  * Extracted when a second caller appeared (publish-from-build). Every guarantee the store rests on
  * lives HERE, so neither entry point can accidentally skip one:
+ *   • the app MUST be one NavBharatAI built — `provenance` is REQUIRED, so there is no code path that
+ *     can ingest an arbitrary file a user uploaded from their device (admin 2026-08-16: the store
+ *     carries only NavBharatAI-built apps — "kisi aur ka banaya virus nahi"). A NavBharatAI build that
+ *     lives in the user's own GitHub is still a NavBharatAI build and reaches here through
+ *     publish-from-build; a random `.apk`/`.zip` from a device has no way in at all;
  *   • the file must genuinely be an installable, signed Android package;
  *   • it must be scanned — no verdict means NO publication, ever;
  *   • malware is recorded but never stored (we keep no copy of it);
@@ -166,7 +157,7 @@ async function ingestApkSubmission(
   bytes: Buffer,
   form: SubmissionForm,
   uid: string,
-  provenance?: { source: 'navbharatai-build'; repo: string; artifactId: string },
+  provenance: { source: 'navbharatai-build'; repo: string; artifactId: string },
 ): Promise<{ httpStatus: number; body: Record<string, unknown> }> {
     // 1) Is this genuinely an installable Android app?
     const facts = await inspectApk(bytes);
@@ -266,58 +257,17 @@ export function registerNavStoreRoutes(app: Express): void {
     });
   });
 
-  /**
-   * Submit an app.
-   *
-   * The order is the safety model: validate → inspect → scan → store as PENDING. A failure at any
-   * step means nothing is stored and nothing is publishable.
-   */
-  app.post('/api/nav-store/submit', async (req: Request, res: Response) => {
-    const me = await verifyFirebaseIdentity(req);
-    if (!me?.uid) return res.status(401).json({ error: 'Please sign in to publish an app.' });
-
-    if (!isStorageConfigured() || !isScanningConfigured()) {
-      return res.status(503).json({
-        error: 'The Nav App Store is not accepting apps yet — malware scanning and app storage must be switched on first. Nothing was uploaded.',
-      });
-    }
-
-    const body = (req.body || {}) as Record<string, unknown>;
-    const parsed = validateSubmission(body as Partial<SubmissionForm>);
-    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
-
-    // APK BYTES — chunked upload first, legacy base64 as a fallback (2026-07-28).
-    //
-    // The store advertises a 150 MB limit but `apkBase64` rides inside a JSON body, and the platform
-    // caps a single request at ~32 MB — so ~24 MB was the REAL ceiling and anything larger died before
-    // this route's own honest 413 could ever run. The advertised number was fiction. A real APK is
-    // 5-50 MB, so most genuine submissions were unpublishable. The client now transfers the file in
-    // chunks and passes `uploadId`; `claimUpload` hands over the assembled bytes. The base64 path is
-    // kept for small files so nothing that worked before breaks.
-    let bytes: Buffer | null = null;
-    let claimedPath: string | null = null;
-    if (typeof body.uploadId === 'string' && body.uploadId) {
-      const claimed = claimUpload(body.uploadId, me?.uid ?? null);
-      if (!claimed) return res.status(403).json({ error: 'That upload has expired — please choose the file again.' });
-      claimedPath = claimed.filePath;
-      try { bytes = fs.readFileSync(claimed.filePath); } catch { bytes = null; }
-    } else {
-      bytes = decodeUpload(body.apkBase64);
-    }
-    const cleanupUpload = () => { if (claimedPath) { try { fs.unlinkSync(claimedPath); } catch { /* already gone */ } claimedPath = null; } };
-    if (!bytes) { cleanupUpload(); return res.status(400).json({ error: 'Please choose your .apk file.' }); }
-    const publishCap = publishableApkLimitBytes(MAX_APK_BYTES, MAX_SCANNABLE_BYTES);
-    if (bytes.length > publishCap) {
-      cleanupUpload();
-      // Same derived number the Publish form advertises — the refusal can never contradict the promise.
-      return res.status(413).json({ error: `That file is over the ${publishCap / 1024 / 1024} MB limit.` });
-    }
-    // The assembled temp file is never needed past this point — the bytes are in memory now.
-    cleanupUpload();
-
-    const out = await ingestApkSubmission(bytes, parsed.value, me.uid);
-    return res.status(out.httpStatus).json(out.body);
-  });
+  // NO DEVICE-UPLOAD ROUTE — the store carries ONLY apps NavBharatAI built (admin 2026-08-16).
+  //
+  // There used to be a `POST /api/nav-store/submit` that ingested a raw `.apk` the user picked from
+  // their device (chunked upload / base64). That was the one hole through which "kisi aur ka banaya
+  // virus" could enter the store — the malware scan + admin review sat downstream of an untrusted
+  // SOURCE. It also contradicted the store's own stated rule (see publish-from-build below). It has
+  // been removed entirely: the ONLY way bytes reach `ingestApkSubmission` is publish-from-build, which
+  // pulls a NavBharatAI build artifact from the user's own GitHub Actions server-side. A NavBharatAI
+  // build stored in the user's GitHub is still allowed (that IS publish-from-build); a device file, a
+  // hand-uploaded `.zip`, or anyone else's `.apk` has no route in at all. `ingestApkSubmission` now
+  // REQUIRES provenance, so even a future caller cannot re-open this hole by accident.
 
   /**
    * PUBLISH FROM THE BUILD — the button that sits next to "Download APK" (admin 2026-08-04).

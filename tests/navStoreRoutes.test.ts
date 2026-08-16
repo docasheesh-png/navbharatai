@@ -6,6 +6,11 @@ import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 // property, tested from several angles below, is that NOTHING can make an app public except an
 // admin explicitly approving it — not a clean scan, not a request parameter, not a status the
 // uploader supplies.
+//
+// SOURCE (admin 2026-08-16): the store carries ONLY apps NavBharatAI built. There is no device-upload
+// route anymore — the ONLY way bytes reach the ingest pipeline is publish-from-build, which pulls a
+// NavBharatAI build artifact from the user's own GitHub Actions server-side. These tests therefore
+// exercise the ingest guarantees THROUGH that path (fetchBuildArtifact is mocked to hand over bytes).
 
 const state = {
   uid: null as string | null,
@@ -19,6 +24,10 @@ const state = {
   apps: {} as Record<string, Record<string, unknown>>,
   putCalls: 0,
   deleted: [] as string[],
+  // The build artifact the (mocked) GitHub fetch hands back.
+  artifactOk: true,
+  artifactBytes: Buffer.alloc(0) as Buffer,
+  artifactFailure: 'expired' as string,
 };
 
 vi.mock('../src/server/lib/authMiddleware', () => ({
@@ -47,6 +56,14 @@ vi.mock('../src/server/lib/malwareScan', () => ({
   }),
 }));
 
+// The ONLY way bytes enter the store now: a NavBharatAI build artifact, fetched server-side. Mocked so
+// the ingest guarantees can be tested without a real GitHub call.
+vi.mock('../src/server/lib/buildArtifact', () => ({
+  fetchBuildArtifact: async () => (state.artifactOk
+    ? { ok: true, bytes: state.artifactBytes }
+    : { ok: false, failure: state.artifactFailure, message: 'The build artifact could not be fetched.' }),
+}));
+
 vi.mock('../src/server/lib/navStoreStore', () => ({
   isStorageConfigured: () => state.storage,
   putApk: async (sha: string) => { state.putCalls++; return `nav-store/apk/${sha}.apk`; },
@@ -67,7 +84,7 @@ const { registerNavStoreRoutes, validateSubmission, isStoreAdmin, UPLOAD_FEE_INR
   await import('../src/server/routes/navStore');
 
 const routes = captureRoutes(registerNavStoreRoutes);
-const submit = routes.get('POST /api/nav-store/submit')!;
+const publishFromBuild = routes.get('POST /api/nav-store/publish-from-build')!;
 const status = routes.get('GET /api/nav-store/status')!;
 const publicList = routes.get('GET /api/nav-store/apps')!;
 const download = routes.get('GET /api/nav-store/download/:id')!;
@@ -76,13 +93,12 @@ const review = routes.get('POST /api/nav-store/admin/review')!;
 
 const ADMIN = 'admin@navbharatai.com';
 
-async function realApk(perms = 'android.permission.INTERNET'): Promise<string> {
+async function realApkBytes(perms = 'android.permission.INTERNET'): Promise<Buffer> {
   const zip = new JSZip();
   zip.file('AndroidManifest.xml', Buffer.from(perms, 'utf16le'));
   zip.file('classes.dex', 'dex');
   zip.file('META-INF/CERT.RSA', 'cert');
-  const buf = await zip.generateAsync({ type: 'nodebuffer' });
-  return buf.toString('base64');
+  return zip.generateAsync({ type: 'nodebuffer' });
 }
 
 const FORM = {
@@ -96,7 +112,10 @@ const FORM = {
   acceptedTerms: true,
 };
 
-beforeEach(() => {
+// The build the publish-from-build route pulls its bytes from.
+const BUILD = { owner: 'ravi', repo: 'chai-app', artifactId: '999', githubToken: 'ghtok' };
+
+beforeEach(async () => {
   process.env.NAV_STORE_ADMINS = ADMIN;
   state.uid = 'user123';
   state.email = 'ravi@example.com';
@@ -109,6 +128,8 @@ beforeEach(() => {
   state.apps = {};
   state.putCalls = 0;
   state.deleted = [];
+  state.artifactOk = true;
+  state.artifactBytes = await realApkBytes();
 });
 
 async function post(handler: (r: unknown, s: unknown) => unknown, body: Record<string, unknown>) {
@@ -116,6 +137,17 @@ async function post(handler: (r: unknown, s: unknown) => unknown, body: Record<s
   await handler(mockReq({ body }), res);
   return res;
 }
+
+/** Publish through the ONLY door: a NavBharatAI build. */
+async function postBuild(overrides: Record<string, unknown> = {}) {
+  return post(publishFromBuild, { ...FORM, ...BUILD, ...overrides });
+}
+
+describe('there is no device-upload door — the store carries only NavBharatAI builds', () => {
+  it('the old POST /api/nav-store/submit route no longer exists', () => {
+    expect(routes.get('POST /api/nav-store/submit')).toBeUndefined();
+  });
+});
 
 describe('validateSubmission — a contactable developer is what makes a takedown possible', () => {
   it('accepts a complete form', () => {
@@ -164,14 +196,19 @@ describe('uploads are free, and the store says so', () => {
 
 describe('THE RULE: nothing reaches the public without an admin', () => {
   it('a clean scan still only produces "pending"', async () => {
-    const res = await post(submit, { ...FORM, apkBase64: await realApk() });
+    const res = await postBuild();
     expect(res.statusCode).toBe(200);
     expect(res.body.status).toBe('pending');
     expect(state.saved[0].status).toBe('pending');
   });
 
-  it('an uploader cannot smuggle in their own status', async () => {
-    await post(submit, { ...FORM, status: 'approved', apkBase64: await realApk() });
+  it('a build-sourced app records its provenance for the reviewer', async () => {
+    await postBuild();
+    expect(state.saved[0].provenance).toMatchObject({ source: 'navbharatai-build', repo: 'ravi/chai-app', artifactId: '999' });
+  });
+
+  it('a publisher cannot smuggle in their own status', async () => {
+    await postBuild({ status: 'approved' });
     expect(state.saved[0].status).toBe('pending');
   });
 
@@ -213,16 +250,16 @@ describe('THE RULE: nothing reaches the public without an admin', () => {
 });
 
 describe('what the store refuses to accept', () => {
-  it('a signed-out visitor cannot upload', async () => {
+  it('a signed-out visitor cannot publish', async () => {
     state.uid = null;
-    const res = await post(submit, { ...FORM, apkBase64: await realApk() });
+    const res = await postBuild();
     expect(res.statusCode).toBe(401);
     expect(state.putCalls).toBe(0);
   });
 
   it('accepts nothing at all while scanning is switched off', async () => {
     state.scanning = false;
-    const res = await post(submit, { ...FORM, apkBase64: await realApk() });
+    const res = await postBuild();
     expect(res.statusCode).toBe(503);
     expect(state.putCalls).toBe(0);
     expect(state.saved).toHaveLength(0);
@@ -231,7 +268,7 @@ describe('what the store refuses to accept', () => {
   it('a MALICIOUS verdict is refused and the file is never stored', async () => {
     state.scanVerdict = 'malicious';
     state.scanMalicious = 7;
-    const res = await post(submit, { ...FORM, apkBase64: await realApk() });
+    const res = await postBuild();
     expect(res.statusCode).toBe(422);
     expect(res.body.error).toMatch(/malicious/i);
     expect(state.putCalls).toBe(0);
@@ -240,35 +277,46 @@ describe('what the store refuses to accept', () => {
 
   it('an UNAVAILABLE scan means no upload — never a silent pass', async () => {
     state.scanVerdict = 'unavailable';
-    const res = await post(submit, { ...FORM, apkBase64: await realApk() });
+    const res = await postBuild();
     expect(res.statusCode).toBe(503);
     expect(state.putCalls).toBe(0);
   });
 
   it('a suspicious verdict is stored but flagged for the reviewer, not published', async () => {
     state.scanVerdict = 'suspicious';
-    const res = await post(submit, { ...FORM, apkBase64: await realApk() });
+    const res = await postBuild();
     expect(res.statusCode).toBe(200);
     expect(state.saved[0].status).toBe('pending');
     expect(res.body.message).toMatch(/flagged/i);
   });
 
   it('a file that is not an Android app is refused', async () => {
-    const res = await post(submit, { ...FORM, apkBase64: Buffer.from('just text').toString('base64') });
+    state.artifactBytes = Buffer.from('just text');
+    const res = await postBuild();
     expect(res.statusCode).toBe(422);
     expect(state.putCalls).toBe(0);
   });
 
   it('an incomplete form is refused before the file is even looked at', async () => {
-    const res = await post(submit, { ...FORM, developerEmail: '', apkBase64: await realApk() });
+    const res = await postBuild({ developerEmail: '' });
     expect(res.statusCode).toBe(400);
     expect(state.putCalls).toBe(0);
+  });
+
+  it('an expired build artifact is a 404 the user can act on, not a silent store', async () => {
+    state.artifactOk = false;
+    state.artifactFailure = 'expired';
+    const res = await postBuild();
+    expect(res.statusCode).toBe(404);
+    expect(state.putCalls).toBe(0);
+    expect(state.saved).toHaveLength(0);
   });
 });
 
 describe('the record kept for every upload', () => {
   it('records the hash, the uploader and the permissions — what a takedown needs', async () => {
-    await post(submit, { ...FORM, apkBase64: await realApk('android.permission.READ_SMS') });
+    state.artifactBytes = await realApkBytes('android.permission.READ_SMS');
+    await postBuild();
     const rec = state.saved[0];
     expect(String(rec.sha256)).toMatch(/^[0-9a-f]{64}$/);
     expect(rec.uid).toBe('user123');
@@ -277,7 +325,8 @@ describe('the record kept for every upload', () => {
   });
 
   it('surfaces high-risk permissions to the uploader too, so nothing is hidden', async () => {
-    const res = await post(submit, { ...FORM, apkBase64: await realApk('android.permission.READ_SMS') });
+    state.artifactBytes = await realApkBytes('android.permission.READ_SMS');
+    const res = await postBuild();
     expect(res.body.highRisk.map((h: { permission: string }) => h.permission)).toContain('android.permission.READ_SMS');
   });
 });

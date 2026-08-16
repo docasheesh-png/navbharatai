@@ -21,9 +21,19 @@ describe('publish-from-build — a second door into the store, with none of the 
     // The whole reason the pipeline was extracted. Two copies would mean two places to forget the
     // scan, and only one of them would be covered by the tests that exist.
     const calls = SRC.match(/await ingestApkSubmission\(/g) || [];
-    expect(calls.length).toBe(2); // the manual upload and the build path
+    expect(calls.length).toBe(1); // ONLY the build path now — the device-upload door was removed
     // Exactly ONE definition — a second one would be the duplication this guards against.
     expect((SRC.match(/async function ingestApkSubmission\(/g) || []).length).toBe(1);
+  });
+
+  it('is the ONLY door — the device-upload route is gone (admin 2026-08-16)', () => {
+    // The store carries ONLY apps NavBharatAI built. A raw .apk/.zip a user picked from their device
+    // was the one way someone else's malware could enter; that route no longer exists at all.
+    expect(SRC).not.toContain("app.post('/api/nav-store/submit'");
+    // And the pipeline REQUIRES provenance, so no future caller can re-open the hole by accident.
+    const sig = SRC.slice(SRC.indexOf('async function ingestApkSubmission('), SRC.indexOf('async function ingestApkSubmission(') + 260);
+    expect(sig).toContain("provenance: { source: 'navbharatai-build'");
+    expect(sig).not.toMatch(/provenance\?:/); // not optional — required
   });
 
   it('cannot publish without scanning configured — the rule the store rests on', () => {
@@ -124,6 +134,25 @@ describe('the Publish button — offered only where it can actually work', () =>
     // No file input anywhere: the whole point is that the user never handles the APK.
     expect(FORM).not.toContain('type="file"');
     expect(FORM).not.toContain('FormData');
+  });
+
+  it('collects the consent the server REQUIRES, so this path is not a silent 400', () => {
+    // validateSubmission rejects a submission without acceptedTerms. Since this is now the ONLY way to
+    // publish, the button MUST gather that consent or every publish fails.
+    expect(FORM).toContain('acceptedTerms');
+    expect(FORM).toContain('type="checkbox"');
+    // The button stays disabled until consent is given (part of `ready`).
+    expect(FORM).toMatch(/form\.acceptedTerms/);
+  });
+
+  it('offers ONLY categories the server accepts — a mismatch is an unpassable 400', () => {
+    // The panel hardcodes its category list; it must equal STORE_CATEGORIES exactly, or a user who
+    // picks a client-only category (the old bug: "Health", "Other") cannot publish at all.
+    const serverCats = (SRC.match(/export const STORE_CATEGORIES = \[([\s\S]*?)\] as const;/) || [])[1] || '';
+    const serverList = [...serverCats.matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
+    const panelCats = (FORM.match(/const CATEGORIES = \[([\s\S]*?)\];/) || [])[1] || '';
+    const panelList = [...panelCats.matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
+    expect(panelList).toEqual(serverList);
   });
 
   it('says PENDING REVIEW on success, never "published"', () => {

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { uploadFileChunked } from '../../lib/zipProjectUpload';
 import {
-  Store, Upload, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
+  Store, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
   CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package,
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
@@ -76,12 +75,6 @@ interface WebApp {
   status?: 'unlisted' | 'listed' | 'removed';
 }
 
-const EMPTY_FORM = {
-  developerName: '', developerEmail: '', developerPhone: '', developerWebsite: '',
-  appName: '', versionName: '1.0.0', shortDescription: '', description: '',
-  category: '', acceptedTerms: false,
-};
-
 export interface NavAppStoreProps {
   /** Deep link (`/store/app/<id>`): open this web app's player immediately. */
   initialWebAppId?: string | null;
@@ -121,14 +114,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
   });
   const [webBusy, setWebBusy] = useState('');
 
-  const [form, setForm] = useState({ ...EMPTY_FORM });
-  const [apkName, setApkName] = useState('');
-  const [apkFile, setApkFile] = useState<File | null>(null);
-  const [uploadPct, setUploadPct] = useState(0);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitResult, setSubmitResult] = useState<{ ok: boolean; message: string; highRisk?: HighRisk[] } | null>(null);
   const [reviewing, setReviewing] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
   const liveRef = useRef(true);
   useEffect(() => () => { liveRef.current = false; }, []);
 
@@ -238,52 +224,6 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
     if (tab === 'review') { void loadQueue(); void loadWebQueue(); }
   }, [tab, loadMine, loadQueue, loadWebMine, loadWebQueue, loadOwned]);
 
-  // KEEP THE FILE, don't base64 it (2026-07-28). Reading a 50 MB APK into a base64 string only to
-  // post it inside JSON is what capped the store at ~24 MB against the platform's request limit —
-  // while the UI advertised 150 MB. The file is now transferred in chunks at submit time.
-  const pickApk = useCallback((file: File) => {
-    setSubmitResult(null);
-    if (!/\.apk$/i.test(file.name)) {
-      setSubmitResult({ ok: false, message: 'Please choose a .apk file.' });
-      return;
-    }
-    setApkFile(file);
-    setApkName(file.name);
-  }, []);
-
-  const submit = useCallback(async () => {
-    if (submitting) return;
-    setSubmitting(true);
-    setSubmitResult(null);
-    try {
-      if (!apkFile) { setSubmitResult({ ok: false, message: 'Please choose your .apk file.' }); return; }
-      // Chunked transfer — every request clears the platform cap, so a real 5-150 MB APK gets through.
-      const { uploadId } = await uploadFileChunked(apkFile, (p) => setUploadPct(Math.round(p.fraction * 100)));
-      const res = await fetch('/api/nav-store/submit', {
-        method: 'POST',
-        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ ...form, uploadId }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!liveRef.current) return;
-      if (!res.ok || !data?.ok) {
-        setSubmitResult({ ok: false, message: data?.error || 'Your app could not be submitted.' });
-        return;
-      }
-      setSubmitResult({ ok: true, message: data.message, highRisk: data.highRisk });
-      setForm({ ...EMPTY_FORM });
-      setApkFile(null);
-      setApkName('');
-      void loadMine();
-    } catch (err) {
-      if (liveRef.current) {
-        setSubmitResult({ ok: false, message: err instanceof Error ? err.message : 'Could not reach the server. Nothing was uploaded.' });
-      }
-    } finally {
-      if (liveRef.current) { setSubmitting(false); setUploadPct(0); }
-    }
-  }, [form, apkFile, submitting, loadMine]);
-
   const decide = useCallback(async (id: string, decision: 'approved' | 'rejected' | 'removed') => {
     setReviewing(id);
     try {
@@ -298,30 +238,6 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
       if (liveRef.current) setReviewing('');
     }
   }, [loadQueue, loadApps]);
-
-  const field = (k: keyof typeof EMPTY_FORM, label: string, opts: { type?: string; rows?: number; hint?: string; required?: boolean } = {}) => (
-    <label className="block">
-      <span className="block text-xs text-white/50 mb-1.5">
-        {label}{opts.required && <span className="text-rose-400"> *</span>}
-      </span>
-      {opts.rows ? (
-        <textarea
-          value={form[k] as string}
-          onChange={(e) => setForm((p) => ({ ...p, [k]: e.target.value }))}
-          rows={opts.rows}
-          className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500 resize-y"
-        />
-      ) : (
-        <input
-          type={opts.type || 'text'}
-          value={form[k] as string}
-          onChange={(e) => setForm((p) => ({ ...p, [k]: e.target.value }))}
-          className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
-        />
-      )}
-      {opts.hint && <span className="block text-[11px] text-white/35 mt-1 leading-snug">{opts.hint}</span>}
-    </label>
-  );
 
   return (
     <div className="h-full overflow-y-auto overscroll-contain bg-[#0d1117] text-white" style={{ WebkitOverflowScrolling: 'touch' }}>
@@ -472,6 +388,11 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
               </p>
             </div>
           ) : (
+            // PUBLISH FROM THE BUILD ONLY (admin 2026-08-16). The store carries ONLY apps NavBharatAI
+            // built — there is no "choose a file from your device" anymore, because that was the one way
+            // someone else's malware could enter. You publish an app straight from its finished build
+            // (the "Publish to App Mart" button beside Download), which sends the app NavBharatAI
+            // made — including one saved to your own GitHub — with no file to upload. See navStore.ts.
             <div className="space-y-4">
               <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs leading-relaxed text-white/60">
                 <p className="flex items-center gap-1.5 text-emerald-300 font-semibold mb-1">
@@ -481,82 +402,45 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                 usually takes a day. Apps that fail the scan are never stored.
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                {field('developerName', 'Your name or company', { required: true })}
-                {field('developerEmail', 'Contact email', { type: 'email', required: true, hint: 'How anyone reports a problem with your app. Not shown publicly.' })}
-                {field('developerPhone', 'Phone (optional)')}
-                {field('developerWebsite', 'Website (optional)', { hint: 'Starting with https://' })}
-                {field('appName', 'App name', { required: true })}
-                {field('versionName', 'Version', { required: true, hint: 'For example 1.0.0' })}
+              <div className="rounded-xl border border-white/10 bg-[#161b22] p-4">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-white mb-2">
+                  <Store size={15} className="text-emerald-400" /> Only apps you built with NavBharatAI
+                </p>
+                <p className="text-xs text-white/60 leading-relaxed">
+                  App Mart carries only apps NavBharatAI made — so there is no app-file upload
+                  here. You cannot upload a <span className="text-white/80">.apk</span>, a
+                  {' '}<span className="text-white/80">.zip</span>, or a file from anywhere else. This is
+                  what keeps the store free of apps NavBharatAI did not build.
+                </p>
               </div>
 
-              {field('shortDescription', 'One-line description', { required: true, hint: 'Shown in the app list. Up to 120 characters.' })}
-              {field('description', 'Full description', { rows: 4, required: true, hint: 'What does your app do? At least 30 characters.' })}
-
-              <label className="block">
-                <span className="block text-xs text-white/50 mb-1.5">Category<span className="text-rose-400"> *</span></span>
-                <select
-                  value={form.category}
-                  onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}
-                  className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
-                >
-                  <option value="">Choose a category…</option>
-                  {(status?.categories || []).map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </label>
-
-              <div>
-                <span className="block text-xs text-white/50 mb-1.5">Your app file<span className="text-rose-400"> *</span></span>
-                <input ref={fileRef} type="file" accept=".apk" className="hidden"
-                       onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) pickApk(f); }} />
-                <button
-                  onClick={() => fileRef.current?.click()}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed border-white/20 hover:border-white/40 text-sm text-white/70 transition-colors"
-                >
-                  <Upload size={15} /> {apkName || `Choose your .apk (up to ${status?.maxSizeMb ?? 150} MB)`}
-                </button>
+              <div className="rounded-xl border border-white/10 bg-[#0d1117] p-4">
+                <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-3">How to publish your app</p>
+                <ol className="space-y-2.5 text-sm text-white/75">
+                  <li className="flex gap-2.5">
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-300 text-[11px] font-bold flex items-center justify-center">1</span>
+                    <span>Open the app you built with NavBharatAI (a new one, or one saved to your GitHub).</span>
+                  </li>
+                  <li className="flex gap-2.5">
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-300 text-[11px] font-bold flex items-center justify-center">2</span>
+                    <span>Build its Android app (APK) from the build screen.</span>
+                  </li>
+                  <li className="flex gap-2.5">
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-300 text-[11px] font-bold flex items-center justify-center">3</span>
+                    <span>
+                      Next to <span className="inline-flex items-center gap-1 text-white/90"><Download size={12} /> Download</span>,
+                      tap <span className="inline-flex items-center gap-1 font-semibold text-emerald-300"><Store size={12} /> Publish to App Mart</span>.
+                      Fill in your name, email and app details there — NavBharatAI sends the build for you,
+                      with no file to upload.
+                    </span>
+                  </li>
+                </ol>
+                <p className="flex items-start gap-1.5 text-[11px] text-white/45 leading-snug mt-3 pt-3 border-t border-white/10">
+                  <Info size={12} className="shrink-0 mt-px" />
+                  A NavBharatAI app stored in your GitHub still publishes this way — it is a NavBharatAI
+                  build, so it comes straight from your build, never a hand-uploaded file.
+                </p>
               </div>
-
-              <label className="flex items-start gap-2.5 text-xs text-white/60 leading-relaxed cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form.acceptedTerms}
-                  onChange={(e) => setForm((p) => ({ ...p, acceptedTerms: e.target.checked }))}
-                  className="mt-0.5 accent-emerald-500 flex-shrink-0"
-                />
-                <span>
-                  I made this app or have the right to publish it, it contains no malware, and I
-                  understand it will be removed if it harms users.
-                </span>
-              </label>
-
-              <button
-                onClick={() => void submit()}
-                disabled={submitting || !apkFile}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {submitting ? <Loader2 size={17} className="animate-spin" /> : <Upload size={17} />}
-                {submitting
-                  ? (uploadPct > 0 && uploadPct < 100 ? `Uploading ${uploadPct}%…` : 'Scanning your app…')
-                  : 'Submit my app'}
-              </button>
-
-              {submitResult && (
-                <div className={`rounded-xl p-3 text-xs leading-relaxed ${submitResult.ok ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`}>
-                  <p className="flex gap-2">
-                    {submitResult.ok ? <CheckCircle2 size={14} className="mt-0.5 flex-shrink-0" /> : <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />}
-                    <span>{submitResult.message}</span>
-                  </p>
-                  {submitResult.highRisk && submitResult.highRisk.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-white/10 text-white/60">
-                      <p className="font-semibold mb-1">Your app asks for these sensitive permissions:</p>
-                      {submitResult.highRisk.map((h) => (
-                        <p key={h.permission}>• {h.why}</p>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           )
         )}

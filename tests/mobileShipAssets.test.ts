@@ -17,7 +17,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { assembleMobileProject, unshippableAssetImports } from '../src/server/lib/mobileProjectAssembler';
+import { assembleMobileProject } from '../src/server/lib/mobileProjectAssembler';
+// Moved to its canonical home when the App Store's publish gate became the second caller — one
+// definition of "which asset imports will not resolve", never a re-export creating two import paths.
+import { unshippableAssetImports } from '../src/server/lib/assetImports';
 
 const PNG = 'data:image/png;base64,iVBORw0KGgo=';
 const WOFF = 'data:font/woff2;base64,d09GMgABAAA=';

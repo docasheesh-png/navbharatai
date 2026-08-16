@@ -6,6 +6,7 @@ import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { auth } from '../../lib/firebase';
 import { fetchPassStatus, type PassStatus } from './professionalPass';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
+import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { MessageEditActions } from '../chat/MessageEditActions';
@@ -331,6 +332,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
             })) {
               e.preventDefault();
               void send();
+              dismissKeyboardOnMobile(composerRef.current);
             }
           }}
           onPaste={(e) => {
@@ -355,7 +357,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
             <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[12px]">■</span>
           </button>
         ) : (
-          <button onClick={() => send()} disabled={!input.trim() && files.length === 0} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white flex items-center justify-center shrink-0">
+          <button onClick={() => { send(); dismissKeyboardOnMobile(composerRef.current); }} disabled={!input.trim() && files.length === 0} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white flex items-center justify-center shrink-0">
             <Send className="w-4 h-4" />
           </button>
         )}

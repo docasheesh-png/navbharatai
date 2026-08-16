@@ -33924,3 +33924,19 @@ the admin's condition is met: a handled report is pure stored cost once its bug 
 Tests: store guards (empty id → false; never-throw; VITEST no-op → false/0) + source-contract wiring
 (routes admin-gated, clear needs confirm, UI has delete/clear calling the right endpoints). Gate: tsc
 (frontend+server) clean; affected suites green.
+
+---
+
+## 2026-08-16 — Chat: keyboard auto-dismisses after send on mobile
+
+**Admin ask:** on a phone, after sending a message to an AI chat the on-screen keyboard stayed open with
+no way to close it — it covered half the screen while reading the reply. *"Ya button aa jaye band karne
+ka, ya message send hone ke baad keyboard automatic band ho jaye — kya accha rahega?"*
+
+**Chosen (auto-dismiss, no extra button):** cleaner — no UI clutter, and it matches the expectation
+(sent → read the answer). One shared helper `src/lib/dismissKeyboard.ts` (`dismissKeyboardOnMobile(el)`)
+blurs the composer, **guarded to a coarse pointer** so a DESKTOP keeps focus and the next message flows
+without re-clicking. Wired at BOTH send paths (Enter + button) of ALL THREE chat composers — General
+Assistant (`AIChat`), Doctor AI (`SDAChat`), Professionals (`ProfessionalChat`) — since the same gap was
+in each (rule 3: fix the class, one implementation, no drift). +5 tests (mobile blurs, desktop doesn't,
+activeElement fallback, safe no-op with no window/matchMedia). Gate: tsc clean; full vitest green (15,916).

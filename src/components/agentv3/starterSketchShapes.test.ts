@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { sketchFor, unmappedStarterIds, usedShapes } from './starterSketch';
+import { sketchFor, unmappedStarterIds, usedShapes } from './starterSketchShapes';
 import { STARTER_TEMPLATES } from './starterTemplates';
 
 /**

@@ -178,6 +178,15 @@ export interface AgentRunnerOptions {
 
 // ── Parallel tool execution (capped) ───────────────────────────────────────────
 // Read-only / side-effect-free tools — safe to run concurrently with each other.
+/**
+ * How much of the system prompt and of the last message the diagnostics preview keeps.
+ *
+ * The stored report truncates far below this anyway; the point of slicing HERE is that the giant
+ * string is never built in the first place. See the note at the call site.
+ */
+const PROMPT_PREVIEW_HEAD = 4000;
+const SEPARATOR = '\n---\n';
+
 const PARALLEL_SAFE_TOOLS = new Set<string>([
   'read_file', 'grep', 'glob', 'recall', 'evaluate', 'second_opinion', 'consensus',
 ]);
@@ -494,7 +503,18 @@ export class AgentRunner {
         // #4 — what we're about to ask: a head preview of the prompt (system + the latest turn).
         const lastMsg = messages[messages.length - 1] as { content?: unknown } | undefined;
         const lastMsgText = typeof lastMsg?.content === 'string' ? lastMsg.content : JSON.stringify(lastMsg?.content ?? '');
-        const promptPreview = `${system ?? ''}\n---\n${lastMsgText}`;
+        // NEVER MATERIALIZE THE WHOLE PROMPT TO TAKE A PREVIEW OF ITS HEAD (autopsy debc468c).
+        //
+        // The report that found this recorded `promptChars: 76,543,256` — a real 76 MB last message
+        // (a tool result), which this line then CONCATENATED into a second 76 MB string, purely so
+        // that ~800 characters of its head could be stored. Two copies of 76 MB, on every turn of
+        // every build, inside a Cloud Run container with a fixed memory ceiling.
+        //
+        // The size is still reported exactly — it is summed rather than measured off a string that
+        // no longer needs to exist.
+        const systemText = system ?? '';
+        const promptChars = systemText.length + SEPARATOR.length + lastMsgText.length;
+        const promptPreview = `${systemText.slice(0, PROMPT_PREVIEW_HEAD)}${SEPARATOR}${lastMsgText.slice(0, PROMPT_PREVIEW_HEAD)}`;
         const llmStartedAt = Date.now();
         let turn: TurnResult;
         try {
@@ -530,7 +550,7 @@ export class AgentRunner {
           // #4 — capture the FAILED model turn before it propagates (provider error, timeout, …).
           try {
             this.opts.onLlmCall?.({
-              model, promptPreview, promptChars: promptPreview.length,
+              model, promptPreview, promptChars,
               responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0,
               inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - llmStartedAt,
               ok: false, error: err instanceof Error ? err.message : String(err),
@@ -559,7 +579,7 @@ export class AgentRunner {
         // The requested id stays the fallback for runners that don't report their model.
         try {
           this.opts.onLlmCall?.({
-            model: turn.model ?? model, promptPreview, promptChars: promptPreview.length,
+            model: turn.model ?? model, promptPreview, promptChars,
             responsePreview: turn.text, responseChars: turn.text.length,
             finishReason: turn.stopReason, toolCalls: turn.toolUses.length,
             inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens,

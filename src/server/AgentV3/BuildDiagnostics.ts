@@ -318,6 +318,15 @@ const PREVIEW_ERROR_CAP = 4000;
 /** Per-stream output cap — large enough to hold a real npm/tsc/vite failure, bounded for storage. */
 const CMD_OUTPUT_CAP = 4000;
 const LLM_PREVIEW_CAP = 2000;
+
+/**
+ * Prompt size (pre-compaction, in characters) past which a step is called out as pathological.
+ *
+ * 8 MB, chosen to sit far above any legitimate build. A large real prompt is a few hundred KB — the
+ * transcript compactor exists precisely because ~233 KB was once enough to time the cheap floor out.
+ * Anything at this scale is a tool result that should never have been read, not a big project.
+ */
+const HUGE_PROMPT_CHARS = 8 * 1024 * 1024;
 const ERROR_MESSAGE_CAP = 4000;
 const STACK_CAP = 4000;
 
@@ -746,6 +755,32 @@ export class BuildDiagnostics {
         latencyMs: rec.latencyMs,
         ok: rec.ok,
         error: rec.error ? rec.error.slice(0, 500) : undefined,
+      });
+    }
+    // AN ENORMOUS PROMPT IS THE REPORT'S OWN BURIED HEADLINE — say so out loud (autopsy debc468c).
+    //
+    // That report carried `promptChars: 76,543,256` beside `inputTokens: 24,853`. Both numbers were
+    // TRUE and they measure different things: promptChars is the system prompt plus the last message
+    // BEFORE the transcript compactor trims it, inputTokens is what the provider actually received
+    // after. Printed side by side with no explanation, the pair reads as broken telemetry — which is
+    // exactly the conclusion I reached on first pass, and it stopped the investigation dead.
+    //
+    // The number was not noise. It was the loudest signal in the file: a single tool returned ~76 MB,
+    // which the compactor then had to throw away. Nothing charged the user for it, so no cost line
+    // showed it, and the sole trace was a field that looked like a glitch. Now it is a finding.
+    if (typeof rec.promptChars === 'number' && rec.promptChars > HUGE_PROMPT_CHARS) {
+      this.record({
+        phase: 'provider',
+        severity: 'warning',
+        code: 'HUGE_PROMPT_DISCARDED',
+        message:
+          `A single step built a ${Math.round(rec.promptChars / (1024 * 1024))} MB prompt before compaction, ` +
+          `of which the model received ${rec.inputTokens ?? 0} input tokens. Almost all of it was a tool ` +
+          `result — most often one file read that is far larger than any file a build should be reading ` +
+          `(a lockfile, a bundle, a minified asset). The compactor discarded it, so it cost memory and ` +
+          `time without ever reaching the model.`,
+        autoResolved: false,
+        detail: `promptChars=${rec.promptChars} inputTokens=${rec.inputTokens ?? 0} model=${rec.model ?? 'unknown'}`,
       });
     }
     // A truncated response (max_tokens) or a failed call is a real struggle → flag on the timeline.

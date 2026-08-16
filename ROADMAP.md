@@ -146,14 +146,43 @@ Ordered by what a user would actually feel.
    `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` → the vault→app pipe injects them into `.env` →
    the generated module reads those exact names via `import.meta.env`. It also fails LOUDLY when the
    keys are absent rather than shipping a login screen that silently never works.
-4. **AWS / Azure / Railway deploy providers.** Render shipped (and its UI was wired 2026-08-07). Three
-   more provider modules, same shape as `renderDeploy.ts`.
-5. **Visual template gallery.** ✅ **VERIFIED GENUINELY OPEN (2026-08-08)** — the first §1 item this
-   week that checked out as actually missing. `TemplatesPanel.tsx` has 14 starters, each carrying only
-   `id`, `name`, a Lucide `icon` and a `prompt`; there is no screenshot, thumbnail or category field
-   anywhere, and no `/api/templates` endpoint. (`savedTemplates` does exist, so the save-as-template
-   half is partly there — check it before rebuilding that piece.) Screenshots + categories + "build
-   this" kills cold-start and drops weak-tier cost toward zero.
+4. **AWS / Azure / Railway deploy providers.** ⚠️ **GENUINELY ABSENT, but RE-PRIORITISED DOWN after
+   counting what already ships (2026-08-16) — do not treat this as a top-five item.**
+   Verified registry: **Firebase** (always available, zero setup — the platform service account),
+   **Cloudflare**, **Vercel**, **Netlify** all call `registerDeployProvider`, plus **Render** for the
+   separate backend. So a user already has four static hosts *and* a backend host, one of which needs no
+   credentials at all.
+   Each of the three named here needs the user to bring credentials for a cloud most indie makers do not
+   have (AWS: IAM + bucket policy + CloudFront distribution; Azure Static Web Apps: fewer users still),
+   and this file already records that **Railway's API could not be verified from a session**. Building
+   them adds provider *count*, not user capability — and the AIM tie-breaker is what makes NavBharatAI
+   best, not what makes its comparison table longest.
+   **Build one only when a real user asks for that specific cloud.** GitHub Pages is the better next
+   provider if one is ever wanted: it is named in `DeployProviders.ts`'s own header, needs no new
+   credential (the user's GitHub OAuth token is already threaded through `DeployContext.githubToken`),
+   and every user of the save-to-GitHub flow already has the account.
+5. ~~**Visual template gallery.**~~ — ✅ **ALREADY BUILT AND WIRED (verified against live code
+   2026-08-16). Every clause of the old entry was wrong**, and it is worth reading why, because this
+   line carried the words "✅ VERIFIED GENUINELY OPEN" and was still the fifth false-open in this file.
+   **It had audited the wrong file.** `TemplatesPanel.tsx` is the saved-template list; the starter
+   library is `src/components/agentv3/starterTemplates.ts`, and it has:
+   - **25** starters, not 14;
+   - a real **`category`** field (Business / Social / Productivity / Commerce / Personal) plus
+     `startersByCategory()`;
+   - **tier gating** the old line never mentioned — `partitionStarters(powerUnlocked)` shows a FREE user
+     only the `tier:'simple'` apps the weak tier reliably ships end-to-end, with a curated few `pro`
+     apps as locked "⚡ Pro" showcases. That protects a free user's first build, which matters more than
+     any thumbnail;
+   - **visuals, and they are RENDERED** — `starterSketch.ts` + `StarterSketch.tsx`, mounted at
+     `AgentV3Panel.tsx` ~3187.
+   **On the "screenshots" the old line asked for: they were deliberately REFUSED, and the reasoning is
+   in `starterSketch.ts`.** Photographing 26 generated apps yields images that go stale the day the
+   engine improves, and drawing an attractive fake one is a picture of an app that does not exist, shown
+   to the person deciding what to build — a rule-2 violation. So each template shows a *layout sketch*
+   (list / dashboard / grid / feed / board / form / keypad / focus / landing), labelled a sketch and
+   never "preview". **Do not "fix" this by adding screenshots without reading that file first.**
+   The only genuinely absent piece is a `/api/templates` endpoint, and nothing needs one: the library is
+   static data compiled into the client, which is faster and cannot fail.
 6. **Regional languages** — ⚠️ **RE-SCOPED AGAIN 2026-08-11 by the admin, and the 2026-08-08 line above
    it was WRONG. It contradicted CLAUDE.md's own Language standard and cost a session's work.**
 
@@ -376,5 +405,13 @@ The code half is done where one exists; only the infrastructure remains.
 **The failure mode this document keeps having, stated plainly:** it goes stale in the direction of
 *claiming work is still open*, and a session that trusts it rebuilds finished features. That has now
 happened with a bucket provisioner (built twice, the duplicate deleted unmerged), an animation recipe, a
-scaffold fallback, and seven Cloud Run switches. **Nothing here is evidence. The code and `CLAUDE.md`
-are evidence.**
+scaffold fallback, seven Cloud Run switches, and — the sharpest one — **the template gallery, which
+carried the words "✅ VERIFIED GENUINELY OPEN" while being fully built and wired.** That entry failed
+because its check read `TemplatesPanel.tsx`, a file with a similar name, instead of the module that
+actually holds the feature. **Nothing here is evidence. The code and `CLAUDE.md` are evidence.**
+
+**So the check that actually works, learned from the five misses:** grep for the DOMAIN NOUN across the
+whole tree (`bucket`, `template`, `sketch`, `animation`), never for the file or feature name you expect —
+every one of these was hiding in a module named something else. And confirm the feature is **rendered or
+called**, not merely present: `starterSketch.ts` existing proves nothing; `AgentV3Panel.tsx` mounting
+`<StarterSketch/>` is what proves it ships.

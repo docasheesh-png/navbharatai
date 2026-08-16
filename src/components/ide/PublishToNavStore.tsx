@@ -90,7 +90,7 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
         className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10 transition-colors"
       >
         <Store size={16} />
-        Publish to Nav App Store
+        Publish to App Mart
       </button>
     );
   }
@@ -101,7 +101,7 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
     <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.04] p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h4 className="text-sm font-bold text-white flex items-center gap-1.5"><Store size={14} /> Publish to Nav App Store</h4>
+          <h4 className="text-sm font-bold text-white flex items-center gap-1.5"><Store size={14} /> Publish to App Mart</h4>
           <p className="text-[11px] text-white/50 leading-snug mt-0.5">
             NavBharatAI sends this build straight to the store — you do not need to upload the file.
             A reviewer checks every app before it goes live.

@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import {
   Sparkles, Shield, MessageSquare, Bot, Stethoscope,
   Scale, GraduationCap, Activity, Zap, Code2, Rocket,
-  CheckCircle2, ArrowRight, ChevronRight, LayoutGrid
+  CheckCircle2, ArrowRight, ChevronRight, LayoutGrid, Store, Play
 } from 'lucide-react';
 import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
@@ -31,6 +31,13 @@ interface HomeViewProps {
   onStartProfessionals?: () => void;
   /** Open the "Other AI" page — the builder-tools hub (admin 2026-07-23: a full view, like the other 3). */
   onOpenOtherAI?: () => void;
+  /**
+   * Open App Mart — apps other people built, playable instantly (admin 2026-08-16).
+   * It was buried inside Other's tool grid, where a store cannot do its job: a place nobody arrives
+   * at has nothing to sell, and everything planned on top of it (ads, creator earnings) needs an
+   * audience first. So it is promoted to a home tile of its own.
+   */
+  onOpenAppMart?: () => void;
   isAdmin?: boolean;
   data?: HomeData;
   onUpdate?: (newData: HomeData) => void;
@@ -120,6 +127,29 @@ const PRODUCT_CARDS = [
     btnLabel: 'Open Tools',
     btnIcon: LayoutGrid,
   },
+  {
+    // APP MART — the fifth tile (admin 2026-08-16). This card is deliberately the only one that is
+    // not about BUILDING: it is where you go to USE what other people built. That difference is the
+    // whole reason it earns its own tile instead of a row inside Other's tool grid.
+    id: 'appmart',
+    badge: 'App Mart',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
+    gradient: 'from-emerald-600/20 via-teal-500/10 to-transparent',
+    border: 'border-emerald-500/20 hover:border-emerald-400/50',
+    glow: 'shadow-emerald-500/10',
+    iconBg: 'bg-emerald-500/15',
+    iconColor: 'text-emerald-400',
+    Icon: Store,
+    title: 'App Mart',
+    subtitle: 'Play & Install Apps',
+    description: 'Apps and games made by other NavBharatAI creators. Tap one and it runs straight away in your browser — nothing to download, nothing to install. Like what you see? Make it yours in one tap and change it however you like.',
+    features: ['Play instantly — no install', 'Install Android apps (.apk)', 'Remix any app into your own'],
+    featureIcon: CheckCircle2,
+    featureColor: 'text-emerald-400',
+    btnClass: 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white',
+    btnLabel: 'Open App Mart',
+    btnIcon: Play,
+  },
 ];
 
 const PROF_ICONS = [Stethoscope, Scale, GraduationCap, Activity, Code2];
@@ -132,6 +162,7 @@ export const HomeView = ({
   onStartProChat,
   onStartProfessionals,
   onOpenOtherAI,
+  onOpenAppMart,
   isAdmin,
   data,
   onUpdate,
@@ -147,6 +178,7 @@ export const HomeView = ({
     professionals: onStartProfessionals,
     // "Other AI" navigates to its OWN full page (like the other 3 cards) — the tools live INSIDE it.
     tools: onOpenOtherAI,
+    appmart: onOpenAppMart,
   };
 
   return (
@@ -216,7 +248,7 @@ export const HomeView = ({
         </motion.div>
 
         {/* ── Product Cards (4: Free / Pro / Professionals / Other AI) ── */}
-        <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+        <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 sm:gap-5">
           {PRODUCT_CARDS.map((rawCard, i) => {
             // Play compliance: the Professionals card's copy must not name medical assistants in the
             // native shell (the shipped app declares no medical features — copy and app must match).

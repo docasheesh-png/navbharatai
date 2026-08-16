@@ -83,7 +83,7 @@ const NAVDATA_HINT =
   + ' `NavData.list(collection, limit)` (both return Promises; rows come newest-first as'
   + ' {id, data, at}). Use it for small shared rows (chat messages, guestbook entries, scores,'
   + ' bookings) instead of building a server. In the preview the rows are per-device; published on'
-  + ' the Nav App Store the same code shares rows between all viewers. Rows are small (≤2KB) and'
+  + ' App Mart the same code shares rows between all viewers. Rows are small (≤2KB) and'
   + ' quota-bound — for real databases, auth or relations use the user\'s own database instead.';
 
 function frameworkScaffoldHint(framework?: string): string {

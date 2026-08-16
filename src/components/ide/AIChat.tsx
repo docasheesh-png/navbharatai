@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { playTapTone } from '../../lib/tapTone';
+import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Search, Volume2 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
@@ -567,6 +568,7 @@ export const AIChat: React.FC<AIChatProps> = ({
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, []);
+
 
   const handleRestoreByUci = async () => {
     if (!resumeUciInput.trim() || !onRestoreUci) return;
@@ -1690,6 +1692,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                         onSend(attachments);
                         setAttachments([]);
                         setEditingMsgId(null);
+                        dismissKeyboardOnMobile(textareaRef.current);
                       }
                     }}
                     onPaste={handlePaste}
@@ -1780,6 +1783,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                           onSend(attachments);
                           setAttachments([]);
                           setEditingMsgId(null);
+                          dismissKeyboardOnMobile(textareaRef.current);
                         }}
                         disabled={(!input.trim() && attachments.length === 0) || isLoading}
                         className="p-3 bg-indigo-600 text-white rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95"

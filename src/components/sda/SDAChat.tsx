@@ -7,6 +7,7 @@ import {
   Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import ReactMarkdown from 'react-markdown';
@@ -1141,6 +1142,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                     })) {
                       e.preventDefault();
                       void handleSend();
+                      dismissKeyboardOnMobile(inputRef.current);
                     }
                   }}
                   placeholder={attachedFile ? "Add a note about this document (optional)..." : "Type your answer or clinical finding..."}
@@ -1190,7 +1192,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               </button>
             ) : (
               <button
-                onClick={() => handleSend()}
+                onClick={() => { handleSend(); dismissKeyboardOnMobile(inputRef.current); }}
                 disabled={!input.trim() && !attachedFile}
                 className="w-10 h-10 flex items-center justify-center bg-emerald-700 hover:bg-emerald-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all shrink-0 shadow-lg shadow-emerald-900/40"
               >

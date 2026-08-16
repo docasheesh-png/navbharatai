@@ -588,3 +588,112 @@ describe('the scaffold port is guidance, not an order (admin 2026-08-15)', () =>
     expect(architectSystemPrompt('vite-react')).toMatch(/DEFAULT, not a requirement/);
   });
 });
+
+describe('the game HUD contract (admin screenshot 2026-08-16 — overlapping HUD on a phone)', () => {
+  /**
+   * A real App Mart game rendered its mode name, five hearts, "Level 1" and a countdown printed
+   * THROUGH each other in one band, because each overlay had been given its own
+   * `position:absolute; top:12px` — which puts them all in the same place on a narrow screen.
+   *
+   * The player-side fix (portalling the store player above the tab bar) recovers the space the phone
+   * chrome was stealing; it cannot un-overlap a HUD the build already wrote wrong. This is the
+   * upstream half — the one that stops the NEXT game from repeating it.
+   */
+  it('tells the builder a HUD is one laid-out container, not one absolute box per element', () => {
+    const p = architectSystemPrompt('vite-react');
+    expect(p).toContain('THE HUD IS A LAYOUT, NOT A PILE');
+    expect(p).toContain('justify-content: space-between');
+    expect(p).toContain('ONE container per corner/edge (never one per element)');
+  });
+
+  it('requires the HUD not to swallow taps meant for the game', () => {
+    expect(architectSystemPrompt('vite-react')).toContain('pointer-events');
+  });
+
+  it('names the two mobile units that are wrong by default', () => {
+    // 100vh is wrong by the height of the browser bar, and ignoring the safe area puts an on-screen
+    // joystick under the phone's own chrome — both produce "the controls are unreachable".
+    const p = architectSystemPrompt('vite-react');
+    expect(p).toContain('100dvh');
+    expect(p).toContain('env(safe-area-inset-');
+  });
+
+  it('stops the build telling a phone player to press keys they do not have', () => {
+    expect(architectSystemPrompt('vite-react')).toContain('is DESKTOP');
+  });
+
+  it('teaches all THREE machines a game is played on, not just phone-vs-desktop', () => {
+    // Admin, 2026-08-16: "usko sabhi (3) cheezo ke liye sikhao — mobile | desktop | tablet."
+    // Tablet is the one that gets skipped and the one that breaks: it is wide like a desktop and
+    // touch like a phone, so a width-only rule hands it mouse-sized buttons or a stretched phone.
+    const p = architectSystemPrompt('vite-react');
+    expect(p).toContain('PHONE, PORTRAIT');
+    expect(p).toContain('PHONE, LANDSCAPE');
+    expect(p).toContain('TABLET');
+    expect(p).toContain('DESKTOP');
+  });
+
+  it('decides controls by INPUT capability rather than by screen width', () => {
+    // The insight that makes the three-way rule work at all: width cannot tell touch from mouse.
+    const p = architectSystemPrompt('vite-react');
+    expect(p).toContain('pointer: coarse');
+    expect(p).toContain('hover: hover');
+  });
+
+  it('names the landscape-phone trap, where the screen is wide but SHORT', () => {
+    expect(architectSystemPrompt('vite-react')).toMatch(/wide but very SHORT/);
+  });
+
+  it('carries the contract for every framework, not just the React one', () => {
+    // The same class of game ships as a static canvas page just as often as a Vite app.
+    for (const fw of ['vite-react', 'static', 'nextjs', undefined]) {
+      expect(architectSystemPrompt(fw), String(fw)).toContain('THE HUD IS A LAYOUT, NOT A PILE');
+    }
+  });
+});
+
+describe('the three-screen contract for ordinary pages (mobile | tablet | desktop)', () => {
+  /**
+   * Admin, 2026-08-16: "usko sabhi (3) cheezo ke liye sikhao — mobile | desktop | tablet."
+   *
+   * The per-page contract had five points and said nothing at all about form factors, so "works on a
+   * phone" was left to luck. Tablet is the one that gets skipped in practice AND the one that breaks,
+   * because it is the only device that is wide like a desktop and touch like a phone at the same time
+   * — a width-only breakpoint therefore gives it either mouse-sized tap targets or a phone layout
+   * stretched into a lonely strip.
+   */
+  it('adds a SIXTH point naming all three screens', () => {
+    const p = architectSystemPrompt('vite-react');
+    expect(p).toContain('THE THREE SCREENS — PHONE, TABLET, DESKTOP');
+  });
+
+  it('separates the two questions: size decides layout, input decides controls', () => {
+    // This split IS the rule. Collapsing it back into "breakpoints" is what broke tablets.
+    expect(architectSystemPrompt('vite-react')).toContain('SIZE decides the LAYOUT, INPUT decides the CONTROLS');
+  });
+
+  it('names both tablet failure modes, not just one', () => {
+    const p = architectSystemPrompt('vite-react');
+    expect(p).toMatch(/three or four\s+squeezed narrower/);   // the desktop layout crammed in
+    expect(p).toMatch(/single column stretched/);              // the phone layout blown up
+  });
+
+  it('forbids hover as the ONLY route to an action', () => {
+    // A hover-only menu is not "degraded" on touch, it is completely unreachable.
+    expect(architectSystemPrompt('vite-react')).toMatch(/hover must NEVER be the only way/);
+  });
+
+  it('treats height and orientation as real constraints', () => {
+    const p = architectSystemPrompt('vite-react');
+    expect(p).toContain('HEIGHT IS A SCREEN SIZE TOO');
+    expect(p).toMatch(/BOTH orientations/);
+  });
+
+  it('carries the contract on every framework, including the ones without the CSS kit', () => {
+    // The five-point contract explicitly still applies on Remix/Astro/Lit, where the kit classes do
+    // not exist — the sixth must travel with it, or those scaffolds silently lose it.
+    for (const fw of ['vite-react', 'static', 'nextjs', 'go', 'flask', undefined]) {
+      expect(architectSystemPrompt(fw), String(fw)).toContain('THE THREE SCREENS — PHONE, TABLET, DESKTOP');
+    }
+  });
+});

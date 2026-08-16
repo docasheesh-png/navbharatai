@@ -33756,3 +33756,100 @@ recorded on 2026-08-06.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1277 files / 15845 tests passed** · `npm run build` OK.
+
+## 2026-08-16 — App Mart player: the game was cut off, and the HUD was overlapping (admin choice: A + D)
+
+Admin screenshot: playing a store game, the screen is cut and the top HUD text prints through itself.
+Presented the options and the admin picked **A** (player takes the whole screen) and **D** (teach the
+builder), which is the right pair — they are two different bugs with two different owners, and A
+alone would have left the overlapping text exactly as it was.
+
+### A — the player now really owns the screen (ours)
+
+The player asked for the viewport with `fixed inset-0 z-[90]` and lost it twice over:
+
+1. The global mobile tab bar (`App.tsx`, `fixed bottom-0 z-[150]`) painted straight over the player's
+   bottom ~3.5rem — which is where a game puts its on-screen joystick. That is the cut in the
+   screenshot: the joystick sitting behind HOME / AI / PREVIEW.
+2. `position: fixed` is viewport-relative only while NO ancestor creates a containing block. Any
+   `transform` / `filter` / `backdrop-filter` up the tree silently re-anchors it, and the store is
+   reached through animated panels — so full-screen was a hope, never a guarantee.
+
+Both closed at the cause rather than by nudging a number: the player is **portalled to
+`document.body`** (removing every ancestor from the question) and its z-index is **derived from the
+tab bar's** rather than being a second hard-coded constant free to drift. Safe-area insets were added
+in the same change — now that the player genuinely starts at the top of the screen, ✕ would otherwise
+sit under the notch, and a player you cannot close is worse than one that is cut off.
+
+⚠️ One trap worth recording: the z-index is applied as an INLINE STYLE, not a Tailwind class.
+Tailwind's JIT only emits classes it finds as literal source text, so a computed `` z-[${n}] ``
+compiles to **nothing at all** — the player would slip back under the tab bar with no error anywhere.
+`playerFullScreen.test.ts` pins all of it, including a check that reads the tab bar's REAL z-index out
+of `App.tsx`, so the copy cannot silently fall out of step with the original.
+
+### D — the builder is taught the HUD contract (upstream, so the next game is right)
+
+The overlapping text is the GAME's own markup, not the player's: each overlay (mode name, hearts,
+level, timer, the "WASD to move" hint) had been given its own `position:absolute; top:12px`, which
+puts them all in the same place once the screen is narrower than the desktop the build imagined.
+Notably `GameShellGenerator`'s HUD is already correct — one flex row, `space-between`,
+`pointer-events: none` — so this game was not built through it, and the rule belongs where a freeform
+build can see it: the architect prompt.
+
+Added there: one positioned container per corner/edge (never one per element), `pointer-events: none`
+so the HUD cannot eat taps meant for the game, `flex-wrap` with a gap so a narrow screen wraps instead
+of colliding, the keyboard hint marked DESKTOP-only (a phone player cannot press WASD), and `100dvh`
+plus `env(safe-area-inset-*)` — the two mobile units that are wrong by default and put an on-screen
+joystick under the phone's own chrome.
+
+**Honest limit:** D fixes future builds. Games already published keep their HUD until their creator
+rebuilds — option E (catching it at publish time) is the one that would reach those, and the admin
+did not pick it, so it stays unbuilt rather than half-built.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1278 files / 15855 tests passed** · `npm run build` OK.
+
+## 2026-08-16 — The three-screen contract: phone | tablet | desktop (admin: "sabhi 3 cheezo ke liye sikhao")
+
+The HUD rule shipped an hour earlier only distinguished touch from desktop. The admin asked for all
+three explicitly, and that turned out to be the more important request: **the per-page contract had
+five points and said nothing about form factors at all**, so "works on a phone" was left to luck, and
+tablet was named nowhere in the entire architect prompt.
+
+**Tablet is the one that gets skipped AND the one that breaks**, for a reason worth writing down: it
+is the only device that is wide like a desktop and touch like a phone at the same time. A width-only
+breakpoint therefore gives it one of two obviously-wrong results — the desktop's three or four columns
+squeezed narrower, or the phone's single column stretched into a lonely strip between huge empty
+margins. Both are immediately visible to whoever is holding it.
+
+So the rule taught is not "add a tablet breakpoint". It is:
+
+> **SIZE decides the LAYOUT. INPUT decides the CONTROLS.**
+
+Two separate questions, and collapsing them into one is precisely what breaks tablets. Layout goes by
+width (phone = one column, tablet = two, desktop = full with a max-width); controls go by CAPABILITY
+— `@media (pointer: coarse)` for 44×44px targets, `@media (hover: hover)` for hover effects, with the
+hard rule that **hover may never be the only route to an action** (a hover-only menu is not degraded
+on touch, it is unreachable). Width cannot answer that question: a tablet is wide and touch, a
+touchscreen laptop is both.
+
+Added alongside it, because each is a real failure and none was stated anywhere:
+- **Height is a screen size too.** A phone in LANDSCAPE — how most people hold a game — is wide but
+  very short, and a header sized for portrait eats a third of it. Tablets are rotated constantly, so
+  BOTH orientations must work.
+- `100dvh` not `100vh`, `env(safe-area-inset-*)` on anything pinned to an edge, and no fixed pixel
+  width beyond ~320px on content (the cause of a phone page scrolling sideways).
+
+The game HUD rule was extended to the same three machines with the specifics that differ per device:
+phone-portrait (controls in the bottom corners where thumbs rest), phone-landscape (the HUD must
+SHRINK, not stack into more rows), **tablet** (keep touch controls and keep them near the bottom
+corners — do not stretch them to the far edges of a 12-inch screen where no thumb reaches; scale the
+playfield up, not the controls), and desktop (hide the joystick, support keys properly, cap the
+playfield with a max-width rather than sprawling across an ultrawide).
+
+Test-locked, including that the sixth point travels to EVERY framework — the five-point contract
+explicitly still applies on Remix/Astro/Lit where the CSS kit classes do not exist, so the sixth had
+to as well or those scaffolds would silently lose it.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1281 files / 15886 tests passed** · `npm run build` OK.

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Share2, Flag, Lock, Check, Sparkles, Gamepad2, Type } from 'lucide-react';
 import { authedHeaders } from '../../App';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
@@ -27,6 +28,36 @@ import { clientWorkspaceId, v3SessionStorageKey, writeRemixHandoff } from '../ag
 // the header. The player page inlines its compiler and loads dependencies only from that mirror, so
 // the opaque origin costs nothing.
 const PLAYER_SANDBOX = 'allow-scripts allow-forms allow-popups allow-modals';
+
+/**
+ * THE PLAYER OWNS THE WHOLE SCREEN — above every piece of NavBharatAI's own chrome.
+ *
+ * ROOT CAUSE (admin screenshot, 2026-08-16: "app mart me game khelte hain to screen cut ho jati
+ * hai"). The player asked for the full viewport with `fixed inset-0 z-[90]`, and then lost it twice:
+ *
+ *   • the global mobile tab bar (App.tsx, `fixed bottom-0 z-[150]`) painted straight over the
+ *     player's bottom ~3.5rem, so a game's on-screen joystick sat behind HOME / AI / PREVIEW; and
+ *   • `position: fixed` is only viewport-relative while NO ancestor creates a containing block —
+ *     any `transform`, `filter` or `backdrop-filter` up the tree silently re-anchors it. The store
+ *     is reached through animated panels, so this was never a guarantee, only a hope.
+ *
+ * Both are closed here rather than by nudging a number. The player is PORTALLED TO `document.body`,
+ * which removes every ancestor from the question, and its z-index is derived from the tab bar's
+ * (`GLOBAL_MOBILE_NAV_Z`) instead of being a second hard-coded constant that can drift away from it.
+ * A test pins the ordering, because "the game is cut off at the bottom" is exactly the kind of bug
+ * that comes back the next time someone raises a z-index somewhere else.
+ *
+ * The tab bar is NOT unmounted: hiding it would mean touching global layout state from a viewer
+ * component, and the player already carries its own ✕. Covering it is the smaller, reversible move.
+ */
+export const GLOBAL_MOBILE_NAV_Z = 150;
+
+/**
+ * Applied as an INLINE STYLE, not a Tailwind class, and deliberately so: Tailwind's JIT only emits
+ * classes it can find as literal text in the source, so a computed `z-[${n}]` would compile to
+ * nothing at all — the player would silently drop back under the tab bar with no error anywhere.
+ */
+export const PLAYER_Z = GLOBAL_MOBILE_NAV_Z + 50;
 
 /**
  * GAME MODE — the viewer's own switch (admin 2026-08-15: "ek toggle on/off bana do").
@@ -229,10 +260,23 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
     } catch { /* the dialog stays open; the user can retry */ }
   }, [appId, reportText]);
 
-  return (
-    <div className="fixed inset-0 z-[90] bg-[#0d1117] flex flex-col">
+  return createPortal(
+    <div
+      className="fixed inset-0 bg-[#0d1117] flex flex-col"
+      style={{ zIndex: PLAYER_Z, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+    >
       {/* Slim bar — the only NavBharatAI chrome. The app owns the rest of the screen. */}
-      <div className="flex items-center gap-2 px-3 h-11 border-b border-white/10 bg-[#0d1117] flex-shrink-0">
+      <div
+        className="flex items-center gap-2 px-3 border-b border-white/10 bg-[#0d1117] flex-shrink-0"
+        style={{
+          // The bar is a fixed 2.75rem of tappable content PLUS the device's notch inset ABOVE it.
+          // Now that the player really does start at the top of the screen, ✕ would otherwise sit
+          // under the status bar / notch on a phone — an unclosable player is far worse than a cut
+          // one, so the inset is added to the HEIGHT rather than eaten out of it.
+          height: 'calc(2.75rem + env(safe-area-inset-top, 0px))',
+          paddingTop: 'env(safe-area-inset-top, 0px)',
+        }}
+      >
         <span className="text-sm font-semibold text-white truncate flex-1">{meta?.name || 'Loading…'}</span>
         {html && (
           <button
@@ -379,7 +423,8 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

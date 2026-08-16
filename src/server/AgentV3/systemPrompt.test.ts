@@ -588,3 +588,44 @@ describe('the scaffold port is guidance, not an order (admin 2026-08-15)', () =>
     expect(architectSystemPrompt('vite-react')).toMatch(/DEFAULT, not a requirement/);
   });
 });
+
+describe('the game HUD contract (admin screenshot 2026-08-16 — overlapping HUD on a phone)', () => {
+  /**
+   * A real App Mart game rendered its mode name, five hearts, "Level 1" and a countdown printed
+   * THROUGH each other in one band, because each overlay had been given its own
+   * `position:absolute; top:12px` — which puts them all in the same place on a narrow screen.
+   *
+   * The player-side fix (portalling the store player above the tab bar) recovers the space the phone
+   * chrome was stealing; it cannot un-overlap a HUD the build already wrote wrong. This is the
+   * upstream half — the one that stops the NEXT game from repeating it.
+   */
+  it('tells the builder a HUD is one laid-out container, not one absolute box per element', () => {
+    const p = architectSystemPrompt('vite-react');
+    expect(p).toContain('THE HUD IS A LAYOUT, NOT A PILE');
+    expect(p).toContain('justify-content: space-between');
+    expect(p).toContain('ONE container per corner/edge (never one per element)');
+  });
+
+  it('requires the HUD not to swallow taps meant for the game', () => {
+    expect(architectSystemPrompt('vite-react')).toContain('pointer-events');
+  });
+
+  it('names the two mobile units that are wrong by default', () => {
+    // 100vh is wrong by the height of the browser bar, and ignoring the safe area puts an on-screen
+    // joystick under the phone's own chrome — both produce "the controls are unreachable".
+    const p = architectSystemPrompt('vite-react');
+    expect(p).toContain('100dvh');
+    expect(p).toContain('env(safe-area-inset-');
+  });
+
+  it('stops the build telling a phone player to press keys they do not have', () => {
+    expect(architectSystemPrompt('vite-react')).toContain('DESKTOP-only');
+  });
+
+  it('carries the contract for every framework, not just the React one', () => {
+    // The same class of game ships as a static canvas page just as often as a Vite app.
+    for (const fw of ['vite-react', 'static', 'nextjs', undefined]) {
+      expect(architectSystemPrompt(fw), String(fw)).toContain('THE HUD IS A LAYOUT, NOT A PILE');
+    }
+  });
+});

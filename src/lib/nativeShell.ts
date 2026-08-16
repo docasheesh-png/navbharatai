@@ -15,6 +15,7 @@
 // unit-testable without a native runtime.
 
 import { playTapTone } from './tapTone';
+import { readTapFeedbackPrefs, TAP_FEEDBACK_DEFAULTS, type TapFeedbackPrefs } from './tapFeedbackPrefs';
 
 /** The minimal Capacitor surface this module touches (DI for tests). */
 export interface NativeShellContext {
@@ -313,6 +314,14 @@ export function installTapHaptics(
   root: { addEventListener: (t: string, cb: (e: Event) => void, o?: unknown) => void; removeEventListener: (t: string, cb: (e: Event) => void, o?: unknown) => void },
   now: () => number = () => Date.now(),
   tick: () => void = playTapTone,
+  // THE USER'S CHOICE, READ PER TAP — not once at install (admin 2026-08-16, Settings → General
+  // Settings → Touch feedback). This listener is installed once at boot and holds no React state, so
+  // reading the preference here would freeze it at boot: flipping the switch would change nothing
+  // until the app restarted, which is exactly the "the setting exists but does not work" defect the
+  // second absolute rule forbids. A localStorage read is microseconds and happens at most once per
+  // 60 ms (the gap guard below), so per-tap is free and always correct.
+  prefs: () => TapFeedbackPrefs = readTapFeedbackPrefs,
+  buzz: (style: 'light' | 'medium' | 'heavy') => void = (style) => { void triggerHaptic(ctx, style); },
 ): () => void {
   if (!isNativeShell(ctx)) return () => {};
   let last = 0;
@@ -322,7 +331,12 @@ export function installTapHaptics(
     const t = now();
     if (t - last < HAPTIC_MIN_GAP_MS) return;
     last = t;
-    try { tick(); } catch { /* best effort — feedback must never break a tap */ }
+    // Read AFTER the gap guard so a rejected tap costs nothing at all.
+    const p = (() => { try { return prefs(); } catch { return TAP_FEEDBACK_DEFAULTS; } })();
+    if (p.sound) { try { tick(); } catch { /* best effort — feedback must never break a tap */ } }
+    // 'light' deliberately: vibration is opt-IN precisely because the motor is heavy-handed on many
+    // Android phones, so a user who asks for it should get the gentlest version, not the strongest.
+    if (p.vibration) { try { buzz('light'); } catch { /* best effort */ } }
   };
   root.addEventListener('pointerdown', onDown, { passive: true });
   return () => root.removeEventListener('pointerdown', onDown, { passive: true } as unknown);

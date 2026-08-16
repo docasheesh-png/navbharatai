@@ -7,6 +7,7 @@ import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirement
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { analyzeAppScope } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
+import { fullstackBootHint } from '../lib/fullstackBootHint';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { requestedFeatureLabels, renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
@@ -9229,6 +9230,14 @@ export function registerAgentV3Routes(app: Express): void {
         // null for an ordinary top-level-src app (no false noise).
         const layoutHint = frontendLayoutHint(tree);
         if (layoutHint) buildPrompt = `${layoutHint}\n\n${buildPrompt}`;
+        // FULLSTACK BOOT (admin 2026-08-16): the 17m47s / 35.8-min flails were a full-stack client+server
+        // app misread as `vite-react` — server up on 5000, model burned 10 min trying to move it to 5173
+        // and hand-probing ports. Prevent it upstream: derive the ONE dev command + the exact preview
+        // port (SERVER's port for single-port, CLIENT's for two-port) from package.json + the server file,
+        // and hand it to the builder before it touches the preview. Deterministic; null for a non-fullstack
+        // app (a plain client/API is already covered by the framework hint). Reads only a handful of files.
+        const bootHint = await fullstackBootHint(tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''));
+        if (bootHint) buildPrompt = `${bootHint}\n\n${buildPrompt}`;
       } catch { /* project context is best-effort — never blocks a build */ }
 
       // MEMORY FIX 2 (Claude-level conversation memory): load the most recent PRIOR build transcript

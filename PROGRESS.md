@@ -33125,3 +33125,44 @@ still dying with BOTH armed, that report will name the killer. Not claimed as fi
   admin's manual step (rule 6 boundary, unchanged). This bundle is what carries the session's FRONTEND
   work (voice typing, zip import, Sonic, Settings regroup, Other-AI regroup, image gen) to installed
   Android users; server-side fixes reached them on merge via Cloud Run.
+---
+
+## 2026-08-16 — Deterministic FULLSTACK BOOT hint: kill the LLM port-probing flail (prevention, 50/50 law)
+
+**The report this closes.** The admin's 2026-08-15 builds (17m47s to edit a to-do app, one 35.8-min run)
+were a full-stack **client + Express server** app misread as a plain `vite-react` scaffold. The server came
+up correctly on its own port (mitrify: 5000), but — told by the framework hint the port was 5173 — the
+model spent its last ten minutes trying to MOVE the working server onto 5173, and hand-probed ports with
+`tsx server/index.ts 2>&1 & sleep 8; curl http://localhost:PORT` loops. The exact failure is even quoted in
+`systemPrompt.ts:56-59`. All of the platform's deterministic port machinery (pin, drift re-probe, sweep,
+watchdog, recovery classifier) is **downstream compensation** that only runs AFTER the model has flailed.
+
+**Root cause (upstream).** `FRAMEWORK_HINTS` in `systemPrompt.ts` has entries for every single-framework
+scaffold but **no full-stack entry**, and `update_preview(port)` requires the model to pick the port. For a
+client+server app the model gets zero start-command/port guidance and hand-hunts. This is a PREVENTION gap,
+not a healing gap — the strongest lever per the 50/50 law.
+
+**The fix — `src/server/lib/fullstackBootHint.ts` (+test, 11 cases).** A pure, deterministic analyzer
+(mirrors `frontendLayoutHint`) that, on an edit/continue of an existing app, derives from `package.json` +
+the server file:
+- **single-port** (the server serves the client itself — `setupVite`/`serveStatic`/`vite.middlewares`/
+  `express.static`): the preview IS the server's port. Reuses `serverListenPort` (parses `process.env.PORT
+  || N`, `const PORT = N`, `.listen(N`) → `devScriptPort` → 5000. Tells the builder: run ONE `npm run dev`,
+  do NOT run the server file by hand, do NOT start a separate client, call `update_preview` with the port
+  the server bound, and NEVER move the server to match a framework default.
+- **two-port** (one dev script boots a Vite client AND the server via `concurrently`/`npm-run-all`): the
+  preview is the CLIENT (Vite) port (from `vite.config` `server.port`, else 5173); the client proxies /api.
+- **null** for a plain client or a plain API (already covered by the framework hint) — no false noise.
+
+Reuses `resolveDevRunCommand` + `devScriptPort` from `DevServerRecovery.ts` (PURE, dependency-free) so the
+boot command + script-port logic is not re-drifted (rule 2 — fix the class). Wired at `agentv3.ts` right
+beside `frontendLayoutHint` (the every-build project-context block); reads only the handful of files
+`fullstackBootProbeFiles` selects. Best-effort — can NEVER block a build; fresh builds (empty tree) get no
+hint, so behaviour there is byte-identical. No new flag, no new model pass, no extra cost.
+
+**Honest boundary.** This targets the reported case (an EDIT/continue of an existing full-stack app, where
+the files exist at prompt time). A FRESH full-stack build's shape isn't known until files are generated
+mid-turn; classifying that would touch scaffold/framework selection and is a larger, riskier change — left
+as a future item rather than pretended fixed here.
+
+Gate: `tsc --noEmit` + `tsc -p tsconfig.server.json` clean; full `vitest` green (15,718).

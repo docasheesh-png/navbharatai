@@ -19,6 +19,7 @@ import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 import { isGreenSnapshotKey } from './GreenGuard';
 import { workspacePrefixFor } from '../lib/workspaceIdentity';
+import { toDurableFileKey, normalizeFileMapKeys } from '../lib/workspacePath';
 
 const COLLECTION = 'workspace_files_v3';
 /** Firestore's hard per-document limit is 1 MB; skip a single file larger than this. */
@@ -129,7 +130,11 @@ export function essentialManifestsToCarry(existingPaths: string[], incomingPaths
 export async function saveWorkspaceFiles(workspaceId: string, files: Record<string, string>): Promise<void> {
   const db = getDb();
   if (!db) return;
-  const entries = Object.entries(files).filter(([, c]) => typeof c === 'string' && Buffer.byteLength(c, 'utf8') <= MAX_FILE_BYTES);
+  // PHANTOM-FILE GUARD (build 5b4f9b63) — see toDurableFileKey. An absolute in-workspace key stored
+  // here is a file the analyzers see and the sandbox does not have; normalize BEFORE anything is
+  // written so the map can only ever hold paths the sandbox could actually resolve.
+  const normalized = normalizeFileMapKeys(files);
+  const entries = Object.entries(normalized.files).filter(([, c]) => typeof c === 'string' && Buffer.byteLength(c, 'utf8') <= MAX_FILE_BYTES);
   if (entries.length === 0) return; // never overwrite a good saved set with nothing
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);
@@ -198,7 +203,10 @@ export async function resetWorkspaceFilesForApprovedRebuild(workspaceId: string,
 export async function mergeWorkspaceFiles(workspaceId: string, partial: Record<string, string>): Promise<void> {
   const db = getDb();
   if (!db) return;
-  const entries = Object.entries(partial || {}).filter(([, c]) => typeof c === 'string' && Buffer.byteLength(c, 'utf8') <= MAX_FILE_BYTES);
+  // PHANTOM-FILE GUARD — same rule as saveWorkspaceFiles. This is the path a zip/GitHub import and
+  // every single IDE edit take, so it is the likeliest door for an absolute path to walk through.
+  const entries = Object.entries(normalizeFileMapKeys(partial || {}).files)
+    .filter(([, c]) => typeof c === 'string' && Buffer.byteLength(c, 'utf8') <= MAX_FILE_BYTES);
   if (entries.length === 0) return;
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);
@@ -276,14 +284,23 @@ export async function loadWorkspaceFiles(workspaceId: string): Promise<Record<st
     if (!meta.exists) return {};
     const paths: string[] = Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
     if (paths.length === 0) return {};
-    const allowed = new Set(paths);
+    // HEAL ON READ, not by migration. The writers above stop NEW phantoms; every workspace that
+    // already holds one (the admin's did — that is how this was found) would otherwise keep reporting
+    // a duplicate entry point forever. Normalizing here fixes them all at once, with no backfill job
+    // and no risk of a half-migrated store: the map a caller receives can only contain paths the
+    // sandbox could resolve. Matching on the NORMALIZED path keeps the metadata list authoritative,
+    // so a file the user deleted still stays deleted.
+    const allowed = new Set(paths.map((p) => toDurableFileKey(p)).filter((p): p is string => p !== null));
     const docs = await root.collection('files').get();
     const out: Record<string, string> = {};
     for (const d of docs.docs) {
       const data = d.data();
-      if (typeof data.path === 'string' && typeof data.content === 'string' && allowed.has(data.path)) {
-        out[data.path] = data.content;
-      }
+      if (typeof data.path !== 'string' || typeof data.content !== 'string') continue;
+      const key = toDurableFileKey(data.path);
+      if (key === null || !allowed.has(key)) continue;
+      // A phantom and its real twin carry the same content in practice; when they do not, the doc that
+      // sorts later wins, exactly as before this guard existed for a single key.
+      out[key] = data.content;
     }
     return out;
   } catch {
@@ -325,9 +342,17 @@ export async function listWorkspaceFilePaths(workspaceId: string): Promise<strin
     const meta = await db.collection(COLLECTION).doc(workspaceId).get();
     if (!meta.exists) return [];
     const data = meta.data();
-    return Array.isArray(data?.paths)
-      ? data!.paths.filter((p: unknown): p is string => typeof p === 'string' && p.length > 0)
-      : [];
+    if (!Array.isArray(data?.paths)) return [];
+    // Normalized + de-duplicated for the same reason loadWorkspaceFiles heals on read: this list is
+    // what `countEditableSourceFiles` counts and what the rebuild guard weighs, so a phantom here
+    // inflates the size of a project that does not contain it.
+    const seen = new Set<string>();
+    for (const p of data!.paths) {
+      if (typeof p !== 'string' || p.length === 0) continue;
+      const key = toDurableFileKey(p);
+      if (key !== null) seen.add(key);
+    }
+    return Array.from(seen);
   } catch {
     return [];
   }
@@ -408,12 +433,29 @@ export function reconcileProjectFileTree(
   return out;
 }
 
-/** Pure: split a current path list into what remains after removing `toRemove`, + the removed paths. */
+/**
+ * Pure: split a current path list into what remains after removing `toRemove`, + the removed paths.
+ *
+ * Matching is on the NORMALIZED path, so `src/main.tsx` deletes a legacy entry stored as
+ * `/home/user/workspace/src/main.tsx`. Without that, a phantom key (see toDurableFileKey) was
+ * literally undeletable: the only spelling the store knew was one no caller would ever type. The
+ * ORIGINAL string is what comes back in `removed`, because `fileDocId` must address the content doc
+ * exactly as it was written.
+ */
 export function diffRemovedPaths(current: string[], toRemove: string[]): { remaining: string[]; removed: string[] } {
-  const removeSet = new Set((toRemove || []).filter((p) => typeof p === 'string' && p));
+  const removeSet = new Set<string>();
+  for (const p of toRemove || []) {
+    if (typeof p !== 'string' || !p) continue;
+    removeSet.add(p);
+    const key = toDurableFileKey(p);
+    if (key !== null) removeSet.add(key);
+  }
   const remaining: string[] = [];
   const removed: string[] = [];
-  for (const p of current || []) (removeSet.has(p) ? removed : remaining).push(p);
+  for (const p of current || []) {
+    const key = toDurableFileKey(p);
+    (removeSet.has(p) || (key !== null && removeSet.has(key)) ? removed : remaining).push(p);
+  }
   return { remaining, removed };
 }
 

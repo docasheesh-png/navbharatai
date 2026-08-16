@@ -1330,6 +1330,14 @@ export function isExpectedNonzeroExit(command: string, exitCode: number | null):
   // the project-wide `tsc --noEmit` / `tsc -p …` (no file operands) — that one is NEVER excused here, so
   // a genuine type error still counts. tsc exits 1/2 on errors; the E2B wrapper can surface -1.
   if (isUnconfiguredTscFileProbe(last)) return exitCode === 1 || exitCode === 2 || exitCode < 0;
+  // `npm audit fix` EXITS 1 WHEN VULNERABILITIES REMAIN — that is npm's documented behaviour, and on a
+  // tree whose remaining advisories all need a BREAKING major upgrade it is the only exit it can give.
+  // The command still did its whole job (build 5b4f9b63: "up to date, audited 727 packages", every
+  // compatible fix applied, then a list of the ones that need `--force`). We deliberately never pass
+  // `--force` (see npmAuditFix.ts), so this exit code is not a failure of ours — it is the expected
+  // answer to the question we asked. Recorded as an error it became the headline root cause of a build
+  // whose real problem was that it never built anything.
+  if (/^npm(\s+\S+)*\s+audit\b/.test(last) && /\bfix\b/.test(last)) return exitCode === 1;
   return false;
 }
 
@@ -1441,6 +1449,10 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   'DESIGN_PAGE_INCONSISTENT',    // per-page design coverage — a quality note, never a cause
   'TEST_SUITE_UNVERIFIED',       // our sandbox could not run the suite; not the app's defect
   'REQUIREMENT_GAPS',            // "this domain usually also needs…" — a suggestion, not a fault
+  // A CVE COUNT IS A FINDING ABOUT THE USER'S DEPENDENCIES, NOT A THING OUR BUILD FAILED AT (build
+  // 5b4f9b63). Same class as DEPHEALTH_ADVISORY directly above; it was simply recorded under a
+  // different code and so kept its eligibility.
+  'DEPENDENCY_VULNERABILITIES',
   'POST_ANSWER_TIMING',          // pure measurement
   // A setup-timing measurement (how long prep took before the first model call) is an advisory about
   // the WAIT, never the CAUSE of anything. BENCHMARK #2 (2026-08-12): a fully successful build — tsc
@@ -1532,6 +1544,13 @@ export function failureHasSurvivingConsequence(
     !i.autoResolved
     && i.observation !== true
     && !isRecoverableOnSuccess(i.code)   // another transient is not a consequence
+    // AN ADVISORY THAT *RECOMMENDS* A COMMAND IS NOT EVIDENCE THAT THE COMMAND'S FAILURE SURVIVED
+    // (build 5b4f9b63). `npm audit fix` exited 1, and the DEPENDENCY_VULNERABILITIES advisory happens
+    // to contain the sentence "Running `npm audit fix` applies the compatible fixes" — so the substring
+    // test read the RECOMMENDATION as the CONSEQUENCE, refused to forgive the failure, and made
+    // "$ npm audit fix → exit 1 (14s)" the headline root cause of a build whose real problem was that
+    // it never built anything. An advisory is a note about the project; it is a consequence of nothing.
+    && !isNeverRootCause(i.code)
     && typeof i.message === 'string'
     && i.message.includes(key));
 }

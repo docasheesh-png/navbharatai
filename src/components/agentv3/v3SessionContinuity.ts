@@ -54,3 +54,52 @@ export function clientWorkspaceId(userId: string | null | undefined, sessionId: 
   if (!sessionId) return '';
   return `agentv3-${normalizeUid(userId)}-${sessionId}`;
 }
+
+/**
+ * REMIX HANDOFF — the store → v5.0 baton (root-caused 2026-08-16, admin: "make it yours dabaya, v5
+ * khulta hai par code nahi milta").
+ *
+ * WHY A DEDICATED RECORD instead of just the sticky key: the player wrote the sticky session under
+ * `agentv3_session_<real-uid>` — correct, because the store page had a resolved sign-in. Then it
+ * RELOADS, and Firebase restores the session ASYNCHRONOUSLY (0.3–2s, as this codebase's own auth
+ * comments say). The v5 panel mounts inside that window with `userId === undefined`, reads
+ * `agentv3_session_anon`, finds nothing, and mints a BRAND-NEW EMPTY session — permanently, because
+ * the session id is fixed on first render. The copied files sat safe on the server the whole time,
+ * attached to a workspace nothing was pointing at any more.
+ *
+ * So the baton carries the WORKSPACE ID the server already resolved, not ingredients the client has
+ * to re-derive from an identity it does not have yet. It cannot race: there is nothing to compute.
+ *
+ * sessionStorage on purpose — this is a one-shot baton for THIS tab's next load, not state. It is
+ * consumed (deleted) on read, so a later reload does not re-announce an old remix.
+ */
+const REMIX_HANDOFF_KEY = 'nbi_v3_remix_handoff';
+
+export interface RemixHandoff {
+  /** The session id the store minted; the panel adopts it verbatim. */
+  sessionId: string;
+  /** The workspace the SERVER wrote the files into — already resolved, never re-derived. */
+  workspaceId: string;
+  /** For the confirmation the user sees, so the handoff is visible rather than silent. */
+  appName: string;
+  /** True when the app was one the user had already bought — used only for the wording. */
+  owned?: boolean;
+}
+
+export function writeRemixHandoff(h: RemixHandoff): void {
+  try { sessionStorage.setItem(REMIX_HANDOFF_KEY, JSON.stringify(h)); } catch { /* private mode — the sticky key still tries */ }
+}
+
+/** Read AND consume the baton. Returns null when there is none or it is unreadable. */
+export function takeRemixHandoff(): RemixHandoff | null {
+  try {
+    const raw = sessionStorage.getItem(REMIX_HANDOFF_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(REMIX_HANDOFF_KEY);
+    const h = JSON.parse(raw) as RemixHandoff;
+    if (!h || typeof h.sessionId !== 'string' || !h.sessionId || typeof h.workspaceId !== 'string' || !h.workspaceId) return null;
+    return { sessionId: h.sessionId, workspaceId: h.workspaceId, appName: typeof h.appName === 'string' ? h.appName : 'Your app', owned: h.owned === true };
+  } catch {
+    return null;
+  }
+}

@@ -52,7 +52,7 @@ import {
 } from '../lib/navStoreWeb';
 import { generateEnvExample } from '../AgentV3/EnvExampleGenerator';
 import { loadWorkspaceFiles, saveWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
-import { validateRemixPrice, hasPurchased, canAffordRemix, settleRemixPurchase, resalePriceCheck, resalePriceFloor, MAX_REMIX_PRICE_INR, PAID_REMIX_ENABLED } from '../lib/navStoreRemixPurchase';
+import { validateRemixPrice, hasPurchased, canAffordRemix, settleRemixPurchase, resalePriceCheck, resalePriceFloor, MAX_REMIX_PRICE_INR, PAID_REMIX_ENABLED, listPurchases } from '../lib/navStoreRemixPurchase';
 import { addDataRow, listDataRows, isValidDataCollection } from '../lib/navStoreWebData';
 import { rateLimiter } from '../lib/authMiddleware';
 import { verifiedWorkspaceReadOk } from '../lib/workspaceIdentity';
@@ -793,9 +793,14 @@ export function registerNavStoreRoutes(app: Express): void {
       const price = PAID_REMIX_ENABLED ? (found.priceInr ?? 0) : 0;
       const buyerUid = await verifyFirebaseToken(req);
       let settlementNote: string | undefined;
+      // "Buy once, take the code whenever you like" (admin 2026-08-16) — reported back so v5 can say
+      // "copied again" rather than "yours now". Only read when there IS a price: while paid remix is
+      // parked this stays false and costs no lookup.
+      let alreadyOwned = false;
       if (price > 0 && buyerUid !== found.uid) {
         if (!buyerUid) return res.status(401).json({ error: `This remix costs ₹${price} — sign in to buy it (it's non-refundable; you can use the app free first).` });
         const owned = await hasPurchased(found.id, buyerUid);
+        alreadyOwned = owned;
         if (!owned) {
           const afford = await canAffordRemix(buyerUid, price);
           if (!afford.ok) return res.status(402).json({ error: afford.reason });
@@ -822,10 +827,43 @@ export function registerNavStoreRoutes(app: Express): void {
         settlementNote = settled.note;
       }
       bumpWebAppCounter(found.id, 'remixes');
-      res.json({ ok: true, fileCount: Object.keys(files).length, name: found.name, apiKeysNeeded: neededVars, ...(settlementNote ? { settlementNote } : {}) });
+      res.json({ ok: true, fileCount: Object.keys(files).length, name: found.name, apiKeysNeeded: neededVars, alreadyOwned, ...(settlementNote ? { settlementNote } : {}) });
     } catch (e) {
       logStoreError('web/remix', e);
       res.status(502).json({ error: 'The remix failed — nothing was copied.' });
+    }
+  });
+
+  /**
+   * WHAT THIS BUYER OWNS (admin 2026-08-16: "purchase ho jaye to us par kharidne wale ka naam likh
+   * jaye, fir jitni baar chahe code copy kare — par bas wahi ek app").
+   *
+   * A purchase is a permanent entitlement, not a one-shot download. The record and the free
+   * re-remix already existed; this is the missing half — being able to SEE what you own, so the
+   * guarantee is usable instead of theoretical. Nothing here grants anything: the remix route
+   * re-checks `hasPurchased` for the ONE app being copied, so this list can never widen access.
+   */
+  app.get('/api/nav-store/web/purchases', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.status(401).json({ error: 'Sign in to see the apps you own.' });
+    try {
+      const owned = await listPurchases(me.uid);
+      // The listing may have been removed or renamed since the purchase; the ENTITLEMENT survives
+      // either way, so a missing listing is reported honestly rather than dropped from the list.
+      const apps = await Promise.all(owned.map(async (p) => {
+        const found = await getWebApp(p.appId);
+        return {
+          appId: p.appId,
+          priceInr: p.priceInr,
+          at: p.at,
+          name: found && found.status !== 'removed' ? found.name : null,
+          available: !!found && found.status !== 'removed',
+        };
+      }));
+      res.json({ apps });
+    } catch (e) {
+      logStoreError('web/purchases', e);
+      res.status(502).json({ error: 'Could not load the apps you own.' });
     }
   });
 

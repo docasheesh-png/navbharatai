@@ -100,6 +100,16 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
   const [webApps, setWebApps] = useState<WebApp[]>([]);
   const [webMine, setWebMine] = useState<WebApp[]>([]);
   const [webQueue, setWebQueue] = useState<WebApp[]>([]);
+  /**
+   * APPS YOU OWN (admin 2026-08-16: "purchase ho jaye to us par kharidne wale ka naam likh jaye, fir
+   * jitni baar chahe code copy kare — par bas wahi ek app").
+   *
+   * A purchase is a permanent entitlement, not a one-shot download: buy once, take the code as often
+   * as you like, and ONLY for that app. The server already recorded the purchase and already lets an
+   * owner re-copy free; this section is the missing half — seeing what you own, so the promise is
+   * usable. Hidden entirely when you own nothing, so it never shows an empty shelf.
+   */
+  const [owned, setOwned] = useState<Array<{ appId: string; name: string | null; priceInr: number; at: number; available: boolean }>>([]);
   // A share link (`/store/app/<id>`) opens the player IMMEDIATELY — the receiver tapped an app,
   // not a store; the store is what they see when they close it. Read once at mount.
   const [playingId, setPlayingId] = useState<string | null>(() => {
@@ -175,6 +185,14 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
     } catch { /* shown as an empty list */ }
   }, []);
 
+  const loadOwned = useCallback(async () => {
+    try {
+      const res = await fetch('/api/nav-store/web/purchases', { headers: await authedHeaders() });
+      const data = await res.json().catch(() => null);
+      if (liveRef.current && Array.isArray(data?.apps)) setOwned(data.apps);
+    } catch { /* signed out or offline — the section simply stays hidden */ }
+  }, []);
+
   const loadWebQueue = useCallback(async () => {
     try {
       const res = await fetch('/api/nav-store/web/admin/queue', { headers: await authedHeaders() });
@@ -216,9 +234,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
 
   useEffect(() => { void loadStatus(); void loadApps(); void loadWebApps(); }, [loadStatus, loadApps, loadWebApps]);
   useEffect(() => {
-    if (tab === 'mine') { void loadMine(); void loadWebMine(); }
+    if (tab === 'mine') { void loadMine(); void loadWebMine(); void loadOwned(); }
     if (tab === 'review') { void loadQueue(); void loadWebQueue(); }
-  }, [tab, loadMine, loadQueue, loadWebMine, loadWebQueue]);
+  }, [tab, loadMine, loadQueue, loadWebMine, loadWebQueue, loadOwned]);
 
   // KEEP THE FILE, don't base64 it (2026-07-28). Reading a 50 MB APK into a base64 string only to
   // post it inside JSON is what capped the store at ~24 MB against the platform's request limit —
@@ -546,6 +564,35 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         {/* ── My apps ── */}
         {tab === 'mine' && webMine.length > 0 && (
           <div className="mb-5">
+            {owned.length > 0 && (
+              <div className="mb-6">
+                <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
+                  <ShieldCheck size={12} /> Apps you own — take the code any time
+                </p>
+                <p className="text-[11px] text-white/35 mb-2 leading-relaxed">
+                  You bought these. Copying is free and unlimited, for these apps only — buy once, take the code whenever you need it.
+                </p>
+                <div className="grid gap-2">
+                  {owned.map((o) => (
+                    <div key={o.appId} className="flex items-center gap-3 p-3 rounded-xl bg-[#161b22] border border-white/10">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold truncate">{o.name || 'An app you bought'}</p>
+                        <p className="text-[11px] text-white/35 mt-0.5">
+                          Bought for ₹{o.priceInr}
+                          {!o.available && <span className="text-amber-300"> · the creator has taken this off the store — your copy stays yours</span>}
+                        </p>
+                      </div>
+                      {o.available && (
+                        <button
+                          onClick={() => setPlayingId(o.appId)}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex-shrink-0 transition-colors"
+                        ><Play size={12} /> Open &amp; copy</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
               <Globe size={12} /> My instant apps
             </p>

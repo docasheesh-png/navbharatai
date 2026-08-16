@@ -3,7 +3,7 @@ import { X, Share2, Flag, Lock, Check, Sparkles, Gamepad2, Type } from 'lucide-r
 import { authedHeaders } from '../../App';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { auth } from '../../lib/firebase';
-import { clientWorkspaceId, v3SessionStorageKey } from '../agentv3/v3SessionContinuity';
+import { clientWorkspaceId, v3SessionStorageKey, writeRemixHandoff } from '../agentv3/v3SessionContinuity';
 
 // WEB APP PLAYER — a store app running FULL SCREEN in the viewer's own browser (Kadam 1).
 //
@@ -196,8 +196,13 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
         setError(data?.error || 'The remix failed — nothing was copied.');
         return;
       }
-      // Point the sticky session at the new workspace (same fallback order the panel itself uses),
-      // then reload into v5. The files are already durably there; v5 simply opens "their" app.
+      // HAND THE BATON OVER EXPLICITLY (root-caused 2026-08-16). The sticky key alone was not enough:
+      // it is written under the REAL uid here, but the reload below re-mounts v5 BEFORE Firebase has
+      // restored the sign-in, so the panel read the 'anon' key, found nothing, and minted an empty
+      // session — while these files sat safe on a workspace nothing pointed at. The baton carries the
+      // workspace id the SERVER already resolved, so the panel has nothing to re-derive and nothing
+      // to race. The sticky key is still written, for every reload after this one.
+      writeRemixHandoff({ sessionId: sid, workspaceId: target, appName: meta?.name || 'Your app', owned: data.alreadyOwned === true });
       const key = v3SessionStorageKey(uid);
       try { localStorage.setItem(key, sid); } catch { try { sessionStorage.setItem(key, sid); } catch { /* both blocked */ } }
       try { sessionStorage.setItem('nbi_v3_open', '1'); } catch { /* view falls back to home */ }
@@ -207,7 +212,7 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
     } finally {
       if (liveRef.current) setRemixing(false);
     }
-  }, [appId, password, remixing]);
+  }, [appId, password, remixing, meta]);
 
   const sendReport = useCallback(async () => {
     if (reportText.trim().length < 5) return;

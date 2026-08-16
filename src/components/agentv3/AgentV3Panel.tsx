@@ -43,7 +43,7 @@ import { speechRecognitionSupported } from '../../lib/voiceInput';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { acceptZipPick, notZipMessage } from '../../lib/zipPicker';
 import { historyOpen404Action } from './historyOpenPolicy';
-import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
+import { v3SessionStorageKey, readStickySession, clientWorkspaceId, takeRemixHandoff } from './v3SessionContinuity';
 import { loadDraft, saveDraft } from './composerDraft';
 import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
@@ -112,6 +112,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // one-click Continue instead of silently resetting. Set on reopen; cleared once a build starts or the
   // user dismisses/continues.
   const [interruptedResume, setInterruptedResume] = useState(false);
+  /**
+   * "Your app arrived" — the confirmation a store remix never had (admin report 2026-08-16).
+   * Even when the copy worked, v5 opened on an EMPTY CHAT with the files quietly in the Files tab,
+   * so the honest read of that screen was "nothing happened". Seeded from the store baton on mount.
+   */
+  const [remixArrived, setRemixArrived] = useState<{ appName: string; owned: boolean } | null>(null);
   // ASK-USER (opt-in): dismiss state for the non-blocking clarify card. Reset whenever a NEW clarify
   // arrives so a fresh build's questions always show; the build itself never waits on this.
   const [clarifyDismissed, setClarifyDismissed] = useState(false);
@@ -641,6 +647,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     try { localStorage.setItem(sessionStorageKey, id); return; } catch { /* try sessionStorage next */ }
     try { sessionStorage.setItem(sessionStorageKey, id); } catch { /* both storages unavailable */ }
   };
+  // The store handoff for THIS mount (consumed from sessionStorage once) — drives the workspace the
+  // panel adopts and the confirmation the user sees.
+  const remixHandoffRef = useRef<ReturnType<typeof takeRemixHandoff>>(null);
   const sessionIdRef = useRef<string>('');
   if (!sessionIdRef.current) {
     // ADMIN RULE (2026-07-05 — REPLACES the retired 2026-07-01 always-fresh rule): the v5.0 chat is
@@ -652,9 +661,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // ANON-KEY HEAL (Fix 26): a panel that mounted BEFORE auth resolved stored its sticky id under
     // the anon key; a later mount with the real uid must still find that session (same device, same
     // human) instead of minting a fresh empty one — the split-key half of the "sab gayab" wipe.
-    sessionIdRef.current = readStickySession(userId) || readStickySession(undefined) || newSessionId();
+    // THE STORE BATON WINS, and is read FIRST (root-caused 2026-08-16). "Make it yours" reloads the
+    // page, and this line runs BEFORE Firebase has restored the sign-in — so `userId` is undefined,
+    // both reads below hit the 'anon' key, and a brand-new EMPTY session was minted while the copied
+    // files sat on a workspace nothing pointed at. The baton carries an id that needs no identity to
+    // resolve, so there is nothing here to race.
+    const handoff = takeRemixHandoff();
+    if (handoff) remixHandoffRef.current = handoff;
+    sessionIdRef.current = handoff?.sessionId || readStickySession(userId) || readStickySession(undefined) || newSessionId();
     persistSessionId(sessionIdRef.current);
   }
+  // Announce the handoff exactly once per mount, after the baton has been consumed above.
+  const remixAnnouncedRef = useRef(false);
+  useEffect(() => {
+    const h = remixHandoffRef.current;
+    if (!h || remixAnnouncedRef.current) return;
+    remixAnnouncedRef.current = true;
+    setRemixArrived({ appName: h.appName, owned: h.owned === true });
+  }, []);
+
   // The workspaceId THIS session expects — passed to checkRunning/resume/subscribeLive so the server
   // only auto-attaches/mirrors a build that actually belongs to THIS session, never one still running
   // under a DIFFERENT v5.0 chat on the same account (root-caused 2026-07-01: "+ New chat" — and, more
@@ -1857,6 +1882,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setAgentHistory([]);
       setCheckpointHistory([]);
       setFiles([]);
+      // RE-ARM THE FILE REHYDRATE HERE, not only in the `restored` branch below (2026-08-16). This
+      // function has just emptied the file list; if the conversation turns out NOT to exist, the old
+      // code returned with the list empty AND the rehydrate still marked done for this workspace, so
+      // nothing ever refilled it. A workspace with FILES BUT NO CONVERSATION is not a corner case —
+      // it is exactly what a store remix produces.
+      rehydratedWsRef.current = '';
       // Session switch = full surface switch (same class as the "+New chat" leak): the opened chat
       // must not inherit the previous session's plan/advice threads, report history, git/ship state,
       // or preview. Its own durable framework is adopted just below when known.
@@ -2716,7 +2747,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // ANON PARITY (Fix 26): rehydrate durable files for the anon identity too — `!userId` here is
     // why "sari file gone" showed after a panel reset even though the durable store held every file.
     if (running || !sessionIdRef.current) return;
-    const wsId = state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current);
+    // The store baton's workspace outranks a locally-derived one: it is what the server actually
+    // wrote the copied files into, and it does not depend on an identity that may still be resolving.
+    const wsId = state.workspaceId || remixHandoffRef.current?.workspaceId || clientWorkspaceId(userId, sessionIdRef.current);
     // Skip only if we've already rehydrated THIS workspace, or the cache already holds THIS workspace's
     // files. A stale in-flight load for a PREVIOUS workspace (workspaceFilesFor !== wsId) must NOT block
     // loading the current one.
@@ -3247,6 +3280,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 mid-flight. Shows only when the reopened build's durable status was 'running' AND there is
                 no live build anywhere (serverBuildRunning false) and nothing is streaming here. Files, plan
                 and memory were all saved durably, so Continue picks up from where it stopped. */}
+            {remixArrived && (
+              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-100">
+                <div className="flex items-start gap-2">
+                  <Sparkles className="w-4 h-4 mt-0.5 shrink-0 text-emerald-400" />
+                  <div className="flex-1">
+                    <div className="font-medium">
+                      {remixArrived.owned ? `${remixArrived.appName} is yours — copied again` : `${remixArrived.appName} is yours now`}
+                    </div>
+                    <div className="text-emerald-200/80 text-xs mt-0.5">
+                      Every file is here and ready to edit — open the Files tab to look around, or just tell me what to change.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRemixArrived(null)}
+                    className="shrink-0 text-emerald-200/70 text-xs hover:text-emerald-100"
+                  >Dismiss</button>
+                </div>
+              </div>
+            )}
             {interruptedResume && !serverBuildRunning && !running && (
               <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100">
                 <div className="flex items-start gap-2">

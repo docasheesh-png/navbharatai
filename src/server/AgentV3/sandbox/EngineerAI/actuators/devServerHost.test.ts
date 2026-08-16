@@ -381,6 +381,52 @@ describe('isLongRunningCommand', () => {
     expect(isLongRunningCommand('')).toBe(false);
   });
 
+  it('does NOT treat `2>/dev/null` as a dev server (autopsy debc468c — the 95-second git checkout)', () => {
+    // THE BUG: the keyword test is /\b(?:dev|serve|watch|livereload)\b/, and `/` is a non-word
+    // character on both sides of the `dev` in `/dev/null`. Every command carrying the commonest
+    // idiom in shell was therefore routed into the dev-server path — dependency staleness check,
+    // npm install, port pinning, backgrounded launch, port wait, and up to TWO server restarts.
+    //
+    // Measured in the report that found this: `git checkout HEAD -- server/ensureSchema.ts
+    // 2>/dev/null` took 95 SECONDS. The restarts also tore down the app's already-running server,
+    // which is where that build's `EADDRINUSE 0.0.0.0:5000` came from — the platform fighting its
+    // own app over a command that only wanted to restore one file.
+    expect(isLongRunningCommand('git checkout HEAD -- server/ensureSchema.ts 2>/dev/null')).toBe(false);
+    expect(isLongRunningCommand('ls -la 2>/dev/null')).toBe(false);
+    expect(isLongRunningCommand('mkdir -p src/pages 2>/dev/null')).toBe(false);
+    expect(isLongRunningCommand('npx tsc --noEmit 2>/dev/null')).toBe(false);
+    expect(isLongRunningCommand('rm -rf node_modules/.cache >/dev/null 2>&1')).toBe(false);
+    expect(isLongRunningCommand('cat package.json 2>/dev/null || echo missing')).toBe(false);
+    // The exact command from the report, verbatim.
+    expect(isLongRunningCommand(
+      'git checkout HEAD -- server/ensureSchema.ts 2>/dev/null || echo "Not a git repo or file not tracked"',
+    )).toBe(false);
+  });
+
+  it('a file-manipulating command is never a dev server, whatever words follow (second layer)', () => {
+    // Independent of the /dev/null fix: `git` cannot start a server, so the question should not
+    // even be asked of the rest of the line. Both layers exist because the first one alone was a
+    // single regex away from letting this class back in through a different keyword.
+    expect(isLongRunningCommand('git log --oneline -- src/dev/notes.md')).toBe(false);
+    expect(isLongRunningCommand('rm -rf .cache/dev')).toBe(false);
+    expect(isLongRunningCommand('sed -i "s/serve/host/" vite.config.ts')).toBe(false);
+    expect(isLongRunningCommand('cp src/dev.ts src/dev.backup.ts')).toBe(false);
+    expect(isLongRunningCommand('mkdir -p src/watch')).toBe(false);
+    // …but a real launch chained AFTER one still counts — the per-segment design must survive.
+    expect(isLongRunningCommand('rm -rf .cache && npm run dev')).toBe(true);
+    expect(isLongRunningCommand('git stash; npx vite --host 0.0.0.0')).toBe(true);
+  });
+
+  it('a REAL dev server still counts when it also redirects to /dev/null', () => {
+    // The half that matters: silencing the fix must not silence the detection. A dev server that
+    // discards its own output is still a dev server, and missing it would orphan the process —
+    // the "Killed right after ready" failure this module exists to prevent.
+    expect(isLongRunningCommand('npm run dev > /dev/null 2>&1')).toBe(true);
+    expect(isLongRunningCommand('npx vite --host 0.0.0.0 2>/dev/null')).toBe(true);
+    expect(isLongRunningCommand('cat /dev/null; npm run dev')).toBe(true);
+    expect(isLongRunningCommand('bash dev.sh 2>/dev/null')).toBe(true);
+  });
+
   it('does NOT treat pkill/ps/grep/head as long-running just because they reference "vite" as a filter (real build-report regression)', () => {
     // Confirmed from a real failing build report: these were misrouted into the background-dev-
     // server-start path, which force-killed the port then tried to "launch" the command with

@@ -33610,3 +33610,80 @@ All four are test-locked; each new test was verified to FAIL against the old cod
 Committed to `claude/navbharatai-pro-testing-p2mgr5`. **NOT pushed and NOT merged**: this session's
 GitHub write access expired (403 on push/merge, MCP token expired). PR #2350 (the preview-failover
 honesty fix) is also still open and unmerged. Nothing in this entry is live until those land.
+
+## 2026-08-16 — AUTOPSY of build debc468c: `2>/dev/null` made every shell command a "dev server launch"
+
+Admin sent an IN-FLIGHT report (18m 17s in, no verdict yet). Mining it produced the largest single
+speed root cause found so far, and it was proven by execution rather than inferred from the log.
+
+### Step 1 — the ledger
+
+**✅ Self-healed (2)** — sandbox had lost all 179 files (read 1, store held 179) and all 179 were
+restored from the durable store; port 5000 EADDRINUSE was "freed and restarted".
+**🔀 Worked around (2)** — `plannedModel: claude-sonnet-4-6`, delivered 20/20 by `kimi-k2.5` (the
+admin is on the free list, so the cheap ladder is correct — but the report advertises a plan it does
+not follow); the health-check twice restarted blind on *"the dev server did not start and the log
+had no recognisable error"*, which is a retry around an undiagnosed failure.
+**⏭️ Skipped (1)** — the model's `git checkout HEAD -- server/ensureSchema.ts` carried its own
+`|| echo "Not a git repo or file not tracked"` escape hatch, and nothing verified the restore
+actually happened.
+**❌ Still broken (3)** — `[migration] provider backfill failed error: column "mobile" does not
+exist` survived; the health-check declared *"dev server did not come up on port 5173"* while the app
+was listening on **5000**; `promptChars: 76,543,256` against `inputTokens: 24,853` is telemetry
+corruption that makes prompt-size analysis untrustworthy.
+**🥵 Struggle (5)** — 232s before the FIRST model call · a `git checkout` that took **95s** ·
+`npm run dev` 93s ending in EADDRINUSE · `update_preview` 156s · two typechecks 35s + 37s.
+
+**The arithmetic that matters:** ~648s of the 18m build went to those five, against ~180s of total
+model latency across all 20 calls. **Roughly 59% overhead, 16% thinking.**
+
+### Step 2 — the missing subsystem, and the proof
+
+Not a missing subsystem — a single regex. `isLongRunningCommand` routes a command into the
+dev-server path (dependency staleness check → `npm install` → port pin → host bind → background
+launch → port wait → up to TWO server restarts). Its keyword test is
+`/\b(?:dev|serve|watch|livereload)\b/`, and **`/` is a non-word character on both sides of the `dev`
+in `2>/dev/null`.**
+
+Verified by running the real code against the report's verbatim commands:
+
+```
+false  git checkout HEAD -- server/ensureSchema.ts
+true   git checkout HEAD -- server/ensureSchema.ts 2>/dev/null
+true   ls -la 2>/dev/null
+true   mkdir -p src/pages 2>/dev/null
+true   npx tsc --noEmit 2>/dev/null
+```
+
+Every command carrying the commonest idiom in shell was treated as starting a dev server. That is
+the 95-second `git checkout`. And it is worse than slow: those restart attempts tear down the app's
+ALREADY-RUNNING server, which is exactly where `EADDRINUSE: address already in use 0.0.0.0:5000`
+came from. The platform was fighting its own app over a command that wanted to restore one file.
+
+### Step 3 + Step 5 — both halves
+
+**The root cause:** `stripShellPlumbing()` removes redirections and `/dev/` device paths before the
+segment is judged. Narrow on purpose — widening it to "ignore anything path-shaped" would start
+hiding real launches like `bash ./dev.sh`.
+
+**Why it could arise at all (the other 50%):** one regex was the entire defence, so any keyword
+landing inside a path could resurrect the class. `ONE_SHOT_PREFIX` now also covers the commands
+whose NAME already answers the question — `git`, `rm`, `cp`, `mv`, `mkdir`, `sed`, `awk`, `chmod`
+and friends cannot start a server, so nothing later on the line gets a vote. `npx`, `xargs`, `tee`,
+`bash` and `sh` are deliberately absent, because each really can.
+
+Tests lock both halves, and each new test was **verified to fail against the old code** (1 failed /
+123 passed before the fix; 125 passed after). The reverse case is locked too: a real dev server that
+redirects its own output to `/dev/null` must still be detected, or it would be orphaned and reaped —
+the "Killed right after ready" failure this module exists to prevent.
+
+### Still open (recorded, not patched)
+
+- **Port disagreement**: health-check polls 5173, the app binds 5000. The same three-way port
+  disagreement another session recorded on 2026-08-13. The `/dev/null` fix removes the *spurious*
+  restarts; it does not reconcile the ports.
+- **`promptChars` telemetry is corrupt** (76M chars vs 24.8k tokens).
+- **`column "mobile" does not exist`** — a real error inside the user's own app.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1277 files / 15838 tests passed** · `npm run build` OK.

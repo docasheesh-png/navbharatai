@@ -716,10 +716,32 @@ export function useAgentV3Build(): UseAgentV3Build {
     const gen = ++generationRef.current;  // this resume is now the authoritative generation
     // The replayed buffer rebuilds the CURRENT build's live state — but it only replays THIS
     // build's events, so state that outlives a single turn must survive the reconnect (admin
-    // 2026-07-21, same vanish class as the send-reset): prior turns' archived action rows
-    // (activityLog), the diff decorations, and the running plan all stay.
+    // 2026-07-21, same vanish class as the send-reset).
+    //
+    // 🔒 THE LINE, STATED ONCE SO IT STOPS BEING RE-DERIVED WRONG (admin report 2026-08-16:
+    // "resume par click kiya — sari files gayab, sara preview gayab"):
+    //
+    //   WORKSPACE facts survive a reconnect. STREAM facts do not.
+    //
+    // The app's FILES, its PREVIEW and its CHECKPOINTS belong to the workspace — they exist on the
+    // server whether or not any stream is attached, and they are what the user calls "my app".
+    // `narration`, `activity` and `terminal` belong to one build's stream and are correctly rebuilt
+    // from the replay.
+    //
+    // The previous version had the right instinct and the wrong list: it preserved activityLog, diffs
+    // and todos — and dropped `files` and `previewUrl`, which are the two the user actually SEES. So
+    // pressing Resume on a FINISHED build (attach 404s, because there is nothing to attach to) blanked
+    // the entire app: no files, no preview, while the banner said "your files are safe". They were
+    // safe on the server, which is no comfort at all when the screen is empty.
+    //
+    // Preserving them is also the right behaviour on the HAPPY path: a genuinely live build replays its
+    // own `file_changed` / `preview` events on top, so the fresh state wins where it exists and nothing
+    // vanishes where it does not. There is no case where blanking first is better.
     setState((prev) => ({
       ...initialAgentV3State(),
+      files: prev.files,
+      previewUrl: prev.previewUrl,
+      checkpoints: prev.checkpoints,
       activityLog: prev.activityLog,
       diffs: prev.diffs,
       todos: prev.todos,

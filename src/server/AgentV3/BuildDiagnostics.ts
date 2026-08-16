@@ -649,6 +649,52 @@ export class BuildDiagnostics {
    * call's own latency is subtracted, and the two numbers are reported separately — preparation is a
    * platform problem, model latency is a provider one, and they have nothing to do with each other.
    */
+  /**
+   * WHERE DID THE SILENT MINUTES GO? — the diagnostic that would have found the `listFiles` bug on the
+   * day it was reported instead of a week later (Mitrify report a876b7bb, 2026-08-15).
+   *
+   * That report said `330s of preparation` and then listed the CATEGORIES it assumed were responsible
+   * ("sandbox setup, project restore, dependency install and secrets loading") — none of them measured.
+   * Meanwhile the report's own timestamps contained the answer in plain sight: 226 of those seconds
+   * were ONE unbroken stretch with nothing recorded at all, sitting immediately after
+   * "GitHub import via SERVER-SIDE zipball SUCCEEDED". That stretch was `listFiles` enumerating
+   * `node_modules` over the network. A reader had to diff timestamps by hand to see it.
+   *
+   * 🔒 DERIVED FROM EVIDENCE ALREADY RECORDED, NOT FROM NEW TIMERS. Every entry is already stamped, so
+   * the longest gap is a fact we own and simply never printed. That matters for more than tidiness:
+   * hand-placed timers only measure the stretches somebody already suspected, and the whole problem
+   * here was a stretch nobody suspected. This finds the next one too — including on code paths that do
+   * not exist yet.
+   *
+   * Honest by construction: it names the last thing that HAPPENED before the silence, never a cause.
+   * "The silence began after X" is a fact; "X caused it" would be a guess, and X is often innocent —
+   * it is simply the last thing that spoke.
+   *
+   * Returns null when nothing is worth reporting (no gap, or one too short to matter). PURE.
+   */
+  static longestSilentGap(
+    entries: ReadonlyArray<{ ts: number; message: string }>,
+    startedAt: number,
+    untilTs: number,
+    minSeconds = 20,
+  ): { seconds: number; after: string } | null {
+    const marks = [...(entries || [])]
+      .filter((e) => e && typeof e.ts === 'number' && e.ts >= startedAt && e.ts <= untilTs)
+      .sort((a, b) => a.ts - b.ts);
+    let best: { seconds: number; after: string } | null = null;
+    // The window from the build's start to its FIRST recorded entry counts too — a build that is silent
+    // for four minutes before it says anything is exactly the case worth surfacing.
+    let prevTs = startedAt;
+    let prevMsg = 'the build started';
+    for (const m of [...marks, { ts: untilTs, message: '' }]) {
+      const seconds = Math.round((m.ts - prevTs) / 1000);
+      if (seconds > (best?.seconds ?? 0)) best = { seconds, after: prevMsg };
+      if (m.message) { prevTs = m.ts; prevMsg = m.message; }
+    }
+    if (!best || best.seconds < minSeconds) return null;
+    return { seconds: best.seconds, after: best.after.split('\n')[0].slice(0, 120) };
+  }
+
   private recordTimeToFirstCall(latencyMs?: number): void {
     if (this.llmCalls.length > 0) return; // only the first
     const elapsedMs = Math.max(0, this.now() - this.startedAt);
@@ -663,6 +709,13 @@ export class BuildDiagnostics {
       // an upper bound rather than repeating the old confident, wrong attribution.
       ? `${seconds}s passed before the build's first model call was recorded — this includes the call's own duration, which was not measured, so treat it as an upper bound on setup.`
       : `${seconds}s of preparation before the build's first model call began — sandbox setup, project restore, dependency install and secrets loading all happen in it, and the user waits through every second. The first call itself then took ${Math.round(lat / 1000)}s; that is model time, not setup.`;
+    // WHERE THE TIME WENT — see longestSilentGap. Appended rather than replacing the sentence above,
+    // because the total and the biggest single stretch answer two different questions, and the second
+    // one is what an autopsy actually acts on. Only stated when a real gap exists.
+    const gap = BuildDiagnostics.longestSilentGap(this.issues, this.startedAt, this.now() - (lat ?? 0));
+    const withGap = gap
+      ? `${message} The longest single stretch with NOTHING recorded was ${gap.seconds}s, beginning right after: "${gap.after}" — that is where to look first (it names when the silence started, not what caused it).`
+      : message;
     this.record({
       phase: 'plan',
       // Loud past the point where a user starts wondering whether anything is happening. Judged on
@@ -670,7 +723,7 @@ export class BuildDiagnostics {
       // flagging it here sent the reader hunting the wrong subsystem.
       severity: seconds >= 60 ? 'warning' : 'info',
       code: 'TIME_TO_FIRST_CALL',
-      message,
+      message: withGap,
       autoResolved: seconds < 60,
     });
   }

@@ -148,3 +148,63 @@ html[data-theme] .hover\:bg-neutral-800:hover { background-color: var(--surface-
   --border-soft: rgba(255, 255, 255, 0.1);
   --accent: #818cf8;
 }
+
+/* ── White-ALPHA utilities: the half of the remap that was missing (found 2026-08-16) ───────────
+   THE BUG, seen on a real screen: App Mart's subtitle and its empty-state message were INVISIBLE in
+   the light theme. The rules above remap `.text-white`, but `text-white/50` is a DIFFERENT class, so
+   it was never remapped — it stayed literally white, at 50%, on a light background. The app carries
+   566 of those, plus 589 `bg-white/N` and 1153 `border-white/N`, across 35+ files, and TWO of the
+   four themes (light, comfort) are light. So this was not one screen's problem; it was every faded
+   label, every subtle chip and every hairline border in the app, on half the themes.
+
+   WHY color-mix AND NOT A FIXED COLOUR: these classes mean "the text colour, faded" — not "white".
+   Mixing the THEME's own text colour to the same percentage keeps that meaning in every theme. And it
+   makes the dark themes a genuine NO-OP by construction, not by inspection: on dark
+   `--text-primary` IS `#ffffff`, so `color-mix(in srgb, var(--text-primary) 40%, transparent)`
+   resolves to exactly the rgba(255,255,255,0.4) the class already produced.
+
+   The same reasoning gives bg/border their fix for free: `bg-white/5` is a subtle CONTRAST overlay.
+   On a dark surface that means a touch lighter; on a light surface it must mean a touch darker, which
+   is what mixing the text colour produces — instead of an invisible white-on-white chip.
+   ──────────────────────────────────────────────────────────────────────────────────────────────── */
+html[data-theme] .text-white\/5   { color: color-mix(in srgb, var(--text-primary) 5%, transparent); }
+html[data-theme] .text-white\/10  { color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
+html[data-theme] .text-white\/15  { color: color-mix(in srgb, var(--text-primary) 15%, transparent); }
+html[data-theme] .text-white\/20  { color: color-mix(in srgb, var(--text-primary) 20%, transparent); }
+html[data-theme] .text-white\/25  { color: color-mix(in srgb, var(--text-primary) 25%, transparent); }
+html[data-theme] .text-white\/30  { color: color-mix(in srgb, var(--text-primary) 30%, transparent); }
+html[data-theme] .text-white\/35  { color: color-mix(in srgb, var(--text-primary) 35%, transparent); }
+html[data-theme] .text-white\/40  { color: color-mix(in srgb, var(--text-primary) 40%, transparent); }
+html[data-theme] .text-white\/45  { color: color-mix(in srgb, var(--text-primary) 45%, transparent); }
+html[data-theme] .text-white\/50  { color: color-mix(in srgb, var(--text-primary) 50%, transparent); }
+html[data-theme] .text-white\/55  { color: color-mix(in srgb, var(--text-primary) 55%, transparent); }
+html[data-theme] .text-white\/60  { color: color-mix(in srgb, var(--text-primary) 60%, transparent); }
+html[data-theme] .text-white\/70  { color: color-mix(in srgb, var(--text-primary) 70%, transparent); }
+html[data-theme] .text-white\/75  { color: color-mix(in srgb, var(--text-primary) 75%, transparent); }
+html[data-theme] .text-white\/80  { color: color-mix(in srgb, var(--text-primary) 80%, transparent); }
+html[data-theme] .text-white\/85  { color: color-mix(in srgb, var(--text-primary) 85%, transparent); }
+html[data-theme] .text-white\/90  { color: color-mix(in srgb, var(--text-primary) 90%, transparent); }
+
+html[data-theme] .bg-white\/2   { background-color: color-mix(in srgb, var(--text-primary) 2%, transparent); }
+html[data-theme] .bg-white\/3   { background-color: color-mix(in srgb, var(--text-primary) 3%, transparent); }
+html[data-theme] .bg-white\/5   { background-color: color-mix(in srgb, var(--text-primary) 5%, transparent); }
+html[data-theme] .bg-white\/8   { background-color: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+html[data-theme] .bg-white\/10  { background-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
+html[data-theme] .bg-white\/15  { background-color: color-mix(in srgb, var(--text-primary) 15%, transparent); }
+html[data-theme] .bg-white\/20  { background-color: color-mix(in srgb, var(--text-primary) 20%, transparent); }
+html[data-theme] .bg-white\/25  { background-color: color-mix(in srgb, var(--text-primary) 25%, transparent); }
+html[data-theme] .bg-white\/80  { background-color: color-mix(in srgb, var(--text-primary) 80%, transparent); }
+html[data-theme] .bg-white\/90  { background-color: color-mix(in srgb, var(--text-primary) 90%, transparent); }
+
+html[data-theme] .border-white\/3   { border-color: color-mix(in srgb, var(--text-primary) 3%, transparent); }
+html[data-theme] .border-white\/4   { border-color: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+html[data-theme] .border-white\/5   { border-color: color-mix(in srgb, var(--text-primary) 5%, transparent); }
+html[data-theme] .border-white\/8   { border-color: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+html[data-theme] .border-white\/10  { border-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
+html[data-theme] .border-white\/12  { border-color: color-mix(in srgb, var(--text-primary) 12%, transparent); }
+html[data-theme] .border-white\/15  { border-color: color-mix(in srgb, var(--text-primary) 15%, transparent); }
+html[data-theme] .border-white\/20  { border-color: color-mix(in srgb, var(--text-primary) 20%, transparent); }
+html[data-theme] .border-white\/25  { border-color: color-mix(in srgb, var(--text-primary) 25%, transparent); }
+html[data-theme] .border-white\/30  { border-color: color-mix(in srgb, var(--text-primary) 30%, transparent); }
+html[data-theme] .border-white\/40  { border-color: color-mix(in srgb, var(--text-primary) 40%, transparent); }
+html[data-theme] .border-white\/50  { border-color: color-mix(in srgb, var(--text-primary) 50%, transparent); }

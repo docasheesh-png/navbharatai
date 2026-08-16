@@ -33236,3 +33236,45 @@ was shortened until it fits on one line rather than being cut at "nothing to".
 column squeezes its children instead of growing, so the container never overflows. The check that
 actually catches it walks every child (`h2, p, button, ul`) and asserts its box sits inside the
 card's box AND that the element's own text is not clipped. Clean at 360, 390 and 430px.
+
+## 2026-08-16 — Whole card = button, and a light-theme bug found by looking at the screen
+
+**1. The whole Home card is the button** (admin: "pure card me kahi bhi tap karne par woh open ho
+jaye"). The card became `<motion.button>`; the CTA became a styled `<span>` — a `<button>` inside a
+`<button>` is invalid HTML AND fires the click twice. The card re-asserts `text-left` (a button
+centres its text) and carries the press feedback. Verified in Chromium: zero nested buttons, and a
+tap on a DEAD area of the card — the empty space beside the icon — opens the destination, on both the
+2x1 tile and a 1x1 square. That last check is the only thing that actually proves "anywhere".
+
+**2. 🔴 ROOT CAUSE FOUND WHILE LOOKING: white-alpha utilities were never remapped for light themes.**
+While screenshotting App Mart, its subtitle and empty-state message were INVISIBLE in the light
+theme. Diagnosis in the live browser: the root div's computed background was `rgb(248,250,252)` while
+its `text-white/50` child computed to white-at-50% — readable text on a dark theme, nothing at all on
+a light one.
+
+`theme-compat.css` remaps `.text-white` → `var(--text-primary)`, but `text-white/50` is a DIFFERENT
+class name and was never touched. Scale of the class (rule 3, hunted before fixing): **566
+`text-white/N`, 589 `bg-white/N`, 1153 `border-white/N` across 35+ files**, and **two of the four
+themes are light** (light, comfort). So this was not App Mart's bug — it was every faded label, every
+subtle chip and every hairline border, on half the themes.
+
+**The fix mixes the THEME'S OWN text colour to the same percentage** rather than naming a grey,
+because that is what those classes always meant ("the text colour, faded"). That choice makes the
+dark themes a no-op BY CONSTRUCTION — there `--text-primary` IS `#ffffff`, so
+`color-mix(in srgb, var(--text-primary) 40%, transparent)` resolves to exactly the
+`rgba(255,255,255,0.4)` the class already produced. **Confirmed empirically in Chromium**: every
+opacity step resolves to the identical colour on dark. `bg-white/N` and `border-white/N` get the
+right answer from the same reasoning — a "subtle contrast overlay" must go darker on a light surface,
+not stay invisible white.
+
+Locked by `tests/themeAlphaRemap.test.ts`: every step the app actually uses must be remapped (the
+exact gap that caused this), the remap must use the theme var and not a literal, every rule stays
+gated on `html[data-theme]` so no-attribute is still the untouched dark app, and the percentage in
+each rule must match its class name.
+
+⚠️ **Two measurement traps for whoever verifies this next, both of which fooled me first:**
+`color(srgb 1 1 1 / 0.4)` and `rgba(255,255,255,0.4)` are the SAME colour on a 0-1 vs 0-255 scale —
+comparing the raw numbers reports a false mismatch. And a contrast ratio computed against the wrong
+ancestor's background is meaningless; the screenshots were the reliable check.
+
+Gate: tsc ✓ tsc -p server ✓ vitest **1272 files / 15746 tests** ✓ build ✓

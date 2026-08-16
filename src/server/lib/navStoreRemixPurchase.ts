@@ -245,3 +245,39 @@ export async function settleRemixPurchase(input: {
     return { charged: true, creatorCredited: false, note: 'creator credit pending — recorded for reconciliation' };
   }
 }
+
+/**
+ * WHAT THIS BUYER OWNS — the answer to "I paid, and then I lost the code" (admin 2026-08-16).
+ *
+ * The admin's own design, and the right one: once a purchase completes, the buyer's name is written
+ * against that app, and from then on they may take the code as many times as they like — **that app
+ * only**, never the rest of the store. Most of it was already true: `settleRemixPurchase` writes the
+ * record and the remix route lets an owner copy again for free, forever. What was missing is the
+ * ability to SEE what you own, which is what makes the guarantee usable rather than theoretical.
+ *
+ * Deliberately a SINGLE-FIELD query with the sort done in memory — a `.where(buyerUid).orderBy(at)`
+ * would demand a composite index and throw FAILED_PRECONDITION in production, which is exactly how
+ * the store's first real publish broke (2026-08-15). A person's purchase list is small.
+ */
+export interface PurchaseRecord {
+  appId: string;
+  buyerUid: string;
+  creatorUid: string;
+  priceInr: number;
+  at: number;
+}
+
+export async function listPurchases(buyerUid: string, limit = 100): Promise<PurchaseRecord[]> {
+  const d = db();
+  if (!d || !buyerUid) return [];
+  try {
+    const snap = await d.collection(PURCHASES).where('buyerUid', '==', buyerUid).limit(500).get();
+    return snap.docs
+      .map((x) => x.data() as PurchaseRecord)
+      .filter((p) => p && typeof p.appId === 'string')
+      .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
+}

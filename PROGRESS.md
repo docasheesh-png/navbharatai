@@ -33340,3 +33340,43 @@ invisible until it breaks something:**
 
 Locked by `tests/inlineThemeColours.test.ts`, which pins all three traps as well as the sweep itself.
 Gate: tsc ✓ tsc -p server ✓ vitest **1274 files / 15770 tests** ✓ build ✓
+
+## 2026-08-16 — "Make it yours opens v5 but the code never arrives" — root cause + the entitlement
+
+**THE ROOT CAUSE, and it was a RACE, not a lost file.** The player writes the sticky session under
+`agentv3_session_<real-uid>` (correct — the store page had a resolved sign-in), then RELOADS. Firebase
+restores a session ASYNCHRONOUSLY — 0.3–2s, as this codebase's own auth comments state — so the v5
+panel mounts inside that window with `userId === undefined`, reads `agentv3_session_anon`, finds
+nothing, and mints a **brand-new empty session**. Permanently: the session id is fixed on the panel's
+first render. The copied files were never lost; they sat on a workspace nothing pointed at any more.
+
+The shape of the report confirms it: signed OUT this would have worked, because 'anon' is stable and
+there is no race. **The bug bit only signed-in users — the ones who can buy.** An existing "anon-key
+heal" covered the OPPOSITE direction (stored anon, later real uid) and so never caught this.
+
+**The fix removes the race instead of narrowing it:** a one-shot handoff baton
+(`writeRemixHandoff`/`takeRemixHandoff`) carries the **workspace id the SERVER already resolved**, so
+the client has nothing to re-derive from an identity it may not have yet. The panel reads the baton
+BEFORE the identity-dependent sticky keys, and the file rehydrate targets that workspace. The sticky
+key is still written — it is what every reload *after* this one uses.
+
+**Two more defects found by reading the same path:**
+- `openConversation` empties the file list and *then* looks the conversation up — but only the
+  `restored` branch re-armed the rehydrate. A workspace with **files but no conversation** is exactly
+  what a remix produces, so the not-found path returned with an empty list that nothing refilled.
+  Re-armed before the lookup.
+- **No confirmation.** Even when the copy worked, v5 opened on an empty chat with the files quietly in
+  the Files tab — the honest read of that screen is "nothing happened". v5 now names the app.
+
+**BUY ONCE, COPY FOREVER (admin's own design, 2026-08-16):** *"purchase ho jaye to us par kharidne
+wale ka naam likh jaye, fir jitni baar chahe code copy kare — par bas wahi ek app."* Most of this was
+already true and worth saying plainly rather than rebuilding: `settleRemixPurchase` writes the record
+and the remix route already lets an owner copy again free, forever. The missing half was **seeing what
+you own** — `listPurchases` (single-field query, sorted in memory: a `.where(buyerUid).orderBy(at)`
+would demand the composite index that broke the store's first publish), `GET /web/purchases`, and an
+"Apps you own" section in App Mart → My apps, hidden entirely when you own nothing. Listing grants
+nothing: the remix route still re-checks `hasPurchased` for the ONE app being copied. A creator
+un-publishing does not revoke a purchase — the row says so.
+
+Locked by `tests/remixHandoff.test.ts` (12 tests). Gate: tsc ✓ tsc -p server ✓ vitest
+**1275 files / 15782 tests** ✓ build ✓

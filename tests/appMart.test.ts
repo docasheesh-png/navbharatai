@@ -90,3 +90,38 @@ describe('Browse is two labelled halves, and an empty half never says the store 
     expect(store).toContain('App Mart is just getting started.');
   });
 });
+
+describe('the phone layout the admin drew: 2-up squares, App Mart 2x1 across the bottom', () => {
+  const home = read('src/components/home/HomeView.tsx');
+
+  it('the grid is TWO columns on a phone — not one card per row', () => {
+    // Verified in a real Chromium at 390px: the four tiles measure 173x173 and App Mart 358x179.
+    // One-per-row meant four scrolls before App Mart was even on screen — the opposite of promoting it.
+    expect(home).toContain('grid-cols-2');
+    expect(home).not.toContain('grid-cols-1 sm:grid-cols-2');
+  });
+
+  it('the four are 1x1 squares and App Mart is 2x1', () => {
+    expect(home).toContain("card.id === 'appmart' ? 'col-span-2 aspect-[2/1] xl:col-span-1' : 'aspect-square'");
+  });
+
+  it('squares only work because the content shrinks with them', () => {
+    // A square tile with a description and three feature bullets in it would overflow. These are the
+    // rules that make the shape possible — remove one and the tile spills.
+    expect(home).toContain('hidden sm:block text-[#8b949e]');   // description
+    expect(home).toContain('hidden sm:flex flex-col gap-1.5');  // feature list
+    expect(home).toContain('hidden sm:inline-block');            // badge
+  });
+
+  it('the full cards come back from sm up — this is a phone layout, not a downgrade', () => {
+    expect(home).toContain("'sm:aspect-auto'");
+  });
+
+  it('button labels are SHORT on a phone, because a truncated label reads as a broken screen', () => {
+    // "Explore Professionals" rendered as "EXPLORE PROF…" in a 1x1 tile. Verified zero truncation
+    // after this change by measuring scrollWidth vs clientWidth in a real browser.
+    expect(home).toContain("btnLabelShort: 'Experts'");
+    expect(home).toContain("btnLabelShort: 'Free Chat'");
+    expect(home).toContain('btnLabelShort ?? card.btnLabel');
+  });
+});

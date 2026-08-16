@@ -33201,3 +33201,25 @@ yet", "No Android apps yet"); the store-wide empty state requires BOTH to be emp
 
 Locked by `tests/appMart.test.ts` (13 tests), including the exact screenshot regression.
 Gate: tsc ✓ tsc -p server ✓ vitest **1271 files / 15732 tests** ✓ build ✓
+
+### The phone layout for the five Home tiles (admin drew it, 2026-08-16)
+
+The admin specified it as a drawing: two 1x1 tiles per row, App Mart 2x1 across the bottom. Built and
+then VERIFIED IN A REAL CHROMIUM at 390px rather than assumed — the four tiles measure **173×173**
+and App Mart **358×179**, exactly the spec.
+
+- Grid `grid-cols-1 sm:grid-cols-2 …` → `grid-cols-2 xl:grid-cols-5`; App Mart carries
+  `col-span-2 aspect-[2/1]`, the other four `aspect-square`, all `sm:aspect-auto`.
+- **Squares only work because the content shrinks with them:** description, feature bullets, the
+  badge and the Professionals icon row are `hidden sm:…` on a phone. Remove any one and the tile
+  overflows — a browser check for `scrollHeight > clientHeight` on every tile returned empty.
+- **Truncated labels were a real defect, caught by looking:** "Explore Professionals" rendered as
+  "EXPLORE PROF…", which reads as a broken screen rather than a label. Each card now carries a short
+  phone label (`btnLabelShort`), and a `scrollWidth > clientWidth` sweep in the browser confirms zero
+  truncation. This is the kind of thing a test cannot see and a screenshot can.
+- The 2x1 tile has room the squares do not, and it is the tile this whole change exists to promote —
+  so it alone carries a one-line phone tagline instead of a bare icon and button.
+- From `sm` up the rich cards return untouched (desktop check: App Mart still renders its 3 feature
+  bullets). This is a phone layout, not a downgrade.
+
+Pinned by 5 more tests in `tests/appMart.test.ts` (18 total).

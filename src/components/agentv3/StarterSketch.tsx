@@ -1,7 +1,7 @@
 // The little layout diagram on a starter template (ROADMAP #1 Phase 3.4).
 //
 // Plain divs, no images, no assets — a few rectangles that say "list", "dashboard", "grid". See
-// starterSketch.ts for why this is a SHAPE and not a screenshot: we do not have a real screenshot of
+// starterSketchShapes.ts for why this is a SHAPE and not a screenshot: we do not have a real screenshot of
 // each template's output, and drawing a convincing fake one would be a picture of an app that does
 // not exist, shown to someone deciding what to build.
 //
@@ -9,7 +9,7 @@
 // announcing "group of empty divs" to a screen reader would be noise, not information.
 
 import React from 'react';
-import { sketchFor, type SketchShape } from './starterSketch';
+import { sketchFor, type SketchShape } from './starterSketchShapes';
 
 /** One bar/box in a sketch. `w` is a percentage so the whole thing scales with its container. */
 const Bar = ({ w = 100, h = 4, dim = false }: { w?: number; h?: number; dim?: boolean }) => (

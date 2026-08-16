@@ -975,3 +975,44 @@ describe('every path that yields a live dev server arms the keepalive', () => {
     expect((code.match(/devServerWatchdogCommand\(\{/g) || []).length).toBe(1);
   });
 });
+
+describe('env prefixes survive a pipeline (autopsy debc468c — the 5173-vs-5000 cascade)', () => {
+  const NODE_SCRIPT = 'NODE_ENV=development tsx server/index.ts';
+
+  it('pins PORT on the piped command the agent actually ran', () => {
+    // Verbatim from the report. The old code returned this untouched, so nothing told the app which
+    // port to bind; it took its own 5000, the health-check waited on 5173, declared "did not come
+    // up", restarted twice, and hit EADDRINUSE against its own still-running first server.
+    expect(pinDevServerPort('npm run dev 2>&1 | head -60', 5173, undefined, NODE_SCRIPT))
+      .toBe('PORT=5173 npm run dev 2>&1 | head -60');
+    expect(ensureHostBinding('npm run dev 2>&1 | head -60', undefined, NODE_SCRIPT))
+      .toBe('HOST=0.0.0.0 npm run dev 2>&1 | head -60');
+  });
+
+  it('still refuses to prefix a CHAIN, where the prefix would land on the wrong command', () => {
+    // `PORT=5173 cd app && npm run dev` would give the port to `cd`. A chain is genuinely unsafe —
+    // this is the half that keeps the fix from being a different bug.
+    expect(pinDevServerPort('cd app && npm run dev', 5173, undefined, NODE_SCRIPT))
+      .toBe('cd app && npm run dev');
+    expect(ensureHostBinding('cd app; npm run dev', undefined, NODE_SCRIPT))
+      .toBe('cd app; npm run dev');
+  });
+
+  it('refuses to prefix when something else FEEDS the server', () => {
+    // `PORT=5173 cat seed.txt | npm run dev` would prefix `cat`, not the server.
+    expect(pinDevServerPort('cat seed.txt | npm run dev', 5173, undefined, NODE_SCRIPT))
+      .toBe('cat seed.txt | npm run dev');
+  });
+
+  it('still refuses to APPEND a flag to a piped command (report 7773b4b0 stays fixed)', () => {
+    // The original bug this guard was written for: the flag landing on `head`. Only the prefix path
+    // was widened; the append path is untouched.
+    expect(pinDevServerPort('npx vite | head -20', 5173, 'vite')).toBe('npx vite | head -20');
+    expect(ensureHostBinding('npx vite | head -20', 'vite')).toBe('npx vite | head -20');
+  });
+
+  it('respects a port the command already pins', () => {
+    expect(pinDevServerPort('PORT=8080 npm run dev | head -5', 5173, undefined, NODE_SCRIPT))
+      .toBe('PORT=8080 npm run dev | head -5');
+  });
+});

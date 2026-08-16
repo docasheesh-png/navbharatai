@@ -94,6 +94,39 @@ export function pipesOrChainsToAnotherCommand(command: string): boolean {
   return /\||&&|;/.test(command);
 }
 
+/**
+ * Can an ENVIRONMENT PREFIX (`PORT=5173 …`, `HOST=0.0.0.0 …`) be safely attached to this command?
+ *
+ * This is a genuinely different question from `pipesOrChainsToAnotherCommand`, and conflating the
+ * two caused a real production cascade (autopsy debc468c, 2026-08-16).
+ *
+ * APPENDING A FLAG and PREFIXING AN ENV VAR fail in opposite directions on a pipeline:
+ *
+ *     npm run dev | head -60   +  ` --port 5173`  →  the flag lands on HEAD          ✗ (report 7773b4b0)
+ *     npm run dev | head -60   prefixed `PORT=5173`  →  applies to NPM RUN DEV       ✓
+ *
+ * A shell env prefix binds to the FIRST simple command of a pipeline, which is exactly the dev
+ * server. So the flag-shaped guard was correct for flags and wrong for prefixes — and because it ran
+ * FIRST, the Node-server branch (which prefixes rather than appends) never got to run at all for a
+ * piped command. The consequence, straight out of the report: the agent ran
+ * `npm run dev 2>&1 | head -60`, no `PORT=` was injected, the app bound its own 5000 while the
+ * health-check waited on 5173, the check declared "did not come up on port 5173", restarted twice,
+ * and collided with its own still-running first server —
+ * `EADDRINUSE: address already in use 0.0.0.0:5000`.
+ *
+ * A CHAIN is different again and genuinely unsafe: in `cd app && npm run dev`, a `PORT=` prefix
+ * would attach to `cd`, not to the server. So `&&` and `;` still refuse the prefix; only `|` allows
+ * it, and only when the first pipeline segment is the command itself rather than something feeding
+ * into it (`cat seed.txt | npm run dev` must not be prefixed on `cat`).
+ */
+export function canPrefixEnv(command: string, isServer: (segment: string) => boolean): boolean {
+  if (!command) return false;
+  if (/&&|;/.test(command)) return false;          // the prefix would land on the chain's FIRST command
+  if (!command.includes('|')) return true;         // no pipeline at all — always safe
+  const first = command.split('|')[0];
+  return isServer(first);                          // only if the server is what the prefix attaches to
+}
+
 export function isNodeServerCommand(command: string): boolean {
   if (!command) return false;
   // A real bundler/dev-CLI invocation is not a bare node server — let the framework branches own it.
@@ -146,9 +179,6 @@ export function ensureHostBinding(command: string, framework?: DevFramework, res
   if (!command) return command;
   // Already binds a host (any interface / explicit flag) — leave untouched.
   if (/--host|-H\b|HOST=|0\.0\.0\.0/.test(command)) return command;
-  // Piped/chained (`| head`, `&& …`) — appending a flag would land it on the WRONG program (report
-  // 7773b4b0: `npm run dev | head` got `--host` appended onto `head`). Leave such a command untouched.
-  if (pipesOrChainsToAnotherCommand(command)) return command;
   // A direct Node server (`tsx server/index.ts`, …) takes no --host flag; most Express/Fastify apps read
   // the bind host from `HOST` (or bind 0.0.0.0 already). Prefix `HOST=0.0.0.0` so a config-driven server
   // is reachable on the PUBLIC E2B preview instead of binding localhost-only (blank preview). A server
@@ -162,8 +192,16 @@ export function ensureHostBinding(command: string, framework?: DevFramework, res
   // app that binds `localhost` (its own default, unless it reads HOST) is up, healthy, and NOT reachable
   // on the public preview. Same defect, same line of reasoning, one function apart.
   if (isNodeServerCommand(command) || (!!resolvedScript && isNodeServerCommand(resolvedScript))) {
-    return `HOST=0.0.0.0 ${command}`;
+    // A PREFIX is safe on a pipeline where an appended flag is not — `HOST=0.0.0.0 npm run dev |
+    // head` gives the host to the server, not to `head`. See `canPrefixEnv`. Without this, a piped
+    // Node server binds localhost only and the public preview is blank.
+    return canPrefixEnv(command, (seg) => isNodeServerCommand(seg) || /(?:npm|pnpm|yarn|bun)\b/.test(seg))
+      ? `HOST=0.0.0.0 ${command}`
+      : command;
   }
+  // Beyond this point every branch APPENDS A FLAG, which a pipeline or chain would land on the wrong
+  // program (report 7773b4b0: `npm run dev | head` got `--host` appended onto `head`).
+  if (pipesOrChainsToAnotherCommand(command)) return command;
   // Next.js dev server.
   if (/\bnext\b/.test(command)) return `${command} -H 0.0.0.0`;
   // Vite invoked directly.
@@ -478,9 +516,6 @@ export function buildPreKillPortCommand(port: number | number[]): string {
 export function pinDevServerPort(command: string, port: number, framework?: DevFramework, resolvedScript?: string): string {
   if (!command) return command;
   if (/--port[=\s]|[\s]-p[\s]/.test(command)) return command; // already pinned — respect it
-  // Piped/chained (`| head`, `&& …`) — appending a `--port` would land it on the WRONG program (report
-  // 7773b4b0: `npm run dev | head` got `--port 3000 --strictPort` appended onto `head`). Skip injection.
-  if (pipesOrChainsToAnotherCommand(command)) return command;
   // A direct Node server (`tsx server/index.ts`, …) takes no `--port` flag; nearly every Express/Fastify
   // app reads its port from `process.env.PORT`. Inject `PORT=<port>` so the server binds the exact port
   // the health-check watches — the fix for the Mitrify "did not come up on port 5173" import (its
@@ -500,8 +535,18 @@ export function pinDevServerPort(command: string, port: number, framework?: DevF
     // RETURN, do not fall through. An already-pinned `PORT=8080 npm run dev` used to skip this branch
     // and land in the Vite one below, which appended `--port … --strictPort` — the very flags this
     // command ignores, and the bug being fixed. A Node server is done here either way.
-    return /\bPORT=/.test(command) ? command : `PORT=${port} ${command}`;
+    //
+    // The prefix is applied even to a PIPED command — see `canPrefixEnv`. `PORT=5173 npm run dev
+    // 2>&1 | head -60` gives the port to the server, not to `head`, and skipping it is precisely
+    // what left the app on 5000 while the health-check watched 5173.
+    if (/\bPORT=/.test(command)) return command;
+    return canPrefixEnv(command, (seg) => isNodeServerCommand(seg) || /(?:npm|pnpm|yarn|bun)\b/.test(seg))
+      ? `PORT=${port} ${command}`
+      : command;
   }
+  // Beyond this point every branch APPENDS A FLAG, which a pipeline or chain would land on the wrong
+  // program (report 7773b4b0: `npm run dev | head` got `--port 3000 --strictPort` put onto `head`).
+  if (pipesOrChainsToAnotherCommand(command)) return command;
   if (/\bnext\b/.test(command) || framework === 'next') return `${command} -p ${port}`;
   const isPmDev = /\b(?:npm|pnpm|yarn|bun)\b.*\b(?:run\s+)?(?:dev|serve)\b/.test(command);
   // Vite (invoked directly, resolved from a script, or the unknown-framework default for a pm-run

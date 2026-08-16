@@ -29,28 +29,51 @@ below, and everything that turned out to be already built was removed rather tha
 
 ---
 
-## 0 · ⚙️ ALREADY BUILT, JUST SWITCHED OFF — the cheapest wins on this page
+## 0 · ⚙️ THE FLAGS — what is ON, and the four real choices left
 
-Nothing to build. These are finished, tested, merged features sitting behind a default-OFF flag. The
-admin has already turned on four (`LINT_GATE`, `INTEGRITY_GATE`, `REQUIREMENT_AWARE`,
-`REVIEW_AUTOFIX_WARNINGS`). These are the rest — **each one now audited against live code, not guessed
-at from the shape of its `env` check** (see the correction box below for why that distinction matters).
+> ## ⚠️ CORRECTED 2026-08-16 — this section was telling the admin to do work they had already done
+>
+> Until today this page listed eight flags as "turn these on", and **the admin had already turned seven
+> of them on** — five on 2026-08-08, two more on 2026-08-14. §5 repeated the same stale instruction as a
+> numbered to-do list, in priority order, as though none of it had happened.
+>
+> That is precisely the failure safeguard #1 exists for, and it has already cost this project real work
+> (PR #1 and PR #4 were built blind on a stale picture of `main`). A roadmap that hands a session
+> finished work is worse than no roadmap: it is confidently wrong, and it burns credit to discover it.
+>
+> **`CLAUDE.md`'s env registry is the authority on what is set in Cloud Run — not this file.** Claude
+> cannot see Cloud Run, so that registry is maintained hand-to-hand with the admin. This table is a
+> convenience view of it and goes stale the moment a switch is flipped. When the two disagree,
+> **`CLAUDE.md` wins** and this table is the thing to fix.
 
-| Flag | What turning it on gives you | Audit verdict (2026-08-07) |
+### ✅ ON in Cloud Run — nothing to do, but know what changed
+
+Dates are from `CLAUDE.md`'s registry. The audit verdicts that justified each are kept, because they are
+what makes the flag *reviewable* if a real report ever turns against it.
+
+| Flag | On since | What it changed | What to watch now that it is live |
+|---|---|---|---|
+| **`AGENTV3_PARALLEL_BUILD`** | 2026-08-08 | Frontend + backend built concurrently (#1790). ONE `parallelBuild` value drives the write-lock, the dispatch AND the architect prompt, so "parallel on, lock off" cannot exist; sub-agents share the same locked actuator. | **The speedup is still unmeasured.** It needs one real large multi-file build compared against a serial one. This is the only flag here that changes HOW a build runs — if anything looks wrong, this is the first to unset. |
+| **`AGENTV3_WEAK_CHECKPOINT`** | 2026-08-08 | Deterministic readiness scan every 20 steps on a weak build; steers only on the two completeness-independent blockers. No LLM call, so no cost. Max 2 nudges from step 15. | Whether weak-tier builds converge in fewer steps. Cannot fail a build. |
+| **`AGENTV3_VACCINE`** | 2026-08-08 | The platform RUNS the built app's own test suite and reports honest pass/fail — a green build whose tests fail can no longer be called verified. A shell command, not a model call. | ⚠️ Its **repair budget is now OPEN**, because `FEATURE_HEAL` went on 2026-08-13 (`vaxHealMax = featureHealEnabled ? 1 : 0`). On its own it was free; it is not any more, for the 20% cohort. |
+| **`AGENTV3_DEPHEALTH_GATE`** | 2026-08-08 | CVE + copyleft advisory appended to an already-successful build. Cannot block or fail one. | Nothing. Advisory by construction. |
+| **`AI_WALLET_SPEND`** | 2026-08-08 | The one-wallet law — every assistant and tool draws the SAME balance a build does. | Turned on only AFTER the audit found and fixed a real **overcharge** (#2175: tiered markup applied per call then summed — three $0.50 calls billed $6.00 instead of $5.50). Nobody was ever billed by it, because the flag had never been on. **That is the lesson worth keeping: a flag that has never been on has never been tested by reality.** |
+| **`AGENTV3_FEATURE_HEAL`** + `_PCT=20` | 2026-08-13 | One bounded pass adds a control the user asked for that is missing from the live DOM, then re-probes the running app. Wrapped in `verifyAfterFix`, so a heal that breaks the render is REVERTED. | Costs an extra model pass on the builds it fires for. `_PCT=20` is a real canary keyed by workspaceId — compare per-build cost and duration for the 20% against the other 80%. ⚠️ An unset/malformed `_PCT` means **100%**, not 0. |
+| **`AGENTV3_DESIGN_GATE`** | 2026-08-13 | The "1st page beautiful, andar ke page HTML feel dete hai" fix. Detection is deterministic and free; ON adds one bounded repair pass naming only the offending pages. Can never fail a build. | No PCT canary — it is all-or-nothing, so watch the first few builds. |
+| **`AGENTV3_STREAMING_PREVIEW`** | 2026-08-14 | Files are persisted the instant they are ready, so the user sees their app 30–155s sooner instead of watching a spinner while a finished app sits on the server. | ⚠️ **Its first real users are recent — treat it as new, not settled.** Watch that the preview appears early *and correct*, not half-rendered. |
+| **`AGENTV3_CACHE_PREFIX`** | 2026-08-14 | ~12 volatile blocks moved out of the static prompt HEAD so the ~46KB body becomes a stable cache prefix. The model sees identical content, only relocated. | Per-build cost should drop on repeat builds of the same workspace. ⚠️ **This entry previously said "🚫 Leave off — the benefit is unmeasurable." That was wrong and is corrected**: the mechanism is Anthropic's prefix matching, and a daily-changing head busts the cache for the entire static body. |
+| `LINT_GATE` · `INTEGRITY_GATE` · `REQUIREMENT_AWARE` · `REVIEW_AUTOFIX_WARNINGS` · `AUTOFIX` · `RATE_PACER` · `COST_ROUTING` (canary) · `AUDIT_FIX` · `BILL_SANDBOX` | Jul–Aug | See `CLAUDE.md` for each. | — |
+
+### ⬜ STILL OFF — the four genuine choices left on this page
+
+| Flag | What turning it on gives you | The honest trade-off |
 |---|---|---|
-| **`AGENTV3_PARALLEL_BUILD`** | Frontend and backend built at the same time (#1790). | ✅ **SAFE — audited by construction.** ONE `parallelBuild` value drives the write-lock, the dispatch decision AND the architect prompt (`agentv3.ts` ~5595), so "parallel on but lock off" cannot exist. Sub-agents get the SAME locked actuator (`makeSubAgentSpawn({ actuator })`); the other eight `buildActuator()` calls belong to unrelated routes, none inside the build stream. Same-path writes serialize, disjoint paths run concurrently. *The SPEEDUP itself is unmeasured — that needs a real large build.* |
-| **`AGENTV3_DEPHEALTH_GATE`** | CVE + strong-copyleft advisory on a finished build. | ✅ **SAFE.** Advisory-only: appends to the summary of an already-`ok` build inside a `try/catch` (`AgentRunner.ts` ~662). Cannot block or fail a build. |
-| `AGENTV3_OBSERVABILITY_INJECT` | Adds a `/health` route to an Express app that lacks one. | ✅ **SAFE.** Purely additive, build-end, never blocks. It does modify the user's app, which is the only thing to be aware of. |
-| `AGENTV3_PRETTIER_GATE` | "N files need formatting" note on the summary. | ✅ Safe — same advisory shape. Lowest value on this page. |
-| `AGENTV3_STREAMING_PREVIEW` | The preview appears tens of seconds sooner. | ⚠️ **REAL TRADE-OFF, not a pure win.** `SimpleBuilder.ts` ~845 hands files to the preview **before** the verify+repair loop, so a user can briefly see an app that is then repaired. How often that happens is unmeasured. Weigh it against "the user judges by what they SEE". |
-| `AGENTV3_REDTEAM` | Really attacks the built app's inputs, then hardens them. | ⚠️ **SAFE but COSTS MONEY.** Correctly routed — inherits `healRunnerRoutingOpts` + `noClaude`, so a weak build stays on GLM/Kimi (never Sonnet/Opus). Well bounded: successful artifact builds only, 12-case hard cap, needs ≥120 s of budget left, abortable. But it is an extra LLM pass on **every successful build** — a money decision, not a technical one. |
-| **`AI_WALLET_SPEND`** | The whole one-wallet law — every assistant and tool draws the SAME balance a build does. The admin's own 2026-08-01 mandate. | ✅ **NOW SAFE — because the audit found and fixed a real bug.** The tiered markup was applied PER CALL and then summed, so a multi-call request was systematically OVERCHARGED (three $0.50 calls billed $6.00 instead of $5.50; worst on the App Debugger, which fans out over file batches). Fixed + test-locked in #2175. Everything else verified clean: no double-charge path, failed actions never charged, unmeasured turns charge zero, empty wallet refused before any provider call, balance-unreadable fails open, server-clock rollup. **Turn on only once #2175 is live.** |
-| **`AGENTV3_WEAK_CHECKPOINT`** | Mid-build course-correction on the weak tier. | ✅ **SAFE and FREE — the best remaining flag.** Runs the DETERMINISTIC readiness scan (no LLM call, so no cost) every 20 steps and steers only on the two blockers that are real regardless of how incomplete the app is: a server-only Node builtin in browser code, and a high-severity security finding. Mid-build false alarms ("unresolved import", "score below floor") are explicitly excluded — steering on those would burn the weak model's scarce steps. Bounded: not before step 15, max 2 nudges. A contract test runs the REAL `Readiness` producer so a wording change cannot silently disable the filter. It helps the tier that struggles most, at zero cost. |
-| **`AGENTV3_VACCINE`** | After a successful build, the platform RUNS the app's own test suite itself and reports honest pass/fail. | ✅ **SAFE, and the cost is a shell command — NOT an LLM call.** `run_tests` is a tool the agent may simply skip; this makes it a system reflex, so *a green build whose own tests fail can never be reported as verified*. That is an honesty hole closed, not a feature added. No suite ⇒ honest no-op, never a fake pass. A failing suite is a WARNING finding, never a hard fail. Budget-gated (needs ≥90 s left) and abortable. **Repair only runs if `FEATURE_HEAL` is also on** (`vaxHealMax = featureHealEnabled ? 1 : 0`) — so on its own it costs no model tokens at all. |
-| `AGENTV3_FEATURE_HEAL` | When the app rendered but a requested control is missing, one bounded pass adds it. | ⚠️ **SAFE but COSTS MONEY** — an extra LLM repair pass. Note it also unlocks the vaccine's repair budget, so turning it on changes two things, not one. Slice 1 already RECORDS the missing-feature finding without it. |
-| `AGENTV3_REVIEW_FASTLANE` | Runs the reviewer on fast-lane builds that currently skip it. | ⚠️ **SAFE but COSTS MONEY** — same shape as `REDTEAM`: better quality, one extra LLM pass per fast-lane build. |
-| `AGENTV3_CACHE_PREFIX` | Prompt-cache stable prefix. | 🚫 **Leave off.** Routing moat, and the benefit is unmeasurable without provider cache-hit telemetry. |
-| `AGENTV3_ASK_USER` | The clarify card. | 👤 The admin declined this deliberately — friction vs zero-UI. Not a task. |
+| `AGENTV3_OBSERVABILITY_INJECT` | Adds a `/health` route to an Express app that lacks one. | ✅ **SAFE.** Purely additive, build-end, never blocks. It does modify the user's app — the only thing to be aware of. |
+| `AGENTV3_PRETTIER_GATE` | "N files need formatting" note on the summary. | ✅ Safe, advisory. **Lowest value on this page** — say no and lose nothing. |
+| `AGENTV3_REDTEAM` | Really attacks the built app's inputs, then hardens them. | ⚠️ **SAFE but COSTS MONEY.** Correctly routed (weak stays on GLM/Kimi, never Sonnet/Opus), well bounded (successful builds only, 12-case cap, needs ≥120s budget, abortable). But it is an extra LLM pass on **every successful build** — a money decision, not a technical one. |
+| `AGENTV3_REVIEW_FASTLANE` | Runs the reviewer on fast-lane builds that currently skip it. | ⚠️ **SAFE but COSTS MONEY** — same shape as `REDTEAM`. |
+| `AGENTV3_ASK_USER` | The clarify card. | 👤 **Declined by the admin deliberately** — friction vs zero-UI. Not a task; do not re-propose. |
+| `AGENTV3_INLINE_BABEL` | — | 🚫 **A REVERSE kill switch. OFF is correct.** See the box below; it must never appear on a "turn these on" list. |
 
 ### ⚠️ How this table used to get things WRONG (corrected 2026-08-07)
 
@@ -72,8 +95,17 @@ classify one by the shape of its condition.*
 
 **Claude's job here:** never recommend a flag ON without auditing it the way `AI_WALLET_SPEND` was on
 2026-08-07 — that audit found a real overcharge precisely *because* the flag had never been on.
-**A flag that has never been on has never been tested by reality.** Every flag in the table above has
-now been audited against live code; there is no ⬜ left in this section.
+**A flag that has never been on has never been tested by reality.**
+
+**And the job this section forgot:** a flag that has been turned ON must be MOVED, in the same session
+the admin says they flipped it. That is the maintenance this file skipped for eight days, and it is why
+§0 and §5 spent that time instructing the admin to redo finished work. The registry in `CLAUDE.md` is
+updated hand-to-hand when a switch is flipped; this table has to follow it, not drift behind it.
+
+⚠️ **The flag surface is now large enough to be its own problem.** `STREAMING_PREVIEW` and
+`CACHE_PREFIX` were made env vars only because they had never run in production and an env var is an
+instant revert with no deploy. Once real builds prove them, their defaults belong in the CODE and the
+two keys should RETIRE — that is what shrinks a list the admin has already objected to the size of.
 
 ---
 
@@ -266,32 +298,21 @@ Each of these is genuinely useful today; the remainder is usually infra-shaped.
 
 Claude cannot reach any of these. Ordered by urgency.
 
-### The Cloud Run switches, in the order to flip them
+### The Cloud Run switches — ✅ DONE, nothing here to flip
 
-1. **`AGENTV3_PARALLEL_BUILD=on` — flip this first.** Audited by construction (see §0): one value drives
-   the lock, the dispatch and the prompt, and sub-agents share the locked actuator, so there is no path
-   where parallel writers run unlocked. Nothing to wait for. Then watch one large build: if it is not
-   faster, unset it — the flag is a clean revert with no state to undo.
-2. **`AGENTV3_WEAK_CHECKPOINT=on`** — the best free win on this page. Costs nothing (the scan is
-   deterministic, not an LLM call) and helps the free tier, which struggles most. See §0 for why its
-   false-alarm filter is trustworthy.
-3. **`AGENTV3_VACCINE=on`** — the platform runs the built app's OWN test suite and reports honest
-   pass/fail, so a green build whose tests fail can no longer be called verified. On its own it spends
-   no model tokens (the repair budget only opens if `FEATURE_HEAL` is on too), and with no suite it is
-   a silent no-op.
-4. **`AGENTV3_DEPHEALTH_GATE=on`** — free safety information (CVE + copyleft on the finished app),
-   advisory-only, cannot block a build. `AGENTV3_OBSERVABILITY_INJECT=on` is the same shape if you want
-   built apps to carry a `/health` route.
-5. **`AI_WALLET_SPEND=on` — but only after the current deploy lands.** The 2026-08-07 audit found the
-   tiered markup was applied per model-call and then summed, which **overcharged** users on any
-   multi-call action (three $0.50 calls billed $6.00 instead of $5.50; worst on the App Debugger).
-   Fixed and test-locked in #2175, merged 2026-08-07 → Cloud Run auto-deploys it. Turn the flag on after
-   that build shows green in Cloud Build, so the first version real users meet is the corrected one.
-   Nobody was ever billed by the bug — the flag had never been on, which is exactly why it survived.
-6. **Judgement calls, not recommendations:** `AGENTV3_STREAMING_PREVIEW` buys tens of seconds of
-   perceived speed but can briefly show an app before it is verified; `AGENTV3_REDTEAM` really hardens
-   the app's inputs but adds an LLM pass to every successful build. Both are safe; both are trade-offs
-   only you can price.
+> **This was a numbered to-do list of six switches, and the admin had already flipped every one of
+> them** (five on 2026-08-08, `STREAMING_PREVIEW` on 2026-08-14) — plus `FEATURE_HEAL`, `DESIGN_GATE`,
+> `BILL_SANDBOX`, `AUDIT_FIX` and `CACHE_PREFIX`, which this list never mentioned at all. It sat here
+> unmaintained for eight days telling the admin to redo finished work. **Corrected 2026-08-16.**
+
+The live state now lives in **one** place — `CLAUDE.md`'s env registry — and is mirrored in §0 above.
+There is no pending switch. The four genuinely-off flags are in §0's second table, and only two of them
+are real decisions (`REDTEAM` and `REVIEW_FASTLANE`, both "better quality for one more LLM pass per
+build" — a money call, not a technical one).
+
+**The rule that keeps this true:** when the admin says they flipped a switch, the same session updates
+`CLAUDE.md`'s registry **and** §0 here. A flag list that lags reality does not merely go stale — it
+actively sends the next session to do work that is already done.
 ### Everything else on the admin's plate
 
 - **VirusTotal licensing** — the free API is, by their terms, not for commercial products, and
@@ -347,3 +368,13 @@ The code half is done where one exists; only the infrastructure remains.
 3. Branch → verification gate → PR → CI green → merge. Merge is what deploys.
 4. Append what shipped to `PROGRESS.md`, and **correct this file in the same PR** — that is the only
    thing that stops it drifting again.
+5. **When the admin says they flipped a Cloud Run switch, update `CLAUDE.md`'s registry AND §0 here in
+   that same session.** Added 2026-08-16, because this is the rule whose absence made §0 and §5 spend
+   eight days instructing the admin to redo work they had already done. `CLAUDE.md` is the authority on
+   what is set — Claude cannot see Cloud Run — and this file is only ever a mirror of it.
+
+**The failure mode this document keeps having, stated plainly:** it goes stale in the direction of
+*claiming work is still open*, and a session that trusts it rebuilds finished features. That has now
+happened with a bucket provisioner (built twice, the duplicate deleted unmerged), an animation recipe, a
+scaffold fallback, and seven Cloud Run switches. **Nothing here is evidence. The code and `CLAUDE.md`
+are evidence.**

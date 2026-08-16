@@ -8,6 +8,16 @@
  */
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
+import { listEqNewestFirst } from './firestoreIndexSafe';
+
+/**
+ * Upper bound on documents read for one history listing.
+ *
+ * Above the default index-safe cap because `getSummary` asks for 1000 records and its totals would
+ * be wrong — quietly, in the user's own cost figures — if the read stopped short of the period it
+ * claims to summarise.
+ */
+const HISTORY_FETCH_CAP = 1000;
 
 export type BuildStatus = 'completed' | 'failed' | 'cancelled';
 
@@ -70,22 +80,43 @@ class UserBuildHistoryStore {
     } catch { /* best-effort */ }
   }
 
-  /** List builds for a user filtered by a time period or date range. */
+  /**
+   * List builds for a user filtered by a time period or date range.
+   *
+   * The query is deliberately a SINGLE equality filter on `userId`, with the date range and the
+   * newest-first ordering applied in memory. Chaining `.orderBy('createdAt')` or a `createdAt`
+   * range onto the `userId` filter makes this a composite-index query, and this project has no
+   * deployed composite indexes (`firestore.indexes.json` is not referenced by `firebase.json` and
+   * no pipeline applies it). The old version did exactly that and swallowed the resulting
+   * FAILED_PRECONDITION into `return []` — so a user with a full build history was shown an empty
+   * one, which is a worse outcome than an error because nobody reports it as a bug.
+   *
+   * `HISTORY_FETCH_CAP` bounds the read: a user past that many builds sees their most recent ones,
+   * never a silently truncated arbitrary subset, because the sort happens after the fetch.
+   */
   async list(userId: string, opts: BuildHistoryQuery = {}): Promise<BuildRecord[]> {
     const db = this.getDb();
     if (!db || !userId) return [];
     try {
       const { from, to } = this.periodToRange(opts);
-      let q: admin.firestore.Query = db
-        .collection('user_build_history')
-        .where('userId', '==', userId)
-        .orderBy('createdAt', 'desc')
-        .limit(opts.limit ?? 100);
-      if (from) q = q.where('createdAt', '>=', from);
-      if (to) q = q.where('createdAt', '<=', to);
-      const snap = await q.get();
-      return snap.docs.map(d => d.data() as BuildRecord);
-    } catch {
+      const rows = await listEqNewestFirst<BuildRecord>(
+        db.collection('user_build_history'),
+        [['userId', userId]],
+        'createdAt',
+        HISTORY_FETCH_CAP,
+        HISTORY_FETCH_CAP,
+      );
+      const inRange = rows.filter((r) => {
+        const at = typeof r.createdAt === 'number' ? r.createdAt : 0;
+        if (from && at < from) return false;
+        if (to && at > to) return false;
+        return true;
+      });
+      return inRange.slice(0, opts.limit ?? 100);
+    } catch (e) {
+      // A single-field query needs no index, so reaching here means the database itself is
+      // unreachable — not a missing index. Say so in the log instead of failing mute.
+      console.warn('[UserBuildHistoryStore] list failed:', (e as Error)?.message || e);
       return [];
     }
   }

@@ -33435,3 +33435,57 @@ real app needs it, not pre-emptively.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` **1275
 files / 15788 tests passed** · `npm run build` OK.
+
+## 2026-08-16 — The composite-index bug class, killed repo-wide (sibling sweep of the publish failure)
+
+The store's first real publish failed on a `.where(X).orderBy(Y)` composite-index query. That was
+fixed in place. This is the sweep the fourth absolute rule requires — hunt the siblings — and it
+found the same shape alive in six more places, two of them failing SILENTLY:
+
+| Where | What a user saw |
+|---|---|
+| `galleryStore.listGalleryApps` / `…ByUid` | gallery listing throws → 500 |
+| `navStoreStore.listApps` / `…ByUid` | APK store listing throws → 500 |
+| `UserBuildHistoryStore.list` | **caught → empty**: "you have no builds", while they did |
+| `logStore.query` | **caught → empty**: every filtered admin log search found "nothing" |
+| `FirestoreJobStore.findJobByIdempotencyKey` | throws → duplicate-build check fails → the same build can run and bill twice |
+| `FirestoreConversationStore.listByUser` | had a fallback, so it worked — by paying for a doomed round-trip on **every** history load |
+
+The two silent ones are the worst of the set. A `catch` that returns `[]` converts a failure into an
+answer, and nobody reports an answer as a bug.
+
+**The deeper cause — a file that looked like configuration and was not.** `firestore.indexes.json`
+declared six composite indexes. `firebase.json` had no `indexes` key, and no pipeline ran
+`firebase deploy --only firestore:indexes`, so it had **never been applied to anything**. One of its
+six entries did not even match the query it claimed to serve (`ai_usage_logs` declared `timestamp`;
+the query orders by `createdAt`). Three separate call sites reasoned from it as if it were live —
+one fallback comment read *"once the index is live the fast path above is used"*, describing a fast
+path that had never once succeeded.
+
+It could not simply be wired up either: `.firebaserc` names `navbharatai-3395f`, the **Hosting**
+project, while Firestore lives in `gen-lang-client-0866594388` / `navbharat-prod`. Deploying indexes
+from this repo would have targeted the wrong project and appeared to succeed. The file is deleted,
+and the reason is recorded in `firestoreIndexSafe.ts` where the next person will actually look.
+
+**The fix is a shape, not six patches.** `src/server/lib/firestoreIndexSafe.ts` holds one
+implementation of "equality filter in Firestore, sort in memory", and its signature has **no
+`orderBy` parameter** — a call site written against it cannot express the broken query. All eight
+sites now use it, including the two that had hand-rolled their own copy of the loop (four copies of
+a rule is how a rule drifts).
+
+**Locked shut:** `firestoreIndexSafe.test.ts` scans every non-test server source file for the
+`.where(A,'==').orderBy(B)` chain and fails on any occurrence — in files written after this one,
+too. It strips comments first (every file that fixed this bug describes the broken shape in prose,
+and a guard that fires on the documentation of a fix gets deleted within a week) and ignores the
+legal same-field range+order used deliberately in `DiagnosticsStore` and `SandboxStore`. A second
+test refuses to let an unwired indexes file exist again.
+
+**Honest limit:** in-memory sorting is correct only while one filter value matches fewer documents
+than the fetch cap (500, or 1000 where a summary depends on the whole period). That holds for every
+collection here today — one document per app, per purchase, per build — and the cap enforces it
+rather than assuming it. When a collection genuinely outgrows it, the answer is a real index created
+in the correct project's console FIRST, not a quietly raised cap, which would turn "the newest 50"
+into "50 arbitrary ones".
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1276 files / 15798 tests passed** · `npm run build` OK.

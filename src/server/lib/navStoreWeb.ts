@@ -31,6 +31,7 @@
 import * as admin from 'firebase-admin';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { getServerDb } from './serverDb';
+import { listEqNewestFirst } from './firestoreIndexSafe';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { scanTextForSecrets, type EnvTemplateSecretIssue } from '../AgentV3/EnvSecretValueAnalysis';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
@@ -335,37 +336,29 @@ export async function getWebAppFiles(id: string): Promise<Record<string, string>
  * throws FAILED_PRECONDITION on its first production use until someone creates the index by hand in
  * the console, and no session has console access. A single-field filter is auto-indexed and can
  * never demand an index, so the shape itself is the fix: filter on one field, sort in memory.
- * The in-memory sort is bounded by FETCH_CAP; these collections are small by construction (one doc
- * per listing, not per row). Pinned by a source test — do not reintroduce a where+orderBy chain.
+ *
+ * The mechanics now live in `firestoreIndexSafe.ts` — this file was the first of what became four
+ * hand-written copies of the same loop, and four copies of a rule is how a rule drifts. That helper
+ * takes no `orderBy` parameter, so a call site written against it cannot express the broken shape.
+ * Pinned by a source test — do not reintroduce a where+orderBy chain here or anywhere else.
  */
-const FETCH_CAP = 500;
-
-function newestFirst(docs: admin.firestore.QueryDocumentSnapshot[], limit: number): WebStoreApp[] {
-  return docs.map((x) => x.data() as WebStoreApp)
-    .sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
-    .slice(0, limit);
-}
-
 export async function listListedWebApps(limit = 60): Promise<WebStoreApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION).where('status', '==', 'listed').limit(FETCH_CAP).get();
-  return newestFirst(snap.docs, limit);
+  return listEqNewestFirst<WebStoreApp>(d.collection(COLLECTION), [['status', 'listed']], 'publishedAt', limit);
 }
 
 export async function listMyWebApps(uid: string, limit = 50): Promise<WebStoreApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION).where('uid', '==', uid).limit(FETCH_CAP).get();
-  return newestFirst(snap.docs, limit);
+  return listEqNewestFirst<WebStoreApp>(d.collection(COLLECTION), [['uid', uid]], 'publishedAt', limit);
 }
 
 /** Web apps awaiting listing review — the admin queue, same discipline as the APK store. */
 export async function listUnlistedWebApps(limit = 50): Promise<WebStoreApp[]> {
   const d = db();
   if (!d) return [];
-  const snap = await d.collection(COLLECTION).where('status', '==', 'unlisted').limit(FETCH_CAP).get();
-  return newestFirst(snap.docs, limit);
+  return listEqNewestFirst<WebStoreApp>(d.collection(COLLECTION), [['status', 'unlisted']], 'publishedAt', limit);
 }
 
 export async function updateWebApp(id: string, patch: Partial<WebStoreApp>): Promise<void> {

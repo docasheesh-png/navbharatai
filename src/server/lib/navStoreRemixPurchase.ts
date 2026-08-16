@@ -30,6 +30,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
+import { listEqNewestFirst } from './firestoreIndexSafe';
 import { TOKENS_PER_RUPEE } from './payments';
 import { debitWalletForBuild } from './walletDebit';
 
@@ -271,12 +272,10 @@ export async function listPurchases(buyerUid: string, limit = 100): Promise<Purc
   const d = db();
   if (!d || !buyerUid) return [];
   try {
-    const snap = await d.collection(PURCHASES).where('buyerUid', '==', buyerUid).limit(500).get();
-    return snap.docs
-      .map((x) => x.data() as PurchaseRecord)
-      .filter((p) => p && typeof p.appId === 'string')
-      .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
-      .slice(0, limit);
+    const rows = await listEqNewestFirst<PurchaseRecord>(
+      d.collection(PURCHASES), [['buyerUid', buyerUid]], 'at', limit,
+    );
+    return rows.filter((p) => p && typeof p.appId === 'string');
   } catch {
     return [];
   }

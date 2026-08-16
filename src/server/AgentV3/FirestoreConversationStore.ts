@@ -27,6 +27,7 @@ import type {
 import { isEnumerableUserId } from './ConversationStore';
 import type { TurnUsage } from './ClaudeClient';
 import { getServerDb } from '../lib/serverDb';
+import { listEqNewestFirst } from '../lib/firestoreIndexSafe';
 
 const COLLECTION = 'agentv3_conversations';
 const ZERO_USAGE: TurnUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
@@ -242,31 +243,25 @@ export class FirestoreConversationStore implements ConversationStore {
     // they are within the user's `fetch` most-recent builds (ample for real users) with zero index churn.
     const sortPinnedFirst = (recs: ConversationRecord[]): ConversationRecord[] =>
       recs.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-    const fetch = Math.max(cap, 100);
     // List view: transcript omitted (empty messages) — call get(id) for the full build.
-    try {
-      const q = await this.db
-        .collection(COLLECTION)
-        .where('userId', '==', userId)
-        .orderBy('updatedAt', 'desc')
-        .limit(fetch)
-        .get();
-      const recs = sortPinnedFirst(q.docs.map((d) => this.toRecord(d.id, d.data() as ConversationMeta, [])));
-      return cap > 0 ? recs.slice(0, cap) : recs;
-    } catch {
-      // FALLBACK — the (userId ASC, updatedAt DESC) composite index may not be deployed yet. Without
-      // it the ordered query THROWS ("query requires an index"), the route returns 500, and the
-      // history menu silently shows "No saved chats yet" even though chats exist. Query by userId
-      // alone (a single-field index always exists), then sort + cap in memory so OLD CHATS still
-      // appear. Once the index is live (firestore.indexes.json) the fast ordered path above is used.
-      const q = await this.db
-        .collection(COLLECTION)
-        .where('userId', '==', userId)
-        .limit(Math.max(cap, 200))
-        .get();
-      const recs = sortPinnedFirst(q.docs.map((d) => this.toRecord(d.id, d.data() as ConversationMeta, [])));
-      return cap > 0 ? recs.slice(0, cap) : recs;
-    }
+    //
+    // ONE query, filtered on `userId` alone. This used to try an ordered `(userId, updatedAt)` query
+    // first and fall back to this one when it threw — but that composite index has never existed:
+    // `firestore.indexes.json` declares it, and nothing deploys that file (`firebase.json` has no
+    // `indexes` key, and no pipeline runs `firebase deploy --only firestore:indexes`). So the
+    // "fast path" threw on every single history load and every user paid for a doomed round-trip
+    // before the real query ran. Removing it makes the history list strictly faster, and the result
+    // identical — the sort was already happening here in memory either way.
+    const rows = await listEqNewestFirst<ConversationRecord>(
+      this.db.collection(COLLECTION),
+      [['userId', userId]],
+      'updatedAt',
+      Math.max(cap, 200),
+      Math.max(cap, 200),
+      (id, data) => this.toRecord(id, data as ConversationMeta, []),
+    );
+    const recs = sortPinnedFirst(rows);
+    return cap > 0 ? recs.slice(0, cap) : recs;
   }
 
   async remove(id: string): Promise<void> {

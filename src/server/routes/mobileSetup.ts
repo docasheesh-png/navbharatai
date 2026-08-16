@@ -18,6 +18,7 @@
 import type { Express, Request, Response } from 'express';
 import axios from 'axios';
 import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { loadWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { sessionWorkspaceId } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { generateShipKit } from '../lib/mobileShipKit';
@@ -136,12 +137,19 @@ export function registerMobileSetupRoutes(app: Express): void {
     // workflow's Java and the app's Capacitor can never disagree (G2). Null → the governed default.
     const capacitorMajor = capacitorMajorFromFiles(appFiles) ?? undefined;
     const kit = generateShipKit({ appName: name, appId: typeof appId === 'string' ? appId : undefined, ios: includeIos, capacitorMajor });
+    // THE APP'S OWN IMAGES AND FONTS (2026-08-16). `loadWorkspaceFiles` is text-only by design, so
+    // without this the pushed repo had `import logo from './logo.png'` and no `logo.png` — a broken
+    // image on a static app, and on a BUILT app a hard "Could not resolve ./logo.png" from Vite, which
+    // is the failure class behind the admin's blocked APK reports. Best-effort: assets are a durable
+    // convenience, and a store hiccup must degrade the app's pictures, never refuse the whole ship.
+    const appAssets = await loadWorkspaceAssets(workspaceId).catch(() => ({} as Record<string, string>));
     const project = assembleMobileProject(appFiles, kit.files, {
       appName: name,
       appId: typeof appId === 'string' ? appId : kit.appId,
       iconDataUrl: typeof iconDataUrl === 'string' ? iconDataUrl : undefined,
       backgroundColor: typeof backgroundColor === 'string' ? backgroundColor : undefined,
       ios: includeIos,
+      appAssets,
     });
 
     try {

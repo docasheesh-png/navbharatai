@@ -34,6 +34,9 @@ import { DEFAULT_CAPACITOR_MAJOR } from './capacitorToolchain';
 // toolchain table (capacitorToolchain.ts) — one source of truth, never a second copy that can drift.
 export { DEFAULT_CAPACITOR_MAJOR } from './capacitorToolchain';
 import { sanitizeReservedSegments } from './appId';
+// The SAME data-uri parser the asset store writes with — a second local regex here would be a second
+// definition of what a stored asset looks like, and the two would drift.
+import { parseDataUri } from '../AgentV3/ProjectImport';
 
 /** Ignore anything that cannot be part of a web build — these bloat the repo and break nothing by leaving. */
 const SKIP_PATH = /(^|\/)(node_modules|\.git|dist|build|\.next|\.cache|coverage)(\/|$)/;
@@ -47,6 +50,25 @@ export interface AssembleOptions {
   iconDataUrl?: string;
   /** Include the iOS workflow + fastlane lane. */
   ios?: boolean;
+  /**
+   * THE APP'S OWN BINARY ASSETS — its logo, photos, fonts, icons — as `path → data:<mime>;base64,…`,
+   * exactly the shape `loadWorkspaceAssets()` returns.
+   *
+   * 🔒 WHY THIS PARAMETER HAD TO EXIST (found 2026-08-16, tracing the admin's blocked APK).
+   * The ship path builds the repo from `loadWorkspaceFiles()`, which is TEXT ONLY by design — binary
+   * assets live in their own durable store (`WorkspaceAssetStore`) precisely so they cannot leak into
+   * the text map. But nothing on this path ever read that store, so `binaryFiles` carried the launcher
+   * ICON and nothing else. An imported app's logo, photos and fonts were persisted correctly and then
+   * simply left behind: the pushed repo had `import logo from './logo.png'` and no `logo.png`.
+   *
+   * On a BUILT app that is not a cosmetic flaw — Vite fails the build with "Could not resolve
+   * ./logo.png", which is the class of failure the admin has been reporting from the APK screen. The
+   * preflight fix that stopped calling an image "a missing library" was right, but it only corrected
+   * the SENTENCE; this is the condition that produced the failure.
+   *
+   * Optional: omitted or empty behaves exactly as before.
+   */
+  appAssets?: Record<string, string>;
 }
 
 export interface AssembledProject {
@@ -374,6 +396,27 @@ export function assembleMobileProject(
   }
 
   const binaryFiles: Record<string, string> = {};
+
+  // THE APP'S OWN ASSETS FIRST (see AssembleOptions.appAssets). Written before the icon so the icon,
+  // which is generated from the user's explicit choice on this screen, always wins a name collision.
+  //
+  // Placed at the SAME paths the app's code imports, and routed through the same static/built split the
+  // text files use: a built app keeps its source layout (Vite resolves `./logo.png` relative to the
+  // source file and hashes it into `dist/` itself), while a static app is served as-is, so its assets
+  // go where its HTML already points — under the web dir, exactly like its text files.
+  const skippedAssets: string[] = [];
+  for (const [path, dataUri] of Object.entries(opts.appAssets || {})) {
+    if (SKIP_PATH.test(path)) continue;
+    const parsed = parseDataUri(dataUri);
+    if (!parsed) { skippedAssets.push(path); continue; }
+    binaryFiles[kind === 'static' ? `${webDir}/${path}` : path] = parsed.base64;
+  }
+  if (skippedAssets.length > 0) {
+    // NEVER SILENT. A dropped asset means a missing image in the shipped app, and the user must hear it
+    // from us rather than discover a blank logo — or a failed build — on the runner.
+    notes.push(`${skippedAssets.length} file(s) could not be read and were not included: ${skippedAssets.slice(0, 3).join(', ')}${skippedAssets.length > 3 ? '…' : ''}. Any image or font among them will be missing from the app.`);
+  }
+
   if (opts.iconDataUrl) {
     const parsed = parseImageDataUrl(opts.iconDataUrl);
     if (parsed) {
@@ -386,7 +429,66 @@ export function assembleMobileProject(
     }
   }
 
+  // HONEST ABOUT WHAT STILL WILL NOT SHIP. With `files` and `binaryFiles` both final, this is a fact
+  // rather than a guess — see unshippableAssetImports. A note, never a refusal.
+  const unshippable = unshippableAssetImports(files, binaryFiles);
+  if (unshippable.length > 0) {
+    notes.push(
+      `${unshippable.length} image/font file(s) your code imports are not in the app and were not pushed: ` +
+      `${unshippable.slice(0, 3).join(', ')}${unshippable.length > 3 ? `, and ${unshippable.length - 3} more` : ''}. ` +
+      (kind === 'built'
+        ? 'A build that imports a file it cannot find will fail, so add these to your app and ship again.'
+        : 'Those images will be blank in the app.'),
+    );
+  }
+
   return { files, binaryFiles, kind, webDir, notes };
+}
+
+/** An asset-file import specifier, as written in source. Mirrors the preflight's scanner. */
+const ASSET_IMPORT_RE =
+  /(?:from\s*['"]([^'"\n]+)['"]|import\s*\(\s*['"]([^'"\n]+)['"]\s*\)|import\s+['"]([^'"\n]+)['"])/g;
+/** Only these extensions are worth reporting — a missing image is visible, a missing `.ts` is a code bug. */
+const SHIPPABLE_ASSET_EXT = /\.(png|jpe?g|gif|webp|avif|ico|bmp|mp4|webm|mp3|wav|ogg|woff2?|ttf|otf|eot)(\?.*)?$/i;
+
+/**
+ * Which asset imports will NOT resolve in the repo we are about to push.
+ *
+ * 🔒 THIS ANSWERS THE QUESTION EXACTLY, WHICH IS THE WHOLE REASON IT CAN EXIST HERE.
+ * The mobile preflight deliberately says NOTHING about a missing image, because it sees a text-only
+ * file map and would report every image as absent — a verdict wrong 100% of the time. Here the answer
+ * is knowable: the pushed repo is precisely `files` + `binaryFiles`, both in hand. So "will this
+ * import resolve after the push?" is a fact, not a guess.
+ *
+ * It is reported as a NOTE and never a failure. A missing picture is a real problem the user must hear
+ * about — but the decision to ship is theirs, and a wrong block is the more expensive mistake.
+ *
+ * Only bare filenames are matched (`./logo.png`, `@assets/hero.jpg`); a `http(s)://` or `data:` source
+ * needs nothing from the repo. PURE.
+ */
+export function unshippableAssetImports(
+  files: Record<string, string>,
+  binaryFiles: Record<string, string>,
+): string[] {
+  const have = new Set<string>();
+  for (const p of [...Object.keys(files || {}), ...Object.keys(binaryFiles || {})]) {
+    have.add(p);
+    have.add(p.split('/').pop() || p);   // match by basename too — the push may re-root a static app
+  }
+  const missing = new Set<string>();
+  for (const [, content] of Object.entries(files || {})) {
+    if (typeof content !== 'string') continue;
+    ASSET_IMPORT_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = ASSET_IMPORT_RE.exec(content))) {
+      const spec = m[1] || m[2] || m[3];
+      if (!spec || /^(https?:|data:|blob:)/i.test(spec)) continue;
+      if (!SHIPPABLE_ASSET_EXT.test(spec)) continue;
+      const base = spec.split(/[?#]/)[0].split('/').pop() || '';
+      if (base && !have.has(base)) missing.add(spec);
+    }
+  }
+  return [...missing].sort();
 }
 
 /** Split a data: URL into its base64 payload and a file extension. Returns null for anything else. */

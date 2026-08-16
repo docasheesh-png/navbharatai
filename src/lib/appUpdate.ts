@@ -62,6 +62,32 @@ export type UpdateVerdict =
 /** Default Play listing for this app. The bundle id is permanent (see nativeShellInvariants). */
 export const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.navbharat.ai';
 
+/**
+ * The Play Store APP deep link for this app. `market://` is answered by the Play Store app on Android and
+ * opens the listing INSIDE the store; a plain `https://play.google.com/…` link opens the browser instead
+ * (admin report 2026-08-16: the Update button opened the website, not the Play Store). The bundle id is
+ * permanent (nativeShellInvariants), so this is a constant.
+ */
+export const PLAY_STORE_MARKET_URL = 'market://details?id=com.navbharat.ai';
+
+/**
+ * The Play Store APP (`market://`) deep link for a Play listing URL. Given the server's `storeUrl` (an
+ * `https://play.google.com/store/apps/details?id=…`), returns the `market://details?id=…` that opens the
+ * Play Store app directly. Any non-Play or malformed URL falls back to this app's own market link, so the
+ * caller always has a store-app URL to fire rather than a browser one. PURE + tested.
+ */
+export function playStoreAppUrl(storeUrl?: string | null): string {
+  if (!storeUrl) return PLAY_STORE_MARKET_URL;
+  try {
+    const u = new URL(storeUrl);
+    if (!/(^|\.)play\.google\.com$/i.test(u.hostname)) return PLAY_STORE_MARKET_URL;
+    const id = u.searchParams.get('id');
+    return id ? `market://details?id=${encodeURIComponent(id)}` : PLAY_STORE_MARKET_URL;
+  } catch {
+    return PLAY_STORE_MARKET_URL;
+  }
+}
+
 /** How long a dismissal silences the banner for the SAME version. */
 export const DISMISS_COOLDOWN_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 

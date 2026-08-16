@@ -108,8 +108,48 @@ const ENV_TEMPLATE = /\.env\.(example|sample|template|dist|defaults?)$/i;
 
 /** Caps — quotas exist from day 1, because one runaway app must never become our bill. */
 export const MAX_SNAPSHOT_FILES = 400;
-export const MAX_SNAPSHOT_FILE_BYTES = 300 * 1024;
+/**
+ * PER-FILE CAP — 300 KB → 700 KB (raised 2026-08-16, after it refused a real app).
+ *
+ * A user's own `admin-dashboard.tsx` was blocked at 300 KB with "large assets don't belong in
+ * published source — move it out". For an ASSET that advice is right; for a PAGE COMPONENT our own
+ * builder generated it is unactionable — there is nothing to move out, it IS the app. The cap was
+ * refusing the very apps the store exists to carry.
+ *
+ * 700 KB is not a new guess either. The REAL ceiling is Firestore's ~1 MiB per document, and each
+ * file is stored as its own doc (`{ content }`), so 700 KB leaves comfortable room for encoding and
+ * field overhead while roughly doubling what a legitimate generated page may be.
+ *
+ * The honest trade-off, stated rather than hidden: the store player compiles the app in the VIEWER'S
+ * browser, so a 700 KB module costs real time on a phone. That is the creator's call to make — a slow
+ * first paint is a worse app; a refused publish is no app at all.
+ */
+export const MAX_SNAPSHOT_FILE_BYTES = 700 * 1024;
 export const MAX_SNAPSHOT_TOTAL_BYTES = 3 * 1024 * 1024;
+
+/**
+ * WHY is this file too big, and what can the user actually DO about it?
+ *
+ * The old refusal asserted "large assets don't belong in published source" for every oversized file,
+ * which is a guess wearing the clothes of a diagnosis — and the wrong guess for a source file. This
+ * measures the file instead: an embedded `data:` URL is a real asset the user CAN move out, and
+ * saying so names the fix; otherwise it is genuinely large code, and the honest advice is different.
+ * Pure, so both branches are testable.
+ */
+export function describeOversizeFile(path: string, content: string): string {
+  const bytes = Buffer.byteLength(content, 'utf8');
+  const kb = (n: number) => `${Math.round(n / 1024)} KB`;
+  let embedded = 0;
+  for (const m of content.matchAll(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi)) {
+    embedded += m[0].length;
+  }
+  if (embedded > bytes / 2) {
+    return `"${path}" is ${kb(bytes)}, and about ${kb(embedded)} of that is an image (or other file) pasted directly into the code. `
+      + `Save it as a real file in your project — or point at a URL — and publish again; the store limit is ${kb(MAX_SNAPSHOT_FILE_BYTES)} per file.`;
+  }
+  return `"${path}" is ${kb(bytes)} of code, over the store's ${kb(MAX_SNAPSHOT_FILE_BYTES)} per-file limit. `
+    + `Ask NavBharatAI to split this page into smaller components and publish again — every viewer's browser has to compile this file, so a huge one is slow for them too.`;
+}
 
 export interface PublishGateResult {
   ok: boolean;
@@ -147,7 +187,7 @@ export function evaluateWebPublish(input: Record<string, string> | null | undefi
   }
   for (const [path, content] of Object.entries(files)) {
     if (Buffer.byteLength(content, 'utf8') > MAX_SNAPSHOT_FILE_BYTES) {
-      return { ok: false, files: {}, reason: `"${path}" is larger than ${Math.round(MAX_SNAPSHOT_FILE_BYTES / 1024)} KB. Large assets don't belong in published source — move it out and publish again.` };
+      return { ok: false, files: {}, reason: describeOversizeFile(path, content) };
     }
   }
   if (total > MAX_SNAPSHOT_TOTAL_BYTES) {

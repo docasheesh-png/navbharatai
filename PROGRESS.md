@@ -33380,3 +33380,27 @@ un-publishing does not revoke a purchase — the row says so.
 
 Locked by `tests/remixHandoff.test.ts` (12 tests). Gate: tsc ✓ tsc -p server ✓ vitest
 **1275 files / 15782 tests** ✓ build ✓
+
+### The publish gate refused a real app with advice that did not fit it (admin report 2026-08-16)
+
+A live publish was refused: *"client/src/pages/admin-dashboard.tsx is larger than 300 KB. Large
+assets don't belong in published source — move it out and publish again."* The gate behaved
+correctly — an honest refusal, not a crash — but it was **wrong twice**:
+
+1. **The cap was our habit, not a constraint.** The REAL ceiling is Firestore's ~1 MiB per document,
+   and each file is one doc (`{ content }`). 300 KB was a third of what is actually safe, so the
+   store was refusing the very apps it exists to carry — a page component **our own builder
+   generated**. Raised to **700 KB**, which leaves clear room under the document limit.
+2. **The advice was a guess wearing the clothes of a diagnosis.** "Large assets don't belong in
+   published source — move it out" is right for an embedded image and meaningless for a page
+   component: there is nothing to move out, it IS the app. `describeOversizeFile` now MEASURES the
+   file: when `data:` URLs are more than half of it, it says an image was pasted into the code and
+   names the fix; otherwise it says the file is large CODE, suggests splitting the page, and gives
+   the reason that makes the limit make sense — *every viewer's browser has to compile this file*.
+   Either way it states the file and its real size, which the old message never did.
+
+The trade-off is recorded rather than hidden: at 700 KB the in-browser compile genuinely costs the
+viewer time on a phone. That is the creator's call — a slow first paint is a worse app; a refused
+publish is no app at all.
+
+Gate: tsc ✓ tsc -p server ✓ vitest **1275 files / 15787 tests** ✓ build ✓

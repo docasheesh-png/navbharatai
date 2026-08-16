@@ -19,6 +19,7 @@ import {
   getStoredFontScale, applyFontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_STEP, FONT_SCALE_DEFAULT,
 } from '../../lib/a11y';
 import { readTapFeedbackPrefs, writeTapFeedbackPrefs, type TapFeedbackPrefs } from '../../lib/tapFeedbackPrefs';
+import { readSwipeGesturePrefs, writeSwipeGesturePrefs, type SwipeGesturePrefs, type SwipeAction } from '../../lib/swipeGesturePrefs';
 import { SettingsScreen, ViewType, ApiKeys, PROVIDER_CONFIG } from '../../types';
 import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { THEME_MODES } from '../../lib/theme';
@@ -233,6 +234,88 @@ function TouchFeedbackControl() {
             </span>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Swipe gestures — on/off, plus what a left→right swipe actually does (Settings → General Settings).
+ *
+ * ADMIN REQUEST 2026-08-16: "left to right swipe par sidebar khul jata hai … selector do (3-4 options)
+ * … swipe on/off bhi."
+ *
+ * WHY A CHOICE RATHER THAN A FIXED BEHAVIOUR: the horizontal swipe is a scarce resource, and this
+ * codebase has already had two features lose a fight over it — App.tsx records that the sidebar swipe
+ * displaced browser back/forward, and that a tab-switching swipe "was removed because it competed with
+ * the sidebar". That conflict cannot be settled in code because it is a matter of taste. Letting the
+ * user settle it hands both removed behaviours back as options.
+ *
+ * The three actions are each something the app ALREADY does — never an invented capability. There is
+ * deliberately no fourth "do nothing": that is what the master switch is for, and offering one outcome
+ * in two places makes a settings screen harder to reason about, not richer. When the switch is off the
+ * selector is genuinely disabled, so the UI cannot imply a choice that has no effect.
+ */
+function SwipeGestureControl() {
+  const [prefs, setPrefs] = React.useState<SwipeGesturePrefs>(() => readSwipeGesturePrefs());
+  const save = (patch: Partial<SwipeGesturePrefs>) => setPrefs(writeSwipeGesturePrefs({ ...prefs, ...patch }));
+  const actions: { id: SwipeAction; icon: string; label: string; hint: string }[] = [
+    { id: 'menu', icon: '☰', label: 'Open menu', hint: 'Opens the side menu (default)' },
+    { id: 'back', icon: '←', label: 'Go back', hint: 'Goes back one screen, like iPhone' },
+    { id: 'tab',  icon: '⇄', label: 'Switch tab', hint: 'Moves to your previous open tab' },
+  ];
+  return (
+    <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
+      <div className="flex items-center gap-4 mb-4">
+        <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">👉</div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-bold text-white">Swipe gestures</div>
+          <div className="text-[11px] text-[#8b949e] mt-0.5 max-w-xs">Sliding your finger across the screen. Turn it off if you open things by accident.</div>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        role="switch"
+        aria-checked={prefs.enabled}
+        aria-label="Swipe gestures"
+        onClick={() => save({ enabled: !prefs.enabled })}
+        className="w-full flex items-center gap-3 p-3 min-h-[44px] rounded-xl border bg-[#161b22] border-white/5 hover:border-white/20 transition-colors text-left mb-3"
+      >
+        <span className="flex-1 text-[11px] font-black text-white uppercase tracking-widest">
+          {prefs.enabled ? 'Swipe is on' : 'Swipe is off'}
+        </span>
+        <span aria-hidden="true" className={`w-10 h-6 rounded-full shrink-0 p-0.5 transition-colors ${prefs.enabled ? 'bg-indigo-600' : 'bg-[#30363d]'}`}>
+          <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${prefs.enabled ? 'translate-x-4' : ''}`} />
+        </span>
+      </button>
+
+      <div className={prefs.enabled ? '' : 'opacity-40 pointer-events-none'}>
+        <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">
+          Swipe left → right does
+        </label>
+        <div role="radiogroup" aria-label="What a left to right swipe does" className="space-y-2">
+          {actions.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              role="radio"
+              aria-checked={prefs.action === a.id}
+              disabled={!prefs.enabled}
+              onClick={() => save({ action: a.id })}
+              className={`w-full flex items-center gap-3 p-3 min-h-[44px] rounded-xl border transition-colors text-left ${prefs.action === a.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#161b22] border-white/5 text-[#8b949e] hover:border-white/20'}`}
+            >
+              <span className="text-base shrink-0 w-5 text-center" aria-hidden="true">{a.icon}</span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-[11px] font-black uppercase tracking-widest">{a.label}</span>
+                <span className={`block text-[10px] leading-relaxed mt-0.5 ${prefs.action === a.id ? 'text-indigo-100' : 'text-[#586069]'}`}>{a.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] text-[#586069] mt-2 leading-relaxed pl-1">
+          Swiping right → left always closes the menu when it is open.
+        </p>
       </div>
     </div>
   );
@@ -738,6 +821,7 @@ export function SettingsPanel({
                         {/* Touch feedback sits under Accessibility deliberately: for a user who finds
                             the tick or the buzz distracting, this IS an accessibility control. */}
                         <TouchFeedbackControl />
+                        <SwipeGestureControl />
                      </div>
 
                      {/* The "Description" textarea was REMOVED here (admin 2026-08-14). It was

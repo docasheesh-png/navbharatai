@@ -5,6 +5,7 @@ import { useToast, ToastContainer } from './components/Toast';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
 import { sanitizeFileMap } from './lib/fileMapSanitize';
 import { computeTabClose } from './lib/tabClose';
+import { readSwipeGesturePrefs, decideSwipe, SWIPE_GESTURE_DEFAULTS } from './lib/swipeGesturePrefs';
 // AgentV3Panel is rendered via ProV3Surface (the gated v5.0 surface), not directly here.
 import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
 import { GitViewPanel } from './components/panels/GitViewPanel';
@@ -730,8 +731,32 @@ export default function App() {
   const [v3OpenNonce, setV3OpenNonce] = useState(0);
   const v3ResumeInFlightRef = useRef(false);
 
-  // Touch swipe → sidebar control (replaces the accidental browser back/forward).
-  // Left→right swipe opens the sidebar; right→left closes it (no-op if already closed).
+  // The swipe's "switch tab" action, held in a ref.
+  //
+  // 🔒 IT MUST GO THROUGH `toggleTab`, NEVER `setActiveView`. toggleTab is the Play-compliance choke
+  // point — its own comment says EVERY tab-open path goes through it so a medical view cannot open in
+  // the native shell "no matter which button, deep link, or restored state asked for it". A gesture is
+  // just another such path, and calling setActiveView directly would be a hole in that guarantee.
+  // toggleTab is defined further down, so the ref is filled in by the effect below it; until then the
+  // gesture is a harmless no-op rather than an unsafe shortcut.
+  const swipeTabRef = useRef<() => void>(() => {});
+  const swipeToPreviousTab = useCallback(() => { try { swipeTabRef.current(); } catch { /* a gesture must never crash the app */ } }, []);
+
+  // Touch swipe → whatever the USER chose (Settings → General Settings → Accessibility → Swipe
+  // gestures). Left→right runs their action; right→left closes an open menu.
+  //
+  // 🔒 THE PREFERENCE IS READ PER SWIPE, NOT AT INSTALL. This effect has `[]` deps and holds no state,
+  // so reading the preference here-and-once would freeze it at app start: changing the setting would do
+  // nothing until a restart — the "the setting exists but does not work" defect. Reading inside the
+  // handler costs one localStorage lookup on a completed swipe only (after the distance guard), and is
+  // always correct. Same reasoning as the touch-feedback preference.
+  //
+  // WHY THIS IS A PREFERENCE AT ALL: the horizontal swipe is a scarce resource, and two features have
+  // already lost a fight over it in this file — the comment below records that a tab-switching swipe
+  // "was removed because it competed with the sidebar", and this gesture itself displaced browser
+  // back/forward. That conflict is not resolvable in code, because it is a matter of taste; letting the
+  // user settle it hands BOTH removed behaviours back as choices. `decideSwipe` holds every rule and is
+  // pure, so the behaviour is testable without a touchscreen.
   useEffect(() => {
     let startX = 0, startY = 0, tracking = false;
     const onStart = (e: TouchEvent) => {
@@ -746,8 +771,21 @@ export default function App() {
       const dx = t.clientX - startX, dy = t.clientY - startY;
       // Mostly-horizontal, decisive swipe only.
       if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-      if (dx > 0) setIsMenuOpen(true);                 // left→right: open
-      else setIsMenuOpen(prev => (prev ? false : prev)); // right→left: close if open, else nothing
+      const prefs = (() => { try { return readSwipeGesturePrefs(); } catch { return SWIPE_GESTURE_DEFAULTS; } })();
+      // `setIsMenuOpen`'s updater gives the CURRENT open state without this effect depending on it —
+      // keeping the listener installed exactly once, which is what makes it cheap and drift-free.
+      setIsMenuOpen((menuOpen) => {
+        const outcome = decideSwipe(dx > 0 ? 'ltr' : 'rtl', prefs, menuOpen);
+        switch (outcome) {
+          case 'open-menu': return true;
+          case 'close-menu': return false;
+          // Navigation is a side effect, so it is deferred out of the state updater — React may call an
+          // updater more than once, and navigating twice from one swipe would be a real bug.
+          case 'go-back': queueMicrotask(() => { try { window.history.back(); } catch { /* nothing to go back to */ } }); return menuOpen;
+          case 'switch-tab': queueMicrotask(() => swipeToPreviousTab()); return menuOpen;
+          default: return menuOpen;
+        }
+      });
     };
     document.addEventListener('touchstart', onStart, { passive: true });
     document.addEventListener('touchend', onEnd, { passive: true });
@@ -755,6 +793,7 @@ export default function App() {
       document.removeEventListener('touchstart', onStart);
       document.removeEventListener('touchend', onEnd);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [errorContext, setErrorContext] = useState<ErrorContext | null>(null);
@@ -1285,6 +1324,22 @@ export default function App() {
     
     setActiveView(view);
   }, [user, openTabs, activeView, addLog, setShowAuth]);
+
+  // Fill the swipe's tab-switch action now that toggleTab exists (see swipeTabRef above for why it
+  // must be toggleTab and not setActiveView). Re-run whenever the tab set or the active tab changes,
+  // so the gesture always acts on the CURRENT tabs rather than a set captured at mount.
+  //
+  // "Previous tab" = the one before the active tab in the open list, wrapping around — a plain,
+  // predictable cycle. A most-recently-used order would be cleverer and much harder to predict with a
+  // gesture you cannot see the result of until it happens.
+  useEffect(() => {
+    swipeTabRef.current = () => {
+      if (openTabs.length < 2) return;   // nothing to switch to — a no-op is the honest outcome
+      const i = openTabs.indexOf(activeView);
+      const prev = openTabs[(i <= 0 ? openTabs.length : i) - 1];
+      if (prev && prev !== activeView) toggleTab(prev);
+    };
+  }, [openTabs, activeView, toggleTab]);
 
   // Cross-component navigation (billing PR 5): deeply-nested surfaces (e.g. the v5.0 panel inside
   // ProV3Surface, which gets no nav callback) can request a view switch by dispatching

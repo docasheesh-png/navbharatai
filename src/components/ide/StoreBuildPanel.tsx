@@ -805,7 +805,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                 <p className="text-[11px] text-emerald-300 text-center font-semibold">{chargeNote}</p>
               )}
               {/* Publish straight from this build (admin 2026-08-04). Offered ONLY for the .apk: the
-                  Nav App Store installs apps, and a .aab is a Play Store bundle no phone can install —
+                  App Mart installs apps, and a .aab is a Play Store bundle no phone can install —
                   showing it here would promise something that cannot work. */}
               {setup && artifacts.filter((a) => /apk/i.test(a.name)).map((a) => (
                 <PublishToNavStore

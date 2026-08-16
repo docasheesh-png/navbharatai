@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import {
   Sparkles, Shield, MessageSquare, Bot, Stethoscope,
   Scale, GraduationCap, Activity, Zap, Code2, Rocket,
-  CheckCircle2, ArrowRight, ChevronRight, LayoutGrid
+  CheckCircle2, ArrowRight, ChevronRight, LayoutGrid, Store, Play
 } from 'lucide-react';
 import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
@@ -31,6 +31,13 @@ interface HomeViewProps {
   onStartProfessionals?: () => void;
   /** Open the "Other AI" page — the builder-tools hub (admin 2026-07-23: a full view, like the other 3). */
   onOpenOtherAI?: () => void;
+  /**
+   * Open App Mart — apps other people built, playable instantly (admin 2026-08-16).
+   * It was buried inside Other's tool grid, where a store cannot do its job: a place nobody arrives
+   * at has nothing to sell, and everything planned on top of it (ads, creator earnings) needs an
+   * audience first. So it is promoted to a home tile of its own.
+   */
+  onOpenAppMart?: () => void;
   isAdmin?: boolean;
   data?: HomeData;
   onUpdate?: (newData: HomeData) => void;
@@ -58,6 +65,7 @@ const PRODUCT_CARDS = [
     featureColor: 'text-orange-400',
     btnClass: 'bg-gradient-to-r from-orange-500 to-amber-400 hover:from-orange-400 hover:to-amber-300 text-white',
     btnLabel: 'Start Free Chat',
+    btnLabelShort: 'Free Chat',
     btnIcon: MessageSquare,
   },
   {
@@ -78,6 +86,7 @@ const PRODUCT_CARDS = [
     featureColor: 'text-indigo-400',
     btnClass: 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white',
     btnLabel: 'Open Pro Builder',
+    btnLabelShort: 'Pro Builder',
     btnIcon: Rocket,
   },
   {
@@ -98,6 +107,7 @@ const PRODUCT_CARDS = [
     featureColor: 'text-teal-400',
     btnClass: 'bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 text-white',
     btnLabel: 'Explore Professionals',
+    btnLabelShort: 'Experts',
     btnIcon: ChevronRight,
   },
   {
@@ -118,7 +128,33 @@ const PRODUCT_CARDS = [
     featureColor: 'text-fuchsia-400',
     btnClass: 'bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:from-fuchsia-500 hover:to-pink-500 text-white',
     btnLabel: 'Open Tools',
+    btnLabelShort: 'Tools',
     btnIcon: LayoutGrid,
+  },
+  {
+    // APP MART — the fifth tile (admin 2026-08-16). This card is deliberately the only one that is
+    // not about BUILDING: it is where you go to USE what other people built. That difference is the
+    // whole reason it earns its own tile instead of a row inside Other's tool grid.
+    id: 'appmart',
+    badge: 'App Mart',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
+    gradient: 'from-emerald-600/20 via-teal-500/10 to-transparent',
+    border: 'border-emerald-500/20 hover:border-emerald-400/50',
+    glow: 'shadow-emerald-500/10',
+    iconBg: 'bg-emerald-500/15',
+    iconColor: 'text-emerald-400',
+    Icon: Store,
+    title: 'App Mart',
+    subtitle: 'Play & Install Apps',
+    description: 'Apps and games made by other NavBharatAI creators. Tap one and it runs straight away in your browser — nothing to download, nothing to install. Like what you see? Make it yours in one tap and change it however you like.',
+    features: ['Play instantly — no install', 'Install Android apps (.apk)', 'Remix any app into your own'],
+    featureIcon: CheckCircle2,
+    featureColor: 'text-emerald-400',
+    btnClass: 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white',
+    phoneTagline: 'Games & apps by other creators — free to play',
+    btnLabel: 'Open App Mart',
+    btnLabelShort: 'Open App Mart',
+    btnIcon: Play,
   },
 ];
 
@@ -132,6 +168,7 @@ export const HomeView = ({
   onStartProChat,
   onStartProfessionals,
   onOpenOtherAI,
+  onOpenAppMart,
   isAdmin,
   data,
   onUpdate,
@@ -147,6 +184,7 @@ export const HomeView = ({
     professionals: onStartProfessionals,
     // "Other AI" navigates to its OWN full page (like the other 3 cards) — the tools live INSIDE it.
     tools: onOpenOtherAI,
+    appmart: onOpenAppMart,
   };
 
   return (
@@ -216,7 +254,7 @@ export const HomeView = ({
         </motion.div>
 
         {/* ── Product Cards (4: Free / Pro / Professionals / Other AI) ── */}
-        <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+        <div className="w-full grid grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-5">
           {PRODUCT_CARDS.map((rawCard, i) => {
             // Play compliance: the Professionals card's copy must not name medical assistants in the
             // native shell (the shipped app declares no medical features — copy and app must match).
@@ -239,35 +277,48 @@ export const HomeView = ({
                 className={cn(
                   'relative flex flex-col rounded-2xl sm:rounded-3xl border bg-[#0d1117] overflow-hidden',
                   'shadow-xl transition-all duration-300',
+                  // PHONE LAYOUT (admin 2026-08-16, given as a drawing): a 2-up grid of SQUARE tiles
+                  // with App Mart lying across the bottom, 2x1. On a phone the old one-per-row cards
+                  // meant four scrolls before App Mart was even on screen — the opposite of promoting
+                  // it. Squares only work if the content inside them shrinks too, which is what the
+                  // `hidden sm:…` rules below do; from `sm` up the full cards return untouched.
+                  card.id === 'appmart' ? 'col-span-2 aspect-[2/1] xl:col-span-1' : 'aspect-square',
+                  'sm:aspect-auto',
                   card.border, card.glow
                 )}
               >
                 {/* Card gradient overlay */}
                 <div className={cn('absolute inset-0 bg-gradient-to-br pointer-events-none', card.gradient)} />
 
-                <div className="relative z-10 flex flex-col h-full p-5 sm:p-6 gap-4">
+                <div className="relative z-10 flex flex-col h-full p-3.5 sm:p-6 gap-2 sm:gap-4">
                   {/* Header row */}
                   <div className="flex items-start justify-between gap-3">
-                    <div className={cn('w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl flex items-center justify-center shrink-0', card.iconBg)}>
-                      <CardIcon className={cn('w-5 h-5 sm:w-6 sm:h-6', card.iconColor)} />
+                    <div className={cn('w-9 h-9 sm:w-12 sm:h-12 rounded-lg sm:rounded-2xl flex items-center justify-center shrink-0', card.iconBg)}>
+                      <CardIcon className={cn('w-4 h-4 sm:w-6 sm:h-6', card.iconColor)} />
                     </div>
-                    <span className={cn('text-[10px] font-black uppercase tracking-widest rounded-full px-2.5 py-1 shrink-0', card.badgeColor)}>
+                    <span className={cn('hidden sm:inline-block text-[10px] font-black uppercase tracking-widest rounded-full px-2.5 py-1 shrink-0', card.badgeColor)}>
                       {card.badge}
                     </span>
                   </div>
 
                   {/* Title + description */}
                   <div className="flex flex-col gap-1">
-                    <h2 className="font-black text-white text-base sm:text-lg leading-tight">{card.title}</h2>
-                    <p className={cn('text-[11px] font-bold uppercase tracking-widest', card.iconColor)}>{card.subtitle}</p>
+                    <h2 className="font-black text-white text-sm sm:text-lg leading-tight">{card.title}</h2>
+                    <p className={cn('text-[9px] sm:text-[11px] font-bold uppercase tracking-wider sm:tracking-widest leading-tight', card.iconColor)}>{card.subtitle}</p>
                   </div>
 
-                  <p className="text-[#8b949e] text-xs sm:text-sm leading-relaxed flex-1">
+                  {(card as { phoneTagline?: string }).phoneTagline && (
+                    <p className="sm:hidden text-[#8b949e] text-[10px] leading-snug shrink-0 truncate">
+                      {(card as { phoneTagline?: string }).phoneTagline}
+                    </p>
+                  )}
+
+                  <p className="hidden sm:block text-[#8b949e] text-xs sm:text-sm leading-relaxed flex-1">
                     {card.description}
                   </p>
 
                   {/* Features */}
-                  <ul className="flex flex-col gap-1.5">
+                  <ul className="hidden sm:flex flex-col gap-1.5">
                     {card.features.map((feat) => (
                       <li key={feat} className="flex items-start gap-2">
                         <FeatIcon className={cn('w-3.5 h-3.5 mt-0.5 shrink-0', card.featureColor)} />
@@ -278,7 +329,7 @@ export const HomeView = ({
 
                   {/* Professionals mini-icon row */}
                   {card.id === 'professionals' && (
-                    <div className="flex items-center gap-2">
+                    <div className="hidden sm:flex items-center gap-2">
                       {(hideMedical ? PROF_ICONS_NATIVE : PROF_ICONS).map((PIcon, idx) => (
                         <div key={idx} className="w-7 h-7 rounded-lg bg-teal-500/10 border border-teal-500/20 flex items-center justify-center">
                           <PIcon className="w-3.5 h-3.5 text-teal-400" />
@@ -293,16 +344,17 @@ export const HomeView = ({
                     onClick={comingSoon ? undefined : (handler || onShowLogin)}
                     disabled={comingSoon}
                     className={cn(
-                      'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl sm:rounded-2xl',
-                      'font-black text-xs uppercase tracking-widest transition-all duration-200',
-                      'select-none',
+                      'w-full flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 sm:py-3 rounded-lg sm:rounded-2xl',
+                      'font-black text-[10px] sm:text-xs uppercase tracking-wider sm:tracking-widest transition-all duration-200',
+                      'select-none mt-auto',
                       comingSoon ? 'opacity-70 cursor-not-allowed' : 'active:scale-95',
                       card.btnClass
                     )}
                   >
-                    <BtnIcon className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{card.btnLabel}</span>
-                    {!comingSoon && <ArrowRight className="w-3.5 h-3.5 shrink-0 ml-auto" />}
+                    <BtnIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                    <span className="truncate sm:hidden">{(card as { btnLabelShort?: string }).btnLabelShort ?? card.btnLabel}</span>
+                    <span className="truncate hidden sm:inline">{card.btnLabel}</span>
+                    {!comingSoon && <ArrowRight className="hidden sm:block w-3.5 h-3.5 shrink-0 ml-auto" />}
                   </button>
                 </div>
               </motion.div>

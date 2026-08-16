@@ -95,7 +95,11 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
       { id: 'analytics', label: 'Analytics', icon: TrendingUp },
       { id: 'insights', label: 'Insights & Webhooks', icon: TrendingUp },
       { id: 'gallery', label: 'Community Gallery', icon: Globe },
-      { id: 'appstore', label: 'Nav App Store', icon: Package },
+      // 'Nav App Store' → renamed **App Mart** and PROMOTED OUT of here to a home tile of its own
+      // (admin 2026-08-16: "usko Other ke andar nahi, bahar homepage par hi ek 5th new tile"). The
+      // entry is not kept here as a shortcut on purpose: this codebase has already learned that a
+      // second doorway to one room makes users think there are two rooms (see the 'database' note
+      // just below, and the Terminal removal in SettingsPanel). One door, on the home screen.
       // 'database' was REMOVED here (admin 2026-07-27). It opened a screen whose only real content was
       // a link to Settings → App Settings → Database — a second doorway to the same place, which made
       // users think there were two different databases to configure. The real screen stays in Settings.

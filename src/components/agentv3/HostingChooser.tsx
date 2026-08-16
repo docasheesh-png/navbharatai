@@ -482,7 +482,7 @@ export function HostingChooser({
           {/* Path 4 — Nav App Store (instant web app). One click; runs in every viewer's browser. */}
           <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4 flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
-              <span className="text-[13px] font-bold text-white">Put it on the Nav App Store</span>
+              <span className="text-[13px] font-bold text-white">Put it on App Mart</span>
               <span className="text-[9px] font-black uppercase tracking-widest text-emerald-300 bg-emerald-900/50 px-2 py-0.5 rounded-full">Instant</span>
             </div>
             <p className="text-[11.5px] text-zinc-400 leading-relaxed">

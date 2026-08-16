@@ -33166,3 +33166,73 @@ mid-turn; classifying that would touch scaffold/framework selection and is a lar
 as a future item rather than pretended fixed here.
 
 Gate: `tsc --noEmit` + `tsc -p tsconfig.server.json` clean; full `vitest` green (15,718).
+
+## 2026-08-16 — App Mart: the store gets a name, a front door, and a shape
+
+`NAV_STORE_MASTER_PLAN.md` Part B item #1, built on the admin's instruction *"app mart wala kaam,
+plan me se abhi kar do"*. Three changes, one purpose — the store was buried and looked broken.
+
+**1. Renamed to App Mart** on every user-visible surface (store screen, the v5 publish card, the
+build panel, the "Publish to…" button, and every `AppKnowledgeBase` entry so every AI in the app
+says the new name). Code COMMENTS were deliberately left alone — they are history, and rewriting
+them would noise up every future diff for no user-visible gain. The old name stays in the knowledge
+base KEYWORDS, because a rename that makes the thing unfindable is a regression wearing new paint.
+
+**2. Promoted to a 5th Home tile.** It was a row inside Other → Monetization & Team. The reason this
+is item #1 of the whole plan and not cosmetic: a store nobody arrives at has nothing to sell, and
+everything designed on top of it (ads, creator earnings) needs an audience first. The Home grid moved
+`lg:grid-cols-4` → `lg:grid-cols-3 xl:grid-cols-5` so the fifth card sits in the row rather than
+dangling under it. It is deliberately the only Home card that is not about BUILDING — it is where you
+go to USE what others built, which is what earns it a tile instead of a tool slot.
+
+**Removed from Other's tool grid rather than kept as a shortcut.** This codebase has twice learned
+that a second doorway to one room makes users believe there are two rooms (the deleted 'database'
+tile; the duplicate Terminal in App Settings). `homeToolGroups.test.ts` pinned "the regrouping never
+dropped a tool" — that pin was UPDATED, not deleted: it now asserts both halves (gone from the grid
+AND present on Home, wired to the store view), because either half alone is a bug — still in the grid
+means two doors, missing from HomeView means none.
+
+**3. Browse is two labelled halves — and the screenshot bug is dead.** Previously the instant-app
+list rendered above and only the APK half had an empty state, so a store WITH an app in it displayed
+"No apps published yet" underneath and read as broken. Now: **Play instantly** and **Install on
+Android** are always both headed; each half owns a message true of that half alone ("No instant apps
+yet", "No Android apps yet"); the store-wide empty state requires BOTH to be empty and invites
+("App Mart is just getting started") rather than apologises.
+
+Locked by `tests/appMart.test.ts` (13 tests), including the exact screenshot regression.
+Gate: tsc ✓ tsc -p server ✓ vitest **1271 files / 15732 tests** ✓ build ✓
+
+### The phone layout for the five Home tiles (admin drew it, 2026-08-16)
+
+The admin specified it as a drawing: two 1x1 tiles per row, App Mart 2x1 across the bottom. Built and
+then VERIFIED IN A REAL CHROMIUM at 390px rather than assumed — the four tiles measure **173×173**
+and App Mart **358×179**, exactly the spec.
+
+- Grid `grid-cols-1 sm:grid-cols-2 …` → `grid-cols-2 xl:grid-cols-5`; App Mart carries
+  `col-span-2 aspect-[2/1]`, the other four `aspect-square`, all `sm:aspect-auto`.
+- **Squares only work because the content shrinks with them:** description, feature bullets, the
+  badge and the Professionals icon row are `hidden sm:…` on a phone. Remove any one and the tile
+  overflows — a browser check for `scrollHeight > clientHeight` on every tile returned empty.
+- **Truncated labels were a real defect, caught by looking:** "Explore Professionals" rendered as
+  "EXPLORE PROF…", which reads as a broken screen rather than a label. Each card now carries a short
+  phone label (`btnLabelShort`), and a `scrollWidth > clientWidth` sweep in the browser confirms zero
+  truncation. This is the kind of thing a test cannot see and a screenshot can.
+- The 2x1 tile has room the squares do not, and it is the tile this whole change exists to promote —
+  so it alone carries a one-line phone tagline instead of a bare icon and button.
+- From `sm` up the rich cards return untouched (desktop check: App Mart still renders its 3 feature
+  bullets). This is a phone layout, not a downgrade.
+
+Pinned by 5 more tests in `tests/appMart.test.ts` (18 total).
+
+**Correction the same session (admin: "poora description nahi chahiye, bas main main 1 ya 2 line"):**
+tried a short line on ALL five tiles and MEASURED the result — in a 158px square (360px phone) the
+line was clipped mid-word behind the button. So only the 2x1 tile carries an extra line; on a square
+the two lines ARE the title and the subtitle, which already say what the card is ("Free AI Chat",
+"Agentic App Builder") — a tagline there was both a duplicate and an overflow. The wide tile's line
+was shortened until it fits on one line rather than being cut at "nothing to".
+
+⚠️ **The measurement that mattered, for whoever tunes these tiles next:** checking
+`scrollHeight > clientHeight` on the CARD reported zero problems while text was visibly cut — a flex
+column squeezes its children instead of growing, so the container never overflows. The check that
+actually catches it walks every child (`h2, p, button, ul`) and asserts its box sits inside the
+card's box AND that the element's own text is not clipped. Clean at 360, 390 and 430px.

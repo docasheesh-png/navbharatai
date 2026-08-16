@@ -2752,6 +2752,7 @@ export default function App() {
                }}
                onStartProfessionals={() => toggleTab('professionals')}
                onOpenOtherAI={() => toggleTab('other_ai')}
+               onOpenAppMart={() => toggleTab('appstore')}
                isAdmin={isAdmin}
                data={homeData}
                onUpdate={(newData) => setHomeData(newData)}

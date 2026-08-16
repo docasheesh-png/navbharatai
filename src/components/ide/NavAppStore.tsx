@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { uploadFileChunked } from '../../lib/zipProjectUpload';
 import {
   Store, Upload, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
-  CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock,
+  CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package,
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../App';
@@ -314,8 +314,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
             <Store size={20} />
           </div>
           <div className="min-w-0">
-            <h1 className="text-lg sm:text-xl font-bold truncate">Nav App Store</h1>
-            <p className="text-xs text-white/50">Publish your Android app — and install apps others have made</p>
+            <h1 className="text-lg sm:text-xl font-bold truncate">App Mart</h1>
+            <p className="text-xs text-white/50">Play apps made by other creators — or publish your own</p>
           </div>
         </div>
 
@@ -342,12 +342,35 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
           </p>
         )}
 
-        {/* ── Browse: INSTANT (web) apps — tap and it runs, nothing to install ── */}
-        {tab === 'browse' && webApps.length > 0 && (
-          <div className="mb-6">
-            <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
-              <Globe size={12} /> Instant apps — run in your browser, nothing to install
+        {/*
+          BROWSE = TWO HALVES, ALWAYS BOTH LABELLED (admin 2026-08-16, from a screenshot).
+          Before this, the instant-app list sat above the APK list and only the APK half rendered an
+          empty state — so a store WITH an app in it showed "No apps published yet" underneath, and
+          the whole screen read as broken. Now each half owns its heading AND its own empty line, so
+          an empty half says "nothing here yet" instead of contradicting the half above it. When BOTH
+          are empty there is one invitation instead of two apologies.
+        */}
+        {tab === 'browse' && !loading && webApps.length === 0 && apps.length === 0 && (
+          <div className="text-center py-14 px-4">
+            <Store size={40} className="text-white/10 mx-auto mb-3" />
+            <p className="text-sm text-white/60 font-medium">App Mart is just getting started.</p>
+            <p className="text-xs text-white/35 mt-1.5 max-w-xs mx-auto leading-relaxed">
+              Build something in NavBharatAI Pro and publish it here — it will run in anyone's browser, with nothing to install.
             </p>
+          </div>
+        )}
+
+        {/* ── Half 1: PLAY INSTANTLY (web apps) — tap and it runs ── */}
+        {tab === 'browse' && !loading && (webApps.length > 0 || apps.length > 0) && (
+          <div className="mb-7">
+            <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
+              <Play size={12} /> Play instantly — runs in your browser, nothing to install
+            </p>
+            {webApps.length === 0 ? (
+              <p className="text-xs text-white/30 py-4 px-3 rounded-xl bg-white/[0.02] border border-white/5">
+                No instant apps yet — the first one can be yours.
+              </p>
+            ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               {webApps.map((a) => (
                 <div key={a.id} className="flex gap-3 p-3 rounded-xl bg-[#161b22] border border-white/10 hover:border-white/25 transition-colors">
@@ -371,22 +394,27 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                 </div>
               ))}
             </div>
+            )}
           </div>
         )}
 
-        {/* ── Browse ── */}
-        {tab === 'browse' && (
-          loading ? (
-            <p className="flex items-center gap-2 text-sm text-white/40 py-10 justify-center">
-              <Loader2 size={15} className="animate-spin" /> Loading apps…
+        {tab === 'browse' && loading && (
+          <p className="flex items-center gap-2 text-sm text-white/40 py-10 justify-center">
+            <Loader2 size={15} className="animate-spin" /> Loading apps…
+          </p>
+        )}
+
+        {/* ── Half 2: INSTALL (Android) — real .apk apps, a different product entirely ── */}
+        {tab === 'browse' && !loading && (webApps.length > 0 || apps.length > 0) && (
+          <div className="mb-6">
+            <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
+              <Package size={12} /> Install on Android — real .apk apps
             </p>
-          ) : apps.length === 0 ? (
-            <div className="text-center py-12 px-4">
-              <Store size={36} className="text-white/10 mx-auto mb-3" />
-              <p className="text-sm text-white/50">No apps published yet.</p>
-              <p className="text-xs text-white/30 mt-1">Every app here is checked by a person before it appears.</p>
-            </div>
-          ) : (
+            {apps.length === 0 ? (
+              <p className="text-xs text-white/30 py-4 px-3 rounded-xl bg-white/[0.02] border border-white/5">
+                No Android apps yet. Every one is scanned and checked by a person before it appears here.
+              </p>
+            ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               {apps.map((a) => (
                 <button
@@ -408,7 +436,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                 </button>
               ))}
             </div>
-          )
+            )}
+          </div>
         )}
 
         {/* ── Publish ── */}

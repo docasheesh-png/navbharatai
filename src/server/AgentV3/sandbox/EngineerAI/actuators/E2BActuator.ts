@@ -97,6 +97,50 @@ export function isIgnoredListPath(relPath: string): boolean {
 }
 
 /**
+ * PRUNE IN THE SANDBOX, NOT ON THE WIRE (Mitrify report a876b7bb, 2026-08-15).
+ *
+ * `listFiles` used to call `sb.files.list(root, { depth: 10 })` — which enumerates EVERYTHING,
+ * `node_modules` included — and only then dropped the ignored dirs with a client-side `.filter`. After
+ * an `npm install` that directory holds tens of thousands of entries, so we paid to enumerate and
+ * transfer a tree whose every path we were about to throw away.
+ *
+ * That report shows the cost: 226 SECONDS of main-thread silence between "import SUCCEEDED" and the
+ * build's first model call, while the background boot's `npm install` was filling `node_modules` and
+ * this listing walked it. It is a per-TURN tax on every large app — the File Guardian calls
+ * `collectWorkspaceFiles` (→ `listFiles`) before the agent edits anything — not an import-only cost.
+ *
+ * 🔒 THIS IS THE FOURTH INSTANCE OF ONE BUG CLASS: doing per-file work over a network for files we do
+ * not want. The sandbox landing (648s), the Firestore merge, and the serial reads in
+ * WorkspaceFiles.ts (790s) were the first three, and each was fixed by moving the work off the wire
+ * rather than by making it faster. Same discipline here: `find` prunes the directories INSIDE the
+ * sandbox, so ~170 relevant paths cross the network instead of ~100,000.
+ *
+ * The prune list is derived from IGNORED_LIST_DIRS — the same single source of truth the client-side
+ * filter uses — so the two can never drift. Pure command builder.
+ */
+export function buildListFilesCommand(root: string, maxDepth = 10): string {
+  const names = [...IGNORED_LIST_DIRS].map((d) => `-name '${d}'`).join(' -o ');
+  return `find '${root}' -maxdepth ${maxDepth} \\( ${names} \\) -prune -o -type f -print 2>/dev/null`;
+}
+
+/**
+ * Parse `find` output into workspace-relative paths. Tolerant by design: a blank line, a stray `./`
+ * prefix, or a path outside the root is dropped rather than trusted, because this feeds the file map
+ * the agent edits. Pure.
+ */
+export function parseListFilesOutput(stdout: string, root: string): string[] {
+  const prefix = root.endsWith('/') ? root : `${root}/`;
+  const out: string[] = [];
+  for (const raw of String(stdout || '').split('\n')) {
+    const line = raw.trim();
+    if (!line || !line.startsWith(prefix)) continue;
+    const rel = line.slice(prefix.length).replace(/^\.\//, '');
+    if (rel) out.push(rel);
+  }
+  return out;
+}
+
+/**
  * A3 (v5.0 redesign — E2B reliability) — resolve the custom E2B image the sandbox should launch from.
  *
  * Root cause the audit found: every sandbox was created from E2B's DEFAULT base image because the
@@ -826,6 +870,23 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   async listFiles(workspaceId: string): Promise<string[]> {
+    // FAST PATH — prune the ignored dirs INSIDE the sandbox (see buildListFilesCommand for the 226s
+    // report this closes). Bounded and best-effort: any failure, timeout, or empty result falls
+    // through to the original enumeration below, so this can only ever be faster, never worse. The
+    // client-side filter still runs on the result, so the returned set is identical either way.
+    try {
+      const listed = await this.fileOp(
+        workspaceId,
+        'files.list.find',
+        (sb) => sb.commands.run(buildListFilesCommand(WORKSPACE_ROOT), { timeoutMs: 20_000 }),
+        25_000,
+      );
+      const paths = parseListFilesOutput(listed?.stdout ?? '', WORKSPACE_ROOT);
+      // An EMPTY result is not trusted: a genuinely empty workspace and a silently-failed `find` look
+      // identical here, and wrongly reporting "no files" would make the File Guardian think the
+      // project vanished. The slow path settles it.
+      if (paths.length > 0) return paths.filter((p) => !isIgnoredListPath(p));
+    } catch { /* fall through to the original listing — never worse than before */ }
     const entries = await this.fileOp(workspaceId, 'files.list', (sb) => sb.files.list(WORKSPACE_ROOT, { depth: 10 }));
     return entries
       .filter(e => e.type === 'file')

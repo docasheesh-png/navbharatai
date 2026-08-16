@@ -37,6 +37,9 @@ import { sanitizeReservedSegments } from './appId';
 // The SAME data-uri parser the asset store writes with — a second local regex here would be a second
 // definition of what a stored asset looks like, and the two would drift.
 import { parseDataUri } from '../AgentV3/ProjectImport';
+// ONE definition of "which asset imports will not resolve" — shared with the App Store's publish gate.
+// See assetImports.ts for why the two callers treat the same fact differently (a note vs a refusal).
+import { unshippableAssetImports } from './assetImports';
 
 /** Ignore anything that cannot be part of a web build — these bloat the repo and break nothing by leaving. */
 const SKIP_PATH = /(^|\/)(node_modules|\.git|dist|build|\.next|\.cache|coverage)(\/|$)/;
@@ -443,52 +446,6 @@ export function assembleMobileProject(
   }
 
   return { files, binaryFiles, kind, webDir, notes };
-}
-
-/** An asset-file import specifier, as written in source. Mirrors the preflight's scanner. */
-const ASSET_IMPORT_RE =
-  /(?:from\s*['"]([^'"\n]+)['"]|import\s*\(\s*['"]([^'"\n]+)['"]\s*\)|import\s+['"]([^'"\n]+)['"])/g;
-/** Only these extensions are worth reporting — a missing image is visible, a missing `.ts` is a code bug. */
-const SHIPPABLE_ASSET_EXT = /\.(png|jpe?g|gif|webp|avif|ico|bmp|mp4|webm|mp3|wav|ogg|woff2?|ttf|otf|eot)(\?.*)?$/i;
-
-/**
- * Which asset imports will NOT resolve in the repo we are about to push.
- *
- * 🔒 THIS ANSWERS THE QUESTION EXACTLY, WHICH IS THE WHOLE REASON IT CAN EXIST HERE.
- * The mobile preflight deliberately says NOTHING about a missing image, because it sees a text-only
- * file map and would report every image as absent — a verdict wrong 100% of the time. Here the answer
- * is knowable: the pushed repo is precisely `files` + `binaryFiles`, both in hand. So "will this
- * import resolve after the push?" is a fact, not a guess.
- *
- * It is reported as a NOTE and never a failure. A missing picture is a real problem the user must hear
- * about — but the decision to ship is theirs, and a wrong block is the more expensive mistake.
- *
- * Only bare filenames are matched (`./logo.png`, `@assets/hero.jpg`); a `http(s)://` or `data:` source
- * needs nothing from the repo. PURE.
- */
-export function unshippableAssetImports(
-  files: Record<string, string>,
-  binaryFiles: Record<string, string>,
-): string[] {
-  const have = new Set<string>();
-  for (const p of [...Object.keys(files || {}), ...Object.keys(binaryFiles || {})]) {
-    have.add(p);
-    have.add(p.split('/').pop() || p);   // match by basename too — the push may re-root a static app
-  }
-  const missing = new Set<string>();
-  for (const [, content] of Object.entries(files || {})) {
-    if (typeof content !== 'string') continue;
-    ASSET_IMPORT_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = ASSET_IMPORT_RE.exec(content))) {
-      const spec = m[1] || m[2] || m[3];
-      if (!spec || /^(https?:|data:|blob:)/i.test(spec)) continue;
-      if (!SHIPPABLE_ASSET_EXT.test(spec)) continue;
-      const base = spec.split(/[?#]/)[0].split('/').pop() || '';
-      if (base && !have.has(base)) missing.add(spec);
-    }
-  }
-  return [...missing].sort();
 }
 
 /** Split a data: URL into its base64 payload and a file extension. Returns null for anything else. */

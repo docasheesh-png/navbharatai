@@ -35,6 +35,7 @@ import { listEqNewestFirst } from './firestoreIndexSafe';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { scanTextForSecrets, type EnvTemplateSecretIssue } from '../AgentV3/EnvSecretValueAnalysis';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
+import { unshippableAssetImports } from './assetImports';
 import { PAID_REMIX_ENABLED } from './navStoreRemixPurchase';
 
 /** Lifecycle: live-via-link → admin lists it → or an admin/owner takes it down. */
@@ -219,6 +220,30 @@ export function evaluateWebPublish(input: Record<string, string> | null | undefi
     return {
       ok: false, files: {},
       reason: `This app can't run in a viewer's browser yet: ${capability.reason || 'it needs a live server.'} Apps on the store run entirely in the browser — no server. You can still share it with hosting (Publish → Host on NavBharatAI).`,
+    };
+  }
+
+  // AN IMAGE THE APP IMPORTS BUT DOES NOT HAVE (2026-08-16, sibling of the mobile-ship asset bug).
+  //
+  // The snapshot is TEXT ONLY — binary assets live in their own durable store, and this gate already
+  // refuses large files with "large assets don't belong in published source". So an app whose code says
+  // `import logo from './logo.png'` publishes with no `logo.png` anywhere in it.
+  //
+  // 🔒 IN A BROWSER THAT IS NOT A BROKEN IMAGE, IT IS A BLANK PAGE. The store compiles and runs the
+  // snapshot as ES modules, so an unresolvable module import fails the whole entry — the viewer gets
+  // nothing, not a missing picture. That is exactly the outcome this prover already refuses on its own
+  // stated principle, three checks above: an app that renders "working-looking and wrong" is worse than
+  // an honest refusal. It simply had no check for this case.
+  //
+  // A REFUSAL here and only a NOTE on the mobile path, deliberately: there the user ships their own app
+  // to their own repo and the call is theirs, while this ships to strangers under our name.
+  // Conservative by construction — see unshippableAssetImports: only real ES asset imports count, so an
+  // `<img src="logo.png">` or a URL-referenced file is never flagged.
+  const missingAssets = unshippableAssetImports(files);
+  if (missingAssets.length > 0) {
+    return {
+      ok: false, files: {},
+      reason: `This app imports ${missingAssets.length} image/font file(s) it doesn't contain (${missingAssets.slice(0, 3).join(', ')}${missingAssets.length > 3 ? `, +${missingAssets.length - 3} more` : ''}). Store apps run entirely from the files you publish, so a viewer's browser can't load them and the app would open blank. Add those files to your app, then publish again.`,
     };
   }
 

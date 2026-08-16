@@ -33489,3 +33489,30 @@ into "50 arbitrary ones".
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1276 files / 15798 tests passed** · `npm run build` OK.
+
+## 2026-08-16 — Regression cover for the listings that had none (follow-through on the index sweep)
+
+The index sweep changed six stores. Three of them — `galleryStore`, `navStoreStore` and
+`UserBuildHistoryStore` — had **no tests at all**, which is a large part of why a broken query
+survived in them: nothing exercised the path except a real user.
+
+`storeListings.test.ts` now drives each function through a Firestore double that **throws if
+`orderBy` is ever called**, so a future edit that reintroduces the ordered query fails in CI rather
+than in front of someone. It also pins the properties those screens owe the user: newest-first
+order, one publisher's own apps only, a `pending` gallery app never reaching a public listing, and
+the date range being applied by us rather than asked of a second Firestore field.
+
+**A dishonest test, corrected.** `FirestoreConversationStore.test.ts` had a case named *"listByUser
+FALLS BACK to in-memory sort when the composite index is missing"*. It still passed after the
+refactor — but it was asserting the wrong guarantee. Locking in "recovers when the ordered query
+throws" enshrined a fast path that had never once succeeded and cost every history load a doomed
+round-trip. The test now asserts the stronger property, with a double that throws on `orderBy`: the
+query is index-free by construction, so no index can ever be required.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1277 files / 15805 tests passed** · `npm run build` OK.
+
+**Android:** signed `.aab` run **#72** green on `bb77037` — carries the App Mart tile, the light-theme
+text fixes, the whole-card buttons and the remix-handoff fix. The app is bundled-mode, so those
+frontend changes reach installed users only through this bundle. Admin action: download the
+`navbharatai-release-aab` artifact and upload it to Play Console.

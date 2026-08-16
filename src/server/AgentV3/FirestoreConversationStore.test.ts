@@ -159,28 +159,38 @@ describe('FirestoreConversationStore (faithful fake)', () => {
     expect(await store.listByUser('nobody')).toEqual([]);
   });
 
-  it('listByUser FALLS BACK to in-memory sort when the composite index is missing (ordered query throws)', async () => {
+  it('listByUser NEVER issues an ordered query, so no composite index can ever be required', async () => {
     // Reproduces the real bug: agentv3_conversations had no (userId, updatedAt) index, so the
-    // ordered query threw and the history menu showed "No saved chats yet". The fallback must still
-    // return the user's chats, sorted newest-first.
+    // ordered query threw and the history menu showed "No saved chats yet".
+    //
+    // This used to be a FALLBACK test — try the ordered query, recover when it throws. That was the
+    // wrong guarantee to lock in: the index was never deployed and never could be from this repo, so
+    // the "fast path" failed on every single history load and each user paid for a doomed round-trip
+    // first. The query is now index-free by construction, and this test asserts the stronger
+    // property: the fake THROWS if `orderBy` is ever called, so a future edit that reintroduces the
+    // ordered query fails here rather than in production.
     const rows: Record<string, any> = {
       a: { userId: 'u1', updatedAt: 300, title: 'A', workspaceId: 'w', createdAt: 1 },
       b: { userId: 'u1', updatedAt: 100, title: 'B', workspaceId: 'w', createdAt: 1 },
       c: { userId: 'u1', updatedAt: 200, title: 'C', workspaceId: 'w', createdAt: 1 },
       d: { userId: 'u2', updatedAt: 999, title: 'D', workspaceId: 'w', createdAt: 1 },
     };
-    const makeQuery = (filters: Array<[string, unknown]>, ordered: boolean, lim?: number): any => ({
-      where: (f: string, _op: string, v: unknown) => makeQuery([...filters, [f, v]], ordered, lim),
-      orderBy: () => makeQuery(filters, true, lim), // an ordered query needs the missing index
-      limit: (n: number) => makeQuery(filters, ordered, n),
+    const makeQuery = (filters: Array<[string, unknown]>, lim?: number): any => ({
+      where: (f: string, _op: string, v: unknown) => makeQuery([...filters, [f, v]], lim),
+      orderBy: () => {
+        // In the real database this is where the missing composite index bites. Failing loudly HERE
+        // is the point: an ordered query must be caught by this test, not by a user whose history
+        // silently reads "No saved chats yet".
+        throw new Error('orderBy() must never be called — it would require an undeployed index');
+      },
+      limit: (n: number) => makeQuery(filters, n),
       get: async () => {
-        if (ordered) throw new Error('FAILED_PRECONDITION: The query requires an index.');
         let ids = Object.keys(rows).filter((id) => filters.every(([f, v]) => rows[id][f] === v));
         if (lim !== undefined) ids = ids.slice(0, lim);
         return { docs: ids.map((id) => ({ id, data: () => rows[id], ref: null })) };
       },
     });
-    const fakeDb = { collection: () => ({ where: (f: string, _op: string, v: unknown) => makeQuery([[f, v]], false, undefined) }) };
+    const fakeDb = { collection: () => makeQuery([], undefined) };
     const store = new FirestoreConversationStore(fakeDb as unknown as admin.firestore.Firestore);
     const u1 = await store.listByUser('u1', 50);
     expect(u1.map((r) => r.id)).toEqual(['a', 'c', 'b']); // newest-first, sorted in memory

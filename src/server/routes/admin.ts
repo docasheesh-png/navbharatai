@@ -15,7 +15,7 @@ import { metricsStore } from '../lib/metricsStore';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
-import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
+import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport, deleteAdminBuildReport, deleteAllAdminBuildReports } from '../AgentV3/AdminBuildReportStore';
 import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
 import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, statusCounts, usersInBuilds } from '../lib/buildListFilter';
@@ -796,6 +796,35 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ ok: true, triage });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to mark the build report.' });
+    }
+  });
+
+  // DELETE a reported build (admin 2026-08-16: "build report delete karne ka option do — agar space kha
+  // rahi ho"). Each inbox record can be ~1 MB (it carries the whole session), so a handled report is
+  // pure stored cost once its bug is fixed. Deleting the inbox copy does NOT touch the user's own
+  // workspace diagnostics — different collection, different purpose.
+  app.delete('/api/admin/build-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const ok = await deleteAdminBuildReport(String(req.params.id));
+      if (!ok) { res.status(404).json({ error: 'Build report not found (or it could not be deleted).' }); return; }
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to delete the build report.' });
+    }
+  });
+
+  // CLEAR THE WHOLE INBOX in one action (admin 2026-08-16). Guarded by an explicit `confirm: true` in the
+  // body so a stray request can never wipe the inbox — this is irreversible.
+  app.post('/api/admin/build-reports/clear', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      if ((req.body ?? {}).confirm !== true) {
+        res.status(400).json({ error: 'Pass { confirm: true } to clear all reports — this cannot be undone.' });
+        return;
+      }
+      const deleted = await deleteAllAdminBuildReports();
+      res.json({ ok: true, deleted });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to clear the build reports.' });
     }
   });
 

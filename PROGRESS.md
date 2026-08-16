@@ -33897,3 +33897,30 @@ path, no device file.
   file upload.
 
 Gate: `tsc --noEmit` + `tsc -p tsconfig.server.json` clean; full `vitest` green (15,721).
+
+---
+
+## 2026-08-16 — Admin: DELETE a build report (reclaim Firestore storage)
+
+**Admin ask:** *"build report delete karne ka option do — agar yeh space kha rahi ho to; nahi kha rahi to
+rahne do."* — a conditional: add delete ONLY if reports actually consume storage.
+
+**Honest finding (they DO consume space).** Build reports are durable **Firestore** docs, not sandbox/
+device files. The admin inbox (`admin_build_reports`) keeps ONE doc per user "Report" click, each up to
+**~1 MB** (it carries the whole session, oldest→newest). Nothing ever deleted them — `deleteDiagnostics`
+existed only for workspace-deletion cleanup, and the inbox had list/get/mark but **no delete at all**. So
+the admin's condition is met: a handled report is pure stored cost once its bug is fixed.
+
+**The option added (admin dashboard → Build Reports):**
+- `deleteAdminBuildReport(id)` + `DELETE /api/admin/build-reports/:id` (verifyAdminToken) — per-report
+  delete, with a `window.confirm`. A trash icon on each row (stopPropagation so it never opens the report
+  it removes) and a Delete button in the open-report detail view.
+- `deleteAllAdminBuildReports()` + `POST /api/admin/build-reports/clear` (verifyAdminToken, requires
+  `{ confirm: true }`) — a "Delete all" header button for reclaiming space in one action; batched
+  (≤300/commit) + hard-guarded against runaway; confirms before wiping (irreversible).
+- Deleting the inbox copy does NOT touch the user's own `workspace_diagnostics_v3` (different collection/
+  purpose) — the user's build-report view is unaffected.
+
+Tests: store guards (empty id → false; never-throw; VITEST no-op → false/0) + source-contract wiring
+(routes admin-gated, clear needs confirm, UI has delete/clear calling the right endpoints). Gate: tsc
+(frontend+server) clean; affected suites green.

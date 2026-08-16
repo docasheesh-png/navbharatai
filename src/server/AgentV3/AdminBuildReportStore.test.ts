@@ -78,3 +78,25 @@ describe('the session view reaches the admin inbox', () => {
     expect(rec.meta.sessionDataLoss).toBeNull();
   });
 });
+
+/**
+ * DELETE — reclaiming storage (admin 2026-08-16: "build report delete karne ka option do — agar space
+ * kha rahi ho"). The store no-ops under VITEST (no real Firestore), so these lock the GUARDS and the
+ * never-throw contract; the route + UI wiring is locked separately in buildReportAdminOnly.test.ts.
+ */
+describe('delete guards never throw and refuse an empty id', () => {
+  it('deleteAdminBuildReport returns false for an empty id', async () => {
+    const { deleteAdminBuildReport } = await import('./AdminBuildReportStore');
+    expect(await deleteAdminBuildReport('')).toBe(false);
+  });
+
+  it('deleteAdminBuildReport is a safe false under VITEST (no Firestore), never a throw', async () => {
+    const { deleteAdminBuildReport } = await import('./AdminBuildReportStore');
+    await expect(deleteAdminBuildReport('some-id')).resolves.toBe(false);
+  });
+
+  it('deleteAllAdminBuildReports returns 0 under VITEST, never a throw', async () => {
+    const { deleteAllAdminBuildReports } = await import('./AdminBuildReportStore');
+    await expect(deleteAllAdminBuildReports()).resolves.toBe(0);
+  });
+});

@@ -104,6 +104,17 @@ describe('Server — report-to-admin + admin-only retrieval', () => {
     expect(admin).toMatch(/app\.get\('\/api\/admin\/build-reports',\s*verifyAdminToken/);
     expect(admin).toMatch(/app\.get\('\/api\/admin\/build-reports\/:id',\s*verifyAdminToken/);
   });
+
+  // DELETE / CLEAR (admin 2026-08-16: "delete karne ka option do — agar space kha rahi ho").
+  it('the delete + clear routes are admin-gated, and clearing requires an explicit confirm', () => {
+    expect(admin).toMatch(/app\.delete\('\/api\/admin\/build-reports\/:id',\s*verifyAdminToken/);
+    expect(admin).toMatch(/app\.post\('\/api\/admin\/build-reports\/clear',\s*verifyAdminToken/);
+    // The bulk wipe is irreversible — a stray request must not trigger it.
+    const at = admin.indexOf("'/api/admin/build-reports/clear'");
+    expect(admin.slice(at, at + 400)).toContain('.confirm !== true');
+    expect(admin).toContain('deleteAllAdminBuildReports');
+    expect(admin).toContain('deleteAdminBuildReport(');
+  });
 });
 
 describe('Admin UI — Build Reports tab', () => {
@@ -112,6 +123,16 @@ describe('Admin UI — Build Reports tab', () => {
     expect(dash).toContain('Build Reports');
     expect(dash).toContain("'/api/admin/build-reports'");
     expect(dash).toContain('downloadSelectedReport');
+  });
+
+  it('the reports tab can DELETE a report and CLEAR all — with a confirm, calling the right endpoints', () => {
+    expect(dash).toContain('deleteReport');
+    expect(dash).toContain('clearAllReports');
+    expect(dash).toContain("method: 'DELETE'");
+    expect(dash).toContain("'/api/admin/build-reports/clear'");
+    // The bulk clear must confirm before it wipes (irreversible).
+    expect(dash).toMatch(/clearAllReports[\s\S]{0,400}window\.confirm/);
+    expect(dash).toContain('JSON.stringify({ confirm: true })');
   });
 });
 

@@ -27,12 +27,12 @@ import { installNativeShellPolish, loadNativeShellContext } from './lib/nativeSh
 const RootFallback = (
   <div style={{
     position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: '#0d1117', fontFamily: 'system-ui, sans-serif', padding: 24,
+    background: 'var(--surface-base)', fontFamily: 'system-ui, sans-serif', padding: 24,
   }}>
-    <div style={{ maxWidth: 380, width: '100%', textAlign: 'center', background: '#161b22', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 20, padding: 28 }}>
+    <div style={{ maxWidth: 380, width: '100%', textAlign: 'center', background: 'var(--surface-card)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 20, padding: 28 }}>
       <div style={{ fontSize: 32 }}>⚠️</div>
-      <h2 style={{ color: '#fff', fontSize: 14, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 12 }}>Something interrupted the app</h2>
-      <p style={{ color: '#8b949e', fontSize: 12, marginTop: 8 }}>Your work is safe. Reload to continue where you left off.</p>
+      <h2 style={{ color: 'var(--text-primary)', fontSize: 14, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 12 }}>Something interrupted the app</h2>
+      <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 8 }}>Your work is safe. Reload to continue where you left off.</p>
       <button
         onClick={() => window.location.reload()}
         style={{ marginTop: 18, padding: '10px 20px', background: '#4f46e5', color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', borderRadius: 12, cursor: 'pointer' }}

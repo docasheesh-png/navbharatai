@@ -49,7 +49,7 @@ export function ConsentBanner() {
           pointerEvents: 'auto',
           maxWidth: 560,
           width: '100%',
-          background: '#161b22',
+          background: 'var(--surface-card)',
           border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: 16,
           padding: '16px 18px',
@@ -60,7 +60,7 @@ export function ConsentBanner() {
           fontFamily: 'system-ui, sans-serif',
         }}
       >
-        <div style={{ color: '#e6edf3', fontSize: 13, lineHeight: 1.5 }}>
+        <div style={{ color: 'var(--text-body)', fontSize: 13, lineHeight: 1.5 }}>
           <strong style={{ display: 'block', fontSize: 13, fontWeight: 800, marginBottom: 4 }}>
             We respect your privacy
           </strong>
@@ -75,7 +75,7 @@ export function ConsentBanner() {
             style={{
               padding: '8px 16px',
               background: 'transparent',
-              color: '#8b949e',
+              color: 'var(--text-muted)',
               fontSize: 12,
               fontWeight: 700,
               border: '1px solid rgba(255,255,255,0.16)',

@@ -115,7 +115,7 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
 
   return (
     <div className="fixed bottom-4 right-4 z-[200] flex flex-col rounded-2xl border border-white/15 shadow-2xl overflow-hidden"
-      style={{ width: 'min(92vw, 384px)', height: 'min(72vh, 560px)', background: '#161b22' }}>
+      style={{ width: 'min(92vw, 384px)', height: 'min(72vh, 560px)', background: 'var(--surface-card)' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 flex-shrink-0" style={{ background: '#1c2230' }}>
         <div className="flex items-center gap-2">
@@ -132,7 +132,7 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5 min-h-0" style={{ background: '#0d1117' }}>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5 min-h-0" style={{ background: 'var(--surface-base)' }}>
         {messages.map((m, i) => (
           <div key={i} className={`flex gap-2 ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
             {m.sender === 'ai' && <div className="w-6 h-6 rounded-full bg-indigo-600/30 flex items-center justify-center flex-shrink-0 mt-0.5"><Bot size={12} className="text-indigo-300" /></div>}
@@ -156,7 +156,7 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
       </div>
 
       {/* Composer */}
-      <div className="flex-shrink-0 border-t border-white/10 p-2.5" style={{ background: '#161b22' }}>
+      <div className="flex-shrink-0 border-t border-white/10 p-2.5" style={{ background: 'var(--surface-card)' }}>
         {pendingImg && (
           <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-lg bg-white/5 text-xs text-gray-300">
             <img src={pendingImg.preview} alt="attached" className="w-8 h-8 rounded object-cover" />
@@ -174,7 +174,7 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
             rows={1}
             placeholder="Ask anything, or send a screenshot…"
             className="flex-1 rounded-xl px-3 py-2 text-xs text-gray-200 border border-white/10 resize-none focus:outline-none focus:border-indigo-500/50 max-h-24"
-            style={{ background: '#0d1117' }}
+            style={{ background: 'var(--surface-base)' }}
           />
           <button onClick={send} disabled={busy || (!input.trim() && !pendingImg)} aria-label="Send" className="w-9 h-9 rounded-lg flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white flex-shrink-0"><Send size={15} /></button>
         </div>

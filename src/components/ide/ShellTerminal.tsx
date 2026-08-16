@@ -186,6 +186,10 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
         fontSize: 13,
         cursorBlink: true,
         scrollback: 5000,
+        // ⚠️ LITERAL HEXES ONLY — this object is parsed by xterm.js, not by the browser's CSS engine,
+        // and its colour parser does not understand `var(...)`. A sweep that replaced hardcoded
+        // colours with theme vars reached in here and had to be backed out: an inline style goes to
+        // the DOM, but a library's config goes to the library.
         theme: {
           background: '#0d1117',
           foreground: '#c9d1d9',

@@ -198,7 +198,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="h-full overflow-y-auto overscroll-contain p-4 sm:p-6 font-sans" style={{ background: '#0d1117', color: '#e6edf3', WebkitOverflowScrolling: 'touch' }}>
+    <div className="h-full overflow-y-auto overscroll-contain p-4 sm:p-6 font-sans" style={{ background: 'var(--surface-base)', color: 'var(--text-body)', WebkitOverflowScrolling: 'touch' }}>
       <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
@@ -213,7 +213,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
 
         {/* WHICH app is being packaged. Without this the builder had no idea — it used whatever
             preview was open, under a hardcoded name. */}
-        <div className="rounded-xl border border-white/10 mb-4" style={{ background: '#161b22' }}>
+        <div className="rounded-xl border border-white/10 mb-4" style={{ background: 'var(--surface-card)' }}>
           <AppTargetPicker
             apps={apps}
             appsLoading={appsLoading}
@@ -225,7 +225,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
         </div>
 
         {/* ── App Information — the ONE form. Everything here reaches the real build below. ── */}
-        <div className="rounded-xl border border-white/10 p-5 sm:p-6" style={{ background: '#161b22' }}>
+        <div className="rounded-xl border border-white/10 p-5 sm:p-6" style={{ background: 'var(--surface-card)' }}>
           <h2 className="text-lg font-semibold text-white mb-1">App Information</h2>
           <p className="text-xs text-white/45 mb-5">Your app’s name, package, icon and colour — used by the build below.</p>
 
@@ -234,7 +234,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
               <label className="block text-xs text-white/50 mb-1">App Name *</label>
               <input
                 className="w-full rounded-lg border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-                style={{ background: '#0d1117' }}
+                style={{ background: 'var(--surface-base)' }}
                 value={info.appName}
                 onChange={(e) => { nameTouched.current = true; updateInfo({ appName: e.target.value }); }}
                 placeholder="My App"
@@ -244,7 +244,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
               <label className="block text-xs text-white/50 mb-1">Package Name</label>
               <input
                 className="w-full rounded-lg border border-white/10 px-3 py-2 text-sm text-white/60 focus:outline-none focus:border-indigo-500"
-                style={{ background: '#0d1117' }}
+                style={{ background: 'var(--surface-base)' }}
                 value={info.packageName}
                 onChange={(e) => setInfo((p) => ({ ...p, packageName: e.target.value }))}
               />
@@ -269,7 +269,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
               <input
                 type="color"
                 className="w-10 h-10 rounded-lg border border-white/10 cursor-pointer p-0.5"
-                style={{ background: '#0d1117' }}
+                style={{ background: 'var(--surface-base)' }}
                 value={info.primaryColor}
                 onChange={(e) => updateInfo({ primaryColor: e.target.value })}
               />

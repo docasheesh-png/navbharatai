@@ -136,6 +136,9 @@ function generateNav(pages: Page[], config: NavConfig): string {
 </nav>`;
 }
 
+// ⚠️ LITERAL HEXES ON PURPOSE — these colours go into the HTML this tool GENERATES for the user's
+// own page, not into NavBharatAI's chrome. A theme var here would leak our palette into their app
+// (and resolve to nothing outside our page). The theme sweep of 2026-08-16 skipped them by design.
 function navBg(scheme: ColorScheme): string {
   switch (scheme) {
     case 'light': return '#ffffff';
@@ -518,7 +521,7 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
         flexDirection: narrow ? 'column' : 'row',
         height: '100%',
         minHeight: narrow ? 0 : 600,
-        background: '#0d1117',
+        background: 'var(--surface-base)',
         color: '#e2e8f0',
         fontFamily: 'system-ui, -apple-system, sans-serif',
         overflow: 'hidden',
@@ -530,7 +533,7 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
       {narrow && (
         <div
           style={{
-            display: 'flex', flexShrink: 0, background: '#161b22',
+            display: 'flex', flexShrink: 0, background: 'var(--surface-card)',
             borderBottom: '1px solid rgba(255,255,255,0.1)',
           }}
         >
@@ -559,7 +562,7 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
           width: narrow ? '100%' : 220,
           flex: narrow ? 1 : undefined,
           flexShrink: 0,
-          background: '#161b22',
+          background: 'var(--surface-card)',
           borderRight: narrow ? 'none' : '1px solid rgba(255,255,255,0.1)',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -623,7 +626,7 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
           style={{
             display: 'flex', alignItems: 'center', gap: 0,
             borderBottom: '1px solid rgba(255,255,255,0.1)',
-            background: '#161b22', paddingLeft: 16, flexShrink: 0,
+            background: 'var(--surface-card)', paddingLeft: 16, flexShrink: 0,
           }}
         >
           {(['content', 'settings'] as EditorTab[]).map((tab) => (
@@ -678,7 +681,7 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
           width: narrow ? '100%' : 280,
           flex: narrow ? 1 : undefined,
           flexShrink: 0,
-          background: '#161b22',
+          background: 'var(--surface-card)',
           borderLeft: narrow ? 'none' : '1px solid rgba(255,255,255,0.1)',
           display: narrow && mobilePanel !== 'export' ? 'none' : 'flex',
           flexDirection: 'column',
@@ -733,7 +736,7 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
           {showExportStructure && (
             <div
               style={{
-                marginTop: 10, background: '#0d1117', borderRadius: 6,
+                marginTop: 10, background: 'var(--surface-base)', borderRadius: 6,
                 border: '1px solid rgba(255,255,255,0.08)', padding: '10px 12px',
                 fontFamily: 'monospace', fontSize: 12, lineHeight: 1.7,
                 color: 'rgba(255,255,255,0.65)',
@@ -829,7 +832,7 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
           <pre
             style={{
               fontFamily: 'monospace', fontSize: 12, color: '#a5f3fc',
-              background: '#0d1117', padding: 16, borderRadius: 8,
+              background: 'var(--surface-base)', padding: 16, borderRadius: 8,
               overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
               maxHeight: 300, overflowY: 'auto',
             }}
@@ -909,7 +912,7 @@ function ContentTab({ page, onCodeChange, onTitleChange, onAIGenerate, generatin
             flex: 1,
             minHeight: 180,
             width: '100%',
-            background: '#0d1117',
+            background: 'var(--surface-base)',
             color: '#a5f3fc',
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: 8,
@@ -1141,7 +1144,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     >
       <div
         style={{
-          background: '#161b22', border: '1px solid rgba(255,255,255,0.12)',
+          background: 'var(--surface-card)', border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: 12, padding: 20, maxWidth: 580, width: '90vw',
           maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.6)',
         }}
@@ -1166,7 +1169,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
-  background: '#0d1117',
+  background: 'var(--surface-base)',
   border: '1px solid rgba(255,255,255,0.1)',
   borderRadius: 7,
   color: '#e2e8f0',

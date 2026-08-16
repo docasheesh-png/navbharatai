@@ -219,7 +219,7 @@ const BarChartSVG: React.FC<{ data: ActivityDay[]; days: number }> = ({ data, da
           style={{
             left: tooltip.x + 8,
             top: tooltip.y - 32,
-            background: '#21262d',
+            background: 'var(--surface-raised)',
             border: '1px solid #30363d',
             whiteSpace: 'nowrap',
           }}
@@ -399,7 +399,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       // h-full (not min-h-full) gives the scroll container a BOUNDED height so overflow-y-auto
       // actually scrolls on mobile; the extra bottom padding clears the fixed bottom nav + safe area.
       className="h-full w-full overflow-y-auto p-4 md:p-6 pb-28 space-y-6 text-sm overscroll-contain"
-      style={{ background: '#0d1117', color: '#c9d1d9' }}
+      style={{ background: 'var(--surface-base)', color: 'var(--text-body)' }}
     >
       {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -417,7 +417,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
           {/* Time Range Tabs */}
           <div
             className="flex rounded-lg overflow-hidden border"
-            style={{ borderColor: '#30363d', background: '#161b22' }}
+            style={{ borderColor: '#30363d', background: 'var(--surface-card)' }}
           >
             {(
               [
@@ -444,7 +444,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
           <button
             onClick={handleRefresh}
             className="p-2 rounded-lg border text-gray-400 hover:text-white transition-colors"
-            style={{ borderColor: '#30363d', background: '#161b22' }}
+            style={{ borderColor: '#30363d', background: 'var(--surface-card)' }}
             title="Refresh data"
           >
             <RefreshCw size={15} className={isRefreshing ? 'animate-spin' : ''} />
@@ -458,7 +458,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
           <div
             key={i}
             className={`rounded-xl border p-4 flex flex-col gap-3 ${card.bgAccent}`}
-            style={{ background: '#161b22' }}
+            style={{ background: 'var(--surface-card)' }}
           >
             <div className="flex items-center justify-between">
               <span className={`${card.accent}`}>{card.icon}</span>
@@ -474,7 +474,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       {/* ── Activity Chart ── */}
       <div
         className="rounded-xl border p-4"
-        style={{ background: '#161b22', borderColor: '#30363d' }}
+        style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}
       >
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -490,7 +490,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
 
       {/* ── Build Performance (P-BRE.8 — real server pipeline health) ── */}
       {buildPerf && buildPerf.totalJobs > 0 && (
-        <div className="rounded-xl border p-4" style={{ background: '#161b22', borderColor: '#30363d' }}>
+        <div className="rounded-xl border p-4" style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}>
           <div className="flex items-center gap-2 mb-4">
             <Activity size={16} className="text-emerald-400" />
             <h2 className="font-semibold text-white text-sm">Build Performance</h2>
@@ -532,7 +532,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
 
       {/* ── AI Build Optimizer (P-BRE.11 — deterministic suggestions from real telemetry) ── */}
       {optimizer && optimizer.suggestions.length > 0 && (
-        <div className="rounded-xl border p-4" style={{ background: '#161b22', borderColor: '#30363d' }}>
+        <div className="rounded-xl border p-4" style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}>
           <div className="flex items-center gap-2 mb-4">
             <Activity size={16} className="text-violet-400" />
             <h2 className="font-semibold text-white text-sm">Build Optimizer</h2>
@@ -557,7 +557,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
 
       {/* ── Build Reliability (P-TQA.13 — real MTTD/MTTR from failure→recovery history) ── */}
       {reliability && reliability.totalFailures > 0 && (
-        <div className="rounded-xl border p-4" style={{ background: '#161b22', borderColor: '#30363d' }}>
+        <div className="rounded-xl border p-4" style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}>
           <div className="flex items-center gap-2 mb-4">
             <Activity size={16} className="text-sky-400" />
             <h2 className="font-semibold text-white text-sm">Build Reliability</h2>
@@ -591,7 +591,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       {/* ── Recent Sessions (real, from local chat history) ── */}
       <div
         className="rounded-xl border p-4"
-        style={{ background: '#161b22', borderColor: '#30363d' }}
+        style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}
       >
         <div className="flex items-center gap-2 mb-4">
           <Clock size={16} className="text-emerald-400" />
@@ -609,7 +609,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
                 <div
                   key={session.id}
                   className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg group hover:bg-white/5 transition-colors"
-                  style={{ background: '#0d1117' }}
+                  style={{ background: 'var(--surface-base)' }}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-medium text-gray-200 truncate">{session.title}</div>

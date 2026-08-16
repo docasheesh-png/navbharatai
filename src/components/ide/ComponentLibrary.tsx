@@ -422,7 +422,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden" style={{ background: '#0d1117', color: '#e6edf3' }}>
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-base)', color: 'var(--text-body)' }}>
       {/* ── Tab Bar ── */}
       <div className="flex-shrink-0 flex items-center gap-1 px-4 py-2 border-b border-gray-800 bg-[#161b22]">
         {([['components', '🧩 Components'], ['libraries', '📦 CDN Libraries']] as const).map(([id, label]) => (
@@ -450,7 +450,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
                 onChange={e => setLibSearch(e.target.value)}
                 placeholder="Search libraries..."
                 className="w-full pl-9 pr-4 py-2 rounded-lg text-xs outline-none"
-                style={{ background: '#161b22', border: '1px solid #30363d', color: '#e6edf3' }}
+                style={{ background: 'var(--surface-card)', border: '1px solid #30363d', color: 'var(--text-body)' }}
               />
             </div>
           </div>
@@ -490,7 +490,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
 
       {/* ── Where does "Add to my app" put things? Answering this once, at the top, is what turns
              every button below from a preview trick into a real change. ── */}
-      <div className="flex-shrink-0 border-b border-gray-800" style={{ background: '#0d1117' }}>
+      <div className="flex-shrink-0 border-b border-gray-800" style={{ background: 'var(--surface-base)' }}>
         <button
           onClick={() => setMobilePicker(v => !v)}
           className="w-full flex items-center gap-2 px-4 py-2.5 text-left md:hidden"
@@ -578,7 +578,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
               onChange={e => setSearch(e.target.value)}
               placeholder="Search components..."
               className="w-full pl-9 pr-4 py-2 rounded-lg text-xs outline-none"
-              style={{ background: '#161b22', border: '1px solid #30363d', color: '#e6edf3' }}
+              style={{ background: 'var(--surface-card)', border: '1px solid #30363d', color: 'var(--text-body)' }}
             />
           </div>
         </div>
@@ -598,12 +598,12 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
                     onClick={() => setSelected(comp)}
                     className="group cursor-pointer rounded-xl overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/40"
                     style={{
-                      background: '#161b22',
+                      background: 'var(--surface-card)',
                       border: isSelected ? '1px solid #6366f1' : '1px solid #30363d',
                     }}
                   >
                     {/* Preview iframe */}
-                    <div className="relative h-[180px] overflow-hidden" style={{ background: '#0d1117' }}>
+                    <div className="relative h-[180px] overflow-hidden" style={{ background: 'var(--surface-base)' }}>
                       <iframe
                         srcDoc={buildSrcdoc(comp.html)}
                         className="w-full h-full pointer-events-none"
@@ -678,7 +678,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
         {selected ? (
           <>
             {/* Large Preview */}
-            <div className="flex-shrink-0 relative" style={{ height: '220px', background: '#0d1117', borderBottom: '1px solid #30363d' }}>
+            <div className="flex-shrink-0 relative" style={{ height: '220px', background: 'var(--surface-base)', borderBottom: '1px solid #30363d' }}>
               <iframe
                 srcDoc={buildSrcdoc(selected.html, customizer)}
                 className="w-full h-full"
@@ -699,7 +699,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
               <div className="space-y-2">
                 <button
                   className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-colors"
-                  style={{ background: '#1f2937', color: '#e2e8f0', border: '1px solid #374151' }}
+                  style={{ background: '#1f2937', color: 'var(--text-body)', border: '1px solid #374151' }}
                   onClick={() => copyToClipboard(selected.html, 'raw')}
                 >
                   {copied === 'raw' ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
@@ -725,7 +725,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
               </div>
 
               {/* Customizer */}
-              <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '10px', padding: '14px' }}>
+              <div style={{ background: 'var(--surface-card)', border: '1px solid #30363d', borderRadius: '10px', padding: '14px' }}>
                 <p className="text-xs font-semibold text-gray-300 mb-3 flex items-center gap-1.5">
                   <Layout size={12} /> Quick Customizer
                 </p>
@@ -753,7 +753,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
                         if (/^#[0-9a-fA-F]{0,6}$/.test(v)) setCustomizer(prev => ({ ...prev, primaryColor: v }));
                       }}
                       className="flex-1 px-2 py-1 rounded text-xs outline-none"
-                      style={{ background: '#0d1117', border: '1px solid #30363d', color: '#e6edf3' }}
+                      style={{ background: 'var(--surface-base)', border: '1px solid #30363d', color: 'var(--text-body)' }}
                     />
                   </div>
                 </div>
@@ -824,7 +824,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
         >
           <div
             className="relative rounded-2xl overflow-hidden shadow-2xl"
-            style={{ width: '700px', maxWidth: '90vw', background: '#161b22', border: '1px solid #30363d' }}
+            style={{ width: '700px', maxWidth: '90vw', background: 'var(--surface-card)', border: '1px solid #30363d' }}
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: '#30363d' }}>
@@ -850,7 +850,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
                 </button>
               </div>
             </div>
-            <div style={{ height: '420px', background: '#0d1117' }}>
+            <div style={{ height: '420px', background: 'var(--surface-base)' }}>
               <iframe
                 srcDoc={buildSrcdoc(modalComp.html)}
                 className="w-full h-full"

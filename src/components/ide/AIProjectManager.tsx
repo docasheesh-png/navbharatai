@@ -161,7 +161,7 @@ export function AIProjectManager() {
 
   const kanbanColumns: Status[] = ['todo', 'inprogress', 'review', 'done'];
 
-  const containerStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', height: '100%', background: '#0f172a', color: '#e2e8f0', fontFamily: 'sans-serif' };
+  const containerStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', height: '100%', background: '#0f172a', color: 'var(--text-body)', fontFamily: 'sans-serif' };
   const cardStyle: React.CSSProperties = { background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '12px' };
 
   return (
@@ -174,14 +174,14 @@ export function AIProjectManager() {
             <input
               value={projectName}
               onChange={e => setProjectName(e.target.value)}
-              style={{ background: 'transparent', border: 'none', outline: 'none', color: '#f1f5f9', fontSize: 15, fontWeight: 600, width: 280 }}
+              style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-body)', fontSize: 15, fontWeight: 600, width: 280 }}
             />
-            <div style={{ color: '#64748b', fontSize: 11 }}>{stats.total} tasks · {stats.done} done · {stats.inprogress} in progress</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>{stats.total} tasks · {stats.done} done · {stats.inprogress} in progress</div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {(['kanban', 'list', 'milestones', 'ai'] as const).map(v => (
-            <button key={v} onClick={() => setActiveView(v)} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500, background: activeView === v ? '#6366f1' : '#334155', color: activeView === v ? '#fff' : '#94a3b8' }}>
+            <button key={v} onClick={() => setActiveView(v)} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500, background: activeView === v ? '#6366f1' : '#334155', color: activeView === v ? '#fff' : 'var(--text-muted)' }}>
               {v === 'ai' ? '✨ AI Plan' : v.charAt(0).toUpperCase() + v.slice(1)}
             </button>
           ))}
@@ -203,7 +203,7 @@ export function AIProjectManager() {
             <Icon size={16} color={color} />
             <div>
               <div style={{ fontSize: 18, fontWeight: 700, color }}>{value}</div>
-              <div style={{ fontSize: 10, color: '#64748b' }}>{label}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{label}</div>
             </div>
           </div>
         ))}
@@ -220,20 +220,20 @@ export function AIProjectManager() {
                 <Sparkles size={18} color="#f59e0b" />
                 <span style={{ fontWeight: 600, fontSize: 14 }}>AI Project Planner</span>
               </div>
-              <p style={{ color: '#94a3b8', fontSize: 12, marginBottom: 16 }}>
+              <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 16 }}>
                 Describe your app idea and AI will generate a complete project plan with tasks, priorities, and milestones.
               </p>
               <textarea
                 value={aiPrompt}
                 onChange={e => setAiPrompt(e.target.value)}
                 placeholder="e.g. E-commerce app with AI product recommendations, Razorpay payments, and WhatsApp notifications..."
-                style={{ width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#e2e8f0', padding: '10px', fontSize: 13, resize: 'vertical', minHeight: 80, boxSizing: 'border-box', outline: 'none' }}
+                style={{ width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'var(--text-body)', padding: '10px', fontSize: 13, resize: 'vertical', minHeight: 80, boxSizing: 'border-box', outline: 'none' }}
               />
               <div style={{ marginTop: 8, marginBottom: 12 }}>
-                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>Quick suggestions:</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>Quick suggestions:</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                   {AI_PROMPT_SUGGESTIONS.map(s => (
-                    <button key={s} onClick={() => setAiPrompt(s)} style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid #334155', background: '#0f172a', color: '#94a3b8', fontSize: 11, cursor: 'pointer' }}>
+                    <button key={s} onClick={() => setAiPrompt(s)} style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid #334155', background: '#0f172a', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer' }}>
                       {s}
                     </button>
                   ))}
@@ -255,20 +255,20 @@ export function AIProjectManager() {
                 <div key={col} style={{ flex: 1, minWidth: 220, display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: col === 'done' ? '#10b981' : col === 'inprogress' ? '#3b82f6' : col === 'review' ? '#f59e0b' : '#64748b' }} />
-                      <span style={{ fontWeight: 600, fontSize: 12, color: '#94a3b8' }}>{STATUS_LABELS[col]}</span>
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: col === 'done' ? '#10b981' : col === 'inprogress' ? '#3b82f6' : col === 'review' ? '#f59e0b' : 'var(--text-muted)' }} />
+                      <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)' }}>{STATUS_LABELS[col]}</span>
                     </div>
-                    <span style={{ background: '#334155', color: '#94a3b8', fontSize: 10, borderRadius: 10, padding: '1px 6px' }}>{colTasks.length}</span>
+                    <span style={{ background: '#334155', color: 'var(--text-muted)', fontSize: 10, borderRadius: 10, padding: '1px 6px' }}>{colTasks.length}</span>
                   </div>
                   {colTasks.map(task => (
-                    <div key={task.id} style={{ background: '#1e293b', border: `1px solid #334155`, borderLeft: `3px solid ${col === 'done' ? '#10b981' : col === 'inprogress' ? '#3b82f6' : col === 'review' ? '#f59e0b' : '#475569'}`, borderRadius: 8, padding: '10px 12px', cursor: 'grab' }}>
+                    <div key={task.id} style={{ background: '#1e293b', border: `1px solid #334155`, borderLeft: `3px solid ${col === 'done' ? '#10b981' : col === 'inprogress' ? '#3b82f6' : col === 'review' ? '#f59e0b' : 'var(--text-faint)'}`, borderRadius: 8, padding: '10px 12px', cursor: 'grab' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                        <div style={{ fontSize: 12, fontWeight: 500, color: '#e2e8f0', flex: 1 }}>{task.title}</div>
-                        <button onClick={() => deleteTask(task.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#475569', padding: '0 0 0 4px' }}>
+                        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)', flex: 1 }}>{task.title}</div>
+                        <button onClick={() => deleteTask(task.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', padding: '0 0 0 4px' }}>
                           <Trash2 size={10} />
                         </button>
                       </div>
-                      {task.description && <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8 }}>{task.description}</div>}
+                      {task.description && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>{task.description}</div>}
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
                         <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, ...Object.fromEntries(Object.entries(PRIORITY_COLORS[task.priority]).map(([k, v]) => [k === 'text' ? 'color' : 'backgroundColor', v])) }}>
                           {task.priority}
@@ -279,14 +279,14 @@ export function AIProjectManager() {
                       </div>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         {kanbanColumns.filter(s => s !== col).map(s => (
-                          <button key={s} onClick={() => moveTask(task.id, s)} style={{ fontSize: 9, padding: '2px 5px', borderRadius: 3, border: '1px solid #334155', background: '#0f172a', color: '#94a3b8', cursor: 'pointer' }}>
+                          <button key={s} onClick={() => moveTask(task.id, s)} style={{ fontSize: 9, padding: '2px 5px', borderRadius: 3, border: '1px solid #334155', background: '#0f172a', color: 'var(--text-muted)', cursor: 'pointer' }}>
                             → {STATUS_LABELS[s]}
                           </button>
                         ))}
                       </div>
                     </div>
                   ))}
-                  <button onClick={() => { setNewTask(p => ({ ...p, status: col })); setShowNewTask(true); }} style={{ padding: '8px', borderRadius: 6, border: '1px dashed #334155', background: 'transparent', color: '#475569', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                  <button onClick={() => { setNewTask(p => ({ ...p, status: col })); setShowNewTask(true); }} style={{ padding: '8px', borderRadius: 6, border: '1px dashed #334155', background: 'transparent', color: 'var(--text-faint)', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                     <Plus size={12} /> Add
                   </button>
                 </div>
@@ -300,7 +300,7 @@ export function AIProjectManager() {
           <div style={{ flex: 1, overflow: 'auto', padding: 12 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid #334155', color: '#64748b' }}>
+                <tr style={{ borderBottom: '1px solid #334155', color: 'var(--text-muted)' }}>
                   {['Task', 'Priority', 'Status', 'Assignee', 'Due Date', ''].map(h => (
                     <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 500 }}>{h}</th>
                   ))}
@@ -309,24 +309,24 @@ export function AIProjectManager() {
               <tbody>
                 {tasks.map(task => (
                   <tr key={task.id} style={{ borderBottom: '1px solid #1e293b' }}>
-                    <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{task.title}</td>
+                    <td style={{ padding: '10px 12px', color: 'var(--text-body)' }}>{task.title}</td>
                     <td style={{ padding: '10px 12px' }}>
-                      <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: task.priority === 'critical' ? '#7f1d1d' : task.priority === 'high' ? '#431407' : task.priority === 'medium' ? '#451a03' : '#1e293b', color: task.priority === 'critical' ? '#fca5a5' : task.priority === 'high' ? '#fb923c' : task.priority === 'medium' ? '#fbbf24' : '#94a3b8' }}>{task.priority}</span>
+                      <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: task.priority === 'critical' ? '#7f1d1d' : task.priority === 'high' ? '#431407' : task.priority === 'medium' ? '#451a03' : '#1e293b', color: task.priority === 'critical' ? '#fca5a5' : task.priority === 'high' ? '#fb923c' : task.priority === 'medium' ? '#fbbf24' : 'var(--text-muted)' }}>{task.priority}</span>
                     </td>
                     <td style={{ padding: '10px 12px' }}>
-                      <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: task.status === 'done' ? '#052e16' : task.status === 'inprogress' ? '#172554' : '#1e293b', color: task.status === 'done' ? '#4ade80' : task.status === 'inprogress' ? '#60a5fa' : '#94a3b8' }}>{STATUS_LABELS[task.status]}</span>
+                      <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: task.status === 'done' ? '#052e16' : task.status === 'inprogress' ? '#172554' : '#1e293b', color: task.status === 'done' ? '#4ade80' : task.status === 'inprogress' ? '#60a5fa' : 'var(--text-muted)' }}>{STATUS_LABELS[task.status]}</span>
                     </td>
-                    <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{task.assignee}</td>
-                    <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{task.dueDate || '—'}</td>
+                    <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{task.assignee}</td>
+                    <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{task.dueDate || '—'}</td>
                     <td style={{ padding: '10px 12px' }}>
-                      <button onClick={() => deleteTask(task.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#475569' }}><Trash2 size={12} /></button>
+                      <button onClick={() => deleteTask(task.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)' }}><Trash2 size={12} /></button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             {tasks.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '60px 20px', color: '#475569' }}>
+              <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-faint)' }}>
                 <Kanban size={32} style={{ margin: '0 auto 12px' }} />
                 <div>No tasks yet. Use AI Plan or add manually.</div>
               </div>
@@ -350,18 +350,18 @@ export function AIProjectManager() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <CalendarDays size={12} color="#64748b" />
-                      <span style={{ fontSize: 11, color: '#64748b' }}>{ms.dueDate}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ms.dueDate}</span>
                       <span style={{ fontSize: 12, fontWeight: 700, color: ms.color }}>{progress}%</span>
                     </div>
                   </div>
                   <div style={{ height: 6, background: '#334155', borderRadius: 3, overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${progress}%`, background: ms.color, borderRadius: 3, transition: 'width 0.3s' }} />
                   </div>
-                  <div style={{ marginTop: 8, fontSize: 11, color: '#64748b' }}>{doneTasks}/{msTasks.length} tasks complete</div>
+                  <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>{doneTasks}/{msTasks.length} tasks complete</div>
                 </div>
               );
             })}
-            <div style={{ ...cardStyle, border: '1px dashed #334155', background: 'transparent', textAlign: 'center', padding: '16px', cursor: 'pointer', color: '#475569' }}>
+            <div style={{ ...cardStyle, border: '1px dashed #334155', background: 'transparent', textAlign: 'center', padding: '16px', cursor: 'pointer', color: 'var(--text-faint)' }}>
               <Trophy size={16} style={{ margin: '0 auto 4px' }} />
               <div style={{ fontSize: 12 }}>All milestones on track!</div>
             </div>
@@ -375,7 +375,7 @@ export function AIProjectManager() {
           <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, padding: 20, width: 400, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontWeight: 600, fontSize: 14 }}>New Task</span>
-              <button onClick={() => setShowNewTask(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><X size={16} /></button>
+              <button onClick={() => setShowNewTask(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={16} /></button>
             </div>
             {[
               { label: 'Title *', key: 'title', type: 'text', placeholder: 'Task title...' },
@@ -384,32 +384,32 @@ export function AIProjectManager() {
               { label: 'Due Date', key: 'dueDate', type: 'date', placeholder: '' },
             ].map(field => (
               <div key={field.key}>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>{field.label}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{field.label}</div>
                 <input
                   type={field.type}
                   value={(newTask as any)[field.key] || ''}
                   onChange={e => setNewTask(p => ({ ...p, [field.key]: e.target.value }))}
                   placeholder={field.placeholder}
-                  style={{ width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#e2e8f0', padding: '8px 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }}
+                  style={{ width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'var(--text-body)', padding: '8px 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }}
                 />
               </div>
             ))}
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>Priority</div>
-                <select value={newTask.priority} onChange={e => setNewTask(p => ({ ...p, priority: e.target.value as Priority }))} style={{ width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#e2e8f0', padding: '8px 10px', fontSize: 13, outline: 'none' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Priority</div>
+                <select value={newTask.priority} onChange={e => setNewTask(p => ({ ...p, priority: e.target.value as Priority }))} style={{ width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'var(--text-body)', padding: '8px 10px', fontSize: 13, outline: 'none' }}>
                   {(['low', 'medium', 'high', 'critical'] as Priority[]).map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>Status</div>
-                <select value={newTask.status} onChange={e => setNewTask(p => ({ ...p, status: e.target.value as Status }))} style={{ width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#e2e8f0', padding: '8px 10px', fontSize: 13, outline: 'none' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Status</div>
+                <select value={newTask.status} onChange={e => setNewTask(p => ({ ...p, status: e.target.value as Status }))} style={{ width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'var(--text-body)', padding: '8px 10px', fontSize: 13, outline: 'none' }}>
                   {(Object.entries(STATUS_LABELS) as [Status, string][]).map(([s, l]) => <option key={s} value={s}>{l}</option>)}
                 </select>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-              <button onClick={() => setShowNewTask(false)} style={{ flex: 1, padding: '9px', borderRadius: 6, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+              <button onClick={() => setShowNewTask(false)} style={{ flex: 1, padding: '9px', borderRadius: 6, border: '1px solid #334155', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
               <button onClick={addTask} style={{ flex: 1, padding: '9px', borderRadius: 6, border: 'none', background: '#6366f1', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Add Task</button>
             </div>
           </div>

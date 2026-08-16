@@ -45,6 +45,8 @@ export interface DarkModeGeneratorProps {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PRESET_THEMES: PresetTheme[] = [
+  // ⚠️ PRESET DATA, NOT OUR UI — the user applies these palettes to THEIR app, so every value must
+  // stay a real colour. Not touched by the 2026-08-16 theme sweep, and must never be.
   { name: 'GitHub Dark',    bg: '#0d1117', bgSecondary: '#161b22', text: '#e6edf3', textSecondary: '#8b949e', accent: '#58a6ff', border: 'rgba(255,255,255,0.1)' },
   { name: 'Dracula',        bg: '#282a36', bgSecondary: '#44475a', text: '#f8f8f2', textSecondary: '#6272a4', accent: '#bd93f9', border: 'rgba(189,147,249,0.2)' },
   { name: 'Nord',           bg: '#2e3440', bgSecondary: '#3b4252', text: '#eceff4', textSecondary: '#9099ab', accent: '#88c0d0', border: 'rgba(136,192,208,0.2)' },
@@ -406,7 +408,7 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ background: '#0d1117', minHeight: '100%', color: '#e6edf3', fontFamily: 'system-ui, sans-serif', padding: 20, boxSizing: 'border-box' }}>
+    <div style={{ background: 'var(--surface-base)', minHeight: '100%', color: '#e6edf3', fontFamily: 'system-ui, sans-serif', padding: 20, boxSizing: 'border-box' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
@@ -417,7 +419,7 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button
             onClick={() => setManualMode(m => !m)}
-            style={{ padding: '6px 12px', background: manualMode ? '#6366f1' : '#21262d', color: '#e6edf3', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
+            style={{ padding: '6px 12px', background: manualMode ? '#6366f1' : 'var(--surface-raised)', color: '#e6edf3', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <Sliders size={14} /> Manual Mode
           </button>
@@ -434,26 +436,26 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
           as input; the user can paste real HTML instead). */}
       {!realApp && (
         <div style={{ marginBottom: 16 }}>
-          <label style={{ fontSize: 12, color: '#8b949e', display: 'block', marginBottom: 6 }}>Paste HTML to convert</label>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Paste HTML to convert</label>
           <textarea
             value={htmlInput}
             onChange={e => setHtmlInput(e.target.value)}
             placeholder="<html>...</html>"
             rows={5}
-            style={{ width: '100%', background: '#161b22', color: '#e6edf3', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: 10, fontSize: 13, fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
+            style={{ width: '100%', background: 'var(--surface-card)', color: '#e6edf3', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: 10, fontSize: 13, fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
           />
         </div>
       )}
 
       {/* Preset Themes */}
       <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 8 }}>Preset Themes</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Preset Themes</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {PRESET_THEMES.map(t => (
             <button
               key={t.name}
               onClick={() => handlePreset(t)}
-              style={{ padding: '5px 12px', background: activeTheme.name === t.name ? '#6366f1' : '#161b22', color: '#e6edf3', border: `1px solid ${activeTheme.name === t.name ? '#6366f1' : 'rgba(255,255,255,0.1)'}`, borderRadius: 20, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+              style={{ padding: '5px 12px', background: activeTheme.name === t.name ? '#6366f1' : 'var(--surface-card)', color: '#e6edf3', border: `1px solid ${activeTheme.name === t.name ? '#6366f1' : 'rgba(255,255,255,0.1)'}`, borderRadius: 20, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
             >
               <span style={{ width: 10, height: 10, borderRadius: '50%', background: t.accent, display: 'inline-block' }} />
               {t.name}
@@ -464,7 +466,7 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
 
       {/* Strategy Selection */}
       <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 8 }}>Dark Mode Strategy</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Dark Mode Strategy</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {([
             ['css-vars', 'CSS Variables', '(recommended)'],
@@ -472,25 +474,25 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
             ['color-scheme', 'color-scheme', 'browser native'],
             ['manual', 'Manual Override', 'swap colors'],
           ] as [Strategy, string, string][]).map(([val, label, hint]) => (
-            <label key={val} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '6px 12px', background: strategy === val ? 'rgba(99,102,241,0.15)' : '#161b22', border: `1px solid ${strategy === val ? '#6366f1' : 'rgba(255,255,255,0.08)'}`, borderRadius: 6, fontSize: 13 }}>
+            <label key={val} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '6px 12px', background: strategy === val ? 'rgba(99,102,241,0.15)' : 'var(--surface-card)', border: `1px solid ${strategy === val ? '#6366f1' : 'rgba(255,255,255,0.08)'}`, borderRadius: 6, fontSize: 13 }}>
               <input type="radio" name="strategy" value={val} checked={strategy === val} onChange={() => handleStrategyChange(val)} style={{ accentColor: '#6366f1' }} />
               <span style={{ fontWeight: strategy === val ? 600 : 400 }}>{label}</span>
-              <span style={{ color: '#8b949e', fontSize: 11 }}>{hint}</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{hint}</span>
             </label>
           ))}
         </div>
       </div>
 
       {/* Preview Section */}
-      <div style={{ background: '#161b22', borderRadius: 10, padding: 16, marginBottom: 16, border: '1px solid rgba(255,255,255,0.08)' }}>
+      <div style={{ background: 'var(--surface-card)', borderRadius: 10, padding: 16, marginBottom: 16, border: '1px solid rgba(255,255,255,0.08)' }}>
         {/* View Mode Toggle Bar */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ display: 'flex', background: '#0d1117', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ display: 'flex', background: 'var(--surface-base)', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
             {(['light', 'both', 'dark'] as ViewMode[]).map(v => (
               <button
                 key={v}
                 onClick={() => setViewMode(v)}
-                style={{ padding: '6px 14px', background: viewMode === v ? '#6366f1' : 'transparent', color: viewMode === v ? '#fff' : '#8b949e', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: viewMode === v ? 600 : 400, display: 'flex', alignItems: 'center', gap: 5 }}
+                style={{ padding: '6px 14px', background: viewMode === v ? '#6366f1' : 'transparent', color: viewMode === v ? '#fff' : 'var(--text-muted)', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: viewMode === v ? 600 : 400, display: 'flex', alignItems: 'center', gap: 5 }}
               >
                 {v === 'light' && <Sun size={12} />}
                 {v === 'both' && <Layers size={12} />}
@@ -499,7 +501,7 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
               </button>
             ))}
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#8b949e', cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
             <input type="checkbox" checked={syncScroll} onChange={e => setSyncScroll(e.target.checked)} style={{ accentColor: '#6366f1' }} />
             Sync scroll
           </label>
@@ -511,7 +513,7 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
             <div style={{ flex: '1 1 260px', minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                 <Sun size={13} color="#f59e0b" />
-                <span style={{ fontSize: 12, color: '#8b949e', fontWeight: 600 }}>Light Mode</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Light Mode</span>
               </div>
               <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
                 {sourceHtml ? (
@@ -528,13 +530,13 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
             <div style={{ flex: '1 1 260px', minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                 <Moon size={13} color="#6366f1" />
-                <span style={{ fontSize: 12, color: '#8b949e', fontWeight: 600 }}>Dark Mode</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Dark Mode</span>
               </div>
               <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(99,102,241,0.3)' }}>
                 {darkHtml ? (
                   <iframe srcDoc={darkHtml} style={iframeStyle} title="Dark preview" sandbox="allow-scripts" />
                 ) : (
-                  <div style={{ ...iframeStyle, background: '#0d1117', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#4a5568', fontSize: 13, gap: 8 }}>
+                  <div style={{ ...iframeStyle, background: 'var(--surface-base)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#4a5568', fontSize: 13, gap: 8 }}>
                     <Moon size={28} color="#2d3148" />
                     <span>Click Auto-Generate to preview</span>
                   </div>
@@ -547,7 +549,7 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
 
       {/* Color Mapping Panel */}
       {generated && (
-        <div style={{ background: '#161b22', borderRadius: 10, marginBottom: 16, border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface-card)', borderRadius: 10, marginBottom: 16, border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
           <button
             onClick={() => setShowColorPanel(p => !p)}
             style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: 'none', border: 'none', color: '#e6edf3', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
@@ -561,7 +563,7 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
                 <thead>
                   <tr style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
                     {['Original', 'Mapped Dark', 'Usage', 'Override'].map(h => (
-                      <th key={h} style={{ padding: '8px 16px', color: '#8b949e', fontWeight: 600, textAlign: 'left', background: '#0d1117', whiteSpace: 'nowrap' }}>{h}</th>
+                      <th key={h} style={{ padding: '8px 16px', color: 'var(--text-muted)', fontWeight: 600, textAlign: 'left', background: 'var(--surface-base)', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -571,16 +573,16 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
                       <td style={{ padding: '8px 16px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <ColorSwatch color={m.original} />
-                          <code style={{ fontSize: 12, color: '#8b949e' }}>{m.original}</code>
+                          <code style={{ fontSize: 12, color: 'var(--text-muted)' }}>{m.original}</code>
                         </div>
                       </td>
                       <td style={{ padding: '8px 16px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <ColorSwatch color={m.override ?? m.dark} />
-                          <code style={{ fontSize: 12, color: '#8b949e' }}>{m.override ?? m.dark}</code>
+                          <code style={{ fontSize: 12, color: 'var(--text-muted)' }}>{m.override ?? m.dark}</code>
                         </div>
                       </td>
-                      <td style={{ padding: '8px 16px', color: '#8b949e', fontSize: 12 }}>{m.usage}</td>
+                      <td style={{ padding: '8px 16px', color: 'var(--text-muted)', fontSize: 12 }}>{m.usage}</td>
                       <td style={{ padding: '8px 16px' }}>
                         <input
                           type="color"
@@ -601,28 +603,28 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
 
       {/* Generated CSS */}
       {generated && (
-        <div style={{ background: '#161b22', borderRadius: 10, marginBottom: 16, border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface-card)', borderRadius: 10, marginBottom: 16, border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
           <button
             onClick={() => setShowCSS(p => !p)}
             style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: 'none', border: 'none', color: '#e6edf3', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
           >
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Code2 size={15} color="#6366f1" /> Generated CSS</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 11, color: '#8b949e', background: '#0d1117', padding: '2px 8px', borderRadius: 10 }}>{generatedCSS.split('\n').length} lines</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', background: 'var(--surface-base)', padding: '2px 8px', borderRadius: 10 }}>{generatedCSS.split('\n').length} lines</span>
               {showCSS ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
             </div>
           </button>
           {showCSS && (
             <div>
               <div style={{ display: 'flex', gap: 8, padding: '0 16px 12px' }}>
-                <button onClick={handleCopy} style={{ padding: '5px 12px', background: '#0d1117', color: '#e6edf3', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <button onClick={handleCopy} style={{ padding: '5px 12px', background: 'var(--surface-base)', color: '#e6edf3', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
                   {copied ? <Check size={12} color="#22c55e" /> : <Copy size={12} />} {copied ? 'Copied!' : 'Copy'}
                 </button>
-                <button onClick={handleDownload} style={{ padding: '5px 12px', background: '#0d1117', color: '#e6edf3', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <button onClick={handleDownload} style={{ padding: '5px 12px', background: 'var(--surface-base)', color: '#e6edf3', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
                   <Download size={12} /> Download
                 </button>
               </div>
-              <pre style={{ margin: 0, padding: '0 16px 16px', fontSize: 12, color: '#8b949e', overflowX: 'auto', fontFamily: 'monospace', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              <pre style={{ margin: 0, padding: '0 16px 16px', fontSize: 12, color: 'var(--text-muted)', overflowX: 'auto', fontFamily: 'monospace', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                 <code>{generatedCSS}</code>
               </pre>
             </div>
@@ -633,7 +635,7 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
       {/* Save into the user's real app. This used to update only the on-screen preview, so the dark
           mode disappeared the moment the tab closed and the v5 builder never knew about it. */}
       {generated && (
-        <div style={{ background: '#161b22', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, overflow: 'hidden' }}>
           <div style={{ padding: '12px 12px 0', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Save size={14} color="#818cf8" /> Save this dark mode into your app
           </div>
@@ -668,7 +670,7 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
                 {saving ? 'Saving into your app…' : 'Save dark mode into my app'}
               </button>
-              <p style={{ marginTop: 8, fontSize: 11, color: '#8b949e', lineHeight: 1.5, display: 'flex', gap: 5 }}>
+              <p style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, display: 'flex', gap: 5 }}>
                 <History size={11} style={{ marginTop: 2, flexShrink: 0 }} />
                 A restore point is saved first, so you can undo this any time from Versioning.
                 Running it again updates the same block rather than adding a second copy.

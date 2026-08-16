@@ -310,7 +310,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
 
   // ── Left panel: the user's apps, and the files inside them ─────────────────
   const browser = (
-    <div className="flex flex-col h-full overflow-hidden" style={{ background: '#161b22' }}>
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-card)' }}>
       <div
         className="flex items-center gap-2 px-3 py-2.5 border-b text-xs font-semibold text-gray-300 shrink-0"
         style={{ borderColor: 'rgba(255,255,255,0.08)' }}
@@ -345,7 +345,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
                 </button>
 
                 {open && (
-                  <div style={{ background: '#0d1117' }}>
+                  <div style={{ background: 'var(--surface-base)' }}>
                     {filesLoading ? (
                       <div className="flex items-center gap-2 px-6 py-3 text-xs text-gray-500">
                         <Loader2 size={12} className="animate-spin" /> Opening files…
@@ -385,11 +385,11 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
   );
 
   return (
-    <div className="flex flex-col h-full overflow-hidden" style={{ background: '#0d1117', color: '#e6edf3' }}>
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-base)', color: 'var(--text-body)' }}>
       {/* ── Header ── */}
       <div
         className="flex items-center gap-2 px-3 py-2.5 border-b shrink-0"
-        style={{ borderColor: 'rgba(255,255,255,0.1)', background: '#161b22' }}
+        style={{ borderColor: 'rgba(255,255,255,0.1)', background: 'var(--surface-card)' }}
       >
         <button
           onClick={() => setBrowserOpen((v) => !v)}
@@ -422,7 +422,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
           >
             <div
               className="flex items-center gap-2 px-3 py-2 border-b text-xs shrink-0"
-              style={{ borderColor: 'rgba(255,255,255,0.08)', background: '#161b22' }}
+              style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'var(--surface-card)' }}
             >
               <span className="font-medium text-gray-200 truncate">{sourceName}</span>
               {selectedPath ? (
@@ -432,7 +432,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
                   value={pasteLanguage}
                   onChange={(e) => setPasteLanguage(e.target.value as PasteLanguage)}
                   className="text-[11px] rounded border border-white/10 px-1 py-0.5 outline-none"
-                  style={{ background: '#0d1117', color: '#e6edf3' }}
+                  style={{ background: 'var(--surface-base)', color: 'var(--text-body)' }}
                   aria-label="Language of the pasted code"
                 >
                   <option value="js">JavaScript</option>
@@ -456,7 +456,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
                 placeholder="Pick a file from your app on the left — or paste code here."
                 spellCheck={false}
                 className="flex-1 resize-none p-3 text-xs font-mono leading-relaxed outline-none text-gray-200 placeholder-gray-600"
-                style={{ background: '#0d1117' }}
+                style={{ background: 'var(--surface-base)' }}
               />
             )}
           </div>
@@ -465,7 +465,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
           <div className="flex flex-col flex-1 overflow-hidden">
             <div
               className="flex items-center gap-2 px-3 py-2 border-b text-xs shrink-0"
-              style={{ borderColor: 'rgba(255,255,255,0.08)', background: '#161b22' }}
+              style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'var(--surface-card)' }}
             >
               <span className="font-medium text-gray-200">Optimised</span>
               <div className="flex-1" />
@@ -494,7 +494,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
             {outputCode && (
               <div
                 className="px-3 py-2.5 border-b shrink-0"
-                style={{ borderColor: 'rgba(255,255,255,0.08)', background: '#161b22' }}
+                style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'var(--surface-card)' }}
               >
                 <button
                   onClick={() => void handleApply()}
@@ -537,12 +537,12 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
             {outputCode ? (
               <pre
                 className="flex-1 overflow-auto p-3 text-xs font-mono leading-relaxed text-green-300 whitespace-pre-wrap break-all"
-                style={{ background: '#0d1117' }}
+                style={{ background: 'var(--surface-base)' }}
               >
                 {outputCode}
               </pre>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-6" style={{ background: '#0d1117' }}>
+              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-6" style={{ background: 'var(--surface-base)' }}>
                 <Zap size={28} className="text-gray-700" />
                 <p className="text-xs text-gray-500 leading-relaxed">
                   The optimised code will appear here, with a button to save it into your app.
@@ -556,7 +556,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
       {/* ── The action bar: one obvious thing to press ── */}
       <div
         className="shrink-0 border-t px-3 py-3"
-        style={{ borderColor: 'rgba(255,255,255,0.1)', background: '#161b22' }}
+        style={{ borderColor: 'rgba(255,255,255,0.1)', background: 'var(--surface-card)' }}
       >
         {problem && (
           <p className="mb-2 flex items-start gap-1.5 text-xs text-amber-300 leading-snug">

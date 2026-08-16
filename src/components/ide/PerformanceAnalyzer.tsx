@@ -337,7 +337,7 @@ function ScoreRing({ score, label }: { score: number; label: string }) {
           {score}
         </text>
       </svg>
-      <span className="text-xs font-medium" style={{ color: '#8b949e' }}>
+      <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
         {label}
       </span>
     </div>
@@ -447,7 +447,7 @@ function MiniBarChart({ history }: { history: HistoryEntry[] }) {
                 const color = scoreColor(val);
                 return (
                   <div key={ci} className="flex flex-col items-center gap-0.5">
-                    <span style={{ fontSize: 8, color: '#8b949e' }}>{val}</span>
+                    <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>{val}</span>
                     <div
                       style={{
                         width: 14,
@@ -456,12 +456,12 @@ function MiniBarChart({ history }: { history: HistoryEntry[] }) {
                         borderRadius: 2,
                       }}
                     />
-                    <span style={{ fontSize: 8, color: '#8b949e' }}>{labels[ci]}</span>
+                    <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>{labels[ci]}</span>
                   </div>
                 );
               })}
             </div>
-            <span style={{ fontSize: 9, color: '#8b949e' }}>
+            <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>
               {new Date(entry.analyzedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
@@ -580,12 +580,12 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
   return (
     <div
       className="flex flex-col h-full overflow-hidden text-[#e6edf3]"
-      style={{ background: '#0d1117', fontFamily: 'sans-serif' }}
+      style={{ background: 'var(--surface-base)', fontFamily: 'sans-serif' }}
     >
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3 border-b border-[#30363d] shrink-0"
-        style={{ background: '#161b22' }}
+        style={{ background: 'var(--surface-card)' }}
       >
         <div className="flex items-center gap-2">
           <Gauge size={18} className="text-indigo-400" />
@@ -741,7 +741,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
           {/* Scores */}
           {result && !isAnalyzing && (
             <>
-              <div className="rounded-xl border border-[#30363d] p-5" style={{ background: '#161b22' }}>
+              <div className="rounded-xl border border-[#30363d] p-5" style={{ background: 'var(--surface-card)' }}>
                 <h2 className="text-xs font-semibold text-[#8b949e] uppercase tracking-widest mb-4">Score Overview</h2>
                 <div className="flex flex-wrap gap-6 justify-center">
                   <ScoreRing score={result.performance.score} label="Performance" />
@@ -754,7 +754,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
               {/* Detailed Findings 2-col */}
               <div>
                 <h2 className="text-xs font-semibold text-[#8b949e] uppercase tracking-widest mb-3">Detailed Findings</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ background: '#161b22', borderRadius: 12, padding: 16, border: '1px solid #30363d' }}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ background: 'var(--surface-card)', borderRadius: 12, padding: 16, border: '1px solid #30363d' }}>
                   <CheckList title="Performance" checks={result.performance.checks} />
                   <CheckList title="Accessibility" checks={result.accessibility.checks} />
                   <CheckList title="SEO" checks={result.seo.checks} />
@@ -764,7 +764,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
 
               {/* History */}
               {history.length > 0 && (
-                <div className="rounded-xl border border-[#30363d] overflow-hidden" style={{ background: '#161b22' }}>
+                <div className="rounded-xl border border-[#30363d] overflow-hidden" style={{ background: 'var(--surface-card)' }}>
                   <button
                     onClick={() => setHistoryOpen((v) => !v)}
                     className="w-full flex items-center justify-between px-4 py-3 hover:bg-[#1c2128] transition-colors"
@@ -790,9 +790,9 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
         {result && !isAnalyzing && recommendations.length > 0 && (
           <div
             className="shrink-0 border-l border-[#30363d] overflow-y-auto p-4 space-y-3"
-            style={{ width: 300, background: '#161b22' }}
+            style={{ width: 300, background: 'var(--surface-card)' }}
           >
-            <h2 className="text-xs font-semibold text-[#8b949e] uppercase tracking-widest sticky top-0 pb-2" style={{ background: '#161b22' }}>
+            <h2 className="text-xs font-semibold text-[#8b949e] uppercase tracking-widest sticky top-0 pb-2" style={{ background: 'var(--surface-card)' }}>
               Recommendations
             </h2>
             {(['high', 'medium', 'low'] as const).map((priority) => {
@@ -818,7 +818,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
           <div
             className="rounded-xl border border-[#30363d] p-5 flex flex-col gap-4 w-[520px] max-w-[95vw]"
-            style={{ background: '#161b22' }}
+            style={{ background: 'var(--surface-card)' }}
           >
             <div className="flex items-center justify-between">
               <span className="font-semibold text-sm text-[#e6edf3]">Paste HTML Code</span>

@@ -418,7 +418,7 @@ Content-Type: application/json
             <label className="text-xs text-gray-400">Message Text</label>
             <textarea
               className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 resize-none focus:outline-none focus:border-white/30"
-              style={{ background: '#0d1117', minHeight: 80 }}
+              style={{ background: 'var(--surface-base)', minHeight: 80 }}
               value={node.data.text || ''}
               onChange={e => updateNodeData(node.id, { text: e.target.value })}
             />
@@ -433,7 +433,7 @@ Content-Type: application/json
               <div key={i} className="flex gap-1.5">
                 <input
                   className="flex-1 rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
-                  style={{ background: '#0d1117' }}
+                  style={{ background: 'var(--surface-base)' }}
                   value={opt}
                   placeholder={`Button ${i + 1}`}
                   onChange={e => { const opts = [...(node.data.options || [])]; opts[i] = e.target.value; updateNodeData(node.id, { options: opts }); }}
@@ -459,7 +459,7 @@ Content-Type: application/json
               <label className="text-xs text-gray-400">Prompt Text</label>
               <input
                 className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
-                style={{ background: '#0d1117' }}
+                style={{ background: 'var(--surface-base)' }}
                 value={node.data.text || ''}
                 onChange={e => updateNodeData(node.id, { text: e.target.value })}
               />
@@ -469,7 +469,7 @@ Content-Type: application/json
               <div key={i} className="flex gap-1.5">
                 <input
                   className="flex-1 rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
-                  style={{ background: '#0d1117' }}
+                  style={{ background: 'var(--surface-base)' }}
                   value={opt}
                   onChange={e => {
                     const opts = [...(node.data.options || [])];
@@ -500,7 +500,7 @@ Content-Type: application/json
             <label className="text-xs text-gray-400">Condition Expression</label>
             <input
               className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-white/30"
-              style={{ background: '#0d1117' }}
+              style={{ background: 'var(--surface-base)' }}
               value={node.data.condition || ''}
               onChange={e => updateNodeData(node.id, { condition: e.target.value })}
               placeholder='e.g. user_input == "yes"'
@@ -514,7 +514,7 @@ Content-Type: application/json
               <label className="text-xs text-gray-400">API URL</label>
               <input
                 className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-white/30"
-                style={{ background: '#0d1117' }}
+                style={{ background: 'var(--surface-base)' }}
                 value={node.data.apiUrl || ''}
                 onChange={e => updateNodeData(node.id, { apiUrl: e.target.value })}
               />
@@ -523,7 +523,7 @@ Content-Type: application/json
               <label className="text-xs text-gray-400">Method</label>
               <select
                 className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
-                style={{ background: '#0d1117' }}
+                style={{ background: 'var(--surface-base)' }}
                 value={node.data.method || 'GET'}
                 onChange={e => updateNodeData(node.id, { method: e.target.value })}
               >
@@ -534,7 +534,7 @@ Content-Type: application/json
               <label className="text-xs text-gray-400">Response Variable</label>
               <input
                 className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-white/30"
-                style={{ background: '#0d1117' }}
+                style={{ background: 'var(--surface-base)' }}
                 value={node.data.responseVar || ''}
                 onChange={e => updateNodeData(node.id, { responseVar: e.target.value })}
                 placeholder="result"
@@ -549,7 +549,7 @@ Content-Type: application/json
             <input
               type="number"
               className="w-full rounded p-1.5 text-sm text-gray-300 border border-white/10 focus:outline-none"
-              style={{ background: '#0d1117' }}
+              style={{ background: 'var(--surface-base)' }}
               value={Math.round(node.x)}
               onChange={e => setNodes(prev => prev.map(n => n.id === node.id ? { ...n, x: Number(e.target.value) } : n))}
             />
@@ -559,7 +559,7 @@ Content-Type: application/json
             <input
               type="number"
               className="w-full rounded p-1.5 text-sm text-gray-300 border border-white/10 focus:outline-none"
-              style={{ background: '#0d1117' }}
+              style={{ background: 'var(--surface-base)' }}
               value={Math.round(node.y)}
               onChange={e => setNodes(prev => prev.map(n => n.id === node.id ? { ...n, y: Number(e.target.value) } : n))}
             />
@@ -570,9 +570,9 @@ Content-Type: application/json
   }
 
   return (
-    <div className="flex flex-col h-full w-full" style={{ background: '#0d1117', color: '#e6edf3' }}>
+    <div className="flex flex-col h-full w-full" style={{ background: 'var(--surface-base)', color: 'var(--text-body)' }}>
       {/* ——— Toolbar (horizontally scrollable so every action stays reachable on a phone) ——— */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 flex-shrink-0 overflow-x-auto no-scrollbar" style={{ background: '#161b22' }}>
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 flex-shrink-0 overflow-x-auto no-scrollbar" style={{ background: 'var(--surface-card)' }}>
         <div className="flex rounded-lg overflow-hidden border border-white/10 flex-shrink-0">
           {(['whatsapp', 'telegram', 'both'] as Platform[]).map(p => (
             <button
@@ -608,7 +608,7 @@ Content-Type: application/json
         <div
           ref={canvasRef}
           className="flex-1 overflow-auto relative"
-          style={{ background: '#0d1117', cursor: dragging.current ? 'grabbing' : 'default' }}
+          style={{ background: 'var(--surface-base)', cursor: dragging.current ? 'grabbing' : 'default' }}
           onPointerMove={handleCanvasPointerMove}
           onPointerUp={handleCanvasPointerUp}
           onPointerLeave={handleCanvasPointerUp}
@@ -680,7 +680,7 @@ Content-Type: application/json
                 >
                   <div
                     className={`w-full h-full rounded-lg border-2 flex flex-col justify-center px-3 select-none transition-all ${cfg.border} ${isSelected ? 'ring-2 ring-white/40' : ''} ${isConnectTarget ? 'ring-2 ring-emerald-400/70' : ''}`}
-                    style={{ background: '#161b22', borderColor: isConnectSource ? '#34d399' : (isSelected ? cfg.color : cfg.color + '66') }}
+                    style={{ background: 'var(--surface-card)', borderColor: isConnectSource ? '#34d399' : (isSelected ? cfg.color : cfg.color + '66') }}
                   >
                     <div className="flex items-center gap-1.5">
                       <div className="flex-shrink-0" style={{ color: cfg.color }}>{cfg.icon}</div>
@@ -742,7 +742,7 @@ Content-Type: application/json
         </div>
 
         {/* Desktop properties (hidden on mobile — the mobile sheet below takes over) */}
-        <div className="hidden md:flex w-[280px] flex-shrink-0 border-l border-white/10 flex-col overflow-y-auto" style={{ background: '#161b22' }}>
+        <div className="hidden md:flex w-[280px] flex-shrink-0 border-l border-white/10 flex-col overflow-y-auto" style={{ background: 'var(--surface-card)' }}>
           {editorOpen && selectedNode ? renderProperties(selectedNode) : (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-6">
               <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center">
@@ -757,7 +757,7 @@ Content-Type: application/json
 
       {/* ——— Mobile properties sheet (opens only via the toolbar's Edit / a double-tap) ——— */}
       {editorOpen && selectedNode && (
-        <div className="md:hidden flex-shrink-0 border-t border-white/10 max-h-[42vh] overflow-y-auto" style={{ background: '#161b22' }}>
+        <div className="md:hidden flex-shrink-0 border-t border-white/10 max-h-[42vh] overflow-y-auto" style={{ background: 'var(--surface-card)' }}>
           <div className="flex items-center justify-between px-4 pt-3">
             <span className="text-xs text-gray-500 uppercase tracking-wider">Edit node</span>
             <button onClick={() => setEditorOpen(false)} className="text-gray-500 hover:text-white" aria-label="Close editor"><X size={16} /></button>
@@ -767,13 +767,13 @@ Content-Type: application/json
       )}
 
       {/* ——— Node palette FOOTER (moved from the old left sidebar; horizontal scroll) ——— */}
-      <div className="flex-shrink-0 border-t border-white/10 overflow-x-auto no-scrollbar flex items-stretch gap-2 px-3 py-2.5" style={{ background: '#161b22' }}>
+      <div className="flex-shrink-0 border-t border-white/10 overflow-x-auto no-scrollbar flex items-stretch gap-2 px-3 py-2.5" style={{ background: 'var(--surface-card)' }}>
         {(Object.entries(nodeConfig) as [NodeType, typeof nodeConfig[NodeType]][]).map(([type, cfg]) => (
           <button
             key={type}
             onClick={() => addNode(type)}
             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 hover:border-white/25 active:scale-95 text-left transition-all flex-shrink-0"
-            style={{ background: '#0d1117' }}
+            style={{ background: 'var(--surface-base)' }}
             title={`Add ${cfg.label} — ${cfg.desc}`}
           >
             <div className="w-7 h-7 rounded flex items-center justify-center flex-shrink-0" style={{ background: cfg.color + '33', color: cfg.color }}>
@@ -790,7 +790,7 @@ Content-Type: application/json
       {/* ——— GO LIVE — real Telegram / WhatsApp connect ——— */}
       {showConnect && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="rounded-xl border border-white/10 p-6 w-full max-w-[480px] max-h-[85vh] overflow-y-auto flex flex-col gap-4" style={{ background: '#161b22' }}>
+          <div className="rounded-xl border border-white/10 p-6 w-full max-w-[480px] max-h-[85vh] overflow-y-auto flex flex-col gap-4" style={{ background: 'var(--surface-card)' }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Rocket size={16} className="text-emerald-400" />
@@ -827,7 +827,7 @@ Content-Type: application/json
                     <div key={label} className="flex flex-col gap-1">
                       <span className="text-[10px] text-gray-500 uppercase tracking-wider">{label}</span>
                       <div className="flex gap-1.5">
-                        <input readOnly value={value} className="flex-1 rounded-lg p-2 text-xs text-gray-200 border border-white/10 font-mono" style={{ background: '#0d1117' }} />
+                        <input readOnly value={value} className="flex-1 rounded-lg p-2 text-xs text-gray-200 border border-white/10 font-mono" style={{ background: 'var(--surface-base)' }} />
                         <button onClick={() => copyField(label, value)} className="px-2 rounded-lg border border-white/10 text-gray-400 hover:text-white">{copiedField === label ? <Check size={12} /> : <Copy size={12} />}</button>
                       </div>
                     </div>
@@ -845,7 +845,7 @@ Content-Type: application/json
                 <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-white transition-colors">
                   <ExternalLink size={13} /> Open @BotFather to get your token
                 </a>
-                <input value={tgToken} onChange={e => setTgToken(e.target.value)} placeholder="Paste your Telegram bot token here" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
+                <input value={tgToken} onChange={e => setTgToken(e.target.value)} placeholder="Paste your Telegram bot token here" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: 'var(--surface-base)' }} />
                 {connErr && <p className="text-xs text-red-400">{connErr}</p>}
                 <button onClick={goLive} disabled={connBusy || !tgToken.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-2">
                   {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect &amp; Go Live</>}
@@ -858,8 +858,8 @@ Content-Type: application/json
                 <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-white transition-colors">
                   <ExternalLink size={13} /> Open Meta App Dashboard (WhatsApp → API Setup)
                 </a>
-                <input value={waToken} onChange={e => setWaToken(e.target.value)} placeholder="WhatsApp permanent access token" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
-                <input value={waPhoneId} onChange={e => setWaPhoneId(e.target.value)} placeholder="Phone Number ID" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: '#0d1117' }} />
+                <input value={waToken} onChange={e => setWaToken(e.target.value)} placeholder="WhatsApp permanent access token" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: 'var(--surface-base)' }} />
+                <input value={waPhoneId} onChange={e => setWaPhoneId(e.target.value)} placeholder="Phone Number ID" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: 'var(--surface-base)' }} />
                 {connErr && <p className="text-xs text-red-400">{connErr}</p>}
                 <button onClick={goLive} disabled={connBusy || !waToken.trim() || !waPhoneId.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-2">
                   {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect</>}
@@ -877,7 +877,7 @@ Content-Type: application/json
       {/* ——— Simulator Modal ——— */}
       {showSimulator && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="rounded-xl border border-white/10 flex flex-col w-full max-w-[380px] max-h-[80vh]" style={{ background: '#161b22' }}>
+          <div className="rounded-xl border border-white/10 flex flex-col w-full max-w-[380px] max-h-[80vh]" style={{ background: 'var(--surface-card)' }}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
@@ -905,7 +905,7 @@ Content-Type: application/json
                   )}
                   <div
                     className={`max-w-[75%] rounded-xl px-3 py-2 text-xs leading-relaxed ${msg.role === 'user' ? 'text-white rounded-br-sm' : 'text-gray-200 rounded-bl-sm'}`}
-                    style={{ background: msg.role === 'user' ? '#1d4ed8' : '#0d1117' }}
+                    style={{ background: msg.role === 'user' ? '#1d4ed8' : 'var(--surface-base)' }}
                   >
                     {msg.text}
                   </div>
@@ -926,7 +926,7 @@ Content-Type: application/json
                       key={i}
                       onClick={() => opt.nextId ? simChoose(opt.nextId, opt.label) : undefined}
                       className="w-full py-2 px-3 rounded-lg border border-green-500/40 text-xs text-green-300 hover:bg-green-500/10 transition-colors text-left"
-                      style={{ background: '#0d1117' }}
+                      style={{ background: 'var(--surface-base)' }}
                     >
                       {opt.label}
                     </button>
@@ -938,7 +938,7 @@ Content-Type: application/json
                 <div className="flex gap-2">
                   <input
                     className="flex-1 rounded-lg px-3 py-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
-                    style={{ background: '#0d1117' }}
+                    style={{ background: 'var(--surface-base)' }}
                     placeholder="Type a message..."
                     onKeyDown={e => {
                       if (e.key === 'Enter') {

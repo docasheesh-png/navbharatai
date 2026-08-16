@@ -73,7 +73,7 @@ export function AppHealthMonitor() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [isLive, refresh]);
 
-  const containerStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', height: '100%', background: '#0f172a', color: '#e2e8f0', fontFamily: 'sans-serif' };
+  const containerStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', height: '100%', background: '#0f172a', color: 'var(--text-body)', fontFamily: 'sans-serif' };
   const cardStyle: React.CSSProperties = { background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '14px 16px' };
 
   const operational = !!health && health.status === 'ok' && health.ready;
@@ -93,19 +93,19 @@ export function AppHealthMonitor() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <HeartPulse size={20} color="#ef4444" />
           <div>
-            <span style={{ fontWeight: 600, fontSize: 15, color: '#f1f5f9' }}>App Health Monitor</span>
+            <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-body)' }}>App Health Monitor</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
               <div style={{ width: 6, height: 6, borderRadius: '50%', background: headlineColor, animation: isLive && !error ? 'pulse 2s infinite' : 'none' }} />
               <span style={{ color: headlineColor, fontSize: 11 }}>{headlineText}</span>
-              {lastUpdated && <span style={{ color: '#475569', fontSize: 10 }}>· Updated {lastUpdated.toLocaleTimeString()}</span>}
+              {lastUpdated && <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>· Updated {lastUpdated.toLocaleTimeString()}</span>}
             </div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <button onClick={() => refresh()} title="Refresh now" style={{ padding: '5px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11, background: '#334155', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button onClick={() => refresh()} title="Refresh now" style={{ padding: '5px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11, background: '#334155', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
             <RefreshCw size={11} /> Refresh
           </button>
-          <button onClick={() => setIsLive(p => !p)} style={{ padding: '5px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11, background: isLive ? '#052e16' : '#334155', color: isLive ? '#4ade80' : '#94a3b8', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button onClick={() => setIsLive(p => !p)} style={{ padding: '5px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11, background: isLive ? '#052e16' : '#334155', color: isLive ? '#4ade80' : 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
             {isLive ? <><Wifi size={11} /> Auto</> : <><RefreshCw size={11} /> Paused</>}
           </button>
         </div>
@@ -118,13 +118,13 @@ export function AppHealthMonitor() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f87171', fontWeight: 600, fontSize: 13 }}>
               <AlertTriangle size={16} /> Health endpoint unreachable
             </div>
-            <p style={{ fontSize: 12, color: '#94a3b8', margin: '6px 0 0' }}>{error}</p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0 0' }}>{error}</p>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
             <div style={{ ...cardStyle, borderLeft: `3px solid ${operational ? '#10b981' : '#f59e0b'}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                <span style={{ color: '#64748b', fontSize: 11 }}>Platform Status</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Platform Status</span>
                 <CheckCircle2 size={16} color={operational ? '#10b981' : '#f59e0b'} />
               </div>
               <div style={{ fontSize: 18, fontWeight: 700, color: operational ? '#10b981' : '#f59e0b' }}>
@@ -133,16 +133,16 @@ export function AppHealthMonitor() {
             </div>
             <div style={{ ...cardStyle, borderLeft: '3px solid #3b82f6' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                <span style={{ color: '#64748b', fontSize: 11 }}>Server Uptime</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Server Uptime</span>
                 <Clock size={16} color="#3b82f6" />
               </div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: '#e2e8f0' }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-body)' }}>
                 {loading || !health ? '…' : formatUptime(health.uptimeSeconds)}
               </div>
             </div>
             <div style={{ ...cardStyle, borderLeft: `3px solid ${health?.ready ? '#10b981' : '#f59e0b'}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                <span style={{ color: '#64748b', fontSize: 11 }}>Readiness</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Readiness</span>
                 <Server size={16} color={health?.ready ? '#10b981' : '#f59e0b'} />
               </div>
               <div style={{ fontSize: 18, fontWeight: 700, color: health?.ready ? '#10b981' : '#f59e0b' }}>
@@ -156,17 +156,17 @@ export function AppHealthMonitor() {
         <div style={{ ...cardStyle }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <Activity size={15} color="#3b82f6" />
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9' }}>Detailed App Telemetry</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-body)' }}>Detailed App Telemetry</span>
           </div>
-          <p style={{ fontSize: 12, color: '#94a3b8', margin: 0, lineHeight: 1.6 }}>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, lineHeight: 1.6 }}>
             Live per-app metrics (latency histograms, error rate, CPU/memory, request volume, incident
             history) require a deployment with telemetry connected. This isn't wired for your app yet —
             so nothing is shown here rather than placeholder numbers. The status above is the real
             platform liveness signal from <code style={{ color: '#cbd5e1' }}>/api/health</code>.
           </p>
-          <p style={{ fontSize: 11, color: '#64748b', margin: '8px 0 0' }}>
+          <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '8px 0 0' }}>
             Administrators can view live build, provider and composite health scores at
-            <code style={{ color: '#94a3b8' }}> /api/admin/health-score</code>.
+            <code style={{ color: 'var(--text-muted)' }}> /api/admin/health-score</code>.
           </p>
         </div>
       </div>

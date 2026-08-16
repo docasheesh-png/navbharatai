@@ -749,7 +749,7 @@ ${generatedCode}
 
               {/* Save into the user's real app. Until now the imported design could only be copied
                   by hand — the Figma fetch was real, but nothing it produced could be kept. */}
-              <div className="flex-shrink-0 border-b border-white/10" style={{ background: '#161b22' }}>
+              <div className="flex-shrink-0 border-b border-white/10" style={{ background: 'var(--surface-card)' }}>
                 <div className="px-4 pt-3 text-sm font-semibold text-gray-200 flex items-center gap-2">
                   <Save size={14} className="text-[#a259ff]" /> Save this design into your app
                 </div>

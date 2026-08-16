@@ -19,11 +19,18 @@ import { join } from 'path';
  */
 
 const css = readFileSync(join(process.cwd(), 'src/styles/theme-compat.css'), 'utf8');
-const srcFiles = () => {
+const sh = (cmd: string) => {
   const { execSync } = require('child_process') as typeof import('child_process');
-  return execSync('grep -rohE "(text|bg|border)-white/[0-9]+" src/ --include="*.tsx" || true', { encoding: 'utf8' })
-    .split('\n').map((s) => s.trim()).filter(Boolean);
+  return execSync(cmd, { encoding: 'utf8' }).split('\n').map((s) => s.trim()).filter(Boolean);
 };
+const srcFiles = () => sh('grep -rohE "(text|bg|border)-white/[0-9]+" src/ --include="*.tsx" || true');
+/** Every white utility carrying a state variant — hover:, focus:, active:, group-hover:. */
+const variantClasses = () => [...new Set(sh(
+  'grep -rohE "(hover|focus|active|group-hover|focus-within|disabled|peer-focus|focus-visible):' +
+  '(text|bg|border|divide|ring|placeholder)-white(/[0-9]+)?" src/ --include="*.tsx" || true'))];
+/** Divider / ring / placeholder / gradient families, which are white literals too. */
+const otherFamilies = () => [...new Set(sh(
+  'grep -rohE "(divide|ring|placeholder|from|via|to)-white(/[0-9]+)?" src/ --include="*.tsx" || true'))];
 
 describe('every white-alpha utility the app actually uses is remapped', () => {
   it('no used step is left behind — that is how the bug happened the first time', () => {
@@ -57,5 +64,43 @@ describe('every white-alpha utility the app actually uses is remapped', () => {
       if (m && m[2] !== m[3]) bad.push(line.trim());
     }
     expect(bad).toEqual([]);
+  });
+});
+
+describe('the SAME gap in its other hiding places (swept 2026-08-16)', () => {
+  it('every STATE VARIANT is remapped — a hover is a different class, and this file knew that', () => {
+    /**
+     * `.hover\:text-white:hover` compiles to `color: #fff` and is a different selector from
+     * `.text-white`, so it escaped every remap. On a light theme, hovering 383 elements turned their
+     * text WHITE ON WHITE — the label vanished under the cursor. This file had already learned the
+     * lesson once for `hover:bg-zinc-800` (its own comment says so); it was never applied to white.
+     *
+     * Verified live in Chromium: on light, hover now resolves to rgb(15,23,42); on dark it still
+     * resolves to rgb(255,255,255) — the exact colour it always was.
+     */
+    const missing = variantClasses().filter((cls) => {
+      // ONE backslash before ":" and "/" — that is how the class is written in the CSS file. Two
+      // (the first attempt) matches nothing and reports every class missing.
+      const esc = cls.replace(/:/g, '\\:').replace(/\//g, '\\/');
+      return !css.includes(`.${esc}`);
+    });
+    expect(missing.sort(), 'these turn white-on-white when hovered in a light theme').toEqual([]);
+  });
+
+  it('dividers, rings, placeholders and gradient stops are remapped too', () => {
+    const missing = otherFamilies().filter((cls) => {
+      const esc = cls.replace(/\//g, '\\/');
+      return !css.includes(`.${esc}`);
+    });
+    expect(missing.sort()).toEqual([]);
+  });
+
+  it('group-hover targets the GROUP, not itself — a plain :hover here would never fire', () => {
+    expect(css).toMatch(/html\[data-theme\] \.group:hover \.group-hover/);
+  });
+
+  it('black scrims are deliberately NOT remapped — a dimming overlay stays dark in every theme', () => {
+    // 193 usages of bg-black/N, almost all modal scrims. "Fixing" them would break what is correct.
+    expect(css).not.toMatch(/\.bg-black\\\/\d+\s*\{/);
   });
 });

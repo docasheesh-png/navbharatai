@@ -33278,3 +33278,34 @@ comparing the raw numbers reports a false mismatch. And a contrast ratio compute
 ancestor's background is meaningless; the screenshots were the reliable check.
 
 Gate: tsc ✓ tsc -p server ✓ vitest **1272 files / 15746 tests** ✓ build ✓
+
+### Full-app sweep for siblings of the light-theme bug (admin: "puri app ko wapas se scan karo")
+
+Scanned every hardcoded-white/dark style the theme layer might not reach. Findings, with the honest
+verdict on each:
+
+| # | Gap | Usages | Effect in a light theme | Fixed |
+|---|---|---|---|---|
+| 1 | **State variants** — `hover:text-white` (383), `hover:bg-white/N` (265), `hover:border-white/N`, `active:`, `focus:`, `group-hover:` | **704** | Text went **white-on-white under the cursor**; hover/press feedback invisible | ✅ |
+| 2 | `divide-white/N`, `ring-white/N`, `placeholder-white/N`, `from-white/N` | 38 | Invisible separators, focus rings, input placeholders | ✅ |
+| 3 | Inline `style={{ background: '#0d1117' }}` and friends | **229** | Stays dark in a light theme | ❌ **impossible in CSS** — see below |
+| 4 | `bg-black/N` | 193 | — | ⛔ **deliberately not touched** |
+| 5 | Unremapped hexes (`#58a6ff`, `#a259ff`, `#ff8080`) | ~14 | — | ⛔ brand colours, correct as-is |
+
+**#1 is the sharpest, and this file had ALREADY learned the lesson:** `theme-compat.css` carries a
+comment saying in as many words that `hover:bg-zinc-800` is a DIFFERENT class from `bg-zinc-800` and
+therefore escapes the remap — it was simply never applied to the white utilities. **Verified live in
+Chromium, both themes:** on light, hover now resolves to `rgb(15,23,42)`; on dark it still resolves to
+`rgb(255,255,255)` — the exact colour it always was. `group-hover` correctly targets `.group:hover`,
+not the element's own `:hover`, which would never fire.
+
+**#4 is NOT a bug and was left alone on purpose.** Those 193 `bg-black/N` are almost all modal
+scrims, and a dimming scrim SHOULD stay dark in a light theme. "Fixing" it would break what is
+already correct — pinned by a test so a future sweep does not helpfully break it.
+
+**#3 IS AN OPEN ROOT CAUSE (rule 6).** 229 inline style colours cannot be overridden by any
+stylesheet — CSS loses to inline styles without `!important`, and blanket-!important would be worse
+than the disease. They need per-component edits (read the colour from the theme vars instead of a
+literal). Recorded here rather than half-fixed; the admin has been told plainly.
+
+Gate: tsc ✓ tsc -p server ✓ vitest **1272 files / 15750 tests** ✓ build ✓

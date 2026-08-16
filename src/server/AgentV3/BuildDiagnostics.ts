@@ -1502,6 +1502,12 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   // fixed for PREVIEW_NOT_RENDERED and then reintroduced by a new code — which is why the fix belongs
   // in this set rather than at the gate's call site.
   'RELEASE_GATE',
+  // A STATEMENT ABOUT THE SUMMARY IS NOT A CAUSE OF THE BUILD (build 4b744bef). The claim audit reads
+  // the reply the model wrote; whatever it finds there, it cannot be why anything happened. It became
+  // the headline rootCause of a successful import — and on that run it was also FALSE (see
+  // `sourceIsWholeApp` in claimAudit.ts), so the admin's one-line verdict on a turn that worked was that
+  // the platform had caught its own AI lying. Exactly the same shape as RELEASE_GATE directly above.
+  'CLAIM_UNSUPPORTED',
 ]);
 
 /**

@@ -346,6 +346,41 @@ export function stripAnsi(text: string): string {
 }
 
 /**
+ * The name of an executable the shell could not find, or null. THE single definition of that question.
+ *
+ * ROOT CAUSE (admin report 2026-08-16, build 4b744bef). The app's start script is
+ * `concurrently "npm run server" "vite"`, `concurrently` was not installed, and the log said exactly
+ * that — on its fourth line: `sh: 1: concurrently: not found`. The platform answered "The dev server did
+ * not start and the log had no recognisable error", restarted the identical command twice, and gave up.
+ * A missing binary cannot appear by itself, so both recovery attempts were spent on a certainty.
+ *
+ * TWO INDEPENDENT REASONS IT WAS INVISIBLE, both the same class: (1) the classifier tested
+ * `/command not found/` — BASH's wording, while this sandbox's shell is `sh` (dash), which says
+ * `sh: 1: NAME: not found` with no "command" in it; (2) its other test was a hardcoded list
+ * (vite|next|tsc|tsx|node|npm), and a start script may run any binary (concurrently, nodemon, turbo…).
+ * `devServerRunnerMissing` in this very file already matched dash correctly — two siblings, one truth,
+ * separate patterns. Both now call this. The generic sibling of `sh: 1: tsx: not found` from 5b4f9b63.
+ *
+ * PRECISION: the name must look like a command (no spaces/metacharacters) and the `NAME:` colon is
+ * required, so prose like "the file was not found" cannot match. PURE.
+ */
+export function missingBinaryFromLog(log: string): string | null {
+  const text = stripAnsi(log || '').slice(-8000);
+  // Three real shapes, in one pass:
+  //   dash  — "sh: 1: concurrently: not found"        (this sandbox)
+  //   bash  — "bash: vite: command not found" / "/bin/sh: createdb: command not found"
+  //   bare  — "next: command not found"
+  const re = /(?:^|\n)[^\n]{0,80}?(?:^|[\s:/])([A-Za-z0-9._@/-]{1,64}):\s*(?:command\s+)?not found\b/gim;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const name = m[1].replace(/^.*\//, ''); // "/usr/bin/foo" → "foo"
+    // A shell prefix or a line number is the frame, never the answer.
+    if (/^(?:sh|bash|dash|zsh|env|\d+)$/i.test(name)) continue;
+    return name;
+  }
+  return null;
+}
+
+/**
  * The unresolved import specifier + the file that imported it, from an esbuild/Vite resolution error.
  *
  * WHY THE IMPORTER MATTERS (mitrify autopsy 2026-08-04): "Could not resolve" means two completely
@@ -426,8 +461,13 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
     return make('db_client_missing', `A script runs \`${tool}\`, which is not installed here — the preview's PostgreSQL ships the server only, with no command-line tools. Run this step through the database client the app already depends on (pg / Prisma / Drizzle) instead of shelling out to \`${tool}\`; installing packages cannot provide it.`);
   }
 
-  if (/\b(?:vite|next|tsc|tsx|node|npm)\b\s*:\s*(?:command\s+)?not found/i.test(text) || /command not found/i.test(text)) {
-    return make('missing_module', 'A required CLI was not found — reinstalling dependencies and restarting.');
+  // 3.6) ANY missing executable, named. See missingBinaryFromLog — this used to be a hardcoded list of
+  //    six tool names plus a `/command not found/` test, and the sandbox's shell is `sh` (dash), which
+  //    says "sh: 1: concurrently: not found" with no "command" in it. So a binary off the list was
+  //    invisible twice over (build 4b744bef).
+  const missingBin = missingBinaryFromLog(text);
+  if (missingBin) {
+    return make('missing_module', `\`${missingBin}\` is not installed — the app's start script runs it, but it is not in node_modules. Reinstalling dependencies (including devDependencies) and restarting.`);
   }
 
   // 2.5) Database not reachable — the app's Postgres isn't running in the sandbox (Prisma P1001, or a raw
@@ -665,11 +705,12 @@ export function planDevServerRecovery(log: string, attempt: number, maxAttempts:
  * Pure.
  */
 export function devServerRunnerMissing(log: string): boolean {
-  const text = (log || '').slice(-8000);
-  // "sh: 1: vite: not found" / "vite: command not found" / "next: not found" — the RUNNER binary,
-  // not a generic module (a missing npm module is handled by the missing_module reinstall path).
-  return /\b(vite|next|nuxt|astro|remix|react-scripts|vue-cli-service|ng|webpack|parcel|tsx|node)\b\s*:\s*(?:command\s+)?not\s+found/i.test(text)
-    || /sh:\s*\d+:\s*[\w./-]+:\s*not\s+found/i.test(text);
+  // ONE definition of "a binary was not found", shared with the classifier. These two functions used to
+  // carry SEPARATE patterns and drifted: this one already knew dash's `sh: 1: X: not found` shape while
+  // classifyDevServerFailure matched only bash's `command not found` against a hardcoded list of six
+  // names. So the health check could correctly refuse to trust the port (this function) and, in the very
+  // same breath, report "the log had no recognisable error" (that one). See missingBinaryFromLog.
+  return missingBinaryFromLog(log) !== null;
 }
 
 export function devServerHealthLine(portUp: boolean, port: number, diagnosis?: DevServerDiagnosis): string {

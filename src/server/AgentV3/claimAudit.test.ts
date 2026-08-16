@@ -214,6 +214,52 @@ describe('a claim of delivery, weighed against what was written', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// THE FALSE ACCUSATION (admin report 2026-08-16, build 4b744bef). The user asked to import a repo and
+// survey it — "do not change any files yet". The engine obeyed, read the project, and wrote a CORRECT
+// survey naming src/main.tsx, AuthContext, ProductList, server/db.ts — all real files in that repo.
+// But `sourceText` is built from the files the turn WROTE, and an import/survey turn writes almost
+// nothing (here: .env and .gitignore). So the check compared a true description against two config
+// files, declared "17 of the 19 things it described appear nowhere in this app's source", and that
+// accusation became the build's headline rootCause.
+//
+// This module's own header: "a false accusation of lying is worse than a missed one."
+describe('the fabrication check needs the app, and knows when it does not have it', () => {
+  const REAL_SURVEY = [
+    '**Entry:** `src/main.tsx` → `src/App.tsx`',
+    '- **State Management:** React Context (**AuthContext**) for JWT auth',
+    '- **Components:** **Login**, **Navigation**, **ProductList**, **AddProduct**, **Summary**',
+    '- **Server:** **server/index.ts**, **server/auth.ts**, **server/db.ts**',
+  ].join('\n');
+  // What an import/survey turn actually wrote: two config files, not the app.
+  const NOT_THE_APP = 'VITE_API_URL=\nDATABASE_URL=postgres://localhost/db\nnode_modules\ndist\n';
+
+  it('accuses nobody when the source we hold is plainly not the project (the reported failure)', () => {
+    const c = auditSummaryClaims(REAL_SURVEY, measured({ sourceText: NOT_THE_APP, sourceIsWholeApp: false }));
+    expect(c.map((x) => x.kind)).not.toContain('ui-described');
+  });
+
+  it('shows the accusation it WOULD have made — proving the guard is what stops it', () => {
+    const c = auditSummaryClaims(REAL_SURVEY, measured({ sourceText: NOT_THE_APP }));
+    expect(c.map((x) => x.kind)).toContain('ui-described');
+  });
+
+  it('still catches a real fabrication on a normal build, where the written files ARE the app', () => {
+    const invented = '**Health 100/100**\n**Level 1**\n**XP 0/100**\n**Location: Forest Path**\n**Inventory**\n**Game Log**';
+    const c = auditSummaryClaims(invented, measured({
+      sourceText: 'export default function Home(){return <div><button>Start</button></div>}',
+      sourceIsWholeApp: true,
+    }));
+    expect(c.map((x) => x.kind)).toContain('ui-described');
+  });
+
+  it('defaults to judging — an omitted flag must not silently disable the check', () => {
+    const invented = '**Health 100/100**\n**Level 1**\n**XP 0/100**\n**Location: Forest Path**\n**Inventory**\n**Game Log**';
+    const c = auditSummaryClaims(invented, measured({ sourceText: 'export default function Home(){return <div/>}' }));
+    expect(c.map((x) => x.kind)).toContain('ui-described');
+  });
+});
+
 describe('it is wired into the build', () => {
   const routes = require('fs').readFileSync(
     require('path').join(__dirname, '../routes/agentv3.ts'), 'utf8',
@@ -232,6 +278,12 @@ describe('it is wired into the build', () => {
     expect(routes).toContain('filesWritten: writtenFiles.size');
     expect(routes).toContain('buildWasRequested: userAskedToBuildAnApp');
     expect(routes).toContain("const userAskedToBuildAnApp = intent === 'new_build'");
+  });
+
+  it('the fabrication check is told when the written files are NOT the app', () => {
+    // Without this the check runs against an import/survey turn's two config files and accuses a
+    // correct survey of inventing the repo it just read (build 4b744bef).
+    expect(routes).toContain('sourceIsWholeApp: !isImportTurn');
   });
 
   it('the correction reaches the USER\'s summary, not just the admin report', () => {

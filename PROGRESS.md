@@ -33940,3 +33940,36 @@ without re-clicking. Wired at BOTH send paths (Enter + button) of ALL THREE chat
 Assistant (`AIChat`), Doctor AI (`SDAChat`), Professionals (`ProfessionalChat`) — since the same gap was
 in each (rule 3: fix the class, one implementation, no drift). +5 tests (mobile blurs, desktop doesn't,
 activeElement fallback, safe no-op with no window/matchMedia). Gate: tsc clean; full vitest green (15,916).
+
+---
+
+## 2026-08-16 — Landed PATCH 3/3 from a sibling session (build 4b744bef autopsy) — verified-not-blind
+
+The admin handed over a 3-commit patch from a sibling Opus 5 session (`claude/navbharatai-pro-testing-p2mgr5`)
+whose GitHub write access had expired (403) before it could push. Per the external-suggestion rule + safeguard
+#6, checked each fix against CURRENT `main` before touching anything:
+- **PATCH 1/3** (preview live-failover: `liveHealthy` / `noLiveRescueNotice`) — **ALREADY in `main`** (landed via
+  its own PR). Skipped.
+- **PATCH 2/3** (build 5b4f9b63: phantom-file `toDurableFileKey`/`normalizeFileMapKeys`, `userAskedToBuildAnApp`,
+  `app-delivered` claim, `npm audit fix` exit-1 + `DEPENDENCY_VULNERABILITIES` never-root-cause) — **ALL FOUR
+  ALREADY in `main`**. Skipped. (Blind-applying would have re-done six fixes and conflicted hard.)
+- **PATCH 3/3** (build 4b744bef: `concurrently: not found`) — **genuinely missing**, so ported it, adapted to
+  current line numbers/signatures, each hunk verified against live code:
+  1. **`missingBinaryFromLog`** (`DevServerRecovery.ts`) — ONE shared recogniser of "a binary was not found",
+     handling dash's `sh: 1: NAME: not found` (this sandbox's shell) not just bash's `command not found`, and
+     any binary not just a hardcoded six. `classifyDevServerFailure` now names the binary + recovery=`reinstall`;
+     `devServerRunnerMissing` delegates to it, so the two siblings can no longer disagree ("refuse the port" +
+     "no recognisable error" in one breath). Generic sibling of `sh: 1: tsx: not found`.
+  2. **`runsUnderMultiplexer`** (`devServerHost.ts`) — decline `--host`/`--port` flag injection when the resolved
+     `dev` script runs through `concurrently`/`npm-run-all`/`turbo run`; npm forwards our flags to the
+     MULTIPLEXER, not the vite inside it. Same bug as a pipe, one level down. Runtime port detection takes over.
+  3. **`sourceIsWholeApp`** (`claimAudit.ts`) + **`CLAIM_UNSUPPORTED` → `NEVER_ROOT_CAUSE`** (`BuildDiagnostics.ts`)
+     + wiring `sourceIsWholeApp: !isImportTurn` (`agentv3.ts`) — a survey/import turn writes almost nothing, so
+     judging its CORRECT description of the repo against `.env`/`.gitignore` produced a false "17 of 19 absent"
+     fabrication verdict that became the build's headline rootCause. The check now declines when what we hold is
+     not the app (defaults to judging, so a normal build is unchanged), and a statement-about-the-summary can
+     never be a cause.
+
+Tests ported faithfully (each was verified to fail against the old code by the original author): +11
+`missingBinaryFromLog`/classify, +4 `runsUnderMultiplexer`, +4 fabrication-guard + wiring, +1 CLAIM_UNSUPPORTED
+never-root-cause. Gate: `tsc --noEmit` + `tsc -p tsconfig.server.json` clean; full `vitest` green (15,937).

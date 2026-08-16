@@ -95,6 +95,29 @@ export function pipesOrChainsToAnotherCommand(command: string): boolean {
 }
 
 /**
+ * True when the resolved `dev` script runs its commands through a MULTIPLEXER — `concurrently`,
+ * `npm-run-all`, `run-p`/`run-s`, `turbo run`. A flag appended to such a script lands on the
+ * multiplexer, never on the dev server hiding inside it.
+ *
+ * THE SAME BUG AS A PIPE, ONE LEVEL DOWN (admin report 2026-08-16, build 4b744bef). The command we
+ * launch is a clean `npm run dev`, so `pipesOrChainsToAnotherCommand` sees nothing to worry about —
+ * but npm forwards trailing arguments to the SCRIPT, and that script was
+ * `concurrently "npm run server" "vite"`. The launch line came out as
+ * `concurrently "npm run server" "vite" --host 0.0.0.0 --port 5173 --strictPort`, so `concurrently`
+ * received the flags and `vite` — the process that needed them — got none. Vite would then bind its own
+ * default while the health check watched 5173, the identical cascade report 26a8e81c already paid for.
+ *
+ * The multiplexer's OWN sub-commands cannot be edited from here safely (rewriting a user's script is a
+ * much larger action than declining to append to it), so this is a decline: leave the command alone and
+ * let runtime port DETECTION find where the server really landed. PURE.
+ */
+export function runsUnderMultiplexer(resolvedScript?: string): boolean {
+  if (!resolvedScript) return false;
+  return /\b(?:concurrently|npm-run-all|run-p|run-s)\b/i.test(resolvedScript)
+    || /\bturbo\s+run\b/i.test(resolvedScript);
+}
+
+/**
  * Can an ENVIRONMENT PREFIX (`PORT=5173 …`, `HOST=0.0.0.0 …`) be safely attached to this command?
  *
  * This is a genuinely different question from `pipesOrChainsToAnotherCommand`, and conflating the
@@ -202,6 +225,9 @@ export function ensureHostBinding(command: string, framework?: DevFramework, res
   // Beyond this point every branch APPENDS A FLAG, which a pipeline or chain would land on the wrong
   // program (report 7773b4b0: `npm run dev | head` got `--host` appended onto `head`).
   if (pipesOrChainsToAnotherCommand(command)) return command;
+  // Runs through `concurrently`/`npm-run-all` — npm forwards our flags to the MULTIPLEXER, not to the
+  // dev server inside it (build 4b744bef). Same defect as a pipe, one level down. See runsUnderMultiplexer.
+  if (runsUnderMultiplexer(resolvedScript)) return command;
   // Next.js dev server.
   if (/\bnext\b/.test(command)) return `${command} -H 0.0.0.0`;
   // Vite invoked directly.
@@ -547,6 +573,9 @@ export function pinDevServerPort(command: string, port: number, framework?: DevF
   // Beyond this point every branch APPENDS A FLAG, which a pipeline or chain would land on the wrong
   // program (report 7773b4b0: `npm run dev | head` got `--port 3000 --strictPort` put onto `head`).
   if (pipesOrChainsToAnotherCommand(command)) return command;
+  // Same as above: a flag appended to a `concurrently`-based script never reaches the dev server, and
+  // a `--strictPort` that lands on the multiplexer is worse than none (build 4b744bef).
+  if (runsUnderMultiplexer(resolvedScript)) return command;
   if (/\bnext\b/.test(command) || framework === 'next') return `${command} -p ${port}`;
   const isPmDev = /\b(?:npm|pnpm|yarn|bun)\b.*\b(?:run\s+)?(?:dev|serve)\b/.test(command);
   // Vite (invoked directly, resolved from a script, or the unknown-framework default for a pm-run

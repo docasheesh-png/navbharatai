@@ -1392,6 +1392,22 @@ describe('a CVE advisory can never explain a build (build 5b4f9b63)', () => {
   });
 });
 
+// A STATEMENT ABOUT THE SUMMARY IS NOT A CAUSE OF THE BUILD (build 4b744bef). CLAIM_UNSUPPORTED reads
+// the reply the model wrote; whatever it finds there, it cannot be why anything happened — and on that
+// run it was FALSE (a correct survey judged against two config files). Same shape as RELEASE_GATE.
+describe('a claim-about-the-summary can never be the build root cause (build 4b744bef)', () => {
+  const claimUnsupported = {
+    ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'CLAIM_UNSUPPORTED',
+    message: '17 of the 19 things it described appear nowhere in this app\'s source.', autoResolved: false,
+  };
+
+  it('is never promoted to the root cause of a successful build', () => {
+    const rootCause = deriveRootCause({ issues: [claimUnsupported], ok: true, commands: [] });
+    expect(rootCause).not.toContain('described');
+    expect(rootCause).toBe('Build completed successfully with no problems recorded.');
+  });
+});
+
 // honestModelLabel — the report must name the model that ACTUALLY ran (autopsy 2026-07-27).
 // The reported build showed `model: "claude-sonnet-4-6"` while noClaude:true, builtBy:"KIMI" and
 // all 8 delivered turns were kimi-k2.5. Naming a model that never executed misdirects the one

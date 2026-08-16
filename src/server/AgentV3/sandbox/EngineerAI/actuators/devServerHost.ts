@@ -198,7 +198,21 @@ export function ensureHostBinding(command: string, framework?: DevFramework, res
  */
 /** The one-shot process-inspection/management commands from the fix below — never a dev-server
  *  start ON THEIR OWN, even when they reference "vite" as a filter/pattern argument. */
-const ONE_SHOT_PREFIX = /^\s*(?:pkill|pgrep|ps|kill|grep|netstat|lsof|fuser|ss|head|tail|wc|find|which|echo|cat)\b/i;
+/**
+ * Commands that CANNOT start a dev server, whatever words appear later in the line.
+ *
+ * Two layers guard this classifier, because one proved not to be enough. `stripShellPlumbing`
+ * (below) removes the redirection that caused the real incident; this list removes the whole
+ * QUESTION for a command whose name already answers it. `git` cannot start a dev server, so no
+ * amount of "dev", "serve" or "watch" further along the line should be able to make it look like
+ * one — not `git checkout -- server/dev.ts`, not `rm -rf .cache/dev`, not `sed -i s/serve/x/ f.ts`.
+ *
+ * The file-manipulating commands were added after the autopsy of build debc468c, where a
+ * `git checkout … 2>/dev/null` spent 95 seconds being treated as a dev-server launch. Only commands
+ * that cannot execute arbitrary code are listed — `npx`, `xargs`, `tee`, `bash` and `sh` are
+ * deliberately absent, since each really can start a server.
+ */
+const ONE_SHOT_PREFIX = /^\s*(?:pkill|pgrep|ps|kill|grep|netstat|lsof|fuser|ss|head|tail|wc|find|which|echo|cat|git|mkdir|rmdir|rm|cp|mv|touch|ln|chmod|sed|awk|diff|sort|uniq|cut|tr|basename|dirname|realpath|stat|printf|pwd|date)\b/i;
 
 /** True when a single command segment (no `;`/`&&`/`||` chaining left in it) itself starts a
  *  dev/preview server. Extracted so isLongRunningCommand can apply it PER-SEGMENT of a compound
@@ -248,6 +262,36 @@ function isDevServerInvocation(segment: string): boolean {
   );
 }
 
+/**
+ * Remove shell PLUMBING before a segment is judged for dev-server-ness.
+ *
+ * ROOT CAUSE THIS CLOSES (autopsy of build debc468c, 2026-08-16). The keyword test above is
+ * `/\b(?:dev|serve|watch|livereload)\b/`, and `/` is a non-word character on both sides of the
+ * `dev` in `2>/dev/null`. So **every command containing the single most common idiom in shell**
+ * was classified as a dev-server launch:
+ *
+ *     git checkout HEAD -- server/ensureSchema.ts 2>/dev/null   → "this starts a dev server"
+ *     ls -la 2>/dev/null                                        → "this starts a dev server"
+ *     mkdir -p src/pages 2>/dev/null                            → "this starts a dev server"
+ *
+ * The cost was not cosmetic. That path runs a dependency-staleness check, an `npm install` when
+ * package.json changed, port pinning, host binding, a backgrounded launch, a port wait, and up to
+ * two dev-server RESTART attempts. In the report that triggered this, a `git checkout` took
+ * **95 seconds** — and, far worse, the restart attempts tore down the app's ALREADY-RUNNING server,
+ * which is where the `EADDRINUSE: address already in use 0.0.0.0:5000` cascade came from. The
+ * platform was fighting its own app, on a command that only wanted to restore one file.
+ *
+ * The stripping is deliberately narrow — redirections and `/dev/` device paths only. Widening it to
+ * "ignore anything that looks like a path" would start hiding real launches like `bash ./dev.sh`.
+ */
+export function stripShellPlumbing(segment: string): string {
+  return segment
+    // `> /dev/null`, `2>/dev/null`, `&>>/dev/null`, `2>&1` — the redirection and its target both go.
+    .replace(/(?:\d*|&)>>?\s*(?:&\d|\/dev\/[a-z0-9]+|\S+)/gi, ' ')
+    // A bare device path used as an argument (`cat /dev/null`, `... < /dev/urandom`).
+    .replace(/(?:^|\s)<?\s*\/dev\/[a-z0-9]+/gi, ' ');
+}
+
 export function isLongRunningCommand(command: string): boolean {
   if (!command) return false;
   if (/^\s*(?:curl|wget)\b/.test(command)) return false;
@@ -265,7 +309,7 @@ export function isLongRunningCommand(command: string): boolean {
   // code path. So: a one-shot-prefixed segment's OWN text is never checked for a dev-server pattern,
   // but every OTHER segment still is — the whole command is long-running if ANY of those matches.
   const segments = command.split(/&&|\|\||;/);
-  return segments.some((seg) => !ONE_SHOT_PREFIX.test(seg) && isDevServerInvocation(seg));
+  return segments.some((seg) => !ONE_SHOT_PREFIX.test(seg) && isDevServerInvocation(stripShellPlumbing(seg)));
 }
 
 /**

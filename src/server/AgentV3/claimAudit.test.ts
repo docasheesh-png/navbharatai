@@ -149,6 +149,71 @@ describe('what the user is told', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// THE APP THAT WAS NEVER BUILT (admin report 2026-08-16, build 5b4f9b63 — "ab to choti moti apps bhi
+// nahi ban rahi hai"). The user asked for a to-do app. The engine globbed the workspace, saw a page
+// whose NAME matched, read three files, wrote NOTHING, and answered "Your to-do list app is complete
+// and ready!" with a table of ticks. Thirty minutes, thirty-one model calls, ok: true, zero files.
+// The dev server never came up, so every runtime check skipped and nothing was left to contradict it.
+describe('a claim of delivery, weighed against what was written', () => {
+  const zeroFiles = (o: Partial<MeasuredFacts> = {}): MeasuredFacts =>
+    measured({ filesWritten: 0, buildWasRequested: true, ...o });
+
+  it('catches the exact sentence the build shipped', () => {
+    const c = auditSummaryClaims('Your to-do list app is **complete and ready**! Here is what was built:', zeroFiles());
+    expect(c.map((x) => x.kind)).toContain('app-delivered');
+    expect(c.find((x) => x.kind === 'app-delivered')!.measured).toMatch(/not one file was created/i);
+  });
+
+  it('catches the more dangerous form — the one that explains away the missing work', () => {
+    const c = auditSummaryClaims('The app is already built with all the requested features!', zeroFiles());
+    expect(c.map((x) => x.kind)).toContain('app-delivered');
+  });
+
+  it('catches it in Hinglish too, since the engine mirrors the user’s language', () => {
+    const c = auditSummaryClaims('Aapka app taiyar hai — sab features kaam kar rahe hain.', zeroFiles());
+    expect(c.map((x) => x.kind)).toContain('app-delivered');
+  });
+
+  it('says nothing when files were actually written — the normal successful build', () => {
+    const c = auditSummaryClaims(
+      'Your to-do list app is complete and ready!',
+      measured({ filesWritten: 12, buildWasRequested: true }),
+    );
+    expect(c.map((x) => x.kind)).not.toContain('app-delivered');
+  });
+
+  it('says nothing on a question the user asked about an existing app', () => {
+    // "does it already have dark mode?" → "yes, the app is already built with it" is TRUE and writes
+    // nothing. Only a BUILD request makes a zero-file turn a failure.
+    const c = auditSummaryClaims(
+      'Yes — the app is already built with dark mode support.',
+      measured({ filesWritten: 0, buildWasRequested: false }),
+    );
+    expect(c.map((x) => x.kind)).not.toContain('app-delivered');
+  });
+
+  it('never accuses when the caller could not tell us the file count', () => {
+    const c = auditSummaryClaims('Your app is complete and ready!', measured({ buildWasRequested: true }));
+    expect(c.map((x) => x.kind)).not.toContain('app-delivered');
+  });
+
+  it('treats an INTENTION to build as no claim at all', () => {
+    for (const s of [
+      "I'll build you a clean, feature-rich to-do list app with all those capabilities.",
+      'Let me first check the current workspace structure and then create a focused plan.',
+      'Next I will build the category filter.',
+    ]) {
+      expect(auditSummaryClaims(s, zeroFiles()).map((x) => x.kind)).not.toContain('app-delivered');
+    }
+  });
+
+  it('corrects the user in their own summary, not only the admin report', () => {
+    const c = auditSummaryClaims('Your to-do list app is complete and ready!', zeroFiles());
+    expect(claimCorrection(c)).toMatch(/nothing was actually built/i);
+  });
+});
+
 describe('it is wired into the build', () => {
   const routes = require('fs').readFileSync(
     require('path').join(__dirname, '../routes/agentv3.ts'), 'utf8',
@@ -158,6 +223,15 @@ describe('it is wired into the build', () => {
     expect(routes).toContain('auditSummaryClaims(result.summary');
     expect(routes).toContain('consoleCaptured: runtimeCaptureAvailable');
     expect(routes).toContain("screenshotTaken: buildDiag.toolWasUsed('screenshot')");
+  });
+
+  it('the delivery claim is judged against the REAL write count and the user’s own request', () => {
+    // Both signals matter: writtenFiles.size is what actually happened, and userAskedToBuildAnApp is
+    // the intent captured BEFORE a non-empty workspace reclassified the turn as an edit. Wiring either
+    // one to a constant would make the check unable to fire on the build that motivated it.
+    expect(routes).toContain('filesWritten: writtenFiles.size');
+    expect(routes).toContain('buildWasRequested: userAskedToBuildAnApp');
+    expect(routes).toContain("const userAskedToBuildAnApp = intent === 'new_build'");
   });
 
   it('the correction reaches the USER\'s summary, not just the admin report', () => {

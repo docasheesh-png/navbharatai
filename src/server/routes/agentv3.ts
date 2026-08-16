@@ -891,10 +891,22 @@ export function shouldRetryEmptyBuild(opts: {
   existingProjectFiles: number;
   aborted: boolean;
   withinCostCap: boolean;
+  /**
+   * Did the USER ask for an app to be BUILT (before the non-empty workspace reclassified it as an
+   * edit)? See `userAskedToBuildAnApp` — the exemption below was written for "fix the server" /
+   * "why is this failing", not for "build me a to-do app".
+   */
+  userAskedToBuildAnApp?: boolean;
 }): boolean {
   if (!opts.expectsArtifacts || opts.filesWritten > 0 || opts.aborted || !opts.withinCostCap) return false;
-  // An edit on a project that already exists may legitimately change nothing.
-  if (opts.isEditMode && opts.existingProjectFiles > 0) return false;
+  // An edit on a project that already exists may legitimately change nothing…
+  // …UNLESS the user asked for an APP TO BE BUILT and only the workspace's existing contents turned
+  // that request into an "edit" (build 5b4f9b63). "Build a to-do list app" that writes zero files has
+  // produced nothing, whatever the turn was reclassified as — and answering it with "your app is
+  // complete and ready" is the failure mode this whole guard exists to prevent. The narrowing that
+  // protects the Shiv Medical Store case ("continue and fix the build" — a genuine edit, correctly
+  // finished without a write) is untouched: that request was never a new_build.
+  if (opts.isEditMode && opts.existingProjectFiles > 0 && !opts.userAskedToBuildAnApp) return false;
   return true;
 }
 
@@ -6063,6 +6075,24 @@ export function registerAgentV3Routes(app: Express): void {
         'classifyIntentSmart',
       );
     } catch { /* LLM upgrade is best-effort — keyword result stands */ }
+    /**
+     * WHAT THE USER ASKED FOR, captured BEFORE the workspace's state gets a vote.
+     *
+     * Every reclassification below is protective and correct — a build request must not bulldoze an
+     * existing app. But once `intent` becomes 'edit_existing', the engine's honesty guards read it as
+     * "the user asked me to edit", and an edit that changes nothing is legitimate. So a BUILD request
+     * that landed in a non-empty workspace inherited an exemption written for a different question.
+     *
+     * ROOT CAUSE (admin report 2026-08-16, build 5b4f9b63). "Build a to-do list app…" was typed into a
+     * workspace holding an unrelated 179-file imported project. The guard flipped it to an edit; the
+     * agent found a page whose name matched, wrote nothing, and answered "Your to-do list app is
+     * complete and ready!". `shouldRetryEmptyBuild` declined to retry — because an edit may legitimately
+     * change nothing — and the build finished `ok: true` with zero files written.
+     *
+     * This constant is the missing distinction: the reclassification still protects the user's app, and
+     * a zero-file outcome is still judged against what they actually asked for.
+     */
+    const userAskedToBuildAnApp = intent === 'new_build';
     // DETERMINISTIC SAFETY-NET (kept from the workspace-aware fix): even if the LLM is down/slow and
     // the keyword fallback returned new_build, a build-intent turn on a NON-empty project — with no
     // explicit "start over" — is an EDIT, never a rebuild-from-scratch. The smart classifier usually
@@ -10214,6 +10244,7 @@ export function registerAgentV3Routes(app: Express): void {
         existingProjectFiles: editFileTree?.length ?? 0,
         aborted: abort.signal.aborted,
         withinCostCap: costAfterFirstAttempt <= capUsd,
+        userAskedToBuildAnApp,
       })) {
         buildDiag.record({
           phase: 'build', severity: 'warning', code: 'EMPTY_BUILD_RETRY',
@@ -12287,6 +12318,12 @@ export function registerAgentV3Routes(app: Express): void {
           previewVerified: previewVerifiedRendered,
           // The app's real source — a label it does not contain cannot have been on the screen.
           sourceText: Array.from(writtenFiles.values()).join('\n'),
+          // "Your to-do list app is complete and ready" over ZERO written files (build 5b4f9b63). The
+          // cheapest honest check in the engine: a claim of delivery, weighed against what was written.
+          // It needs no preview and no browser, which is exactly why it is the one that still works on
+          // the builds where every runtime check skipped.
+          filesWritten: writtenFiles.size,
+          buildWasRequested: userAskedToBuildAnApp,
         });
         if (contradictions.length > 0) {
           result = { ...result, summary: `${result.summary}${claimCorrection(contradictions)}` };

@@ -948,6 +948,21 @@ describe('isExpectedNonzeroExit — routine non-zero exits that are NOT build fa
     expect(isExpectedNonzeroExit('vite build', 1)).toBe(false);
   });
 
+  // `npm audit fix` EXITS 1 WHEN VULNERABILITIES REMAIN — npm's documented behaviour, and the only exit
+  // it can give on a tree whose remaining advisories all need a breaking major upgrade. We deliberately
+  // never pass --force, so that exit is the expected ANSWER to the question we asked, not a failure of
+  // ours. Recorded as an error it became the headline root cause of build 5b4f9b63 — a build whose real
+  // problem was that it never built anything.
+  it('`npm audit fix` exit 1 (vulns remain, need --force) is routine, not a build failure', () => {
+    expect(isExpectedNonzeroExit('npm audit fix', 1)).toBe(true);
+    expect(isExpectedNonzeroExit('npm audit fix 2>&1', 1)).toBe(true);
+  });
+  it('but a crash from it (or a plain `npm audit`) still counts', () => {
+    expect(isExpectedNonzeroExit('npm audit fix', 2)).toBe(false);
+    expect(isExpectedNonzeroExit('npm audit fix', -1)).toBe(false);
+    expect(isExpectedNonzeroExit('npm audit', 1)).toBe(false); // a report, not a remediation we ran
+  });
+
   // Deep-test build #3 (2026-07-17): a single-FILE tsc probe ignores tsconfig → spurious TS17004 on a
   // clean app; it must never count as a build failure (or become rootCause). See isUnconfiguredTscFileProbe.
   it('a single-FILE tsc probe (ignores tsconfig → spurious JSX errors) is routine', () => {
@@ -1327,6 +1342,53 @@ describe('importTurnObservation (mitrify autopsy 2026-07-27)', () => {
     // The finding itself is NOT suppressed — only its promotion to rootCause.
     expect(real.message).toBe(MSG);
     expect(real.autoResolved).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// AN ADVISORY THAT *RECOMMENDS* A COMMAND IS NOT EVIDENCE THAT THE COMMAND'S FAILURE SURVIVED
+// (admin report 2026-08-16, build 5b4f9b63).
+//
+// `npm audit fix` exited 1 — its documented "some vulnerabilities need a breaking upgrade" answer. The
+// DEPENDENCY_VULNERABILITIES advisory in the same run contains the sentence "Running `npm audit fix`
+// applies the compatible fixes", so `failureHasSurvivingConsequence` matched the command's own name
+// inside the RECOMMENDATION, declined to forgive the failure, and made
+//   "$ npm audit fix → exit 1 (14s)"
+// the headline root cause of a thirty-minute build whose real problem was that it never built anything.
+// A CVE count is a finding about the user's dependencies; it is a consequence of nothing.
+describe('a CVE advisory can never explain a build (build 5b4f9b63)', () => {
+  const auditFailure = {
+    ts: 1, phase: 'build' as const, severity: 'error' as const, code: 'SANDBOX_CMD_FAILED',
+    message: '$ npm audit fix → exit 1 (14s)', autoResolved: false,
+  };
+  const cveAdvisory = {
+    ts: 2, phase: 'build' as const, severity: 'warning' as const, code: 'DEPENDENCY_VULNERABILITIES',
+    message: '8 known vulnerabilities in this app\'s dependencies (3 high, 5 moderate). Running `npm audit fix` applies the compatible fixes; it does not upgrade across a major version.',
+    autoResolved: false,
+  };
+
+  it('does not headline the very command the advisory told the build to run', () => {
+    const rootCause = deriveRootCause({ issues: [auditFailure, cveAdvisory], ok: true, commands: [] });
+    expect(rootCause).not.toContain('npm audit fix');
+  });
+
+  it('and the CVE count itself is never promoted to the cause either', () => {
+    const rootCause = deriveRootCause({ issues: [cveAdvisory], ok: true, commands: [] });
+    expect(rootCause).toBe('Build completed successfully with no problems recorded.');
+  });
+
+  it('a REAL surviving consequence still blocks forgiveness — the Mitrify db:push case stands', () => {
+    // `npm run db:push` failed and a still-unresolved, NON-advisory problem names it: the tables were
+    // never created. Forgiving that stamped a permanent failure as the build's one "self-heal".
+    const dbFailure = {
+      ts: 1, phase: 'build' as const, severity: 'error' as const, code: 'SANDBOX_CMD_FAILED',
+      message: '$ npm run db:push → exit 1 (3s)', autoResolved: false,
+    };
+    const consequence = {
+      ts: 2, phase: 'build' as const, severity: 'error' as const, code: 'DB_UNREACHABLE',
+      message: 'npm run db:push never created the tables — the app has no schema.', autoResolved: false,
+    };
+    expect(deriveRootCause({ issues: [dbFailure, consequence], ok: true, commands: [] })).toContain('db:push');
   });
 });
 

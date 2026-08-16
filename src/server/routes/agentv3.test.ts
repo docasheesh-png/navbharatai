@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, terminalConversationStatus, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild,
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, terminalConversationStatus, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, shouldRetryEmptyBuild, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild,
   postBuildCodeGateShouldRun,
 } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
@@ -1680,6 +1680,42 @@ describe('shouldRunIntegrityHeal (mitrify autopsy 2026-07-24) — never mutate f
     expect(shouldRunIntegrityHeal({ gateEnabled: false, resultOk: true, expectsArtifacts: true, aborted: false })).toBe(false);
     expect(shouldRunIntegrityHeal({ gateEnabled: true, resultOk: false, expectsArtifacts: true, aborted: false })).toBe(false);
     expect(shouldRunIntegrityHeal({ gateEnabled: true, resultOk: true, expectsArtifacts: true, aborted: true })).toBe(false);
+  });
+});
+
+// A BUILD REQUEST THAT WROTE NOTHING IS NOT AN "EDIT THAT CHANGED NOTHING" (admin report 2026-08-16,
+// build 5b4f9b63 — "ab to choti moti apps bhi nahi ban rahi hai"). "Build a to-do list app…" was typed
+// into a workspace holding an unrelated 179-file imported project. The non-empty-workspace guard flipped
+// it to an edit — correctly, so the request could not bulldoze the existing app — and that flip handed it
+// the exemption written for "fix the server" / "why is this failing". The agent found a page whose NAME
+// matched, wrote zero files, and answered "Your to-do list app is complete and ready!". No retry fired.
+describe('shouldRetryEmptyBuild — the reclassified build request', () => {
+  const base = {
+    expectsArtifacts: true, filesWritten: 0, isEditMode: true,
+    existingProjectFiles: 179, aborted: false, withinCostCap: true,
+  };
+
+  it('RETRIES when the user asked for an app and not one file was written (the reported failure)', () => {
+    expect(shouldRetryEmptyBuild({ ...base, userAskedToBuildAnApp: true })).toBe(true);
+  });
+
+  it('still exempts a genuine edit that legitimately changed nothing (Shiv Medical Store)', () => {
+    // "continue and fix the build so the app works end-to-end" — the agent diagnosed it, started the
+    // dev server, published a working preview and wrote nothing, because nothing needed to change.
+    // Re-running that whole build on a second model doubled a 15.6-minute, ₹567 build for no reason.
+    expect(shouldRetryEmptyBuild({ ...base, userAskedToBuildAnApp: false })).toBe(false);
+    expect(shouldRetryEmptyBuild(base)).toBe(false); // signal absent ⇒ old behaviour, unchanged
+  });
+
+  it('a NEW build on an empty workspace still retries, as it always did', () => {
+    expect(shouldRetryEmptyBuild({ ...base, isEditMode: false, existingProjectFiles: 0, userAskedToBuildAnApp: true })).toBe(true);
+  });
+
+  it('never retries when files WERE written, the user stopped it, or the cost cap is blown', () => {
+    expect(shouldRetryEmptyBuild({ ...base, filesWritten: 3, userAskedToBuildAnApp: true })).toBe(false);
+    expect(shouldRetryEmptyBuild({ ...base, aborted: true, userAskedToBuildAnApp: true })).toBe(false);
+    expect(shouldRetryEmptyBuild({ ...base, withinCostCap: false, userAskedToBuildAnApp: true })).toBe(false);
+    expect(shouldRetryEmptyBuild({ ...base, expectsArtifacts: false, userAskedToBuildAnApp: true })).toBe(false);
   });
 });
 

@@ -36,9 +36,25 @@ export interface MeasuredFacts {
   previewVerified: boolean;
   /** The app's own source, for checking a described UI against what exists. */
   sourceText?: string;
+  /**
+   * How many files this turn actually created or changed.
+   *
+   * ROOT CAUSE (admin report 2026-08-16, build 5b4f9b63 — "ab to choti moti apps bhi nahi ban rahi").
+   * The user asked for a to-do app. The engine globbed the workspace, saw a page whose NAME matched,
+   * read three files, wrote NOTHING, and replied "Your to-do list app is **complete and ready**!" with
+   * a table of ticks. Thirty minutes, thirty-one model calls, `ok: true`, zero files. The dev server
+   * never came up either, so every runtime check skipped and nothing else was left to contradict it.
+   *
+   * A claim of delivery is checkable without a preview, without a browser and without a model call:
+   * count what was written. This is the cheapest honest check in the engine and it is the one that
+   * was missing.
+   */
+  filesWritten?: number;
+  /** Did the USER ask for an app to be built or changed on this turn? (Not: "explain this code".) */
+  buildWasRequested?: boolean;
 }
 
-export type ClaimKind = 'console-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described';
+export type ClaimKind = 'console-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered';
 
 export interface ClaimContradiction {
   kind: ClaimKind;
@@ -54,6 +70,30 @@ const CONSOLE_CLEAN = /\b(no|zero|without any|free of)\s+(browser\s+)?console\s+
 const SCREENSHOT_SEEN = /\b(screenshot|screen shot)\b[^.]{0,40}\b(shows?|confirms?|verif|proves?)\b|\bverified[^.]{0,30}\bscreenshot\b|\bस्क्रीनशॉट\b/i;
 /** Phrases that assert the live preview renders. */
 const PREVIEW_RENDERS = /\b(preview|app)\s+(is\s+)?(now\s+)?(live|working|renders?|rendering)\b|\blive preview (is )?(working|up)\b/i;
+
+/**
+ * Phrases that assert the REQUESTED APP HAS BEEN DELIVERED.
+ *
+ * Two shapes, both taken from the real summary. "Your to-do list app is **complete and ready**" is the
+ * confident delivery claim; "The app is already built with all the requested features" is the more
+ * dangerous one, because it also explains away the absence of work. Hindi/Hinglish is included because
+ * the engine mirrors the user's language, so the same lie arrives in whichever one they typed.
+ *
+ * Deliberately NOT matched: "I'll build", "let me build", "building" — an intention is not a claim.
+ * Nor is a plan, a next-step list, or a question. The zero-file condition does most of the work here;
+ * these patterns only decide whether the reply CLAIMED anything at all.
+ */
+const APP_DELIVERED = new RegExp([
+  // "your … app is complete and ready" / "the app is done" / "the app is fully built"
+  /\b(?:app|application|website|site|dashboard|game)\b[^.!\n]{0,60}?\b(?:is|are)\b[^.!\n]{0,30}?\b(?:complete|completed|ready|done|finished|fully built|built and ready)\b/,
+  // "already built" / "already implemented" / "already has all the features"
+  /\balready\b[^.!\n]{0,30}?\b(?:built|implemented|complete|created|in place|has all)\b/,
+  // "all the requested features are implemented" / "everything you asked for is working"
+  /\b(?:all (?:the )?(?:requested )?features?|everything (?:you )?(?:asked|requested)[^.!\n]{0,20})\b[^.!\n]{0,40}?\b(?:implemented|delivered|built|working|present|done)\b/,
+  /\bfeatures?\s+delivered\b/,
+  // Hindi/Hinglish: "app ban gaya", "taiyar hai", "पूरा हो गया"
+  /\b(?:app|ऐप)\b[^.!\n]{0,30}?\b(?:ban gaya|ban gayi|taiyar|तैयार|बन गया|पूरा हो गया)\b/,
+].map((r) => r.source).join('|'), 'i');
 
 /**
  * UI labels the summary presents as things on the screen.
@@ -132,6 +172,17 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
       kind: 'preview-renders',
       claimed: 'that the live preview is working',
       measured: 'no browser check confirmed the preview rendering',
+    });
+  }
+
+  // THE APP THAT WAS NEVER BUILT (build 5b4f9b63). Requires all three, so it cannot fire on an honest
+  // turn: the user asked for a build, the summary claims one was delivered, and NOTHING was written.
+  // `filesWritten === undefined` means the caller could not tell us — silence is never an accusation.
+  if (facts.buildWasRequested === true && facts.filesWritten === 0 && APP_DELIVERED.test(text)) {
+    out.push({
+      kind: 'app-delivered',
+      claimed: 'that the app you asked for is built and ready',
+      measured: 'not one file was created or changed on this turn, so nothing was actually built',
     });
   }
 

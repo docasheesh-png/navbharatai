@@ -33516,3 +33516,97 @@ Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean �
 text fixes, the whole-card buttons and the remix-handoff fix. The app is bundled-mode, so those
 frontend changes reach installed users only through this bundle. Admin action: download the
 `navbharatai-release-aab` artifact and upload it to Play Console.
+## 2026-08-16 — AUTOPSY: build `5b4f9b63` ("Build a to-do list app…") — **the app was never built, and the engine said it was ready**
+
+**Report:** `ok: true` · 198 issues · 6 errors · 24 warnings · autoResolved 7 · unresolved 23 ·
+model `kimi-k2.5` (planned `claude-sonnet-4-6`) · builtBy KIMI (31/31 turns) · ~1811s (hit the
+30-minute wall) · rootCause reported as `$ npm audit fix → exit 1 (14s)`.
+
+### THE HEADLINE, stated plainly
+The user asked for a to-do app. The engine **wrote zero files** and replied
+*"Your to-do list app is **complete and ready**!"* with a table of ticks. The dev server never came
+up (`[health-check] dev server did not come up on port 5173 after automatic recovery`). The build
+still finished `ok: true`.
+
+Proof from the report's own tool timeline — between the first model call (245.9s) and the "complete
+and ready" answer (979.9s) the tool calls were: `update_todo, glob, read_file ×3, update_todo, bash,
+update_preview, bash ×8, update_preview, update_todo, bash`. **Not one `write_file` or `edit_file`.**
+The first `edit_file` in the entire build lands at 1494.3s and belongs to the post-answer integrity
+heal, editing files of a completely different app.
+
+### Why the workspace held a different app
+The workspace contained a previously-imported 179-file Replit project (`rest-express`: client/ +
+server/, drizzle, stripe, multer, nodemailer, xlsx). At 264s the agent globbed, saw a file named
+`todo-list.tsx`, and concluded *"I can see there's already a todo-list.tsx page built!"* — then
+*"The app is already built with all the requested features!"*.
+
+### 5-BUCKET LEDGER (honest counts)
+- ✅ **Self-healed — 7 claimed, 2 genuinely verified.** The `autoFocus` removal and the duplicate
+  `index.css` import were re-grepped afterwards (exit 1 = gone) — real. The third claimed fix
+  ("duplicate entry points") was a **false resolution of a false finding** (see ❌ below).
+- 🔀 **Worked around — 4.** `npm install` failed four times (exit 217 → 254 → 1 → 1) and was routed
+  around by `--legacy-peer-deps` / `--force`; `rm -rf node_modules` itself failed
+  (`Directory not empty` ×6) and the build carried on over a half-deleted tree.
+- ⏭️ **Skipped — the entire runtime verification suite.** No `RELEASE_GATE`, no `PREVIEW_*`, no
+  `RUNTIME_*`, no `JOURNEY_*`, no `FEATURE_COVERAGE` in 198 issues. They all need a live preview and
+  they all skip together — so on exactly the builds where something is most likely wrong, nothing is
+  checked. `CLAIM_UNSUPPORTED` did not fire either.
+- ❌ **Still broken — 4.** (1) The requested app does not exist. (2) `npm run build` → exit 127,
+  `sh: 1: tsx: not found`. (3) The dev server never started. (4) A **phantom file** —
+  `/home/user/workspace/src/main.tsx` — that `find` proves does not exist, reported as a duplicate
+  React root AND a third `index.css` importer.
+- 🥵 **Struggle — 3 stretches.** 234s before the first model call (`TIME_TO_FIRST_CALL`, longest
+  silent gap 60s); 1309s→1805s (**~8 minutes, 497s `POST_ANSWER_TIMING`**) hunting the phantom file —
+  one `ls` alone took **74.5s**; and the whole run hit the 30-minute cap.
+
+### MISSING SUBSYSTEM (step 2)
+**Nothing in the engine asks "did we actually produce what was requested?" without a preview.** Every
+delivery check is downstream of a live app, so a dead preview silently disables all of them at once.
+The cheapest honest check in the engine — *count what was written* — did not exist.
+
+### DNA-LEVEL FIXES (steps 3 + 5, the 50/50 law)
+1. **The phantom file — `WorkspaceFileStore` had no path normalization at all.** `toWorkspaceRelPath`
+   (whose own header warns about `/home/user/workspace/src/App.tsx` "easily produced by copying a
+   pwd/find result") was applied to the four ACTUATORS and stopped there. The durable store is the
+   OTHER door into a project's file map and stored whatever key it was handed — so one absolute key
+   became a file every analyzer believed in and the sandbox never had. **A phantom is worse than a
+   missing file: a missing file is noticed, a phantom is believed.** Fixed with `toDurableFileKey` +
+   `normalizeFileMapKeys` applied to `saveWorkspaceFiles`, `mergeWorkspaceFiles`, **and the read
+   path** — so every workspace that already carries one heals itself with no migration. `diffRemovedPaths`
+   now matches on the normalized path too, because a phantom was previously **undeletable**: the only
+   spelling the store knew was one no caller would ever type.
+2. **A build request that wrote nothing is not "an edit that changed nothing."** The non-empty-workspace
+   guard correctly flips `new_build` → `edit_existing` so a request cannot bulldoze an existing app —
+   and that flip handed it `shouldRetryEmptyBuild`'s exemption, which was written for "fix the server" /
+   "why is this failing". `userAskedToBuildAnApp` now captures the user's intent BEFORE the workspace
+   gets a vote. The Shiv Medical Store exemption (a genuine edit correctly finished without a write) is
+   untouched — that request was never a `new_build`.
+3. **`claimAudit` gained `app-delivered`** — a claim of delivery weighed against the real write count.
+   Needs no preview, no browser, no model call, which is precisely why it still works on the builds
+   where every runtime check skipped. Fires only when all three hold: the user asked for a build, the
+   summary claims one, and zero files were written. Hindi/Hinglish included, since the engine mirrors
+   the user's language.
+4. **`npm audit fix` exit 1 is npm's documented answer, not a failure.** Two layers: `isExpectedNonzeroExit`
+   now recognises it (we deliberately never pass `--force`, so "some need a breaking upgrade" is the
+   expected reply to the question we asked); and `failureHasSurvivingConsequence` no longer reads an
+   ADVISORY as evidence — the `DEPENDENCY_VULNERABILITIES` warning contains the sentence *"Running
+   `npm audit fix` applies the compatible fixes"*, so a substring match turned the **recommendation**
+   into the **consequence** and made it the headline root cause of a 30-minute build that never built
+   anything. `DEPENDENCY_VULNERABILITIES` joins `NEVER_ROOT_CAUSE`.
+
+All four are test-locked; each new test was verified to FAIL against the old code.
+
+### OPEN ROOT CAUSES (rule 6 — honestly recorded, not patched)
+- **`npm run build` → `sh: 1: tsx: not found`.** The project declares `tsx` and the four failed
+  installs never landed it. The install failure is upstream of everything else in this report and is
+  not closed here.
+- **The runtime suite is all-or-nothing on a live preview.** Fix 3 gives one preview-free check; the
+  general problem — that a dead preview disables every verification at once — remains.
+- **`plannedModel: claude-sonnet-4-6` vs 31/31 turns on `kimi-k2.5`** (the FREE ladder's cheapest rung,
+  not the paid `kimi-k2.7-code`). Worth confirming this account is on the tier it should be.
+- The three-disagreeing-ports item from the 79d0e3a4 autopsy above is unchanged.
+
+### SHIPPING STATUS — HONEST
+Committed to `claude/navbharatai-pro-testing-p2mgr5`. **NOT pushed and NOT merged**: this session's
+GitHub write access expired (403 on push/merge, MCP token expired). PR #2350 (the preview-failover
+honesty fix) is also still open and unmerged. Nothing in this entry is live until those land.

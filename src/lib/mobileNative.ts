@@ -12,6 +12,7 @@
 
 import { Capacitor } from '@capacitor/core';
 import { AppUpdate } from '@capawesome/capacitor-app-update';
+import { PLAY_STORE_MARKET_URL } from './appUpdate';
 import { InAppReview } from '@capacitor-community/in-app-review';
 import {
   parseReviewState,
@@ -47,11 +48,27 @@ export async function checkForAppUpdate(): Promise<boolean> {
   }
 }
 
-/** Open the Play Store listing so the user can install the pending update. No-op on web / on error. */
+/**
+ * Open the Play Store APP directly so the user can install the pending update. No-op on web / on error.
+ *
+ * OPENS THE STORE, NOT THE WEBSITE (admin report 2026-08-16: "update button click → Play Store nahi,
+ * website open hoti hai"). Two layers, both of which land in the Play Store app rather than a browser:
+ *   1. `AppUpdate.openAppStore()` — the native app-update plugin's own store-open (the primary path).
+ *   2. If that throws, fire the `market://` deep link, which the Play Store app answers via a native
+ *      ACTION_VIEW intent. A plain `https://play.google.com/…` link is deliberately NOT used here —
+ *      that is exactly what opened the browser.
+ */
 export async function openAppStoreForUpdate(): Promise<void> {
   if (!isNativeApp()) return;
   try {
     await AppUpdate.openAppStore();
+    return;
+  } catch {
+    /* plugin path failed — fall through to the direct store deep link */
+  }
+  try {
+    // `_system` sends it out of the WebView; `market://` is answered by the Play Store app, never a browser.
+    window.open(PLAY_STORE_MARKET_URL, '_system');
   } catch {
     /* best effort — never crash */
   }

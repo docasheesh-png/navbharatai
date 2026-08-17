@@ -47,6 +47,17 @@
         </provider>
     </application>
 
+    <!-- Package visibility (Android 11+, API 30+): declare that we launch the Play Store via a
+         `market://` intent, so the "Update" button opens the store APP rather than the website in a
+         browser (admin report 2026-08-16). Without this <queries> entry a market:// intent cannot be
+         resolved on API 30+ and the launch silently fails. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="market" />
+        </intent>
+    </queries>
+
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />

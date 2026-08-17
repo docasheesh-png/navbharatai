@@ -33973,3 +33973,37 @@ whose GitHub write access had expired (403) before it could push. Per the extern
 Tests ported faithfully (each was verified to fail against the old code by the original author): +11
 `missingBinaryFromLog`/classify, +4 `runsUnderMultiplexer`, +4 fabrication-guard + wiring, +1 CLAIM_UNSUPPORTED
 never-root-cause. Gate: `tsc --noEmit` + `tsc -p tsconfig.server.json` clean; full `vitest` green (15,937).
+
+---
+
+## 2026-08-16 — Android "Update" button opens the Play Store APP, not the website
+
+**Admin report:** in the installed Android app, tapping the update prompt's **Update** button opened the
+Play **website** in an in-app browser tab instead of the Play Store app. "Direct Play Store open hona chahiye."
+
+**Root cause.** `UpdateBanner.tsx`'s `open()` did `Browser.open({ url: verdict.storeUrl })` — the Capacitor
+Browser plugin, given the `https://play.google.com/…` listing, shows that page in an in-app browser (a
+website), never the store. (The separate chat-notice path already used the native `AppUpdate.openAppStore()`
+and was fine.)
+
+**Fix.**
+- `UpdateBanner.open` on native now calls `openAppStoreForUpdate()` (the same native path the chat notice
+  uses); on web it still opens the https listing in a browser (correct there). The `Browser.open(storeUrl)`
+  path is removed.
+- `openAppStoreForUpdate` (`mobileNative.ts`) hardened: try `AppUpdate.openAppStore()`, then fall back to
+  firing the **`market://`** deep link (`PLAY_STORE_MARKET_URL`), which the Play Store app answers via a
+  native ACTION_VIEW intent. An `https://play.google.com/…` link is deliberately never used to open — that
+  is exactly what opened the browser. Both surfaces now land in the store app.
+- `appUpdate.ts`: added `PLAY_STORE_MARKET_URL` + pure `playStoreAppUrl(storeUrl)` (https Play listing →
+  `market://details?id=…`, falling back to this app's market link for a missing/non-Play/malformed url).
+- `AndroidManifest.xml`: added a `<queries><intent>…<data android:scheme="market"/></intent></queries>` so
+  the `market://` intent resolves on Android 11+ (API 30+ package visibility); without it the intent would
+  silently fail to launch.
+
+Tests: `playStoreAppUrl` unit tests (+ "never returns an https link"); source-contract that the banner calls
+`openAppStoreForUpdate()` and no longer `Browser.open`s the website, and that the native open uses
+`market://`/`AppUpdate.openAppStore()` not an https link. Gate: `tsc` clean; full `vitest` green.
+
+⚠️ **REACHES USERS ONLY VIA A NEW SIGNED .aab.** This is a frontend + native-manifest change baked into
+`dist/`/the shell, so — like every frontend fix — installed users get it only after a fresh signed
+`.aab`/Play upload, not from the server. (Per the bundled-mode rule in CLAUDE.md.)

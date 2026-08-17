@@ -12,6 +12,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { decideUpdate, updateMessage, parseStoreVersion, type UpdateVerdict } from '../lib/appUpdate';
+import { openAppStoreForUpdate } from '../lib/mobileNative';
 
 const DISMISS_KEY = 'nb_update_dismissed';
 
@@ -85,10 +86,13 @@ export function UpdateBanner({ apiBase = '' }: { apiBase?: string }) {
 
   const open = useCallback(() => {
     if (!verdict.show) return;
-    try {
-      const Browser = (window as any).Capacitor?.Plugins?.Browser;
-      if (Browser?.open) { void Browser.open({ url: verdict.storeUrl }); return; }
-    } catch { /* fall through to the plain navigation below */ }
+    // NATIVE → open the Play Store APP directly. The old code opened `verdict.storeUrl` (the
+    // https://play.google.com/… listing) through the Capacitor Browser plugin, which shows the Play
+    // WEBSITE in an in-app browser tab — not the store (admin report 2026-08-16). `openAppStoreForUpdate`
+    // uses the app-update plugin, then a `market://` intent, both of which land in the Play Store app.
+    const cap = (window as any).Capacitor;
+    if (cap?.isNativePlatform?.()) { void openAppStoreForUpdate(); return; }
+    // WEB → the https listing is the right thing to open in a browser.
     window.open(verdict.storeUrl, '_blank', 'noopener');
   }, [verdict]);
 

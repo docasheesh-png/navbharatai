@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  decideUpdate, updateMessage, parseStoreVersion, PLAY_STORE_URL, DISMISS_COOLDOWN_MS,
+  decideUpdate, updateMessage, parseStoreVersion, PLAY_STORE_URL, PLAY_STORE_MARKET_URL,
+  playStoreAppUrl, DISMISS_COOLDOWN_MS,
   type UpdateDecisionInput,
 } from '../src/lib/appUpdate';
 
@@ -153,6 +154,32 @@ describe('the payload is parsed strictly', () => {
   });
 });
 
+// OPEN THE STORE APP, NOT THE WEBSITE (admin report 2026-08-16). The Update button opened the
+// https://play.google.com listing in an in-app browser tab; a market:// link opens the Play Store app.
+describe('playStoreAppUrl — the market:// deep link', () => {
+  it('turns this app\'s Play listing into its store-app deep link', () => {
+    expect(playStoreAppUrl(PLAY_STORE_URL)).toBe('market://details?id=com.navbharat.ai');
+  });
+
+  it('carries the id from any Play listing url', () => {
+    expect(playStoreAppUrl('https://play.google.com/store/apps/details?id=com.example.foo&hl=en'))
+      .toBe('market://details?id=com.example.foo');
+  });
+
+  it('falls back to this app\'s market link for a missing, non-Play or malformed url', () => {
+    expect(playStoreAppUrl(null)).toBe(PLAY_STORE_MARKET_URL);
+    expect(playStoreAppUrl('')).toBe(PLAY_STORE_MARKET_URL);
+    expect(playStoreAppUrl('https://evil.example/store?id=x')).toBe(PLAY_STORE_MARKET_URL);
+    expect(playStoreAppUrl('not a url')).toBe(PLAY_STORE_MARKET_URL);
+  });
+
+  it('never returns an https link — that is what opened the browser', () => {
+    for (const u of [PLAY_STORE_URL, null, 'https://play.google.com/store/apps/details?id=a.b']) {
+      expect(playStoreAppUrl(u).startsWith('market://')).toBe(true);
+    }
+  });
+});
+
 describe('the message', () => {
   it('names the version when known', () => {
     const v = decideUpdate({ ...base, store: { androidVersionCode: 12, androidVersionName: '1.4.0' } });
@@ -203,6 +230,23 @@ describe('it is actually wired into the app and the server', () => {
     expect(banner).toContain('parseStoreVersion(');
     // It must not re-implement any of the rules locally.
     expect(banner).not.toContain('installedVersionCode <');
+  });
+
+  it('the Update button opens the Play Store APP on native, never the website in a browser tab', () => {
+    // THE BUG (admin 2026-08-16): the old code did `Browser.open({ url: verdict.storeUrl })`, which
+    // shows the https://play.google.com listing in an in-app browser — not the store.
+    const banner = read('src/components/UpdateBanner.tsx');
+    expect(banner).toContain('openAppStoreForUpdate()');
+    // The Play WEBSITE must not be opened through the in-app Browser plugin any more.
+    expect(banner).not.toMatch(/Browser\?\.open\(\{\s*url:\s*verdict\.storeUrl/);
+  });
+
+  it('the native store-open uses market:// (the store app), not an https browser link', () => {
+    const mobile = read('src/lib/mobileNative.ts');
+    expect(mobile).toContain('AppUpdate.openAppStore()');
+    // The fallback is the store-app deep link, deliberately NOT https://play.google.com.
+    expect(mobile).toContain('PLAY_STORE_MARKET_URL');
+    expect(mobile).not.toMatch(/window\.open\(\s*['"]https:\/\/play\.google\.com/);
   });
 
   it('a forced update cannot be dismissed', () => {

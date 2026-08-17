@@ -533,7 +533,11 @@ export function useAgentV3Build(): UseAgentV3Build {
       if (userIdRef.current) params.set('userId', userIdRef.current);
       if (emailRef.current) params.set('email', emailRef.current);
       if (opts?.workspaceId) params.set('workspaceId', opts.workspaceId);
-      const r = await fetch(`/api/agentv3/status?${params.toString()}`);
+      // Bearer token, for the SAME reason /attach sends one: the server now answers `buildRunningHere`
+      // with the exact decision /attach uses, keyed on the VERIFIED identity. Without the token here,
+      // /status would resolve a different identity than /attach and the two could disagree again —
+      // which is precisely the "Resume shows, the click finds nothing" bug this closed (2026-08-17).
+      const r = await fetch(`/api/agentv3/status?${params.toString()}`, { headers: await authJsonHeaders() });
       const j = await r.json().catch(() => ({}));
       setServerBuildRunning(opts?.workspaceId ? j?.buildRunningHere === true : j?.buildRunning === true);
     } catch {
@@ -737,15 +741,14 @@ export function useAgentV3Build(): UseAgentV3Build {
     // Preserving them is also the right behaviour on the HAPPY path: a genuinely live build replays its
     // own `file_changed` / `preview` events on top, so the fresh state wins where it exists and nothing
     // vanishes where it does not. There is no case where blanking first is better.
-    setState((prev) => ({
-      ...initialAgentV3State(),
-      files: prev.files,
-      previewUrl: prev.previewUrl,
-      checkpoints: prev.checkpoints,
-      activityLog: prev.activityLog,
-      diffs: prev.diffs,
-      todos: prev.todos,
-    }));
+    //
+    // ⏸️ AND THE RESET WAITS FOR THE ATTACH TO CONFIRM (admin report 2026-08-17, the second half of
+    // the same class). Even with the workspace facts preserved, resetting HERE — before `/attach`
+    // answers — cleared the narration (the "Done ✓ · ₹cost · Build health" summary included) on the
+    // promise that a replay was coming. When the attach then came back GONE, there was no replay,
+    // and the user watched a finished conversation turn into one lonely notice. The reset exists
+    // ONLY to make room for a replay, so it now runs exactly when a replay is confirmed (`res.ok`),
+    // and a gone/failed attach leaves the screen precisely as it was.
     // NOTE (root-cause fix 2026-07-05, IMG_5709): the optimistic "re-attached live" `notice` is NOT
     // emitted here anymore. It is a PROMISE that a live build exists — printing it before /attach
     // confirms one is exactly what produced the contradiction "re-attached live" + "No running build
@@ -779,8 +782,13 @@ export function useAgentV3Build(): UseAgentV3Build {
         if (outcome === 'gone-notice') {
           // The build ended mid-run (the drop tore it down). Honest, calm, in-thread — NOT a red error.
           // The user's files are durable; they simply resend to continue. No contradiction.
+          // Calm and additive: with the reset now gated on a CONFIRMED live attach, the finished
+          // conversation is still on screen above this line — so the notice reads like a status
+          // update under it, not like the only survivor of a wipe. It must not command the user to
+          // "send your message again": on the Resume-button path nothing was ever sent, and being
+          // told to redo work they never did is exactly the jhatka being fixed.
           const text = opts?.goneNotice
-            ?? 'That build isn’t running anymore — it either finished or the connection dropped during it. Your files are safe. Send your message again to continue.';
+            ?? 'That build isn’t live anymore — it finished, or its connection dropped. Everything is saved and your app is untouched. Just type below whenever you want to continue.';
           setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text, ts: Date.now() }));
           setError(null);
         } else if (outcome === 'gone-silent') {
@@ -795,8 +803,18 @@ export function useAgentV3Build(): UseAgentV3Build {
         setRunning(false);
         return outcome; // 'gone-notice' | 'gone-silent' | 'error' — the panel restores on 'gone-notice'
       }
-      // Live build CONFIRMED (the attach opened a real stream). ONLY NOW show the optimistic
-      // "re-attached live" notice, so the promise can never precede its own confirmation.
+      // Live build CONFIRMED (the attach opened a real stream). ONLY NOW make room for its replay —
+      // stream facts reset, workspace facts carried (see the line above) — and only now show the
+      // optimistic "re-attached live" notice, so the promise can never precede its own confirmation.
+      setState((prev) => ({
+        ...initialAgentV3State(),
+        files: prev.files,
+        previewUrl: prev.previewUrl,
+        checkpoints: prev.checkpoints,
+        activityLog: prev.activityLog,
+        diffs: prev.diffs,
+        todos: prev.todos,
+      }));
       if (opts?.notice) {
         setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: opts.notice as string, ts: Date.now() }));
       }

@@ -81,7 +81,7 @@ export type { PrCapableClient, PrFlowResult, PrFlowOptions, RevertPlan } from '.
 export { UserGitHubClient } from './UserGitHubClient';
 export { parseGitHubRepo, resolveStorageTarget, ownRepoStorageEnabled, WORK_BRANCH } from './GitStorageTarget';
 export type { StorageTarget, OwnRepoTarget, MirrorTarget, ResolveStorageTargetInput } from './GitStorageTarget';
-export { perWorkspaceLockEnabled, maxConcurrentBuilds, buildLockKey, countActiveBuildsForUser, acquireDecision, buildKeyCandidates, workspaceSessionsMatch, MAX_CONCURRENT_BUILDS_DEFAULT } from './BuildConcurrency';
+export { perWorkspaceLockEnabled, maxConcurrentBuilds, buildLockKey, countActiveBuildsForUser, acquireDecision, buildKeyCandidates, findAttachableBuild, isSilentlyStale, STALE_BUILD_SILENCE_MS, workspaceSessionsMatch, MAX_CONCURRENT_BUILDS_DEFAULT } from './BuildConcurrency';
 export type { AcquireResult } from './BuildConcurrency';
 export { emptyQueue, enqueue, claimNext, completeRunning, cancelItem, reorderPending, pendingItems, runningItem, queueSummary, MAX_QUEUE_ITEMS } from './BuildQueue';
 export { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from './RoleChats';

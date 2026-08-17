@@ -75,6 +75,7 @@ import {
   maxConcurrentBuilds,
   buildLockKey,
   countActiveBuildsForUser,
+  findAttachableBuild,
   acquireDecision,
   buildKeyCandidates,
   workspaceSessionsMatch,
@@ -1449,6 +1450,8 @@ export interface RunningBuild {
    *  build genuinely still running in session A silently bleeds into a freshly-opened session B under
    *  the same account (root-caused 2026-07-01: "+ New chat" showing an unrelated build's progress). */
   workspaceId?: string;
+  /** Stamped by broadcastBuild on every event — the liveness signal isSilentlyStale() reads. */
+  lastEventTs?: number;
 }
 const runningBuilds = new Map<string, RunningBuild>();
 
@@ -1471,6 +1474,9 @@ const weakNoticeShownFor = new Set<string>();
 
 /** Push an event into a build's replay buffer and fan it out to every subscriber. */
 function broadcastBuild(rb: RunningBuild, e: unknown): void {
+  // Liveness stamp — the input to isSilentlyStale(). A build that emits is alive; a registry entry
+  // that stops emitting is how a Resume button ends up pointing at a corpse (admin 2026-08-17).
+  rb.lastEventTs = Date.now();
   if (rb.buffer.length < MAX_BUILD_BUFFER) rb.buffer.push(e);
   for (const s of rb.subscribers) { try { s.write(e); } catch { /* drop a dead subscriber */ } }
   // Mirror to the cross-device LiveChannel (throttled, best-effort) so a SECOND device — even on a
@@ -2689,12 +2695,17 @@ export function registerAgentV3Routes(app: Express): void {
     const buildRunning = perWs
       ? countActiveBuildsForUser(runningBuilds.values(), userId) > 0
       : candidates.some((k) => isBuildRunning(k));
-    const buildRunningHere = candidates.some((k) => {
-      const rb = runningBuilds.get(k);
-      if (!rb || rb.ended) return false;
-      if (!workspaceId) return true;          // account-wide back-compat (callers without a session)
-      if (!rb.workspaceId) return true;       // legacy build without a stamped workspace (back-compat)
-      return workspaceSessionsMatch(rb.workspaceId, workspaceId);
+    // `buildRunningHere` — the answer the Resume button renders from — now comes from the SAME
+    // decision `/attach` uses (findAttachableBuild), under the SAME identity (the verified token,
+    // falling back to the claimed uid only for legacy callers that send no token). It used to be a
+    // second, looser implementation keyed on the CLAIMED userId — and every difference between the
+    // two was a way for the button to promise a build the click could not find (admin 2026-08-17:
+    // "build 100% poora, phir bhi Resume aaya — click par sab gayab"). Silently-stale entries are
+    // invisible here by the same shared line, so an orphaned registry corpse cannot summon the
+    // button while it waits for the reaper.
+    const statusVerifiedUid = (await verifiedIdentity(req))?.uid ?? userId;
+    const buildRunningHere = !!findAttachableBuild((k: string) => runningBuilds.get(k), {
+      verifiedUid: statusVerifiedUid, workspaceId, perWorkspace: perWs,
     });
     // T0-9 SECURITY (2026-07-14): `billed`/`powerUnlocked` are MONEY/entitlement facts and were computed
     // from the CLAIMED `?userId`/`?email` — so `?userId=<victim>` leaked whether that account had ever
@@ -4185,22 +4196,19 @@ export function registerAgentV3Routes(app: Express): void {
     // fallback) — look in all three, refusing any build from a DIFFERENT session (session-aware match:
     // an anon-keyed build of the SAME session must attach, a different session's build never may).
     const requestedWorkspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
-    let rb: RunningBuild | undefined;
-    for (const key of buildKeyCandidates(verifiedAttachUid, requestedWorkspaceId, perWorkspaceLockEnabled())) {
-      const cand = runningBuilds.get(key);
-      if (!cand || cand.ended) continue;
-      // Never replay a DIFFERENT session's build into the open one (defense-in-depth on every key).
-      if (requestedWorkspaceId && cand.workspaceId && !workspaceSessionsMatch(cand.workspaceId, requestedWorkspaceId)) continue;
-      // The shared anon bucket for a SIGNED-IN caller: attach replays a full transcript, so require a
-      // positive session match (unguessable sessionId) — never attach it blind.
-      if (key === 'anon' && userId && !(requestedWorkspaceId && cand.workspaceId && workspaceSessionsMatch(cand.workspaceId, requestedWorkspaceId))) continue;
-      rb = cand;
-      break;
-    }
-    if (!rb) {
+    // The SAME shared decision `/status` renders the Resume button from — so the button and the
+    // click can no longer disagree about whether a build exists (the disagreement was the admin's
+    // 2026-08-17 report). The session cross-check and the anon-bucket guard live inside it, and a
+    // silently-stale entry (a corpse that stopped emitting) is refused here for the same reason it
+    // no longer summons the button: attaching to it would stream nothing.
+    const found = findAttachableBuild((k: string) => runningBuilds.get(k), {
+      verifiedUid: verifiedAttachUid, workspaceId: requestedWorkspaceId, perWorkspace: perWorkspaceLockEnabled(),
+    });
+    if (!found) {
       res.status(404).json({ error: 'No running build to resume.' });
       return;
     }
+    const rb: RunningBuild = found.build;
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');

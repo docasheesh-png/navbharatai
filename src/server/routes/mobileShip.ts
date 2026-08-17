@@ -35,6 +35,7 @@ import { CHARGE_PRICE_HEADER, CHARGE_APPLIED_HEADER } from '../../lib/apkChargeN
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { debitWalletForBuild } from '../lib/walletDebit';
+import { appBuildStore } from '../lib/AppBuildStore';
 import { getServerDb } from '../lib/serverDb';
 
 const githubToken = githubTokenFromRequest;
@@ -264,7 +265,12 @@ export function registerMobileShipRoutes(app: Express): void {
         if (!isChargeableApk(String(a.name))) continue;
         try {
           const identity = await verifyFirebaseIdentity(req);
-          if (!identity?.uid || isAgentV3FreeUser(identity.uid, identity.email)) break;
+          if (!identity?.uid) break;
+          // Point this app's row at the run that produced a real file, so "my apps" can open it
+          // directly instead of hunting. A PARTIAL update on purpose — writing a whole row here would
+          // overwrite the workflow and the user's chosen app name with values this route does not know.
+          void appBuildStore.setLatestRun(identity.uid, String(owner), String(repo), String(runId));
+          if (isAgentV3FreeUser(identity.uid, identity.email)) break;
           void debitWalletForBuild(getServerDb() as any, identity.uid, {
             billedInr: apkChargeInr(),
             buildRef: apkChargeRef(owner, repo, String(a.id)),
@@ -319,6 +325,55 @@ export function registerMobileShipRoutes(app: Express): void {
    * Generate the ship kit (pure — no network, no GitHub needed). The caller then pushes `files` with
    * POST /api/github/push and follows `requiredSecrets` / SHIPPING.md.
    */
+  /**
+   * "WHAT HAVE I BUILT?" — the list that survives a back button.
+   *
+   * Admin 2026-08-17: a user built an app, did not download it, backed out, and it was gone. It never
+   * was gone — GitHub holds the artifact in their own repository for 14 days — but nothing recorded that
+   * the build had happened, so there was nothing to look it up by.
+   *
+   * This returns POINTERS ONLY: the apps this user has built, newest first. The live state of each one
+   * (still building / ready / failed / the file has expired) is read from GitHub by the existing
+   * runs + artifacts endpoints, with the user's own token — this route neither caches GitHub's answer
+   * nor pretends to know it, so it can never show a Download button for a file that is no longer there.
+   *
+   * IT TAKES NO MONEY. The ₹1 is charged when a build succeeds; looking at a list of things you already
+   * built is not a second purchase, and a screen that quietly debited a user for scrolling would be the
+   * exact surprise the billing law exists to prevent.
+   */
+  app.get('/api/mobile-ship/my-apps', async (req: Request, res: Response) => {
+    try {
+      const identity = await verifyFirebaseIdentity(req);
+      // No verified user ⇒ an empty list, never another account's apps and never an error the UI has to
+      // handle: a signed-out visitor genuinely has nothing here.
+      if (!identity?.uid) return res.json({ apps: [] });
+      const apps = await appBuildStore.listForUser(identity.uid);
+      res.json({
+        apps: apps.map((a) => ({
+          id: a.id, owner: a.owner, repo: a.repo, workflow: a.workflow,
+          runId: a.runId ?? null, appName: a.appName, createdAt: a.createdAt,
+        })),
+      });
+    } catch {
+      res.status(502).json({ error: 'Could not load your apps just now.' });
+    }
+  });
+
+  /** Remove one app from the user's list. The build itself stays in their GitHub repo, untouched. */
+  app.delete('/api/mobile-ship/my-apps/:id', async (req: Request, res: Response) => {
+    try {
+      const identity = await verifyFirebaseIdentity(req);
+      if (!identity?.uid) return res.status(401).json({ error: 'Sign in first.' });
+      // `forget` checks ownership from the STORED row, not from the id's shape — the doc id is
+      // guessable by construction, so the id alone must never be enough to delete somebody's row.
+      const removed = await appBuildStore.forget(identity.uid, String(req.params.id || ''));
+      if (!removed) return res.status(404).json({ error: 'That app is not on your list.' });
+      res.json({ ok: true });
+    } catch {
+      res.status(502).json({ error: 'Could not update your list just now.' });
+    }
+  });
+
   app.post('/api/mobile-ship/kit', (req: Request, res: Response) => {
     const { appName, appId, webDir, ios, capacitorMajor } = (req.body || {}) as Record<string, unknown>;
     try {
@@ -361,6 +416,25 @@ export function registerMobileShipRoutes(app: Express): void {
         { ref, ...(inputs && typeof inputs === 'object' ? { inputs } : {}) },
         { headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' } },
       );
+      // REMEMBER THIS APP (admin 2026-08-17: "galti se back ho gaya, ab wapas woh dikh hi nahi rahi").
+      // Reading a build back needs `owner` and `repo`, and until now those lived only in the screen's
+      // state — one back gesture and a finished app was unreachable, though the file sat intact in the
+      // user's own GitHub repo for 14 days. A pointer row is all that was missing. Best-effort: a
+      // failure here must never break the build the user is waiting on.
+      try {
+        const identity = await verifyFirebaseIdentity(req);
+        if (identity?.uid) {
+          void appBuildStore.record({
+            userId: identity.uid,
+            owner: String(owner), repo: String(repo), workflow: String(workflow),
+            appName: typeof (req.body as Record<string, unknown>)?.appName === 'string'
+              && String((req.body as Record<string, unknown>).appName).trim()
+              ? String((req.body as Record<string, unknown>).appName).trim()
+              : String(repo),
+            createdAt: Date.now(),
+          });
+        }
+      } catch { /* the list is a convenience; the build is the job */ }
       // 204 No Content on success — GitHub does not return the run, so point the user at the Actions tab.
       res.json({ ok: true, actionsUrl: `https://github.com/${owner}/${repo}/actions/workflows/${workflow}` });
     } catch (err) {

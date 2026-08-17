@@ -26,7 +26,7 @@ import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
 import { signOutEverywhere } from '../lib/firebase';
 import { explainAuthReason, shouldDeepDiagnose } from '../lib/authDiagnostics';
-import { popupFailureAction, waitForSignedInUser, settleNativeSignIn } from './socialSignInPolicy';
+import { popupFailureAction, waitForSignedInUser, settleNativeSignIn, appleSignInFailureMessage } from './socialSignInPolicy';
 
 /**
  * Force-logout the old session BEFORE a new login — WEB ONLY, and never let it block the sign-in.
@@ -691,7 +691,16 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     provider.addScope('name');
     try {
       const outcome = await socialSignIn(provider);
-      if (outcome === 'cancelled') setLoading(false);
+      if (outcome === 'cancelled') {
+        // NOT SILENT, unlike Google/GitHub (admin 2026-08-16, with Apple's own error page attached:
+        // "Invalid web redirect url"). Firebase reports `auth/popup-closed-by-user` for BOTH a real
+        // cancel and a popup the user closed because APPLE refused the request — the SDK cannot tell
+        // them apart. Treating every close as a quiet cancel meant a user hitting the configuration
+        // error saw an Apple error page, closed it, and the app said NOTHING. Forever. A dead button.
+        // See appleSignInFailureMessage: it serves both readings and names the exact fix.
+        setError(appleSignInFailureMessage());
+        setLoading(false);
+      }
     } catch (err: any) {
       console.error('[APPLE SIGN-IN]', err);
       setError(describeSocialError(err));

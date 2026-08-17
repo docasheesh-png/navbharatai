@@ -18,6 +18,7 @@ import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
 import { frameworkRunsInBrowser, serverFrameworkLabel } from '../../lib/frameworkDetect';
 import { authJsonHeaders } from '../../lib/authHeaders';
+import { LIVE_SERVER_PAID_NOTE, LIVE_SERVER_PAID_TAG, isLiveServerNoticeDismissed, dismissLiveServerNotice } from '../../lib/liveServerNotice';
 
 
 function Empty({ children }: { children: React.ReactNode }) {
@@ -179,6 +180,9 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const failedOverToLive = useRef(false);
   const userPickedInBrowser = useRef(false);
   const [failoverNote, setFailoverNote] = useState('');
+  // "Live server is a paid service" note (admin 2026-08-16). Dismissible + remembered, so it informs
+  // once rather than nagging on every switch; the "Paid" tag on the toggle keeps the fact visible after.
+  const [paidNoteDismissed, setPaidNoteDismissed] = useState<boolean>(() => isLiveServerNoticeDismissed());
   const [liveReloadKey, setLiveReloadKey] = useState(0);
   // "Diagnose" — reuses the build loop's real dev-server boot sequence (install/pre-kill/start/
   // port-wait/one retry) instead of guessing, so the empty state can show the REAL internal
@@ -820,9 +824,26 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const switcher = (
     <div className="flex items-center gap-1">
       <button onClick={() => { userPickedInBrowser.current = true; setMode('inbrowser'); }} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="Instant, always-available preview rendered in your browser — no server needed (default)">In-browser</button>
-      <button onClick={() => setMode('live')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app in the cloud sandbox (full fidelity — real npm/runtime)">{effectiveUrl ? '● ' : ''}Live server</button>
+      <button onClick={() => setMode('live')} className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app on a real cloud machine (full fidelity — real npm/runtime). PAID: it uses your credits while it runs. The In-browser preview is free.">{effectiveUrl ? '● ' : ''}Live server<span className="ml-0.5 rounded px-1 text-[9px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-400 border border-amber-500/30">{LIVE_SERVER_PAID_TAG}</span></button>
     </div>
   );
+
+  // "Live server is a paid service" — shown while the user is on the Live server (admin 2026-08-16).
+  // Honest (real cloud compute uses credits; in-browser is free), vendor-free (White-Label), and
+  // dismissible so it informs without nagging. Rendered in both Live-server branches below.
+  const paidNote = mode === 'live' && !paidNoteDismissed ? (
+    <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/40 text-[11px] text-amber-200">
+      <span aria-hidden>⚡</span>
+      <span className="flex-1">{LIVE_SERVER_PAID_NOTE}</span>
+      <button
+        onClick={() => { dismissLiveServerNotice(); setPaidNoteDismissed(true); }}
+        className="shrink-0 rounded px-1.5 font-semibold text-amber-300 hover:text-amber-100"
+        title="Got it — don't show this again"
+      >
+        Got it
+      </button>
+    </div>
+  ) : null;
 
   // Responsive viewport switcher — REAL device-width rendering (not a label), shown on BOTH previews.
   const viewportSwitcher = (
@@ -857,6 +878,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           <button onClick={() => setLiveReloadKey((k) => k + 1)} className="flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           <a href={effectiveUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
         </div>
+        {paidNote}
         {failoverNote && (
           <div className="flex items-start gap-2 px-3 py-1.5 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-sky-200">
             <span className="flex-1">{failoverNote}</span>
@@ -927,12 +949,13 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           <span className="flex-1 truncate">Live server</span>
           <button onClick={() => void refreshSandbox()} className="flex items-center gap-1 hover:text-zinc-200" title="Re-check for the live preview (after the sandbox finishes starting)"><RotateCcw className="w-3.5 h-3.5" /></button>
         </div>
+        {paidNote}
         <div className="flex-1 flex items-center justify-center p-6 text-center">
           <div className="max-w-md text-sm text-zinc-400 space-y-2">
             {sandboxOff ? (
               <>
                 <p className="text-zinc-200 font-medium">Live server preview isn't available on this deployment.</p>
-                <p>The full-fidelity live preview runs your app inside a cloud sandbox (E2B), which isn't configured here. Your app still builds and runs — use the <button onClick={() => setMode('inbrowser')} className="underline hover:text-zinc-200">In-browser preview</button> to see it.</p>
+                <p>The full-fidelity live preview runs your app on a real cloud machine, which isn't configured here. Your app still builds and runs — use the <button onClick={() => setMode('inbrowser')} className="underline hover:text-zinc-200">In-browser preview</button> to see it.</p>
                 <p className="text-zinc-500 text-xs">Admin: set <code className="text-zinc-400">E2B_API_KEY</code> in the server environment to enable the live cloud preview.</p>
               </>
             ) : (

@@ -33,8 +33,26 @@ export default defineConfig(({mode}) => {
           // fetched only when a user turns on the Offline-Thinking beta, never part of the main app
           // load — so naming it lets the bundle-size budget exclude it (see scripts/bundleBudget.mjs)
           // instead of counting a ~2 MB beta-only chunk against the main-app ceiling.
+          //
+          // REACT VENDOR SPLIT (admin 2026-08-16, "app ki speed badhao"). React + react-dom + scheduler +
+          // the router are ALWAYS on the first-paint path and change the LEAST between deploys, yet they
+          // were welded into the main entry chunk — so every app UPDATE forced the user to re-download
+          // them along with the changed app code. Pulling ONLY React into its own chunk means: after a
+          // deploy the ~60 KB gz react-vendor chunk is served from cache and only the app chunk (which
+          // actually changed) re-downloads, and the two load in parallel on a cold visit. This project
+          // ships several times a day, so those cached bytes add up for returning web users.
+          //
+          // DELIBERATELY REACT-ONLY, not "all node_modules → vendor": the per-view chunks (CodeStudio,
+          // NavAppStore, …) are ALREADY lazy, and forcing every dependency into one eager vendor chunk
+          // HOISTS libs that today live only inside those lazy chunks onto the first-paint path — a
+          // measured ~170 KB gz first-paint REGRESSION (exactly the trap scripts/bundleBudget.mjs warns
+          // about: "split first, measure"). React is the one extraction that is provably eager already,
+          // so relocating it cannot regress first paint — it only makes it cacheable.
           manualChunks(id: string) {
             if (id.includes('@mlc-ai/web-llm')) return 'webllm';
+            if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom)[\\/]/.test(id)) {
+              return 'react-vendor';
+            }
           },
         },
       },

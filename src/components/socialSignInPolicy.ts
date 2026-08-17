@@ -94,3 +94,53 @@ export function waitForSignedInUser(auth: MinimalAuthLike, graceMs = 2500): Prom
     const unsubscribe = auth.onAuthStateChanged((u) => { if (u) finish(u); });
   });
 }
+
+// ─── Apple's return URL, and why a closed popup is not always a cancel ────────────────────────────
+
+/**
+ * The return URL Apple must have registered for web sign-in to work.
+ *
+ * ADMIN REPORT 2026-08-16, with Apple's own error page attached:
+ *
+ *   https://appleid.apple.com/auth/authorize
+ *     ?client_id=com.navbharatai.web
+ *     &redirect_uri=https%3A%2F%2Fnavbharatai.com%2F__%2Fauth%2Fhandler
+ *   → invalid_request — "Invalid web redirect url."
+ *
+ * 🔒 ROOT CAUSE, and it is CONFIGURATION, not code: `authDomain` was moved to our own domain
+ * (navbharatai.com) to fix signInWithRedirect's storage partitioning. Firebase therefore sends Apple
+ * `redirect_uri=https://navbharatai.com/__/auth/handler`. That change was mirrored into the GOOGLE
+ * OAuth client — the config comment in src/config/firebase.ts lists exactly that — but Apple keeps its
+ * OWN Return URLs list on its Service ID, and nobody added the new URL there. So Google works and
+ * Apple does not, which is precisely the reported symptom.
+ *
+ * ⚠️ THE FIX IS IN APPLE'S DEVELOPER PORTAL AND CANNOT BE MADE FROM CODE. What code CAN stop doing is
+ * pretending this is a user cancel — see appleSignInFailureMessage.
+ */
+export const APPLE_WEB_RETURN_URL = 'https://navbharatai.com/__/auth/handler';
+export const APPLE_SERVICE_ID = 'com.navbharatai.web';
+
+/**
+ * What to tell someone whose Apple popup closed without signing them in.
+ *
+ * 🔒 WHY THIS IS NOT "Sign-in was cancelled": Firebase reports `auth/popup-closed-by-user` for BOTH a
+ * real cancel AND a popup the user closed because Apple showed it an error — the two are
+ * indistinguishable from the SDK. Today the Apple path treats every such close as a quiet cancel and
+ * shows NOTHING AT ALL, so a user who hit the configuration error above clicks the button, watches an
+ * Apple error page, closes it, and the app says nothing. Forever. That is the single worst version of
+ * this bug: not that it fails, but that it fails silently and looks like a dead button.
+ *
+ * So the message covers both readings honestly — it tells a genuine canceller to try again, and it
+ * tells everyone else the exact thing that is wrong and the exact fix. Naming the Service ID and the
+ * URL matters: this is a two-minute change in Apple's portal, and a message that omits them turns it
+ * into an afternoon of searching.
+ *
+ * Deliberately Apple-only. Google's and GitHub's configuration IS correct, so a closed popup there
+ * genuinely is a cancel and must stay silent.
+ */
+export function appleSignInFailureMessage(): string {
+  return 'Apple sign-in didn\'t complete. If you closed the window, just try again. '
+    + 'If Apple showed an error page, this site\'s return URL isn\'t registered with Apple yet — '
+    + `Admin: add ${APPLE_WEB_RETURN_URL} to the Return URLs of Service ID ${APPLE_SERVICE_ID} `
+    + 'in the Apple Developer portal (Certificates, Identifiers & Profiles → Identifiers → Services IDs).';
+}

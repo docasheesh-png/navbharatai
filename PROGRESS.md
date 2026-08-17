@@ -34268,3 +34268,99 @@ the repo's own language standard, so the recipe belongs there and reads correctl
 quietly half-done: localizing `keyless` is an open item.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
+## 2026-08-16 — v5 Live server: an honest "this is a paid service" note
+
+**Admin ask:** "jab koi app banaye aur user live server use kare, to ek warning note aaye — yeh paid
+service hai! ... isko aur acche se karo!"
+
+**Why it's true (so the note is honest, not decoration).** v5's Preview has two modes:
+- **In-browser** — rendered in the user's OWN browser. No server, FREE, instant.
+- **Live server** — the app runs on a REAL cloud machine (paid compute, billed by the second it is up).
+  That VM time is part of what a paid build costs (`AGENTV3_BILL_SANDBOX`), so leaning on the live server
+  spends the user's credits.
+
+**Done (well-designed, not a crude popup):**
+- `src/lib/liveServerNotice.ts` — pure, vendor-free message (`LIVE_SERVER_PAID_NOTE`), a `Paid` tag, and
+  dismiss helpers (localStorage, DI for tests). Honest about cost, **names no cloud vendor** (White-Label §2).
+- `PreviewSurface.tsx` — while in Live-server mode a dismissible amber note explains it ("Got it" remembers
+  the dismissal, so it informs once instead of nagging), and the Live-server **toggle carries a "Paid" tag**
+  so the cost stays clear even after the note is dismissed. Shown in both live branches (active + waiting).
+- Fixed a WHITE-LABEL LEAK found while here: the live-preview prose said "a cloud sandbox (**E2B**)" to
+  users → now "a real cloud machine" (no vendor name).
+- `AppKnowledgeBase` — a "two previews: in-browser FREE, live server PAID" bullet so every in-app AI
+  answers "does the live preview cost anything?" correctly.
+
+Tests: `liveServerNotice.test.ts` (+7): message is honest + vendor-free, dismiss remembered + never throws,
+and source-contract that the note + Paid tag are wired and the `E2B` prose leak is gone. Gate: tsc
+(frontend+server) clean; full vitest green (15,950).
+
+---
+
+## 2026-08-16 — App-load speed: split React into its own cacheable chunk (measured, honest)
+
+**Admin ask:** "kisi bhi prkar se app ki speed badha sakte ho?" (they selected all of: app-open, build,
+preview). Started with app-OPEN speed because it is the safest, measurable lever.
+
+**Measured first (rule 4 — evidence, not guesses).** Production build showed the app is ALREADY well
+code-split: every heavy view (CodeStudio, NavAppStore, APKBuilder, OfflineAI 215 KB gz, web-llm 2.1 MB gz,
+xterm 70 KB) is its own LAZY chunk and off the first-paint path. The only first-paint weight left is the
+main entry chunk (~648 KB gz), which had ALL of node_modules — including React — welded in.
+
+**What I tried and REJECTED (recorded so it is not re-attempted).** Forcing every `node_modules` dep into
+one `vendor` chunk MEASURED a ~170 KB gz first-paint REGRESSION: it hoisted libs that today live only inside
+lazy view chunks onto the eager path. Exactly the trap `scripts/bundleBudget.mjs` warns about.
+
+**Shipped (safe, no regression).** `manualChunks` now extracts ONLY React (react/react-dom/scheduler/
+react-router) into a `react-vendor` chunk. React is provably always-eager and shared, so relocating it
+cannot regress first paint — it only makes it cacheable. Result: largest first-paint chunk **648 → 597 KB
+gz**; React (~60 KB gz) is now a separate chunk that stays CACHED across deploys, so — on a project that
+ships several times a day — a returning web user re-downloads ~60 KB less on every app update, and the two
+chunks load in parallel on a cold visit.
+
+**Honest scope.** This helps WEB repeat/post-update loads; a first cold visit is ~unchanged bytes; the
+bundled mobile app loads from local `dist/` so it benefits little. The frontend is now close to
+optimal for its feature set — the bigger speed levers are in the build/preview engine (recent wins already
+shipped: streaming preview live, deterministic fullstack boot #2398, concurrently diagnosis #2422; the next
+lever is the ~234-293s `TIME_TO_FIRST_CALL` sandbox-setup gap, a larger engine change to scope carefully).
+
+Gate: production build green; `test:bundle` within budget (largest 597.2 KB / 700; total JS 1382 / 1450);
+tsc clean; full vitest green (15,950).
+
+## 2026-08-17 — Apple sign-in on the browser: config root cause named, silent failure killed (#2428)
+
+**Admin ask:** "browser par apple login fix karo yaar please" — with Apple's own error page attached, which
+is what made this diagnosable in one step instead of a hunt.
+
+**ROOT CAUSE, and it is CONFIGURATION — not code.** The screenshot showed
+`appleid.apple.com/auth/authorize?client_id=com.navbharatai.web&redirect_uri=https%3A%2F%2Fnavbharatai.com%2F__%2Fauth%2Fhandler`
+→ `invalid_request — "Invalid web redirect url."` `authDomain` was moved to our own domain
+(`navbharatai.com`) to fix `signInWithRedirect`'s storage partitioning, so Firebase now sends Apple that
+return URL. The migration WAS mirrored into the Google OAuth client — the config comment in
+`src/config/firebase.ts` lists exactly that URL — but **Apple keeps its own Return URLs list on its Service
+ID**, and nobody added it there. Google works, Apple does not. Exactly the reported symptom.
+
+**🔴 OPEN ROOT CAUSE (rule 6) — admin-only, cannot be fixed from code.** Add
+`https://navbharatai.com/__/auth/handler` to the Return URLs of Service ID `com.navbharatai.web`
+(Apple Developer portal → Certificates, Identifiers & Profiles → Identifiers → Services IDs → Configure).
+No code change can make Apple accept an unregistered URL, so this was NOT patched around and NOT reported
+as fixed.
+
+**A workaround was considered and deliberately REJECTED (safeguard #3).** The plausible one — a secondary
+Firebase app instance pinned to the `firebaseapp.com` authDomain for Apple only — is an untested change to
+the highest-stakes surface in the product, whose failure mode is breaking GOOGLE login too. Not worth it for
+something the admin can fix from a browser tab in two minutes.
+
+**What WAS fixed, and it is the worse half.** Firebase reports `auth/popup-closed-by-user` for BOTH a real
+cancel and a popup closed after Apple refused the request — indistinguishable from the SDK. The Apple
+handler treated every close as a quiet cancel and showed NOTHING, so a user hitting the configuration error
+clicked the button, watched an Apple error page, closed it, and the app said nothing at all. Forever. A dead
+button is a worse bug than an honest failure (rule 5 — fix the system's honesty, not just the code).
+`appleSignInFailureMessage()` now serves both readings and names the exact URL + Service ID + portal page,
+turning an afternoon of searching into the two-minute change above. **Apple only** — Google's and GitHub's
+redirect URIs are registered, so a closed popup there genuinely is a cancel and stays silent (the
+2026-07-06 "cancel must mean cancel" fix), pinned by test so neither the dead button nor a false alarm can
+return.
+
+Gate: tsc clean; vitest 15,872/15,872. Also merged this cycle: #2421 (the iOS splash now shows NavBharatAI's
+logo, not Capacitor's) and #2426 (React chunk split). Fresh `.aab` + `.ipa` triggered from `main` — all
+three are frontend changes, which the bundled Capacitor shell only ships in a new binary.

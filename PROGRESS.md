@@ -34552,3 +34552,48 @@ deploy another), and the import DB advisory. Each already had `workspaceId` in s
 stopped at the first call site instead of sweeping them.
 
 Verification gate: `tsc -p tsconfig.server.json` clean · `vitest run` green.
+
+---
+
+## 2026-08-17 — the native GitHub sign-in that had already succeeded
+
+Admin, with a screenshot of the OAuth diagnostics overlay in the Android app: *"github login ho jata hai
+theek se par, yaha aa kar atak jata hai."*
+
+**The bug was not in the OAuth handshake, and the admin's own description said so.** The sign-in really
+did complete: the deep link returned, `appUrlOpen` fired, the token was stored, `Browser.close()` ran.
+The screen simply never stopped saying "Opening GitHub… Please wait."
+
+**Root cause.** `githubRedirectingMessage` drives that overlay. It was SET when the flow started, and
+across the whole codebase it was CLEARED in exactly ONE place — its own Dismiss button. On the web this
+was invisible: the flow ends in a full-page redirect, and the state dies with the page. On native there
+is no navigation at all — the in-app browser opens over the app and closes again — so the app returns to
+the foreground holding the state it had, and a finished login looked like a hung one. The only escape
+was a button reading "Dismiss", which looks like abandoning something still in progress.
+
+Everything else in that flow was already correct and stayed untouched: the `nbai-native` sentinel, the
+server's `com.navbharat.ai://github-callback` return, the manifest's BROWSABLE intent filter, the
+listener's token handling.
+
+**The sibling, fixed in the same pass (rule 4, step 3).** Backing out of the in-app browser freezes the
+overlay in exactly the same way — no deep link ever fires, and nothing else clears the message. Handled
+via `appStateChange`, with an honest line rather than a spinner.
+
+**The subtlety that shaped the design.** A SUCCESSFUL return fires both the deep link and the resume, on
+some platforms in an unhelpful order. So the resume must never conclude "cancelled" on its own:
+`resumeOutcome` (pure, tested) refuses to overwrite a success, and the caller gives the deep link a grace
+period first. Telling somebody their working sign-in was cancelled is worse than saying nothing.
+
+**A trap that had to be avoided in the wiring.** These native listeners register once and live for the
+session, so anything reading `githubRedirectingMessage` inside one would forever see its value at
+registration — always "nothing in flight". A ref mirrors the state so the listener sees what is actually
+on screen. Pinned by a test, because the bug it prevents is silent.
+
+**Left alone deliberately, and worth a decision later:** the overlay itself is a developer diagnostics
+panel — "GITHUB OAUTH SHIELD", "DIAGNOSTIC KEY / CONFIGURED STATUS", the raw authorize URL with the
+client id — shown full-screen to an ordinary user mid-sign-in. Its "Launch Popup Directly" button calls
+`window.open`, which does nothing useful inside the native app, so the one action a stuck user would try
+is also the one that cannot help. That is a product judgement rather than a bug fix, so it was not
+changed here.
+
+Verification gate: `tsc --noEmit` clean · `vitest run` green.

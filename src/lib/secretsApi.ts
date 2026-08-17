@@ -20,6 +20,13 @@ export interface SecretMeta {
   secret_name: string;
   created_at?: unknown;
   deleted?: boolean;
+  /**
+   * The app this key belongs to, or null for a key shared with every app.
+   *
+   * Metadata, never a credential. Null is what every key saved before app-scoping existed carries, and
+   * what "All apps" still means — see server/lib/secretScope.ts for why that default is load-bearing.
+   */
+  workspace_id?: string | null;
 }
 
 /** Hard ceiling on any vault request so the caller's "Saving…" button can NEVER hang forever — if the
@@ -48,14 +55,29 @@ export async function listSecrets(userId: string): Promise<SecretMeta[]> {
   return res.json();
 }
 
-/** Save (encrypt + store) one secret. Throws with the server's message on failure. */
-export async function saveSecret(userId: string, secretName: string, secretValue: string): Promise<void> {
+/**
+ * Save (encrypt + store) one secret. Throws with the server's message on failure.
+ *
+ * `workspaceId` ties the key to ONE app, so the user's other apps never receive it. Omit it for a key
+ * shared with every app — which is what every key saved before app-scoping existed is, and what the
+ * Settings screen offers as an explicit choice.
+ */
+export async function saveSecret(
+  userId: string,
+  secretName: string,
+  secretValue: string,
+  workspaceId?: string | null,
+): Promise<void> {
   const res = await vaultFetch(
     `/api/secrets/${userId}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ secret_name: secretName, secret_value: secretValue }),
+      body: JSON.stringify({
+        secret_name: secretName,
+        secret_value: secretValue,
+        ...(workspaceId ? { workspace_id: workspaceId } : {}),
+      }),
     },
     'Saving the key timed out. Please check your connection and try again.',
   );

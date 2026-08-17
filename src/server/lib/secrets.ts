@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads/writes user_secrets (owner-only).
 import { query, collection, where, getDocs, doc, updateDoc, getServerDb as getDb } from './serverDb';
+import { resolveScopedSecrets, type VaultSecretRow } from './secretScope';
 
 /**
  * Encryption & user-secret helpers.
@@ -175,27 +176,52 @@ export async function rotateAllSecrets(): Promise<{ rotated: number; skipped: nu
  * the user's real `user_secrets` documents are returned. Invalid env-var names and undecryptable/empty
  * values are dropped. Best-effort: any failure returns {} (the build just runs without injected secrets).
  */
-export async function loadUserVaultSecrets(userId: string): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
-  if (!userId) return out;
+export async function loadUserVaultSecrets(
+  userId: string,
+  // WHICH APP IS THIS FOR? (admin 2026-08-17). Omit it and you get every key the user has, exactly as
+  // this function always behaved — so no existing caller changes. Pass it and the app receives only the
+  // keys it should: the user's SHARED keys plus the ones tied to this workspace. Only the build path
+  // passes it today, because the build is what writes `.env`, and until now that meant every app the
+  // user ever built carried every credential they had ever saved. See secretScope.ts.
+  workspaceId?: string | null,
+): Promise<Record<string, string>> {
+  if (!userId) return {};
   const db = getDb() as any;
-  if (!db) return out;
+  if (!db) return {};
+  const rows: VaultSecretRow[] = [];
   try {
     const snap = await getDocs(query(collection(db, 'user_secrets'), where('user_id', '==', userId)));
     for (const d of snap.docs) {
-      const data = d.data() as { secret_name?: string; encrypted_secret_value?: string; deleted?: boolean };
+      const data = d.data() as {
+        secret_name?: string; encrypted_secret_value?: string; deleted?: boolean; workspace_id?: string | null;
+      };
       if (data?.deleted || !data?.secret_name || !data?.encrypted_secret_value) continue;
       const name = String(data.secret_name).trim();
       // A valid POSIX env-var name only — never let a stored name inject extra .env lines.
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
       const value = decrypt(data.encrypted_secret_value);
       if (value === '') continue; // undecryptable or empty — skip
-      out[name] = value; // last write wins if duplicate names exist
+      rows.push({ name, value, workspaceId: data.workspace_id ?? null });
     }
   } catch (err) {
     console.error('[loadUserVaultSecrets] failed:', err);
+    return {};
   }
-  return out;
+  // Last write still wins among equally-scoped duplicates; an app-specific key beats a shared one.
+  return resolveScopedSecrets(rows, workspaceId);
+}
+
+/**
+ * The names this app did NOT receive, for an honest line in the build report.
+ *
+ * Least privilege's own failure mode is a user wondering why the key they definitely saved is not
+ * there. Names only — a build report is persisted, so a value must never reach it.
+ */
+export async function withheldVaultSecretNames(userId: string, workspaceId: string): Promise<string[]> {
+  if (!userId || !workspaceId) return [];
+  const all = await loadUserVaultSecrets(userId);
+  const mine = await loadUserVaultSecrets(userId, workspaceId);
+  return Object.keys(all).filter((n) => !(n in mine)).sort();
 }
 
 export async function getSecretValue(userId: string, secretName: string): Promise<string | null> {

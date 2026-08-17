@@ -25,7 +25,10 @@ const api = read('src/lib/secretsApi.ts');
 describe('both gates open onto the SAME vault UI', () => {
   it('v5 renders the Settings screen\'s own component, not a copy of it', () => {
     expect(panel).toContain("import('../SecretManager')");
-    expect(panel).toContain('<VaultManager userId={userId} embedded />');
+    // Matched on the ELEMENT, not its full prop list — the sheet legitimately gained `defaultAppId`
+    // when keys became scopeable to one app, and will gain more. What must not change is that v5
+    // renders the Settings screen's own component rather than a second implementation of it.
+    expect(panel).toMatch(/<VaultManager\s+userId=\{userId\}[^>]*\bembedded\b/);
   });
 
   it('Settings renders that same component', () => {

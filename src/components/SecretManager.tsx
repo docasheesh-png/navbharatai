@@ -6,12 +6,15 @@ import { db } from '../lib/firebase'; // shared handle → navbharat-prod (NOT t
 // here used to omit it, so requireUserMatch rejected every save (401) → keys never saved (admin fix).
 import { saveSecret, deleteSecret, verifySecrets, type SecretVerdict } from '../lib/secretsApi';
 import { findRecipeSource } from '../lib/credentialRecipes';
+import { listApps, type AppChoice } from '../lib/appList';
 
 interface Secret {
   id: string;
   secret_name: string;
   created_at: any;
   deleted?: boolean;
+  /** The app this key is tied to, or null/absent for a key shared with every app. */
+  workspace_id?: string | null;
 }
 
 /**
@@ -28,7 +31,18 @@ interface Secret {
  * inside a build the user must not lose their place in, so it drops the full-height frame and the
  * heading the sheet already provides. Nothing about the data path changes with it.
  */
-export const SecretManager: React.FC<{ userId: string; embedded?: boolean }> = ({ userId, embedded }) => {
+export const SecretManager: React.FC<{
+  userId: string;
+  embedded?: boolean;
+  /**
+   * The app this screen opens on, and the default scope for a key saved here.
+   *
+   * v5 passes the build the user is actually looking at, because a key typed while building THAT app
+   * almost always belongs to it — and that default is the whole point of scoping: it keeps the key out
+   * of every other app's `.env`. Settings passes nothing and opens on "All apps".
+   */
+  defaultAppId?: string | null;
+}> = ({ userId, embedded, defaultAppId }) => {
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
@@ -38,6 +52,23 @@ export const SecretManager: React.FC<{ userId: string; embedded?: boolean }> = (
   const [isVerifying, setIsVerifying] = useState(false);
   const [verdicts, setVerdicts] = useState<SecretVerdict[]>([]);
   const [checkedAt, setCheckedAt] = useState('');
+  /**
+   * Which app this screen is showing, and what a new key is saved against.
+   *
+   * `''` is "All apps" — the shared scope, and the value every key saved before scoping existed has.
+   * It is a real choice rather than an absence: a Stripe key most of somebody's apps use belongs here.
+   */
+  const [scope, setScope] = useState<string>(defaultAppId ?? '');
+  // Loaded here rather than passed in, so BOTH doors onto the vault get the picker without either call
+  // site having to remember to wire it — and so the two can never disagree about the user's app list.
+  const [apps, setApps] = useState<AppChoice[]>([]);
+  const appTitle = (id?: string | null) => apps.find((a) => a.id === id)?.title;
+  // Shared keys are shown under EVERY app, because they genuinely apply to every app — hiding them
+  // while an app is selected would make somebody paste a second copy of a key they already have.
+  const visibleSecrets = scope
+    ? secrets.filter((s) => !s.workspace_id || s.workspace_id === scope)
+    : secrets;
+  const scopeTitle = appTitle(scope);
   // Derived, not stored: a pure catalogue lookup on every keystroke is cheaper than keeping a second
   // copy of it in state that could fall out of step with the field.
   const recipe = findRecipeSource(name.trim());
@@ -58,6 +89,14 @@ export const SecretManager: React.FC<{ userId: string; embedded?: boolean }> = (
     return () => unsubscribe();
   }, [userId]);
 
+  // The app list is best-effort decoration on a picker: it never blocks saving a key, and an account
+  // without v5 access (or a failed request) simply gets no picker.
+  useEffect(() => {
+    let alive = true;
+    void listApps().then((rows) => { if (alive) setApps(rows); });
+    return () => { alive = false; };
+  }, []);
+
   const addSecret = async () => {
     if (!name || !value) return;
     const savedName = name.trim();
@@ -65,7 +104,7 @@ export const SecretManager: React.FC<{ userId: string; embedded?: boolean }> = (
     setAddError('');
     setVerdicts([]);
     try {
-      await saveSecret(userId, savedName, value.trim());
+      await saveSecret(userId, savedName, value.trim(), scope || null);
       setName('');
       setValue('');
       // SAY WHETHER IT ACTUALLY WORKS, not just that it stored (2026-08-17). "Saved" is a statement about
@@ -139,6 +178,46 @@ export const SecretManager: React.FC<{ userId: string; embedded?: boolean }> = (
         <span className="font-mono text-indigo-300"> DATABASE_URL</span>, a payment or provider key). Keys are encrypted, scoped to your
         account, and <strong className="text-indigo-200">injected into your app automatically at build time</strong> — never shown to the AI,
         never pasted in chat, never committed to git. Use the exact variable name your app reads.
+      </p>
+
+      {/* WHICH APP ARE THESE KEYS FOR? (admin 2026-08-17)
+          Until now the vault had no app dimension at all, so EVERY key a user had ever saved was written
+          into the `.env` of EVERY app they built — a to-do list carried their payment secret, and went on
+          carrying it if the app was published. This picker is the user-facing half of fixing that: a key
+          saved while an app is selected goes only to that app.
+          "All apps" is a real, deliberate choice, not an absence: a Stripe key most of somebody's apps
+          share belongs there — and it is what every key saved before today already is, which is why
+          nothing that exists today changes behaviour.
+          Hidden entirely when the user has no apps yet: nobody should be asked to choose between one
+          thing, or between nothing. */}
+      {apps.length > 0 && (
+        <div className="space-y-1">
+          <label htmlFor="secret-scope" className="block text-[11px] uppercase tracking-widest text-gray-500 font-bold">
+            Keys for
+          </label>
+          <select
+            id="secret-scope"
+            value={scope}
+            onChange={(e) => setScope(e.target.value)}
+            className="w-full bg-gray-900 border border-gray-700 p-3 rounded text-sm"
+          >
+            <option value="">All apps (shared)</option>
+            {apps.map((a) => (
+              <option key={a.id} value={a.id}>{a.title}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* SAY WHERE THE KEY IS ABOUT TO GO — always, not only when the picker happens to be on screen.
+          v5 opens this with the current build pre-selected, and the picker is hidden whenever the app
+          list could not be loaded. Without this line, that combination saves an app-scoped key while
+          telling the user nothing, and they would later wonder why their other app cannot see it. */}
+      <p className="text-[11px] text-gray-500 leading-snug">
+        {scope
+          ? `A key you add now goes only to ${scopeTitle ? `“${scopeTitle}”` : 'this app'} — your other apps will not receive it. Keys shared with all apps are listed here too, and every app still gets those.`
+          : 'A key you add now goes to every app you build.'
+            + (apps.length > 0 ? ' Pick an app above to keep a key out of your other apps.' : '')}
       </p>
 
       <div className="bg-gray-800 p-4 rounded-lg space-y-4">
@@ -226,7 +305,7 @@ export const SecretManager: React.FC<{ userId: string; embedded?: boolean }> = (
           One tap asks the providers themselves and puts the answer next to each name.
           This is deliberately NOT automatic on mount: it makes real outbound requests, and doing that
           every time somebody opens Settings would be work nobody asked for. */}
-      {secrets.length > 0 && (
+      {visibleSecrets.length > 0 && (
         <div className="flex items-center justify-between gap-2">
           <button
             onClick={checkAllKeys}
@@ -242,12 +321,20 @@ export const SecretManager: React.FC<{ userId: string; embedded?: boolean }> = (
       )}
 
       <div className="space-y-2">
-        {secrets.map((s) => {
+        {visibleSecrets.map((s) => {
           const verdict = verdicts.find((v) => v.names.includes(s.secret_name));
           return (
             <div key={s.id} className="bg-gray-800 p-3 rounded font-mono text-xs space-y-1">
               <div className="flex justify-between items-center gap-2">
                 <span className="truncate">{s.secret_name}</span>
+                {/* Which app owns this key. Shown only when the user actually has apps to tell apart —
+                    and a shared key says so explicitly, because "goes to everything" is the fact most
+                    worth knowing about a payment secret. */}
+                {apps.length > 0 && (
+                  <span className="shrink-0 font-sans text-[10px] text-gray-500 truncate max-w-[45%]">
+                    {s.workspace_id ? (appTitle(s.workspace_id) ?? 'Another app') : 'All apps'}
+                  </span>
+                )}
                 <button onClick={() => handleDeleteSecret(s.id)} aria-label={`Delete ${s.secret_name}`} className="shrink-0 text-red-400 hover:text-red-300">
                   <Trash2 size={16} />
                 </button>

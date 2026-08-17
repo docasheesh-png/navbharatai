@@ -8614,10 +8614,15 @@ export function registerAgentV3Routes(app: Express): void {
       // user stored — without ever pasting it into chat. Loaded from the user's ENCRYPTED vault only
       // (loadUserVaultSecrets never reads process.env, so NavBharatAI's platform keys can never leak in).
       // Captured into `vaultSecrets` so the connected-database context (below) can also read it.
+      // LEAST PRIVILEGE (admin 2026-08-17). This used to load EVERY key the user had ever saved and
+      // write them all into this app's `.env` — so a to-do list carried the user's Razorpay secret, and
+      // if that app was published or exported, the key went with it. Passing the workspace narrows it to
+      // the user's SHARED keys plus the ones tied to THIS app. Keys saved before scoping existed have no
+      // workspace, so they count as shared and every existing build behaves exactly as it did.
       let vaultSecrets: Record<string, string> = {};
       try {
         if (userId) {
-          vaultSecrets = await loadUserVaultSecrets(userId);
+          vaultSecrets = await loadUserVaultSecrets(userId, workspaceId);
           // ENGINEER_DB_PROVIDER is an internal marker (which DB the user connected), not an app secret —
           // keep it OUT of the built app's .env; it is only used to build the DB context prompt below.
           const { [DB_PROVIDER_MARKER]: _dbMarker, ...appEnv } = vaultSecrets;

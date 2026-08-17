@@ -34823,3 +34823,50 @@ The recommendation is: build 8A–8D, ship E1–E3, and leave E4–E15 open-but-
 asks. Completeness was delivered; the priority call is recorded so it is a decision, not a drift.
 
 No code shipped in this entry — it is an audit and a plan. `ROADMAP.md` §8 is the deliverable.
+
+---
+
+## 2026-08-17 — "Cursor for India, in Hindi" — a recommendation of mine, corrected by the admin
+
+Follow-up to the entry above. The admin read §8E's advice to defer the extensibility cluster and pushed
+back: *"to ham indians ke liye bana rahe hai cursor aisa maan lo, hindi me 😂 kya yeh nahi ho sakta.
+agar sach me impossible hai…to chor do. agar koi rasta ho…to isko bhi roadmap me add kar dena!"*
+
+**The push-back was right, and §8E's reasoning was wrong.** Nothing in §8E was a feasibility claim —
+every item there is buildable — but it argued against them on the grounds that they serve "an audience
+we do not have". That does not survive the actual number: India has millions of people who CAN code but
+read English slowly (engineering students, polytechnic/ITI, tier-2/3 developers). Nobody serves them,
+and Cursor never will, because it has no incentive to. The plan is now `ROADMAP.md` §9.
+
+**What the re-examination turned up, which neither of us had: the moat item was missing from §8
+entirely.** NavBharatAI's Indic-language work is genuinely strong — `IndicLanguage.ts` separates Marathi
+from Hindi by real markers (ळ, आहे, नाही), catches romanized input, and is deliberately timid because
+building someone's app in the wrong language is worse than building it in English. **But all of it
+governs ONE thing: which language the GENERATED APP's UI is in.** Nowhere does the platform explain the
+user's OWN code, errors or concepts back to them in their language. "Ye error kya keh raha hai?" has no
+answer today. That capability (§9.1) is the cheapest thing in the section, needs no architecture
+decision, and is the only genuinely un-copyable item in the whole audit.
+
+**The strongest argument is not the admin's framing either, and §9 records the better one.** "Cursor but
+in Hindi" competes on someone else's turf. The compounding version: **this is the next step for the user
+we already have.** Someone who cannot code builds a shop app here; six months later it has real
+customers and they need to understand their own code. Same person, later — and today we lose them at
+exactly that moment.
+
+**The real obstacle is architecture, not features (§9.2).** Cursor runs on YOUR machine against YOUR
+repo; a browser cannot read a local folder. Three paths — a CLI (`npx navbharatai`), a VS Code
+extension, or staying in the browser — and they are not cheaply combinable. Recommendation is the CLI,
+which means **§8E's ranking of item E9 as a "near-non-goal" was wrong under this goal** and is corrected
+in §9.3 along with E11/E4/E6.
+
+**Two cautions kept rather than dropped to agree (§9.4).** This does not replace §8A–§8C and must not
+start before them — steering, a shell, runtime logs and a per-project instruction file serve BOTH
+audiences and are all smaller. And the real cost is focus: an app-builder for non-coders and a coding
+tool for coders are two products sharing one engine. Replit runs both, so it is not fatal, but it should
+be accepted knowingly rather than discovered later.
+
+**The measurable question that should decide §9.2:** do users who built an app here come back asking
+about their CODE? If yes, this is the graduation path. If they only ever ask for more app features, it
+is not — and §9.1 was still worth building.
+
+No code shipped. `ROADMAP.md` §9 is the deliverable; §8 remains the immediate work.

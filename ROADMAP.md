@@ -530,6 +530,112 @@ land and users still ask for E4–E8, that is evidence — and evidence beats th
 
 ---
 
+## 9 · 🔵 "CURSOR FOR INDIA, IN HINDI" — the graduation path (added 2026-08-17)
+
+Admin, after reading §8E's recommendation to defer the extensibility cluster: *"to ham indians ke liye
+bana rahe hai cursor aisa maan lo, hindi me 😂 kya yeh nahi ho sakta. agar sach me impossible hai…to
+chor do. agar koi rasta ho…to isko bhi roadmap me add kar dena!"*
+
+> ### The honest correction that produced this section
+>
+> §8E argued against the extensibility cluster on the grounds that it serves "an audience we do not
+> have". **That reasoning was wrong, and the admin's push-back is what exposed it.** Nothing in §8E was
+> a feasibility claim — every item there is buildable — and the audience objection does not survive
+> contact with the actual number: India has millions of people who CAN code but read English slowly
+> (engineering students, polytechnic/ITI, tier-2/3 developers). Nobody serves them, and Cursor never
+> will, because it has no incentive to.
+>
+> **But the strongest argument is not the admin's either.** "Cursor but in Hindi" is a follower's
+> framing — it competes on someone else's home turf. The compounding framing is better: **this is the
+> next step for the user we ALREADY have.** Somebody who cannot code builds a shop app here; six months
+> later it has real customers and they need to understand their own code. That is the same person,
+> later. Today we lose them at exactly that moment.
+
+### 9.0 · THE FINDING THAT CHANGES THE PLAN — the moat item was missing from §8 entirely
+
+NavBharatAI's Indic-language work is genuinely strong: `IndicLanguage.ts` separates Marathi from Hindi
+by real markers (ळ, आहे, नाही), catches romanized input ("mala ek dukanache app banvayche"), and is
+deliberately timid because building someone's app in the wrong language is worse than building it in
+English. `LanguageDetect.ts`, `narrationCatalogue.ts` and `AppRequirements.ts` carry the same care.
+
+**All of it is about ONE thing: which language the GENERATED APP's UI is in.**
+
+Nowhere does the platform do the other thing: **explain the user's own code, errors and concepts to
+them in their language.** "Ye error kya keh raha hai?", "is function me kya ho raha hai?", "ye galat
+kyun hai?" — none of that exists.
+
+**That capability is the actual moat, and it was not on the §8 roadmap at all.** It is item 9.1, it is
+the cheapest thing in this section, and it does not require the architecture decision below.
+
+### 9.1 · 🟢 CODE LITERACY IN THE USER'S LANGUAGE — build this first, regardless of the fork
+
+| # | Item | Notes |
+|---|---|---|
+| 9.1a | **"Explain this in my language"** on any file, error or diff | The engine already detects the user's language and already reads the code. This is a prompt + a surface, not new capability. Highest value-to-effort ratio in the entire audit. |
+| 9.1b | **Errors explained, not just shown** | Every build error, runtime error and failed test gets a plain-language "what this means / what to change". Reuses the existing honest-error work. |
+| 9.1c | **Hinglish register, not translated Hindi** | ⚠️ **The product risk in this whole section.** Developers say "variable", "function", "deploy" — nobody says "चर". Translating technical terms produces something patronising that a real developer closes immediately. The target register is Hinglish: English nouns, Hindi grammar. Needs a written style rule + tests, the same way the White-Label Law is enforced by a test. |
+| 9.1d | Per-user language preference (not just per-request detection) | Detection is per-message today; a returning user should not have to re-signal. |
+| 9.1e | Hindi/Hinglish code comments **on request only** | Default stays English per `CLAUDE.md`'s language standard — this is an explicit user opt-in for their OWN app, never for NavBharatAI's source. |
+
+### 9.2 · 🔒 THE ARCHITECTURE FORK — the admin must choose before 9.3
+
+**The real obstacle is not any feature. It is that Cursor runs on YOUR machine against YOUR repo, and
+NavBharatAI is a browser talking to a cloud sandbox. A browser cannot read a local folder.** Three
+honest options, and they are not combinable cheaply:
+
+| Path | What it is | Cost | Honest read |
+|---|---|---|---|
+| **P1 · CLI** — `npx navbharatai` | A terminal client that talks to our engine, working on the user's real local repo | Medium build; new auth + transport surface | **The cheapest way to reach a real developer.** §8E called this a near-non-goal (item E9) — **that ranking was wrong if this section is the goal.** Also the natural home for 9.1. |
+| **P2 · VS Code extension** | Lives where the developer already is | Larger; a second client to maintain forever | Highest adoption per user, highest ongoing cost. Do only after P1 proves demand. |
+| **P3 · Stay in the browser** | Make the cloud IDE genuinely good (§8B + §8C + LSP) | Continuous | This is **Replit's** game, not Cursor's. Fine — but then stop calling it Cursor, because the comparison sets a bar we are not aiming at. |
+
+**Recommendation: P1.** It is the only one that reaches someone with an existing codebase, it is the
+smallest of the three, and it can carry 9.1 immediately. P3 items are worth doing anyway because §8B/§8C
+serve BOTH audiences.
+
+### 9.3 · 🔵 THE DEVELOPER SURFACE — re-ranked from §8E under this goal
+
+These are the same items §8E deferred. Under the Cursor-for-India goal their ranking changes; the list
+is unchanged so the two sections cannot drift.
+
+| §8E ref | Item | Old verdict | New verdict under §9 |
+|---|---|---|---|
+| E9 | CLI / editor / CI surface | 🚫 near-non-goal | ✅ **P1 above — now the entry point** |
+| E11 | LSP: go-to-definition, inline errors | 🟡 defer | ✅ Build — this is what "an editor" means to a developer. Biggest item here; scope to 2–3 languages first. |
+| E4 | Custom commands / saved skills | 🟡 defer | ✅ Build — a developer's own repeated workflow is the retention hook. |
+| E8 | MCP client | 🟡 defer | 🟡 Still defer, but for a NEW reason: it is how a developer plugs in their own tools, so it becomes right AFTER P1 has real users — not before. |
+| E6 | Per-tool allow / deny | 🟡 defer | ✅ Build alongside P1. A CLI on a developer's real machine makes this safety-critical, not optional. |
+| E5 | Hooks | 🟡 defer | 🟡 After E4. |
+| E7 | User-defined sub-agents | 🟡 defer | 🟡 After E4. |
+| E14 | Breakpoint debugger | 🚫 too large | 🚫 Unchanged. §8B's logs cover most of the real need. |
+| E12, E13 | Multi-project, test watch | 🟡 defer | 🟡 Unchanged. |
+
+### 9.4 · What I would still say no to, and why
+
+**This does not replace §8A–§8C, and it must not be started before them.** Steering, a working shell,
+runtime logs and a per-project instruction file serve BOTH audiences — the non-coder and the developer —
+and every one of them is smaller than anything in §9.3. Starting here first would build a developer tool
+on a foundation that still cannot be interrupted mid-build.
+
+**The real cost is focus, and it should be accepted knowingly rather than discovered later.** An
+app-builder for non-coders and a coding tool for coders are two products sharing one engine. Replit runs
+both, so it is not fatal — but it doubles the surface that every future change has to be correct on.
+
+### 9.5 · Sequencing
+
+1. **9.1a + 9.1b + 9.1c** — code literacy in the user's language. Small, ships inside the existing
+   product, needs no fork, and is the only genuinely un-copyable item in this document.
+2. **Finish §8A–§8C.** Both audiences need them.
+3. **Admin decides 9.2** (P1 / P2 / P3).
+4. If P1: CLI + E6 (permissions) together, then 9.1 exposed through it.
+5. Then E11 (LSP), then E4. Re-assess before E5/E7/E8.
+
+**The measurable question that should govern step 3:** do users who built an app here come back asking
+about their CODE? If yes, §9 is the graduation path and worth the focus cost. If they only ever ask for
+more features in the app, it is not — and 9.1 alone was still worth building.
+
+---
+
 ## How to use this file
 
 1. **Re-grep before you start.** Every line here is a hint. Nine were wrong on 2026-08-07.

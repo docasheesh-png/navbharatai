@@ -4207,6 +4207,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 userId={userId}
                 email={email}
                 framework={framework}
+                // THE ONE MOUNT THAT KEEPS THIS ALIVE WHILE HIDDEN, so it is the one that must tell the
+                // truth about visibility. The same value already drives the wrapper's CSS one line
+                // above; without it reaching the component, the Live watchdog kept polling — and
+                // therefore kept a billed sandbox awake — the entire time the user was on chat.
+                paneVisible={previewVisible(showWorkspace, tab)}
                 // U1 — auto-refresh the preview as files are written during the build (debounced inside).
                 reloadSignal={filesVersion}
                 // C1 — when the panel is idle (no build running), let the preview auto-boot a dead

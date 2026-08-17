@@ -10,6 +10,7 @@ import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartph
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview } from './previewAutoReboot';
+import { shouldWatchLivePreview } from './previewKeepAlive';
 import { shouldBootImportedProject } from './importedProjectBoot';
 import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
 import { shouldFailoverToLive, liveFailoverNotice, noLiveRescueNotice } from './previewLiveFailover';
@@ -116,7 +117,17 @@ export function veRgbToHex(color: string): string {
   return `#${h(+m[1])}${h(+m[2])}${h(+m[3])}`;
 }
 
-export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, reloadSignal, bootSignal, onFixError, onFileEdited, onAskAiAboutElement }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; reloadSignal?: number; bootSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void }) {
+export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, bootSignal, onFixError, onFileEdited, onAskAiAboutElement }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean;
+  /**
+   * Is this pane the surface actually on screen INSIDE the app?
+   *
+   * REQUIRED, not optional, and that is the point: a caller that UNMOUNTS this component when hidden
+   * passes a literal `true` and is trivially correct, while a caller that keeps it MOUNTED-but-hidden
+   * has to supply the real value. Making it optional would let the next hidden-mount call site
+   * silently reintroduce the sandbox-cost leak this prop was added to close — see
+   * `shouldWatchLivePreview` in previewKeepAlive.ts for the full history.
+   */
+  paneVisible: boolean; reloadSignal?: number; bootSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void }) {
   // A4 (unified preview): in-browser is the DETERMINISTIC DEFAULT — it always renders the current
   // files instantly with no server, so the preview is never a dead "No live preview yet" empty state
   // that depends on an ephemeral E2B sandbox being up. "Live server" (full-fidelity, real runtime) is
@@ -380,10 +391,19 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const healRef = useRef<{ ws: string | null; streak: number; total: number; lastAt: number | null }>({ ws: null, streak: 0, total: 0, lastAt: null });
   const probeInFlight = useRef(false);
   const probeAndMaybeHeal = useCallback(async () => {
-    if (!autoResume || mode !== 'live' || !workspaceId || diagnosing || probeInFlight.current) return;
+    if (diagnosing || probeInFlight.current) return;
+    // ONE rule for "should this watchdog be awake", shared with the interval below so the two can never
+    // disagree. It now also refuses when the pane is hidden INSIDE the app — a Live preview left behind
+    // while the user is on chat was holding a billed sandbox open indefinitely (see the helper).
+    if (!shouldWatchLivePreview({
+      autoResume: !!autoResume,
+      mode,
+      hasWorkspace: !!workspaceId,
+      paneVisible,
+      documentHidden: typeof document !== 'undefined' && document.visibilityState === 'hidden',
+    })) return;
     const hasUrl = !!(url || foundUrl);
     if (!hasUrl || sandbox?.livePreviewAvailable !== true) return;
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // never boot behind a hidden tab
     if (healRef.current.ws !== workspaceId) healRef.current = { ws: workspaceId, streak: 0, total: 0, lastAt: null };
     probeInFlight.current = true;
     try {
@@ -430,11 +450,22 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       probeInFlight.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox, userId, email, framework, runDiagnose]);
-  /** How often the open Live tab re-checks that its preview is still actually alive. */
+  }, [autoResume, mode, workspaceId, paneVisible, url, foundUrl, diagnosing, sandbox, userId, email, framework, runDiagnose]);
+  /**
+   * How often the open Live tab re-checks that its preview is still actually alive.
+   *
+   * ⚠️ THIS NUMBER IS SHORTER THAN THE SANDBOX IDLE LIMIT (300s), BY DESIGN AND BY NECESSITY — a
+   * watchdog that checked less often than the thing it watches would report a dead preview late. That
+   * is exactly why the visibility gate below is load-bearing rather than an optimisation: while this
+   * interval runs it keeps the sandbox alive, so it must only run while a human is genuinely looking.
+   */
   const WATCH_INTERVAL_MS = 150_000;
   useEffect(() => {
-    if (!autoResume || mode !== 'live' || !workspaceId) return;
+    // The SAME rule the probe uses. `paneVisible` is in the deps, so leaving the Preview tab tears the
+    // interval down and returning to it re-arms and re-checks immediately.
+    if (!shouldWatchLivePreview({
+      autoResume: !!autoResume, mode, hasWorkspace: !!workspaceId, paneVisible, documentHidden: false,
+    })) return;
     void probeAndMaybeHeal(); // immediate check on mount / url / workspace change (the old C1b moment)
     const timer = setInterval(() => { void probeAndMaybeHeal(); }, WATCH_INTERVAL_MS);
     const onWake = () => { if (document.visibilityState === 'visible') void probeAndMaybeHeal(); };
@@ -446,7 +477,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       document.removeEventListener('visibilitychange', onWake);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoResume, mode, workspaceId, url, foundUrl, sandbox, probeAndMaybeHeal]);
+  }, [autoResume, mode, workspaceId, paneVisible, url, foundUrl, sandbox, probeAndMaybeHeal]);
 
   // Guards a compile from overlapping itself (a debounced auto-refresh must not fire a second fetch
   // while the first is still in flight — the slower response could otherwise clobber the newer one).

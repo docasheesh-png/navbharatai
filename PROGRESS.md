@@ -34870,3 +34870,54 @@ about their CODE? If yes, this is the graduation path. If they only ever ask for
 is not — and §9.1 was still worth building.
 
 No code shipped. `ROADMAP.md` §9 is the deliverable; §8 remains the immediate work.
+
+---
+
+## 2026-08-17 — The preview left behind: a billed sandbox that could never be reaped
+
+Admin, on E2B cost: *"ek bar user ne app banaya, preview chala, fir user ne koi aur chat open kar li,
+preview aise hi chor diya! to kya billing me add hota rahega?"*
+
+**Yes — and to NavBharatAI, not the user.** Sandbox billing is capped at the build's own duration
+(`agentv3.ts` `Math.min(seconds, buildSeconds)`), so the user was never charged a rupee for it. We
+absorbed 100%.
+
+**The mechanism, and it is pure arithmetic.** Once opened, the preview pane is deliberately never
+unmounted — `previewKeepAlive.ts` hides it with CSS so a detour to chat cannot destroy a rendered
+iframe. That is correct and stays. But a mounted component keeps its timers: the Live watchdog polls
+`/api/agentv3/preview-health` every **150s**, that route runs a real command inside the sandbox
+(`actuator.runCommand`), every sandbox command refreshes the idle clock via `getSandbox()`, and the idle
+sweep pauses a VM at **300s**. 150 < 300, so **the sweep could never win.** A Live preview left behind
+held a billed E2B VM (~₹7/hour, measured) until the browser tab itself was closed.
+
+`probeAndMaybeHeal` already refused to run behind a hidden BROWSER TAB, and that guard was real — it
+just does not cover the reported case. Switching to chat inside NavBharatAI leaves
+`document.visibilityState` at `'visible'` while the pane sits at `display:none`. **The missing fact was
+already being computed one line away for the CSS class** (`previewVisible(showWorkspace, tab)`) and
+simply never reached the watchdog.
+
+**The fix:** `shouldWatchLivePreview` — one pure, tested rule consulted by BOTH the probe and the
+interval, so they cannot drift into "the interval fires while the probe declines", which would be the
+same leak with extra steps. `paneVisible` is threaded from the panel and is in the effect's deps, so
+leaving Preview tears the timer down and returning re-arms it with an immediate check.
+
+**`paneVisible` is REQUIRED, not optional, and that is the actual engineering.** Two of the three call
+sites unmount when hidden and pass a literal; only `AgentV3Panel` keeps the pane alive while hidden and
+must pass the real value. An optional prop defaulting to `true` would have been less code and would have
+let the next hidden-mount call site silently reintroduce the leak. The compiler now refuses.
+
+**What the user loses: nothing.** A returning user meets a paused sandbox and waits through a resume —
+the trade `sandboxReaper.ts` already documents in its own words ("slower, not broken"). What they gain
+is that this now actually happens.
+
+**Sibling hunt (rule 3).** Every other client poller was checked: `useAgentV3Build`'s stall detector
+runs only during a live build, and the rest are 1s UI clocks and a typewriter. The preview watchdog was
+the only timer touching a sandbox.
+
+**Also confirmed while investigating, because the admin proposed building them:** ideas #1 and #2 —
+cache the preview on the device, run the E2B VM only when the cache cannot cope — **are already built.**
+The In-browser preview is the DEFAULT (`useState<'live' | 'inbrowser'>('inbrowser')`), renders from the
+workspace files with no server, and "Live server" is explicitly labelled PAID in the UI. Nothing to
+build there; recorded here so no future session builds it twice (safeguard #6).
+
+Verification gate: `tsc --noEmit` clean · `vitest run` 1301 files / 16,193 tests green.

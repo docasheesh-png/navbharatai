@@ -34597,3 +34597,57 @@ is also the one that cannot help. That is a product judgement rather than a bug 
 changed here.
 
 Verification gate: `tsc --noEmit` clean · `vitest run` green.
+
+---
+
+## 2026-08-17 — two APK-flow bugs from a real run: an unenforceable charge, and a button that would not say why
+
+Admin, with two screenshots from the app.
+
+### 1. ₹1 was charged on DOWNLOAD, which could never be enforced
+
+The admin's words: *"apk ban rahi hai theek thak 0₹ me, bas download hone par charge ₹1 — yeh galat hai,
+user apk banwayega aur github se ja kar download kar lega."*
+
+Correct, and the proof was printed on the same screen: **"GitHub keeps the file for 14 days."** The .apk
+is built by GitHub Actions in the USER'S OWN repository, so anybody could build here for nothing and
+collect the artifact from GitHub. The charge sat on the one step a user can skip — which meant only the
+honest ones paid it.
+
+**Moved to the moment the build SUCCEEDS** (`/api/mobile-ship/artifacts`, where the server first sees a
+chargeable artifact). Two properties made this the right point rather than the trigger:
+- it cannot be skipped — the artifact existing IS the successful build;
+- it keeps the "working result or free" law, because GitHub publishes no artifact for a FAILED run. The
+  admin's first instinct was to charge at build START; that would have billed people for failures, and
+  this repo has an autofix loop precisely because failures happen. Raised, and the admin chose success.
+
+The debit ref is still the artifact id, so it is idempotent across every poll and every later download:
+one built file, one ₹1. The download path now charges nothing and reports `applied: false` honestly, and
+the copy says "₹1 to build your app — once it is built, downloading it is free", which is now literally
+true rather than nearly true.
+
+**Honest boundary (rule 6):** a user who starts a build and never returns to the app is never charged,
+because nothing server-side observes the run completing. Closing that needs a GitHub webhook on the
+user's own repository, which we do not have. The bypass the admin actually reported — build here,
+download from GitHub — is gone.
+
+### 2. "Send for review" was disabled and would not say why
+
+*"apk ban gayi, ab publish to app mart nahi ho rahi, pura form fill kar diya fir bhi."*
+
+The form was genuinely incomplete, and the app never said so. From the admin's own screenshot: the long
+description was **19 characters** where 30 are required, and the developer email was **"aashishcpmt09"** —
+a username, not an address. Every box had text in it and the consent was ticked, so the form looked
+finished and the button just sat there dim.
+
+The validation was RIGHT and is not relaxed — the server enforces the same rules, so loosening the client
+would only move the silence to a 400. What was missing was the sentence. `storeSubmissionReady.ts` (pure,
+tested against the exact reported form) now produces a message per unmet rule: each field says what is
+wrong with IT, and one specific next step appears under the button. Messages quote the real numbers
+("11 more to go") and address the mistake actually made — "it needs an @ and a domain" tells somebody who
+typed their username something that "invalid email" does not.
+
+A disabled control with no stated reason is worse than a rejection: a rejection tells you what to change,
+while this made a working feature look broken.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.

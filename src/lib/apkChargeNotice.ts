@@ -1,23 +1,30 @@
-// TELLING THE USER ABOUT THE ₹1 BUILD-FILE CHARGE — before the download, and after it.
+// TELLING THE USER ABOUT THE ₹1 BUILD CHARGE — before it happens, and after.
 //
 // ADMIN 2026-08-10: "apk download abhi free me ho raha hai — jabki maine kaha tha 1₹ per download!
 // Aur HAR BAR USER KO BATAYA JAYE."
 //
 // TWO SEPARATE FINDINGS BEHIND THIS FILE, and only the second one is a defect:
 //
-//  1. It is NOT free. `/api/mobile-ship/download` has charged ₹1 per built file since 2026-08-06.
-//     It reads free for the admin because their account is on `AGENTV3_FREE_LIST`, which is exempt
-//     everywhere by design — the same reason Professionals looked free. A normal user IS charged.
+//  1. It is NOT free. ₹1 has been charged per built file since 2026-08-06. It reads free for the
+//     admin because their account is on `AGENTV3_FREE_LIST`, which is exempt everywhere by design —
+//     the same reason Professionals looked free. A normal user IS charged.
 //
 //  2. THE REAL DEFECT: the user is never TOLD. The server fires the debit and streams the bytes; the
 //     client just saves the file. So ₹1 leaves a real person's balance with no price shown before and
 //     no confirmation after — money taken silently. That is the opposite of what the billing law asks
 //     for ("the bill they see is 100% REAL"), and it is what this module fixes.
 //
-// The wording carries the one thing users always get wrong about this charge: it is per BUILD, not
-// per download. Re-downloading the same file costs nothing, because the debit is keyed to the
-// artifact's identity. Saying so up front prevents the "it charged me twice!" support message that a
-// bare price would guarantee. PURE — no React, no network, so the sentences are unit-testable.
+// WHERE THE CHARGE MOVED, AND WHY (admin 2026-08-17: "app banane ka 1₹ lagna chahiye"). It used to
+// fire on DOWNLOAD, which could not be enforced at all: the .apk is built by GitHub Actions in the
+// user's own repository and GitHub keeps it for 14 days — a fact this very screen prints — so anyone
+// could build here for nothing and collect the file from GitHub. Charging at the one step a user can
+// skip meant only the honest ones paid. It now fires when the BUILD SUCCEEDS, which is both
+// unavoidable and still honest about failure: GitHub publishes no artifact for a failed run, so a
+// build that does not work still costs nothing.
+//
+// The wording therefore says per BUILD, and says the download is free — both now literally true.
+// The debit is keyed to the artifact, so re-downloading or re-checking a finished build never adds a
+// second charge. PURE — no React, no network, so the sentences are unit-testable.
 
 export type ChargeLang = 'en' | 'hi';
 
@@ -29,18 +36,21 @@ export type ChargeLang = 'en' | 'hi';
  */
 export const APK_PRICE_INR = 1;
 
-/** What the DOWNLOAD BUTTON says, so the price is visible BEFORE the user commits. PURE. */
-export function chargeButtonLabel(priceInr: number, lang: ChargeLang = 'en'): string {
-  if (!(priceInr > 0)) return lang === 'hi' ? 'डाउनलोड' : 'Download';
-  return lang === 'hi' ? `डाउनलोड · ₹${priceInr}` : `Download · ₹${priceInr}`;
+/**
+ * What the DOWNLOAD BUTTON says. No price on it any more: the download itself is free, and printing
+ * "₹1" on a button that takes nothing would be the billing law's own complaint in reverse — a number
+ * shown to somebody who is not being charged is as dishonest as a charge shown to nobody. PURE.
+ */
+export function chargeButtonLabel(_priceInr: number, lang: ChargeLang = 'en'): string {
+  return lang === 'hi' ? 'डाउनलोड' : 'Download';
 }
 
 /** The tooltip/subtitle that explains WHY it is not charged again. PURE. */
 export function chargeHint(priceInr: number, lang: ChargeLang = 'en'): string {
   if (!(priceInr > 0)) return '';
   return lang === 'hi'
-    ? `हर बनी हुई फ़ाइल के लिए ₹${priceInr} — यही फ़ाइल दोबारा डाउनलोड करने पर कुछ नहीं लगता।`
-    : `₹${priceInr} for each build — downloading this same file again is free.`;
+    ? `ऐप बनाने के ₹${priceInr} — बन जाने के बाद डाउनलोड करना मुफ़्त है, चाहे जितनी बार करें।`
+    : `₹${priceInr} to build your app — once it is built, downloading it is free, however many times.`;
 }
 
 /**
@@ -56,8 +66,8 @@ export function chargeReceipt(
     return lang === 'hi' ? 'फ़ाइल तैयार है — इसका कोई शुल्क नहीं लगा।' : 'Your file is ready — no charge for this one.';
   }
   return lang === 'hi'
-    ? `फ़ाइल तैयार है · ₹${opts.priceInr} आपके बैलेंस से लिए गए। यही फ़ाइल दोबारा लेने पर कुछ नहीं लगेगा।`
-    : `Your file is ready · ₹${opts.priceInr} was taken from your balance. Getting this same file again is free.`;
+    ? `ऐप बन गया · ₹${opts.priceInr} आपके बैलेंस से लिए गए। इसे डाउनलोड करना मुफ़्त है।`
+    : `Your app is built · ₹${opts.priceInr} was taken from your balance. Downloading it is free.`;
 }
 
 /** Response headers the download uses to report its own price honestly. */

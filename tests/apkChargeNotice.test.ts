@@ -21,18 +21,26 @@ import {
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), 'utf8');
 
 describe('BEFORE the click — the price is never a surprise', () => {
-  it('states the price AND the per-build rule in the same breath', () => {
+  it('states the price AND what it is for — building, not downloading', () => {
+    // The charge moved to the successful build on 2026-08-17, because a download charge could not be
+    // enforced (the artifact sits in the user's own GitHub repo for 14 days). The sentence has to move
+    // with it: promising "₹1 per download" while charging per build would be the billing law's own
+    // complaint, and the old wording's real job — stopping "it charged me twice!" — is now done by
+    // saying the download is free outright.
     const hint = chargeHint(1);
     expect(hint).toContain('₹1');
-    // Without this line, a user who re-downloads the same file is certain to think they were charged
-    // twice — the debit is keyed to the artifact, so they were not.
-    expect(hint).toMatch(/same file again is free/i);
+    expect(hint).toMatch(/build/i);
+    expect(hint).toMatch(/download\w*\s+(it\s+)?is free|free/i);
   });
 
   it('says nothing at all when the charge is off — no empty "₹0" noise', () => {
     expect(chargeHint(0)).toBe('');
+  });
+
+  it('the DOWNLOAD button carries no price, because the download takes nothing', () => {
+    // A number on a button that charges nothing is as dishonest as a charge nobody was shown.
     expect(chargeButtonLabel(0)).toBe('Download');
-    expect(chargeButtonLabel(1)).toBe('Download · ₹1');
+    expect(chargeButtonLabel(1)).toBe('Download');
   });
 
   it('is written in Hindi, not transliterated', () => {
@@ -47,7 +55,8 @@ describe('AFTER the file arrives — the receipt can never claim a charge nobody
     const r = chargeReceipt({ priceInr: 1, applied: true });
     expect(r).toContain('₹1');
     expect(r).toMatch(/taken from your balance/i);
-    expect(r).toMatch(/same file again is free/i);
+    // Still answers "will this happen again?", now with the true answer: the download is free.
+    expect(r).toMatch(/free/i);
   });
 
   it('a free-list account, an anon caller or a zero price all say "no charge"', () => {
@@ -107,16 +116,19 @@ describe('WIRING — the server reports it and the screen says it', () => {
   });
 
   it('`applied` is only true when a charge genuinely happened', () => {
-    const at = server.indexOf('let chargeApplied = false;');
+    // The charge now lives on the artifacts route (the successful build); the same guarantees moved
+    // with it, and the download reports `false` because it really does take nothing.
+    const at = server.indexOf("'/api/mobile-ship/artifacts'");
     expect(at).toBeGreaterThan(-1);
-    const seg = server.slice(at, at + 900);
+    const seg = server.slice(at, server.indexOf('res.json({ artifacts })', at));
     expect(seg).toContain('isAgentV3FreeUser(identity.uid, identity.email)');
-    expect(seg).toContain('chargeApplied = apkChargeInr() > 0;');
+    const dl = server.indexOf("'/api/mobile-ship/download'");
+    expect(server.slice(dl, server.indexOf('res.send(got.bytes)', dl))).toContain("CHARGE_APPLIED_HEADER, 'false'");
   });
 
-  it('the charge NEVER blocks the bytes — the debit is still fire-and-forget', () => {
-    const at = server.indexOf('let chargeApplied = false;');
-    expect(server.slice(at, at + 900)).toContain('void debitWalletForBuild(');
+  it('the charge NEVER blocks the response — the debit is still fire-and-forget', () => {
+    const at = server.indexOf("'/api/mobile-ship/artifacts'");
+    expect(server.slice(at, server.indexOf('res.json({ artifacts })', at))).toContain('void debitWalletForBuild(');
   });
 
   it('the screen shows the price BEFORE and the receipt AFTER', () => {

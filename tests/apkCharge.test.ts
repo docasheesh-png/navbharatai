@@ -65,20 +65,34 @@ const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(
 const route = readFileSync(join(__dirname, '..', 'src/server/routes/mobileShip.ts'), 'utf8');
 
 describe('download-route wiring', () => {
-  it('charges at DELIVERY (after the artifact fetch succeeded), idempotent ref, verified identity, free-list exempt', () => {
+  it('charges when the BUILD SUCCEEDS, with the same guarantees the delivery charge had', () => {
+    // MOVED 2026-08-17 (admin: "user apk banwayega aur github se ja kar download kar lega"). The charge
+    // used to sit on the download, which could never be enforced: the artifact lives in the user's OWN
+    // GitHub repo for 14 days, so anyone could build here for nothing and collect it there. It now fires
+    // where the server first SEES a successful artifact — a point nobody can skip, and one that still
+    // never bills a failure, because GitHub publishes no artifact for a failed run.
+    const code = stripComments(route);
+    const at = code.indexOf("'/api/mobile-ship/artifacts'");
+    const end = code.indexOf('res.json({ artifacts })', at);
+    expect(at).toBeGreaterThan(-1);
+    const seg = code.slice(at, end);
+    expect(seg).toContain('isChargeableApk(String(a.name))');                 // only a real built app file
+    expect(seg).toContain('verifyFirebaseIdentity(req)');                     // only a real signed-in wallet
+    expect(seg).toContain('isAgentV3FreeUser(identity.uid, identity.email)'); // admin/tester exempt
+    expect(seg).toContain('apkChargeRef(owner, repo, String(a.id))');         // idempotent per artifact
+    expect(seg).toContain('description: chargeDescription(String(a.name))');  // white-label ledger line
+    expect(seg).toContain('void debitWalletForBuild');                        // never blocks the response
+    expect(seg).toContain('break;');                                          // one charge per build, not per file
+  });
+
+  it('the DOWNLOAD takes nothing — that is the whole point of the move', () => {
+    // If a charge ever returns here it is charged twice for one build, and the bypass comes back with it.
     const code = stripComments(route);
     const dl = code.indexOf("'/api/mobile-ship/download'");
-    const fetchOk = code.indexOf('fetchBuildArtifact', dl);
-    const charge = code.indexOf('isChargeableApk(got.fileName)', dl);
     const send = code.indexOf('res.send(got.bytes)', dl);
-    expect(charge).toBeGreaterThan(fetchOk); // a failed build never reaches the charge
-    expect(charge).toBeLessThan(send);       // decided beside the stream, not after the response ends
     const seg = code.slice(dl, send);
-    expect(seg).toContain('verifyFirebaseIdentity(req)');            // only a real signed-in wallet
-    expect(seg).toContain('isAgentV3FreeUser(identity.uid, identity.email)'); // admin/tester exempt
-    expect(seg).toContain('apkChargeRef(owner, repo, artifactId)');  // idempotent per artifact
-    expect(seg).toContain('description: chargeDescription(got.fileName)'); // white-label ledger line
-    expect(seg).toContain('void debitWalletForBuild');               // never blocks/delays the bytes
+    expect(seg).not.toContain('debitWalletForBuild');
+    expect(seg).toContain(`${'CHARGE_APPLIED_HEADER'}, 'false'`); // and it reports that honestly
   });
 
   it('the price is DISCLOSED before the user builds (no surprise charges — the bill they pay is real)', () => {

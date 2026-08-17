@@ -246,6 +246,33 @@ export function registerMobileShipRoutes(app: Express): void {
       const artifacts = (r.data?.artifacts || [])
         .filter((a: Record<string, unknown>) => !a.expired)
         .map((a: Record<string, unknown>) => ({ id: a.id, name: a.name, sizeBytes: a.size_in_bytes }));
+
+      // ₹1 IS CHARGED FOR THE BUILD, AT THE MOMENT IT SUCCEEDS (admin 2026-08-17).
+      //
+      // It used to be charged when the user pressed Download — which could not be enforced at all. The
+      // .apk is built by GitHub Actions in the USER'S OWN repository and GitHub keeps it for 14 days, a
+      // fact our own UI prints, so anybody could build here for nothing and collect the file from
+      // GitHub. The charge was optional in practice, and only the honest users paid it.
+      //
+      // The artifact existing IS the build having succeeded — GitHub publishes nothing for a failed run
+      // — so this is also the moment that keeps the "working result or free" law: a failed build still
+      // costs the user nothing, which is why the charge is here and not on the trigger.
+      //
+      // The debit ref is still the ARTIFACT, so it is idempotent across every poll and every later
+      // download: one built file, one ₹1, however many times this endpoint is called.
+      for (const a of artifacts) {
+        if (!isChargeableApk(String(a.name))) continue;
+        try {
+          const identity = await verifyFirebaseIdentity(req);
+          if (!identity?.uid || isAgentV3FreeUser(identity.uid, identity.email)) break;
+          void debitWalletForBuild(getServerDb() as any, identity.uid, {
+            billedInr: apkChargeInr(),
+            buildRef: apkChargeRef(owner, repo, String(a.id)),
+            description: chargeDescription(String(a.name)),
+          });
+        } catch { /* the charge must never break the build from being shown as ready */ }
+        break; // one charge per build, not per file in it
+      }
       res.json({ artifacts });
     } catch {
       res.status(502).json({ error: 'Could not read the build files from GitHub.' });
@@ -270,35 +297,18 @@ export function registerMobileShipRoutes(app: Express): void {
       const status = got.failure === 'expired' ? 404 : got.failure === 'not-app' ? 422 : got.failure === 'bad-request' ? 400 : 502;
       return res.status(status).json({ error: got.message });
     }
-    // ₹1-PER-BUILT-FILE (admin 2026-08-06, "sabhi kuch 1₹ par file"): charged at DELIVERY of a real
-    // built .apk/.aab/.ipa — never on a failed build (nothing streams), never twice for one artifact
-    // (the debit ref IS the artifact), never for free-list/anon, and never blocking the bytes. See
-    // lib/apkCharge.ts for the full contract.
+    // THE DOWNLOAD IS FREE. The ₹1 was charged when the build SUCCEEDED (see /artifacts above).
     //
-    // TELL THE USER (admin 2026-08-10: "har bar user ko bataya jaye"). Until now the debit was fired
-    // and the bytes streamed — so ₹1 left a real person's balance with NO price shown before and NO
-    // confirmation after. Money taken silently is the exact opposite of the billing law's promise
-    // that the bill a user sees is the real one. The response now REPORTS its own charge, so the
-    // client can show the price on the button and confirm the amount once the file arrives.
-    // `applied` is only true when a charge genuinely happened: a free-list account (which is why this
-    // reads "free" for the admin), an anonymous caller, or a price of 0 all report false rather than
-    // printing a number nobody paid.
-    let chargeApplied = false;
-    try {
-      if (isChargeableApk(got.fileName)) {
-        const identity = await verifyFirebaseIdentity(req);
-        if (identity?.uid && !isAgentV3FreeUser(identity.uid, identity.email)) {
-          chargeApplied = apkChargeInr() > 0;
-          void debitWalletForBuild(getServerDb() as any, identity.uid, {
-            billedInr: apkChargeInr(),
-            buildRef: apkChargeRef(owner, repo, artifactId),
-            description: chargeDescription(got.fileName),
-          });
-        }
-      }
-    } catch { /* the charge must never break the download */ }
+    // It used to be charged here, and that could never be enforced: the artifact lives in the user's
+    // own GitHub repository for 14 days — our own UI says so — so anyone could build here for nothing
+    // and fetch the file from GitHub instead. Charging at the only step a user can skip meant only the
+    // honest ones paid.
+    //
+    // The headers stay, and still report the truth, because the client shows a receipt from them. The
+    // debit ref is the same artifact id either way, so a download after the build-time charge adds
+    // nothing — the report below says "already paid for this build", not "you were just charged".
     res.setHeader(CHARGE_PRICE_HEADER, String(isChargeableApk(got.fileName) ? apkChargeInr() : 0));
-    res.setHeader(CHARGE_APPLIED_HEADER, chargeApplied ? 'true' : 'false');
+    res.setHeader(CHARGE_APPLIED_HEADER, 'false');
     res.setHeader('Access-Control-Expose-Headers', `${CHARGE_PRICE_HEADER}, ${CHARGE_APPLIED_HEADER}`);
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${got.fileName}"`);

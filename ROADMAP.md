@@ -390,6 +390,146 @@ The code half is done where one exists; only the infrastructure remains.
 
 ---
 
+## 8 · 🟢🔵 THE CONTROL GAP — closing the 60-item Claude Code audit (added 2026-08-17)
+
+Source: the capability audit run on 2026-08-17 against `main @ a599ea2`, by code search across
+`src/server`, `src/components`, `src/hooks`. Admin asked for a roadmap covering **all 60** gaps, so all
+60 are here — but they are ordered by **what the user gains**, not by the audit's numbering.
+
+> ### The finding that shapes this whole section
+>
+> **v5 is not behind on intelligence. It is behind on CONTROL.** Almost every gap has the same shape:
+> the engine can do the thing, the user cannot direct it, interrupt it, inspect it, or extend it. v5 was
+> built as an *appliance* — state a wish, receive an app — which is right for someone who cannot code,
+> and stops being right the moment their app gets real.
+>
+> **Two of the top items are already-built code behind a switch.** A1's steering exists and is gated to
+> one tier; A2's shell exists and is mounted in a different screen. Neither is a feature to build. Check
+> that before estimating anything here.
+
+> ### ⚠️ Method caveat — carried from the audit, do not skip
+>
+> The audit's "absent" findings come from grep. **That method produced two false positives before
+> publication**: `browser_action`/`screenshot` (dispatched with `if`, not `case`) and GitHub repo import
+> (lives in `GithubApiTree.ts`). Both were corrected. Per this file's own §"How to use", **re-grep the
+> DOMAIN NOUN before starting any item below** — never the feature name you expect.
+
+**Verified PRESENT during the same scan — do NOT rebuild:** a real PTY shell (`ShellTerminal.tsx`),
+sub-agents (`task`/`second_opinion`/`consensus`), plan approval + permission gates (`Approvals.ts`,
+5 call sites), secret requests, browser control, GitHub repo import, vision (images + PDF), web search,
+checkpoints + restore, Git panel, todo list, transcript compaction, deploy/preview/billing.
+
+---
+
+### 8A · CONTROL — do these first (🟢 all small, highest value per rupee)
+
+| # | Item | Audit ref | Where | Notes |
+|---|---|---|---|---|
+| A1 | **Open mid-build steering to every tier** | major 6 | `routes/agentv3.ts:1434–1438` | `steerQueue` EXISTS, gated to `'max'`. Ungate + cap queue depth. **Start here.** A steer costs one prompt; a Stop-and-rebuild costs a whole build — this SAVES tokens. |
+| A2 | **Wire the real shell into v5's Terminal** | major 1, minor 21 | `AgentV3Panel.tsx:4307` renders a read-only log; `ide/ShellTerminal.tsx` is the real PTY | Split the tab: AI log on top, live shell below. No new backend — routes `/shell/*` already exist and are owner-checked + rate-limited. ⚠️ Decide the sandbox-time billing question first (see 8F). |
+| A3 | **`web_fetch` tool** | major 7 | new tool in `ToolCatalog.ts` + `ToolDispatcher.ts` | Read a URL the user supplies. **Must ship with SSRF defence** — block private/link-local ranges, `redirect: 'error'`, size + time cap. Same discipline as `credentialProbe.ts`. |
+| A4 | **Queue a message while a build runs** | minor 2 | `hooks/useAgentV3Build.ts` + composer | Rides A1's queue. Without A1 it has nowhere to go. |
+| A5 | **Edit a past message and re-run from it** | minor 1 | `AgentV3Panel.tsx`; pattern exists in `ProfessionalChat.tsx:146` | Copy the existing rewind-the-transcript approach. Must refuse while a turn is in flight. |
+| A6 | **Retry the last step only** | minor 9 | build loop | Needs a durable "last tool call" record. Cheaper than the full-rebuild users do today. |
+| A7 | **Explicit "answer, don't build" control** | minor 10 | intent routing exists, is not user-facing | A visible toggle. Today a question can spend a build. |
+
+**Ship gate for 8A:** each item is its own PR, verification gate, CI green, merge. A1 and A3 also need
+an `AppKnowledgeBase.ts` entry (user-facing capability change).
+
+---
+
+### 8B · SEEING WHAT HAPPENED — debuggability (🟢)
+
+| # | Item | Audit ref | Notes |
+|---|---|---|---|
+| B1 | Live runtime log viewer for the running app | minor 22 | Sandbox already streams; this is a surface, not a capability. Biggest single win in this tier — server bugs are currently invisible. |
+| B2 | Ports + processes panel | minor 26 | `serviceGraph.ts` already models services/ports. Render it. |
+| B3 | Start / stop / restart one service | minor 25 | Today a stuck server needs a full rebuild. |
+| B4 | Re-run only the failing test | minor 28 | `run_tests` exists; add a filter argument. |
+| B5 | Name a checkpoint | minor 15 | 14 unnamed checkpoints are unusable. Tiny change, large usability gain. |
+| B6 | Diff two checkpoints | minor 14 | Diff machinery already exists for the build diff view. |
+| B7 | Undo ONE edit without restoring a whole checkpoint | minor 13 | Needs per-edit granularity in the checkpoint store. |
+| B8 | Show context usage | minor 7 | Compaction already runs (`SessionTimeline.ts`); surface the number so quality drops have a visible cause. |
+
+---
+
+### 8C · THE PROJECT'S OWN RULES (🟢)
+
+| # | Item | Audit ref | Notes |
+|---|---|---|---|
+| C1 | **Per-project instruction file** the AI always reads | minor 18 | The single highest-leverage item in this tier — it is NavBharatAI's own `CLAUDE.md`, for the user's app. Stops users repeating house rules every session. |
+| C2 | Ignore-file support | minor 19 | "Never touch this folder." Pairs with C1. |
+| C3 | @-mention a file to scope a request | minor 6 | Cuts tokens AND improves accuracy — pays for itself. |
+| C4 | Env editor + dev/staging/prod profiles | minor 31 (partial), 32 | Vault holds SECRETS; there is no plain env editor and one value set serves every environment. |
+| C5 | Add / remove a dependency from the UI | minor 30 | |
+| C6 | File tree: rename, move, multi-select | minor 11, 12 | |
+
+---
+
+### 8D · DATA &amp; VERSION CONTROL (🔵 multi-PR)
+
+| # | Item | Audit ref | Notes |
+|---|---|---|---|
+| D1 | Database browser + read-only SQL runner | minor 23, 24 | ⚠️ Runs against the USER'S OWN database. Read-only first; writes need their own confirmation. Closes "did my data actually save?" — today unanswerable without building a screen. |
+| D2 | Git blame / file history, partial commit, revert one commit | minor 37, 38, 39 | `GitManager` exists; these are surfaces on it. |
+| D3 | Open a PR, read CI, reply to review comments | minor 33, 34, 35 | Needs the GitHub App token path that already exists for storage. |
+| D4 | Merge-conflict resolution | minor 36 | Hard. Blocks all real collaboration — do it only if 8E's team tier is actually pursued. |
+| D5 | Two branches at once | minor 40 | Needs per-branch sandbox isolation. Expensive in E2B time — cost it before building. |
+
+---
+
+### 8E · PLATFORM &amp; TEAM — 🚨 MY RECOMMENDATION IS TO DEFER MOST OF THIS
+
+> **Stated plainly, because the admin asked for all 60 and this is where I disagree with building them
+> all.** Items E4–E9 are the extensibility cluster — hooks, skills, custom agents, MCP, per-tool
+> permissions, a CLI. Together they are what makes Claude Code a *developer platform*. Chasing them
+> turns NavBharatAI into a competitor to Cursor for an audience it does not have, while the real moat —
+> Hindi, Cashfree, UPI, domain recipes, the App Store, mobile-first — goes unattended. They are listed
+> in full because completeness was asked for. **The recommendation is: build 8A–8D, ship E1–E3, and
+> treat E4–E15 as OPEN-but-not-scheduled** until a real user asks for one.
+
+| # | Item | Audit ref | Verdict |
+|---|---|---|---|
+| E1 | Share a build with a read-only link | minor 42 | ✅ **Build it.** Cheapest trust win here — a user showing a client their app is organic marketing. ⚠️ Must pass the provider-anonymisation pass (White-Label Law) before any report is shareable. |
+| E2 | Invite a teammate, roles, audit log | minor 41, 43, 44 | ✅ Build when the first agency asks. Not before. |
+| E3 | Background tasks + scheduled runs | major 9, 10 | ✅ **Build it.** A build owning the whole screen is the most-felt limit that is not about code. |
+| E4 | Custom commands / saved skills | major 4, minor 48 | 🟡 Defer. High retention value in theory; unproven for our audience. |
+| E5 | Hooks | major 3, minor 47 | 🟡 Defer — developer-platform feature. |
+| E6 | Per-tool allow / deny rules | major 5, minor 49 | 🟡 Defer. Gates already exist and are the safety-critical half. |
+| E7 | User-defined sub-agents | major 8, minor 45 | 🟡 Defer. |
+| E8 | MCP **client** | major 2, minor 46 | 🟡 Defer. Note: `McpServerGenerator.ts`'s header already records this decision and its reasoning — read it before re-proposing. |
+| E9 | Use v5 from a terminal / editor / CI | minor 50 | 🚫 Near-non-goal. This is Cursor's product, not ours. |
+| E10 | Search chat history · fork a conversation · export a transcript | minor 3, 4, 5 | 🟡 Search is the useful third; fork and export are rarely asked for. |
+| E11 | Go-to-definition · inline errors (LSP) | minor 16, 17 | 🟡 Defer — large build, serves developers. |
+| E12 | Two projects side by side | minor 20 | 🟡 Defer. |
+| E13 | Test watch mode | minor 29 | 🟡 Defer. |
+| E14 | Breakpoint debugger | minor 27 | 🚫 Very large. B1 (logs) covers most of the real need. |
+| E15 | Response style / verbosity setting | minor 8 | 🟡 Small; do it alongside C1 if convenient. |
+
+---
+
+### 8F · 🔒 DECISIONS THE ADMIN MUST MAKE FIRST (not a session's call)
+
+1. **A2 blocks on a money decision.** A user-facing shell holds a billed E2B VM (~₹7/hr, measured), and
+   sandbox time is billed to the user only for BUILD seconds (`agentv3.ts:1225`,
+   `Math.min(seconds, buildSeconds)`). Terminal time is absorbed by NavBharatAI today. Three options:
+   bill terminal time like build time · keep it free with a per-day cap · paid tiers only. **Do not ship
+   A2 until this is chosen** — an uncapped shell on our account is a crypto-miner invitation.
+2. **D1 write access.** Read-only browsing is safe. Letting a user run writes against their own
+   production database needs an explicit confirmation design.
+3. **E2 team pricing.** Multi-user changes the billing model; not a code decision.
+
+### 8G · Sequencing
+
+**Sprint 1 (control):** A1 → A2 (after 8F.1) → A3 → A4.
+**Sprint 2 (visibility):** B1 → B5 → B2 → B8.
+**Sprint 3 (project rules):** C1 → C3 → C2.
+**Sprint 4 (trust):** E1 → E3.
+**Then re-assess.** A1, A2, B1 and C1 alone close most of what a real user actually feels. If those four
+land and users still ask for E4–E8, that is evidence — and evidence beats this document.
+
+---
+
 ## How to use this file
 
 1. **Re-grep before you start.** Every line here is a hint. Nine were wrong on 2026-08-07.

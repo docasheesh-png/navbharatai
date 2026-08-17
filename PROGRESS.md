@@ -34773,3 +34773,53 @@ zero keystrokes yields four notes — plus the throttle, the unwatched case, a h
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 1300 files / 16,179 tests green.
+
+---
+
+## 2026-08-17 — Capability audit vs Claude Code, and the roadmap that closes it → **THIS IS THE NEXT WORK**
+
+Admin: *"navbharatai pro v5 ko scan / audit karo aur claude code se compare karo… kam se kam 10 badi
+aur 50 choti gaps dhundo"*, then *"in sare gaps ko fill karne ke liye ek detailed roadmap banao"*.
+
+**The plan lives in `ROADMAP.md` §8** ("THE CONTROL GAP"), not here — this file is the append-only
+record of what SHIPPED, and §8 is what is still to do. This entry exists so a session reading
+`PROGRESS.md` for the resume point is sent to the right place. **Next session: start at ROADMAP §8G,
+Sprint 1, item A1.**
+
+**The audit.** Sixty gaps, every one from code search across `src/server`, `src/components`,
+`src/hooks` at `main @ a599ea2` — never from recollection. Ten major, fifty minor, plus fourteen
+capabilities verified PRESENT so the gap count is read in proportion.
+
+**The finding, in one line: v5 is not behind on intelligence — it is behind on CONTROL.** Nearly every
+gap is the same shape: the engine can do the thing, the user cannot direct it, interrupt it, inspect it
+or extend it. v5 is an appliance — state a wish, receive an app — which is the right design for someone
+who cannot code, and stops being right the moment their app gets real.
+
+**The two cheapest items are already-written code behind a switch, which is the most useful thing the
+audit turned up:**
+- **Mid-build steering already exists** (`routes/agentv3.ts:1434–1438`) and is gated to the Full Team
+  (`'max'`) tier. Every other user's only option when a build goes wrong is Stop-and-rebuild. Ungating
+  it does not cost tokens — it SAVES them, because a steer is one prompt and a rebuild is a whole build.
+- **A real PTY shell already exists** (`ide/ShellTerminal.tsx`, xterm.js, owner-checked, rate-limited)
+  and is mounted in Code Studio. v5's own Terminal tab renders `state.terminal.join('\n')` — a read-only
+  log with no input box. It needs a door, not a feature. ⚠️ Blocked on one admin decision first
+  (ROADMAP §8F.1): terminal time holds a billed E2B VM and is charged to nobody today.
+
+**Honest method note, recorded because it changes how much this audit should be trusted.** The grep
+method produced **two false positives before publication**: `browser_action`/`screenshot` were recorded
+as missing (they are dispatched with an `if`, not a `case`) and so was GitHub repo import (it lives in
+`GithubApiTree.ts`). Both were caught and corrected before the list was written. This is exactly the
+failure mode `ROADMAP.md`'s own header warns about — grep the DOMAIN NOUN, not the expected file name —
+and it fired inside an audit whose whole purpose was accuracy. Treat any single "absent" in §8 as
+high-confidence but not proof; re-grep before building.
+
+**Where I disagreed with the request, stated rather than quietly obeyed (third absolute rule).** The
+admin asked for a roadmap covering all sixty. All sixty are in §8. But §8E carries an explicit
+recommendation to DEFER most of the extensibility cluster — hooks, skills, custom sub-agents, MCP
+client, per-tool permissions, a CLI. Together those are what make Claude Code a *developer platform*;
+building them turns NavBharatAI into a competitor to Cursor for an audience it does not have, while the
+India-first moat (Hindi, Cashfree, UPI, domain recipes, the App Store, mobile-first) goes unattended.
+The recommendation is: build 8A–8D, ship E1–E3, and leave E4–E15 open-but-unscheduled until a real user
+asks. Completeness was delivered; the priority call is recorded so it is a decision, not a drift.
+
+No code shipped in this entry — it is an audit and a plan. `ROADMAP.md` §8 is the deliverable.

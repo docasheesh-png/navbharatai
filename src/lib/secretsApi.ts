@@ -62,6 +62,43 @@ export async function saveSecret(userId: string, secretName: string, secretValue
   if (!res.ok) throw new Error(await errorMessage(res, 'Could not save the key. Please try again.'));
 }
 
+/** What the provider itself said about a saved credential. Mirrors the server's ProbeVerdict, minus
+ *  `detail` (HTTP statuses and error types are diagnostics and stay server-side). */
+export interface SecretVerdict {
+  /** The variable name(s) this covers, exactly as the user saved them. Never a value. */
+  names: string[];
+  /** The provider as the user knows it — "Stripe". */
+  provider: string;
+  /** 'working' is the only status that means proven; 'unreachable'/'not-testable' mean we could not tell. */
+  status: 'working' | 'rejected' | 'unreachable' | 'not-testable';
+  message: string;
+}
+
+/**
+ * Ask the server to check the caller's SAVED keys against the providers themselves.
+ *
+ * Call this AFTER `saveSecret`, not instead of it: the plaintext is deliberately not sent here — the
+ * server reads the values back out of the user's own encrypted vault, so verifying adds no second path
+ * for a live credential to travel over the network.
+ *
+ * Returns [] rather than throwing when the check itself fails. A verification we could not run is not a
+ * verdict on the user's keys, and it must never turn a successful SAVE into a visible error.
+ */
+export async function verifySecrets(userId: string): Promise<SecretVerdict[]> {
+  try {
+    const res = await vaultFetch(
+      `/api/secrets/${userId}/verify`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+      'Checking your keys timed out.',
+    );
+    if (!res.ok) return [];
+    const body = await res.json();
+    return Array.isArray(body?.verdicts) ? body.verdicts : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Soft-delete one secret by id. Throws with the server's message on failure. */
 export async function deleteSecret(userId: string, secretId: string): Promise<void> {
   const res = await vaultFetch(`/api/secrets/${userId}/${secretId}`, { method: 'DELETE' }, 'Deleting the key timed out. Please try again.');

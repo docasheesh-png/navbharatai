@@ -1,0 +1,219 @@
+import { describe, it, expect, vi } from 'vitest';
+import {
+  probeCredentials, probesFor, verdictFromStatus, probeSummary,
+  isSafeSlug, supabaseProbeUrl, MAX_PROBES, type ProbeFetch,
+} from './credentialProbe';
+
+/** A fetch that always answers with one status, and records every request it saw. */
+const stub = (status: number) => {
+  const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+  const fn: ProbeFetch = async (url, init) => {
+    calls.push({ url, headers: init.headers });
+    return { status, ok: status >= 200 && status < 300 };
+  };
+  return { fn, calls };
+};
+
+describe('honesty: only the provider itself can call a key wrong', () => {
+  it('2xx is the ONLY thing that proves a key works', async () => {
+    const { fn } = stub(200);
+    const [v] = await probeCredentials({ STRIPE_SECRET_KEY: 'sk_live_a' }, fn);
+    expect(v.status).toBe('working');
+    expect(v.message).toContain('✅');
+  });
+
+  it('401/403 — and nothing else — means the key is genuinely wrong', () => {
+    expect(verdictFromStatus('Stripe', ['K'], 401).status).toBe('rejected');
+    expect(verdictFromStatus('Stripe', ['K'], 403).status).toBe('rejected');
+  });
+
+  it('a provider OUTAGE never tells the user their key is invalid', async () => {
+    // This is the rule that matters most: a vendor incident must not condemn a working credential.
+    for (const status of [500, 502, 503, 429, 404, 400]) {
+      const { fn } = stub(status);
+      const [v] = await probeCredentials({ STRIPE_SECRET_KEY: 'sk_live_a' }, fn);
+      expect(v.status, `HTTP ${status}`).toBe('unreachable');
+      expect(v.message, `HTTP ${status}`).not.toMatch(/did not accept/i);
+    }
+  });
+
+  it('a network error is our failure, not a verdict on their key', async () => {
+    const boom: ProbeFetch = async () => { throw Object.assign(new Error('ECONNREFUSED'), { name: 'FetchError' }); };
+    const [v] = await probeCredentials({ STRIPE_SECRET_KEY: 'sk_live_a' }, boom);
+    expect(v.status).toBe('unreachable');
+    expect(v.message).toMatch(/could not check/i);
+  });
+
+  it('never throws, whatever the fetch does', async () => {
+    const nasty: ProbeFetch = async () => { throw 'not even an Error'; };
+    await expect(probeCredentials({ STRIPE_SECRET_KEY: 'sk_a' }, nasty)).resolves.toBeInstanceOf(Array);
+  });
+
+  it('says nothing at all when there is nothing it can test', async () => {
+    const { fn, calls } = stub(200);
+    // Maps and MSG91 are deliberately unprobeable — checking them would spend the user's money.
+    expect(await probeCredentials({ GOOGLE_MAPS_API_KEY: 'AIza', MSG91_AUTH_KEY: 'abc' }, fn)).toEqual([]);
+    expect(await probeCredentials({}, fn)).toEqual([]);
+    expect(await probeCredentials(null, fn)).toEqual([]);
+    expect(calls).toHaveLength(0); // and it made no request while deciding that
+  });
+});
+
+describe('rule 1: no probe may ever cost the user money', () => {
+  it('does not probe the providers whose only check is billable', async () => {
+    const { fn, calls } = stub(200);
+    await probeCredentials({
+      GOOGLE_MAPS_API_KEY: 'AIza-billable-quota',
+      VITE_GOOGLE_MAPS_API_KEY: 'AIza-billable-quota',
+      MSG91_AUTH_KEY: 'sending-an-sms-costs-money',
+      AUTH0_CLIENT_SECRET: 'needs-a-token-exchange',
+      SMTP_PASS: 'needs-a-mail-transport',
+    }, fn);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('leaves connection strings to secretPreflight — two owners would disagree', async () => {
+    const { fn, calls } = stub(200);
+    await probeCredentials({ DATABASE_URL: 'postgres://u:p@h/db', MONGODB_URI: 'mongodb+srv://u:p@h/db' }, fn);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('every probe it DOES run is a GET', async () => {
+    const seen: string[] = [];
+    const fn: ProbeFetch = async (_url, init) => { seen.push(init.method); return { status: 200, ok: true }; };
+    await probeCredentials({ STRIPE_SECRET_KEY: 'sk', RESEND_API_KEY: 're', OPENAI_API_KEY: 'sk' }, fn);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(new Set(seen)).toEqual(new Set(['GET']));
+  });
+});
+
+describe('rule 3: no user-controlled hosts (SSRF)', () => {
+  it('refuses a Supabase URL that is not https on a Supabase domain', () => {
+    expect(supabaseProbeUrl('https://abc.supabase.co')).toBe('https://abc.supabase.co/rest/v1/');
+    expect(supabaseProbeUrl('http://abc.supabase.co')).toBeNull();          // not https
+    expect(supabaseProbeUrl('https://evil.com')).toBeNull();                 // not Supabase
+    expect(supabaseProbeUrl('https://abc.supabase.co.evil.com')).toBeNull(); // suffix trick
+    expect(supabaseProbeUrl('https://169.254.169.254/')).toBeNull();         // cloud metadata
+    expect(supabaseProbeUrl('http://localhost:8080')).toBeNull();
+    expect(supabaseProbeUrl('not a url')).toBeNull();
+    expect(supabaseProbeUrl('')).toBeNull();
+  });
+
+  it('a rejected Supabase URL causes NO outbound request at all', async () => {
+    const { fn, calls } = stub(200);
+    const out = await probeCredentials(
+      { VITE_SUPABASE_URL: 'https://169.254.169.254/', VITE_SUPABASE_ANON_KEY: 'k' }, fn,
+    );
+    expect(calls).toHaveLength(0);
+    expect(out[0].status).toBe('not-testable');
+  });
+
+  it('refuses a path segment that could escape the URL', () => {
+    expect(isSafeSlug('mycloud')).toBe(true);
+    expect(isSafeSlug('AC123_abc-def')).toBe(true);
+    expect(isSafeSlug('../../etc')).toBe(false);
+    expect(isSafeSlug('a/b')).toBe(false);
+    expect(isSafeSlug('evil.com')).toBe(false);   // a dot could start a host
+    expect(isSafeSlug('a@b')).toBe(false);        // an @ could redirect the host
+    expect(isSafeSlug('')).toBe(false);
+    expect(isSafeSlug('a'.repeat(200))).toBe(false);
+  });
+
+  it('an unsafe Cloudinary cloud name is not-testable, not a crafted request', async () => {
+    const { fn, calls } = stub(200);
+    const out = await probeCredentials(
+      { CLOUDINARY_CLOUD_NAME: '../../evil', CLOUDINARY_API_KEY: 'k', CLOUDINARY_API_SECRET: 's' }, fn,
+    );
+    expect(calls).toHaveLength(0);
+    expect(out[0].status).toBe('not-testable');
+  });
+
+  it('every probe URL it builds is https on the provider\'s own host', async () => {
+    const { fn, calls } = stub(200);
+    await probeCredentials({
+      STRIPE_SECRET_KEY: 'sk', RAZORPAY_KEY_ID: 'id', RAZORPAY_KEY_SECRET: 's',
+      SENDGRID_API_KEY: 'SG.a', RESEND_API_KEY: 're', MAPBOX_ACCESS_TOKEN: 'pk.a',
+    }, fn);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) {
+      const u = new URL(c.url);
+      expect(u.protocol).toBe('https:');
+      expect(u.hostname).toMatch(/\.(?:com|co|in)$/);
+    }
+  });
+});
+
+describe('rule 4: a value never appears in a verdict', () => {
+  it('keeps the secret out of names, messages and details', async () => {
+    const secret = 'sk_live_SUPERSECRETVALUE';
+    const { fn } = stub(401);
+    const [v] = await probeCredentials({ STRIPE_SECRET_KEY: secret }, fn);
+    const blob = JSON.stringify(v);
+    expect(blob).not.toContain(secret);
+    expect(blob).not.toContain('SUPERSECRET');
+    expect(v.names).toEqual(['STRIPE_SECRET_KEY']);
+  });
+
+  it('a network error never leaks a key that lives in a query string', async () => {
+    // Mapbox and Google put the key in the URL, and fetch errors routinely echo the URL back.
+    const leaky: ProbeFetch = async (url) => { throw Object.assign(new Error(`failed to reach ${url}`), { name: 'TypeError' }); };
+    const [v] = await probeCredentials({ MAPBOX_ACCESS_TOKEN: 'pk.SUPERSECRETTOKEN' }, leaky);
+    expect(JSON.stringify(v)).not.toContain('SUPERSECRETTOKEN');
+    expect(v.detail).toBe('TypeError');
+  });
+
+  it('the admin summary carries names and statuses only', async () => {
+    const { fn } = stub(401);
+    const verdicts = await probeCredentials({ STRIPE_SECRET_KEY: 'sk_live_SECRETVALUE' }, fn);
+    const summary = probeSummary(verdicts);
+    expect(summary).toContain('STRIPE_SECRET_KEY');
+    expect(summary).not.toContain('SECRETVALUE');
+    expect(probeSummary([])).toBe('');
+  });
+});
+
+describe('probesFor — which credentials get checked', () => {
+  it('needs the WHOLE set before it runs a multi-value probe', () => {
+    expect(probesFor({ RAZORPAY_KEY_ID: 'id' })).toEqual([]);                       // secret missing
+    expect(probesFor({ RAZORPAY_KEY_SECRET: 's' })).toEqual([]);                    // id missing
+    expect(probesFor({ RAZORPAY_KEY_ID: 'id', RAZORPAY_KEY_SECRET: 's' })).toHaveLength(1);
+  });
+
+  it('treats an empty or whitespace value as absent', () => {
+    expect(probesFor({ STRIPE_SECRET_KEY: '' })).toEqual([]);
+    expect(probesFor({ STRIPE_SECRET_KEY: '   ' })).toEqual([]);
+  });
+
+  it('accepts a browser-prefixed name for a probe that names the bare one', () => {
+    const found = probesFor({ VITE_MAPBOX_ACCESS_TOKEN: 'pk.a' });
+    expect(found).toHaveLength(1);
+    expect(found[0].names).toEqual(['VITE_MAPBOX_ACCESS_TOKEN']); // reports the name the user really saved
+  });
+
+  it('is bounded, so a big vault cannot fan out without limit', () => {
+    const big: Record<string, string> = {
+      STRIPE_SECRET_KEY: 'a', RAZORPAY_KEY_ID: 'a', RAZORPAY_KEY_SECRET: 'a',
+      SENDGRID_API_KEY: 'a', RESEND_API_KEY: 'a', TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 'a',
+      CLOUDINARY_CLOUD_NAME: 'c', CLOUDINARY_API_KEY: 'a', CLOUDINARY_API_SECRET: 'a',
+      MAPBOX_ACCESS_TOKEN: 'a', CLERK_SECRET_KEY: 'a', OPENAI_API_KEY: 'a', GOOGLE_API_KEY: 'a',
+      VITE_SUPABASE_URL: 'https://x.supabase.co', VITE_SUPABASE_ANON_KEY: 'a',
+    };
+    expect(probesFor(big).length).toBeLessThanOrEqual(MAX_PROBES);
+  });
+});
+
+describe('the batch is bounded in time', () => {
+  it('a hanging provider degrades to unreachable rather than stalling the caller', async () => {
+    vi.useFakeTimers();
+    try {
+      const hang: ProbeFetch = () => new Promise(() => { /* never settles */ });
+      const p = probeCredentials({ STRIPE_SECRET_KEY: 'sk_a' }, hang, 50);
+      await vi.advanceTimersByTimeAsync(200);
+      const out = await p;
+      expect(out).toHaveLength(1);
+      expect(out[0].status).toBe('unreachable');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

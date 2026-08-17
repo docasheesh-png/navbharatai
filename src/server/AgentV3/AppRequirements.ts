@@ -28,6 +28,8 @@
 // Twilio, Cloudinary…). None of NavBharatAI's own AI vendors is ever named — that rule is about hiding
 // which model built the app, not about hiding the user's own integrations.
 
+import { recipeFor, preferredOption, optionLink, requiredVarNames } from '../../lib/credentialRecipes';
+
 /** Where a requirement is satisfied. */
 export type RequirementKind =
   /** The engine provisions it automatically — informational only, never shown as a user task. */
@@ -45,6 +47,23 @@ export interface AppRequirement {
   envVars: string[];
   /** Exact in-app navigation path where the user supplies it. */
   settingsPath: string;
+  /**
+   * The env-var names the BUILT APP's own code actually reads, out of this service's catalogue entry.
+   *
+   * A requirement can be served by more than one provider (`maps` is Google OR Mapbox), and sending a
+   * Mapbox user into the Google Cloud Console is worse than saying nothing at all. The app's own source
+   * is the only non-guessing way to tell them apart, so it is recorded here and handed to
+   * credentialRecipes' `preferredOption`. Empty when the service was detected from a package alone.
+   */
+  matchedEnvVars: string[];
+  /**
+   * The npm packages the built app declares, out of this service's catalogue entry.
+   *
+   * Weaker than `matchedEnvVars` but available earlier: an app can declare `mapbox-gl` before any code
+   * reads a token, and without this such an app would be pointed at whichever provider happens to be
+   * listed first. Empty when the service was detected from an env reference alone.
+   */
+  matchedPackages: string[];
 }
 
 /** What the detector reads. All fields optional — a caller with only a file map still gets a result. */
@@ -55,7 +74,10 @@ export interface RequirementInput {
   prompt?: string | null;
 }
 
-interface ServiceSpec extends Omit<AppRequirement, 'kind'> {
+// The catalogue ENTRY, not a detection result: `matchedEnvVars`/`matchedPackages` describe what one
+// particular app turned out to reference, so they are omitted here rather than carried as empty arrays
+// on every spec — a spec that could hold them would invite somebody to read them as catalogue data.
+interface ServiceSpec extends Omit<AppRequirement, 'kind' | 'matchedEnvVars' | 'matchedPackages'> {
   kind: RequirementKind;
   /** npm package names (exact, from package.json deps) that imply this service. */
   packages: string[];
@@ -209,12 +231,40 @@ export function detectAppRequirements(input: RequirementInput): AppRequirement[]
   const found: AppRequirement[] = [];
   const seen = new Set<string>();
   for (const spec of SERVICES) {
-    const hit = spec.packages.some((n) => pkgs.has(n)) || spec.envHints.some((n) => envs.has(n));
-    if (!hit || seen.has(spec.id)) continue;
+    const matchedEnvVars = spec.envHints.filter((n) => envs.has(n));
+    const matchedPackages = spec.packages.filter((n) => pkgs.has(n));
+    if ((matchedPackages.length === 0 && matchedEnvVars.length === 0) || seen.has(spec.id)) continue;
     seen.add(spec.id);
-    found.push({ id: spec.id, label: spec.label, kind: spec.kind, envVars: [...spec.envVars], settingsPath: spec.settingsPath });
+    found.push({
+      id: spec.id, label: spec.label, kind: spec.kind, envVars: [...spec.envVars],
+      settingsPath: spec.settingsPath, matchedEnvVars, matchedPackages,
+    });
   }
   return found;
+}
+
+/**
+ * Every env-var name this catalogue knows for one service — the union of the names that satisfy it and
+ * the wider set that merely hints at it.
+ *
+ * Exported for ONE reason: credentialRecipes.ts annotates these names with "where does a human get this
+ * value", and an annotation keyed to a name that no longer exists here would silently stop appearing.
+ * Its test suite cross-checks against this function, so the two files cannot drift apart in silence —
+ * which is the exact failure that left five copies of this knowledge scattered around the repo. PURE.
+ */
+export function serviceEnvNames(id: string): string[] {
+  const spec = SERVICES.find((s) => s.id === id);
+  return spec ? Array.from(new Set([...spec.envVars, ...spec.envHints])) : [];
+}
+
+/**
+ * Every npm package this catalogue detects one service by. Exported for the same anti-drift reason as
+ * `serviceEnvNames` — credentialRecipes maps packages to providers, and a package named there that this
+ * detector never looks for would be a rule that can never fire. PURE.
+ */
+export function servicePackages(id: string): string[] {
+  const spec = SERVICES.find((s) => s.id === id);
+  return spec ? [...spec.packages] : [];
 }
 
 /**
@@ -248,6 +298,14 @@ export function unconfiguredRequirements(
 interface NoticeStrings {
   head: (n: number) => string;
   add: string;
+  /**
+   * "…where you get it from", given an already-rendered link.
+   *
+   * A function rather than a word because the clause sits BEFORE the source in English ("get it from X")
+   * and AFTER it in every Indian language here ("X से लें"). A shared word plus a fixed word order would
+   * read as machine translation in exactly the languages this notice exists to serve.
+   */
+  from: (source: string) => string;
   tail: string;
 }
 
@@ -255,49 +313,60 @@ const STRINGS: Record<string, NoticeStrings> = {
   hi: {
     head: (n) => `🔑 यह ऐप बन गया है। इसे पूरी तरह चालू करने के लिए ${n === 1 ? '1 चीज़' : `${n} चीज़ें`} आपके अपने account से चाहिए:`,
     add: 'डालें',
+    from: (src) => `${src} से लें`,
     tail: 'तब तक वे बटन “Coming soon” दिखाएँगे — बाक़ी पूरा ऐप सामान्य रूप से चलेगा।',
   },
   bn: {
     head: (n) => `🔑 অ্যাপটি তৈরি হয়ে গেছে। এটি সম্পূর্ণ চালু করতে ${n === 1 ? '১টি জিনিস' : `${n}টি জিনিস`} আপনার নিজের account থেকে দরকার:`,
-    add: 'দিন', tail: 'ততক্ষণ ওই বোতামগুলি “Coming soon” দেখাবে — বাকি পুরো অ্যাপ স্বাভাবিক ভাবে চলবে।',
+    add: 'দিন', from: (src) => `${src} থেকে নিন`,
+    tail: 'ততক্ষণ ওই বোতামগুলি “Coming soon” দেখাবে — বাকি পুরো অ্যাপ স্বাভাবিক ভাবে চলবে।',
   },
   pa: {
     head: (n) => `🔑 ਐਪ ਬਣ ਗਈ ਹੈ। ਇਸਨੂੰ ਪੂਰੀ ਤਰ੍ਹਾਂ ਚਲਾਉਣ ਲਈ ${n === 1 ? '1 ਚੀਜ਼' : `${n} ਚੀਜ਼ਾਂ`} ਤੁਹਾਡੇ ਆਪਣੇ account ਤੋਂ ਚਾਹੀਦੀਆਂ ਹਨ:`,
-    add: 'ਪਾਓ', tail: 'ਉਦੋਂ ਤੱਕ ਉਹ ਬਟਨ “Coming soon” ਦਿਖਾਉਣਗੇ — ਬਾਕੀ ਪੂਰੀ ਐਪ ਆਮ ਵਾਂਗ ਚੱਲੇਗੀ।',
+    add: 'ਪਾਓ', from: (src) => `${src} ਤੋਂ ਲਵੋ`,
+    tail: 'ਉਦੋਂ ਤੱਕ ਉਹ ਬਟਨ “Coming soon” ਦਿਖਾਉਣਗੇ — ਬਾਕੀ ਪੂਰੀ ਐਪ ਆਮ ਵਾਂਗ ਚੱਲੇਗੀ।',
   },
   gu: {
     head: (n) => `🔑 એપ બની ગઈ છે. તેને પૂરેપૂરી ચાલુ કરવા ${n === 1 ? '1 વસ્તુ' : `${n} વસ્તુઓ`} તમારા પોતાના account માંથી જોઈએ:`,
-    add: 'ઉમેરો', tail: 'ત્યાં સુધી એ બટન “Coming soon” બતાવશે — બાકીની આખી એપ સામાન્ય રીતે ચાલશે.',
+    add: 'ઉમેરો', from: (src) => `${src} પરથી લો`,
+    tail: 'ત્યાં સુધી એ બટન “Coming soon” બતાવશે — બાકીની આખી એપ સામાન્ય રીતે ચાલશે.',
   },
   or: {
     head: (n) => `🔑 ଆପ୍‌ ତିଆରି ହୋଇଗଲା। ଏହାକୁ ସମ୍ପୂର୍ଣ୍ଣ ଚଳାଇବା ପାଇଁ ${n === 1 ? '୧ଟି ଜିନିଷ' : `${n}ଟି ଜିନିଷ`} ଆପଣଙ୍କ ନିଜ account ରୁ ଦରକାର:`,
-    add: 'ଦିଅନ୍ତୁ', tail: 'ସେ ପର୍ଯ୍ୟନ୍ତ ସେହି ବଟନ୍‌ “Coming soon” ଦେଖାଇବ — ବାକି ପୂରା ଆପ୍‌ ସ୍ୱାଭାବିକ ଭାବେ ଚାଲିବ।',
+    add: 'ଦିଅନ୍ତୁ', from: (src) => `${src} ରୁ ନିଅନ୍ତୁ`,
+    tail: 'ସେ ପର୍ଯ୍ୟନ୍ତ ସେହି ବଟନ୍‌ “Coming soon” ଦେଖାଇବ — ବାକି ପୂରା ଆପ୍‌ ସ୍ୱାଭାବିକ ଭାବେ ଚାଲିବ।',
   },
   ta: {
     head: (n) => `🔑 ஆப் தயாராகிவிட்டது. இதை முழுமையாக இயக்க ${n === 1 ? '1 விஷயம்' : `${n} விஷயங்கள்`} உங்கள் சொந்த account-லிருந்து தேவை:`,
-    add: 'சேர்க்கவும்', tail: 'அதுவரை அந்த பட்டன்கள் “Coming soon” எனக் காட்டும் — மீதி முழு ஆப்பும் வழக்கம் போல் இயங்கும்.',
+    add: 'சேர்க்கவும்', from: (src) => `${src} இல் இருந்து பெறவும்`,
+    tail: 'அதுவரை அந்த பட்டன்கள் “Coming soon” எனக் காட்டும் — மீதி முழு ஆப்பும் வழக்கம் போல் இயங்கும்.',
   },
   te: {
     head: (n) => `🔑 యాప్ తయారైంది. దీన్ని పూర్తిగా నడపడానికి ${n === 1 ? '1 విషయం' : `${n} విషయాలు`} మీ సొంత account నుండి కావాలి:`,
-    add: 'జోడించండి', tail: 'అప్పటివరకు ఆ బటన్లు “Coming soon” అని చూపిస్తాయి — మిగిలిన యాప్ మామూలుగా పనిచేస్తుంది.',
+    add: 'జోడించండి', from: (src) => `${src} నుండి తీసుకోండి`,
+    tail: 'అప్పటివరకు ఆ బటన్లు “Coming soon” అని చూపిస్తాయి — మిగిలిన యాప్ మామూలుగా పనిచేస్తుంది.',
   },
   kn: {
     head: (n) => `🔑 ಆ್ಯಪ್ ಸಿದ್ಧವಾಗಿದೆ. ಇದನ್ನು ಸಂಪೂರ್ಣವಾಗಿ ಚಲಾಯಿಸಲು ${n === 1 ? '1 ವಿಷಯ' : `${n} ವಿಷಯಗಳು`} ನಿಮ್ಮ ಸ್ವಂತ account ನಿಂದ ಬೇಕು:`,
-    add: 'ಸೇರಿಸಿ', tail: 'ಅಲ್ಲಿಯವರೆಗೆ ಆ ಬಟನ್‌ಗಳು “Coming soon” ಎಂದು ತೋರಿಸುತ್ತವೆ — ಉಳಿದ ಪೂರ್ತಿ ಆ್ಯಪ್ ಎಂದಿನಂತೆ ಚಲಿಸುತ್ತದೆ.',
+    add: 'ಸೇರಿಸಿ', from: (src) => `${src} ಇಂದ ಪಡೆಯಿರಿ`,
+    tail: 'ಅಲ್ಲಿಯವರೆಗೆ ಆ ಬಟನ್‌ಗಳು “Coming soon” ಎಂದು ತೋರಿಸುತ್ತವೆ — ಉಳಿದ ಪೂರ್ತಿ ಆ್ಯಪ್ ಎಂದಿನಂತೆ ಚಲಿಸುತ್ತದೆ.',
   },
   ml: {
     head: (n) => `🔑 ആപ്പ് തയ്യാറായി. ഇത് പൂർണ്ണമായി പ്രവർത്തിപ്പിക്കാൻ ${n === 1 ? '1 കാര്യം' : `${n} കാര്യങ്ങൾ`} നിങ്ങളുടെ സ്വന്തം account-ൽ നിന്ന് വേണം:`,
-    add: 'ചേർക്കുക', tail: 'അതുവരെ ആ ബട്ടണുകൾ “Coming soon” എന്ന് കാണിക്കും — ബാക്കി ആപ്പ് പതിവുപോലെ പ്രവർത്തിക്കും.',
+    add: 'ചേർക്കുക', from: (src) => `${src} ൽ നിന്ന് എടുക്കുക`,
+    tail: 'അതുവരെ ആ ബട്ടണുകൾ “Coming soon” എന്ന് കാണിക്കും — ബാക്കി ആപ്പ് പതിവുപോലെ പ്രവർത്തിക്കും.',
   },
   ar: {
     head: (n) => `🔑 ایپ بن گئی ہے۔ اِسے پوری طرح چلانے کے لیے ${n === 1 ? '1 چیز' : `${n} چیزیں`} آپ کے اپنے account سے چاہیے:`,
-    add: 'ڈالیں', tail: 'تب تک وہ بٹن “Coming soon” دکھائیں گے — باقی پوری ایپ معمول کے مطابق چلے گی۔',
+    add: 'ڈالیں', from: (src) => `${src} سے لیں`,
+    tail: 'تب تک وہ بٹن “Coming soon” دکھائیں گے — باقی پوری ایپ معمول کے مطابق چلے گی۔',
   },
 };
 
 const ENGLISH: NoticeStrings = {
   head: (n) => `🔑 Your app is built. ${n === 1 ? '1 thing needs' : `${n} things need`} a key from your own account to go fully live:`,
   add: 'add',
+  from: (src) => `get it from ${src}`,
   tail: 'Until then those buttons show “Coming soon” — the rest of the app works normally.',
 };
 
@@ -311,10 +380,21 @@ export function appRequirementsNotice(missing: AppRequirement[], langCode?: stri
   if (items.length === 0) return '';
   const s = (langCode && STRINGS[langCode]) || ENGLISH;
   const lines = items.map((r) => {
-    const keys = (r.envVars ?? []).filter((k) => typeof k === 'string' && k).map((k) => `\`${k}\``).join(', ');
-    return keys
+    const option = preferredOption(recipeFor(r.id), { envVars: r.matchedEnvVars, packages: r.matchedPackages });
+    // NAME ONLY THE CHOSEN PROVIDER'S KEYS. `envVars` is an ANY-ONE-OF list — "Maps" carries both
+    // GOOGLE_MAPS_API_KEY and MAPBOX_ACCESS_TOKEN — and rendering it verbatim reads as "go and get all
+    // of these", next to a link to one console. Once the app's own packages and imports have told us
+    // which provider it uses, asking for the other one's key is noise the user cannot act on.
+    const names = option ? requiredVarNames(option, r.matchedEnvVars) : (r.envVars ?? []);
+    const keys = names.filter((k) => typeof k === 'string' && k).map((k) => `\`${k}\``).join(', ');
+    const base = keys
       ? `• **${r.label}** — ${r.settingsPath} → ${keys} ${s.add}`
       : `• **${r.label}** — ${r.settingsPath}`;
+    // WHERE THE KEY COMES FROM. Without this the line is a perfect instruction for somebody who already
+    // holds the key, and a dead end for everybody else. A service we have no curated recipe for keeps
+    // exactly the old line — an invented link on a payment console is far worse than no link.
+    const source = optionLink(option);
+    return source ? `${base} · ${s.from(source)}` : base;
   });
   return [s.head(items.length), ...lines, s.tail].join('\n');
 }

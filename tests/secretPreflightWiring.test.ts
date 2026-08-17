@@ -20,7 +20,20 @@ describe('The preflight runs at the moment the keys reach the app', () => {
   const fn = braceBlock(dispatcher, 'async ensureUserSecretsEnvFile(');
 
   it('is called from the one place that writes the vault into the app\'s .env', () => {
-    expect(fn).toContain('await verifyInjectedSecrets(this.userSecretsEnv)');
+    expect(fn).toContain('verifyInjectedSecrets(this.userSecretsEnv)');
+    // It moved inside a Promise.all when the credential probe was added (2026-08-17), so the `await`
+    // now sits on the batch. Pin that it is still awaited SOMEWHERE — a fire-and-forget preflight
+    // would report on a build that had already finished leaning on the credential.
+    expect(fn).toContain('await Promise.all([');
+  });
+
+  it('the probe runs ALONGSIDE the preflight, never queued behind it', () => {
+    // Both have their own deadline. In sequence they would add up on every build that saves a
+    // credential, and neither needs the other's answer — so the concurrency is a real property to
+    // protect, not an incidental shape.
+    const batch = fn.slice(fn.indexOf('await Promise.all(['), fn.indexOf(']);', fn.indexOf('await Promise.all([')));
+    expect(batch).toContain('verifyInjectedSecrets');
+    expect(batch).toContain('probeCredentials');
   });
 
   it('the keys are WRITTEN first — verification never gates the user\'s own choice', () => {
@@ -30,7 +43,11 @@ describe('The preflight runs at the moment the keys reach the app', () => {
   });
 
   it('a preflight that throws degrades to the old honest line instead of losing the narration', () => {
-    expect(fn).toContain('catch { verdicts = []; }');
+    // Two layers, and both matter: the per-promise `.catch` keeps ONE failing check from destroying the
+    // other's result, and the outer catch is the backstop if the batch itself throws. Either way
+    // `verdicts` ends up empty and the old honest line is what the user sees.
+    expect(fn).toContain('.catch(() => [] as SecretVerdict[])');
+    expect(fn).toContain('catch { verdicts = []; probed = []; }');
     expect(fn).toContain('if (verdicts.length === 0) {');
     // The sentence moved into the narration catalogue (ROADMAP item 6) so it can be spoken in the
     // user's own language. The degradation still narrates the SAME fact, with the same count.

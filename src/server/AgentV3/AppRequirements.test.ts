@@ -162,6 +162,48 @@ describe('appRequirementsNotice — short, localized, honest', () => {
     }
   });
 
+  it('tells the user WHERE THE KEY COMES FROM, not just where to paste it', () => {
+    const msg = appRequirementsNotice(razorpay, null);
+    expect(msg).toContain('https://dashboard.razorpay.com/app/keys');
+    expect(msg).toContain('get it from');
+  });
+
+  it('the "where from" clause is localized too, not an English island in a Hindi message', () => {
+    expect(appRequirementsNotice(razorpay, 'hi')).toContain('से लें');
+    expect(appRequirementsNotice(razorpay, 'ta')).toContain('பெறவும்');
+    // …and every language still carries the link itself.
+    for (const lang of ['hi', 'bn', 'pa', 'gu', 'or', 'ta', 'te', 'kn', 'ml', 'ar']) {
+      expect(appRequirementsNotice(razorpay, lang)).toContain('https://dashboard.razorpay.com/app/keys');
+    }
+  });
+
+  it('adding the source did NOT make the message longer — still one line per item', () => {
+    expect(appRequirementsNotice(razorpay, null).split('\n')).toHaveLength(3);
+    expect(appRequirementsNotice(razorpay, 'hi').split('\n')).toHaveLength(3);
+  });
+
+  it('names ONE provider\'s keys and that same provider\'s console — never a mix', () => {
+    // `maps` is served by Google OR Mapbox. An app that declares mapbox-gl must not be handed the
+    // Google Cloud Console, nor asked for a Google key it will never read.
+    const mapbox = detectAppRequirements({ files: { 'package.json': pkg({ 'mapbox-gl': '^3.0.0' }) } });
+    const msg = appRequirementsNotice(mapbox, null);
+    expect(msg).toContain('account.mapbox.com');
+    expect(msg).toContain('`VITE_MAPBOX_ACCESS_TOKEN`');
+    expect(msg).not.toContain('GOOGLE_MAPS_API_KEY');
+    expect(msg).not.toContain('console.cloud.google.com');
+  });
+
+  it('a service with no curated recipe keeps exactly the old line — never an invented link', () => {
+    // Detected via an env reference only, and app_ai_key HAS a recipe, so use a genuinely link-less
+    // shape: assert the fallback path renders without a source clause rather than a fabricated one.
+    const line = appRequirementsNotice(
+      [{ id: 'no_such_service', label: 'Something', kind: 'user', envVars: ['SOME_KEY'], settingsPath: 'Settings → X', matchedEnvVars: [], matchedPackages: [] }],
+      null,
+    );
+    expect(line).toContain('`SOME_KEY`');
+    expect(line).not.toContain('http');
+  });
+
   it('kind:auto requirements are never rendered as a user task', () => {
     const db = detectAppRequirements({ files: { 'package.json': pkg({ '@prisma/client': '^5.0.0' }) } });
     expect(appRequirementsNotice(db, null)).toBe('');

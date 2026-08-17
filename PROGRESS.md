@@ -34053,6 +34053,221 @@ Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean �
 
 ---
 
+## 2026-08-17 — "KAHAN SE MILEGA": the credential help layer, slice 1 (the recipe registry)
+
+**Admin ask:** *"hamara navbharatai user ko batata nahi hai, kaun kaun se credentials/keys/secrets
+chahiye aur kahan milenge… jaise Claude Code help karta hai, waisa ek system bana do — chahe
+credentials agent hi kyun na banana pade."*
+
+**Honest finding before building anything (safeguard #6).** ~70% of the asked-for system already
+existed and was live: `secretRequest.ts` asks for keys mid-build with exact names, `AppRequirements.ts`
+lists what a finished app still needs in 10 Indian languages, `missingCredentialGuard.ts` freezes an
+unconfigured feature as "Coming soon" instead of crashing the app, `secretPreflight.ts` actually TESTS
+a saved database credential, and the AES-256 vault injects everything into `.env`. The genuine gap was
+narrow and specific: **nothing ever told the user where the key comes from in the first place.** "Add
+`RAZORPAY_KEY_ID` in Settings → Secrets & API Keys" is a perfect instruction for somebody who already
+holds a Razorpay key and a dead end for everybody else.
+
+**Root cause (rule 4, step 2 — fix the class).** That knowledge DID exist in this repo, five times over
+and drifting: `dbProviders.ts` (11 databases), `paymentSetup.ts` (gateways), `AuthSettings.tsx`,
+`StorageSettings.tsx`, and `APIMarketplace.tsx` (33 services, no links at all) — and **none of it was
+reachable from `AppRequirements.ts`**, the one module that decides what the app in front of the user
+actually needs. The knowledge existed and never arrived.
+
+**Rejected: a separate "credentials agent".** Recommended against it and said so plainly (rule 3).
+Three reasons: it is one more place to go when the user's problem is at the moment the key is needed;
+a model asked "where are Razorpay's API keys?" answers fluently and is subtly wrong the day a console
+is reorganised — a wrong path into a payment console is a trust failure, not a typo; and a sixth copy
+of knowledge that already exists five times would deepen the disease. Built a curated, deterministic
+table instead. A table cannot hallucinate; it can go stale, which is a far safer failure and is stated
+in the file with a verification date.
+
+**Shipped:** `src/server/AgentV3/credentialRecipes.ts` — one registry, keyed by the service ids
+`AppRequirements` already owns, covering all 11 user-supplied services. Each provider carries its
+console link, the exact clicks inside that console, what it costs, which values are shown ONCE, which
+need an OTP / KYC / an admin role, which must never reach a browser bundle (`serverOnly`), and the
+prefixes that mark a TEST key (`testPrefixes` — groundwork for slice 2). Plus `keyless`: the genuinely
+keyless route where one exists (UPI takes real money with no gateway account; OpenStreetMap draws a
+real map with no token; NavBharatAI creates a database in one tap) — because the best credential help
+is not needing the credential.
+
+**Links were verified, not remembered.** Direct fetch is blocked by this environment's egress policy,
+so each entry was checked against the provider's own current documentation. That pass corrected three
+things that were wrong from memory: MSG91's auth-key URL, Clerk's deep link (replaced with the
+dashboard root, which cannot rot the same way), and the Google Maps order of operations — the API must
+be ENABLED before a key works, which is the commonest reason a fresh Maps key returns an error.
+
+**Two quality bugs found and fixed while wiring it:**
+1. An app that declares `mapbox-gl` but has not yet read a token was being sent to the *Google* Cloud
+   Console — the package is a provider signal and was being ignored. `AppRequirement` now records
+   `matchedEnvVars` + `matchedPackages`, and `preferredOption` resolves env-var first, package second,
+   easiest-to-obtain last.
+2. The Maps line asked for BOTH `GOOGLE_MAPS_API_KEY` and `MAPBOX_ACCESS_TOKEN` next to one console
+   link — `envVars` is an any-one-of list being rendered as a shopping list. `requiredVarNames()` now
+   names only the chosen provider's keys, preferring the name the app's own code actually reads when
+   it differs only by a `VITE_`/`NEXT_PUBLIC_` prefix (saving `VITE_MAPBOX_ACCESS_TOKEN` for an app
+   that reads `MAPBOX_ACCESS_TOKEN` leaves the feature just as dead), while still completing the set
+   so a referenced key never ships without its secret.
+
+**Anti-drift lock (rule 4, step 4).** `AppRequirements` owns WHICH env vars a service needs; this file
+owns WHERE A HUMAN GETS THEM, and never re-declares a name. `serviceEnvNames()` / `servicePackages()`
+are exported purely so the test suite fails CI if the two ever disagree — the five-way drift cannot
+come back silently.
+
+**Message length unchanged.** The checklist is still one heading, one line per item, one closing line
+(admin 2026-08-03: long build messages go unread). The line carries the clickable link only; the full
+console path lives in the registry for the surfaces that have room for it (slices 2–4).
+
+**Honest scope boundary — what is NOT in this slice.** `keyless`, `serverOnly` and `testPrefixes` are
+recorded and tested but not yet SURFACED anywhere; the mid-build popup and the Settings screen still
+show no link. Those are slices 2–4 (test-vs-live key warning; verify-on-paste green tick; a Setup
+Checklist screen). Recorded here so nobody reads the registry's existence as the feature being done.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
+
+---
+
+## 2026-08-17 — credential help, slice 2: the two failures that happen AFTER you have the right key
+
+Slice 1 got people to the right console page. These two go wrong once the user is already holding a
+correct, working credential — which is exactly why nothing in the stack caught them: the key is valid,
+the build is green, the preview renders, and the app is still wrong.
+
+**1. The live secret published to every visitor.** `VITE_`/`NEXT_PUBLIC_`/`REACT_APP_` is not a naming
+style, it is an instruction to the bundler to INLINE that value into the JavaScript every visitor
+downloads. A user who saves their Stripe secret as `VITE_STRIPE_SECRET_KEY` — because the *publishable*
+one needed the prefix — has published a key that can charge cards and issue refunds. The app works
+flawlessly, which is what makes this the most dangerous state in the whole credential flow.
+
+**2. The test key that never takes money.** Every payment console hands out a sandbox pair first, and
+building against it is CORRECT. The failure is silent and late: the app ships, a real customer pays, and
+nothing arrives, because `rzp_test_` charges an imaginary card perfectly. No error anywhere — the user
+finds out from a missing settlement, days after they stopped looking at NavBharatAI.
+
+**Shipped:** `src/server/AgentV3/credentialSafety.ts`, wired into `ToolDispatcher`'s existing
+secrets-injection step (fires once per build, best-effort, advisory — it can never block or fail a
+build). Deliberately a SEPARATE module from `secretPreflight.ts`: that one answers "does this credential
+WORK", and these are an orthogonal axis — a live secret in a browser variable works perfectly and is a
+disaster; a test key connects successfully and takes no money. Folding either into `SecretStatus` would
+force one value to carry two unrelated verdicts and make an exposed key look like a *broken* one.
+
+**Precision budget (the design constraint that shaped the whole file).** A false "your key is exposed"
+is expensive — it teaches people to dismiss the warning, and the next one is the real one. So every rule
+needs a POSITIVE identification: either the curated catalogue marks that variable `serverOnly`, or the
+value carries a vendor-assigned prefix that cannot be anything else (`sk_live_`, `whsec_`, `SG.`, `sk.`).
+A value we do not recognise produces NOTHING — silence is the default, not the fallback. Test-locked:
+publishable keys, Supabase anon keys, Mapbox public tokens and Firebase API keys are all designed to
+ship in the browser and must never fire.
+
+**Honesty details worth keeping:** the exposure message tells the user to ROTATE the key, not merely to
+move it — the old value is already public, so moving it fixes nothing on its own. The test-key message
+does not scold (it says "exactly right while you are building") but still names the real consequence.
+And no message or admin summary ever contains a secret VALUE, not even truncated — a build report is
+persisted and assembled into an admin inbox, and half a live key in permanent storage is still a leak.
+That is asserted directly rather than assumed.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
+
+---
+
+## 2026-08-17 — credential help, slice 3: does the key ACTUALLY work?
+
+Slices 1 and 2 got the user to the right console page and warned them about the two ways a correct key
+still goes wrong. This closes the loop: after somebody pastes a credential, NavBharatAI finds out
+whether it genuinely works instead of copying it in and hoping.
+
+`secretPreflight.ts` already proved this is worth doing — it opens a real connection to a saved database
+and has caught stale, mistyped and deleted-database credentials at the START of a build rather than ten
+minutes later inside a preview that will not load. But it can only test ONE class of secret, a Postgres
+URL, and honestly reports every API key as "unchecked". That is most of them.
+
+**Shipped:** `src/server/AgentV3/credentialProbe.ts` — free, read-only probes for Stripe, Razorpay,
+SendGrid, Resend, Twilio, Cloudinary, Mapbox, Clerk, OpenAI, Google AI Studio and Supabase. Wired in two
+places: the build (beside the existing preflight) and a new `POST /api/secrets/:userId/verify` that the
+Secrets screen calls after a save, so the user sees a real green tick on paste.
+
+**The four rules the module is built around, each of which had to shape the code rather than a comment:**
+
+1. **Never spend the user's money.** Every probe is a free read — list, describe, whoami. Google Maps and
+   MSG91 are deliberately ABSENT: a Maps key check consumes billable quota and MSG91's is an SMS. Being
+   unable to check is an honest outcome; guessing is not. Test-locked — those names produce zero
+   outbound requests.
+2. **A failure we did not understand is never "your key is wrong".** ONLY 401/403 — the provider itself
+   rejecting the credential — yields `rejected`. A 500, 429, timeout or DNS failure yields `unreachable`,
+   which says we could not tell. Telling somebody their working key is invalid because the vendor had an
+   incident is a worse bug than not checking at all. Test-locked across 500/502/503/429/404/400.
+3. **No user-controlled hosts.** Every host is a hardcoded constant. The two places a user value reaches
+   a URL at all — Cloudinary's cloud name and Twilio's SID, both PATH segments — are validated against a
+   strict slug pattern, and Supabase's URL (the one genuinely user-supplied host) must be https on a
+   Supabase domain or it is not probed. Test-locked against the suffix trick
+   (`abc.supabase.co.evil.com`), cloud metadata (`169.254.169.254`) and `localhost`. `redirect: 'error'`
+   means an authenticated probe cannot be bounced to a host we never allowed.
+4. **The value never reaches a verdict.** Not in names, messages, details or the admin summary. One case
+   needed real care: Mapbox and Google carry the key in a QUERY STRING, and fetch errors routinely echo
+   the URL back — so a network failure records the error TYPE only, never the error text. Test-locked.
+
+**Design notes worth keeping.** The build-time probe runs CONCURRENTLY with `verifyInjectedSecrets`
+rather than after it: run in sequence they would add their deadlines together on every build that saves
+a credential, and neither needs the other's answer. Only `working` and `rejected` produce a narration
+line — "we could not reach Stripe" is noise on a build the user is watching, and is already in the admin
+report. The verify ROUTE does not accept plaintext: the client saves through the existing POST and then
+asks the server to check what is already stored, so verification adds no second network path for a live
+credential. A rejected key is still SAVED — the user chose it, and quietly discarding it would be a
+second, quieter version of the bug this fixes.
+
+**A real bug the tests caught before it shipped.** The route's per-user throttle read
+`state.get(userId) ?? 0`, which makes "never called" indistinguishable from "called at timestamp 0" — so
+a caller's very FIRST verification could be refused. Invisible in production (real clocks are large) and
+exactly the kind of thing that surfaces later as an unreproducible "the button did nothing". Fixed to
+test presence explicitly, and pinned.
+
+Kill switch: `AGENTV3_CREDENTIAL_PROBE=off` (default ON — checking the key IS the feature — but it makes
+real outbound calls, so it reverts without a deploy).
+
+**Honest boundary — still not testable, and why.** SMTP needs a real connect+AUTH over a mail transport
+rather than an HTTPS call; faking it with an HTTP request would prove nothing, so SMTP credentials are
+reported as unchecked. Auth0 needs a client-credentials token exchange, which is not a read. Both are
+recorded as open items rather than half-built.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
+
+---
+
+## 2026-08-17 — credential help, slice 4: the recipe reaches the two screens where the user is stuck
+
+Slice 1 put a LINK in the build-summary checklist, deliberately nothing more — that message is under a
+standing "keep it short" constraint and a full console path is several times the length of a link. But
+the checklist is not where somebody is actually stuck. They are stuck in front of an empty box, either
+in the mid-build key popup or on Settings → Secrets & API Keys, and both had room for the whole recipe
+and were showing none of it.
+
+**Both screens now carry, per variable:** the clickable console page, the exact clicks inside it, what
+it costs (free tier / card required / KYC), the per-variable "where" — including the sentence that
+matters most, *shown ONCE, copy it before closing* — and the keyless alternative where one exists.
+
+**`keyless` is finally surfaced, and this is the highest-value line in the feature.** It was recorded in
+slice 1 and displayed nowhere. "You may not need this at all — a UPI link accepts real payments with no
+gateway account and no fees" can delete the entire task rather than help with it. It is rendered LAST on
+the card on purpose: shown first it would read as a reason to abandon a key the user already has in hand.
+
+**The Settings screen also warns BEFORE the paste, not after.** When the typed name is a `serverOnly`
+variable, the box says not to add a `VITE_`/`NEXT_PUBLIC_` prefix. Slice 2 catches that mistake after the
+fact, but by then the only honest advice is "rotate the key" — the same warning delivered thirty seconds
+earlier costs the user nothing.
+
+**Refactor: `credentialRecipes.ts` moved `src/server/AgentV3/` → `src/lib/`.** Both sides need it now,
+and `src/lib/dbProviders.ts` documents this exact precedent. The alternative — a client copy of the
+catalogue — would have re-created the five-way drift this whole feature was written to end, in one step.
+It is pure and dependency-free, so the move is import paths only.
+
+**Why the localized build message was deliberately NOT given the keyless line.** The `keyless` strings
+are English sentences, and the checklist is rendered in ten Indian languages. Dropping an English
+sentence into a Hindi message is the "English island" this feature already avoids elsewhere, and
+localizing 4 recipes × 10 languages is real work that has not been done. The two SCREENS are English by
+the repo's own language standard, so the recipe belongs there and reads correctly. Recorded rather than
+quietly half-done: localizing `keyless` is an open item.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
 ## 2026-08-16 — v5 Live server: an honest "this is a paid service" note
 
 **Admin ask:** "jab koi app banaye aur user live server use kare, to ek warning note aaye — yeh paid

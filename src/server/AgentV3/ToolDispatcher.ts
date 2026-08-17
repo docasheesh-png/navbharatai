@@ -5,6 +5,8 @@ import { narrationText, type NarrationId, type NarrationParams } from './narrati
 import { noteHeal } from './HealLedger';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
+import { inspectCredentials } from './credentialSafety';
+import { probeCredentials, realProbeFetch, credentialProbeEnabled, type ProbeVerdict } from './credentialProbe';
 import { planSecretRequest, secretRequestPrompt, secretRequestResult, type SecretAsk } from './secretRequest';
 
 /**
@@ -628,14 +630,44 @@ export class ToolDispatcher {
       // narration distinguishes proven / broken / untested instead of blurring all three into a count.
       // Bounded and best-effort: costs nothing when no connection string is saved, and a verification
       // that itself fails degrades to "untested" — it never withholds a key the user chose to save.
+      // Both checks run CONCURRENTLY, under their own budgets. Run in sequence they would add their
+      // deadlines together on every build that saves a credential; side by side the cost is the slower
+      // of the two. They test different transports (a database connection vs an HTTPS read) and neither
+      // depends on the other's answer, so there is nothing to serialize.
       let verdicts: SecretVerdict[] = [];
-      try { verdicts = await verifyInjectedSecrets(this.userSecretsEnv); } catch { verdicts = []; }
+      let probed: ProbeVerdict[] = [];
+      try {
+        [verdicts, probed] = await Promise.all([
+          verifyInjectedSecrets(this.userSecretsEnv).catch(() => [] as SecretVerdict[]),
+          credentialProbeEnabled()
+            ? probeCredentials(this.userSecretsEnv, realProbeFetch).catch(() => [] as ProbeVerdict[])
+            : Promise.resolve([] as ProbeVerdict[]),
+        ]);
+      } catch { verdicts = []; probed = []; }
       if (verdicts.length === 0) {
         this.narrate('secrets.loaded', { count: names.length });
       } else {
         const { loaded, problems } = preflightNarration(verdicts);
         this.events?.emit({ type: 'narration', agent: 'architect', text: loaded, ts: Date.now() });
         for (const p of problems) this.events?.emit({ type: 'narration', agent: 'architect', text: p, ts: Date.now() });
+      }
+      // TWO FAILURES THE VERDICTS ABOVE CANNOT SEE, because in both the credential WORKS (2026-08-17).
+      // A live secret saved under a VITE_/NEXT_PUBLIC_ name is inlined into the JavaScript every visitor
+      // downloads — the app runs flawlessly and the key is public. A sandbox key charges an imaginary
+      // card perfectly and no money ever arrives, which the user discovers days later from a missing
+      // settlement. Deterministic and catalogue-driven, so a clean vault costs nothing and an
+      // unrecognised value says nothing at all. Advisory only — it can never block or fail a build.
+      try {
+        for (const w of inspectCredentials(this.userSecretsEnv)) {
+          this.events?.emit({ type: 'narration', agent: 'architect', text: w.message, ts: Date.now() });
+        }
+      } catch { /* a warning that fails is silence, never a broken build */ }
+      // …and what the providers themselves said. Only a REJECTED key and a PROVEN one are worth a line:
+      // "we could not reach Stripe" is noise on a build the user is watching, and it is already recorded
+      // for the admin report. A key that works earns its green tick because it was actually checked.
+      for (const p of probed) {
+        if (p.status !== 'rejected' && p.status !== 'working') continue;
+        this.events?.emit({ type: 'narration', agent: 'architect', text: p.message, ts: Date.now() });
       }
     } catch { /* best-effort — never block the build; the app just runs without injected keys */ }
   }

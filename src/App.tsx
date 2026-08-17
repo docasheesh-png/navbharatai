@@ -1,5 +1,7 @@
 import UpdateBanner from './components/UpdateBanner';
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
+// Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
+import { tokenFromDeepLink, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
@@ -446,6 +448,15 @@ export default function App() {
   // preview) docks to the right of the Pro Chat on desktop. User can collapse it.
   const [settingsScreen, setSettingsScreen] = useState<SettingsScreen>('root');
   const [githubRedirectingMessage, setGithubRedirectingMessage] = useState<string | null>(null);
+  /**
+   * A mirror of the message above, for the native listeners.
+   *
+   * Those listeners are registered ONCE and live for the whole session, so they close over the state as
+   * it was at registration — reading `githubRedirectingMessage` inside one would forever see `null` and
+   * conclude nothing is in flight. A ref is the value they can actually see.
+   */
+  const githubRedirectingRef = useRef<string | null>(null);
+  useEffect(() => { githubRedirectingRef.current = githubRedirectingMessage; }, [githubRedirectingMessage]);
   const [githubDebugData, setGithubDebugData] = useState<{
     oauthUrl?: string;
     redirectUri?: string;
@@ -2359,19 +2370,45 @@ export default function App() {
         if (Capacitor.isNativePlatform?.() !== true) return;
         const { App: CapApp } = await import('@capacitor/app');
         const handle = await CapApp.addListener('appUrlOpen', (data: { url?: string }) => {
-          const url = data?.url || '';
-          if (!/gh_token=/.test(url)) return; // not our GitHub deep link — ignore
-          const frag = url.split('#')[1] || url.split('?')[1] || '';
-          const token = new URLSearchParams(frag).get('gh_token');
-          if (!token) return;
+          const token = tokenFromDeepLink(data?.url);
+          if (!token) return; // not our GitHub deep link — ignore
           setGithubToken(token);
           localStorage.setItem('gh_token', token);
           rememberGithubOwner(auth.currentUser?.uid);
           addLog('GitHub connected successfully.', 'success');
           fetchGitHubUser(token);
+          // THE REPORTED BUG (admin 2026-08-17). Everything above already worked — the sign-in genuinely
+          // succeeded and the token was stored — but the "Opening GitHub… Please wait." overlay was
+          // cleared NOWHERE except its own Dismiss button. On the web the full-page redirect destroys
+          // that state, so it never showed; on native the app never navigates, so it sat there forever
+          // over a login that had already finished. The success path now has something to say.
+          setGithubRedirectingMessage(null);
           void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
         });
         removeGithubUrlOpen = () => { try { handle.remove(); } catch { /* already removed */ } };
+
+        // THE SAME STUCK STATE FROM THE OTHER DIRECTION: the user backs out of the in-app browser, so no
+        // deep link ever fires and the overlay freezes identically. Once the app is in the foreground
+        // again, "Opening GitHub… Please wait." is simply not true any more, whichever way it ended.
+        const resumeHandle = await CapApp.addListener('appStateChange', ({ isActive }: { isActive: boolean }) => {
+          if (!isActive) return;
+          // A successful return fires BOTH this and the deep link, on some platforms in an unhelpful
+          // order — so give the deep link its chance before concluding anything, and then decide from
+          // the state rather than from the event. `resumeOutcome` refuses to call a success a
+          // cancellation; telling somebody their working sign-in failed is worse than saying nothing.
+          window.setTimeout(() => {
+            const outcome = resumeOutcome({
+              stillWaiting: githubRedirectingRef.current !== null,
+              hasToken: !!localStorage.getItem('gh_token'),
+            });
+            if (outcome === 'cancelled') setGithubRedirectingMessage(GITHUB_CANCELLED_MESSAGE);
+          }, RESUME_GRACE_MS);
+        });
+        const removeUrlOpen = removeGithubUrlOpen;
+        removeGithubUrlOpen = () => {
+          removeUrlOpen?.();
+          try { resumeHandle.remove(); } catch { /* already removed */ }
+        };
       } catch { /* not native / plugin absent — the web flows above handle the token */ }
     })();
 

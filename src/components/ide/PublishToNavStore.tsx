@@ -15,6 +15,8 @@
 
 import React, { useState } from 'react';
 import { Store, Loader2, CheckCircle2, AlertTriangle, X } from 'lucide-react';
+// The submit rules, and — the part that was missing — the sentence explaining which one is not met yet.
+import { storeSubmissionProblems, storeSubmissionBlockedReason, type StoreField } from '../../lib/storeSubmissionReady';
 
 interface Props {
   owner: string;
@@ -108,13 +110,16 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
   // Mirror the server's validateSubmission so the button is only enabled when the submit will actually
   // pass — otherwise the user meets a silent 400. (Server stays the source of truth; this only prevents
   // a doomed request.)
-  const ready =
-    form.appName.trim().length >= 2 &&
-    form.shortDescription.trim().length >= 10 &&
-    form.description.trim().length >= 30 &&
-    form.developerName.trim().length >= 2 &&
-    /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(form.developerEmail.trim()) &&
-    form.acceptedTerms;
+  //
+  // AND SAY WHY IT IS OFF (admin report 2026-08-17: "pura form fill kar diya fir bhi"). The rules were
+  // right; the silence was the bug. A form that looks finished — every box filled, consent ticked —
+  // sat behind a dead button because the description was 19 characters where 30 are required and the
+  // email was a username. A disabled control with no stated reason is worse than a rejection: a
+  // rejection tells you what to change, this just makes the feature look broken. Same rules, now with
+  // the sentence that was missing.
+  const problems = storeSubmissionProblems(form);
+  const ready = problems.length === 0;
+  const problemFor = (field: StoreField) => problems.find((p) => p.field === field)?.message;
 
   return (
     <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.04] p-4 space-y-3">
@@ -132,12 +137,18 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
       </div>
 
       <div className="grid gap-2">
+        {/* Each field says what is wrong with IT, right where the user is looking, and disappears the
+            moment it is satisfied. Derived from the same rules the button uses, so the two can never
+            disagree about whether this form is submittable. */}
         <input value={form.appName} onChange={set('appName')} placeholder="App name"
           className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
+        {problemFor('appName') && <p className="text-[11px] text-amber-300/90 -mt-1 leading-snug">{problemFor('appName')}</p>}
         <input value={form.shortDescription} onChange={set('shortDescription')} placeholder="One line about your app"
           className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
+        {problemFor('shortDescription') && <p className="text-[11px] text-amber-300/90 -mt-1 leading-snug">{problemFor('shortDescription')}</p>}
         <textarea value={form.description} onChange={set('description')} placeholder="What does your app do? (at least 30 characters)" rows={3}
           className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
+        {problemFor('description') && <p className="text-[11px] text-amber-300/90 -mt-1 leading-snug">{problemFor('description')}</p>}
         <div className="grid grid-cols-2 gap-2">
           <select value={form.category} onChange={set('category')}
             className="bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white">
@@ -152,6 +163,8 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
           <input value={form.developerEmail} onChange={set('developerEmail')} placeholder="Your email" type="email"
             className="bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30" />
         </div>
+        {problemFor('developerName') && <p className="text-[11px] text-amber-300/90 -mt-1 leading-snug">{problemFor('developerName')}</p>}
+        {problemFor('developerEmail') && <p className="text-[11px] text-amber-300/90 -mt-1 leading-snug">{problemFor('developerEmail')}</p>}
       </div>
 
       <label className="flex items-start gap-2.5 text-[11px] text-white/60 leading-relaxed cursor-pointer">
@@ -175,6 +188,17 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
         {busy ? <Loader2 size={16} className="animate-spin" /> : <Store size={16} />}
         {busy ? 'Sending your app…' : 'Send for review'}
       </button>
+
+      {/* THE SENTENCE THE BUTTON OWED THE USER. Beside the field hints above, this puts the reason where
+          the user is actually looking when nothing happens — at the button they just pressed. One
+          specific next step rather than a list, because a wall of complaints on a form somebody thinks
+          is finished reads as rejection. */}
+      {!busy && !ready && (
+        <p className="flex items-start gap-1.5 text-[11px] text-amber-300/90 leading-snug">
+          <AlertTriangle size={13} className="shrink-0 mt-px" />
+          <span>{storeSubmissionBlockedReason(form)}</span>
+        </p>
+      )}
 
       {busy && (
         <p className="text-[11px] text-white/45 leading-snug">

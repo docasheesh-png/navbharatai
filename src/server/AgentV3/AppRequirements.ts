@@ -28,7 +28,7 @@
 // Twilio, Cloudinary…). None of NavBharatAI's own AI vendors is ever named — that rule is about hiding
 // which model built the app, not about hiding the user's own integrations.
 
-import { recipeFor, preferredOption, optionLink, requiredVarNames } from '../../lib/credentialRecipes';
+import { recipeFor, preferredOption, optionLink, requiredVarNames, type KeylessRoute } from '../../lib/credentialRecipes';
 
 /** Where a requirement is satisfied. */
 export type RequirementKind =
@@ -307,58 +307,96 @@ interface NoticeStrings {
    */
   from: (source: string) => string;
   tail: string;
+  /**
+   * "You may not need all of these —", introducing the keyless routes.
+   *
+   * This is the single most valuable line in the notice, because it can DELETE a task rather than help
+   * with it: a shop can take real money over UPI with no payment account at all. It is a separate short
+   * clause per route rather than a translation of the long English sentences on the Settings screens —
+   * forty long translations would be forty chances to ship a clumsy one, and this message is under a
+   * standing brevity constraint anyway.
+   */
+  keylessHead: string;
+  keyless: Record<KeylessRoute, string>;
 }
+
+const KEYLESS_EN: Record<KeylessRoute, string> = {
+  upi: 'a UPI link takes real payments with no payment account at all',
+  osm: 'a free OpenStreetMap map needs no key',
+  'db-auth': 'the database you connect already includes login',
+  'one-tap-db': 'NavBharatAI can create the database for you in one tap',
+};
 
 const STRINGS: Record<string, NoticeStrings> = {
   hi: {
     head: (n) => `🔑 यह ऐप बन गया है। इसे पूरी तरह चालू करने के लिए ${n === 1 ? '1 चीज़' : `${n} चीज़ें`} आपके अपने account से चाहिए:`,
     add: 'डालें',
     from: (src) => `${src} से लें`,
+    keylessHead: '💡 शायद इनमें से कुछ की ज़रूरत ही न पड़े —',
+    keyless: { 'upi': 'UPI लिंक से बिना किसी payment account के असली payment आ सकता है', 'osm': 'मुफ़्त OpenStreetMap के नक़्शे को कोई key नहीं चाहिए', 'db-auth': 'जो database आप जोड़ेंगे उसमें login पहले से है', 'one-tap-db': 'NavBharatAI एक tap में आपका database बना सकता है' },
     tail: 'तब तक वे बटन “Coming soon” दिखाएँगे — बाक़ी पूरा ऐप सामान्य रूप से चलेगा।',
   },
   bn: {
     head: (n) => `🔑 অ্যাপটি তৈরি হয়ে গেছে। এটি সম্পূর্ণ চালু করতে ${n === 1 ? '১টি জিনিস' : `${n}টি জিনিস`} আপনার নিজের account থেকে দরকার:`,
     add: 'দিন', from: (src) => `${src} থেকে নিন`,
+    keylessHead: '💡 হয়তো এর কয়েকটির দরকারই নেই —',
+    keyless: { 'upi': 'UPI লিঙ্ক দিয়ে কোনো payment account ছাড়াই আসল payment নেওয়া যায়', 'osm': 'বিনামূল্যের OpenStreetMap মানচিত্রে কোনো key লাগে না', 'db-auth': 'আপনি যে database যুক্ত করবেন তাতে login আগে থেকেই আছে', 'one-tap-db': 'NavBharatAI এক tap-এ আপনার database বানিয়ে দিতে পারে' },
     tail: 'ততক্ষণ ওই বোতামগুলি “Coming soon” দেখাবে — বাকি পুরো অ্যাপ স্বাভাবিক ভাবে চলবে।',
   },
   pa: {
     head: (n) => `🔑 ਐਪ ਬਣ ਗਈ ਹੈ। ਇਸਨੂੰ ਪੂਰੀ ਤਰ੍ਹਾਂ ਚਲਾਉਣ ਲਈ ${n === 1 ? '1 ਚੀਜ਼' : `${n} ਚੀਜ਼ਾਂ`} ਤੁਹਾਡੇ ਆਪਣੇ account ਤੋਂ ਚਾਹੀਦੀਆਂ ਹਨ:`,
     add: 'ਪਾਓ', from: (src) => `${src} ਤੋਂ ਲਵੋ`,
+    keylessHead: '💡 ਸ਼ਾਇਦ ਇਹਨਾਂ ਵਿੱਚੋਂ ਕੁਝ ਦੀ ਲੋੜ ਹੀ ਨਾ ਪਵੇ —',
+    keyless: { 'upi': 'UPI ਲਿੰਕ ਨਾਲ ਬਿਨਾਂ ਕਿਸੇ payment account ਦੇ ਅਸਲੀ payment ਆ ਸਕਦੀ ਹੈ', 'osm': 'ਮੁਫ਼ਤ OpenStreetMap ਨਕਸ਼ੇ ਲਈ ਕੋਈ key ਨਹੀਂ ਚਾਹੀਦੀ', 'db-auth': 'ਜੋ database ਤੁਸੀਂ ਜੋੜੋਗੇ ਉਸ ਵਿੱਚ login ਪਹਿਲਾਂ ਤੋਂ ਹੈ', 'one-tap-db': 'NavBharatAI ਇੱਕ tap ਵਿੱਚ ਤੁਹਾਡਾ database ਬਣਾ ਸਕਦਾ ਹੈ' },
     tail: 'ਉਦੋਂ ਤੱਕ ਉਹ ਬਟਨ “Coming soon” ਦਿਖਾਉਣਗੇ — ਬਾਕੀ ਪੂਰੀ ਐਪ ਆਮ ਵਾਂਗ ਚੱਲੇਗੀ।',
   },
   gu: {
     head: (n) => `🔑 એપ બની ગઈ છે. તેને પૂરેપૂરી ચાલુ કરવા ${n === 1 ? '1 વસ્તુ' : `${n} વસ્તુઓ`} તમારા પોતાના account માંથી જોઈએ:`,
     add: 'ઉમેરો', from: (src) => `${src} પરથી લો`,
+    keylessHead: '💡 કદાચ આમાંથી કેટલીક વસ્તુની જરૂર જ ન પડે —',
+    keyless: { 'upi': 'UPI લિંકથી કોઈ payment account વગર જ સાચી payment આવી શકે છે', 'osm': 'મફત OpenStreetMap નકશા માટે કોઈ key જોઈતી નથી', 'db-auth': 'તમે જે database જોડશો તેમાં login પહેલેથી છે', 'one-tap-db': 'NavBharatAI એક tap માં તમારું database બનાવી શકે છે' },
     tail: 'ત્યાં સુધી એ બટન “Coming soon” બતાવશે — બાકીની આખી એપ સામાન્ય રીતે ચાલશે.',
   },
   or: {
     head: (n) => `🔑 ଆପ୍‌ ତିଆରି ହୋଇଗଲା। ଏହାକୁ ସମ୍ପୂର୍ଣ୍ଣ ଚଳାଇବା ପାଇଁ ${n === 1 ? '୧ଟି ଜିନିଷ' : `${n}ଟି ଜିନିଷ`} ଆପଣଙ୍କ ନିଜ account ରୁ ଦରକାର:`,
     add: 'ଦିଅନ୍ତୁ', from: (src) => `${src} ରୁ ନିଅନ୍ତୁ`,
+    keylessHead: '💡 ହୁଏତ ଏଥିରୁ କେତେକର ଆବଶ୍ୟକତା ହିଁ ନାହିଁ —',
+    keyless: { 'upi': 'UPI ଲିଙ୍କ ଦ୍ୱାରା କୌଣସି payment account ବିନା ଅସଲ payment ଆସିପାରେ', 'osm': 'ମାଗଣା OpenStreetMap ମାନଚିତ୍ର ପାଇଁ କୌଣସି key ଦରକାର ନାହିଁ', 'db-auth': 'ଆପଣ ଯେଉଁ database ଯୋଡ଼ିବେ ସେଥିରେ login ପୂର୍ବରୁ ଅଛି', 'one-tap-db': 'NavBharatAI ଗୋଟିଏ tap ରେ ଆପଣଙ୍କ database ତିଆରି କରିପାରେ' },
     tail: 'ସେ ପର୍ଯ୍ୟନ୍ତ ସେହି ବଟନ୍‌ “Coming soon” ଦେଖାଇବ — ବାକି ପୂରା ଆପ୍‌ ସ୍ୱାଭାବିକ ଭାବେ ଚାଲିବ।',
   },
   ta: {
     head: (n) => `🔑 ஆப் தயாராகிவிட்டது. இதை முழுமையாக இயக்க ${n === 1 ? '1 விஷயம்' : `${n} விஷயங்கள்`} உங்கள் சொந்த account-லிருந்து தேவை:`,
     add: 'சேர்க்கவும்', from: (src) => `${src} இல் இருந்து பெறவும்`,
+    keylessHead: '💡 இவற்றில் சிலவற்றுக்கு தேவையே இல்லாமல் இருக்கலாம் —',
+    keyless: { 'upi': 'UPI இணைப்பு மூலம் எந்த payment account இல்லாமலேயே உண்மையான payment பெறலாம்', 'osm': 'இலவச OpenStreetMap வரைபடத்திற்கு key தேவையில்லை', 'db-auth': 'நீங்கள் இணைக்கும் database-இல் login ஏற்கனவே உள்ளது', 'one-tap-db': 'NavBharatAI ஒரே tap-இல் உங்கள் database-ஐ உருவாக்கும்' },
     tail: 'அதுவரை அந்த பட்டன்கள் “Coming soon” எனக் காட்டும் — மீதி முழு ஆப்பும் வழக்கம் போல் இயங்கும்.',
   },
   te: {
     head: (n) => `🔑 యాప్ తయారైంది. దీన్ని పూర్తిగా నడపడానికి ${n === 1 ? '1 విషయం' : `${n} విషయాలు`} మీ సొంత account నుండి కావాలి:`,
     add: 'జోడించండి', from: (src) => `${src} నుండి తీసుకోండి`,
+    keylessHead: '💡 వీటిలో కొన్ని అవసరమే లేకపోవచ్చు —',
+    keyless: { 'upi': 'UPI లింక్‌తో ఎలాంటి payment account లేకుండానే నిజమైన payment రావచ్చు', 'osm': 'ఉచిత OpenStreetMap మ్యాప్‌కు ఏ key అవసరం లేదు', 'db-auth': 'మీరు కలిపే database లో login అప్పటికే ఉంది', 'one-tap-db': 'NavBharatAI ఒక్క tap లో మీ database ను తయారు చేయగలదు' },
     tail: 'అప్పటివరకు ఆ బటన్లు “Coming soon” అని చూపిస్తాయి — మిగిలిన యాప్ మామూలుగా పనిచేస్తుంది.',
   },
   kn: {
     head: (n) => `🔑 ಆ್ಯಪ್ ಸಿದ್ಧವಾಗಿದೆ. ಇದನ್ನು ಸಂಪೂರ್ಣವಾಗಿ ಚಲಾಯಿಸಲು ${n === 1 ? '1 ವಿಷಯ' : `${n} ವಿಷಯಗಳು`} ನಿಮ್ಮ ಸ್ವಂತ account ನಿಂದ ಬೇಕು:`,
     add: 'ಸೇರಿಸಿ', from: (src) => `${src} ಇಂದ ಪಡೆಯಿರಿ`,
+    keylessHead: '💡 ಇವುಗಳಲ್ಲಿ ಕೆಲವು ಬೇಕಾಗದೇ ಇರಬಹುದು —',
+    keyless: { 'upi': 'UPI ಲಿಂಕ್‌ನಿಂದ ಯಾವುದೇ payment account ಇಲ್ಲದೆಯೇ ನಿಜವಾದ payment ಬರಬಹುದು', 'osm': 'ಉಚಿತ OpenStreetMap ನಕ್ಷೆಗೆ ಯಾವ key ಬೇಕಿಲ್ಲ', 'db-auth': 'ನೀವು ಸೇರಿಸುವ database ನಲ್ಲಿ login ಈಗಾಗಲೇ ಇದೆ', 'one-tap-db': 'NavBharatAI ಒಂದೇ tap ನಲ್ಲಿ ನಿಮ್ಮ database ರಚಿಸಬಲ್ಲದು' },
     tail: 'ಅಲ್ಲಿಯವರೆಗೆ ಆ ಬಟನ್‌ಗಳು “Coming soon” ಎಂದು ತೋರಿಸುತ್ತವೆ — ಉಳಿದ ಪೂರ್ತಿ ಆ್ಯಪ್ ಎಂದಿನಂತೆ ಚಲಿಸುತ್ತದೆ.',
   },
   ml: {
     head: (n) => `🔑 ആപ്പ് തയ്യാറായി. ഇത് പൂർണ്ണമായി പ്രവർത്തിപ്പിക്കാൻ ${n === 1 ? '1 കാര്യം' : `${n} കാര്യങ്ങൾ`} നിങ്ങളുടെ സ്വന്തം account-ൽ നിന്ന് വേണം:`,
     add: 'ചേർക്കുക', from: (src) => `${src} ൽ നിന്ന് എടുക്കുക`,
+    keylessHead: '💡 ഇവയിൽ ചിലത് വേണ്ടിവരില്ലായിരിക്കാം —',
+    keyless: { 'upi': 'UPI ലിങ്ക് വഴി ഒരു payment account പോലും ഇല്ലാതെ യഥാർത്ഥ payment ലഭിക്കും', 'osm': 'സൗജന്യ OpenStreetMap മാപ്പിന് key ആവശ്യമില്ല', 'db-auth': 'നിങ്ങൾ ചേർക്കുന്ന database-ൽ login നേരത്തെ തന്നെയുണ്ട്', 'one-tap-db': 'NavBharatAI ഒറ്റ tap-ൽ നിങ്ങളുടെ database ഉണ്ടാക്കിത്തരും' },
     tail: 'അതുവരെ ആ ബട്ടണുകൾ “Coming soon” എന്ന് കാണിക്കും — ബാക്കി ആപ്പ് പതിവുപോലെ പ്രവർത്തിക്കും.',
   },
   ar: {
     head: (n) => `🔑 ایپ بن گئی ہے۔ اِسے پوری طرح چلانے کے لیے ${n === 1 ? '1 چیز' : `${n} چیزیں`} آپ کے اپنے account سے چاہیے:`,
     add: 'ڈالیں', from: (src) => `${src} سے لیں`,
+    keylessHead: '💡 شاید اِن میں سے کچھ کی ضرورت ہی نہ پڑے —',
+    keyless: { 'upi': 'UPI لنک سے کسی payment account کے بغیر ہی اصلی payment آ سکتی ہے', 'osm': 'مفت OpenStreetMap نقشے کے لیے کوئی key نہیں چاہیے', 'db-auth': 'جو database آپ جوڑیں گے اُس میں login پہلے سے موجود ہے', 'one-tap-db': 'NavBharatAI ایک tap میں آپ کا database بنا سکتا ہے' },
     tail: 'تب تک وہ بٹن “Coming soon” دکھائیں گے — باقی پوری ایپ معمول کے مطابق چلے گی۔',
   },
 };
@@ -367,6 +405,8 @@ const ENGLISH: NoticeStrings = {
   head: (n) => `🔑 Your app is built. ${n === 1 ? '1 thing needs' : `${n} things need`} a key from your own account to go fully live:`,
   add: 'add',
   from: (src) => `get it from ${src}`,
+  keylessHead: '💡 You may not need all of these —',
+  keyless: KEYLESS_EN,
   tail: 'Until then those buttons show “Coming soon” — the rest of the app works normally.',
 };
 
@@ -396,5 +436,30 @@ export function appRequirementsNotice(missing: AppRequirement[], langCode?: stri
     const source = optionLink(option);
     return source ? `${base} · ${s.from(source)}` : base;
   });
-  return [s.head(items.length), ...lines, s.tail].join('\n');
+
+  // THE ONE LINE THAT CAN DELETE A TASK RATHER THAN HELP WITH IT.
+  //
+  // This is the only place the notice grows, and it is worth the row: a shop can take real money over a
+  // UPI link with no payment account at all, so the best possible outcome of this whole checklist is
+  // that an item disappears from it. It appears ONLY when something still missing genuinely has a
+  // keyless route, so a checklist with no shortcut is byte-identical to before.
+  //
+  // Capped at two. Three shortcuts in one sentence stops being advice and becomes a paragraph, and this
+  // message has been under a "keep it short" instruction since 2026-08-03.
+  const routes: string[] = [];
+  for (const r of items) {
+    const key = recipeFor(r.id)?.keylessKey;
+    if (!key) continue;
+    const text = s.keyless[key];
+    if (text && !routes.includes(text)) routes.push(text);
+    if (routes.length === 2) break;
+  }
+  // Borrow the sentence terminator from this language's own closing line rather than hardcoding a Latin
+  // full stop — Hindi/Punjabi/Gujarati/Odia/Bengali end a sentence with `।` and Urdu with `۔`, and a
+  // stray `.` is the small tell that a string was translated by someone not reading it. Derived rather
+  // than declared so a new language cannot forget to set it.
+  const stop = s.tail.trim().slice(-1);
+  const keylessLine = routes.length > 0 ? `${s.keylessHead} ${routes.join('; ')}${stop}` : null;
+
+  return [s.head(items.length), ...lines, ...(keylessLine ? [keylessLine] : []), s.tail].join('\n');
 }

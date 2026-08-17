@@ -34364,3 +34364,67 @@ return.
 Gate: tsc clean; vitest 15,872/15,872. Also merged this cycle: #2421 (the iOS splash now shows NavBharatAI's
 logo, not Capacitor's) and #2426 (React chunk split). Fresh `.aab` + `.ipa` triggered from `main` — all
 three are frontend changes, which the bundled Capacitor shell only ships in a new binary.
+
+---
+
+## 2026-08-17 — credential help, slice 5: the checklist, and closing the open items
+
+Admin: "sabhi slice 5 bhi complete karo." Three things, two of which were recorded as OPEN in slices 3
+and 4 rather than quietly dropped — this closes them.
+
+**1. SMTP is now genuinely checkable (closes the slice-3 open item).** Every other credential could be
+verified with an HTTPS read; SMTP could not, so mail credentials were honestly reported as unchecked.
+That gap mattered more than it looked: the commonest mail credential our users paste is a Gmail app
+password, and the commonest mistake is pasting their ORDINARY Google password, which Google rejects at
+login with no other symptom — the first anybody knows is a real user never receiving their signup email.
+
+`smtpProbe.ts` speaks the login handshake directly over TLS. Two decisions worth keeping:
+- **No dependency.** The obvious implementation is nodemailer's `verify()`; nodemailer is not a
+  dependency of this server (it appears only in the apps we GENERATE), and adding a mail library to send
+  zero mail is a supply-chain surface bought for nothing. Node ships `tls`.
+- **It sends nothing, ever.** The conversation stops at AUTH: no MAIL FROM, no RCPT TO, no DATA. A probe
+  that "just sent a test mail to yourself" could spam a real inbox from the user's own domain. Test-locked
+  by asserting those commands are never issued.
+- It also **refuses to authenticate without TLS**: a server that rejects STARTTLS gets no credentials,
+  and we report "could not check" rather than falling back to a plaintext AUTH to get an answer.
+- Same honesty rule as the HTTP probes: only a 535/534/538/530-class reply means the password is wrong.
+  A 421 (server busy) or 451 is "we could not tell". Gmail's 534-at-the-username-step — the single most
+  common real failure for our users — is correctly a rejection, not a protocol error.
+
+**2. Auth0 stays unchecked, and the reason is now precise.** Slice 3 said "needs a token exchange, which
+is not a read". The sharper reason: Auth0's free tier METERS machine-to-machine tokens, so minting one
+to answer a question the user never asked spends a quota they may need. That is rule 1 (never spend the
+user's money), so this is a deliberate refusal rather than a gap.
+
+**3. `keyless` is localized (closes the slice-4 open item).** It was recorded in slice 1, surfaced on the
+English screens in slice 4, and invisible in the ten-language build checklist — the one place the user
+actually reads it after a build.
+
+Not by translating the four long English sentences: forty long translations are forty chances to ship a
+clumsy one. Each recipe now carries a stable `keylessKey` (`upi` / `osm` / `db-auth` / `one-tap-db`) and
+the SHORT localized clause lives in AppRequirements' own STRINGS table, beside every other localized
+string. The long English form stays for the Settings screens, which are English by the repo's language
+standard.
+
+This is the ONLY place the notice was allowed to grow, and it is worth the row: a shop can take real
+money over a UPI link with no payment account at all, so the best outcome of the whole checklist is an
+item leaving it. Capped at two routes (three shortcuts in one sentence is a paragraph, not advice), and
+absent entirely when nothing missing has a keyless route — a Stripe-only app's message is byte-identical
+to before. The sentence terminator is DERIVED from each language's own closing line (`।`, `۔`, `.`)
+rather than hardcoded, so a new language cannot forget to set it and a stray Latin full stop — the small
+tell that a string was translated by somebody not reading it back — cannot appear.
+
+**4. The checklist itself.** A saved key told the user nothing about whether it still WORKS, so a
+revoked, rotated or expired credential looked exactly like a healthy one until a build failed on it.
+Settings → Secrets & API Keys now has one "Check my keys" button that asks the providers about every
+saved key and puts the answer beside each name. Deliberately not automatic on mount — it makes real
+outbound requests, and doing that whenever somebody opens Settings is work nobody asked for. A key with
+no verdict shows NOTHING rather than a grey "unknown" pill: absence is the truth, and a badge on every
+unverifiable key is noise that teaches people to stop reading the badges that matter.
+
+**A design gap fixed on the way.** `probeCredentials` took an injectable `doFetch` but would have called
+the real SMTP probe directly, so any test naming `SMTP_HOST` would have made a real DNS lookup and a real
+outbound connection from CI. A probe that can only be exercised against somebody's live mail server is a
+probe that does not get exercised — it is injected now, like the fetch.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.

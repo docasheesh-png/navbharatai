@@ -172,6 +172,50 @@ describe('rule 4: a value never appears in a verdict', () => {
   });
 });
 
+describe('SMTP — checked over its own transport, and never by sending mail', () => {
+  const smtpCreds = { SMTP_HOST: 'smtp.gmail.com', SMTP_USER: 'a@b.com', SMTP_PASS: 'app-password' };
+  const smtpStub = (status: 'working' | 'rejected' | 'unreachable') => async () => ({ status });
+
+  it('produces a verdict naming all three variables the user saved', async () => {
+    const { fn } = stub(200);
+    const [v] = await probeCredentials(smtpCreds, fn, undefined, smtpStub('working'));
+    expect(v.status).toBe('working');
+    expect(v.names).toEqual(['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS']);
+    // The user is told explicitly that checking their mail login did not mail anybody.
+    expect(v.message).toMatch(/no email was sent/i);
+  });
+
+  it('names the real cause when Gmail rejects an ordinary password', async () => {
+    const { fn } = stub(200);
+    const [v] = await probeCredentials(smtpCreds, fn, undefined, smtpStub('rejected'));
+    expect(v.status).toBe('rejected');
+    expect(v.message).toMatch(/App Password/i);
+  });
+
+  it('accepts SMTP_PASSWORD as well, since the catalogue lists both spellings', async () => {
+    const { fn } = stub(200);
+    const [v] = await probeCredentials(
+      { SMTP_HOST: 'h', SMTP_USER: 'u', SMTP_PASSWORD: 'p' }, fn, undefined, smtpStub('working'),
+    );
+    expect(v.names).toContain('SMTP_PASSWORD');
+  });
+
+  it('does not run at all on an incomplete set — a host with no password is not a failure', async () => {
+    const { fn } = stub(200);
+    let called = false;
+    const spy = async () => { called = true; return { status: 'working' as const }; };
+    expect(await probeCredentials({ SMTP_HOST: 'h' }, fn, undefined, spy)).toEqual([]);
+    expect(called).toBe(false);
+  });
+
+  it('runs ALONGSIDE the HTTP probes, not after them', async () => {
+    const { fn } = stub(200);
+    const out = await probeCredentials({ ...smtpCreds, STRIPE_SECRET_KEY: 'sk' }, fn, undefined, smtpStub('working'));
+    expect(out).toHaveLength(2);
+    expect(out.map((v) => v.provider).sort()).toEqual(['Stripe', 'your mail server']);
+  });
+});
+
 describe('probesFor — which credentials get checked', () => {
   it('needs the WHOLE set before it runs a multi-value probe', () => {
     expect(probesFor({ RAZORPAY_KEY_ID: 'id' })).toEqual([]);                       // secret missing

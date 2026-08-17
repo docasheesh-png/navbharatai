@@ -34050,3 +34050,31 @@ rather than half-built.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1283 files / 15948 tests passed** · `npm run build` OK.
+
+---
+
+## 2026-08-16 — v5 Live server: an honest "this is a paid service" note
+
+**Admin ask:** "jab koi app banaye aur user live server use kare, to ek warning note aaye — yeh paid
+service hai! ... isko aur acche se karo!"
+
+**Why it's true (so the note is honest, not decoration).** v5's Preview has two modes:
+- **In-browser** — rendered in the user's OWN browser. No server, FREE, instant.
+- **Live server** — the app runs on a REAL cloud machine (paid compute, billed by the second it is up).
+  That VM time is part of what a paid build costs (`AGENTV3_BILL_SANDBOX`), so leaning on the live server
+  spends the user's credits.
+
+**Done (well-designed, not a crude popup):**
+- `src/lib/liveServerNotice.ts` — pure, vendor-free message (`LIVE_SERVER_PAID_NOTE`), a `Paid` tag, and
+  dismiss helpers (localStorage, DI for tests). Honest about cost, **names no cloud vendor** (White-Label §2).
+- `PreviewSurface.tsx` — while in Live-server mode a dismissible amber note explains it ("Got it" remembers
+  the dismissal, so it informs once instead of nagging), and the Live-server **toggle carries a "Paid" tag**
+  so the cost stays clear even after the note is dismissed. Shown in both live branches (active + waiting).
+- Fixed a WHITE-LABEL LEAK found while here: the live-preview prose said "a cloud sandbox (**E2B**)" to
+  users → now "a real cloud machine" (no vendor name).
+- `AppKnowledgeBase` — a "two previews: in-browser FREE, live server PAID" bullet so every in-app AI
+  answers "does the live preview cost anything?" correctly.
+
+Tests: `liveServerNotice.test.ts` (+7): message is honest + vendor-free, dismiss remembered + never throws,
+and source-contract that the note + Paid tag are wired and the `E2B` prose leak is gone. Gate: tsc
+(frontend+server) clean; full vitest green (15,950).

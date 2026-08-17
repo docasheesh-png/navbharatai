@@ -91,6 +91,74 @@ export function workspaceSessionsMatch(a: string | null | undefined, b: string |
   return false;
 }
 
+/**
+ * How long a registry entry may stay SILENT before it stops counting as a running build.
+ *
+ * A genuinely-live build cannot be silent this long: the server emits progress narration on minute
+ * boundaries ("⏱️ Still building… N min") and stream deltas besides, so a live entry's
+ * `lastEventTs` refreshes at least every couple of minutes. Six minutes of nothing means the build
+ * loop is gone — crashed, stuck on an un-abortable await, or orphaned by a dropped connection whose
+ * cleanup never ran.
+ *
+ * Chosen against the real failure (admin report 2026-08-17): an orphaned entry sat `ended: false`
+ * in the registry, `/status` reported it as running, and the panel showed a Resume button for a
+ * build that was already finished on screen. The only sweeper that would have cleared it runs at
+ * the ~32-minute hard max — so the button lied for up to half an hour.
+ */
+export const STALE_BUILD_SILENCE_MS = 6 * 60_000;
+
+/** The slice of a registry entry the attach/status decision needs. */
+export interface AttachableBuildEntry {
+  ended: boolean;
+  startedTs: number;
+  workspaceId?: string;
+  /** Stamped on every broadcast event. Absent on entries created before this field existed. */
+  lastEventTs?: number;
+}
+
+/** True when a not-ended entry has emitted nothing for longer than a live build ever goes quiet. */
+export function isSilentlyStale(rb: AttachableBuildEntry, now: number = Date.now()): boolean {
+  if (rb.ended) return false; // ended is its own, louder verdict — not "stale"
+  const lastSeen = typeof rb.lastEventTs === 'number' ? rb.lastEventTs : rb.startedTs;
+  return now - lastSeen > STALE_BUILD_SILENCE_MS;
+}
+
+/**
+ * THE ONE ANSWER to "is there a build this caller can attach to?" — used by BOTH `/status` (which
+ * decides whether the Resume button exists) and `/attach` (which decides what clicking it does).
+ *
+ * ROOT CAUSE THIS CLOSES (admin report 2026-08-17: "build 100% poora, phir bhi Resume aa gaya —
+ * click kiya to sab gayab"). The two endpoints answered the same question with DIFFERENT code:
+ * `/status` keyed on the CLAIMED query userId, treated an unstamped legacy entry as a match, and
+ * had no anon-bucket guard; `/attach` keyed on the VERIFIED token uid with a strict session match.
+ * Every one of those differences is a door to "the button shows, the click 404s" — the user is
+ * promised a build that the click then cannot find, and the panel tears down a finished
+ * conversation chasing it. Two implementations of one question WILL disagree eventually; this
+ * function is the question implemented once.
+ *
+ * The guards are `/attach`'s (the stricter, security-reviewed set), plus staleness: an entry that
+ * has been silent past `STALE_BUILD_SILENCE_MS` is invisible to both endpoints, so a corpse in the
+ * registry can no longer summon a Resume button — and attaching to one (which would stream
+ * nothing) is refused for the same reason, by the same line.
+ */
+export function findAttachableBuild<T extends AttachableBuildEntry>(
+  get: (key: string) => T | undefined,
+  opts: { verifiedUid: string | null; workspaceId: string | null; perWorkspace: boolean; now?: number },
+): { key: string; build: T } | null {
+  const now = opts.now ?? Date.now();
+  for (const key of buildKeyCandidates(opts.verifiedUid, opts.workspaceId, opts.perWorkspace)) {
+    const cand = get(key);
+    if (!cand || cand.ended) continue;
+    if (isSilentlyStale(cand, now)) continue;
+    // Never surface a DIFFERENT session's build (defense-in-depth on every key).
+    if (opts.workspaceId && cand.workspaceId && !workspaceSessionsMatch(cand.workspaceId, opts.workspaceId)) continue;
+    // The shared anon bucket for a SIGNED-IN caller: require a positive session match — never blind.
+    if (key === 'anon' && opts.verifiedUid && !(opts.workspaceId && cand.workspaceId && workspaceSessionsMatch(cand.workspaceId, opts.workspaceId))) continue;
+    return { key, build: cand };
+  }
+  return null;
+}
+
 export type AcquireResult =
   | { ok: true }
   /** This exact workspace is already building (same-app mutual exclusion) — attach/stop it, don't start a second. */

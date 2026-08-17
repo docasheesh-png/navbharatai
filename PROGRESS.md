@@ -34007,3 +34007,46 @@ Tests: `playStoreAppUrl` unit tests (+ "never returns an https link"); source-co
 ⚠️ **REACHES USERS ONLY VIA A NEW SIGNED .aab.** This is a frontend + native-manifest change baked into
 `dist/`/the shell, so — like every frontend fix — installed users get it only after a fresh signed
 `.aab`/Play upload, not from the server. (Per the bundled-mode rule in CLAUDE.md.)
+## 2026-08-17 — The Resume button that lied (admin report: "build 100% poora, phir bhi Resume aaya — click par sab gayab")
+
+Build finished, "Done ✓ 7m 4s · ₹70.02 · Build health 76" on screen — and a Resume button appeared
+anyway. Clicking it blanked the conversation down to one notice; a reload brought everything back
+(the durable store was always fine). Four fixes, admin-approved as one cluster.
+
+**1. THE ROOT: `/status` and `/attach` answered the same question with different code.** The Resume
+button renders from `/status buildRunningHere`; the click calls `/attach`. `/status` keyed on the
+CLAIMED query `userId`, auto-matched unstamped legacy entries, and had no anon-bucket guard;
+`/attach` keyed on the VERIFIED token uid with the strict session match. Every one of those
+differences is a door to "the button shows, the click 404s" — and two implementations of one
+question WILL disagree eventually. Now `findAttachableBuild()` (`BuildConcurrency.ts`) is the
+question implemented ONCE: both endpoints call it, under the same identity (`checkRunning` now sends
+the Bearer token exactly as `/attach` always did).
+
+**2. STALENESS: a registry corpse can no longer summon the button.** The orphan behind the report —
+an entry left `ended: false` by an earlier dropped attempt — was only cleared by the ~32-minute
+zombie sweeper, so `/status` reported it as running for up to half an hour. Every broadcast now
+stamps `rb.lastEventTs`; an entry silent past 6 minutes (a live build narrates at least every ~2)
+is invisible to BOTH endpoints by the same shared line. Reporting-only by design: nothing new kills
+a live build, the button just stops testifying for corpses.
+
+**3. THE WIPE: resume()'s reset now waits for the attach to CONFIRM.** PR #2409 (another session)
+had already made files/preview/checkpoints survive; but the reset still ran BEFORE `/attach`
+answered, clearing the narration — the Done/cost/health summary included — on the promise of a
+replay. A gone attach has no replay, so a finished conversation became one lonely notice. The reset
+exists only to make room for a replay: it now runs exactly when `res.ok` confirms one, and a gone
+attach leaves the screen precisely as it was. Test-pinned by ORDER (reset offset > ok-check offset),
+because this is the second time this class regressed through "the right code in the wrong order".
+
+**4. THE JHATKA: the gone notice stopped ordering the user around.** "Send your message again to
+continue" was written for a dropped mid-build connection — shown on the Resume path, it tells a user
+who sent nothing to redo work they never did. With the transcript now intact above it, the notice is
+a calm status line: finished-or-dropped, everything saved, type whenever you like.
+
+Honest boundary: cross-INSTANCE disagreement (the /status poll landing on a Cloud Run instance that
+holds the entry while /attach lands on one that does not) is narrowed but not eliminated — the
+client clears the button the moment an attach comes back gone, so the lie self-heals on first click
+instead of persisting. A durable-store-backed running-flag would close it fully; recorded here
+rather than half-built.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1283 files / 15948 tests passed** · `npm run build` OK.

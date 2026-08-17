@@ -87,11 +87,42 @@ describe('🔒 1️⃣ the app survives a reconnect', () => {
   it('🔒 the real resume() carries exactly these forward — pinned against the source', () => {
     // The reset lives inside a 12k-line hook; nothing FAILS if a refactor drops a line from it, the
     // user's app just silently vanishes again. So the source itself is the assertion.
+    // Slice to the next function rather than a byte count — the reset moved DEEPER into resume()
+    // when it was gated on the confirmed attach, and a fixed window is exactly the kind of pin that
+    // silently stops guarding after an honest refactor.
     const at = hook.indexOf('const resume = useCallback');
-    const body = hook.slice(at, at + 3000);
+    const body = hook.slice(at, hook.indexOf('const shipToMain', at));
     for (const field of ['files: prev.files', 'previewUrl: prev.previewUrl', 'checkpoints: prev.checkpoints']) {
       expect(body, field).toContain(field);
     }
+  });
+
+  it('🔒 the reset runs ONLY after the attach confirms a live stream (2026-08-17)', () => {
+    // The second half of the same class: even with the workspace facts preserved, resetting BEFORE
+    // /attach answered cleared the narration — the "Done ✓ · cost · Build health" summary — on the
+    // promise of a replay. A GONE attach has no replay, so the user watched a finished conversation
+    // become one lonely notice. The reset exists only to make room for a replay: it must sit AFTER
+    // the `res.ok` check, and the gone path must not touch state beyond appending its notice.
+    const at = hook.indexOf('const resume = useCallback');
+    const body = hook.slice(at, hook.indexOf('const shipToMain', at));
+    const resetAt = body.indexOf('...initialAgentV3State()');
+    const confirmAt = body.indexOf('if (!res.ok || !res.body)');
+    expect(resetAt, 'the making-room reset must exist').toBeGreaterThan(-1);
+    expect(confirmAt, 'the attach confirmation check must exist').toBeGreaterThan(-1);
+    expect(resetAt, 'reset must come AFTER the ok-check, i.e. only on a confirmed live attach').toBeGreaterThan(confirmAt);
+    // And the gone path stays additive: it appends a narration notice, never a state reset.
+    const goneBlock = body.slice(confirmAt, body.indexOf('// Live build CONFIRMED'));
+    expect(goneBlock).not.toContain('initialAgentV3State');
+  });
+
+  it('the gone notice never orders the user to resend work they did not lose', () => {
+    // "Send your message again" was written for a dropped mid-build connection, but the Resume
+    // button shows it to a user who sent nothing — being told to redo unremembered work IS the
+    // jhatka. The default must stay calm and truthful instead.
+    const at = hook.indexOf('const resume = useCallback');
+    const body = hook.slice(at, hook.indexOf('const shipToMain', at));
+    expect(body).not.toContain('Send your message again');
+    expect(body).toContain('Everything is saved');
   });
 });
 

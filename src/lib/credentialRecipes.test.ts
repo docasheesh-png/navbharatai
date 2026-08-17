@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   CREDENTIAL_RECIPES, recipeFor, preferredOption, recipeVarNames, optionSource, optionLink,
-  requiredVarNames, isSameCredentialName,
+  requiredVarNames, isSameCredentialName, findRecipeSource,
 } from './credentialRecipes';
-import { serviceEnvNames, servicePackages, detectAppRequirements } from './AppRequirements';
+import { serviceEnvNames, servicePackages, detectAppRequirements } from '../server/AgentV3/AppRequirements';
 
 const pkg = (deps: Record<string, string>) => JSON.stringify({ name: 'app', dependencies: deps });
 
@@ -168,6 +168,37 @@ describe('requiredVarNames — the app names them, the recipe completes them', (
     expect(isSameCredentialName('X_TOKEN', 'Y_TOKEN')).toBe(false);
     // A bare prefix is not a credential name, and must not collapse everything into one match.
     expect(isSameCredentialName('VITE_', 'NEXT_PUBLIC_')).toBe(false);
+  });
+});
+
+describe('findRecipeSource — what the SCREENS show beside the paste box', () => {
+  it('resolves a variable to its provider, console page, clicks and cost', () => {
+    const s = findRecipeSource('RAZORPAY_KEY_SECRET')!;
+    expect(s.option.provider).toBe('Razorpay');
+    expect(s.option.link).toContain('razorpay.com');
+    expect(s.option.path).toContain('API Keys');
+    expect(s.variable.where).toMatch(/ONCE/);      // the sentence that saves a second key being generated
+    expect(s.option.cost).toBeTruthy();
+    expect(s.recipe.keyless).toMatch(/UPI/);
+  });
+
+  it('matches regardless of a browser prefix, so the screen still helps', () => {
+    expect(findRecipeSource('VITE_MAPBOX_ACCESS_TOKEN')?.option.provider).toBe('Mapbox');
+    expect(findRecipeSource('MAPBOX_ACCESS_TOKEN')?.option.provider).toBe('Mapbox');
+  });
+
+  it('is null for a name we do not know — the screen then shows nothing rather than a guess', () => {
+    expect(findRecipeSource('MY_OWN_CUSTOM_THING')).toBeNull();
+    expect(findRecipeSource('')).toBeNull();
+    expect(findRecipeSource('   ')).toBeNull();
+  });
+
+  it('every server-only variable can be flagged before the user pastes it', () => {
+    // The screen warns about a VITE_ prefix BEFORE the value is saved, because afterwards the only
+    // honest advice is "rotate the key". That warning needs this flag to be reachable per variable.
+    expect(findRecipeSource('STRIPE_SECRET_KEY')?.variable.serverOnly).toBe(true);
+    expect(findRecipeSource('CLERK_SECRET_KEY')?.variable.serverOnly).toBe(true);
+    expect(findRecipeSource('STRIPE_PUBLISHABLE_KEY')?.variable.serverOnly).toBeUndefined();
   });
 });
 

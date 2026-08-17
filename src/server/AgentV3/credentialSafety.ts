@@ -32,7 +32,7 @@
 //
 // PURE — no I/O, no LLM call, zero added cost. Never blocks or fails a build.
 
-import { findRecipeVar } from './credentialRecipes';
+import { findRecipeVar } from '../../lib/credentialRecipes';
 
 export type CredentialWarningKind =
   /** A sandbox credential: correct for building, takes no real money. */

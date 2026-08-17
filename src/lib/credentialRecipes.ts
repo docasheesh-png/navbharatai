@@ -47,6 +47,13 @@
 // table with a stated verification date, not a self-checking one. Re-verify when a user reports a path
 // that no longer matches, and move the date when you do.
 //
+// ── WHY THIS LIVES IN src/lib AND NOT UNDER src/server ──────────────────────────────────────────────
+// Both sides need it: the server builds the post-build checklist from it, and the Settings screen and
+// the mid-build key popup show the console path and steps from it. `src/lib/dbProviders.ts` is here for
+// exactly this reason and says so — the alternative is a second copy for the client, which is the
+// five-way drift this file was written to end, re-created in one step. It is PURE and dependency-free
+// so it can be imported from either side.
+//
 // PURE — no I/O, no LLM call, zero added cost to any build.
 
 /** One environment variable, annotated with where a human finds its value. */
@@ -490,11 +497,32 @@ export function requiredVarNames(
  * catching. Returns the first match — a name means the same thing wherever it appears. PURE.
  */
 export function findRecipeVar(name: string): RecipeVar | null {
+  return findRecipeSource(name)?.variable ?? null;
+}
+
+/** Everything known about one variable: the provider it belongs to and the recipe that owns it. */
+export interface RecipeSource {
+  recipe: CredentialRecipe;
+  option: CredentialOption;
+  variable: RecipeVar;
+}
+
+/**
+ * The full context for a variable the user is being asked for — provider, console page, exact clicks,
+ * cost, and whether the whole credential can be avoided.
+ *
+ * This is what the SCREENS use, as opposed to the one-line link the build message carries: a form field
+ * has room to say "shown ONCE, copy it before closing" next to the box the user is about to paste into,
+ * and that is the sentence that saves somebody from generating a second key. PURE.
+ */
+export function findRecipeSource(name: string): RecipeSource | null {
   const wanted = String(name ?? '').trim();
   if (!wanted) return null;
   for (const recipe of CREDENTIAL_RECIPES) {
     for (const option of recipe.options) {
-      for (const v of option.vars) if (isSameCredentialName(v.name, wanted)) return v;
+      for (const variable of option.vars) {
+        if (isSameCredentialName(variable.name, wanted)) return { recipe, option, variable };
+      }
     }
   }
   return null;

@@ -34230,3 +34230,41 @@ reported as unchecked. Auth0 needs a client-credentials token exchange, which is
 recorded as open items rather than half-built.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
+
+---
+
+## 2026-08-17 — credential help, slice 4: the recipe reaches the two screens where the user is stuck
+
+Slice 1 put a LINK in the build-summary checklist, deliberately nothing more — that message is under a
+standing "keep it short" constraint and a full console path is several times the length of a link. But
+the checklist is not where somebody is actually stuck. They are stuck in front of an empty box, either
+in the mid-build key popup or on Settings → Secrets & API Keys, and both had room for the whole recipe
+and were showing none of it.
+
+**Both screens now carry, per variable:** the clickable console page, the exact clicks inside it, what
+it costs (free tier / card required / KYC), the per-variable "where" — including the sentence that
+matters most, *shown ONCE, copy it before closing* — and the keyless alternative where one exists.
+
+**`keyless` is finally surfaced, and this is the highest-value line in the feature.** It was recorded in
+slice 1 and displayed nowhere. "You may not need this at all — a UPI link accepts real payments with no
+gateway account and no fees" can delete the entire task rather than help with it. It is rendered LAST on
+the card on purpose: shown first it would read as a reason to abandon a key the user already has in hand.
+
+**The Settings screen also warns BEFORE the paste, not after.** When the typed name is a `serverOnly`
+variable, the box says not to add a `VITE_`/`NEXT_PUBLIC_` prefix. Slice 2 catches that mistake after the
+fact, but by then the only honest advice is "rotate the key" — the same warning delivered thirty seconds
+earlier costs the user nothing.
+
+**Refactor: `credentialRecipes.ts` moved `src/server/AgentV3/` → `src/lib/`.** Both sides need it now,
+and `src/lib/dbProviders.ts` documents this exact precedent. The alternative — a client copy of the
+catalogue — would have re-created the five-way drift this whole feature was written to end, in one step.
+It is pure and dependency-free, so the move is import paths only.
+
+**Why the localized build message was deliberately NOT given the keyless line.** The `keyless` strings
+are English sentences, and the checklist is rendered in ten Indian languages. Dropping an English
+sentence into a Hindi message is the "English island" this feature already avoids elsewhere, and
+localizing 4 recipes × 10 languages is real work that has not been done. The two SCREENS are English by
+the repo's own language standard, so the recipe belongs there and reads correctly. Recorded rather than
+quietly half-done: localizing `keyless` is an open item.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.

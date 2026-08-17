@@ -28,7 +28,7 @@
 // Twilio, Cloudinary…). None of NavBharatAI's own AI vendors is ever named — that rule is about hiding
 // which model built the app, not about hiding the user's own integrations.
 
-import { recipeFor, preferredOption, optionLink, requiredVarNames } from './credentialRecipes';
+import { recipeFor, preferredOption, optionLink, requiredVarNames } from '../../lib/credentialRecipes';
 
 /** Where a requirement is satisfied. */
 export type RequirementKind =

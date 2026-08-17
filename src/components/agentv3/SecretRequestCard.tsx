@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Key, Eye, EyeOff, ChevronDown, Loader2, AlertCircle } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { findRecipeSource } from '../../lib/credentialRecipes';
 
 /**
  * The build is asking for credentials — the popup where the user types them.
@@ -90,10 +91,40 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone }: SecretReq
         </button>
       </div>
 
-      {secrets.map((s) => (
+      {secrets.map((s) => {
+        // WHERE THE VALUE ACTUALLY COMES FROM. `why` is written by the builder at run time, so it can be
+        // vague and cannot be trusted to carry a URL. This is the curated, human-checked recipe for the
+        // exact variable being asked for — and a form field is the one place with room for the sentence
+        // that matters most ("shown ONCE"), right beside the box the user is about to paste into.
+        // A variable we have no recipe for simply shows `why` alone, exactly as before.
+        const source = findRecipeSource(s.name);
+        return (
         <div key={s.name} className="space-y-1">
           <label htmlFor={`secret-${s.name}`} className="block text-[11px] font-mono text-amber-200">{s.name}</label>
           <p className="text-[10px] text-zinc-400 leading-snug">{s.why}</p>
+          {source && (
+            <div className="text-[10px] text-zinc-400 leading-snug space-y-0.5 border-l-2 border-amber-900/60 pl-2">
+              <p>
+                <span className="text-zinc-500">Get it from </span>
+                <a
+                  href={source.option.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-amber-300 underline underline-offset-2"
+                >
+                  {source.option.linkLabel}
+                </a>
+                <span className="text-zinc-500"> → {source.option.path}</span>
+              </p>
+              <p className="text-zinc-500">{source.variable.where}</p>
+              <p className="text-zinc-500">{source.option.cost}</p>
+              {source.recipe.keyless && (
+                // The most valuable line on the card: it can remove the task entirely. Shown last so it
+                // never looks like a reason to abandon a key the user already has in hand.
+                <p className="text-emerald-400/80">💡 {source.recipe.keyless}</p>
+              )}
+            </div>
+          )}
           <div className="flex gap-1.5">
             <input
               id={`secret-${s.name}`}
@@ -117,7 +148,8 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone }: SecretReq
             </button>
           </div>
         </div>
-      ))}
+        );
+      })}
 
       {error && (
         <div className="flex items-center gap-1.5 text-[11px] text-red-300">

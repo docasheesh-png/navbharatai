@@ -5,6 +5,7 @@ import { db } from '../lib/firebase'; // shared handle → navbharat-prod (NOT t
 // Authenticated vault client — always attaches the signed-in user's Firebase token. Raw axios calls
 // here used to omit it, so requireUserMatch rejected every save (401) → keys never saved (admin fix).
 import { saveSecret, deleteSecret, verifySecrets, type SecretVerdict } from '../lib/secretsApi';
+import { findRecipeSource } from '../lib/credentialRecipes';
 
 interface Secret {
   id: string;
@@ -22,6 +23,9 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
   const [addError, setAddError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [verdicts, setVerdicts] = useState<SecretVerdict[]>([]);
+  // Derived, not stored: a pure catalogue lookup on every keystroke is cheaper than keeping a second
+  // copy of it in state that could fall out of step with the field.
+  const recipe = findRecipeSource(name.trim());
 
   useEffect(() => {
     const q = query(
@@ -105,6 +109,36 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
           placeholder="Secret Name (e.g. OPENAI_API_KEY)"
           className="w-full bg-gray-900 border border-gray-700 p-3 rounded text-sm font-mono placeholder:text-gray-500"
         />
+        {/* WHERE THE VALUE COMES FROM, the moment we recognise the name. Somebody typing
+            RAZORPAY_KEY_SECRET here is on this screen precisely because they are trying to find that
+            value, and until now the screen offered them nothing but an empty box. Appears only for a
+            name in the curated catalogue — never a guessed link. */}
+        {recipe && (
+          <div className="text-[11px] text-gray-400 leading-relaxed bg-gray-900/60 border border-gray-700 rounded p-3 space-y-1">
+            <p>
+              <span className="text-gray-500">Get it from </span>
+              <a
+                href={recipe.option.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-indigo-300 underline underline-offset-2"
+              >
+                {recipe.option.linkLabel}
+              </a>
+              <span className="text-gray-500"> → {recipe.option.path}</span>
+            </p>
+            <p className="text-gray-500">{recipe.variable.where}</p>
+            <p className="text-gray-500">{recipe.option.cost}</p>
+            {recipe.variable.serverOnly && (
+              // Said BEFORE they paste, because after the fact the only honest advice is "rotate it".
+              <p className="text-amber-300/90">
+                Server-side only — do not add a VITE_ or NEXT_PUBLIC_ prefix to this one, or its value is
+                published inside your app for every visitor to read.
+              </p>
+            )}
+            {recipe.recipe.keyless && <p className="text-emerald-400/90">💡 {recipe.recipe.keyless}</p>}
+          </div>
+        )}
         <div className="relative">
           <input
             type={showValue ? 'text' : 'password'}

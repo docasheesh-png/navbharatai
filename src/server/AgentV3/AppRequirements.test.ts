@@ -120,11 +120,58 @@ describe('appRequirementsNotice — short, localized, honest', () => {
   });
 
   it('stays SHORT — one heading, one line per item, one closing line', () => {
-    expect(appRequirementsNotice(razorpay, null).split('\n')).toHaveLength(3);
+    // Measured on a service with NO keyless route, so this pins the baseline shape rather than the
+    // shortcut line's presence. Stripe has none (there is no honest way to take card payments for free).
+    const stripe = detectAppRequirements({ files: { 'package.json': pkg({ stripe: '^14.0.0' }) } });
+    expect(appRequirementsNotice(stripe, null).split('\n')).toHaveLength(3);
     const three = detectAppRequirements({
-      files: { 'package.json': pkg({ razorpay: '^2.9.0', nodemailer: '^6.9.0', twilio: '^4.0.0' }) },
+      files: { 'package.json': pkg({ stripe: '^14.0.0', nodemailer: '^6.9.0', '@sendgrid/mail': '^8.0.0' }) },
     });
     expect(appRequirementsNotice(three, null).split('\n')).toHaveLength(5);
+  });
+
+  it('adds EXACTLY one line when a task can be skipped entirely, and none otherwise', () => {
+    // The only place the notice is allowed to grow, and the one worth growing for: a shop can take real
+    // money over UPI with no payment account, so the best outcome of this checklist is an item leaving it.
+    expect(appRequirementsNotice(razorpay, null).split('\n')).toHaveLength(4);
+    expect(appRequirementsNotice(razorpay, null)).toMatch(/UPI/);
+    // Stripe has no honest keyless route — and must not be given a fabricated one.
+    const stripe = detectAppRequirements({ files: { 'package.json': pkg({ stripe: '^14.0.0' }) } });
+    expect(appRequirementsNotice(stripe, null)).not.toMatch(/💡/);
+  });
+
+  it('caps the shortcut line at two routes — advice, not a paragraph', () => {
+    const many = detectAppRequirements({
+      files: {
+        'package.json': pkg({
+          razorpay: '^2.9.0', 'mapbox-gl': '^3.0.0', '@clerk/clerk-react': '^5.0.0', mongodb: '^6.0.0',
+        }),
+      },
+    });
+    const tip = appRequirementsNotice(many, null).split('\n').find((l) => l.includes('💡'))!;
+    expect(tip).toBeTruthy();
+    expect(tip.split(';')).toHaveLength(2);
+  });
+
+  it('the shortcut speaks the user\'s language — never an English island in a Hindi message', () => {
+    expect(appRequirementsNotice(razorpay, 'hi')).toMatch(/UPI लिंक/);
+    expect(appRequirementsNotice(razorpay, 'ta')).toMatch(/UPI இணைப்பு/);
+    expect(appRequirementsNotice(razorpay, 'bn')).toMatch(/UPI লিঙ্ক/);
+    for (const lang of ['hi', 'bn', 'pa', 'gu', 'or', 'ta', 'te', 'kn', 'ml', 'ar']) {
+      const tip = appRequirementsNotice(razorpay, lang).split('\n').find((l) => l.includes('💡'));
+      expect(tip, `${lang} has no localized shortcut line`).toBeTruthy();
+      // The English sentence from the Settings screens must never leak into a localized message.
+      expect(tip).not.toMatch(/no gateway account/);
+    }
+  });
+
+  it('ends the shortcut with the language\'s OWN sentence mark, not a Latin full stop', () => {
+    // `।` in Devanagari-family scripts, `۔` in Urdu — a stray "." is the small tell that a line was
+    // translated by somebody not reading it back.
+    for (const [lang, mark] of [['hi', '।'], ['pa', '।'], ['gu', '.'], ['bn', '।'], ['ar', '۔']] as const) {
+      const tip = appRequirementsNotice(razorpay, lang).split('\n').find((l) => l.includes('💡'))!;
+      expect(tip.trim().endsWith(mark), `${lang} should end with ${mark}`).toBe(true);
+    }
   });
 
   it('is honest: the app works, only those buttons are frozen — never a fake success', () => {
@@ -178,8 +225,10 @@ describe('appRequirementsNotice — short, localized, honest', () => {
   });
 
   it('adding the source did NOT make the message longer — still one line per item', () => {
-    expect(appRequirementsNotice(razorpay, null).split('\n')).toHaveLength(3);
-    expect(appRequirementsNotice(razorpay, 'hi').split('\n')).toHaveLength(3);
+    // The console LINK rides the item's own line; only the keyless shortcut is allowed a line of its own.
+    const stripe = detectAppRequirements({ files: { 'package.json': pkg({ stripe: '^14.0.0' }) } });
+    expect(appRequirementsNotice(stripe, null).split('\n')).toHaveLength(3);
+    expect(appRequirementsNotice(stripe, 'hi').split('\n')).toHaveLength(3);
   });
 
   it('names ONE provider\'s keys and that same provider\'s console — never a mix', () => {

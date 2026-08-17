@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, Eye, EyeOff, Save, Trash2 } from 'lucide-react';
+import { Lock, Eye, EyeOff, Save, Trash2, ShieldCheck } from 'lucide-react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase'; // shared handle → navbharat-prod (NOT the (default) DB)
 // Authenticated vault client — always attaches the signed-in user's Firebase token. Raw axios calls
@@ -23,6 +23,7 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
   const [addError, setAddError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [verdicts, setVerdicts] = useState<SecretVerdict[]>([]);
+  const [checkedAt, setCheckedAt] = useState('');
   // Derived, not stored: a pure catalogue lookup on every keystroke is cheaper than keeping a second
   // copy of it in state that could fall out of step with the field.
   const recipe = findRecipeSource(name.trim());
@@ -75,6 +76,23 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
       setAddError(err?.message || 'Could not save the key. Please check your connection and try again.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  /**
+   * Ask the providers about EVERY saved key, not just the one last typed.
+   *
+   * The plaintext never leaves the browser here — the server reads the values back out of the user's own
+   * encrypted vault. A check that fails returns [] rather than throwing, because a verification we could
+   * not run is not a verdict on anybody's keys and must not turn this screen into an error state.
+   */
+  const checkAllKeys = async () => {
+    setIsVerifying(true);
+    try {
+      setVerdicts(await verifySecrets(userId));
+      setCheckedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -182,15 +200,54 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
         ))}
       </div>
 
+      {/* THE CHECKLIST. A saved key told the user nothing about whether it still works, so a revoked,
+          rotated or expired credential looked exactly like a healthy one until a build failed on it.
+          One tap asks the providers themselves and puts the answer next to each name.
+          This is deliberately NOT automatic on mount: it makes real outbound requests, and doing that
+          every time somebody opens Settings would be work nobody asked for. */}
+      {secrets.length > 0 && (
+        <div className="flex items-center justify-between gap-2">
+          <button
+            onClick={checkAllKeys}
+            disabled={isVerifying}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-700 text-[11px] font-bold uppercase tracking-widest text-gray-300 hover:text-white hover:border-gray-500 disabled:opacity-50"
+          >
+            <ShieldCheck size={14} /> {isVerifying ? 'Checking…' : 'Check my keys'}
+          </button>
+          {checkedAt && !isVerifying && (
+            <span className="text-[10px] text-gray-500">Checked {checkedAt}</span>
+          )}
+        </div>
+      )}
+
       <div className="space-y-2">
-        {secrets.map((s) => (
-          <div key={s.id} className="flex justify-between items-center bg-gray-800 p-3 rounded font-mono text-xs">
-            <span>{s.secret_name}</span>
-            <button onClick={() => handleDeleteSecret(s.id)} className="text-red-400 hover:text-red-300">
-              <Trash2 size={16} />
-            </button>
-          </div>
-        ))}
+        {secrets.map((s) => {
+          const verdict = verdicts.find((v) => v.names.includes(s.secret_name));
+          return (
+            <div key={s.id} className="bg-gray-800 p-3 rounded font-mono text-xs space-y-1">
+              <div className="flex justify-between items-center gap-2">
+                <span className="truncate">{s.secret_name}</span>
+                <button onClick={() => handleDeleteSecret(s.id)} aria-label={`Delete ${s.secret_name}`} className="shrink-0 text-red-400 hover:text-red-300">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+              {/* A key with no verdict shows NOTHING — absence of a badge means "not checked", which is
+                  the truth. A grey "unknown" pill on every unverifiable key would be noise that teaches
+                  people to stop reading the badges that matter. */}
+              {verdict && (
+                <p
+                  className={`font-sans leading-snug ${
+                    verdict.status === 'working' ? 'text-emerald-400'
+                      : verdict.status === 'rejected' ? 'text-red-400'
+                        : 'text-gray-500'
+                  }`}
+                >
+                  {verdict.message}
+                </p>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

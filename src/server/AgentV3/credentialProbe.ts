@@ -46,6 +46,8 @@ export function credentialProbeEnabled(env: NodeJS.ProcessEnv = process.env): bo
   return (env.AGENTV3_CREDENTIAL_PROBE ?? '').trim().toLowerCase() !== 'off';
 }
 
+import { probeSmtp, resolvePort } from './smtpProbe';
+
 /** What we found out about one credential. */
 export type ProbeStatus =
   /** The provider accepted it. This is the only status that means "proven". */
@@ -131,9 +133,11 @@ interface ProbeSpec {
  * Absent on purpose, and each for a stated reason rather than an oversight:
  *   • Google Maps — the cheapest key check consumes billable quota (rule 1).
  *   • MSG91 — validating a sender key means sending an SMS, which costs the user money (rule 1).
- *   • Auth0 — needs a client-credentials token exchange first, which is a write-ish flow, not a read.
- *   • SMTP — needs a mail transport rather than an HTTP call; a real connect+AUTH probe is worth adding
- *     later, but faking it with an HTTP request would prove nothing.
+ *   • Auth0 — the only "is this secret valid" call is a client-credentials token exchange, and Auth0's
+ *     free tier METERS machine-to-machine tokens. Minting one to answer a question the user never asked
+ *     would spend a quota they may need later. That is rule 1, so it stays unchecked deliberately.
+ *   • SMTP — needs a mail transport rather than an HTTP call, so it is not in this table: it is handled
+ *     by `probeSmtpCredential` below, which speaks the login handshake over TLS and sends no mail.
  *   • DATABASE_URL / MONGODB_URI — secretPreflight.ts owns connection strings.
  */
 const PROBES: ProbeSpec[] = [
@@ -262,6 +266,51 @@ export function verdictFromStatus(provider: string, names: string[], httpStatus:
 }
 
 /**
+ * SMTP, which needs a mail transport rather than an HTTPS read.
+ *
+ * Slice 3 recorded this as an open item and reported mail credentials as unchecked. It is worth closing
+ * because the commonest mail credential our users paste is a Gmail app password, and the commonest
+ * mistake is pasting their ORDINARY password — which Google rejects at login with no other symptom, so
+ * the first sign of trouble is a real user never receiving their signup email.
+ *
+ * `smtpProbe` speaks the login handshake directly over TLS and SENDS NOTHING: no MAIL FROM, no RCPT TO,
+ * no DATA. Its honesty rule is the same as the HTTP probes' — only the server's own auth rejection
+ * counts as a bad credential.
+ */
+export async function probeSmtpCredential(
+  values: Record<string, string>,
+  // Injected for the same reason `doFetch` is: without it, any test that mentions SMTP_HOST makes a real
+  // DNS lookup and a real outbound connection from CI. A probe that can only be exercised against
+  // somebody's live mail server is a probe that does not get exercised.
+  doProbe: typeof probeSmtp = probeSmtp,
+): Promise<ProbeVerdict | null> {
+  const host = lookup(values, 'SMTP_HOST');
+  const user = lookup(values, 'SMTP_USER');
+  // Providers disagree on the name, and our own catalogue lists both.
+  const pass = lookup(values, 'SMTP_PASS') || lookup(values, 'SMTP_PASSWORD');
+  if (!host || !user || !pass) return null;
+
+  const names = [host.name, user.name, pass.name];
+  const r = await doProbe(host.value, resolvePort(lookup(values, 'SMTP_PORT')?.value), user.value, pass.value);
+  if (r.status === 'working') {
+    return { names, provider: 'your mail server', status: 'working', message: '✅ Your email settings work — NavBharatAI signed in to your mail server just now (no email was sent).' };
+  }
+  if (r.status === 'rejected') {
+    return {
+      names, provider: 'your mail server', status: 'rejected',
+      message: '❌ Your mail server did not accept this username and password. If you use Gmail, it must be a 16-character '
+        + 'App Password, not your normal Google password — re-copy it in Settings → App Settings → Secrets & API Keys.',
+      detail: r.detail,
+    };
+  }
+  return {
+    names, provider: 'your mail server', status: 'unreachable',
+    message: '⏳ NavBharatAI could not reach your mail server to check these settings, so they were saved as you entered them.',
+    detail: r.detail,
+  };
+}
+
+/**
  * Check every credential we safely can, under one overall deadline.
  *
  * Never throws and never rejects: a probe that fails is a probe that says `unreachable`, because a bug
@@ -272,9 +321,22 @@ export async function probeCredentials(
   values: Record<string, string> | null | undefined,
   doFetch: ProbeFetch,
   budgetMs = PROBE_BUDGET_MS,
+  doSmtpProbe: typeof probeSmtp = probeSmtp,
 ): Promise<ProbeVerdict[]> {
   const planned = probesFor(values || {});
-  if (planned.length === 0) return [];
+  // SMTP rides the same budget but not the same transport, so it is raced alongside rather than folded
+  // into `planned` — a mail handshake has nothing in common with an HTTPS GET but the deadline.
+  const smtp = probeSmtpCredential(values || {}, doSmtpProbe).catch(() => null);
+  if (planned.length === 0) {
+    const only = await Promise.race([
+      smtp,
+      new Promise<null>((resolve) => {
+        const t = setTimeout(() => resolve(null), budgetMs);
+        if (typeof t === 'object' && t && typeof (t as { unref?: () => void }).unref === 'function') (t as { unref: () => void }).unref();
+      }),
+    ]);
+    return only ? [only] : [];
+  }
 
   const runOne = async ({ spec, names, resolved }: (typeof planned)[number]): Promise<ProbeVerdict> => {
     let req: { url: string; headers: Record<string, string> } | null = null;
@@ -321,7 +383,7 @@ export async function probeCredentials(
     const t = setTimeout(() => resolve('timeout'), budgetMs);
     if (typeof t === 'object' && t && typeof (t as { unref?: () => void }).unref === 'function') (t as { unref: () => void }).unref();
   });
-  const settled = await Promise.race([Promise.all(planned.map(runOne)), deadline]);
+  const settled = await Promise.race([Promise.all([...planned.map(runOne), smtp]), deadline]);
   if (settled === 'timeout') {
     return planned.map(({ spec, names }) => ({
       names, provider: spec.provider, status: 'unreachable' as const,
@@ -329,7 +391,7 @@ export async function probeCredentials(
       detail: 'batch-timeout',
     }));
   }
-  return settled;
+  return settled.filter((v): v is ProbeVerdict => v !== null);
 }
 
 /**

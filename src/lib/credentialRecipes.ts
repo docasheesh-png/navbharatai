@@ -118,7 +118,30 @@ export interface CredentialRecipe {
    * near-miss that does not actually do the same job.
    */
   keyless: string | null;
+  /**
+   * A stable id for the keyless route, so the same fact can be said in the user's own language.
+   *
+   * `keyless` above is a full English sentence written for the SCREENS, which are English by this
+   * repo's language standard. The build checklist is not — it renders in ten Indian languages, and
+   * dropping an English sentence into a Hindi message is the "English island" this feature avoids
+   * everywhere else. Translating four long sentences into ten languages would also be forty chances to
+   * ship a clumsy one; a short line keyed by id is both translatable well and short enough for a
+   * message that is under a standing brevity constraint. The words live in AppRequirements' own
+   * STRINGS table, beside every other localized string. `null` wherever `keyless` is null.
+   */
+  keylessKey: KeylessRoute | null;
 }
+
+/** The keyless routes we can describe in the user's own language. */
+export type KeylessRoute =
+  /** Take real money with no payment-gateway account at all. */
+  | 'upi'
+  /** Draw a real map with no token. */
+  | 'osm'
+  /** The database the user already connected also does login. */
+  | 'db-auth'
+  /** NavBharatAI provisions the database itself. */
+  | 'one-tap-db';
 
 /**
  * The catalogue. Keyed by AppRequirements' service ids.
@@ -131,6 +154,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
     id: 'payments_razorpay',
     keyless: 'To take money in India you may not need this at all — a UPI link accepts real payments with no gateway account and no fees.',
+    keylessKey: 'upi',
     options: [
       {
         provider: 'Razorpay',
@@ -149,6 +173,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
     id: 'payments_cashfree',
     keyless: 'To take money in India you may not need this at all — a UPI link accepts real payments with no gateway account and no fees.',
+    keylessKey: 'upi',
     options: [
       {
         provider: 'Cashfree',
@@ -167,6 +192,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
     id: 'payments_stripe',
     keyless: null,
+    keylessKey: null,
     options: [
       {
         provider: 'Stripe',
@@ -186,6 +212,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
     id: 'email_smtp',
     keyless: null,
+    keylessKey: null,
     options: [
       {
         provider: 'Gmail (app password)',
@@ -205,6 +232,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
     id: 'email_api',
     keyless: null,
+    keylessKey: null,
     options: [
       {
         provider: 'Resend',
@@ -229,6 +257,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
     id: 'sms',
     keyless: null,
+    keylessKey: null,
     options: [
       {
         provider: 'MSG91',
@@ -256,6 +285,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
     id: 'maps',
     keyless: 'A map may need no key at all — OpenStreetMap with Leaflet draws a real, zoomable map for free, and a plain Google Maps embed needs no key either.',
+    keylessKey: 'osm',
     options: [
       {
         provider: 'Google Maps',
@@ -280,6 +310,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
     id: 'app_ai_key',
     keyless: null,
+    keylessKey: null,
     options: [
       {
         provider: 'Google AI Studio',
@@ -304,6 +335,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
     id: 'storage',
     keyless: null,
+    keylessKey: null,
     options: [
       {
         provider: 'Cloudinary',
@@ -336,6 +368,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
     id: 'auth',
     keyless: 'You may not need a separate login provider — a database you connect in Settings → App Settings → Database (Supabase or Firebase) already includes real email and Google login.',
+    keylessKey: 'db-auth',
     options: [
       {
         provider: 'Clerk',
@@ -367,6 +400,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
     id: 'database_hosted',
     keyless: 'NavBharatAI can create a real database for you in one tap from Settings → App Settings → Database — you do not have to open any console yourself.',
+    keylessKey: 'one-tap-db',
     options: [
       {
         provider: 'Supabase',

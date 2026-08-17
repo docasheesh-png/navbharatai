@@ -3092,7 +3092,11 @@ export function registerAgentV3Routes(app: Express): void {
     const files = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
     // A signed-out user has no vault and no Supabase grant — the honest answer is "not connected, and
     // we cannot create one either", which the client turns into "sign in / connect your own".
-    const vaultSecrets = uid ? await loadUserVaultSecrets(uid).catch(() => ({} as Record<string, string>)) : {};
+    // SCOPED TO THIS APP (2026-08-17). Unscoped, this answered "is a database connected?" from EVERY
+    // key the user has, while the BUILD only receives this app's keys — so a database connected for a
+    // different app would be reported as ready here and then be absent at build time. The readiness
+    // answer has to be about the same app the build is.
+    const vaultSecrets = uid ? await loadUserVaultSecrets(uid, workspaceId).catch(() => ({} as Record<string, string>)) : {};
     const supabaseConnected = uid ? !!(await getConnection(uid).catch(() => null))?.orgId : false;
     res.json(databaseReadiness({
       files,
@@ -3407,7 +3411,8 @@ export function registerAgentV3Routes(app: Express): void {
     // implement. Beyond the wrong words, deploying every user's backend with one server-side key would
     // put all of them in a single Render account billed to whoever owns it — against the standing rule
     // that user apps run on the USER's own account. Their key is preferred; ours only backstops.
-    const renderVault = userId ? await loadUserVaultSecrets(userId).catch(() => null) : null;
+    // Scoped: a deploy key the user tied to one app must not deploy a different one.
+    const renderVault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
     const renderKey = resolveRenderKey(renderVault);
     if (!renderKey) { res.status(503).json({ ok: false, reason: 'not-configured', error: renderRequirement(process.env, renderVault) }); return; }
     try {
@@ -6505,7 +6510,9 @@ export function registerAgentV3Routes(app: Express): void {
         try {
           const provider = detectDatabaseProvider(importedFiles);
           if (provider) {
-            const vault = userId ? await loadUserVaultSecrets(userId).catch(() => null) : null;
+            // Scoped, for the same reason as database-readiness: this advisory is about whether THIS
+            // app has a database, and an unscoped read would call it connected using another app's key.
+            const vault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
             const connected = !!userDatabaseContext(vault);
             const advisory = persistentDatabaseAdvisory({ provider, connected });
             if (advisory) emit({ type: 'narration', agent: 'architect', text: advisory, ts: Date.now() });

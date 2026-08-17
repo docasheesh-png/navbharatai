@@ -10,19 +10,27 @@
 // The fix is least privilege: an app gets the keys it was given, plus the ones the user deliberately
 // marked as shared. That is also exactly the app-picker the admin asked for, seen from the server side.
 //
-// ── WHY IT IS ADDITIVE, AND WHY THAT MATTERS MORE THAN THE FIX ──────────────────────────────────────
-// Every key already in every user's vault predates this and carries no workspace. If those became
-// "belongs to no app", every existing user's next build would silently lose its credentials — a
-// perfect example of a security improvement that breaks the one absolute rule. So:
+// ── THE THREE RULES ─────────────────────────────────────────────────────────────────────────────────
 //
-//   * a key with NO workspace is a SHARED key and goes to every app, exactly as today;
+//   * a key with NO workspace is a SHARED key and goes to every app;
 //   * a key WITH a workspace goes only to that app;
-//   * a caller that does not say which app it is building for gets EVERYTHING, as today.
+//   * a caller that does not name an app gets EVERYTHING.
 //
-// The third rule is the one that keeps this safe. Only the build path knows its workspace, so only the
-// build path narrows; every other reader (a deploy, a readiness check, the user's own Settings list) is
-// byte-identical to before. A path taught scoping later opts IN by passing an id — it can never opt in
-// by accident.
+// The first rule is a real product choice, not a migration artefact: a user with one Stripe account
+// behind three apps wants that key shared, and "All apps" is offered explicitly on the Settings screen.
+//
+// The third is a SAFETY DEFAULT, and it is deliberately the conservative direction. Narrowing has to be
+// asked for, so a reader that has not been taught scoping keeps working instead of silently losing
+// credentials. Every reader that legitimately knows its app now passes one — the build, the
+// database-readiness check, the backend deploy, and the import advisory — because for those, answering
+// from the user's whole vault is not merely over-broad, it is WRONG: a database connected for a
+// different app would be reported as ready here and then be absent at build time.
+//
+// ── PRECEDENCE ──────────────────────────────────────────────────────────────────────────────────────
+// An app-specific key OVERRIDES a shared key of the same name. Somebody who keeps a shared
+// `STRIPE_SECRET_KEY` for most of their apps and a different one for a particular app is expressing an
+// exception, and an exception that loses to the general case is not an exception. It also makes the
+// shared key a safe default rather than a trap, because the specific one always wins.
 //
 // PURE — no I/O, so the decision is tested directly rather than through Firestore.
 
@@ -41,14 +49,11 @@ export function isSharedSecret(row: Pick<VaultSecretRow, 'workspaceId'>): boolea
 /**
  * The keys one app should receive.
  *
- * Precedence is the interesting part: an app-specific key OVERRIDES a shared key of the same name. That
- * is the direction a user means every time — somebody who saves a shared `STRIPE_SECRET_KEY` for most of
- * their apps and a different one for a particular app is expressing an exception, and an exception that
- * loses to the general case is not an exception. It also makes the shared key a safe default rather than
- * a trap, because the specific one always wins.
+ * Shared keys first, then app-specific ones overwrite by name (see PRECEDENCE above).
  *
- * `workspaceId` null/empty ⇒ the caller did not say which app, so it gets everything (today's behaviour).
- * PURE.
+ * `workspaceId` null/empty ⇒ the caller did not name an app, so it gets everything. That is the
+ * conservative direction on purpose: a reader that has not been taught scoping keeps working rather
+ * than silently losing credentials. PURE.
  */
 export function resolveScopedSecrets(
   rows: readonly VaultSecretRow[] | null | undefined,

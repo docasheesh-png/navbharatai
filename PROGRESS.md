@@ -34527,3 +34527,28 @@ build report. Least privilege's own failure mode is a user wondering why the key
 is not there, and naming what was withheld turns that into a sentence instead of a mystery. Next slice.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
+
+### Correction the same day — the rationale above was partly wrong, and a sibling was left behind
+
+Two things, after the admin said there are NO existing users (the app is still in testing).
+
+**1. The justification I wrote for the design was wrong, so it is corrected in the code and tests.** The
+entry above defends "no workspace ⇒ shared" and "an unscoped caller gets everything" as protecting
+existing users' builds. Those users do not exist. The DESIGN is still right, for different reasons, and
+leaving a false rationale in a permanent record would push a later session into a wrong decision:
+- **"All apps" is a real product choice**, not a migration artefact — a user with one Stripe account
+  behind three apps wants that key shared, and the Settings screen offers it explicitly.
+- **"unscoped caller gets everything" is a SAFETY DEFAULT**, not backwards compatibility: narrowing must
+  be *asked for*, so a reader that has not been taught scoping keeps working instead of silently losing
+  credentials.
+
+**2. A defect I introduced, found by hunting the siblings (rule 4, step 3).** I scoped the BUILD and left
+three other vault readers unscoped. The worst was `database-readiness`: it answered "is a database
+connected?" from the user's WHOLE vault while the build only receives that app's keys — so a database
+connected for a DIFFERENT app was reported as ready, and then absent at build time. That is not
+over-broad, it is a wrong answer, and my own change created it. All three readers that legitimately know
+their app now pass it: `database-readiness`, `deploy-backend` (a deploy key tied to one app must not
+deploy another), and the import DB advisory. Each already had `workspaceId` in scope — the gap was that I
+stopped at the first call site instead of sweeping them.
+
+Verification gate: `tsc -p tsconfig.server.json` clean · `vitest run` green.

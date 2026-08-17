@@ -5,10 +5,10 @@ const shared = (name: string, value = `${name}-shared`): VaultSecretRow => ({ na
 const forApp = (name: string, workspaceId: string, value = `${name}-${workspaceId}`): VaultSecretRow =>
   ({ name, value, workspaceId });
 
-describe('THE RULE THAT KEEPS EXISTING USERS WORKING', () => {
-  it('a key saved before scoping existed goes to every app, exactly as today', () => {
-    // Every key in every user's vault right now has no workspace. If those became "belongs to no app",
-    // the next build of every existing user would silently lose its credentials.
+describe('SHARED IS A REAL CHOICE, NOT A MIGRATION ARTEFACT', () => {
+  it('a key with no app goes to every app', () => {
+    // A user with one Stripe account behind three apps wants that key shared, and the Settings screen
+    // offers "All apps" explicitly. It is also what a key carries when nobody picked an app.
     const rows = [shared('STRIPE_SECRET_KEY'), shared('RAZORPAY_KEY_ID')];
     expect(resolveScopedSecrets(rows, 'ws-1')).toEqual({
       STRIPE_SECRET_KEY: 'STRIPE_SECRET_KEY-shared',
@@ -18,8 +18,8 @@ describe('THE RULE THAT KEEPS EXISTING USERS WORKING', () => {
   });
 
   it('a caller that does not name an app still gets EVERYTHING', () => {
-    // Only the build path knows its workspace. Every other reader must be byte-identical to before, so
-    // narrowing can never happen by accident — a path opts IN by passing an id.
+    // The conservative direction on purpose: narrowing must be ASKED for, so a reader that has not been
+    // taught scoping keeps working rather than silently losing credentials.
     const rows = [shared('A'), forApp('B', 'ws-1'), forApp('C', 'ws-2')];
     const all = { A: 'A-shared', B: 'B-ws-1', C: 'C-ws-2' };
     expect(resolveScopedSecrets(rows, undefined)).toEqual(all);

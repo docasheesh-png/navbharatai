@@ -1,5 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
-import { popupFailureAction, waitForSignedInUser, settleNativeSignIn, type MinimalAuthLike } from './socialSignInPolicy';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  popupFailureAction,
+  waitForSignedInUser,
+  settleNativeSignIn,
+  appleSignInFailureMessage,
+  APPLE_WEB_RETURN_URL,
+  APPLE_SERVICE_ID,
+  type MinimalAuthLike,
+} from './socialSignInPolicy';
 
 describe('popupFailureAction', () => {
   // THE bug (admin, 2026-07-06): closing the popup ("cancel") forced a FULL-PAGE Google redirect.
@@ -115,5 +125,57 @@ describe('settleNativeSignIn (the "stuck on the login spinner after Google" hang
 
   it("FAILS cleanly when the exchange fails and no session ever appears (honest error, not a hang)", async () => {
     expect(await settleNativeSignIn(Promise.reject(new Error('boom')), fakeAuth({}), 1000, 40)).toBe('failed');
+  });
+});
+
+// THE bug (admin 2026-08-16, with Apple's own error page attached): Apple web sign-in dies at
+// `invalid_request — Invalid web redirect url` because the Service ID has no Return URL for our custom
+// authDomain. The USER-VISIBLE half of that bug is worse than the config half: the popup close came back
+// as `auth/popup-closed-by-user`, the Apple handler treated it as a quiet cancel, and the app showed
+// NOTHING — a button that does nothing, forever. These pin the message that ends the silence.
+describe('appleSignInFailureMessage — the Apple close is never silent, and it names the actual fix', () => {
+  it('names the EXACT return URL and Service ID an admin has to register (a two-minute portal change)', () => {
+    const msg = appleSignInFailureMessage();
+    expect(msg).toContain(APPLE_WEB_RETURN_URL);
+    expect(msg).toContain(APPLE_SERVICE_ID);
+    expect(APPLE_WEB_RETURN_URL).toBe('https://navbharatai.com/__/auth/handler');
+    expect(APPLE_SERVICE_ID).toBe('com.navbharatai.web');
+  });
+
+  it('points at the portal page the URL is actually added on (not just "check Apple")', () => {
+    expect(appleSignInFailureMessage()).toMatch(/Services\s*IDs/i);
+  });
+
+  it('ALSO serves a genuine canceller — the SDK cannot tell the two apart, so the text must cover both', () => {
+    expect(appleSignInFailureMessage()).toMatch(/try again/i);
+  });
+});
+
+describe('AuthComponent wiring — Apple speaks up, Google and GitHub stay quiet', () => {
+  const src = readFileSync(join(__dirname, 'AuthComponent.tsx'), 'utf8');
+
+  // The branch body only — bounded by the handler's own `} catch (`, so the window can never bleed
+  // into the NEXT handler and read its setError as this one's (it did, first time round).
+  function cancelledBranchAfter(handler: string): string {
+    const start = src.indexOf(`const ${handler} = async`);
+    expect(start, `${handler} not found`).toBeGreaterThan(-1);
+    const at = src.indexOf("outcome === 'cancelled'", start);
+    expect(at, `${handler} has no cancelled branch`).toBeGreaterThan(-1);
+    const end = src.indexOf('} catch (', at);
+    expect(end, `${handler}'s cancelled branch is not inside a try/catch`).toBeGreaterThan(at);
+    return src.slice(at, end);
+  }
+
+  it('the Apple cancelled branch surfaces the honest message (this is the reported dead button)', () => {
+    expect(cancelledBranchAfter('handleAppleSignIn')).toContain('setError(appleSignInFailureMessage())');
+  });
+
+  // Google's and GitHub's redirect URIs ARE registered, so a closed popup there really is a cancel.
+  // Showing a config error to those users would be a lie — and re-showing an error banner on a
+  // deliberate cancel is exactly the noise the 2026-07-06 fix removed.
+  it('Google and GitHub cancels stay SILENT — no error banner on a deliberate cancel', () => {
+    for (const handler of ['handleGoogleSignIn', 'handleGithubSignIn']) {
+      expect(cancelledBranchAfter(handler), handler).not.toMatch(/setError\(/);
+    }
   });
 });

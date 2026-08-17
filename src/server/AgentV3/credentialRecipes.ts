@@ -482,6 +482,25 @@ export function requiredVarNames(
 }
 
 /**
+ * The annotated variable matching a name the user actually saved, ignoring a browser-exposure prefix.
+ *
+ * The prefix is deliberately ignored: somebody who saves `VITE_STRIPE_SECRET_KEY` has saved a Stripe
+ * secret key, and the whole point of looking it up is to notice that they put it somewhere every visitor
+ * to their site can read. Matching only the exact catalogue name would miss precisely the case worth
+ * catching. Returns the first match — a name means the same thing wherever it appears. PURE.
+ */
+export function findRecipeVar(name: string): RecipeVar | null {
+  const wanted = String(name ?? '').trim();
+  if (!wanted) return null;
+  for (const recipe of CREDENTIAL_RECIPES) {
+    for (const option of recipe.options) {
+      for (const v of option.vars) if (isSameCredentialName(v.name, wanted)) return v;
+    }
+  }
+  return null;
+}
+
+/**
  * Every env var name this file annotates, for the id given — used by the test that proves the annotation
  * has not drifted away from AppRequirements' catalogue. PURE.
  */

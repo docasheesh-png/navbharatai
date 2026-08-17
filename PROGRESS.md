@@ -34124,3 +34124,46 @@ show no link. Those are slices 2–4 (test-vs-live key warning; verify-on-paste 
 Checklist screen). Recorded here so nobody reads the registry's existence as the feature being done.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
+
+---
+
+## 2026-08-17 — credential help, slice 2: the two failures that happen AFTER you have the right key
+
+Slice 1 got people to the right console page. These two go wrong once the user is already holding a
+correct, working credential — which is exactly why nothing in the stack caught them: the key is valid,
+the build is green, the preview renders, and the app is still wrong.
+
+**1. The live secret published to every visitor.** `VITE_`/`NEXT_PUBLIC_`/`REACT_APP_` is not a naming
+style, it is an instruction to the bundler to INLINE that value into the JavaScript every visitor
+downloads. A user who saves their Stripe secret as `VITE_STRIPE_SECRET_KEY` — because the *publishable*
+one needed the prefix — has published a key that can charge cards and issue refunds. The app works
+flawlessly, which is what makes this the most dangerous state in the whole credential flow.
+
+**2. The test key that never takes money.** Every payment console hands out a sandbox pair first, and
+building against it is CORRECT. The failure is silent and late: the app ships, a real customer pays, and
+nothing arrives, because `rzp_test_` charges an imaginary card perfectly. No error anywhere — the user
+finds out from a missing settlement, days after they stopped looking at NavBharatAI.
+
+**Shipped:** `src/server/AgentV3/credentialSafety.ts`, wired into `ToolDispatcher`'s existing
+secrets-injection step (fires once per build, best-effort, advisory — it can never block or fail a
+build). Deliberately a SEPARATE module from `secretPreflight.ts`: that one answers "does this credential
+WORK", and these are an orthogonal axis — a live secret in a browser variable works perfectly and is a
+disaster; a test key connects successfully and takes no money. Folding either into `SecretStatus` would
+force one value to carry two unrelated verdicts and make an exposed key look like a *broken* one.
+
+**Precision budget (the design constraint that shaped the whole file).** A false "your key is exposed"
+is expensive — it teaches people to dismiss the warning, and the next one is the real one. So every rule
+needs a POSITIVE identification: either the curated catalogue marks that variable `serverOnly`, or the
+value carries a vendor-assigned prefix that cannot be anything else (`sk_live_`, `whsec_`, `SG.`, `sk.`).
+A value we do not recognise produces NOTHING — silence is the default, not the fallback. Test-locked:
+publishable keys, Supabase anon keys, Mapbox public tokens and Firebase API keys are all designed to
+ship in the browser and must never fire.
+
+**Honesty details worth keeping:** the exposure message tells the user to ROTATE the key, not merely to
+move it — the old value is already public, so moving it fixes nothing on its own. The test-key message
+does not scold (it says "exactly right while you are building") but still names the real consequence.
+And no message or admin summary ever contains a secret VALUE, not even truncated — a build report is
+persisted and assembled into an admin inbox, and half a live key in permanent storage is still a leak.
+That is asserted directly rather than assumed.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.

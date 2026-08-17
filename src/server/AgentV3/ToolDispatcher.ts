@@ -5,6 +5,7 @@ import { narrationText, type NarrationId, type NarrationParams } from './narrati
 import { noteHeal } from './HealLedger';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
+import { inspectCredentials } from './credentialSafety';
 import { planSecretRequest, secretRequestPrompt, secretRequestResult, type SecretAsk } from './secretRequest';
 
 /**
@@ -637,6 +638,17 @@ export class ToolDispatcher {
         this.events?.emit({ type: 'narration', agent: 'architect', text: loaded, ts: Date.now() });
         for (const p of problems) this.events?.emit({ type: 'narration', agent: 'architect', text: p, ts: Date.now() });
       }
+      // TWO FAILURES THE VERDICTS ABOVE CANNOT SEE, because in both the credential WORKS (2026-08-17).
+      // A live secret saved under a VITE_/NEXT_PUBLIC_ name is inlined into the JavaScript every visitor
+      // downloads — the app runs flawlessly and the key is public. A sandbox key charges an imaginary
+      // card perfectly and no money ever arrives, which the user discovers days later from a missing
+      // settlement. Deterministic and catalogue-driven, so a clean vault costs nothing and an
+      // unrecognised value says nothing at all. Advisory only — it can never block or fail a build.
+      try {
+        for (const w of inspectCredentials(this.userSecretsEnv)) {
+          this.events?.emit({ type: 'narration', agent: 'architect', text: w.message, ts: Date.now() });
+        }
+      } catch { /* a warning that fails is silence, never a broken build */ }
     } catch { /* best-effort — never block the build; the app just runs without injected keys */ }
   }
 

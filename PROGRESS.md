@@ -34651,3 +34651,47 @@ A disabled control with no stated reason is worse than a rejection: a rejection 
 while this made a working feature look broken.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
+
+---
+
+## 2026-08-17 — "My apps": the built .apk that a back button could no longer reach
+
+Admin: *"user ne apk banayi, ban gayi. usne download nahi ki, galti se back ho gaya. ab wapas woh dikh
+hi nahi rahi hai."*
+
+**The file was never lost.** It sits in the user's OWN GitHub repository, and GitHub keeps a build
+artifact for 14 days — a fact our own build screen prints. What was lost was the WAY BACK: reading a
+build needs `owner` and `repo`, and those existed only in the build screen's component state. One back
+gesture and the app could no longer name the repository it had just built into, so a finished app became
+unreachable while sitting intact a tap away. Nothing anywhere recorded that a build had happened, so
+there was nothing to look it up by.
+
+**Shipped:** `AppBuildStore` (the missing row), `GET /api/mobile-ship/my-apps` + a DELETE, and
+`MyBuiltApps.tsx` — mounted in the APK Builder below the build panel, not only inside the publish flow,
+because the same list answers "give me my file again" and "put it on App Mart" and routing the first
+through a publish page would be a detour.
+
+**The row is a POINTER only** — owner, repo, workflow, run. No app bytes (GitHub already holds them, and
+a copy would make us responsible for someone's app) and no GitHub token (that would turn a convenience
+index into a credential store). Every read still goes to GitHub with the user's own live token.
+
+**Two rules the screen is built around:**
+1. **Opening it costs nothing.** The ₹1 is charged when a build SUCCEEDS, and that charge lives on the
+   artifacts endpoint — so status here comes from `runs` (free) and `artifacts` is called only when the
+   user OPENS one app. Without that split, opening a list of five old builds would have produced a
+   five-rupee surprise, which is precisely what the billing law exists to prevent. Said on screen too.
+2. **It never offers a file that is not there.** A successful run whose artifact GitHub has deleted
+   reports "expired — build it again", not a Download button that fails. Fixing one lie by shipping a
+   newer one is not a fix.
+
+**Two design errors caught while building it, both the same shape — writing more than I knew:**
+- I first keyed the row on the RUN id. A row written at trigger time has no run id yet, so it and its
+  later self would have been two entries; and somebody who rebuilds the calculator four times would see
+  four calculators. The admin asked for their APPS, not their build history. One row per (user, repo).
+- Recording the run id from `/artifacts` wrote a WHOLE row with `workflow: ''` and the repo name as the
+  app name. Firestore's `merge: true` does not ignore those — it OVERWRITES. Every successful build
+  would have blanked the workflow (breaking the list's ability to read that build back) and replaced a
+  name the user chose. `setLatestRun` now touches only the run id: a partial update is the honest shape
+  for partial knowledge.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { AppTargetPicker, useUserApps, useAppFiles } from './AppTargetPicker';
 import { StoreBuildPanel } from './StoreBuildPanel';
+import { MyBuiltApps } from './MyBuiltApps';
 import { readIconFile, readIconFromClipboard } from '../../lib/appIcon';
 // The SAME pure helpers the server uses to derive and normalise the package name (rule 4 — no drift, so
 // what the user sees here is exactly what the build will use). appId.ts / mobileProjectAssembler are pure
@@ -91,6 +92,17 @@ function packageAdvisory(typed: string, appName: string): { effective: string; o
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, githubToken, githubUser, onConnectGitHub, onDisconnectGitHub, onMakeIcon }) => {
+  // The same auth the build panel sends: the user's Firebase identity (whose wallet and app list this
+  // is) plus their GitHub token (which is what actually reads their repositories).
+  const myAppsHeaders = useCallback(async (extra?: Record<string, string>) => {
+    const headers: Record<string, string> = { ...(extra || {}) };
+    if (githubToken) headers['x-github-token'] = githubToken;
+    try {
+      const { authHeaders } = await import('../../lib/authedFetch');
+      Object.assign(headers, await authHeaders());
+    } catch { /* signed out — the route answers with an empty list, never another account's apps */ }
+    return headers;
+  }, [githubToken]);
   // The tier the user selected in the v5.0 panel (persisted there). It routes the AI build-repair to the
   // same models the main build uses; absent ⇒ the server falls back to the weak-safe (cheap, no-Claude)
   // path by construction, so this can never accidentally spend a flagship model.
@@ -392,6 +404,18 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
             powerLevel={selectedPowerLevel}
           />
         </div>
+
+        {/* EVERY APP THIS USER HAS BUILT (admin 2026-08-17: "galti se back ho gaya, ab wapas woh dikh
+            hi nahi rahi hai"). The build above only knows the app it just made; this survives leaving
+            the screen, so a finished .apk is never one back gesture away from being unreachable.
+            Mounted here rather than only inside the publish flow: the same list answers "give me my
+            file again" and "put it on App Mart", and routing the first through a publish page would
+            be a detour. Costs nothing to open — see MyBuiltApps. */}
+        {githubToken && (
+          <div className="rounded-xl border border-white/10 bg-black/20 p-3 mb-4">
+            <MyBuiltApps ghHeaders={myAppsHeaders} />
+          </div>
+        )}
 
         {/* Step-by-step publishing walkthrough for a first-time, non-technical publisher. Opened from
             the build panel's "Show me how to publish" button. */}

@@ -3002,7 +3002,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       <div className="shrink-0 border-b border-zinc-800">
         {/* In focus mode the fixed Exit-Focus button lives at the top-right corner (App.tsx). Reserve
             room on the right so the header's own trailing controls (Stop/Resume) don't sit under it. */}
-        <div className={`flex items-center gap-2 pl-4 pt-3 pb-2 ${focusMode ? 'pr-14' : 'pr-4'}`}>
+        {/* HEIGHT (admin 2026-08-17: "upar ke 25% bina baat ke header me chala jata hai"). On a phone
+            this row and the two below it were eating a quarter of the screen before the preview even
+            started. Padding is halved on small screens (the desktop spacing is unchanged), and the
+            title below no longer wraps — the wrap was the bigger half of the cost. */}
+        <div className={`flex items-center gap-2 pl-4 pt-1.5 pb-1.5 sm:pt-3 sm:pb-2 ${focusMode ? 'pr-14' : 'pr-4'}`}>
           {/* History menu (3-line): this account's saved chats + New chat. Per-user (Firestore), so the
               same list and the same project/memory continue from any device the user signs in on.
               MOBILE FOOTER (admin 2026-07-07): on mobile/tablet the footer's History item owns this —
@@ -3030,7 +3034,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             )}
           </div>
           <Bot className="w-5 h-5 text-indigo-400" />
-          <span className="font-semibold">NavBharatAI Pro v5.0</span>
+          {/* The full name wrapped to TWO lines on a phone, which cost more height than every padding
+              value in this header put together. "NavBharatAI" is already on the bar directly above, so
+              the short form loses nothing a user can actually see — the full name returns at lg. */}
+          <span className="font-semibold whitespace-nowrap">
+            <span className="lg:hidden">Pro v5.0</span>
+            <span className="hidden lg:inline">NavBharatAI Pro v5.0</span>
+          </span>
           <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
           {/* Paid-public (billing PR 5): a live wallet-balance chip — shown ONLY when this user is
               actually on paid billing (server `billed:true`), so admin/free-list users and the
@@ -4134,22 +4144,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             collapsed — unmounting it destroyed the preview iframe, so every tab switch / back-to-chat
             lost the rendered preview and forced a full re-build of it. */}
         <div className={`flex-1 sm:flex-none sm:w-1/2 flex-col min-h-0 ${showWorkspace ? 'flex' : 'hidden'}`}>
-          <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs">
+          {/* DESKTOP: title + close on their own row, exactly as before. */}
+          <div className="hidden sm:flex shrink-0 items-center justify-between gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs">
             <span className="font-medium text-zinc-300 capitalize">{tab}</span>
             <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" className="flex items-center gap-1 text-zinc-400 hover:text-white">
               <X className="w-4 h-4" />
             </button>
           </div>
-          {/* U2 (audit Batch 4): on a PHONE, opening the workspace hides the chat column (hidden sm:flex
-              above), so the live build progress vanished the moment the user tapped Preview. Keep a
-              compact progress strip here — MOBILE ONLY (sm:hidden; desktop keeps the chat split with the
-              full indicator) — so the user can watch the preview AND still see what the build is doing.
-              Same real WorkingIndicator (current action + elapsed + expandable real activity log). */}
-          {(running || state.activity.length > 0) && (
-            <div className="sm:hidden shrink-0 px-3 py-1.5 border-b border-zinc-800 bg-zinc-950">
-              <WorkingIndicator activity={state.activity} running={running} />
-            </div>
-          )}
+          {/* PHONE: ONE row instead of two (admin 2026-08-17). The title+close row and the progress
+              strip carried completely different information and each spent a full row's height on a
+              screen that had already given a quarter of itself to headers. Side by side they cost one.
+              U2 (audit Batch 4) is preserved: opening the workspace hides the chat column on a phone
+              (hidden sm:flex above), so the live build progress must stay visible here — same real
+              WorkingIndicator, just sharing the row.
+              This row renders UNCONDITIONALLY. The strip it absorbed was gated on there being activity;
+              the close button is not optional, and hiding the only way back to chat whenever a build
+              happened to be idle would strand the user in the workspace. */}
+          <div className="sm:hidden shrink-0 flex items-center gap-2 px-3 py-1 border-b border-zinc-800 bg-zinc-950 text-xs">
+            <span className="font-medium text-zinc-300 capitalize shrink-0">{tab}</span>
+            {(running || state.activity.length > 0) && (
+              <div className="flex-1 min-w-0 flex justify-end">
+                <WorkingIndicator activity={state.activity} running={running} />
+              </div>
+            )}
+            <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" aria-label="Close workspace" className="ml-auto shrink-0 flex items-center text-zinc-400 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
 
           {/* PREVIEW PERSISTENCE: once the preview has been opened ONCE, PreviewSurface stays
               mounted for the rest of the session (hidden via CSS on other tabs / collapsed chat) —

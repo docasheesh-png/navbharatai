@@ -824,7 +824,11 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const switcher = (
     <div className="flex items-center gap-1">
       <button onClick={() => { userPickedInBrowser.current = true; setMode('inbrowser'); }} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="Instant, always-available preview rendered in your browser — no server needed (default)">In-browser</button>
-      <button onClick={() => setMode('live')} className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app on a real cloud machine (full fidelity — real npm/runtime). PAID: it uses your credits while it runs. The In-browser preview is free.">{effectiveUrl ? '● ' : ''}Live server<span className="ml-0.5 rounded px-1 text-[9px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-400 border border-amber-500/30">{LIVE_SERVER_PAID_TAG}</span></button>
+      {/* "Live server" wrapped onto two lines on a phone, which stretched this whole toolbar row
+          (admin 2026-08-17). It says "Live" on small screens and the full "Live server" from sm up.
+          The Paid tag is NOT shortened away at any width: it is the only always-visible statement
+          that this preview spends the user's credits, and the note beside it is dismissible. */}
+      <button onClick={() => setMode('live')} className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border whitespace-nowrap ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app on a real cloud machine (full fidelity — real npm/runtime). PAID: it uses your credits while it runs. The In-browser preview is free.">{effectiveUrl ? '● ' : ''}Live<span className="hidden sm:inline">&nbsp;server</span><span className="ml-0.5 rounded px-1 text-[9px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-400 border border-amber-500/30">{LIVE_SERVER_PAID_TAG}</span></button>
     </div>
   );
 

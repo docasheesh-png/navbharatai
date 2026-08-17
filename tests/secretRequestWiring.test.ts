@@ -146,8 +146,14 @@ describe('link 5 — the popup, with the minimise the admin asked for', () => {
 
 describe('link 6 — saving writes the SAME vault Settings uses', () => {
   it('the panel calls the shared secrets API, not a private path', () => {
-    expect(panel).toContain("import { saveSecret } from '../../lib/secretsApi'");
+    // Matched on the MODULE rather than one exact member list: the panel legitimately imports more
+    // from this client over time (it gained `listSecrets` when v5's More menu grew a Keys & Secrets
+    // door). What must never change is WHERE the call comes from — the shared, always-authenticated
+    // vault client — so that is what is pinned.
+    expect(panel).toMatch(/import \{[^}]*\bsaveSecret\b[^}]*\} from '\.\.\/\.\.\/lib\/secretsApi'/);
     expect(panel).toContain('await saveSecret(userId, name, value)');
+    // And never a hand-rolled request to the vault, which is how the auth header got forgotten before.
+    expect(panel).not.toMatch(/fetch\(\s*[`'"]\/api\/secrets/);
   });
 
   it('answering clears the gate so a saved key is never asked for again on screen', () => {

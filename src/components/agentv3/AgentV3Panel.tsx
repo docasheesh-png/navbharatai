@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
 import { AttachMenu } from '../AttachMenu';
 import { SecretRequestCard } from './SecretRequestCard';
-import { saveSecret } from '../../lib/secretsApi';
+import { saveSecret, listSecrets } from '../../lib/secretsApi';
+// THE SAME vault UI the Settings screen renders — imported, never reimplemented, so the two doors
+// cannot drift into two behaviours. Lazy because most sessions never open it.
+const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ default: m.SecretManager })));
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye,
   Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
-  Star, Search, Mic, Camera, Volume2,
+  Star, Search, Mic, Camera, Volume2, Key,
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
@@ -2140,7 +2143,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // ── Mobile footer (admin 2026-07-07): v5.0 owns the app's bottom nav while it is the active view.
   // One sheet at a time: the footer's History and More items open bottom sheets anchored above the
   // nav; any footer navigation action closes them.
-  const [mobileSheet, setMobileSheet] = useState<null | 'history' | 'more' | 'report'>(null);
+  const [mobileSheet, setMobileSheet] = useState<null | 'history' | 'more' | 'report' | 'secrets'>(null);
+  // How many keys the vault already holds, for the More-menu label. Fetched only when that menu is
+  // opened — a count nobody is looking at is not worth a request on every panel mount.
+  const [savedKeyCount, setSavedKeyCount] = useState<number | null>(null);
   const openSurfaceFromFooter = (t: SurfaceTab) => {
     setMobileSheet(null);
     setTab(t);
@@ -2597,7 +2603,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       openChat: () => { setMobileSheet(null); setShowWorkspace(false); },
       openPreview: () => openSurfaceFromFooter('preview'),
       openFiles: () => openSurfaceFromFooter('files'),
-      openMore: () => setMobileSheet(mobileSheet === 'more' ? null : 'more'),
+      openMore: () => {
+        const next = mobileSheet === 'more' ? null : 'more';
+        setMobileSheet(next);
+        // Count the vault's keys only when the menu that displays the count is actually being opened,
+        // and only once per panel. A number nobody is looking at is not worth a request.
+        if (next === 'more' && userId && savedKeyCount === null) {
+          void listSecrets(userId)
+            .then((rows) => setSavedKeyCount(rows.length))
+            // A count we could not load simply does not appear. It is decoration on a menu item; it
+            // must never turn into an error the user has to deal with.
+            .catch(() => { /* leave it unknown */ });
+        }
+      },
       // Admin 2026-07-07 — real state, never faked: the green dot fires only when the app is
       // genuinely viewable (live URL, or a finished OK build with real files), and the Files badge
       // shows the ACTUAL built/restored file count (live build list, else the rehydrated store).
@@ -4371,7 +4389,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           >
             <div className="sticky top-0 z-10 bg-zinc-900 flex items-center justify-between px-4 pt-3 pb-2 border-b border-zinc-800">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                {mobileSheet === 'history' ? 'Session history' : mobileSheet === 'report' ? 'Which build had the problem?' : 'More'}
+                {mobileSheet === 'history' ? 'Session history' : mobileSheet === 'report' ? 'Which build had the problem?' : mobileSheet === 'secrets' ? 'Keys & Secrets' : 'More'}
               </span>
               <button onClick={() => setMobileSheet(null)} aria-label="Close" className="p-1 rounded text-zinc-400 hover:text-white touch-manipulation">
                 <X className="w-4 h-4" />
@@ -4381,6 +4399,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               <div className="py-1.5">{historyListBody}</div>
             ) : mobileSheet === 'report' ? (
               <div>{reportPickerRows((b) => { setMobileSheet(null); void sendReportToAdmin(b); }, true)}</div>
+            ) : mobileSheet === 'secrets' ? (
+              // The SAME vault component the Settings screen renders — not a copy of it. Lazy, so a
+              // user who never opens this door never downloads it.
+              userId
+                ? <Suspense fallback={<div className="px-4 py-6 text-xs text-zinc-500">Loading your keys…</div>}>
+                    <VaultManager userId={userId} embedded />
+                  </Suspense>
+                : <div className="px-4 py-6 text-xs text-zinc-500">Sign in to manage your keys.</div>
             ) : (
               <div className="py-1.5">
                 {/* Framework — moved here from the header (admin: "React + Vite ko More me bhej do") */}
@@ -4400,6 +4426,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <button onClick={() => openSurfaceFromFooter('terminal')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
                   <Terminal className="w-4 h-4 shrink-0 text-zinc-400" />
                   <span className="flex-1 text-left">Terminal</span>
+                </button>
+                {/* ANOTHER DOOR TO THE SAME ROOM (admin 2026-08-17: "ek room ke kayi gate").
+                    The keys an app needs are supplied here and in Settings → App Settings → Secrets &
+                    API Keys, and both have always written to the SAME per-user vault — the store was
+                    never the missing piece, the door was. A user mid-build had to leave v5 entirely and
+                    hunt for a Settings tile.
+                    It opens IN PLACE rather than navigating: sending someone to Settings while their
+                    build is running loses the build, the preview and the chat, and they have to find
+                    their way back. Same component, same API, no second implementation to drift. */}
+                <button
+                  onClick={() => setMobileSheet('secrets')}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
+                >
+                  <Key className="w-4 h-4 shrink-0 text-zinc-400" />
+                  <span className="flex-1 text-left">Keys &amp; Secrets</span>
+                  {savedKeyCount !== null && savedKeyCount > 0 && (
+                    <span className="text-xs text-zinc-500">{savedKeyCount} saved</span>
+                  )}
                 </button>
                 <button onClick={() => openSurfaceFromFooter('history')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
                   <History className="w-4 h-4 shrink-0 text-zinc-400" />

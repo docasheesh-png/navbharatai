@@ -34050,3 +34050,63 @@ rather than half-built.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1283 files / 15948 tests passed** · `npm run build` OK.
+
+---
+
+## 2026-08-16 — v5 Live server: an honest "this is a paid service" note
+
+**Admin ask:** "jab koi app banaye aur user live server use kare, to ek warning note aaye — yeh paid
+service hai! ... isko aur acche se karo!"
+
+**Why it's true (so the note is honest, not decoration).** v5's Preview has two modes:
+- **In-browser** — rendered in the user's OWN browser. No server, FREE, instant.
+- **Live server** — the app runs on a REAL cloud machine (paid compute, billed by the second it is up).
+  That VM time is part of what a paid build costs (`AGENTV3_BILL_SANDBOX`), so leaning on the live server
+  spends the user's credits.
+
+**Done (well-designed, not a crude popup):**
+- `src/lib/liveServerNotice.ts` — pure, vendor-free message (`LIVE_SERVER_PAID_NOTE`), a `Paid` tag, and
+  dismiss helpers (localStorage, DI for tests). Honest about cost, **names no cloud vendor** (White-Label §2).
+- `PreviewSurface.tsx` — while in Live-server mode a dismissible amber note explains it ("Got it" remembers
+  the dismissal, so it informs once instead of nagging), and the Live-server **toggle carries a "Paid" tag**
+  so the cost stays clear even after the note is dismissed. Shown in both live branches (active + waiting).
+- Fixed a WHITE-LABEL LEAK found while here: the live-preview prose said "a cloud sandbox (**E2B**)" to
+  users → now "a real cloud machine" (no vendor name).
+- `AppKnowledgeBase` — a "two previews: in-browser FREE, live server PAID" bullet so every in-app AI
+  answers "does the live preview cost anything?" correctly.
+
+Tests: `liveServerNotice.test.ts` (+7): message is honest + vendor-free, dismiss remembered + never throws,
+and source-contract that the note + Paid tag are wired and the `E2B` prose leak is gone. Gate: tsc
+(frontend+server) clean; full vitest green (15,950).
+
+---
+
+## 2026-08-16 — App-load speed: split React into its own cacheable chunk (measured, honest)
+
+**Admin ask:** "kisi bhi prkar se app ki speed badha sakte ho?" (they selected all of: app-open, build,
+preview). Started with app-OPEN speed because it is the safest, measurable lever.
+
+**Measured first (rule 4 — evidence, not guesses).** Production build showed the app is ALREADY well
+code-split: every heavy view (CodeStudio, NavAppStore, APKBuilder, OfflineAI 215 KB gz, web-llm 2.1 MB gz,
+xterm 70 KB) is its own LAZY chunk and off the first-paint path. The only first-paint weight left is the
+main entry chunk (~648 KB gz), which had ALL of node_modules — including React — welded in.
+
+**What I tried and REJECTED (recorded so it is not re-attempted).** Forcing every `node_modules` dep into
+one `vendor` chunk MEASURED a ~170 KB gz first-paint REGRESSION: it hoisted libs that today live only inside
+lazy view chunks onto the eager path. Exactly the trap `scripts/bundleBudget.mjs` warns about.
+
+**Shipped (safe, no regression).** `manualChunks` now extracts ONLY React (react/react-dom/scheduler/
+react-router) into a `react-vendor` chunk. React is provably always-eager and shared, so relocating it
+cannot regress first paint — it only makes it cacheable. Result: largest first-paint chunk **648 → 597 KB
+gz**; React (~60 KB gz) is now a separate chunk that stays CACHED across deploys, so — on a project that
+ships several times a day — a returning web user re-downloads ~60 KB less on every app update, and the two
+chunks load in parallel on a cold visit.
+
+**Honest scope.** This helps WEB repeat/post-update loads; a first cold visit is ~unchanged bytes; the
+bundled mobile app loads from local `dist/` so it benefits little. The frontend is now close to
+optimal for its feature set — the bigger speed levers are in the build/preview engine (recent wins already
+shipped: streaming preview live, deterministic fullstack boot #2398, concurrently diagnosis #2422; the next
+lever is the ~234-293s `TIME_TO_FIRST_CALL` sandbox-setup gap, a larger engine change to scope carefully).
+
+Gate: production build green; `test:bundle` within budget (largest 597.2 KB / 700; total JS 1382 / 1450);
+tsc clean; full vitest green (15,950).

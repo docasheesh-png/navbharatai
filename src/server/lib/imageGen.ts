@@ -40,6 +40,10 @@ export const IMAGE_STYLE_ENHANCERS: Record<string, string> = {
   gradient: 'smooth gradient, colorful gradient background',
   flat: 'flat design, 2D, vector style, no shadows',
   '3d': '3D render, isometric, depth, shadows, realistic',
+  // See STYLE_DIRECTION.photo in imagePromptCraft.ts for why realism needs CAMERA language rather than
+  // the word "realistic" — which, note, `3d` above already contains, and which is exactly why asking
+  // for a realistic image used to return an isometric render.
+  photo: 'photograph, 50mm lens, natural light, shallow depth of field, sharp focus, true-to-life colour, fine texture',
 };
 
 /** Size id → aspect-ratio hint (the model takes ratios, not exact pixels). */
@@ -50,12 +54,27 @@ export const IMAGE_SIZE_RATIOS: Record<string, string> = {
   icon: '1:1',
 };
 
-/** Size id → concrete pixel dimensions (for providers that take width/height, e.g. Pollinations). */
+/**
+ * Size id → concrete pixel dimensions (for providers that take width/height, e.g. Pollinations).
+ *
+ * RAISED 2026-08-16, from the admin's "isko aur enhance karo" with a soft 512×512 image attached.
+ * Resolution was a real part of that softness and the cheapest half to fix: the free provider takes
+ * width/height directly, so a larger image costs exactly the same — nothing, and no extra call.
+ *
+ * 🔒 `icon` WAS THE WORST OFFENDER AT 512, and it is the one the admin actually used. An app icon is
+ * the one image with a KNOWN required size: the Play Store and the App Store both demand 1024×1024.
+ * Generating at 512 meant every icon a user made had to be upscaled before it could be submitted —
+ * we were producing, by default, the one thing the store will not accept.
+ *
+ * ⚠️ DELIBERATELY MODERATE, not maximal. These go through a 60s route timeout on a FREE provider; a
+ * 2048 request that times out falls through to the PAID rungs, so chasing pixels would quietly turn a
+ * ₹0 image into a billed one. These sizes are comfortably inside what the free tier returns quickly.
+ */
 export const IMAGE_SIZE_PIXELS: Record<string, { w: number; h: number }> = {
-  square: { w: 1024, h: 1024 },
-  wide: { w: 1280, h: 720 },
-  portrait: { w: 768, h: 1024 },
-  icon: { w: 512, h: 512 },
+  square: { w: 1280, h: 1280 },
+  wide: { w: 1536, h: 864 },     // 16:9
+  portrait: { w: 960, h: 1280 }, // 3:4
+  icon: { w: 1024, h: 1024 },    // exactly what Play/App Store require
 };
 
 /** Whether the FREE image provider (Pollinations) is enabled — default ON; kill switch IMAGE_GEN_POLLINATIONS=off. */

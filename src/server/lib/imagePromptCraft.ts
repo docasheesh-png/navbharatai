@@ -131,7 +131,35 @@ const STYLE_DIRECTION: Record<string, { add: string; conflicts: string[] }> = {
   gradient: { add: 'smooth colour gradient, soft blended tones, modern', conflicts: ['flat', 'single colour', 'monochrome'] },
   flat: { add: 'flat 2D vector style, solid fills, no shadows, clean edges', conflicts: ['3d', 'realistic', 'photorealistic', 'depth', 'shadow', 'gradient'] },
   '3d': { add: '3D render, soft studio lighting, subtle depth of field, physically believable materials', conflicts: ['flat', '2d', 'vector', 'line art'] },
+  /**
+   * PHOTO — the style that did not exist, and whose absence WAS the complaint (admin 2026-08-16:
+   * "is type ki photo generate kar raha hai … realistic image banane ke liye jo kuch ho sake karo",
+   * with a soft isometric 3D blob attached).
+   *
+   * 🔒 THE ROOT CAUSE WAS NOT THE PROMPT WORDING, IT WAS THAT REALISM WAS UNREACHABLE. The six style
+   * chips were minimal / vibrant / dark / gradient / flat / 3d — not one of them asks for a
+   * PHOTOGRAPH. The image the admin sent is exactly what `3d` is specified to produce ("3D render,
+   * isometric, depth, shadows"), so the engine did as it was told; the user simply had no way to ask
+   * for anything else.
+   *
+   * The direction is CAMERA language rather than adjectives, because that is what actually moves a
+   * diffusion model toward realism: a focal length implies a perspective, an aperture implies depth of
+   * field, and a light source implies shadow behaviour. "realistic, high quality, 4k" — the words most
+   * people reach for — are nearly inert by comparison, and "4k" in particular is a resolution claim
+   * the prompt cannot deliver.
+   */
+  photo: {
+    add: 'photograph, shot on a full-frame camera with a 50mm lens at f/2, natural light, shallow depth of field, sharp focus on the subject, true-to-life colour, fine surface detail and texture',
+    conflicts: ['flat', 'vector', 'cartoon', 'illustration', 'drawing', 'anime', 'painting', 'render', 'isometric', 'minimal'],
+  },
 };
+
+/**
+ * Negatives that only make sense for a PHOTO request — the styles a realism prompt keeps drifting into.
+ * Kept separate from the per-purpose negatives because "no illustration" is nonsense on an icon brief
+ * and actively harmful on a logo one.
+ */
+const PHOTO_NEGATIVE = 'illustration, cartoon, anime, 3d render, cgi, painting, drawing, sketch, plastic-looking, over-smoothed skin, waxy texture, blurry, soft focus, low detail';
 
 /** Size id → the ratio the model understands. */
 const SIZE_RATIO: Record<string, string> = { square: '1:1', wide: '16:9', portrait: '3:4', icon: '1:1' };
@@ -222,6 +250,11 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
   if (purpose !== 'general') parts.push(PURPOSE_DIRECTION[purpose] + '.');
 
   const styleSpec = STYLE_DIRECTION[String(input.style ?? '')];
+  // Whether the PHOTO direction actually made it into the prompt. Tracked rather than inferred from
+  // `input.style`, because a chip that CONFLICTED with the user's wording was dropped — and adding
+  // "no illustration" negatives to a prompt we never sent photo direction to would fight the user's
+  // own words, which is the one thing this module refuses to do.
+  let photoApplied = false;
   if (styleSpec) {
     if (styleConflictsWithPrompt(input.style, base)) {
       // Silent would be wrong: the user tapped that chip and is entitled to know it was set aside.
@@ -229,6 +262,7 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
     } else {
       const fresh = freshTerms(styleSpec.add, base);
       if (fresh) parts.push(`Style: ${fresh}.`);
+      if (String(input.style) === 'photo') photoApplied = true;
     }
   }
 
@@ -246,7 +280,12 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
     notes.push(`Image engines are unreliable at spelling — check that "${wantedText}" came out right, and keep it short. For a logo you will get a cleaner result adding the text yourself afterwards.`);
   }
 
-  const negative = [BASE_NEGATIVE, purpose !== 'general' ? PURPOSE_NEGATIVE[purpose] : '']
+  const negative = [
+    BASE_NEGATIVE,
+    purpose !== 'general' ? PURPOSE_NEGATIVE[purpose] : '',
+    // Realism drifts toward illustration unless it is told not to — see PHOTO_NEGATIVE.
+    photoApplied ? PHOTO_NEGATIVE : '',
+  ]
     .filter(Boolean)
     .join(', ');
 

@@ -3092,7 +3092,11 @@ export function registerAgentV3Routes(app: Express): void {
     const files = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
     // A signed-out user has no vault and no Supabase grant — the honest answer is "not connected, and
     // we cannot create one either", which the client turns into "sign in / connect your own".
-    const vaultSecrets = uid ? await loadUserVaultSecrets(uid).catch(() => ({} as Record<string, string>)) : {};
+    // SCOPED TO THIS APP (2026-08-17). Unscoped, this answered "is a database connected?" from EVERY
+    // key the user has, while the BUILD only receives this app's keys — so a database connected for a
+    // different app would be reported as ready here and then be absent at build time. The readiness
+    // answer has to be about the same app the build is.
+    const vaultSecrets = uid ? await loadUserVaultSecrets(uid, workspaceId).catch(() => ({} as Record<string, string>)) : {};
     const supabaseConnected = uid ? !!(await getConnection(uid).catch(() => null))?.orgId : false;
     res.json(databaseReadiness({
       files,
@@ -3407,7 +3411,8 @@ export function registerAgentV3Routes(app: Express): void {
     // implement. Beyond the wrong words, deploying every user's backend with one server-side key would
     // put all of them in a single Render account billed to whoever owns it — against the standing rule
     // that user apps run on the USER's own account. Their key is preferred; ours only backstops.
-    const renderVault = userId ? await loadUserVaultSecrets(userId).catch(() => null) : null;
+    // Scoped: a deploy key the user tied to one app must not deploy a different one.
+    const renderVault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
     const renderKey = resolveRenderKey(renderVault);
     if (!renderKey) { res.status(503).json({ ok: false, reason: 'not-configured', error: renderRequirement(process.env, renderVault) }); return; }
     try {
@@ -6505,7 +6510,9 @@ export function registerAgentV3Routes(app: Express): void {
         try {
           const provider = detectDatabaseProvider(importedFiles);
           if (provider) {
-            const vault = userId ? await loadUserVaultSecrets(userId).catch(() => null) : null;
+            // Scoped, for the same reason as database-readiness: this advisory is about whether THIS
+            // app has a database, and an unscoped read would call it connected using another app's key.
+            const vault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
             const connected = !!userDatabaseContext(vault);
             const advisory = persistentDatabaseAdvisory({ provider, connected });
             if (advisory) emit({ type: 'narration', agent: 'architect', text: advisory, ts: Date.now() });
@@ -8614,10 +8621,15 @@ export function registerAgentV3Routes(app: Express): void {
       // user stored — without ever pasting it into chat. Loaded from the user's ENCRYPTED vault only
       // (loadUserVaultSecrets never reads process.env, so NavBharatAI's platform keys can never leak in).
       // Captured into `vaultSecrets` so the connected-database context (below) can also read it.
+      // LEAST PRIVILEGE (admin 2026-08-17). This used to load EVERY key the user had ever saved and
+      // write them all into this app's `.env` — so a to-do list carried the user's Razorpay secret, and
+      // if that app was published or exported, the key went with it. Passing the workspace narrows it to
+      // the user's SHARED keys plus the ones tied to THIS app. Keys saved before scoping existed have no
+      // workspace, so they count as shared and every existing build behaves exactly as it did.
       let vaultSecrets: Record<string, string> = {};
       try {
         if (userId) {
-          vaultSecrets = await loadUserVaultSecrets(userId);
+          vaultSecrets = await loadUserVaultSecrets(userId, workspaceId);
           // ENGINEER_DB_PROVIDER is an internal marker (which DB the user connected), not an app secret —
           // keep it OUT of the built app's .env; it is only used to build the DB context prompt below.
           const { [DB_PROVIDER_MARKER]: _dbMarker, ...appEnv } = vaultSecrets;

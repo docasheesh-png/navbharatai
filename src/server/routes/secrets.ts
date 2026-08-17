@@ -51,8 +51,13 @@ export function registerSecretsRoutes(app: Express): void {
       // ciphertext has no reason to leave the server, and the client only ever renders the name.
       const secrets = secretsSnapshot.docs
         .map((doc: any) => {
-          const d = doc.data() as { secret_name?: string; created_at?: unknown; deleted?: boolean };
-          return { id: doc.id, secret_name: d.secret_name, created_at: d.created_at, deleted: d.deleted };
+          const d = doc.data() as { secret_name?: string; created_at?: unknown; deleted?: boolean; workspace_id?: string | null };
+          // `workspace_id` is metadata, not a credential: the UI needs it to show which app a key
+          // belongs to and to offer the app picker. Absent ⇒ shared with every app (see secretScope.ts).
+          return {
+            id: doc.id, secret_name: d.secret_name, created_at: d.created_at, deleted: d.deleted,
+            workspace_id: d.workspace_id ?? null,
+          };
         })
         .filter((s) => !s.deleted);
       res.json(secrets);
@@ -66,12 +71,17 @@ export function registerSecretsRoutes(app: Express): void {
     const db = getDb() as any;
     try {
       const { userId } = req.params;
-      const { secret_name, secret_value } = req.body;
+      const { secret_name, secret_value, workspace_id } = req.body;
       const encryptedValue = encrypt(secret_value);
+      // WHICH APP IS THIS KEY FOR? (admin 2026-08-17). Absent/empty ⇒ SHARED with every app, which is
+      // what every key saved before scoping existed is, and what the Settings screen still offers as an
+      // option. A value here ties the key to one workspace, so the user's other apps never receive it.
+      const scope = typeof workspace_id === 'string' && workspace_id.trim() ? workspace_id.trim() : null;
       await addDoc(collection(db, 'user_secrets'), {
         user_id: userId,
         secret_name,
         encrypted_secret_value: encryptedValue,
+        workspace_id: scope,
         created_at: new Date()
       });
       res.json({ success: true });

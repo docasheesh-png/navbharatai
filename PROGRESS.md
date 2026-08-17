@@ -34474,3 +34474,81 @@ is "2 needed" — what THIS app is still missing. That needs the build's require
 the client, and today they exist only as text inside the build summary. Not faked with a guess.
 
 Verification gate: `tsc --noEmit` clean · `vitest run` green.
+
+---
+
+## 2026-08-17 — per-app secret scoping: the app picker, and the leak underneath it
+
+Admin asked for a dropdown at the top of Settings → App Settings so a user with more than one app can
+choose whose credentials they are looking at. Chasing that request found a real defect.
+
+**THE DEFECT (verified in code, not inferred).** The vault had no app dimension at all:
+`loadUserVaultSecrets` queried by `user_id` alone, and `routes/agentv3.ts` injected the entire result
+into the built app's `.env`. So a user who had ever saved a Razorpay secret had it written into the
+`.env` of EVERY app they built afterwards — a to-do list, a landing page, anything — and if such an app
+was published or exported, the key went with it. Nothing errored and nothing looked wrong; the app
+simply received far more than it needed. The admin asked for a convenience; underneath it was least
+privilege.
+
+**Shipped:** `src/server/lib/secretScope.ts` (pure) + a `workspaceId` parameter on
+`loadUserVaultSecrets`, threaded from the build. A key now carries an optional `workspace_id`; an app
+receives the user's SHARED keys plus the ones tied to that workspace.
+
+**Why it cannot break an existing user, which mattered more than the fix itself.** Every key in every
+vault today predates this and carries no workspace. Three rules keep that safe:
+- no workspace ⇒ SHARED ⇒ goes to every app, exactly as today;
+- a caller that does not name an app gets EVERYTHING, exactly as today — only the build path passes a
+  workspace, so only the build narrows. A path opts IN to scoping by passing an id; it can never opt in
+  by accident. This is the rule that makes the change survivable.
+- an app-specific key OVERRIDES a shared one of the same name: somebody with a shared Stripe key and a
+  different one for a particular app is stating an exception, and an exception that loses to the general
+  case is not an exception.
+
+**UI.** `SecretManager` gained a picker ("All apps (shared)" plus each app) and shows, per key, which app
+owns it. It loads the app list ITSELF (`src/lib/appList.ts`, from the v5 conversation list, deduped by
+workspace and bounded) rather than taking it as a prop, so both doors onto the vault get the picker
+without either call site remembering to wire it, and the two cannot disagree about what the apps are
+called. v5 opens the sheet with the CURRENT build pre-selected — the admin chose that default, and it is
+the one that actually keeps a key out of the other apps' `.env`.
+
+**An honesty gap caught while building it.** v5 pre-selects the current app, and the picker is hidden
+whenever the app list could not be loaded (no v5 access, failed request). That combination would have
+saved an app-scoped key while telling the user nothing, and they would later wonder why their other app
+could not see it. The "where this key is about to go" line now renders ALWAYS, picker or no picker.
+
+**Two of my own tests had to be corrected rather than silenced** — both pinned an exact JSX/import
+string that legitimately changed (`listSecrets` added to an import; `defaultAppId` added to an element).
+Each was re-pinned to the INVARIANT it was actually protecting (the module the call comes from; the
+element being the shared component), and one gained an extra guard rather than losing one. A test that
+pins formatting instead of meaning is a test that will be silenced by somebody in a hurry.
+
+**Still open, deliberately:** `withheldSecretNames` exists and is tested but is not yet surfaced in the
+build report. Least privilege's own failure mode is a user wondering why the key they definitely saved
+is not there, and naming what was withheld turns that into a sentence instead of a mystery. Next slice.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
+
+### Correction the same day — the rationale above was partly wrong, and a sibling was left behind
+
+Two things, after the admin said there are NO existing users (the app is still in testing).
+
+**1. The justification I wrote for the design was wrong, so it is corrected in the code and tests.** The
+entry above defends "no workspace ⇒ shared" and "an unscoped caller gets everything" as protecting
+existing users' builds. Those users do not exist. The DESIGN is still right, for different reasons, and
+leaving a false rationale in a permanent record would push a later session into a wrong decision:
+- **"All apps" is a real product choice**, not a migration artefact — a user with one Stripe account
+  behind three apps wants that key shared, and the Settings screen offers it explicitly.
+- **"unscoped caller gets everything" is a SAFETY DEFAULT**, not backwards compatibility: narrowing must
+  be *asked for*, so a reader that has not been taught scoping keeps working instead of silently losing
+  credentials.
+
+**2. A defect I introduced, found by hunting the siblings (rule 4, step 3).** I scoped the BUILD and left
+three other vault readers unscoped. The worst was `database-readiness`: it answered "is a database
+connected?" from the user's WHOLE vault while the build only receives that app's keys — so a database
+connected for a DIFFERENT app was reported as ready, and then absent at build time. That is not
+over-broad, it is a wrong answer, and my own change created it. All three readers that legitimately know
+their app now pass it: `database-readiness`, `deploy-backend` (a deploy key tied to one app must not
+deploy another), and the import DB advisory. Each already had `workspaceId` in scope — the gap was that I
+stopped at the first call site instead of sweeping them.
+
+Verification gate: `tsc -p tsconfig.server.json` clean · `vitest run` green.

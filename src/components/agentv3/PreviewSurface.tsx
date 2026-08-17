@@ -13,7 +13,7 @@ import { shouldAutoRebootPreview } from './previewAutoReboot';
 import { shouldWatchLivePreview } from './previewKeepAlive';
 import { shouldBootImportedProject } from './importedProjectBoot';
 import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
-import { shouldFailoverToLive, liveFailoverNotice, noLiveRescueNotice } from './previewLiveFailover';
+import { shouldFailoverToLive, liveFailoverNotice, noLiveRescueNotice, rescueActionForPreviewError } from './previewLiveFailover';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
@@ -640,8 +640,18 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       // exactly the wrong thing to act on. See previewLiveFailover.ts for the report this closes —
       // switching on URL presence alone sent a user from one broken preview to another while promising
       // "that is your app really running".
-      if (source === 'in-browser' && mode === 'inbrowser' && effectiveUrl
-          && !failedOverToLive.current && !userPickedInBrowser.current) {
+      const rescue = rescueActionForPreviewError({
+        mode,
+        errorSource: source,
+        hasLiveUrl: !!effectiveUrl,
+        alreadyFailedOver: failedOverToLive.current,
+        userPickedInBrowser: userPickedInBrowser.current,
+      });
+      // NO LIVE SERVER TO RESCUE THEM WITH — the ordinary state days after a build, once the sandbox
+      // has been paused. This used to fall outside the guard entirely and the user got NOTHING: a
+      // broken preview, no explanation, and no hint that Diagnose would fix it in one tap.
+      if (rescue === 'tell-user') setFailoverNote(noLiveRescueNotice());
+      if (rescue === 'check-live') {
         failedOverToLive.current = true; // claim the one attempt now, so a burst of errors cannot race
         void (async () => {
           let healthy: boolean | null = null;

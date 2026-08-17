@@ -34921,3 +34921,51 @@ workspace files with no server, and "Live server" is explicitly labelled PAID in
 build there; recorded here so no future session builds it twice (safeguard #6).
 
 Verification gate: `tsc --noEmit` clean · `vitest run` 1301 files / 16,193 tests green.
+
+---
+
+## 2026-08-17 — "3 din baad preview chalta hi nahi hai": a rescue that only worked while it was not needed
+
+Admin: *"jab koi user in-browser preview wali app ko 3 din baad open karta hai, to preview chalta hi
+nahi hai, e2b me chalta hai."*
+
+**The clock in that sentence is the whole bug.** The in-browser preview has an automatic rescue: when
+it fails to load an app's packages, it probes the live server and moves the user there. That rescue was
+gated on a live URL **already existing** — and whether one exists is purely a function of how long ago
+the build ran.
+
+- **Right after a build:** the sandbox is warm and the build has emitted a live URL. A broken
+  in-browser preview failed over to it, the user saw their app, and nothing looked wrong.
+- **Days later:** the sandbox has long been paused, so there is no live URL. The entire block was
+  skipped — no failover, and **not even the explanation.** The user got a blank or broken preview with
+  no message, while the Diagnose button one tap away would have started a live server and worked.
+
+**What proves this was an oversight and not a policy:** `noLiveRescueNotice()` was already written for
+exactly this case — it says the live server is not running and to tap Diagnose — and the guard made it
+unreachable in precisely the situation it describes. It could only fire when a live URL existed but was
+unhealthy.
+
+**Fix:** `rescueActionForPreviewError` — one pure decision returning `check-live` / `tell-user` /
+`none`. "No live URL" is now `tell-user`, never silence. So is a user who explicitly chose In-browser
+(their choice still wins — we just no longer leave them guessing why the view is broken) and a second
+error after one failover. The only silent outcomes left are the two that genuinely are not the user's
+problem: an error from the live surface, and an error from a surface they are not looking at.
+
+**Wording fixed in the same change, because the fix is what makes people see it.** The notice ended
+"— nothing here means your files are lost", which parses as *"there is nothing here, which means your
+files are lost"* — the opposite of the reassurance intended. Harmless while nearly unreachable; not once
+this path actually shows it. Now: "none of this means your files are lost."
+
+**A test was re-pinned, and the reason is recorded so it is not mistaken for weakening one.** An
+existing assertion matched the literal phrase `not serving`; the clearer sentence says `is not
+running`, which keeps the same guarantee. It now matches the FACT rather than the prose, and gained a
+new assertion that the notice may never claim the live server IS running.
+
+**Ruled out along the way, all by reading the code rather than guessing** — recorded so the next session
+does not re-investigate them: durable workspace files have no TTL (`WorkspaceFileStore`, Firestore,
+kept indefinitely); `collectFilesWithSavedFallback` already falls back from a dead sandbox to the saved
+files; `frameworkRunsInBrowser(undefined)` returns `true`, so a missing framework does not silently
+block a compile; and the sticky session id is read from `localStorage` first, so a workspace id survives
+days.
+
+Verification gate: `tsc --noEmit` clean · `vitest run` 1301 files / 16,202 tests green.

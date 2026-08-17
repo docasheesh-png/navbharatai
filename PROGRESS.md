@@ -34167,3 +34167,66 @@ persisted and assembled into an admin inbox, and half a live key in permanent st
 That is asserted directly rather than assumed.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
+
+---
+
+## 2026-08-17 — credential help, slice 3: does the key ACTUALLY work?
+
+Slices 1 and 2 got the user to the right console page and warned them about the two ways a correct key
+still goes wrong. This closes the loop: after somebody pastes a credential, NavBharatAI finds out
+whether it genuinely works instead of copying it in and hoping.
+
+`secretPreflight.ts` already proved this is worth doing — it opens a real connection to a saved database
+and has caught stale, mistyped and deleted-database credentials at the START of a build rather than ten
+minutes later inside a preview that will not load. But it can only test ONE class of secret, a Postgres
+URL, and honestly reports every API key as "unchecked". That is most of them.
+
+**Shipped:** `src/server/AgentV3/credentialProbe.ts` — free, read-only probes for Stripe, Razorpay,
+SendGrid, Resend, Twilio, Cloudinary, Mapbox, Clerk, OpenAI, Google AI Studio and Supabase. Wired in two
+places: the build (beside the existing preflight) and a new `POST /api/secrets/:userId/verify` that the
+Secrets screen calls after a save, so the user sees a real green tick on paste.
+
+**The four rules the module is built around, each of which had to shape the code rather than a comment:**
+
+1. **Never spend the user's money.** Every probe is a free read — list, describe, whoami. Google Maps and
+   MSG91 are deliberately ABSENT: a Maps key check consumes billable quota and MSG91's is an SMS. Being
+   unable to check is an honest outcome; guessing is not. Test-locked — those names produce zero
+   outbound requests.
+2. **A failure we did not understand is never "your key is wrong".** ONLY 401/403 — the provider itself
+   rejecting the credential — yields `rejected`. A 500, 429, timeout or DNS failure yields `unreachable`,
+   which says we could not tell. Telling somebody their working key is invalid because the vendor had an
+   incident is a worse bug than not checking at all. Test-locked across 500/502/503/429/404/400.
+3. **No user-controlled hosts.** Every host is a hardcoded constant. The two places a user value reaches
+   a URL at all — Cloudinary's cloud name and Twilio's SID, both PATH segments — are validated against a
+   strict slug pattern, and Supabase's URL (the one genuinely user-supplied host) must be https on a
+   Supabase domain or it is not probed. Test-locked against the suffix trick
+   (`abc.supabase.co.evil.com`), cloud metadata (`169.254.169.254`) and `localhost`. `redirect: 'error'`
+   means an authenticated probe cannot be bounced to a host we never allowed.
+4. **The value never reaches a verdict.** Not in names, messages, details or the admin summary. One case
+   needed real care: Mapbox and Google carry the key in a QUERY STRING, and fetch errors routinely echo
+   the URL back — so a network failure records the error TYPE only, never the error text. Test-locked.
+
+**Design notes worth keeping.** The build-time probe runs CONCURRENTLY with `verifyInjectedSecrets`
+rather than after it: run in sequence they would add their deadlines together on every build that saves
+a credential, and neither needs the other's answer. Only `working` and `rejected` produce a narration
+line — "we could not reach Stripe" is noise on a build the user is watching, and is already in the admin
+report. The verify ROUTE does not accept plaintext: the client saves through the existing POST and then
+asks the server to check what is already stored, so verification adds no second network path for a live
+credential. A rejected key is still SAVED — the user chose it, and quietly discarding it would be a
+second, quieter version of the bug this fixes.
+
+**A real bug the tests caught before it shipped.** The route's per-user throttle read
+`state.get(userId) ?? 0`, which makes "never called" indistinguishable from "called at timestamp 0" — so
+a caller's very FIRST verification could be refused. Invisible in production (real clocks are large) and
+exactly the kind of thing that surfaces later as an unreproducible "the button did nothing". Fixed to
+test presence explicitly, and pinned.
+
+Kill switch: `AGENTV3_CREDENTIAL_PROBE=off` (default ON — checking the key IS the feature — but it makes
+real outbound calls, so it reverts without a deploy).
+
+**Honest boundary — still not testable, and why.** SMTP needs a real connect+AUTH over a mail transport
+rather than an HTTPS call; faking it with an HTTP request would prove nothing, so SMTP credentials are
+reported as unchecked. Auth0 needs a client-credentials token exchange, which is not a read. Both are
+recorded as open items rather than half-built.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.

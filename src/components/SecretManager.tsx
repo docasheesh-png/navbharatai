@@ -4,7 +4,7 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase'; // shared handle → navbharat-prod (NOT the (default) DB)
 // Authenticated vault client — always attaches the signed-in user's Firebase token. Raw axios calls
 // here used to omit it, so requireUserMatch rejected every save (401) → keys never saved (admin fix).
-import { saveSecret, deleteSecret } from '../lib/secretsApi';
+import { saveSecret, deleteSecret, verifySecrets, type SecretVerdict } from '../lib/secretsApi';
 
 interface Secret {
   id: string;
@@ -20,6 +20,8 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
   const [showValue, setShowValue] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [addError, setAddError] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verdicts, setVerdicts] = useState<SecretVerdict[]>([]);
 
   useEffect(() => {
     const q = query(
@@ -39,12 +41,30 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
 
   const addSecret = async () => {
     if (!name || !value) return;
+    const savedName = name.trim();
     setIsLoading(true);
     setAddError('');
+    setVerdicts([]);
     try {
-      await saveSecret(userId, name.trim(), value.trim());
+      await saveSecret(userId, savedName, value.trim());
       setName('');
       setValue('');
+      // SAY WHETHER IT ACTUALLY WORKS, not just that it stored (2026-08-17). "Saved" is a statement about
+      // this database and says nothing about the credential; a mistyped key used to be as successful as a
+      // working one, and the user found out from a payment button failing for a real customer.
+      //
+      // This runs AFTER the save and never blocks it: the key is stored either way (the user chose it),
+      // and a check we could not run is reported as unknown rather than as a bad key. It is deliberately
+      // not awaited into the save's own error path — a failed check must never make a successful save
+      // look like a failure.
+      setIsVerifying(true);
+      try {
+        const all = await verifySecrets(userId);
+        // Only the credential they just saved — a whole-vault report on every add would be noise.
+        setVerdicts(all.filter((v) => v.names.includes(savedName)));
+      } finally {
+        setIsVerifying(false);
+      }
     } catch (err: any) {
       // Honest, visible failure — a silent console.error left the user thinking the key saved when it didn't.
       console.error('Failed to add secret:', err);
@@ -107,6 +127,25 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
         {addError && (
           <p className="text-[11px] text-red-400 font-semibold text-center">{addError}</p>
         )}
+        {/* WHAT THE PROVIDER ITSELF SAID. Shown only after a successful save, and only for a key we could
+            actually check — silence means "we have no free, read-only way to test this one", which is an
+            honest absence rather than an implied pass. A rejected key is still saved: the user chose it,
+            and quietly discarding it would be a second, quieter version of the bug this fixes. */}
+        {isVerifying && (
+          <p className="text-[11px] text-gray-400 font-semibold text-center">Checking the key with the provider…</p>
+        )}
+        {!isVerifying && verdicts.map((v) => (
+          <p
+            key={v.names.join('+')}
+            className={`text-[11px] font-semibold text-center leading-relaxed ${
+              v.status === 'working' ? 'text-emerald-400'
+                : v.status === 'rejected' ? 'text-red-400'
+                  : 'text-gray-400'
+            }`}
+          >
+            {v.message}
+          </p>
+        ))}
       </div>
 
       <div className="space-y-2">

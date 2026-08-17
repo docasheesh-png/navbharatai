@@ -118,8 +118,12 @@ describe('The route answers facts and never acts', () => {
   it('a signed-out caller gets an honest "not connected, cannot create" rather than an error', () => {
     const at = route.indexOf("app.get('/api/agentv3/database-readiness'");
     const fn = route.slice(at, at + 2000);
-    expect(fn).toContain('uid ? await loadUserVaultSecrets(uid)');
+    expect(fn).toMatch(/uid \? await loadUserVaultSecrets\(uid/);
     expect(fn).toContain('supabaseConnected');
+    // The readiness answer must be about the SAME app the build is. Read unscoped, this reported a
+    // database connected for a DIFFERENT app as ready here, and it was then absent at build time —
+    // not merely over-broad, but a wrong answer to the question the screen is asking.
+    expect(fn).toMatch(/loadUserVaultSecrets\(uid, workspaceId\)/);
   });
 });
 

@@ -65,7 +65,13 @@ describe('The deploy runs on the USER\'s Render account, not ours', () => {
   it('the route reads the user\'s own saved key and passes it to the engine', () => {
     // Before this, the engine only ever read process.env — so one server key would have deployed every
     // user's backend into a single Render account billed to whoever owns it.
-    expect(route).toContain('const renderVault = userId ? await loadUserVaultSecrets(userId)');
+    // Matched on the CALL, not its argument list: the read gained a workspace when keys became
+    // scopeable to one app. The property being protected is that the key comes from the USER's own
+    // vault rather than the server's env — that is what keeps every user's backend on their own
+    // Render account instead of one account billed to whoever owns our key.
+    expect(route).toMatch(/const renderVault = userId \? await loadUserVaultSecrets\(userId/);
+    // …and that it is the key for THIS app: a deploy key the user tied to one app must not deploy another.
+    expect(route).toMatch(/loadUserVaultSecrets\(userId, workspaceId\)/);
     expect(route).toContain('resolveRenderKey(renderVault)');
     expect(route).toContain('apiKey: renderKey.key');
   });

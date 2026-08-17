@@ -34110,3 +34110,42 @@ lever is the ~234-293s `TIME_TO_FIRST_CALL` sandbox-setup gap, a larger engine c
 
 Gate: production build green; `test:bundle` within budget (largest 597.2 KB / 700; total JS 1382 / 1450);
 tsc clean; full vitest green (15,950).
+
+## 2026-08-17 — Apple sign-in on the browser: config root cause named, silent failure killed (#2428)
+
+**Admin ask:** "browser par apple login fix karo yaar please" — with Apple's own error page attached, which
+is what made this diagnosable in one step instead of a hunt.
+
+**ROOT CAUSE, and it is CONFIGURATION — not code.** The screenshot showed
+`appleid.apple.com/auth/authorize?client_id=com.navbharatai.web&redirect_uri=https%3A%2F%2Fnavbharatai.com%2F__%2Fauth%2Fhandler`
+→ `invalid_request — "Invalid web redirect url."` `authDomain` was moved to our own domain
+(`navbharatai.com`) to fix `signInWithRedirect`'s storage partitioning, so Firebase now sends Apple that
+return URL. The migration WAS mirrored into the Google OAuth client — the config comment in
+`src/config/firebase.ts` lists exactly that URL — but **Apple keeps its own Return URLs list on its Service
+ID**, and nobody added it there. Google works, Apple does not. Exactly the reported symptom.
+
+**🔴 OPEN ROOT CAUSE (rule 6) — admin-only, cannot be fixed from code.** Add
+`https://navbharatai.com/__/auth/handler` to the Return URLs of Service ID `com.navbharatai.web`
+(Apple Developer portal → Certificates, Identifiers & Profiles → Identifiers → Services IDs → Configure).
+No code change can make Apple accept an unregistered URL, so this was NOT patched around and NOT reported
+as fixed.
+
+**A workaround was considered and deliberately REJECTED (safeguard #3).** The plausible one — a secondary
+Firebase app instance pinned to the `firebaseapp.com` authDomain for Apple only — is an untested change to
+the highest-stakes surface in the product, whose failure mode is breaking GOOGLE login too. Not worth it for
+something the admin can fix from a browser tab in two minutes.
+
+**What WAS fixed, and it is the worse half.** Firebase reports `auth/popup-closed-by-user` for BOTH a real
+cancel and a popup closed after Apple refused the request — indistinguishable from the SDK. The Apple
+handler treated every close as a quiet cancel and showed NOTHING, so a user hitting the configuration error
+clicked the button, watched an Apple error page, closed it, and the app said nothing at all. Forever. A dead
+button is a worse bug than an honest failure (rule 5 — fix the system's honesty, not just the code).
+`appleSignInFailureMessage()` now serves both readings and names the exact URL + Service ID + portal page,
+turning an afternoon of searching into the two-minute change above. **Apple only** — Google's and GitHub's
+redirect URIs are registered, so a closed popup there genuinely is a cancel and stays silent (the
+2026-07-06 "cancel must mean cancel" fix), pinned by test so neither the dead button nor a false alarm can
+return.
+
+Gate: tsc clean; vitest 15,872/15,872. Also merged this cycle: #2421 (the iOS splash now shows NavBharatAI's
+logo, not Capacitor's) and #2426 (React chunk split). Fresh `.aab` + `.ipa` triggered from `main` — all
+three are frontend changes, which the bundled Capacitor shell only ships in a new binary.

@@ -13,6 +13,11 @@ interface Props {
 }
 
 const STYLES = [
+  // PHOTO IS FIRST, and that placement is the point (admin 2026-08-16: "realistic image banane ke liye
+  // jo kuch ho sake karo"). Realism was previously UNREACHABLE — none of the six chips asked for a
+  // photograph, so a user wanting one picked "3D" and got the isometric render it promises. First
+  // position because it is what most people want most of the time.
+  { id: 'photo', label: 'Realistic', desc: 'Real photo look', emoji: '📷' },
   { id: 'minimal', label: 'Minimal', desc: 'Clean & simple', emoji: '⬜' },
   { id: 'vibrant', label: 'Vibrant', desc: 'Bold colors', emoji: '🌈' },
   { id: 'dark', label: 'Dark', desc: 'Dark aesthetic', emoji: '🌑' },
@@ -21,11 +26,15 @@ const STYLES = [
   { id: '3d', label: '3D', desc: 'Three dimensional', emoji: '🎯' },
 ];
 
+// ⚠️ THESE MUST MATCH IMAGE_SIZE_PIXELS ON THE SERVER — a shared test asserts it. They did not
+// (2026-08-16): the picker advertised 512×512 while the server generated 1024, and "App Icon 192×192"
+// while it generated 512. Every number a user read here was wrong, which is its own small dishonesty
+// and made the real fix — raising the resolution — impossible to even see.
 const SIZES = [
-  { id: 'square', label: 'Square', w: 512, h: 512, desc: '512×512' },
-  { id: 'wide', label: 'Wide / OG', w: 1200, h: 630, desc: '1200×630' },
-  { id: 'portrait', label: 'Portrait', w: 400, h: 700, desc: '400×700' },
-  { id: 'icon', label: 'App Icon', w: 192, h: 192, desc: '192×192' },
+  { id: 'square', label: 'Square', w: 1280, h: 1280, desc: '1280×1280' },
+  { id: 'wide', label: 'Wide / OG', w: 1536, h: 864, desc: '1536×864' },
+  { id: 'portrait', label: 'Portrait', w: 960, h: 1280, desc: '960×1280' },
+  { id: 'icon', label: 'App Icon', w: 1024, h: 1024, desc: '1024×1024' },
 ];
 
 // Image types — a compulsory selector (exactly one is always active). The chosen type is

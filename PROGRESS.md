@@ -34428,3 +34428,49 @@ outbound connection from CI. A probe that can only be exercised against somebody
 probe that does not get exercised — it is injected now, like the fetch.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
+
+---
+
+## 2026-08-17 — "ek room ke kayi gate": the vault gets a door inside Pro v5
+
+Admin, with a screenshot of v5's More menu: add a "Keys and Secrets" entry there, linked to Settings →
+App Settings → Secrets & API Keys, so "dono ek jagah store ho" and the app the user builds syncs with it.
+
+**The honest correction, and it changes the job.** The two are ALREADY one place. Settings' SecretManager,
+the Database/Auth/Storage screens and the mid-build popup all call the same `saveSecret()` →
+`/api/secrets/:userId` → the one per-user `user_secrets` collection, and `loadUserVaultSecrets()` reads
+that same collection into the built app's `.env`. So there was never a second store to sync — the store
+was fine and the DOOR was missing. Said plainly rather than accepting the premise and "building the
+sync", which would have been work with nothing behind it.
+
+**Built:** a "Keys & Secrets" item in v5's More sheet, showing how many keys are already saved.
+
+**Two decisions worth keeping:**
+
+1. **It opens IN PLACE, not by navigating to Settings.** The obvious implementation is the
+   `navbharat:navigate` event this panel already uses for billing and Database. But sending somebody to
+   Settings while their build is running loses the build, the preview and the chat, and they have to
+   find their way back — that is a teleport to another building, not a second gate to the same room. The
+   sheet renders the SAME `SecretManager` component, lazily, so a user who never opens the door never
+   downloads it.
+2. **The count is fetched only when the More menu is opened, once per panel, and a failure is silent.**
+   It is decoration on a menu item; it must never become a request on every mount, nor an error the user
+   has to deal with.
+
+`SecretManager` gained one prop, `embedded`, which changes only CHROME (drops the full-height frame and
+the heading the sheet already provides). Nothing about the data path varies with it — that separation is
+the point, because the moment a door has its own data path it is a different room.
+
+**The real risk this creates, and the test that holds it.** Three doors onto one vault is fine; a FOURTH
+one added in a hurry with its own little fetch is not — a key saved at one gate would then be invisible
+at another, with no error anywhere, because both screens work perfectly on their own data.
+`tests/secretsOneVault.test.ts` pins that v5 renders the Settings component itself rather than a copy,
+that the vault UI contains no raw `fetch`/`axios` (the exact shape of the old 401 bug, where three
+hand-written copies of the call meant two forgot the auth header and keys silently never saved), that
+`secretsApi` has ONE fetch wrapper rather than one per caller, and that the new gate does not navigate away.
+
+**Recorded as the next step, not done here:** the menu item says "3 saved"; what it should eventually say
+is "2 needed" — what THIS app is still missing. That needs the build's requirements as structured data on
+the client, and today they exist only as text inside the build summary. Not faked with a guess.
+
+Verification gate: `tsc --noEmit` clean · `vitest run` green.

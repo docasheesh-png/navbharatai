@@ -14,7 +14,21 @@ interface Secret {
   deleted?: boolean;
 }
 
-export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
+/**
+ * ONE VAULT, MORE THAN ONE DOOR (admin 2026-08-17: "ek room ke kayi gate").
+ *
+ * This component is the vault's UI, and it is deliberately the ONLY one. It is rendered from Settings →
+ * App Settings → Secrets & API Keys and, since 2026-08-17, from Pro v5's own More menu — the same
+ * component, reading and writing the same per-user `user_secrets` collection through the same
+ * authenticated `/api/secrets` client. There is no second store to keep in step, because there is no
+ * second implementation: a key saved at either door is the same key the build injects into the app's
+ * `.env`, and `tests/secretsOneVault.test.ts` fails CI if a future change forks that.
+ *
+ * `embedded` only changes the CHROME. The Settings page owns a full screen; the v5 sheet is a panel
+ * inside a build the user must not lose their place in, so it drops the full-height frame and the
+ * heading the sheet already provides. Nothing about the data path changes with it.
+ */
+export const SecretManager: React.FC<{ userId: string; embedded?: boolean }> = ({ userId, embedded }) => {
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
@@ -105,10 +119,17 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
   };
 
   return (
-    <div id="secret-manager-container" className="p-6 bg-[#161b22] border border-white/5 rounded-[2.5rem] space-y-6 text-white min-h-screen">
-      <h2 className="text-2xl font-black uppercase tracking-tight flex items-center gap-2">
-        <Lock className="w-6 h-6 text-indigo-400" /> Secret Management
-      </h2>
+    <div
+      id="secret-manager-container"
+      className={embedded
+        ? 'p-4 space-y-4 text-white'
+        : 'p-6 bg-[#161b22] border border-white/5 rounded-[2.5rem] space-y-6 text-white min-h-screen'}
+    >
+      {!embedded && (
+        <h2 className="text-2xl font-black uppercase tracking-tight flex items-center gap-2">
+          <Lock className="w-6 h-6 text-indigo-400" /> Secret Management
+        </h2>
+      )}
 
       {/* One vault for every key an app needs — the Cashfree-specific panel was removed (admin 2026-07-18):
           a Cashfree key is just a name/value secret (CASHFREE_WEBHOOK_SECRET, CASHFREE_CLIENT_ID, …), so it

@@ -34050,3 +34050,77 @@ rather than half-built.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1283 files / 15948 tests passed** · `npm run build` OK.
+
+---
+
+## 2026-08-17 — "KAHAN SE MILEGA": the credential help layer, slice 1 (the recipe registry)
+
+**Admin ask:** *"hamara navbharatai user ko batata nahi hai, kaun kaun se credentials/keys/secrets
+chahiye aur kahan milenge… jaise Claude Code help karta hai, waisa ek system bana do — chahe
+credentials agent hi kyun na banana pade."*
+
+**Honest finding before building anything (safeguard #6).** ~70% of the asked-for system already
+existed and was live: `secretRequest.ts` asks for keys mid-build with exact names, `AppRequirements.ts`
+lists what a finished app still needs in 10 Indian languages, `missingCredentialGuard.ts` freezes an
+unconfigured feature as "Coming soon" instead of crashing the app, `secretPreflight.ts` actually TESTS
+a saved database credential, and the AES-256 vault injects everything into `.env`. The genuine gap was
+narrow and specific: **nothing ever told the user where the key comes from in the first place.** "Add
+`RAZORPAY_KEY_ID` in Settings → Secrets & API Keys" is a perfect instruction for somebody who already
+holds a Razorpay key and a dead end for everybody else.
+
+**Root cause (rule 4, step 2 — fix the class).** That knowledge DID exist in this repo, five times over
+and drifting: `dbProviders.ts` (11 databases), `paymentSetup.ts` (gateways), `AuthSettings.tsx`,
+`StorageSettings.tsx`, and `APIMarketplace.tsx` (33 services, no links at all) — and **none of it was
+reachable from `AppRequirements.ts`**, the one module that decides what the app in front of the user
+actually needs. The knowledge existed and never arrived.
+
+**Rejected: a separate "credentials agent".** Recommended against it and said so plainly (rule 3).
+Three reasons: it is one more place to go when the user's problem is at the moment the key is needed;
+a model asked "where are Razorpay's API keys?" answers fluently and is subtly wrong the day a console
+is reorganised — a wrong path into a payment console is a trust failure, not a typo; and a sixth copy
+of knowledge that already exists five times would deepen the disease. Built a curated, deterministic
+table instead. A table cannot hallucinate; it can go stale, which is a far safer failure and is stated
+in the file with a verification date.
+
+**Shipped:** `src/server/AgentV3/credentialRecipes.ts` — one registry, keyed by the service ids
+`AppRequirements` already owns, covering all 11 user-supplied services. Each provider carries its
+console link, the exact clicks inside that console, what it costs, which values are shown ONCE, which
+need an OTP / KYC / an admin role, which must never reach a browser bundle (`serverOnly`), and the
+prefixes that mark a TEST key (`testPrefixes` — groundwork for slice 2). Plus `keyless`: the genuinely
+keyless route where one exists (UPI takes real money with no gateway account; OpenStreetMap draws a
+real map with no token; NavBharatAI creates a database in one tap) — because the best credential help
+is not needing the credential.
+
+**Links were verified, not remembered.** Direct fetch is blocked by this environment's egress policy,
+so each entry was checked against the provider's own current documentation. That pass corrected three
+things that were wrong from memory: MSG91's auth-key URL, Clerk's deep link (replaced with the
+dashboard root, which cannot rot the same way), and the Google Maps order of operations — the API must
+be ENABLED before a key works, which is the commonest reason a fresh Maps key returns an error.
+
+**Two quality bugs found and fixed while wiring it:**
+1. An app that declares `mapbox-gl` but has not yet read a token was being sent to the *Google* Cloud
+   Console — the package is a provider signal and was being ignored. `AppRequirement` now records
+   `matchedEnvVars` + `matchedPackages`, and `preferredOption` resolves env-var first, package second,
+   easiest-to-obtain last.
+2. The Maps line asked for BOTH `GOOGLE_MAPS_API_KEY` and `MAPBOX_ACCESS_TOKEN` next to one console
+   link — `envVars` is an any-one-of list being rendered as a shopping list. `requiredVarNames()` now
+   names only the chosen provider's keys, preferring the name the app's own code actually reads when
+   it differs only by a `VITE_`/`NEXT_PUBLIC_` prefix (saving `VITE_MAPBOX_ACCESS_TOKEN` for an app
+   that reads `MAPBOX_ACCESS_TOKEN` leaves the feature just as dead), while still completing the set
+   so a referenced key never ships without its secret.
+
+**Anti-drift lock (rule 4, step 4).** `AppRequirements` owns WHICH env vars a service needs; this file
+owns WHERE A HUMAN GETS THEM, and never re-declares a name. `serviceEnvNames()` / `servicePackages()`
+are exported purely so the test suite fails CI if the two ever disagree — the five-way drift cannot
+come back silently.
+
+**Message length unchanged.** The checklist is still one heading, one line per item, one closing line
+(admin 2026-08-03: long build messages go unread). The line carries the clickable link only; the full
+console path lives in the registry for the surfaces that have room for it (slices 2–4).
+
+**Honest scope boundary — what is NOT in this slice.** `keyless`, `serverOnly` and `testPrefixes` are
+recorded and tested but not yet SURFACED anywhere; the mid-build popup and the Settings screen still
+show no link. Those are slices 2–4 (test-vs-live key warning; verify-on-paste green tick; a Setup
+Checklist screen). Recorded here so nobody reads the registry's existence as the feature being done.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.

@@ -1782,6 +1782,30 @@ ${paintWaitJs('p')}
     await sandbox.pty.resize(pid, { cols, rows });
   }
 
+  /**
+   * Record that a terminal is doing real work in this sandbox, WITHOUT touching the sandbox.
+   *
+   * Deliberately synchronous and handle-free. The obvious implementation — call `getSandbox()`, which
+   * already refreshes activity — would turn a passive liveness note into a real sandbox round-trip,
+   * and worse, into a sandbox CREATE for a workspace that had legitimately been paused. A note says
+   * "the VM you can already see is busy"; it must never be able to start one.
+   *
+   * Everything here is best-effort: the caller is a shell's output stream, and a cost optimisation
+   * must never be able to break it.
+   */
+  noteActivity(workspaceId: string): void {
+    if (!workspaceId) return;
+    const existing = this.sandboxes.get(workspaceId);
+    if (!existing) return; // nothing warm to hold — never resurrect a paused VM from a note
+    this._lastActivity.set(workspaceId, Date.now());
+    // Reset the cloud-side countdown too, for the same reason a build does: our sweep is not the only
+    // clock that can end a long-running command.
+    try { existing.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {}); } catch { /* non-fatal */ }
+    // Keeps the DURABLE record fresh so the cross-instance orphan reaper can tell a watched terminal
+    // apart from an abandoned VM. Internally throttled by shouldTouchDurable.
+    this._touchDurable(workspaceId, existing.sandboxId);
+  }
+
   async killPty(workspaceId: string, pid: number): Promise<boolean> {
     this.ptys.delete(pid);
     try {

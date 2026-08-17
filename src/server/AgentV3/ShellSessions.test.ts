@@ -16,6 +16,7 @@ import {
   MAX_SHELLS_PER_WORKSPACE,
   MAX_INPUT_CHARS,
   IDLE_TIMEOUT_MS,
+  ACTIVITY_NOTE_MS,
   type PtyHost,
 } from './ShellSessions';
 
@@ -35,6 +36,7 @@ function fakeHost() {
     exit: (code?: number) => void;
   }[] = [];
   const writes: { pid: number; data: string }[] = [];
+  const notes: string[] = [];
   const resizes: { pid: number; cols: number; rows: number }[] = [];
   const kills: number[] = [];
   let nextPid = 100;
@@ -57,9 +59,10 @@ function fakeHost() {
     async writePty(_w, pid, data) { writes.push({ pid, data }); },
     async resizePty(_w, pid, cols, rows) { resizes.push({ pid, cols, rows }); },
     async killPty(_w, pid) { kills.push(pid); return true; },
+    noteActivity(workspaceId) { notes.push(workspaceId); },
   };
 
-  return { host, opened, writes, resizes, kills, failOpen: () => { failNext = true; } };
+  return { host, opened, writes, resizes, kills, notes, failOpen: () => { failNext = true; } };
 }
 
 beforeEach(() => { _clearShells(); });
@@ -417,5 +420,123 @@ describe('shellsForWorkspace', () => {
     const list = shellsForWorkspace('ws1');
     expect(list).toHaveLength(2);
     if (a.ok && b.ok) expect(list.map((s) => s.shellId)).toEqual([a.shell.shellId, b.shell.shellId]);
+  });
+});
+
+describe('the sandbox idle clock — a watched terminal must never be paused mid-command', () => {
+  /**
+   * THE BUG (2026-08-17). The sandbox's idle sweep pauses a VM after 5 minutes of no SANDBOX
+   * activity, and that clock is only wound by `getSandbox()`. Typing winds it, because writePty
+   * calls getSandbox. PTY OUTPUT does not — it arrives on a callback the SDK already holds and
+   * reaches no actuator method at all.
+   *
+   * So `npm install` — minutes of streaming output and not one keystroke — looked completely idle,
+   * and the VM was paused out from under a command that was succeeding.
+   */
+  it('output from a WATCHED shell keeps telling the sandbox it is busy', async () => {
+    // The reported scenario, on the clock: a user starts `npm install` and only READS. Nothing is
+    // typed for minutes, so this output is the ONLY thing that can hold the VM.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-08-17T10:00:00Z'));
+      const { host, opened, notes } = fakeHost();
+      const r = await openShell('ws1', host, { userId: 'u1' });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      subscribeShell(r.shell.shellId, () => {}, 'u1');
+      notes.length = 0; // the subscribe itself notes; this test is about the OUTPUT
+
+      // Four minutes of install chatter, past the 5-minute idle limit that used to pause the VM.
+      for (let minute = 1; minute <= 4; minute += 1) {
+        vi.setSystemTime(new Date(`2026-08-17T10:0${minute}:00Z`));
+        opened[0].emit(`added ${minute * 100} packages\r\n`);
+      }
+      // One note per elapsed window — the VM's idle clock is rewound long before it can expire.
+      expect(notes).toEqual(['ws1', 'ws1', 'ws1', 'ws1']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a reader attaching notes immediately — a waking phone must not wait out a throttle', async () => {
+    const { host, notes } = fakeHost();
+    const r = await openShell('ws1', host, { userId: 'u1' });
+    if (!r.ok) return;
+    subscribeShell(r.shell.shellId, () => {}, 'u1');
+    expect(notes).toEqual(['ws1']);
+  });
+
+  it('THROTTLES: a flood of output costs ONE note, not thousands', async () => {
+    // `npm install` emits thousands of chunks a second. A note per chunk would be its own bug.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-08-17T10:00:00Z'));
+      const { host, opened, notes } = fakeHost();
+      const r = await openShell('ws1', host, { userId: 'u1' });
+      if (!r.ok) return;
+      subscribeShell(r.shell.shellId, () => {}, 'u1');
+      notes.length = 0;
+
+      vi.setSystemTime(new Date('2026-08-17T10:01:00Z'));
+      for (let i = 0; i < 5000; i += 1) opened[0].emit(`line ${i}\r\n`);
+      expect(notes).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sends nothing when NOBODY is watching — abandonment must stay abandonment', async () => {
+    // The cost half of the fix. "Output = alive" on its own would let a forgotten `npm run dev`
+    // hold a billed VM for as long as it chattered. An unwatched shell goes idle exactly as before.
+    const { host, opened, notes } = fakeHost();
+    const r = await openShell('ws1', host, { userId: 'u1' });
+    if (!r.ok) return;
+    for (let i = 0; i < 100; i += 1) opened[0].emit('still running\r\n');
+    expect(notes).toEqual([]);
+  });
+
+  it('stops noting once the last reader leaves', async () => {
+    const { host, opened, notes } = fakeHost();
+    const r = await openShell('ws1', host, { userId: 'u1' });
+    if (!r.ok) return;
+    const off = subscribeShell(r.shell.shellId, () => {}, 'u1');
+    off?.();
+    notes.length = 0;
+    opened[0].emit('output with nobody home\r\n');
+    expect(notes).toEqual([]);
+  });
+
+  it('works with a host that does not implement noteActivity at all', async () => {
+    // The method is OPTIONAL — LocalActuator has no idle sweep and needs no change. A shell must
+    // never break because its host cannot be told about activity.
+    const { host, opened } = fakeHost();
+    const bare: PtyHost = {
+      openPty: host.openPty.bind(host),
+      writePty: host.writePty.bind(host),
+      resizePty: host.resizePty.bind(host),
+      killPty: host.killPty.bind(host),
+    };
+    const r = await openShell('ws1', bare, { userId: 'u1' });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    subscribeShell(r.shell.shellId, () => {}, 'u1');
+    expect(() => opened[0].emit('hello\r\n')).not.toThrow();
+    expect(readShell(r.shell.shellId, 0, 'u1')?.data).toBe('hello\r\n');
+  });
+
+  it('a throwing noteActivity can never break the output stream', async () => {
+    const { host, opened } = fakeHost();
+    const hostile: PtyHost = { ...host, noteActivity() { throw new Error('sandbox gone'); } };
+    const r = await openShell('ws1', hostile, { userId: 'u1' });
+    if (!r.ok) return;
+    subscribeShell(r.shell.shellId, () => {}, 'u1');
+    expect(() => opened[0].emit('output survives\r\n')).not.toThrow();
+    expect(readShell(r.shell.shellId, 0, 'u1')?.data).toBe('output survives\r\n');
+  });
+
+  it('the note interval stays comfortably under the tightest idle limit', () => {
+    // The sandbox sweep's floor is 5 minutes. A note slower than that would fix nothing.
+    expect(ACTIVITY_NOTE_MS).toBeGreaterThan(0);
+    expect(ACTIVITY_NOTE_MS).toBeLessThan(5 * 60_000);
   });
 });

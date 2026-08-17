@@ -34723,3 +34723,53 @@ biggest historical contributors — the 226s node_modules walk and cold-rebuild-
 fixed.
 
 Gate: `tsc -p tsconfig.server.json` clean; full `vitest` green (16,172).
+## 2026-08-17 — Terminal: the sandbox paused itself mid-`npm install`
+
+Admin asked whether a user can run their own commands from v5's 3-dot → Terminal (they cannot — that
+tab renders `state.terminal.join('\n')`, a read-only log of what the AI ran), then asked for the
+terminal's bugs to be fixed and nothing else. This is that bug.
+
+**Two independent idle clocks, and the terminal only ever wound one.**
+
+The sandbox's clock (`E2BActuator._lastActivity`) is refreshed inside `getSandbox()`. A build winds it
+constantly. A terminal winds it when the user TYPES, because `writePty` calls `getSandbox`. It does
+**not** wind for OUTPUT: PTY output arrives on a callback the E2B SDK already holds and reaches no
+actuator method at all.
+
+The idle limit is 5 minutes (lowered from 15 on 2026-08-13 off the measured E2B bill). `npm install`,
+a test run, a first `npm run build` all stream for longer than that without a keystroke. To that
+clock the terminal looked perfectly idle, so `_sweepIdleSandboxes` paused the VM **in the middle of a
+command that was succeeding**, and the shell died under the user's cursor.
+
+The 5-minute limit is only safe because the sweep is build-aware (`setBuildActive`). Nobody made it
+terminal-aware — the terminal shipped 2026-08-04, the limit dropped to 5 on 2026-08-13, and the two
+were never reconciled.
+
+**The fix — terminals report their work through the same kind of channel builds do.** `PtyHost` gains
+an optional `noteActivity(workspaceId)`; `appendOutput` calls it; `E2BActuator` implements it as a
+cheap synchronous refresh of `_lastActivity` + the cloud-side timeout + the durable touch.
+
+**Three decisions that are the actual engineering, not the plumbing:**
+- **`noteActivity` must NOT call `getSandbox()`**, though that would have been one line and would
+  have refreshed activity for free. `getSandbox` CREATES a sandbox when none is warm — a passive
+  liveness note would have become a resurrection, spending real money for a workspace nobody asked to
+  wake. A note may only say "the VM you can already see is busy". It returns early with no warm handle.
+- **A subscriber is REQUIRED.** "Output = alive" alone is a cost leak wearing a bugfix's clothes: a
+  forgotten `npm run dev` with nobody watching would hold a billed VM for as long as it chattered.
+  Gating on an attached reader keeps the honest invariant the shell reaper already uses — work nobody
+  is watching is abandonment — so an unwatched shell goes idle exactly as it does today.
+- **Throttled to 30s per shell.** `npm install` emits thousands of chunks a second; a note per chunk
+  would have been its own bug. 30s is comfortably under the 5-minute floor it protects.
+
+`sweepShells` is deliberately unchanged: no-reader + no-input for 30 minutes still dies.
+
+**Not a sibling, checked:** the preview has its own 150s watchdog (`PreviewSurface` `WATCH_INTERVAL_MS`)
+that probes and self-heals, so it never went silent past the idle limit. The terminal was the one
+long-running surface with nothing.
+
+Regression tests encode the reported scenario on a fake clock — four minutes of install chatter with
+zero keystrokes yields four notes — plus the throttle, the unwatched case, a host with no
+`noteActivity` at all, and a `noteActivity` that throws.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+1300 files / 16,179 tests green.

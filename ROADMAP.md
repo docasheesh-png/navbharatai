@@ -457,7 +457,7 @@ an `AppKnowledgeBase.ts` entry (user-facing capability change).
 
 | # | Item | Audit ref | Notes |
 |---|---|---|---|
-| C1 | **Per-project instruction file** the AI always reads | minor 18 | The single highest-leverage item in this tier — it is NavBharatAI's own `CLAUDE.md`, for the user's app. Stops users repeating house rules every session. |
+| C1 | ✅ **DONE 2026-08-18 (#TBD)** — per-project instruction file | minor 18 | `AgentV3/projectInstructions.ts` (pure) + read into the build prompt. Accepts `NAVBHARATAI.md` (ours, first) then `AGENTS.md` / `CLAUDE.md` / `.cursorrules`, so an IMPORTED repo's existing rules work with nothing to convert. ROOT ONLY (a `docs/AGENTS.md` is an article, not policy), capped at 8k with an honest truncation note, FENCED + attributed so a user file cannot read as a system directive. Injected into the per-turn USER message, never the static system prompt — that is the cached prefix, and a per-project block at its head would bust the cache for every workspace. The user is TOLD which file was used. |
 | C2 | Ignore-file support | minor 19 | "Never touch this folder." Pairs with C1. |
 | C3 | @-mention a file to scope a request | minor 6 | Cuts tokens AND improves accuracy — pays for itself. |
 | C4 | Env editor + dev/staging/prod profiles | minor 31 (partial), 32 | Vault holds SECRETS; there is no plain env editor and one value set serves every environment. |

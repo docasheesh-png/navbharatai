@@ -329,3 +329,28 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s1).not.toBe(s0);
   });
 });
+
+// B8 — the context meter. It is a CURRENT reading, not a log: a second event replaces the first.
+describe('context_usage', () => {
+  it('starts null — nothing has been measured yet, and a meter must never guess', () => {
+    expect(initialAgentV3State().contextUsage).toBeNull();
+  });
+
+  it('stores the reading', () => {
+    const s = agentV3Reducer(initialAgentV3State(), { type: 'context_usage', pct: 74, level: 'high', note: 'getting long', ts: 1 });
+    expect(s.contextUsage).toEqual({ pct: 74, level: 'high', note: 'getting long' });
+  });
+
+  it('REPLACES rather than accumulating (this is a gauge, not a history)', () => {
+    let s = agentV3Reducer(initialAgentV3State(), { type: 'context_usage', pct: 74, level: 'high', note: 'a', ts: 1 });
+    s = agentV3Reducer(s, { type: 'context_usage', pct: 91, level: 'critical', note: 'b', ts: 2 });
+    expect(s.contextUsage).toEqual({ pct: 91, level: 'critical', note: 'b' });
+  });
+
+  it('does not disturb the rest of the state', () => {
+    const before = initialAgentV3State();
+    const after = agentV3Reducer(before, { type: 'context_usage', pct: 10, level: 'ok', note: '', ts: 1 });
+    expect(after.files).toEqual(before.files);
+    expect(after.checkpoints).toEqual(before.checkpoints);
+  });
+});

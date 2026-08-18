@@ -158,6 +158,10 @@ export type AgentEvent =
   // the encrypted vault by the client and never travels on this stream (see secretRequest.ts).
   | { type: 'secret_request'; agent: AgentRole; callId: string; prompt: string; secrets: Array<{ name: string; why: string }>; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
+  // B8 — how full the conversation's context is. Carries a PERCENTAGE and plain words only: the window
+  // size differs per engine, so sending it would leak which engine ran (White-Label Law). Emitted only
+  // when the reading meaningfully CHANGES, never once per turn.
+  | { type: 'context_usage'; pct: number; level: 'ok' | 'high' | 'critical'; note: string; ts: number }
   | { type: 'preview'; url: string; ts: number }
   | { type: 'repo'; url: string; fullName: string; ts: number }
   // Own-repo working-branch storage is active — drives the client's "Ship to main" / "Revert" controls.

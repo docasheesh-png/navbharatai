@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, terminalConversationStatus, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, shouldRetryEmptyBuild, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild,
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshipHealEnabled, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, terminalConversationStatus, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, reviewerShouldRun, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, zeroBillForFailedBuild, shouldRunIntegrityHeal, shouldRetryEmptyBuild, emptyBuildFailureSummary, finalSyntaxErrorSummary, failedImportPromptNote, importSurveyPromptNote, importHonestySummaryPrefix, IMPORT_HONESTY_PREFIX_MARK, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, steerQueueHasRoom, STEER_QUEUE_MAX, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild,
   postBuildCodeGateShouldRun,
 } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
@@ -1955,12 +1955,44 @@ describe('redactProviderError / sandboxUnavailableNotice — no raw infra error 
   });
 });
 
-describe('Full Team mid-build steering gates (Fix 60)', () => {
-  it("steerAllowedForBuild: ONLY the max (Full Team) tier — enforced on the BUILD's resolved tier", () => {
+describe('Mid-build steering gates (Fix 60, ungated to every tier by ROADMAP §8A/A1)', () => {
+  const TIERS = ['max', 'weak', 'off', 'mini', 'medium', undefined, null, ''] as const;
+
+  afterEach(() => { delete process.env.AGENTV3_STEER_ALL_TIERS; });
+
+  it('steerAllowedForBuild: EVERY tier may steer — the max-only paywall billed a whole rebuild to avoid one turn', () => {
+    for (const t of TIERS) {
+      expect(steerAllowedForBuild(t as string | undefined | null), String(t)).toBe(true);
+    }
+  });
+
+  it('AGENTV3_STEER_ALL_TIERS=off restores the max-only gate with no deploy (it is a pricing decision)', () => {
+    process.env.AGENTV3_STEER_ALL_TIERS = 'off';
     expect(steerAllowedForBuild('max')).toBe(true);
     for (const t of ['weak', 'off', 'mini', 'medium', undefined, null, '']) {
-      expect(steerAllowedForBuild(t as string | undefined | null)).toBe(false);
+      expect(steerAllowedForBuild(t as string | undefined | null), String(t)).toBe(false);
     }
+  });
+
+  it('only the exact value "off" reverts — a typo must not silently re-paywall the feature', () => {
+    for (const v of ['on', 'false', '0', 'OFFF', '']) {
+      process.env.AGENTV3_STEER_ALL_TIERS = v;
+      expect(steerAllowedForBuild('weak'), v).toBe(true);
+    }
+    process.env.AGENTV3_STEER_ALL_TIERS = ' OFF ';  // trimmed + case-insensitive, so this DOES revert
+    expect(steerAllowedForBuild('weak')).toBe(false);
+  });
+
+  // The queue cap only became necessary when the feature stopped being max-only: the runner injects
+  // the WHOLE queue at one step boundary, so an unbounded queue is an unbounded prompt.
+  it('steerQueueHasRoom: accepts up to STEER_QUEUE_MAX, then refuses (never a silent drop)', () => {
+    expect(STEER_QUEUE_MAX).toBeGreaterThan(0);
+    expect(steerQueueHasRoom(0)).toBe(true);
+    expect(steerQueueHasRoom(undefined)).toBe(true);       // no queue yet
+    expect(steerQueueHasRoom(null)).toBe(true);
+    expect(steerQueueHasRoom(STEER_QUEUE_MAX - 1)).toBe(true);
+    expect(steerQueueHasRoom(STEER_QUEUE_MAX)).toBe(false);
+    expect(steerQueueHasRoom(STEER_QUEUE_MAX + 10)).toBe(false);
   });
 
   it('sanitizeSteerMessage: trims, refuses empty/non-string, caps at 2000 chars', () => {

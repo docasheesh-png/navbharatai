@@ -7,13 +7,19 @@
 import type { AgentCard, TodoItem } from './agentV3Types';
 
 /**
- * May the composer send a LIVE message to the team right now? Only during a running BUILD on the
- * FULL TEAM ('max') tier — Plan/Advise lanes have their own send path (they are read-only and
- * already work mid-build), and lower tiers keep today's behavior (composer sends start a new turn).
- * The server enforces the same gate on /steer (the build's resolved tier), so this is UX, not security.
+ * May the composer send a LIVE message to the team right now? During a running BUILD, in the build
+ * lane — Plan/Advise have their own send path (read-only, and they already work mid-build).
+ *
+ * 🔓 EVERY TIER since ROADMAP §8A/A1 (2026-08-18). It was 'max'-only, which left everyone else with
+ * Stop-and-rebuild as their only correction — paying for a whole build to avoid one turn. See
+ * `steerAllowedForBuild` in routes/agentv3.ts for the full reasoning and the revert switch; the server
+ * still enforces the real gate on the build's resolved tier, so this stays UX, not security.
+ *
+ * `powerLevel` is deliberately still a parameter: the server is authoritative, and if the admin flips
+ * AGENTV3_STEER_ALL_TIERS=off, this signature is where the tier check comes back — no call-site churn.
  */
-export function canSteerMidBuild(running: boolean, powerLevel: string, chatMode: string): boolean {
-  return running === true && powerLevel === 'max' && chatMode === 'build';
+export function canSteerMidBuild(running: boolean, _powerLevel: string, chatMode: string): boolean {
+  return running === true && chatMode === 'build';
 }
 
 /** Whether the premium Team HQ card is shown: FULL TEAM tier + a build actually running. */

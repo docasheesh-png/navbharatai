@@ -4153,7 +4153,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   }}
                 />
                 {/* Expand / minimize the composer so a long message can be read & edited.
-                    Hidden while Full Team steering is live — Stop takes this slot then (Fix 60). */}
+                    Hidden while mid-build steering is live — Stop takes this slot then (Fix 60). */}
                 {!canSteerMidBuild(running, powerLevel, chatMode) && (
                   <button
                     type="button"
@@ -4172,8 +4172,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     {roleBusy ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                   </button>
                 ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
-                  // FULL TEAM (Fix 60): the composer stays LIVE mid-build — Send messages the working
-                  // team (server /steer); Stop moves to the smaller slot so it stays one tap away.
+                  // Fix 60, ungated to every tier by A1: the composer stays LIVE mid-build — Send
+                  // messages the working team (server /steer); Stop moves to the smaller slot so it
+                  // stays one tap away. The `running ? Stop` branch below is the fallback if the admin
+                  // reverts with AGENTV3_STEER_ALL_TIERS=off: the client cannot see that env, so a
+                  // non-max user would still get this composer and the server would refuse the message
+                  // with its honest FULL_TEAM_ONLY error rendered in the thread. Ugly on an emergency
+                  // revert, never silent — which is the trade this switch is for. Do not delete the
+                  // branch to tidy up; it is what the gate returns to.
                   <>
                     <button onClick={stop} title="Stop the build" className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80`}>
                       <Square className="w-4 h-4" />

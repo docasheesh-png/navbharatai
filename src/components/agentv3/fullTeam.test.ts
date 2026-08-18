@@ -2,21 +2,24 @@ import { describe, it, expect } from 'vitest';
 import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './fullTeam';
 import type { AgentCard, TodoItem } from './agentV3Types';
 
-describe('canSteerMidBuild — mid-build messages are a Full Team (max) premium (Fix 60)', () => {
-  it('allows ONLY: running build + max tier + build lane', () => {
+describe('canSteerMidBuild — mid-build messages are open to EVERY tier (A1, was max-only)', () => {
+  it('allows a running build in the build lane', () => {
     expect(canSteerMidBuild(true, 'max', 'build')).toBe(true);
   });
 
-  it('refuses every lower tier while running (the premium is tier-exact)', () => {
+  // THE CHANGE (ROADMAP §8A/A1): these tiers used to be refused, leaving Stop-and-rebuild as the only
+  // correction — paying for a whole build to avoid one turn. The free tier paid it in NavBharatAI's money.
+  it('allows EVERY lower tier too — control is not what makes Full Team premium', () => {
     for (const tier of ['weak', 'off', 'mini', 'medium']) {
-      expect(canSteerMidBuild(true, tier, 'build')).toBe(false);
+      expect(canSteerMidBuild(true, tier, 'build'), tier).toBe(true);
     }
   });
 
-  it('refuses when idle (a normal send starts a turn instead) and on the read-only lanes', () => {
+  it('still refuses when idle (a normal send starts a turn instead) and on the read-only lanes', () => {
     expect(canSteerMidBuild(false, 'max', 'build')).toBe(false);
+    expect(canSteerMidBuild(false, 'weak', 'build')).toBe(false);
     expect(canSteerMidBuild(true, 'max', 'planner')).toBe(false);
-    expect(canSteerMidBuild(true, 'max', 'advisor')).toBe(false);
+    expect(canSteerMidBuild(true, 'weak', 'advisor')).toBe(false);
   });
 });
 

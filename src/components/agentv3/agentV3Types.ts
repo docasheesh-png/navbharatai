@@ -50,6 +50,8 @@ export interface GitCheckpoint {
   sha: string;
   message: string;
   ts: number;
+  /** B5 — the user's own name for this version. Absent (not empty) when they haven't named it. */
+  label?: string;
 }
 
 /** One NDJSON line from /api/agentv3/chat: an engine AgentEvent or the final result. */

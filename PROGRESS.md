@@ -34695,3 +34695,31 @@ index into a credential store). Every read still goes to GitHub with the user's 
   for partial knowledge.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run` green.
+
+---
+
+## 2026-08-17 — Honesty fix: TIME_TO_FIRST_CALL no longer blames "dependency install"
+
+From the build-setup investigation (the ~234-293s "prep before first model call" lever). The
+`TIME_TO_FIRST_CALL` diagnostic listed the pre-first-call wait as "sandbox setup, project restore,
+**dependency install** and secrets loading". Reading the actual code proved `npm install` is NOT on that
+critical path: on a fresh build it runs in the BACKGROUND boot, concurrent with the build (it is only
+invoked from the dev-server/preview boot paths, `E2BActuator.ts`), and a resumed sandbox already carries
+`node_modules`. So naming it there sent an autopsy to optimise install when the real blocking costs are
+the cold `Sandbox.create` and its round-trips (list-files ×2, `.env` write) plus the vault read.
+
+Same class as the dukaan-report fix this file already carries (a diagnostic pointing at the wrong
+subsystem): the message now names only the steps that genuinely block — "sandbox setup, project restore
+and secrets loading" — and states explicitly that dependency install is NOT part of the wait. +1 test
+locks it (`does NOT blame dependency install`); the stale doc comments were corrected. No behaviour
+change — a report-wording (honesty) fix only, outside the build critical path.
+
+Recorded for whoever takes the bigger setup-time lever next: the real, admin-gated wins found by the
+investigation are (a) run `Sandbox.create` in PARALLEL with the first planning/blueprint model call
+(the mega-roadmap path already does this — up to ~45s off, but it re-orders the build critical path =
+the MOAT, so it needs explicit admin sign-off), and (b) INFRA: set `E2B_TEMPLATE_ID` to a pre-baked
+image with `node_modules` (removes install from preview boot) and/or a warm sandbox pool. The two
+biggest historical contributors — the 226s node_modules walk and cold-rebuild-on-resume — are already
+fixed.
+
+Gate: `tsc -p tsconfig.server.json` clean; full `vitest` green (16,172).

@@ -66,6 +66,30 @@ describe('every generated workflow is real, runnable YAML', () => {
   });
 });
 
+describe('the web-build step packages what the preview verified (piano APK #3, 2026-08-18)', () => {
+  it('every workflow falls back to the bundler when ONLY the strict type check failed', () => {
+    for (const { path, wf } of workflows()) {
+      const build = steps(wf).find((s) => s.name === 'Build the web app');
+      expect(build, `${path} has no web-build step`).toBeTruthy();
+      // The strict script still runs first — the fallback fires only on a type-check-only failure,
+      // and only for a Vite app (a real syntax error fails the bundler too, so nothing broken passes).
+      expect(build!.run).toContain('npm run build');
+      expect(build!.run).toContain("grep -qE 'error TS[0-9]+'");
+      expect(build!.run).toContain('node_modules/.bin/vite');
+      expect(build!.run).toContain('npx vite build');
+      // The findings are surfaced, never hidden — an honest warning, not a silent bypass.
+      expect(build!.run).toContain('::warning::');
+    }
+  });
+
+  it('the step carries the heap the Gradle half already forces, so a large app cannot OOM', () => {
+    for (const { path, wf } of workflows()) {
+      const build = steps(wf).find((s) => s.name === 'Build the web app') as (Step & { env?: Record<string, string> });
+      expect(build?.env?.NODE_OPTIONS, `${path} web-build step has no heap headroom`).toBe('--max-old-space-size=4096');
+    }
+  });
+});
+
 describe('the install step matches what is actually in the repository', () => {
   it('never runs npm ci unless a lock file is genuinely present', () => {
     for (const { path, wf } of workflows()) {

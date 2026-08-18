@@ -40,6 +40,7 @@ export type RepairCode =
   | 'SIGNING_CREDENTIALS_WRONG'
   | 'GOOGLE_SERVICES_MISSING'
   | 'NPM_REGISTRY_AUTH'
+  | 'TYPE_GATE_BLOCKED_PACKAGING'
   | 'APP_CODE_BUILD_FAILED'
   | 'UNKNOWN';
 
@@ -295,6 +296,25 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
       summary: 'The build machine ran out of memory while building the app.',
       autoFixable: true,
       needs: [workflowPath],
+    };
+  }
+
+  // ── The strict TYPE gate failed, not the app itself (autopsy 2026-08-18: piano, APK run #3). The
+  // scaffold's build script is "tsc && vite build", and the preview the user approved never ran that
+  // type check (the dev server strips types without checking them) — so an app the user has SEEN working
+  // died here in seconds and could never become an apk. The CURRENT workflow packages straight from the
+  // bundler when only type findings stop the strict script, so refreshing our own workflow IS the repair
+  // for every repository pushed before that fix existed. When the bundler itself ALSO failed, its own
+  // signature ("error during build:") is in the log and this branch stands aside, so a genuinely broken
+  // app is still reported as the app-code failure it is. Guarded to the webbuild stage (or an old log
+  // with no stage marker) so a stray "error TS" in a later stage can never claim it. ──
+  const tsStage = failedStage(full);
+  if (/error TS\d+/.test(log) && !/error during build:/i.test(log) && (tsStage === 'webbuild' || tsStage === null)) {
+    return {
+      code: 'TYPE_GATE_BLOCKED_PACKAGING',
+      summary: 'A strict code check was blocking the packaging even though your app itself runs. The build is being updated to package the app and report those findings instead of stopping on them.',
+      autoFixable: true,
+      needs: [workflowPath, 'package.json'],
     };
   }
 
@@ -617,6 +637,11 @@ export function repairFiles(
     // Replacing our own workflow with the current one IS the repair here — the failure is in a stage we
     // set up, and the current kit is by construction our best version of it.
     case 'STALE_WORKFLOW':
+      return refresh();
+    // The current kit's web-build step packages straight from the bundler when only type findings block
+    // the strict script — so refreshing our own workflow IS the repair. A repository already carrying the
+    // fallback yields null here, and the route's AI pass then gets its turn at the app code itself.
+    case 'TYPE_GATE_BLOCKED_PACKAGING':
       return refresh();
     case 'NPM_PEER_CONFLICT':
       // A refresh is preferred: the current install step already carries the --legacy-peer-deps

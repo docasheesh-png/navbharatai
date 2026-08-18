@@ -425,7 +425,7 @@ checkpoints + restore, Git panel, todo list, transcript compaction, deploy/previ
 
 | # | Item | Audit ref | Where | Notes |
 |---|---|---|---|---|
-| A1 | **Open mid-build steering to every tier** | major 6 | `routes/agentv3.ts:1434–1438` | `steerQueue` EXISTS, gated to `'max'`. Ungate + cap queue depth. **Start here.** A steer costs one prompt; a Stop-and-rebuild costs a whole build — this SAVES tokens. |
+| A1 | ✅ **DONE 2026-08-18 (#TBD)** — mid-build steering open to every tier | major 6 | `steerAllowedForBuild` + `canSteerMidBuild` | Ungated at BOTH ends via one predicate each, `STEER_QUEUE_MAX = 5` cap (the runner injects the whole queue in one turn, so unbounded queue = unbounded prompt), honest 429 over the cap. Team HQ card stays `'max'`-only — that is the real premium. Revert: `AGENTV3_STEER_ALL_TIERS=off`. |
 | A2 | **Wire the real shell into v5's Terminal** | major 1, minor 21 | `AgentV3Panel.tsx:4307` renders a read-only log; `ide/ShellTerminal.tsx` is the real PTY | Split the tab: AI log on top, live shell below. No new backend — routes `/shell/*` already exist and are owner-checked + rate-limited. ⚠️ Decide the sandbox-time billing question first (see 8F). |
 | A3 | **`web_fetch` tool** | major 7 | new tool in `ToolCatalog.ts` + `ToolDispatcher.ts` | Read a URL the user supplies. **Must ship with SSRF defence** — block private/link-local ranges, `redirect: 'error'`, size + time cap. Same discipline as `credentialProbe.ts`. |
 | A4 | **Queue a message while a build runs** | minor 2 | `hooks/useAgentV3Build.ts` + composer | Rides A1's queue. Without A1 it has nowhere to go. |

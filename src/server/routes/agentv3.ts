@@ -2472,13 +2472,44 @@ export function sandboxUnavailableNotice(): string {
 }
 
 /**
- * Full Team mid-build steering (Fix 60) — pure gates, exported for unit tests.
- * Steering is the FULL TEAM ('max') tier's premium capability: the gate runs on the BUILD's
- * resolved power level (what the engine actually runs), so a hand-crafted request from a
- * lower tier can never reach it.
+ * Mid-build steering (Fix 60) — pure gates, exported for unit tests.
+ *
+ * 🔓 UNGATED TO EVERY TIER (ROADMAP §8A item A1, 2026-08-18). It shipped as the FULL TEAM ('max')
+ * tier's premium capability. That gate cost money instead of earning it: a non-max user watching a
+ * build go wrong had exactly one lever — Stop, then rebuild from scratch. A rebuild is the single most
+ * expensive operation in the product; a steer is ONE extra turn. So the paywall billed a whole build to
+ * avoid selling a turn, and on the free tier NavBharatAI paid that bill itself.
+ *
+ * It was also the wrong thing to charge for. Being able to interrupt and redirect is basic control that
+ * every competitor gives away, and the DEFAULT experience is what a user judges us by. Full Team keeps
+ * what actually makes it premium — Opus at max effort, and the Team HQ card (`showTeamHq`, still 'max'
+ * only). Steering was never what made that tier worth its price.
+ *
+ * `AGENTV3_STEER_ALL_TIERS=off` restores the max-only gate with no deploy — this is a pricing decision,
+ * and a pricing decision the admin may disagree with should be revertible in one env change.
  */
 export function steerAllowedForBuild(powerLevel: string | undefined | null): boolean {
-  return powerLevel === 'max';
+  if (String(process.env.AGENTV3_STEER_ALL_TIERS ?? '').trim().toLowerCase() === 'off') {
+    return powerLevel === 'max';
+  }
+  return true;
+}
+
+/**
+ * How many un-drained steering messages one running build will hold.
+ *
+ * WHY A CAP AT ALL (it did not need one while the feature was 'max'-only): the runner drains the whole
+ * queue at the next step boundary and injects it as user turns, so an unbounded queue is an unbounded
+ * prompt — a user who taps send twenty times while waiting would push twenty messages into a single
+ * turn, on a build they are already paying for. Five is above any real burst and far below a prompt the
+ * model cannot use. Over the cap the message is REFUSED honestly rather than silently dropped: a
+ * steering message the user believes was delivered is worse than one they know was not.
+ */
+export const STEER_QUEUE_MAX = 5;
+
+/** Whether one more message fits on a build's queue. Pure. */
+export function steerQueueHasRoom(pending: number | undefined | null): boolean {
+  return (typeof pending === 'number' ? pending : 0) < STEER_QUEUE_MAX;
 }
 
 /** Normalise a steering message: trim, refuse empty/non-string, cap at 2000 chars. */
@@ -3976,10 +4007,17 @@ export function registerAgentV3Routes(app: Express): void {
       const rb = runningBuilds.get(key);
       if (!rb || rb.ended) continue;
       if (key === 'anon' && userId && steerWorkspaceId && rb.workspaceId && !workspaceSessionsMatch(rb.workspaceId, steerWorkspaceId)) continue;
-      // TIER GATE: mid-build steering is the Full Team tier's premium capability — enforced on the
-      // BUILD's resolved tier (what the engine is actually running), never the client's claim.
+      // TIER GATE: open to every tier (A1) unless AGENTV3_STEER_ALL_TIERS=off restores the old
+      // max-only rule. Still enforced on the BUILD's resolved tier, never the client's claim.
       if (!steerAllowedForBuild(rb.powerLevel)) {
         res.status(403).json({ error: 'Mid-build team messages are a Full Team tier feature. Switch to Full Team before starting the build.', code: 'FULL_TEAM_ONLY' });
+        return;
+      }
+      // QUEUE CAP: refuse honestly rather than accept a message the team will never act on well.
+      // The runner injects the WHOLE queue at one step boundary, so an unbounded queue is an
+      // unbounded prompt on a build the user is already paying for.
+      if (!steerQueueHasRoom(rb.steerQueue?.length)) {
+        res.status(429).json({ error: `The team already has ${STEER_QUEUE_MAX} messages waiting — they will be picked up at the next step. Send this one after they land.`, code: 'STEER_QUEUE_FULL' });
         return;
       }
       (rb.steerQueue ??= []).push(message);
@@ -9113,10 +9151,10 @@ export function registerAgentV3Routes(app: Express): void {
         maxBudgetUsd: maxBudgetUsdForRunner,
         maxSteps,
         toolConcurrency,
-        // Full Team mid-build steering (Fix 60): ONLY the 'max' tier drains the /steer queue — the
-        // premium capability is tier-gated at BOTH ends (the route refuses non-max queues; the runner
-        // simply has no poll elsewhere). Spread into every top-level/heal runner via baseRunnerOpts,
-        // so the team keeps listening through repair phases too.
+        // Mid-build steering (Fix 60, ungated to every tier by A1): the runner drains the /steer
+        // queue at each step boundary. Gated at BOTH ends by the SAME predicate, so the revert switch
+        // (AGENTV3_STEER_ALL_TIERS=off) cannot leave one end open and the other closed. Spread into
+        // every top-level/heal runner via baseRunnerOpts, so the team keeps listening through repair.
         ...(steerAllowedForBuild(powerLevelReqEffective)
           ? { steerPoll: () => (rb.steerQueue && rb.steerQueue.length ? rb.steerQueue.splice(0, rb.steerQueue.length) : []) }
           : {}),

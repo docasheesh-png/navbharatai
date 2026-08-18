@@ -78,3 +78,23 @@ describe('v5.0 mobile footer wiring (admin 2026-08-04)', () => {
     expect(PANEL).toContain('bumpReportSendCount');
   });
 });
+
+describe('previewReadySignal — restoredIdle (the remix-arrival green dot, 2026-08-17)', () => {
+  it('an idle session with rehydrated files is genuinely viewable', () => {
+    // A remixed workspace never built HERE, so done stays false — but the in-browser preview
+    // compiles the restored files fine. The dot saying "nothing to see" was one more reason a
+    // fresh remix felt like nothing had happened.
+    expect(previewReadySignal(false, false, undefined, 24, true)).toBe(true);
+  });
+
+  it('restoredIdle with ZERO files still says no — an empty copy must not get a green dot', () => {
+    expect(previewReadySignal(false, false, undefined, 0, true)).toBe(false);
+  });
+
+  it('the flag absent preserves every historical verdict', () => {
+    expect(previewReadySignal(false, false, undefined, 24)).toBe(false); // mid-build: not yet
+    expect(previewReadySignal(false, true, true, 24)).toBe(true);       // finished OK
+    expect(previewReadySignal(false, true, false, 24)).toBe(false);     // finished broken
+    expect(previewReadySignal(true, false, undefined, 0)).toBe(true);   // live URL always wins
+  });
+});

@@ -2619,11 +2619,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       // Admin 2026-07-07 — real state, never faked: the green dot fires only when the app is
       // genuinely viewable (live URL, or a finished OK build with real files), and the Files badge
       // shows the ACTUAL built/restored file count (live build list, else the rehydrated store).
-      previewReady: previewReadySignal(!!state.previewUrl, state.done, state.ok, realFileCount),
+      // `restoredIdle`: an idle session whose files were rehydrated from the durable store (a remix,
+      // or a reopened chat) is genuinely viewable — the in-browser preview compiles those files —
+      // even though no build ran here, so `done` never fired.
+      previewReady: previewReadySignal(!!state.previewUrl, state.done, state.ok, realFileCount,
+        !running && workspaceFiles !== null && Object.keys(workspaceFiles).length > 0),
       fileCount: realFileCount,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onFooterApi, showWorkspace, tab, reportSending, openReportPicker, mobileSheet, state.previewUrl, state.done, state.ok, state.files.length, workspaceFiles]);
+  }, [onFooterApi, showWorkspace, tab, reportSending, openReportPicker, mobileSheet, state.previewUrl, state.done, state.ok, state.files.length, workspaceFiles, running]);
   // Which workspaceId the cached `workspaceFiles` belong to. Guards a race: on a fast session switch,
   // an in-flight load for the OLD workspace could set `workspaceFiles`, then the rehydrate effect would
   // see it non-null and skip loading the NEW workspace — leaving stale files visible. Comparing this to
@@ -2802,6 +2806,38 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     void loadWorkspaceFiles(wsId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, state.workspaceId, running, workspaceFiles, workspaceFilesFor]);
+
+  // THE ARRIVAL MOMENT (admin 2026-08-17: "Make it yours ke baad v5 khulta hai, par user ko kuch
+  // show nahi hota — feel aana chahiye ki app aa gayi hai").
+  //
+  // Everything under the hood already worked: the baton carried the session, the files rehydrated,
+  // the preview could render them. But the user LANDED on an empty chat — the copied app was real
+  // and invisible, which reads exactly like "kuch nahi hua". So the moment the copied files actually
+  // arrive (never before — celebrating an empty copy would be a lie), three things happen once:
+  // a real agent message with the app's name and its REAL file count enters the chat, and the
+  // preview surface opens so the app is visibly RUNNING on screen. Seeing it run IS the feel; no
+  // banner can substitute for it.
+  //
+  // Gated on files > 0 by design: if the copy failed, nothing celebrates — the banner alone stays,
+  // and the Files tab tells the truth. Fires once per mount (the baton is consumed on mount, so a
+  // reload cannot re-celebrate).
+  const remixCelebratedRef = useRef(false);
+  useEffect(() => {
+    const h = remixHandoffRef.current;
+    if (!h || remixCelebratedRef.current || running) return;
+    if (!workspaceFiles || !workspaceFilesFor) return; // the copied files have not arrived yet
+    const count = Object.keys(workspaceFiles).length;
+    if (count === 0) return;
+    remixCelebratedRef.current = true;
+    setAgentHistory((prev) => [...prev, {
+      role: 'agent',
+      agent: 'architect',
+      text: `🎉 **${h.appName}** is yours now — all ${count} files are in this chat and ready to edit. I've opened the preview so you can see it running. Tell me what you'd like to change, in your own words.`,
+      ts: Date.now(),
+    }]);
+    openSurfaceFromFooter('preview');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceFiles, workspaceFilesFor, running]);
 
   // Plan (todo list) collapse toggle (Task 3) — keeps the chat area readable.
   const [planCollapsed, setPlanCollapsed] = useState(false);
@@ -3343,8 +3379,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       {remixArrived.owned ? `${remixArrived.appName} is yours — copied again` : `${remixArrived.appName} is yours now`}
                     </div>
                     <div className="text-emerald-200/80 text-xs mt-0.5">
-                      Every file is here and ready to edit — open the Files tab to look around, or just tell me what to change.
+                      Every file is here and ready to edit — see it running, or just tell me what to change.
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => openSurfaceFromFooter('preview')}
+                      className="mt-2 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors"
+                    >▶ Open preview</button>
                   </div>
                   <button
                     type="button"

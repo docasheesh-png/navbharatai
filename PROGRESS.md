@@ -34999,3 +34999,49 @@ actually loaded", never a guess — and still refuses a green dot for zero files
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1285 files / 15981 tests passed** · `npm run build` OK.
+
+---
+
+## 2026-08-18 — AUTOPSY: piano build `a487e019` — the app was done in ~5-6 min; TWO HUNG provider calls ate the other ~6
+
+**Corrects an earlier draft of this entry** (which mislabelled the build "free-tier test account" and buried the
+real cause). The admin pushed back on both points and was right on both.
+
+**Report:** prompt "एक पियानो बनाओ … रियल मल्टी कीज़ 🎹" · `ok: true` · vite-react · **710s (~12 min)** ·
+`deliveredVia: KIMI` · `CHEAP_FLOOR_DECISION: "Cheap floor ACTIVE — ON leads the first attempt; Claude/Haiku only
+backstop"` · review 88/100 · `RELEASE_GATE: YELLOW` · 141 issues (0 err, 10 warn, 5 auto-resolved, 5 unresolved).
+
+### CORRECTION 1 — NOT a "free user". This is the cheap-floor routing, which leads EVERY build.
+`billing.userTier` is `free-list (admin/tester)` = the admin is BILLING-exempt (free-list), not a free-plan user.
+The model choice is separate: the **cheap floor is ACTIVE and LEADS** (GLM/Kimi first, Claude only a backstop) — the
+admin-confirmed routing policy (CLAUDE.md, cheap-floor default `on`), and the admin's account is also the cost-routing
+canary. So `noClaude/weak` here is the DESIGNED cheap-floor-first path, delivered by KIMI without ever needing to
+escalate to Claude — not a "free tier". My earlier framing was wrong.
+
+### CORRECTION 2 — the real answer to "app 4 min me ban gayi, build itna lamba kyu chala?"
+The app WAS built and rendering by **~+338s (5.6 min)** ("पियानो बनकर तैयार है! स्क्रीनशॉट देखें"). The extra ~6 min
+was almost entirely **two provider calls that HUNG**, not real work — proven by the per-call latencies + tiny token
+output:
+- **+297s: a GLM call hung for 244 SECONDS** (finished ~+541s) and returned only **248 output tokens** — a
+  stalled/rate-limited connection, not generation. (This is a shadow/race-lane call; `shadowFastLaneTokens.GLM`.)
+- **+502s: a kimi-k2.6 call hung for 147 SECONDS** (the post-answer/review phase).
+- Plus **~48s** lost up front to the fast lane planning then aborting (`SIMPLE_BUILD_FALLBACK`: "planning alone took
+  48s, so 3 stages would need 241s against a 240s budget → switch to full builder").
+
+So the build was NOT slow because a piano is hard, or because the tier is weak — the actual generation finished in
+~5-6 minutes. **~6 minutes were burned by two hung provider connections that nothing killed fast enough.** The rest of
+the timeline (typecheck+one repair pass +516→592s, review) is normal post-build work.
+
+### THE ROOT CAUSE (open — rule 6): no fast per-call latency ceiling that abandons a hung call and re-races.
+A model call returning 248 tokens in 244 seconds should be killed and re-raced in ~30-60s, not left to hang for 4
+minutes. `raceTimeout` exists as a utility but is not enforced as a tight per-model-call ceiling on the build/shadow
+lane. **This is the single biggest lever on real build TIME — bigger than any model-quality change** — but it lives in
+the multi-provider routing/racing layer = the MOAT, so it needs the admin's explicit sign-off before being touched
+(CLAUDE.md). Recorded here; the targeted fix is a per-call timeout (abandon+re-race a hung call fast), not a routing
+rewrite.
+
+### The rest of the 5-bucket ledger (unchanged, for completeness)
+✅ 5 self-healed (missing/duplicate imports fixed) · 🔀 4 provider fallbacks (KIMI 3 timeout, GLM 1 rate-limit) ·
+⏭️ tests scaffolded-not-run, no journey (a piano saves nothing) · ❌ 5 unresolved (shipped not-typechecking, design
+D/50, phantom `"stores"` dep, empty catch, aria-labels) · 🥵 the two hung calls above. The engine stayed HONEST
+throughout (YELLOW gate, honest "TS errors remain" line, honest vuln advisory) — this is a SPEED bug, not an honesty one.

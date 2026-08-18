@@ -27,7 +27,7 @@ describe('HOME_TOOL_GROUPS — the builder tools moved from Settings to the Home
     expect(ids).toEqual([
       'analytics', 'api', 'apk', 'botbuilder', 'cicd', 'codereview', 'collab',
       'components', 'darkmode', 'debugger', 'designsys', 'domain', 'figma', 'gallery', 'imagegen',
-      'insights', 'minifier', 'monetize', 'multipages', 'performance', 'seo', 'team', 'testing',
+      'insights', 'minifier', 'monetize', 'multipages', 'performance', 'seo', 'sharereview', 'team', 'testing',
       'versioning', 'whitelabel',
     ]);
   });

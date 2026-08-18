@@ -35,6 +35,7 @@ import type { ReportPickerItem } from '../../lib/reportPicker';
 import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { SplitDivider } from './SplitDivider';
+import { PreviewWidthChips } from './PreviewWidthChips';
 import { loadSplit, saveSplit, clampSplit, MIN_PANE_PX } from './splitPane';
 import { NextSuggestionsBulb } from './NextSuggestionsBulb';
 import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
@@ -238,6 +239,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // report — so the divider's last step calls setShowWorkspace(false) instead.
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
   const [split, setSplit] = useState<number>(() => loadSplit());
+  // The row's measured width. The DIVIDER can read this on demand (it only needs it mid-gesture),
+  // but the device chips need it during RENDER — "is a true 768px tablet possible in this window?"
+  // is a question asked on every paint, and it changes when the window does. Hence one observer.
+  const [splitContainerPx, setSplitContainerPx] = useState(0);
+  useEffect(() => {
+    const el = splitContainerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(([entry]) => setSplitContainerPx(entry.contentRect.width));
+    ro.observe(el);
+    setSplitContainerPx(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, [showWorkspace]);
   const applySplit = useCallback((pct: number) => {
     const width = splitContainerRef.current?.getBoundingClientRect().width ?? 0;
     const next = clampSplit(pct, width);
@@ -4406,9 +4419,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           className={`flex-1 sm:flex-none flex-col min-h-0 ${showWorkspace ? 'flex' : 'hidden'}`}
           style={showWorkspace ? { flex: `0 1 ${100 - split}%`, minWidth: MIN_PANE_PX } : undefined}
         >
-          {/* DESKTOP: title + close on their own row, exactly as before. */}
+          {/* DESKTOP: title + close on their own row, exactly as before — plus, on the Preview tab,
+              the one-tap device widths. They sit HERE, next to the app itself, because that is where
+              the user is already looking when the question "does this work on a phone?" occurs to
+              them (admin 2026-08-17). */}
           <div className="hidden sm:flex shrink-0 items-center justify-between gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs">
-            <span className="font-medium text-zinc-300 capitalize">{tab}</span>
+            <span className="font-medium text-zinc-300 capitalize shrink-0">{tab}</span>
+            {tab === 'preview' && (
+              <PreviewWidthChips split={split} containerPx={splitContainerPx} onSplit={applySplit} />
+            )}
             <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" className="flex items-center gap-1 text-zinc-400 hover:text-white">
               <X className="w-4 h-4" />
             </button>

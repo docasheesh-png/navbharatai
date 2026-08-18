@@ -36,6 +36,62 @@ export const SPLIT_STEPS = [25, 33, 50, 67, 75] as const;
 
 const STORAGE_KEY = 'nbai_v3_split_pct';
 
+/**
+ * ONE-TAP DEVICE WIDTHS — the divider stops being a layout knob and becomes a real check
+ * (admin 2026-08-17: "yeh bhi adjust kar ke banao").
+ *
+ * The live px number while dragging was half the idea; a number you can only see WHILE your hand is
+ * moving is not a testing tool. These are the other half: tap "Phone" and the preview really is
+ * 390px wide — the app rendered at a phone width, in place, with no device emulator, no separate
+ * mode, and nothing faked. It is the natural companion of the three-screen contract the builder was
+ * taught the day before: the engine is told to build for phone/tablet/desktop, and this is where the
+ * user checks whether it did.
+ *
+ * THE NUMBERS ARE REAL DEVICES, not round guesses:
+ *   • 390 — iPhone 14/15/16 logical width, and within a few px of most modern Androids.
+ *   • 768 — the classic tablet-portrait width, and the breakpoint most CSS frameworks treat as the
+ *     tablet boundary (`md` in Tailwind).
+ * "Desktop" is deliberately NOT a number: it means "give the preview the rest of the room", because
+ * a desktop is whatever the user's screen is, not a width we get to pick.
+ */
+export const DEVICE_WIDTHS = [
+  { id: 'phone', label: 'Phone', px: 390 },
+  { id: 'tablet', label: 'Tablet', px: 768 },
+] as const;
+
+export type DeviceId = typeof DEVICE_WIDTHS[number]['id'] | 'desktop';
+
+/** How close a pane width must be to a device's width to count as "showing" it. */
+const DEVICE_MATCH_TOLERANCE_PX = 12;
+
+/**
+ * The split that gives the WORKSPACE pane `targetPx` — or as close as the window honestly allows.
+ *
+ * Returns the split AND whether the exact width was achievable, because those are different facts
+ * and the UI must not conflate them: on a narrow laptop, "Tablet" (768px) may be impossible without
+ * crushing the chat below its minimum. We give the widest we can and let the caller say so. The
+ * label always shows the REAL width, so an approximation can never masquerade as the real thing.
+ */
+export function splitForPaneWidth(targetPx: number, containerPx: number, minPx: number = MIN_PANE_PX): { pct: number; exact: boolean } {
+  if (!(containerPx > 0)) return { pct: SPLIT_DEFAULT, exact: false };
+  const wanted = ((containerPx - targetPx) / containerPx) * 100;
+  const pct = clampSplit(wanted, containerPx, minPx);
+  // Exact when the clamp did not have to move it — compare in PIXELS, since a sub-percent nudge on a
+  // wide monitor is still several pixels and would show as a different number to the user.
+  return { pct, exact: Math.abs(paneWidthPx(pct, containerPx) - targetPx) <= 1 };
+}
+
+/** Which device chip (if any) the current pane width is showing. `null` = a custom, dragged width. */
+export function matchedDevice(paneWidth: number, containerPx: number, minPx: number = MIN_PANE_PX): DeviceId | null {
+  for (const d of DEVICE_WIDTHS) {
+    if (Math.abs(paneWidth - d.px) <= DEVICE_MATCH_TOLERANCE_PX) return d.id;
+  }
+  // "Desktop" = the preview is as wide as this window can give it, i.e. the chat is at its minimum.
+  const { min } = splitBounds(containerPx, minPx);
+  if (containerPx > 0 && Math.abs(paneWidth - paneWidthPx(min, containerPx)) <= 1) return 'desktop';
+  return null;
+}
+
 /** The minimum/maximum chat percentage a container of this width can honour. */
 export function splitBounds(containerPx: number, minPx: number = MIN_PANE_PX): { min: number; max: number } {
   // A container too narrow for two minimums has no room to choose: pin to the middle rather than

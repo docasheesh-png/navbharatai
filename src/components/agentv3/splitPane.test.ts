@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   SPLIT_DEFAULT, MIN_PANE_PX, SPLIT_STEPS,
   splitBounds, clampSplit, splitFromPointer, nextSplitAction, paneWidthPx, loadSplit, saveSplit,
+  DEVICE_WIDTHS, splitForPaneWidth, matchedDevice,
 } from './splitPane';
 
 /**
@@ -196,5 +197,70 @@ describe('the wiring the layout depends on', () => {
     expect(divider).toContain('role="separator"');
     expect(divider).toContain('aria-valuenow');
     expect(divider).toContain('tabIndex={0}');
+  });
+});
+
+describe('one-tap device widths — the divider becomes a real responsive check', () => {
+  // Admin 2026-08-17 ("yeh bhi adjust kar ke banao"): a px number visible only WHILE dragging is not
+  // a testing tool. Tapping "Phone" must genuinely lay the app out at 390px — and, where the window
+  // cannot honour a width, must say so instead of quietly showing something narrower.
+
+  it('the widths are real devices, not round guesses', () => {
+    expect(DEVICE_WIDTHS.map((d) => d.px)).toEqual([390, 768]);
+  });
+
+  it('a wide window gives the EXACT device width', () => {
+    const { pct, exact } = splitForPaneWidth(390, 1400);
+    expect(exact).toBe(true);
+    expect(paneWidthPx(pct, 1400)).toBe(390);
+  });
+
+  it('tablet on a wide window is exact too', () => {
+    const { pct, exact } = splitForPaneWidth(768, 1600);
+    expect(exact).toBe(true);
+    expect(paneWidthPx(pct, 1600)).toBe(768);
+  });
+
+  it('a window too narrow reports exact:false rather than pretending', () => {
+    // 1000px cannot show a 768px tablet AND keep the chat above its 280px minimum.
+    const { pct, exact } = splitForPaneWidth(768, 1000);
+    expect(exact).toBe(false);
+    expect(paneWidthPx(pct, 1000)).toBe(720);        // the widest honestly available…
+    expect(paneWidthPx(pct, 1000)).toBeLessThan(768); // …and visibly NOT the tablet width claimed
+  });
+
+  it('an unknown container never claims exactness', () => {
+    expect(splitForPaneWidth(390, 0)).toEqual({ pct: SPLIT_DEFAULT, exact: false });
+  });
+
+  it('matchedDevice lights the chip the user is actually looking at', () => {
+    const phone = splitForPaneWidth(390, 1400).pct;
+    expect(matchedDevice(paneWidthPx(phone, 1400), 1400)).toBe('phone');
+    const tablet = splitForPaneWidth(768, 1400).pct;
+    expect(matchedDevice(paneWidthPx(tablet, 1400), 1400)).toBe('tablet');
+  });
+
+  it('the widest the window allows counts as Desktop', () => {
+    const widest = splitBounds(1400).min;
+    expect(matchedDevice(paneWidthPx(widest, 1400), 1400)).toBe('desktop');
+  });
+
+  it('a hand-dragged width matches NOTHING — no chip may falsely claim it', () => {
+    // The user dragged to something of their own; lighting a chip would tell them they are looking
+    // at a phone when they are not.
+    expect(matchedDevice(paneWidthPx(55, 1400), 1400)).toBeNull();
+  });
+
+  it('the chips read the MEASURED pane, never the button that was pressed', () => {
+    const chips = readFileSync(join(__dirname, 'PreviewWidthChips.tsx'), 'utf8');
+    expect(chips).toContain('const paneWidth = paneWidthPx(split, containerPx)');
+    // The label must come from that measurement, so an unsatisfiable request self-corrects on screen.
+    expect(chips).toContain('${paneWidth}px');
+  });
+
+  it('a device that cannot fit is DISABLED, not silently approximated', () => {
+    const chips = readFileSync(join(__dirname, 'PreviewWidthChips.tsx'), 'utf8');
+    expect(chips).toContain('!exact');
+    expect(chips).toContain('disabled={disabled}');
   });
 });

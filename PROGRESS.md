@@ -35245,3 +35245,33 @@ there is no border to move. The divider is `hidden sm:flex`. The admin called th
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1302 files / 16237 tests passed** · `npm run build` OK.
+
+### Same day — the px readout grew into a real responsive check (admin: "yeh bhi adjust kar ke banao")
+
+The number that appears while dragging was only half the idea, and the admin quoted the other half
+back at me. A width you can see only WHILE your hand is moving is not a testing tool. So the preview
+header now carries **Phone · Tablet · Full** and the preview's real width in pixels, always visible.
+
+The widths are real devices, not round numbers: **390** (iPhone 14/15/16 logical width, and within a
+few px of most modern Androids) and **768** (tablet portrait, and the `md` boundary most CSS
+frameworks use). "Full" is deliberately NOT a number — a desktop is whatever the user's screen is,
+not a width we get to pick.
+
+**Nothing is emulated.** No fake user-agent, no device frame, no scaling — the app is genuinely laid
+out at that width in a real browser, which is the only reason the check is worth anything. It is the
+direct companion of the three-screen contract the builder was taught the day before: the engine is
+told to build for phone/tablet/desktop, and this is where the user verifies that it did.
+
+**Honest in three places, because "approximately a tablet" is worse than no tablet button:**
+- The px label is MEASURED from the real pane, never from the button pressed. Tap Tablet on a narrow
+  laptop and it reads 690px, not 768.
+- A device the window cannot honour is **disabled with a plain reason**, not silently approximated —
+  `splitForPaneWidth` returns `{ pct, exact }` precisely so the UI can tell those apart.
+- A hand-dragged width matches NO chip, so nothing can claim the user is looking at a phone when
+  they are not.
+
+The chips set the SAME single `split` number the divider drives — no second source of truth for the
+same width. `AppKnowledgeBase.ts` extended in the same commit.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1314 files / 16494 tests passed** · `npm run build` OK.

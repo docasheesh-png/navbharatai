@@ -35179,3 +35179,28 @@ live and none of them has real-world evidence yet.
 
 **Admin-side items still open:** the Apple Service ID return URL (open root cause, config-only), and the
 Play Console upload. Fresh `.aab` + `.ipa` triggered from `main`.
+
+---
+
+## 2026-08-18 — Piano-autopsy proactive layer: first-pass CORRECTNESS & QUALITY BAR for weak builds (PR #2455, merged 3f77d26)
+
+The piano autopsy (build `a487e019`) closed its two code-fixable root causes earlier today (#2441
+OpenAiToolRunner 120s timeout — the 244s/147s hung provider calls; #2443 phantom baseUrl-alias dep
+pruning). The remaining recurring items were all one class: **weak/cheap-floor first-pass defects the
+gates flag honestly but the free tier never gets a strong repair pass for** — TypeScript errors, an
+empty `catch {}`, missing `aria-label`s on icon-only controls. The admin approved the zero-cost
+upstream fix ("han").
+
+**Shipped:** `weakBuildDiscipline.ts` (the existing single-source weak-build prompt block) gains a
+"CORRECTNESS & QUALITY BAR" section — type-safe code with no `any` escape hatch, never swallow an
+error (empty catch forbidden, failures must surface), accessible names on every icon-only control and
+a `<label>` on every input, stated BEFORE the model writes code (50/50 law: the model was never told
+the bar — that condition is now dead). Same gating as the block it extends: weak builds only
+(`noClaudeBuild`), `AGENTV3_WEAK_DISCIPLINE=off` kill switch, ZERO new passes/model calls/cost,
+paid/power prompts byte-for-byte unchanged. Tests lock all three rules + the gating
+(`weakBuildDiscipline.test.ts`).
+
+**Honest expectation (rule 3):** guidance, not a guarantee — the weak model will still err sometimes;
+the measure of success is the next real weak-tier build report showing fewer first-pass
+type/catch/a11y findings. Gate: frontend+server tsc green, full suite 16,228 tests / 1,301 files
+passed; CI green before merge.

@@ -35310,3 +35310,44 @@ workflows, and bash -n on the new step.
 
 **For the admin:** after deploy, open the piano app in NavBharatAI and press the build button again —
 the engine reads the failure, refreshes the workflow, re-runs the build itself, and the APK completes.
+## 2026-08-19 — "GitHub connected hai fir bhi yeh error": a THIRD copy of where the token lives
+
+Admin screenshot: the APK is built and downloadable, the Publish-to-App-Mart form is filled in, and
+"Send for review" answers **"Connect GitHub first — no access token was sent"** for an account that
+is connected perfectly well.
+
+**Root cause, and it is a repeat of a documented one.** `routes/navStore.ts` read the token from
+`body.githubToken`, while its client — `PublishToNavStore.tsx`, using the very same `ghHeaders()` as
+the Download button beside it — sends it as the `X-GitHub-Token` HEADER. So the token was ALWAYS
+empty: not flaky, not conditional, a 100% failure that then told the user to go and reconnect
+something that was already fine.
+
+`lib/mobileShipAuth.ts` exists precisely to be the single answer to "which header?", and its own
+header documents the 2026-08-03 outage caused by the first two copies disagreeing. The lesson was
+written down and missed anyway, because **its test asserted a FIXED LIST of two route files** —
+and `navStore.ts` was written later. A guard over a list of files does not guard the rule; it
+guards the files that existed the day it was written.
+
+**Fixed:** the route now uses `githubTokenFromRequest(req)`.
+
+**⚠️ AND A GUARD I ALMOST GOT WRONG, recorded because the near-miss is the lesson.** My first
+version of the widened test banned `body.githubToken` everywhere. It failed — and it was RIGHT to
+fail: `routes/agentv3.ts` reads it from the body in seven places, and the v5.0 client genuinely
+POSTS it in the body to those routes (ship, revert, deploy). Client and server agree there, so they
+work. A blanket ban would have "fixed" seven working features into failure.
+
+The real invariant is not "never read the body" — it is **AGREEMENT: whatever a client sends, its
+server must read.** So the guard is now precise:
+- the three routes whose clients use `ghHeaders()` must use the shared helper and must not reach
+  into the body;
+- the **pair** that actually broke is asserted as a pair — `PublishToNavStore.tsx` sends
+  `ghHeaders()` AND `navStore.ts` reads `githubTokenFromRequest`, because each file was
+  self-consistent and only the pair was wrong;
+- every route calling `fetchBuildArtifact` (the header-based download path) is DISCOVERED from
+  source rather than listed, so a route written tomorrow cannot opt out by being new.
+
+Both new assertions verified to fail against the old code (2 failed / 9 passed before; 11 pass
+after). Comments are stripped before scanning — the files describe the broken shape on purpose.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1314 files / 16497 tests passed** · `npm run build` OK.

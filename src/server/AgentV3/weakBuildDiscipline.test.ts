@@ -20,6 +20,27 @@ describe('weakBuildDiscipline', () => {
     expect(block).toContain('server-only Node libraries');
   });
 
+  it('states the first-pass correctness & quality bar (the piano-autopsy weak-tier defects)', () => {
+    const block = weakBuildDisciplineBlock(true, {} as NodeJS.ProcessEnv);
+    expect(block).toContain('CORRECTNESS & QUALITY BAR');
+    // Type errors shipped by the weak model → type-safe, no `any` escape hatch.
+    expect(block).toContain('TYPE-SAFE');
+    expect(block).toContain('any');
+    // Empty catch block flagged but never repaired on the free/cheap tier.
+    expect(block).toContain('NEVER swallow an error');
+    expect(block).toContain('catch');
+    // Missing accessible names on icon-only controls.
+    expect(block).toContain('aria-label');
+  });
+
+  it('the quality bar is also gated by the same weak-only + kill-switch rules', () => {
+    // Non-weak builds never see it, and the kill switch removes the whole block (bar included).
+    expect(weakBuildDisciplineBlock(false, {} as NodeJS.ProcessEnv)).not.toContain('CORRECTNESS & QUALITY BAR');
+    expect(
+      weakBuildDisciplineBlock(true, { AGENTV3_WEAK_DISCIPLINE: 'off' } as unknown as NodeJS.ProcessEnv),
+    ).not.toContain('CORRECTNESS & QUALITY BAR');
+  });
+
   it('is disabled by the AGENTV3_WEAK_DISCIPLINE=off kill switch', () => {
     expect(weakBuildDisciplineBlock(true, { AGENTV3_WEAK_DISCIPLINE: 'off' } as unknown as NodeJS.ProcessEnv)).toBe('');
   });

@@ -35275,3 +35275,38 @@ same width. `AppKnowledgeBase.ts` extended in the same commit.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1314 files / 16494 tests passed** · `npm run build` OK.
+
+---
+
+## 2026-08-18 — APK dead-end killed: the strict type gate no longer blocks packaging a working app (PR #2460, merged 0afdcc7)
+
+**The admin's report:** "navbharatai apk bana nahi pa raha" — the piano app's "Build Android APK
+(installable)" run #3 died at "Build the web app" in 3 seconds.
+
+**Root cause (evidence, not guess):** the scaffold's build script is `tsc && vite build`, and the piano
+app carried TypeScript type errors (a known autopsy item from build `a487e019`). The PREVIEW the user
+approved never enforced that type gate — the dev server strips types without checking them — so the
+packaging bar was silently STRICTER than the bar the app was verified against: a working app on screen,
+a phone build that could never finish. The deterministic repair loop honestly said `APP_CODE_BUILD_FAILED
+/ cannot fix`, leaving a non-technical user at a dead end.
+
+**The class fix (both halves):**
+- `mobileShipKit.ts`: ONE shared "Build the web app" step for the APK, AAB and iOS workflows (three
+  drifting copies before). Strict script first; when it fails AND the log shows ONLY `error TS…` findings
+  AND the app is a Vite app, the bundler runs directly — the user gets exactly the app the preview
+  showed, findings surfaced as an honest `::warning::`, never hidden. A real syntax error fails the
+  bundler too, so nothing broken can ride the fallback. The step bakes in the 4g Node heap the Gradle
+  half already forces (so `repairOutOfMemory` is correctly a no-op on fresh workflows, still live for
+  old-shape repos).
+- `mobileBuildRepair.ts`: new `TYPE_GATE_BLOCKED_PACKAGING` classification — auto-fixable,
+  webbuild-stage-guarded, stands aside when the bundler also failed (`error during build:`). Repair =
+  refresh our own workflow, which heals EVERY already-pushed repository (piano included) on the next
+  press of the build button. Already-current workflow ⇒ null ⇒ honest stop, then the AI pass gets its
+  turn at the app code.
+
+Gate: both tsc green, full suite 16,461 tests / 1,312 files, CI green before merge. Tests lock the real
+piano log end-to-end (classify → repair), the two guards, the fallback + heap in all three generated
+workflows, and bash -n on the new step.
+
+**For the admin:** after deploy, open the piano app in NavBharatAI and press the build button again —
+the engine reads the failure, refreshes the workflow, re-runs the build itself, and the APK completes.

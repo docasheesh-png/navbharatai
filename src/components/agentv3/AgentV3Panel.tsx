@@ -34,6 +34,9 @@ import { saveLastReport, readLastReport } from './reportCache';
 import type { ReportPickerItem } from '../../lib/reportPicker';
 import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
+import { SplitDivider } from './SplitDivider';
+import { PreviewWidthChips } from './PreviewWidthChips';
+import { loadSplit, saveSplit, clampSplit, MIN_PANE_PX } from './splitPane';
 import { NextSuggestionsBulb } from './NextSuggestionsBulb';
 import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
 import { clampComposerHeight } from './composerHeight';
@@ -228,6 +231,32 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Workspace is collapsed by default so the chat takes the full width; opening a
   // header tab pill surfaces it. On mobile an open workspace takes over the area.
   const [showWorkspace, setShowWorkspace] = useState(false);
+  // The chat ⇆ workspace split, in percent of the row (admin 2026-08-17). Restored from the user's
+  // last choice, because a layout preference that resets on every reload is not a preference.
+  // NOTE the division of labour, kept deliberately clean: `showWorkspace` owns "is the workspace
+  // visible", `split` owns "how wide is it when it is". Letting the split ALSO mean hidden (0 or
+  // 100) would be two states for one truth — the exact shape behind this session's Resume-button
+  // report — so the divider's last step calls setShowWorkspace(false) instead.
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const [split, setSplit] = useState<number>(() => loadSplit());
+  // The row's measured width. The DIVIDER can read this on demand (it only needs it mid-gesture),
+  // but the device chips need it during RENDER — "is a true 768px tablet possible in this window?"
+  // is a question asked on every paint, and it changes when the window does. Hence one observer.
+  const [splitContainerPx, setSplitContainerPx] = useState(0);
+  useEffect(() => {
+    const el = splitContainerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(([entry]) => setSplitContainerPx(entry.contentRect.width));
+    ro.observe(el);
+    setSplitContainerPx(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, [showWorkspace]);
+  const applySplit = useCallback((pct: number) => {
+    const width = splitContainerRef.current?.getBoundingClientRect().width ?? 0;
+    const next = clampSplit(pct, width);
+    setSplit(next);
+    saveSplit(next);
+  }, []);
   // PREVIEW PERSISTENCE (admin 2026-07-07): once the Preview tab has been opened once, its
   // PreviewSurface (and the iframe inside) stays mounted for the whole session — hidden via CSS on
   // other tabs — so switching tabs / going back to chat never destroys the rendered preview. The
@@ -3328,11 +3357,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row flex-1 min-h-0">
+      <div ref={splitContainerRef} className="flex flex-col sm:flex-row flex-1 min-h-0">
         {/* LEFT: the chat. Full width when the workspace is collapsed. When the
             workspace is open it shares the width on desktop, and is HIDDEN on
-            mobile (the workspace takes over so it's usable on a phone). */}
-        <div className={`${showWorkspace ? 'hidden sm:flex sm:w-1/2 sm:border-r border-zinc-800' : 'flex flex-1'} flex-col min-h-0`}>
+            mobile (the workspace takes over so it's usable on a phone).
+            The share is the USER'S (admin 2026-08-17) — see SplitDivider below. `minWidth` is what
+            keeps the promise when the WINDOW shrinks: the browser enforces it with no listener, so
+            a split saved on a wide monitor cannot squeeze the composer on a laptop. */}
+        <div
+          className={`${showWorkspace ? 'hidden sm:flex' : 'flex flex-1'} flex-col min-h-0`}
+          style={showWorkspace ? { flex: `0 1 ${split}%`, minWidth: MIN_PANE_PX } : undefined}
+        >
           {/* 3 PAGES: Build · Plan · Advise — one shared session + project memory, each its OWN
               visible thread. The switcher moved BACK to the composer's left column as a dropup
               selector (admin 2026-07-07: "old position me rakho, input box ke pas, dropdown selector"
@@ -4372,10 +4407,27 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             PREVIEW PERSISTENCE (admin 2026-07-07): the pane stays MOUNTED and is hidden via CSS when
             collapsed — unmounting it destroyed the preview iframe, so every tab switch / back-to-chat
             lost the rendered preview and forced a full re-build of it. */}
-        <div className={`flex-1 sm:flex-none sm:w-1/2 flex-col min-h-0 ${showWorkspace ? 'flex' : 'hidden'}`}>
-          {/* DESKTOP: title + close on their own row, exactly as before. */}
+        {showWorkspace && (
+          <SplitDivider
+            split={split}
+            onSplit={applySplit}
+            onCollapse={() => setShowWorkspace(false)}
+            containerRef={splitContainerRef}
+          />
+        )}
+        <div
+          className={`flex-1 sm:flex-none flex-col min-h-0 ${showWorkspace ? 'flex' : 'hidden'}`}
+          style={showWorkspace ? { flex: `0 1 ${100 - split}%`, minWidth: MIN_PANE_PX } : undefined}
+        >
+          {/* DESKTOP: title + close on their own row, exactly as before — plus, on the Preview tab,
+              the one-tap device widths. They sit HERE, next to the app itself, because that is where
+              the user is already looking when the question "does this work on a phone?" occurs to
+              them (admin 2026-08-17). */}
           <div className="hidden sm:flex shrink-0 items-center justify-between gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs">
-            <span className="font-medium text-zinc-300 capitalize">{tab}</span>
+            <span className="font-medium text-zinc-300 capitalize shrink-0">{tab}</span>
+            {tab === 'preview' && (
+              <PreviewWidthChips split={split} containerPx={splitContainerPx} onSplit={applySplit} />
+            )}
             <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" className="flex items-center gap-1 text-zinc-400 hover:text-white">
               <X className="w-4 h-4" />
             </button>

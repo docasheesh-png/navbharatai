@@ -35074,3 +35074,63 @@ source folder). A bare file `src/utils.ts` is NOT treated as a folder, so `utils
 Wired into the EXISTING best-effort package.json rewrite (`agentv3.ts` ~8426, the pass that already ADDS missing
 deps via `applyWellKnownMissingDeps`) — same write, now add-and-prune in one pass, with honest narration. It runs
 in the guardian's try/catch so it can never block a build. +9 tests. Gate: `tsc -p tsconfig.server.json` clean.
+
+## 2026-08-18 — ROADMAP §8 Sprints 1–3 shipped end to end (A1, A3, B1, B5, B2, B8, C1, C3, C2)
+
+**Context.** §8 was added the previous day from a 60-item capability audit, whose central finding was that
+**v5 is not behind on intelligence, it is behind on CONTROL** — the engine can do the thing, the user
+cannot direct it, interrupt it, inspect it or extend it. Nine items shipped today, one PR each, each with
+its own verification gate and green CI before merge.
+
+**Sprint 1 — control.**
+- **A1 — mid-build steering opened to EVERY tier** (#2442). It shipped as Full Team's premium. That
+  paywall COST money rather than earning it: a non-max user watching a build go wrong had exactly one
+  lever — Stop, then rebuild from scratch, the most expensive operation in the product — to avoid selling
+  one turn. On the free tier NavBharatAI paid that bill itself. Full Team keeps what actually makes it
+  premium (Opus at max effort, the Team HQ card). `STEER_QUEUE_MAX = 5`; revert via
+  `AGENTV3_STEER_ALL_TIERS=off` since this is a pricing decision.
+- **A4 — found ALREADY DELIVERED by A1** and marked as such in the roadmap rather than left as a phantom
+  item to be re-built later.
+- **A3 — `web_fetch`** (#2444). v5 could SEARCH the web and SCREENSHOT a page but not READ one, so a
+  pasted docs link left it guessing from a snippet. SSRF defence REUSES `lib/ssrfGuard.ts`; residual
+  DNS-rebinding risk documented in the module rather than papered over.
+- **A2 remains BLOCKED on the admin's money decision** (§8F.1) — an uncapped user-facing shell holds a
+  billed VM. Recommendation given: free with a daily cap.
+
+**Sprint 2 — visibility.**
+- **B1 — the "App Logs" tab** (#2445). The dev server already wrote everything it printed to
+  DEV_SERVER_LOG_PATH and the ENGINE already read it; the user never saw a byte, so a backend throwing on
+  every request just looked like "the app doesn't work" with a rebuild as the only lever. Polling, not
+  SSE, because the log is a file in a billed VM. Restart and skipped-byte gaps are reported, and an empty
+  pane says WHICH empty it is (never built / dormant / running-but-silent).
+- **B5 — name a checkpoint** (#2446). "14 unnamed checkpoints are unusable" — restore existed but was not
+  usable. The label key is OMITTED not undefined: Firestore rejects undefined and `saveCheckpoint` swallows
+  its own errors, so the naive version would have SILENTLY stopped persisting history.
+- **B2 — running/not-running strip** (#2447). ⚠️ A first draft hand-rolled a SECOND /proc/net/tcp parser
+  when `PortDiscovery.ts` already had a production-proven one; only the compiler's duplicate-identifier
+  error caught it. Recorded because the self-check missed it.
+- **B8 — context meter** (#2448). Compaction already ran silently, so a long session just seemed to get
+  worse. Uses PROVIDER-REPORTED tokens only — no count means no meter, because an estimate on a
+  user-facing gauge is the same dishonesty the billing law forbids. Percentage only (a window size would
+  leak which engine ran).
+
+**Sprint 3 — the project's own rules.**
+- **C1 — per-project instruction file** (#2449). `NAVBHARATAI.md`, plus `AGENTS.md` / `CLAUDE.md` /
+  `.cursorrules` so an imported repo's existing rules work with nothing to convert. Injected into the
+  per-turn USER message, never the static system prompt — that is the cached prefix, and a per-project
+  block at its head would bust the cache for every workspace.
+- **C3 — `@file` scoping + picker** (#2450). Removes the SEARCH that starts every edit request (billed
+  tokens) and the wrong-file guess that follows it (billed twice). The picker claims only Arrow/Tab/Esc:
+  Enter already carries send/steer/newline logic that differs by lane, tier and device.
+- **C2 — `.navbharataiignore`** (#2451). A GUARD, not a prompt request. Sub-agents write files too, so the
+  guard is armed for them via a THUNK — the spawn factory is built before the file is read, and passing an
+  array would have silently disarmed every child, leaving a feature that looked present and protected
+  nothing. HONEST BOUNDARY recorded: it guards the AI's file tools, not the filesystem.
+
+**Also this session (before §8):** the Apple web sign-in root cause (#2428, config-only — see the entry
+above), the iOS splash logo (#2421) and the React chunk split (#2426).
+
+**Next.** §8G says "then re-assess", and the roadmap's own words are that evidence beats the document.
+The right next input is a REAL build report from v5.0 rather than starting Sprint 4 blind — per the fifth
+absolute rule, a real run is the highest-signal evidence available. Fresh `.aab` + `.ipa` triggered from
+`main`, since B1/B2/B5/B8/C3 are frontend changes and the mobile shells are bundled.

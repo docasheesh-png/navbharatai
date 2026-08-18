@@ -35051,3 +35051,26 @@ single biggest lever on real build TIME, now closed at the source.
 ⏭️ tests scaffolded-not-run, no journey (a piano saves nothing) · ❌ 5 unresolved (shipped not-typechecking, design
 D/50, phantom `"stores"` dep, empty catch, aria-labels) · 🥵 the two hung calls above. The engine stayed HONEST
 throughout (YELLOW gate, honest "TS errors remain" line, honest vuln advisory) — this is a SPEED bug, not an honesty one.
+
+---
+
+## 2026-08-18 — Phantom baseUrl-alias dependency guard (the `"stores"` dep from autopsy a487e019)
+
+Second fix from the piano-build autopsy (admin: "sab fix karo"). The review flagged a `"stores"` entry in the
+built app's package.json that is not a real npm package. Root cause (verified in code, NOT a template leftover
+as the review guessed): the scaffold sets **`baseUrl:"src"`**, so a model that writes
+`import { useStore } from 'stores/useStore'` sees a LOCAL path (`src/stores/useStore`) but sometimes ALSO lists
+`"stores"` in `dependencies` — confusing the local alias FOLDER for an npm package. `npm install` then chases
+a package that does not exist. Same class as the `md`-package bug already in `DependencyReconciler.ts`, the
+other direction (declared-but-local vs imported-but-undeclared).
+
+**Fix — safe by construction.** `phantomAliasDependencies(files)` (pure, +tests) names a declared dep ONLY when
+BOTH hold: (a) the project declares `baseUrl:"src"`, AND (b) a `src/<name>/` **folder** exists in the file map.
+With `baseUrl:"src"`, `<name>/x` resolves to `src/<name>/x` locally, so that declared package is provably
+UNREACHABLE — removing it can only fix, never break. A real package is never removed (it has no same-named local
+source folder). A bare file `src/utils.ts` is NOT treated as a folder, so `utils` is never mis-flagged.
+`removeDependenciesFromPackageJson` prunes them (never throws; preserves formatting).
+
+Wired into the EXISTING best-effort package.json rewrite (`agentv3.ts` ~8426, the pass that already ADDS missing
+deps via `applyWellKnownMissingDeps`) — same write, now add-and-prune in one pass, with honest narration. It runs
+in the guardian's try/catch so it can never block a build. +9 tests. Gate: `tsc -p tsconfig.server.json` clean.

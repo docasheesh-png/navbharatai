@@ -159,3 +159,70 @@ export function findMissingDependencies(files: Record<string, string>): string[]
   }
   return [...missing].sort();
 }
+
+/** True when the project's tsconfig/jsconfig declares `baseUrl: "src"` (or "./src" / "src/"). Regex, not
+ *  JSON.parse — a tsconfig may carry comments/trailing commas that JSON.parse rejects. PURE. */
+function hasSrcBaseUrl(files: Record<string, string>): boolean {
+  const key = Object.keys(files ?? {}).find((p) => /(^|\/)(?:tsconfig|jsconfig)(?:\.[\w-]+)?\.json$/i.test(p));
+  return !!key && /"baseUrl"\s*:\s*"\.?\/?src\/?"/.test(files[key] ?? '');
+}
+
+/** Top-level FOLDER names directly under a `src/` root (a folder = it has children), e.g. `src/stores/x.ts`
+ *  → "stores". A bare file `src/utils.ts` is NOT a folder, so `utils` is never returned — that keeps the
+ *  phantom check to names that are provably local alias DIRECTORIES. PURE. */
+function srcTopLevelFolders(files: Record<string, string>): Set<string> {
+  const out = new Set<string>();
+  for (const p of Object.keys(files ?? {})) {
+    const m = /(?:^|\/)src\/([^/]+)\/.+/.exec(p);
+    if (m) out.add(m[1]);
+  }
+  return out;
+}
+
+/**
+ * Dependencies declared in package.json that are actually LOCAL `baseUrl:"src"` alias FOLDERS — the
+ * phantom-dependency class (autopsy build a487e019, 2026-08-18: a piano shipped a `"stores"` dep that is
+ * not a real npm package). The scaffold sets `baseUrl:"src"`, so the model that writes
+ * `import { useStore } from 'stores/useStore'` sees a LOCAL path (`src/stores/useStore`) but sometimes
+ * ALSO lists `"stores"` in `dependencies`. With `baseUrl:"src"`, `stores/x` resolves to `src/stores/x`
+ * locally, so that declared package is provably UNREACHABLE — and `npm install` then chases a package
+ * that does not exist. Removing it can only ever fix, never break. The sibling of the `md`-package bug
+ * above (this is the other direction: declared-but-local, not imported-but-undeclared).
+ *
+ * SAFE BY CONSTRUCTION — a name is flagged only when BOTH hold: (a) the project declares `baseUrl:"src"`,
+ * AND (b) a `src/<name>/` FOLDER exists in the file map. A real npm package is never removed because a
+ * real package does not have a same-named local source folder shadowing it under baseUrl. PURE.
+ */
+export function phantomAliasDependencies(files: Record<string, string>): string[] {
+  const pkgJsonKey = Object.keys(files ?? {}).find((p) => p === 'package.json' || p.endsWith('/package.json'));
+  if (!pkgJsonKey) return [];
+  const declared = declaredDependencies(files[pkgJsonKey]);
+  if (declared.size === 0 || !hasSrcBaseUrl(files)) return [];
+  const folders = srcTopLevelFolders(files);
+  return [...declared].filter((name) => folders.has(name)).sort();
+}
+
+/**
+ * Remove the given dependency names from a package.json's `dependencies`/`devDependencies`, preserving
+ * two-space formatting + trailing newline. Returns the ORIGINAL string unchanged when nothing matched or
+ * the JSON is unparseable (best-effort — a package.json edit must never throw in a build). PURE.
+ */
+export function removeDependenciesFromPackageJson(pkgRaw: string, names: readonly string[]): string {
+  if (!pkgRaw || names.length === 0) return pkgRaw;
+  const drop = new Set(names);
+  let pkg: Record<string, unknown>;
+  try { pkg = JSON.parse(pkgRaw) as Record<string, unknown>; } catch { return pkgRaw; }
+  if (!pkg || typeof pkg !== 'object') return pkgRaw;
+  let changed = false;
+  for (const section of ['dependencies', 'devDependencies', 'peerDependencies'] as const) {
+    const group = pkg[section];
+    if (group && typeof group === 'object') {
+      for (const name of Object.keys(group as Record<string, unknown>)) {
+        if (drop.has(name)) { delete (group as Record<string, unknown>)[name]; changed = true; }
+      }
+    }
+  }
+  if (!changed) return pkgRaw;
+  const trailingNl = /\n$/.test(pkgRaw) ? '\n' : '';
+  return JSON.stringify(pkg, null, 2) + trailingNl;
+}

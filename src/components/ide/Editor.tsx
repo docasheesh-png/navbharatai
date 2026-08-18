@@ -399,7 +399,12 @@ export const Editor: React.FC<EditorProps> = React.memo(({
       )}
 
       {/* Editor — Monaco when available; plain textarea on mobile or if Monaco can't load */}
-      {!isBinaryFile && <div className="flex-1 overflow-hidden relative">
+      {/* min-h-0 for the same reason as the file list: a flex-1 child in a `flex flex-col h-full`
+          needs it so the item can shrink to the available height instead of being floored at its
+          content height by the default `min-height:auto`. Without it, on a small screen the editor
+          area is pushed to full content height and the mobile textarea / Monaco can't scroll within
+          the visible pane. Locked by Editor.scroll.test.tsx. */}
+      {!isBinaryFile && <div className="flex-1 min-h-0 overflow-hidden relative">
         {useTextarea ? (
           <textarea
             value={content}

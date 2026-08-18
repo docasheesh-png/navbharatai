@@ -1,5 +1,86 @@
 import { describe, it, expect } from 'vitest';
-import { packageNameFromSpecifier, extractImportedPackages, findMissingDependencies } from './DependencyReconciler';
+import { packageNameFromSpecifier, extractImportedPackages, findMissingDependencies, phantomAliasDependencies, removeDependenciesFromPackageJson } from './DependencyReconciler';
+
+// THE PHANTOM DEPENDENCY (autopsy build a487e019, 2026-08-18). The scaffold sets baseUrl:"src", so a model
+// that writes `import { useStore } from 'stores/useStore'` sees a LOCAL path (src/stores/useStore) but
+// sometimes ALSO lists "stores" in package.json dependencies — a package that does not exist. With
+// baseUrl:"src" that declared package is provably unreachable, so it is safe to remove.
+describe('phantomAliasDependencies — declared deps that are actually local baseUrl:"src" folders', () => {
+  const TSCONFIG = JSON.stringify({ compilerOptions: { baseUrl: 'src' } });
+
+  it('flags the reported "stores" case: a src/stores/ folder + "stores" in deps', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { react: '^18', stores: '^1.0.0' } }),
+      'tsconfig.json': TSCONFIG,
+      'src/stores/useStore.ts': 'export const useStore = () => {};',
+      'src/App.tsx': "import { useStore } from 'stores/useStore';",
+    };
+    expect(phantomAliasDependencies(files)).toEqual(['stores']);
+  });
+
+  it('flags every alias folder that leaked into deps, sorted', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { types: '*', components: '1.0.0', react: '^18' } }),
+      'tsconfig.json': TSCONFIG,
+      'src/types/index.ts': 'export type X = 1;',
+      'src/components/Button.tsx': 'export const Button = () => null;',
+    };
+    expect(phantomAliasDependencies(files)).toEqual(['components', 'types']);
+  });
+
+  it('does NOT flag a real package that has no same-named src folder', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { zustand: '^4', react: '^18' } }),
+      'tsconfig.json': TSCONFIG,
+      'src/stores/useStore.ts': "import { create } from 'zustand';",
+    };
+    expect(phantomAliasDependencies(files)).toEqual([]);
+  });
+
+  it('does NOTHING without baseUrl:"src" — the alias assumption must be proven', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { stores: '^1' } }),
+      'tsconfig.json': JSON.stringify({ compilerOptions: { baseUrl: '.' } }),
+      'src/stores/x.ts': 'export const x = 1;',
+    };
+    expect(phantomAliasDependencies(files)).toEqual([]);
+  });
+
+  it('does not flag a bare FILE (src/utils.ts) as a folder alias — folders only', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { utils: '^1' } }),
+      'tsconfig.json': TSCONFIG,
+      'src/utils.ts': 'export const u = 1;', // a file, not a folder — never flagged
+    };
+    expect(phantomAliasDependencies(files)).toEqual([]);
+  });
+
+  it('is junk-safe (no package.json / no deps / empty)', () => {
+    expect(phantomAliasDependencies({})).toEqual([]);
+    expect(phantomAliasDependencies({ 'package.json': '{ not json', 'tsconfig.json': TSCONFIG })).toEqual([]);
+  });
+});
+
+describe('removeDependenciesFromPackageJson', () => {
+  it('removes the named deps from every section, keeps formatting', () => {
+    const raw = JSON.stringify({ dependencies: { react: '^18', stores: '^1' }, devDependencies: { vite: '^5' } }, null, 2) + '\n';
+    const out = removeDependenciesFromPackageJson(raw, ['stores']);
+    const pkg = JSON.parse(out);
+    expect(pkg.dependencies).toEqual({ react: '^18' });
+    expect(pkg.devDependencies).toEqual({ vite: '^5' });
+    expect(out.endsWith('\n')).toBe(true);
+  });
+
+  it('returns the input UNCHANGED when nothing matched or names is empty', () => {
+    const raw = JSON.stringify({ dependencies: { react: '^18' } });
+    expect(removeDependenciesFromPackageJson(raw, [])).toBe(raw);
+    expect(removeDependenciesFromPackageJson(raw, ['stores'])).toBe(raw);
+  });
+
+  it('never throws on unparseable JSON', () => {
+    expect(removeDependenciesFromPackageJson('{ not json', ['x'])).toBe('{ not json');
+  });
+});
 
 describe('packageNameFromSpecifier — resolve an import to the installable package name', () => {
   it('keeps scoped packages, collapsing deep sub-paths', () => {

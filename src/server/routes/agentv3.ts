@@ -312,7 +312,7 @@ import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } f
 import { userStorageContext } from '../AgentV3/userStorageContext';
 import { userAuthContext } from '../AgentV3/userAuthContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
-import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
+import { findMissingDependencies, phantomAliasDependencies, removeDependenciesFromPackageJson } from '../AgentV3/DependencyReconciler';
 import { ensureViteReactFoundation, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
@@ -8463,12 +8463,24 @@ export function registerAgentV3Routes(app: Express): void {
               }
               if (typeof union['package.json'] === 'string') {
                 const depRes = applyWellKnownMissingDeps(union);
-                if (depRes.added.length) {
-                  const newPkg = depRes.files['package.json'];
-                  await writeWorkspaceFiles(actuator, workspaceId, { 'package.json': newPkg });
-                  await mergeWorkspaceFiles(workspaceId, { 'package.json': newPkg }).catch(() => {});
+                // ADD missing deps AND PRUNE phantom baseUrl:"src" alias deps in the SAME rewrite (autopsy
+                // a487e019: a piano shipped a `"stores"` dep that is not a real npm package — the model
+                // read the scaffold's `import from 'stores/x'` alias and listed the local folder as an npm
+                // package). phantomAliasDependencies is safe-by-construction — it only names a dep whose
+                // `src/<name>/` folder exists under a declared `baseUrl:"src"`, i.e. one that is provably
+                // unreachable as a package, so removing it can never break the app.
+                const afterAdd = depRes.added.length ? depRes.files['package.json'] : union['package.json'];
+                const phantoms = phantomAliasDependencies(union);
+                const finalPkg = phantoms.length ? removeDependenciesFromPackageJson(afterAdd, phantoms) : afterAdd;
+                const pruned = phantoms.length > 0 && finalPkg !== afterAdd;
+                if (depRes.added.length || pruned) {
+                  await writeWorkspaceFiles(actuator, workspaceId, { 'package.json': finalPkg });
+                  await mergeWorkspaceFiles(workspaceId, { 'package.json': finalPkg }).catch(() => {});
                   state.recordFileChange({ path: 'package.json', kind: 'modify' }, 'architect');
-                  events.emit({ type: 'narration', agent: 'architect', text: `🔧 Added ${depRes.added.length} missing dependency(ies) to package.json (${depRes.added.map((d) => d.package).join(', ')}) so the app installs and runs.`, ts: Date.now() });
+                  const parts: string[] = [];
+                  if (depRes.added.length) parts.push(`added ${depRes.added.length} missing dependency(ies) (${depRes.added.map((d) => d.package).join(', ')})`);
+                  if (pruned) parts.push(`removed ${phantoms.length} phantom local-alias dependency(ies) (${phantoms.join(', ')}) that npm cannot install`);
+                  events.emit({ type: 'narration', agent: 'architect', text: `🔧 In package.json: ${parts.join(' and ')} — so the app installs and runs cleanly.`, ts: Date.now() });
                 }
               }
             } catch { /* best-effort — the readiness-pass reconcile still backstops */ }

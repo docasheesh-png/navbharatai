@@ -426,7 +426,7 @@ checkpoints + restore, Git panel, todo list, transcript compaction, deploy/previ
 | # | Item | Audit ref | Where | Notes |
 |---|---|---|---|---|
 | A1 | ✅ **DONE 2026-08-18 (#TBD)** — mid-build steering open to every tier | major 6 | `steerAllowedForBuild` + `canSteerMidBuild` | Ungated at BOTH ends via one predicate each, `STEER_QUEUE_MAX = 5` cap (the runner injects the whole queue in one turn, so unbounded queue = unbounded prompt), honest 429 over the cap. Team HQ card stays `'max'`-only — that is the real premium. Revert: `AGENTV3_STEER_ALL_TIERS=off`. |
-| A2 | **Wire the real shell into v5's Terminal** | major 1, minor 21 | `AgentV3Panel.tsx:4307` renders a read-only log; `ide/ShellTerminal.tsx` is the real PTY | Split the tab: AI log on top, live shell below. No new backend — routes `/shell/*` already exist and are owner-checked + rate-limited. ⚠️ Decide the sandbox-time billing question first (see 8F). |
+| A2 | ✅ **DONE 2026-08-18 (#TBD)** — real shell in v5's Terminal | major 1, minor 21 | Tab SPLIT: build log on top, real PTY below (lazy — xterm must never reach first paint). 8F.1 answered by the admin: **free, 30 min/day**. `AgentV3/terminalQuota.ts` + `TerminalUsageStore.ts`; gate on `/shell/open`, accrual WHILE attached (metering only on close is bypassable by shutting the tab) with a final tick on disconnect. Quota events are WRITTEN INTO the terminal — a session that just stops is indistinguishable from a broken one. `AGENTV3_TERMINAL_DAILY_MINUTES` tunes it; an EMPTY value means unset, not 0. |
 | A3 | ✅ **DONE 2026-08-18 (#TBD)** — `web_fetch` tool | major 7 | `AgentV3/webFetch.ts` + catalog + dispatcher | Reads ONE user-supplied URL. SSRF defence REUSES `lib/ssrfGuard.ts` (not a second copy): scheme check, hostname denylist, every resolved A/AAAA must be public, `redirect: 'error'`, 2 MB cap enforced while STREAMING (never from `content-length`), 15s timeout, 30k-char output cap that says when it truncated. Residual DNS-rebinding risk documented in the module, not papered over. |
 | A4 | ✅ **DELIVERED BY A1 2026-08-18** — nothing left to build | minor 2 | same composer + `/steer` queue | A1 shipped the whole path: the composer stays live during a build on every tier, the message queues server-side (cap 5), and the runner injects it at the next step. Re-check before writing any code here — this row is why. |
 | A5 | **Edit a past message and re-run from it** | minor 1 | `AgentV3Panel.tsx`; pattern exists in `ProfessionalChat.tsx:146` | Copy the existing rewind-the-transcript approach. Must refuse while a turn is in flight. |
@@ -510,11 +510,11 @@ an `AppKnowledgeBase.ts` entry (user-facing capability change).
 
 ### 8F · 🔒 DECISIONS THE ADMIN MUST MAKE FIRST (not a session's call)
 
-1. **A2 blocks on a money decision.** A user-facing shell holds a billed E2B VM (~₹7/hr, measured), and
-   sandbox time is billed to the user only for BUILD seconds (`agentv3.ts:1225`,
-   `Math.min(seconds, buildSeconds)`). Terminal time is absorbed by NavBharatAI today. Three options:
-   bill terminal time like build time · keep it free with a per-day cap · paid tiers only. **Do not ship
-   A2 until this is chosen** — an uncapped shell on our account is a crypto-miner invitation.
+1. ✅ **A2's money decision — ANSWERED by the admin 2026-08-18: free, with a 30-minute daily cap.**
+   (A user-facing shell holds a billed E2B VM, ~₹7/hr measured, and terminal time is absorbed by
+   NavBharatAI.) Shipped as `AGENTV3_TERMINAL_DAILY_MINUTES`, default 30. The cap is what converts an
+   unbounded liability — a tab open around the clock is ~₹5,000/month, a miner is worse — into a known
+   small one, while keeping the terminal free to open.
 2. **D1 write access.** Read-only browsing is safe. Letting a user run writes against their own
    production database needs an explicit confirmation design.
 3. **E2 team pricing.** Multi-user changes the billing model; not a code decision.

@@ -346,6 +346,7 @@ import { makeFirstPaintHandler } from '../AgentV3/streamingFirstPaint';
 import { buildRuntimeLogCommand, parseRuntimeLogOutput, runtimeLogGapNotice } from '../AgentV3/runtimeLogs';
 import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeServiceStatus, extraPorts, portsSummary } from '../AgentV3/portsPanel';
 import { findProjectInstructionPath, normalizeProjectInstructions, projectInstructionsBlock, projectInstructionsNotice } from '../AgentV3/projectInstructions';
+import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '../AgentV3/fileMentions';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
 import { abortBuild } from '../AgentV3/buildAbortCause';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
@@ -9476,6 +9477,17 @@ export function registerAgentV3Routes(app: Express): void {
         // something unasked. Deliberately in the per-turn USER message, never the static system prompt:
         // that prompt is the cached prefix (AGENTV3_CACHE_PREFIX), and a per-project block at its head
         // would bust the cache for every workspace and make every build more expensive.
+        // C3 — files the user named with `@`. Removes the SEARCH that otherwise starts every edit
+        // request (billed tokens) and the wrong-file guess that follows it (billed twice). Resolved
+        // against the REAL tree, so a mention is a checked claim, never a path we invented; anything we
+        // could not find is told to the user rather than silently dropped, because a dropped mention is
+        // indistinguishable from the AI ignoring what they asked for.
+        const mentions = parseFileMentions(prompt, tree);
+        const mentionBlock = fileMentionsBlock(mentions);
+        if (mentionBlock) buildPrompt = `${mentionBlock}\n\n---\n\n${buildPrompt}`;
+        const missNotice = unresolvedMentionsNotice(mentions);
+        if (missNotice) events.emit({ type: 'narration', agent: 'architect', text: missNotice, ts: Date.now() });
+
         const instrPath = findProjectInstructionPath(tree);
         if (instrPath) {
           const instr = normalizeProjectInstructions(instrPath, await actuator.readFile(workspaceId, instrPath).catch(() => ''));

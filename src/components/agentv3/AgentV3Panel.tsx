@@ -66,6 +66,7 @@ import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './full
 import { useRuntimeLogs } from '../../hooks/useRuntimeLogs';
 import { checkpointDisplayName } from '../../lib/checkpointLabel';
 import { useAppServices } from '../../hooks/useAppServices';
+import { activeMentionQuery, rankMentionSuggestions, applyMentionSuggestion } from '../../lib/fileMentionPicker';
 import { runtimeLogEmptyMessage } from '../../lib/runtimeLogBuffer';
 import { db, sanitizeFirestoreData } from '../../App';
 
@@ -295,6 +296,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setLabelError('Network error — that name was not saved.');
     }
   }, [labelDraft, state.workspaceId, userId, email, applyCheckpointLabel]);
+  // C3 — the `@` file picker. View state only; every rule lives in lib/fileMentionPicker.ts so it is
+  // unit-tested rather than verified by typing into a live build.
+  const [mentionCaret, setMentionCaret] = useState(0);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  const mentionQuery = mentionDismissed ? null : activeMentionQuery(prompt, mentionCaret);
+  const mentionSuggestions = mentionQuery ? rankMentionSuggestions(state.files.map((f) => f.path), mentionQuery.query) : [];
+  const mentionOpen = mentionSuggestions.length > 0;
+  const acceptMention = useCallback((path: string) => {
+    if (!mentionQuery) return;
+    const next = applyMentionSuggestion(prompt, mentionQuery, path);
+    setPrompt(next.text);
+    setMentionCaret(next.caret);
+    setMentionIndex(0);
+    // Restore the caret after React re-renders the textarea, or it jumps to the end of the message.
+    requestAnimationFrame(() => {
+      const el = composerRef.current;
+      if (el) { el.focus(); el.setSelectionRange(next.caret, next.caret); }
+    });
+  }, [mentionQuery, prompt]);
   const [previewEverOpened, setPreviewEverOpened] = useState(false);
   useEffect(() => {
     if (previewVisible(showWorkspace, tab)) setPreviewEverOpened(true);
@@ -4204,6 +4225,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 </div>
               )}
               <div className="relative w-full order-1" data-tour="chat">
+                {/* C3 — the @ file picker. Naming the file removes the SEARCH that otherwise starts
+                    every edit request (billed tokens) and the wrong-file guess that follows it. */}
+                {mentionOpen && (
+                  <div className="absolute bottom-full mb-1 left-0 right-0 z-20 max-h-56 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-lg">
+                    {mentionSuggestions.map((path, i) => (
+                      <button
+                        key={path}
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); acceptMention(path); }}
+                        onMouseEnter={() => setMentionIndex(i)}
+                        className={`w-full text-left px-2 py-1 text-xs truncate ${i === mentionIndex ? 'bg-indigo-600/30 text-white' : 'text-zinc-300 hover:bg-zinc-800'}`}
+                      >
+                        {path}
+                      </button>
+                    ))}
+                    <div className="px-2 py-1 text-[10px] text-zinc-500 border-t border-zinc-800">Tab to insert · Esc to close</div>
+                  </div>
+                )}
                 <textarea
                   ref={composerRef}
                   className={`w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-3 pr-16 py-1 text-sm resize-none focus:outline-none focus:border-indigo-500 overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}
@@ -4218,7 +4257,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       : 'Type…'
                   }
                   value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
+                  onChange={(e) => {
+                    setPrompt(e.target.value);
+                    // C3 — track the caret so the picker knows whether it sits inside an @mention.
+                    setMentionCaret(e.target.selectionStart ?? e.target.value.length);
+                    setMentionDismissed(false);
+                    setMentionIndex(0);
+                  }}
+                  onSelect={(e) => setMentionCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
                   onPaste={(e) => {
                     const imgs = (Array.from(e.clipboardData.items) as DataTransferItem[])
                       .filter((it) => it.type.startsWith('image/'))
@@ -4227,6 +4273,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     if (imgs.length > 0) { e.preventDefault(); setFiles((prev) => [...prev, ...imgs].slice(0, 8)); }
                   }}
                   onKeyDown={(e) => {
+                    // C3 — the @ picker claims ONLY Arrow/Tab/Escape, and only while it is open.
+                    // Enter is deliberately left alone: it already carries send / steer / newline logic
+                    // that differs by lane, tier and device, and quietly changing it to "accept
+                    // suggestion" would be a much worse bug than having to press Tab.
+                    if (mentionOpen) {
+                      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex((i) => (i + 1) % mentionSuggestions.length); return; }
+                      if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIndex((i) => (i - 1 + mentionSuggestions.length) % mentionSuggestions.length); return; }
+                      if (e.key === 'Tab') { e.preventDefault(); acceptMention(mentionSuggestions[mentionIndex] ?? mentionSuggestions[0]); return; }
+                      // Escape closes the picker FIRST — a user dismissing a menu does not expect it to
+                      // stop their build (which is what the next line does).
+                      if (e.key === 'Escape') { e.preventDefault(); setMentionDismissed(true); return; }
+                    }
                     // U7 (audit): Esc stops a running build from the composer.
                     if (e.key === 'Escape' && running) { e.preventDefault(); stop(); return; }
                     // Fix 60 — Full Team steering: while a 'max'-tier build runs, Enter sends the

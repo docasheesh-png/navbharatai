@@ -7,7 +7,7 @@ import { saveSecret, listSecrets } from '../../lib/secretsApi';
 // cannot drift into two behaviours. Lazy because most sessions never open it.
 const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ default: m.SecretManager })));
 import {
-  Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
+  Bot, Send, Square, Loader2, Terminal, ScrollText, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye,
   Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
@@ -63,6 +63,8 @@ import { resolveFrameworkSelection } from '../../lib/frameworkDetect';
 import { PreviewSurface } from './PreviewSurface';
 import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './fullTeam';
+import { useRuntimeLogs } from '../../hooks/useRuntimeLogs';
+import { runtimeLogEmptyMessage } from '../../lib/runtimeLogBuffer';
 import { db, sanitizeFirestoreData } from '../../App';
 
 /** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
@@ -78,7 +80,7 @@ import { authJsonHeaders } from '../../lib/authHeaders';
  * files, diff, terminal, git) update live alongside. All activity is REAL engine
  * output — nothing is a scripted animation.
  */
-type SurfaceTab = 'preview' | 'files' | 'diff' | 'terminal' | 'history';
+type SurfaceTab = 'preview' | 'files' | 'diff' | 'terminal' | 'logs' | 'history';
 interface ChatMsg {
   role: 'user' | 'agent';
   agent?: string;
@@ -224,6 +226,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // PreviewSurface (and the iframe inside) stays mounted for the whole session — hidden via CSS on
   // other tabs — so switching tabs / going back to chat never destroys the rendered preview. The
   // first mount stays lazy so a session that never opens Preview never pays its compile/boot cost.
+  // B1 — the App Logs pane polls ONLY while it is the visible tab. That `active` argument is the whole
+  // cost control: the log lives in a billed sandbox, so a closed pane must cost exactly zero requests.
+  const logsActive = showWorkspace && tab === 'logs';
+  const runtimeLogs = useRuntimeLogs(state.workspaceId ?? null, userId, email, logsActive);
+  const logPaneRef = useRef<HTMLPreElement>(null);
+  // Follow the tail like a real log viewer — but only when the user is already AT the bottom, so
+  // scrolling up to read an error is never yanked away by the next poll.
+  useEffect(() => {
+    const el = logPaneRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  }, [runtimeLogs.text]);
   const [previewEverOpened, setPreviewEverOpened] = useState(false);
   useEffect(() => {
     if (previewVisible(showWorkspace, tab)) setPreviewEverOpened(true);
@@ -3160,6 +3175,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <TabPill active={showWorkspace && tab === 'files'} onClick={() => openTab('files')} icon={<FolderOpen className="w-3.5 h-3.5" />}>Files ({state.files.length})</TabPill>
           <TabPill active={showWorkspace && tab === 'diff'} onClick={() => openTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabPill>
           <TabPill active={showWorkspace && tab === 'terminal'} onClick={() => openTab('terminal')} icon={<Terminal className="w-3.5 h-3.5" />}>Terminal</TabPill>
+          {/* B1 — the user's OWN app's runtime log. Distinct from Terminal, which is the AI's build
+              log: this is what THEIR server printed. It polls only while this tab is open (billed VM). */}
+          <TabPill active={showWorkspace && tab === 'logs'} onClick={() => openTab('logs')} icon={<ScrollText className="w-3.5 h-3.5" />}>App Logs</TabPill>
           <TabPill active={showWorkspace && tab === 'history'} onClick={() => openTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({allCheckpoints.length})</TabPill>
           {/* Report to admin (admin 2026-07-29): the report itself stays admin-only — the user submits
               it and never sees the content. Since 2026-08-04 clicking it first asks WHICH build, so a
@@ -4359,6 +4377,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               {tab === 'terminal' && (state.terminal.length === 0 ? <Empty>No terminal output yet.</Empty> : (
                 <pre className="whitespace-pre-wrap text-zinc-300">{state.terminal.join('\n')}</pre>
               ))}
+              {/* B1 — APP LOGS: what the user's own server printed, live. Empty is never a blank pane:
+                  runtimeLogEmptyMessage says which of "never built" / "not running" / "running but
+                  silent" it is, because those three look identical and mean completely different things. */}
+              {tab === 'logs' && (
+                <div className="space-y-2">
+                  {runtimeLogs.notice && (
+                    <div className="text-[11px] text-amber-300/90 border border-amber-700/40 bg-amber-950/30 rounded px-2 py-1">
+                      {runtimeLogs.notice}
+                    </div>
+                  )}
+                  {runtimeLogs.text
+                    ? <pre ref={logPaneRef} className="whitespace-pre-wrap text-zinc-300 max-h-[60vh] overflow-y-auto">{runtimeLogs.text}</pre>
+                    : <Empty>{runtimeLogEmptyMessage(runtimeLogs.status, runtimeLogs.hasLog)}</Empty>}
+                </div>
+              )}
               {tab === 'history' && (
                 <div className="space-y-2">
                   {/* Restore the WHOLE project at once — a real restore (files written back into the
@@ -4478,6 +4511,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <button onClick={() => openSurfaceFromFooter('terminal')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
                   <Terminal className="w-4 h-4 shrink-0 text-zinc-400" />
                   <span className="flex-1 text-left">Terminal</span>
+                </button>
+                {/* B1 — App Logs on mobile too: a phone user hits a broken backend exactly as often. */}
+                <button onClick={() => openSurfaceFromFooter('logs')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
+                  <ScrollText className="w-4 h-4 shrink-0 text-zinc-400" />
+                  <span className="flex-1 text-left">App Logs</span>
                 </button>
                 {/* ANOTHER DOOR TO THE SAME ROOM (admin 2026-08-17: "ek room ke kayi gate").
                     The keys an app needs are supplied here and in Settings → App Settings → Secrets &

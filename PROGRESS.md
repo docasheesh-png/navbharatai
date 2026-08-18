@@ -35134,3 +35134,48 @@ above), the iOS splash logo (#2421) and the React chunk split (#2426).
 The right next input is a REAL build report from v5.0 rather than starting Sprint 4 blind — per the fifth
 absolute rule, a real run is the highest-signal evidence available. Fresh `.aab` + `.ipa` triggered from
 `main`, since B1/B2/B5/B8/C3 are frontend changes and the mobile shells are bundled.
+
+## 2026-08-18 (later) — A2 shipped: a real terminal in v5, free with a 30-minute daily cap
+
+**The admin answered §8F.1** ("terminal ka paisa — free rakhein par roz 30 minute limit"), which was the
+one thing blocking the last item on the §8 board. Their call, correctly: opening a terminal should not
+feel expensive, and the cap is what converts an unbounded liability into a known small one — a shell
+holds a BILLED E2B VM (~₹7/hr measured) whose time NavBharatAI absorbs, so one tab left open around the
+clock is ~₹5,000/month and a miner is worse.
+
+**The shell already existed** (`ShellTerminal` + owner-checked, rate-limited `/shell/*` routes) and was
+reachable only from Code Studio. So the work was the quota plus the wiring: the Terminal tab is now SPLIT
+— build log on top, real PTY below, lazy-loaded so xterm never reaches first paint (largest chunk moved
+605.1 → 605.4 KB, i.e. it stayed lazy).
+
+**Four decisions worth keeping:**
+1. **Accrual happens WHILE ATTACHED, not only on close.** Most people shut the tab rather than clicking
+   close, so metering on close alone would make the cap bypassable *by doing nothing*. A final tick lands
+   on disconnect. Honest limit recorded in the module: an abrupt disconnect loses at most one tick, so it
+   UNDER-counts — under-counting costs us a little, over-counting would charge somebody for time they
+   never spent, which the billing law forbids outright.
+2. **The quota is WRITTEN INTO the terminal**, not merely enforced. A session that just stops responding
+   is indistinguishable from a broken one; the user would conclude the feature is broken rather than that
+   they used it up. Warning in the last five minutes; the refusal says when it resets and that their app
+   and files are untouched.
+3. **Its own store, not a bucket on `ToolUsageStore`** — that one counts ACTIONS, this counts SECONDS, and
+   a `count` field meaning both would depend on which caller you happened to be reading. What genuinely is
+   one concept (`istDayKey`) is imported rather than re-derived. Reads fail OPEN; the increment is a
+   TRANSACTION, because several tabs on one account would otherwise overwrite each other's accruals and
+   quietly hand out unlimited time.
+4. ⚠️ **An empty `AGENTV3_TERMINAL_DAILY_MINUTES` means UNSET, not zero.** `Number('')` is 0 — finite and
+   non-negative — so the obvious implementation turns a key set with no value in Cloud Run into a SILENT
+   total shutdown of the terminal for every user, with nothing in the logs to explain it. Caught by its
+   own test; only a deliberate "0" switches it off.
+
+Metered against the VERIFIED identity (a gate a caller can spoof by editing a request body is
+decoration); the admin free-list stays unmetered.
+
+**§8 is now clear:** A1, A2, A3, B1, B5, B2, B8, C1, C3, C2 all shipped today, with A4 found already
+delivered by A1. What remains in §8 is the material the roadmap itself marks 🟡 defer or 🚫 non-goal, plus
+Sprint 4 (E1, E3) — and §8G's own instruction at this point is to re-assess against real usage rather than
+keep building. The next input should be a real v5.0 build report (fifth absolute rule): ten changes are
+live and none of them has real-world evidence yet.
+
+**Admin-side items still open:** the Apple Service ID return URL (open root cause, config-only), and the
+Play Console upload. Fresh `.aab` + `.ipa` triggered from `main`.

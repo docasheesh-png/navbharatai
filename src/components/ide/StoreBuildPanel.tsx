@@ -3,7 +3,7 @@ import { chargeReceipt, chargeHint, readChargeHeaders, APK_PRICE_INR } from '../
 import { PublishToNavStore } from './PublishToNavStore';
 import {
   Loader2, Github, Download, CheckCircle2, AlertTriangle, ExternalLink,
-  Rocket, Key, RefreshCw, Wrench,
+  Rocket, Key, RefreshCw, Wrench, FileJson, CircleStop,
 } from 'lucide-react';
 import { authedHeaders } from '../../App';
 // The workflow filenames come from the ONE shared registry the server's dispatch allow-list also reads.
@@ -64,6 +64,15 @@ interface RunInfo {
 }
 
 interface Artifact { id: number; name: string; sizeBytes: number }
+
+/** The failure half of the server's build report — what the panel shows when a build dies. */
+interface ReportFailure {
+  whatStopped: string;
+  stage: string | null;
+  why: string;
+  logExcerpt: string[];
+}
+interface BuildReportLite { failure: ReportFailure | null }
 
 export interface StoreBuildPanelProps {
   /** Which of the user's apps to package. */
@@ -165,6 +174,13 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   const [downloading, setDownloading] = useState('');
   /** What the last download cost — shown in plain words so a charge is never silent. */
   const [chargeNote, setChargeNote] = useState('');
+  // STOP + BUILD REPORT (admin 2026-08-18: "bich me rokne ka koi button nahi hai… stop button banao;
+  // build report bhi chahiye; fail ho to pura likh kar aye, JSON me download ho").
+  const stopRef = useRef(false);
+  const [stopping, setStopping] = useState(false);
+  /** The failure half of the build report, fetched when a build dies, so the WHY is written in full. */
+  const [failReport, setFailReport] = useState<BuildReportLite | null>(null);
+  const [reportBusy, setReportBusy] = useState(false);
 
   const liveRef = useRef(true);
   useEffect(() => () => { liveRef.current = false; }, []);
@@ -235,6 +251,23 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   }, [setup, ghHeaders]);
 
   /**
+   * The full WHY of a failed build, from the server's build report — so the panel can write out what
+   * stopped it and show the real log lines, instead of a one-line summary. Best-effort: the short
+   * summary above it still stands if this cannot be read.
+   */
+  const fetchFailReport = useCallback(async (runId: number, kind: BuildKind) => {
+    if (!setup) return;
+    try {
+      const res = await fetch(
+        `/api/mobile-ship/report?owner=${encodeURIComponent(setup.owner)}&repo=${encodeURIComponent(setup.repo)}&runId=${runId}&workflow=${workflowFor(kind)}`,
+        { headers: await ghHeaders() },
+      );
+      const data = await res.json().catch(() => null);
+      if (liveRef.current && data && 'failure' in data) setFailReport(data as BuildReportLite);
+    } catch { /* the one-line summary still stands */ }
+  }, [setup, ghHeaders]);
+
+  /**
    * THE WHOLE CYCLE, hands-off: start the build, watch it, and when it fails for a reason NavBharatAI
    * put there itself, fix it and start it again — all the user sees is the percentage climbing.
    *
@@ -267,7 +300,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       // iOS has no installable file to hand back; a green build goes to the user's TestFlight, so we ask
       // the workflow to upload there (Apple's rule). Android just builds the file.
       if (!(await dispatch(workflow, isIos(kind) ? { upload: 'true' } : undefined))) { if (liveRef.current) setPhase('ready'); return; }
-      if (!liveRef.current) return;
+      if (!liveRef.current || stopRef.current) return;
       setProgressNote('Building your app…');
 
       const startedAt = Date.now();
@@ -275,7 +308,8 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       const bumpProgress = (next: number) => setProgress((p) => Math.max(p, next)); // never go backward
       for (let i = 0; i < 150 && liveRef.current && !finished; i++) {
         await new Promise((r) => setTimeout(r, 5000));
-        if (!liveRef.current) return;
+        // The user pressed Stop: stopBuild owns the cancel and the UI — this watcher just stands down.
+        if (!liveRef.current || stopRef.current) return;
         try {
           const res = await fetch(
             `/api/mobile-ship/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&workflow=${workflow}`,
@@ -348,7 +382,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
       if (finished.conclusion !== 'failure') {
         setPhase('failed');
-        setError(`The build ended as "${finished.conclusion}".`);
+        setError(finished.conclusion === 'cancelled'
+          ? 'The build was stopped before it finished. Nothing was charged.'
+          : `The build ended as "${finished.conclusion}".`);
         return;
       }
 
@@ -356,6 +392,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       if (attempt === MAX_AUTO_ATTEMPTS - 1) {
         setPhase('failed');
         setError('NavBharatAI fixed what it could and tried again, but the build still did not finish.');
+        void fetchFailReport(finished.id, kind);
         return;
       }
       setProgressNote('Something went wrong — NavBharatAI is looking at it…');
@@ -372,6 +409,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
       if (!fix?.fixed) {
         setPhase('failed');
+        void fetchFailReport(finished.id, kind);
         if (fix?.report) setFixReport(fix.report);
         setError(
           // A missing signing key is the ONE failure that is genuinely the user's to resolve, and only
@@ -386,11 +424,14 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       }
       setProgressNote(`${fix.summary} NavBharatAI fixed it and is building again…`);
     }
-  }, [setup, ghHeaders, dispatch]);
+  }, [setup, ghHeaders, dispatch, fetchFailReport]);
 
   /** Step 2 — one press, and everything from here on happens on its own. */
   const build = useCallback((kind: BuildKind = 'apk') => {
     if (!setup) return;
+    stopRef.current = false;
+    setStopping(false);
+    setFailReport(null);
     setBuildKind(kind);
     setPhase('building');
     setError('');
@@ -405,6 +446,78 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     setProgressNote('Sending your app to be built…');
     void runCycle(kind);
   }, [setup, runCycle]);
+
+  /**
+   * STOP the build (admin 2026-08-18). A REAL stop: GitHub is told to cancel the run, so the machine
+   * genuinely stops — not a UI that merely looks away while the build burns on. If the run has not
+   * shown up in the list yet, the newest unfinished run is looked up and cancelled, so a stop pressed
+   * in the first seconds still lands. A stopped build was never successful, so it charges nothing.
+   */
+  const stopBuild = useCallback(async () => {
+    setStopping(true);
+    stopRef.current = true; // the watching cycle checks this and stands down
+    try {
+      if (setup) {
+        let runId: number | undefined = run?.id;
+        if (!runId) {
+          // The dispatch went out but the run has not been seen yet — find it so the stop is real.
+          const res = await fetch(
+            `/api/mobile-ship/runs?owner=${encodeURIComponent(setup.owner)}&repo=${encodeURIComponent(setup.repo)}&workflow=${workflowFor(buildKind)}`,
+            { headers: await ghHeaders() },
+          );
+          const data = await res.json().catch(() => null);
+          runId = ((data?.runs || []) as RunInfo[]).find((r) => r.status !== 'completed')?.id;
+        }
+        if (runId) {
+          await fetch('/api/mobile-ship/cancel', {
+            method: 'POST',
+            headers: await ghHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ owner: setup.owner, repo: setup.repo, runId }),
+          });
+        }
+      }
+    } catch { /* the wait still ends; an uncancelled run stops itself at the workflow's own timeout */ }
+    if (!liveRef.current) return;
+    setStopping(false);
+    setPhase('ready');
+    setProgress(0);
+    setSteps([]);
+    setProgressNote('');
+    setError('Build stopped. Nothing was charged — you can start it again any time.');
+  }, [setup, run, buildKind, ghHeaders]);
+
+  /**
+   * THE BUILD REPORT, as a file (admin 2026-08-18: "jisko json me download kiya ja sake"). Fetched
+   * fresh from the server so it always describes the run's final state, then handed to the browser as
+   * a .json download.
+   */
+  const downloadReport = useCallback(async () => {
+    if (!setup || !run) return;
+    setReportBusy(true);
+    try {
+      const res = await fetch(
+        `/api/mobile-ship/report?owner=${encodeURIComponent(setup.owner)}&repo=${encodeURIComponent(setup.repo)}&runId=${run.id}&workflow=${workflowFor(buildKind)}`,
+        { headers: await ghHeaders() },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(data?.error || 'Could not read the build report.');
+        return;
+      }
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${setup.repo}-build-report.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('Could not read the build report.');
+    } finally {
+      if (liveRef.current) setReportBusy(false);
+    }
+  }, [setup, run, buildKind, ghHeaders]);
 
   /** Step 3 — the actual file, streamed through the server so the browser just gets a download. */
   const download = useCallback(async (artifact: Artifact) => {
@@ -569,6 +682,33 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
         {setup && (phase === 'ready' || phase === 'failed') && (
           <>
+            {/* WHY THE BUILD FAILED — in full (admin 2026-08-18: "jab app build fail ho to, pura likh
+                kar aye, build kyu fail hui"). The written reason comes from the server's build report —
+                the SAME classifier the self-heal uses — with the build's own log lines underneath for
+                anyone who wants the detail. */}
+            {phase === 'failed' && failReport?.failure && (
+              <div className="rounded-lg border border-red-500/25 p-3 text-xs leading-relaxed"
+                   style={{ background: 'rgba(239,68,68,0.06)' }}>
+                <p className="flex items-center gap-1.5 text-red-300 font-semibold mb-1.5">
+                  <AlertTriangle size={13} /> Why this build failed
+                </p>
+                <p className="text-white/70">
+                  Stopped at: <span className="text-white/90 font-medium">{failReport.failure.whatStopped}</span>
+                </p>
+                <p className="text-white/70 mt-1.5">{failReport.failure.why}</p>
+                {failReport.failure.logExcerpt.length > 0 && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-white/50 hover:text-white/80 select-none">
+                      Show the build&apos;s own log lines
+                    </summary>
+                    <pre className="mt-1.5 max-h-48 overflow-auto rounded bg-black/40 p-2 text-[10px] text-white/60 whitespace-pre-wrap break-words">
+                      {failReport.failure.logExcerpt.join('\n')}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
+
             {/* PRIMARY — the one-click path. No keys, no secrets, nothing for the user to set up. */}
             <button
               onClick={() => build('apk')}
@@ -746,6 +886,17 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                 <ExternalLink size={11} /> Watch the details
               </a>
             )}
+            {/* STOP (admin 2026-08-18: "bich me rokne ka koi button nahi hai"). A real cancel on the
+                build machine, not just a UI that looks away — and honestly free: a stopped build never
+                produced a file, so nothing is charged. */}
+            <button
+              onClick={() => void stopBuild()}
+              disabled={stopping}
+              className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-red-500/40 text-red-300 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
+            >
+              {stopping ? <Loader2 size={13} className="animate-spin" /> : <CircleStop size={13} />}
+              {stopping ? 'Stopping…' : 'Stop this build'}
+            </button>
           </div>
         )}
 
@@ -833,9 +984,23 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           )
         )}
 
+        {/* THE BUILD REPORT (admin 2026-08-18) — the whole account of this build as a .json file:
+            result, duration, every step, and (on failure) the full written why with the real log
+            lines. Offered for successful AND failed builds alike. */}
+        {(phase === 'built' || phase === 'failed') && setup && run && (
+          <button
+            onClick={() => void downloadReport()}
+            disabled={reportBusy}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-white/10 hover:bg-white/5 disabled:opacity-40 transition-colors text-white/60"
+          >
+            {reportBusy ? <Loader2 size={12} className="animate-spin" /> : <FileJson size={12} />}
+            Download build report (JSON)
+          </button>
+        )}
+
         {(phase === 'built' || phase === 'failed') && setup && (
           <button
-            onClick={() => { setPhase('ready'); setError(''); setArtifacts([]); setProgress(0); setAttempt(0); }}
+            onClick={() => { setPhase('ready'); setError(''); setArtifacts([]); setProgress(0); setAttempt(0); setFailReport(null); }}
             className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-white/10 hover:bg-white/5 transition-colors text-white/60"
           >
             <RefreshCw size={12} /> Start over

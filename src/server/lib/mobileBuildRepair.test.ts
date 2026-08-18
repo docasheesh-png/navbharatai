@@ -96,6 +96,52 @@ describe('reading a failed build log', () => {
     expect(d.autoFixable).toBe(false);
   });
 
+  // THE PIANO CASE (real run 2026-08-18, "Build Android APK (installable)" #3): the scaffold's build
+  // script is "tsc && vite build"; the app carried type errors the preview never enforced, so the step
+  // died in 3 seconds and the apk could never be built — for an app the user had SEEN working.
+  describe('the type gate that blocked a working app from becoming an apk', () => {
+    const TS_ONLY_LOG = [
+      '##[group]Run npm run build',
+      '> piano@0.0.0 build',
+      '> tsc -p tsconfig.build.json && vite build',
+      "src/components/Key.tsx(14,23): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.",
+      '##[error]Process completed with exit code 2.',
+      '##[endgroup]',
+      'NBAI_FAILED_STAGE=webbuild',
+    ].join('\n');
+
+    it('names it, auto-fixable — the repair is refreshing our own workflow', () => {
+      const d = classifyBuildFailure(TS_ONLY_LOG, APK_PATH);
+      expect(d.code).toBe('TYPE_GATE_BLOCKED_PACKAGING');
+      expect(d.autoFixable).toBe(true);
+      // White-Label Law: the user-facing summary never leaks a vendor/model name.
+      expect(d.summary).not.toMatch(/GLM|Kimi|Claude|Sonnet|Opus|Gemini|Grok|Anthropic|Moonshot/i);
+    });
+
+    it('stands aside when the BUNDLER also failed — that is a real app-code failure', () => {
+      const log = `${TS_ONLY_LOG}\nerror during build:\nsrc/App.tsx (12:8): "useKeys" is not exported`;
+      expect(classifyBuildFailure(log, APK_PATH).code).toBe('APP_CODE_BUILD_FAILED');
+    });
+
+    it('never claims a failure in a LATER stage, whatever the log happens to contain', () => {
+      const log = 'error TS2345: whatever\nNBAI_FAILED_STAGE=android';
+      expect(classifyBuildFailure(log, APK_PATH).code).not.toBe('TYPE_GATE_BLOCKED_PACKAGING');
+    });
+
+    it('repairs by pushing the CURRENT workflow (which carries the bundler fallback)', () => {
+      const d = classifyBuildFailure(TS_ONLY_LOG, APK_PATH);
+      const oldWorkflow = APK_WORKFLOW.replace(/ {6}- name: Build the web app[\s\S]*?exit "\$rc"/, '      - name: Build the web app\n        run: npm run build');
+      const repair = repairFiles(d, { [APK_PATH]: oldWorkflow }, APK_PATH, { workflow: APK_WORKFLOW });
+      expect(repair).not.toBeNull();
+      expect(repair!.files[APK_PATH]).toContain('npx vite build');
+    });
+
+    it('returns null when the workflow is already current — the loop must stop, honestly', () => {
+      const d = classifyBuildFailure(TS_ONLY_LOG, APK_PATH);
+      expect(repairFiles(d, { [APK_PATH]: APK_WORKFLOW }, APK_PATH, { workflow: APK_WORKFLOW })).toBeNull();
+    });
+  });
+
   it('reports the app\'s own compile error precisely instead of "something went wrong"', () => {
     const log = [
       '> my-app@0.0.0 build',
@@ -160,7 +206,13 @@ describe('the repairs themselves', () => {
   });
 
   it('gives the build more memory as a sibling of run:, not inside the shell command', () => {
-    const fixed = repairOutOfMemory(APK_WORKFLOW);
+    // The CURRENT kit bakes the heap in up front (the same 4g the Gradle step forces), so the repair on a
+    // fresh workflow is correctly a no-op — the memory is already at the value the repair would set.
+    expect(APK_WORKFLOW).toContain('NODE_OPTIONS: --max-old-space-size=4096');
+    expect(repairOutOfMemory(APK_WORKFLOW)).toBeNull();
+    // An OLD repository (pre-heap workflow) still gets the surgical insert, as a real step key.
+    const old = '      - name: Build the web app\n        run: npm run build\n';
+    const fixed = repairOutOfMemory(old);
     expect(fixed).toContain('NODE_OPTIONS: --max-old-space-size=4096');
     const lines = fixed!.split('\n');
     const runIdx = lines.findIndex((l) => l.trim() === 'run: npm run build');

@@ -337,6 +337,7 @@ import { classifyBrowseTarget } from '../lib/browseTarget';
 import { formatUiFindings, type ScannedElement } from './UiElementFinder';
 import { envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
+import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -477,6 +478,34 @@ export class ToolDispatcher {
   /** Set by the composition root from the build request's `appSignature` flag (default ON). */
   setSignatureEnabled(enabled: boolean): void {
     this.signatureEnabled = enabled !== false;
+  }
+
+  /**
+   * C2 — paths the project owner declared off-limits in `.navbharataiignore`. Empty by default, so a
+   * project without the file behaves exactly as before.
+   */
+  private ignoreRules: IgnoreRule[] = [];
+
+  /** Set by the composition root once per build, from the project's own ignore file. */
+  setIgnoreRules(rules: IgnoreRule[]): void {
+    this.ignoreRules = Array.isArray(rules) ? rules : [];
+  }
+
+  /**
+   * C2 — refuse a write to a protected path.
+   *
+   * THROWS rather than returning a string. A returned string is a SUCCESSFUL tool result here, so the
+   * model would read "BLOCKED" as "done" and move on believing it had made the change. Throwing makes
+   * `dispatch` emit a tool_result with `is_error: true`, which the model must actually handle — the
+   * same lesson the deploy tool learned when its failure messages were being RETURNED and the build
+   * timeline recorded two successful no-op deploys.
+   */
+  private assertWritable(path: string): void {
+    if (this.ignoreRules.length === 0) return;
+    const rule = matchingIgnoreRule(path, this.ignoreRules);
+    if (!rule) return;
+    try { getWorkspaceMemory(this.workspaceId).recordAudit(`[PROTECTED] refused write to ${path} (${rule.source})`); } catch { /* audit best-effort */ }
+    throw new Error(protectedWriteMessage(path, rule));
   }
 
 
@@ -2052,6 +2081,7 @@ export class ToolDispatcher {
         // Deterministic backstop: a Vite config must always allow the E2B preview host, or the
         // preview shows "Blocked request … is not allowed" instead of the app. No-op for non-configs
         // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
+        this.assertWritable(path); // C2 — checked AFTER any relocation, so the REAL destination is judged
         let content = guardConfigContent(path, this.applyPostgresProviderLock(path, reqStr(input, 'content')));
         // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
         // to their known-good major IN the written package.json, so a later plain `npm install` (which
@@ -2173,6 +2203,7 @@ export class ToolDispatcher {
           if (typeof f !== 'object' || f === null) throw new Error('Each file entry must be an object.');
           const obj = f as Record<string, unknown>;
           const p = reqStr(obj, 'path');
+          this.assertWritable(p); // C2 — one protected entry fails the whole batch, never half-applies
           // Same Vite-preview-host backstop as write_file, applied per batched file.
           return { path: p, content: guardConfigContent(p, this.applyPostgresProviderLock(p, reqStr(obj, 'content'))) };
         });
@@ -2305,6 +2336,7 @@ export class ToolDispatcher {
 
       case 'edit_file': {
         const path = reqStr(input, 'path');
+        this.assertWritable(path); // C2 — an edit is a write; the same protection applies
         const oldStr = reqStr(input, 'old_string');
         const newStr = reqStr(input, 'new_string');
         const existing = await this.actuator.readFile(this.workspaceId, path);
@@ -7699,6 +7731,10 @@ export class ToolDispatcher {
         const from = reqStr(input, 'from').trim().replace(/^\.?\//, '');
         const to = reqStr(input, 'to').trim().replace(/^\.?\//, '');
         if (!from || !to) return 'codemod_move_file: both "from" and "to" workspace paths are required.';
+        // C2 — BOTH ends. Moving a protected file OUT is as destructive as editing it, and moving one
+        // INTO a protected folder plants a file the owner said to leave alone.
+        this.assertWritable(from);
+        this.assertWritable(to);
         const graph = getWorkspaceMemory(this.workspaceId).graph();
         // Affected set: the moved file + who imports it + what it imports (all from the indexed graph).
         const needed = new Set<string>([from, ...whoImports(graph, from), ...dependenciesOf(graph, from)]);

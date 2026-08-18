@@ -6,6 +6,7 @@ import { AgentEventStream } from './AgentEventStream';
 import type { ToolUse } from './ClaudeClient';
 import type { AgentEvent } from './types';
 import { getWorkspaceMemory } from './WorkspaceMemory';
+import { parseIgnoreFile } from './ignoreRules';
 
 /** An in-memory fake sandbox implementing just the ActuatorPort slice. */
 class FakeActuator implements ActuatorPort {
@@ -1967,5 +1968,72 @@ describe('user vault keys reach the app the build produces', () => {
     } finally {
       delete process.env.GEMINI_API_KEY;
     }
+  });
+});
+
+
+// C2 — the ignore file is a GUARD, not a request. A prompt asking nicely is a wish: a model told not to
+// touch the payments folder still edits it during a big refactor, and the user finds out when their live
+// payment flow breaks. These assert the write is genuinely REFUSED.
+//
+// The guard THROWS, and dispatch() turns that into a tool_result with `is_error: true` — which is the
+// point. A returned STRING would be a SUCCESSFUL tool result, so the model would read "BLOCKED" as
+// "done" and move on believing it had made the change.
+describe('C2 — protected paths are refused, not merely discouraged', () => {
+  let act: FakeActuator;
+  let d: ToolDispatcher;
+
+  beforeEach(() => {
+    act = new FakeActuator();
+    d = new ToolDispatcher(act, 'ws-c2', new WorkspaceState(), new AgentEventStream());
+    d.setIgnoreRules(parseIgnoreFile('payments/\n!payments/README.md'));
+  });
+
+  const call = (name: string, input: Record<string, unknown>) => d.dispatch({ id: 't', name, input } as ToolUse);
+  const errorText = (r: unknown): string => {
+    const block = r as { is_error?: boolean; content?: unknown };
+    expect(block?.is_error, 'the guard must produce an ERROR result, never a successful one').toBe(true);
+    return String(block?.content ?? '');
+  };
+
+  it('write_file to a protected path is an ERROR result, and nothing is written', async () => {
+    expect(errorText(await call('write_file', { path: 'payments/api.ts', content: 'x' })))
+      .toMatch(/protected by the project owner/i);
+    expect(act.files.has('payments/api.ts')).toBe(false);
+  });
+
+  it('edit_file is a write too, and is refused the same way', async () => {
+    act.files.set('payments/api.ts', 'const a = 1;');
+    expect(errorText(await call('edit_file', { path: 'payments/api.ts', old_str: 'const a = 1;', new_str: 'const a = 2;' })))
+      .toMatch(/protected/i);
+    expect(act.files.get('payments/api.ts')).toBe('const a = 1;');
+  });
+
+  // Half-applying a batch would leave the project in a state nobody asked for.
+  it('write_files_batch fails LOUDLY on one protected entry, never half-applies', async () => {
+    expect(errorText(await call('write_files_batch', {
+      files: [{ path: 'src/ok.ts', content: 'a' }, { path: 'payments/api.ts', content: 'b' }],
+    }))).toMatch(/protected/i);
+    expect(act.files.has('payments/api.ts')).toBe(false);
+  });
+
+  it('a negated path inside a protected folder stays editable', async () => {
+    await call('write_file', { path: 'payments/README.md', content: '# docs' });
+    expect(act.files.get('payments/README.md')).toBe('# docs');
+  });
+
+  it('everything outside the protected paths is untouched by the guard', async () => {
+    await call('write_file', { path: 'src/App.tsx', content: 'app' });
+    expect(act.files.get('src/App.tsx')).toBe('app');
+  });
+
+  it('a project with NO ignore file behaves exactly as before', async () => {
+    const plain = new ToolDispatcher(act, 'ws-c2b', new WorkspaceState(), new AgentEventStream());
+    await plain.dispatch({ id: 't', name: 'write_file', input: { path: 'payments/api.ts', content: 'x' } } as ToolUse);
+    expect(act.files.get('payments/api.ts')).toBe('x');
+  });
+
+  it('the refusal tells the model what to do instead, so it cannot loop against the wall', async () => {
+    expect(errorText(await call('write_file', { path: 'payments/api.ts', content: 'x' }))).toMatch(/tell the user/i);
   });
 });

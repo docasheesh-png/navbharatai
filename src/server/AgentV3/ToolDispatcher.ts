@@ -336,6 +336,7 @@ import { redactSecrets, redactDeep } from './SecretRedactor';
 import { classifyBrowseTarget } from '../lib/browseTarget';
 import { formatUiFindings, type ScannedElement } from './UiElementFinder';
 import { envKillSwitch } from '../lib/envFlag';
+import { webFetchUrl, formatWebFetchResult } from './webFetch';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -7504,6 +7505,15 @@ export class ToolDispatcher {
         }
         const limit = typeof input.limit === 'number' ? input.limit : 5;
         return await this.webSearch(query, limit);
+      }
+
+      case 'web_fetch': {
+        // A3 — read ONE user-supplied URL. All SSRF defence lives in webFetch.ts (shared ssrfGuard,
+        // redirect refusal, streamed size cap, timeout); this case only turns the result into the
+        // tool's contract. A failure THROWS, like every other tool here, so the agent reads it as a
+        // TOOL_ERROR with an honest sentence and can choose what to do next.
+        const url = reqStr(input, 'url');
+        return formatWebFetchResult(url, await webFetchUrl(url));
       }
 
       case 'deploy': {

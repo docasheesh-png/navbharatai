@@ -3061,6 +3061,23 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'web_fetch',
+      description:
+        'READ a specific web page the user gave you, and get its text back. Use this whenever the user ' +
+        'pastes a link — API docs, a reference page, a spec, an article — instead of guessing from a ' +
+        'search snippet. web_search finds pages; this one reads ONE page you already have the URL for. ' +
+        'Returns the page as plain text (HTML markup, scripts and styles stripped). Only public http/https ' +
+        'pages, no redirects, and long pages are cut at 30,000 characters and say so. If the page renders ' +
+        'entirely with JavaScript there will be no text — use the screenshot tool for that.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'The full public URL to read, e.g. https://vitejs.dev/config/server-options.' },
+        },
+        required: ['url'],
+      },
+    },
+    {
       name: 'screenshot',
       description:
         'Capture a screenshot of ANY URL and SEE the result image. Two uses: (1) YOUR OWN APP — use the ' +
@@ -3350,6 +3367,7 @@ export const CATALOG_TOOL_NAMES = [
   'check_conventions',
   'generate_release_notes',
   'web_search',
+  'web_fetch',
   'screenshot',
   'find_ui_element',
   'browser_action',

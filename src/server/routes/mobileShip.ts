@@ -58,46 +58,11 @@ export function isDispatchableWorkflow(file: unknown): file is ShipWorkflowFile 
   return isShipWorkflow(file);
 }
 
-/**
- * Turn a raw GitHub Actions step name into plain, white-label language for the build-progress view — or
- * null to HIDE it (GitHub's own housekeeping steps, and trivial ones the user does not care about). The
- * generated workflow's own step names are already user-friendly and vendor-free; this also collapses the
- * setup steps and guards against any future technical name leaking to a user (White-Label Law).
- */
-export function friendlyBuildStep(rawName: string): string | null {
-  const n = (rawName || '').toLowerCase().trim();
-  if (!n) return null;
-  // GitHub's own housekeeping + trivial / failure-only steps → hidden.
-  if (/^set up job$|^complete job$|^post\b/.test(n)) return null;
-  if (/checkout/.test(n)) return null;
-  if (/remove the keystore|always remove|clean ?up|summary|explain what stopped/.test(n)) return null;
-
-  // Build-machine setup, both platforms.
-  if (/set ?up node|setup-node|set ?up java|setup-java|select xcode|xcode-select|install ruby|bundler|bundle install/.test(n)) return 'Getting the build machine ready';
-
-  // iOS-specific — checked BEFORE the Android/generic rules so "cap sync ios", the TestFlight upload and
-  // Apple signing are never mislabelled as Android or as a generic "download".
-  if (/cocoapods|pod install|cap (add|sync) ios|the ios project|sync the ios/.test(n)) return 'Preparing the iOS project';
-  if (/testflight|upload_to_testflight|pilot|\bdeliver\b|app store connect/.test(n)) return 'Uploading to TestFlight';
-  if (/certificate|provisioning|keychain|import_certificate|\bmatch\b|code ?sign/.test(n)) return 'Setting up signing';
-  if (/\.ipa|xcodebuild|build_app|\bgym\b|archive the app|build the (signed )?ios/.test(n)) return 'Compiling your iOS app';
-
-  // Shared build steps.
-  if (/install/.test(n) && /librar/.test(n)) return "Installing your app's libraries";
-  if (/build the web app|npm run build/.test(n)) return 'Building your app';
-
-  // Android-specific.
-  if (/generate and sync|android project|cap (add|sync)/.test(n)) return 'Preparing the Android project';
-  if (/keystore|wire gradle signing/.test(n)) return 'Setting up signing';
-  if (/bundle|assemble|installable apk|compil/.test(n)) return 'Compiling your Android app';
-
-  // Generic, either platform.
-  if (/signing secret|pre-?flight/.test(n)) return 'Checking your signing key';
-  if (/versioncode|build number|stamp.*version|export compliance/.test(n)) return 'Setting the app version';
-  if (/upload/.test(n)) return 'Packaging your download';
-  // Our step names are white-label by construction; anything unmatched is safe to show as-is.
-  return rawName.trim();
-}
+// The step mapping moved into lib/mobileBuildReport.ts, where the downloadable build report ALSO reads
+// it — one mapping, so a user can never watch one set of steps and download a report describing another.
+// Re-exported so existing importers and tests are untouched.
+export { friendlyBuildStep } from '../lib/mobileBuildReport';
+import { mapRunSteps, buildMobileBuildReport } from '../lib/mobileBuildReport';
 
 // Artifact fetching/unwrapping moved to lib/buildArtifact when the Nav App Store needed the SAME
 // bytes. Re-exported here so existing importers and tests are untouched — one implementation, no
@@ -186,25 +151,8 @@ export function registerMobileShipRoutes(app: Express): void {
       );
       const job = (r.data?.jobs || [])[0] as { status?: string; conclusion?: string | null; steps?: Array<Record<string, unknown>> } | undefined;
       const rawSteps = (job?.steps || []) as Array<{ name?: string; status?: string; conclusion?: string | null }>;
-
-      const steps: Array<{ label: string; state: 'done' | 'running' | 'pending' | 'failed' }> = [];
-      for (const s of rawSteps) {
-        const label = friendlyBuildStep(String(s.name || ''));
-        if (!label) continue; // hide GitHub's own housekeeping steps
-        const state: 'done' | 'running' | 'pending' | 'failed' =
-          s.conclusion === 'failure' ? 'failed'
-            : s.status === 'completed' ? 'done'
-              : s.status === 'in_progress' ? 'running'
-                : 'pending';
-        // Collapse consecutive duplicates (e.g. setup steps that map to one friendly label).
-        const prev = steps[steps.length - 1];
-        if (prev && prev.label === label) {
-          if (state === 'failed' || state === 'running') prev.state = state;
-          else if (prev.state === 'pending' && state === 'done') prev.state = 'done';
-          continue;
-        }
-        steps.push({ label, state });
-      }
+      // ONE shared mapping with the downloadable build report (lib/mobileBuildReport.ts).
+      const steps = mapRunSteps(rawSteps);
 
       const total = steps.length || 1;
       const done = steps.filter((s) => s.state === 'done').length;
@@ -227,6 +175,100 @@ export function registerMobileShipRoutes(app: Express): void {
       const status = (err as { response?: { status?: number } })?.response?.status || 502;
       res.status(status === 404 ? 404 : 502).json({
         error: status === 404 ? 'That build could not be found.' : 'Could not read the build progress from GitHub.',
+      });
+    }
+  });
+
+  /**
+   * STOP a running build (admin 2026-08-18: "100% tak ho kar hi manta hai, bich me rokne ka koi button
+   * nahi hai! aab aur apk build me stop button banao").
+   *
+   * A REAL cancel, not a UI that merely stops watching: GitHub is told to cancel the run, so the
+   * runner genuinely stops and no further minutes are spent. Honest edge: a run that has already
+   * finished cannot be cancelled — GitHub answers 409 — and that is reported as "already finished"
+   * rather than pretended away. A stopped build was never successful, so it charges nothing (the ₹1
+   * is charged only when an artifact exists — see /artifacts).
+   */
+  app.post('/api/mobile-ship/cancel', async (req: Request, res: Response) => {
+    const token = githubToken(req);
+    if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
+    const { owner, repo, runId } = (req.body || {}) as Record<string, unknown>;
+    if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
+    if (!/^\d{1,20}$/.test(String(runId || ''))) return res.status(400).json({ error: 'A valid build id is required.' });
+
+    try {
+      await axios.post(
+        `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/cancel`,
+        {},
+        { headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' } },
+      );
+      res.json({ ok: true, stopped: true });
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      // 409 = the run already finished before the cancel arrived. Not an error the user did anything
+      // wrong about — say what actually happened.
+      if (status === 409) return res.json({ ok: true, stopped: false, note: 'That build had already finished before it could be stopped.' });
+      res.status(status === 404 ? 404 : 502).json({
+        error: status === 404 ? 'That build could not be found.' : 'Could not stop the build on GitHub.',
+      });
+    }
+  });
+
+  /**
+   * THE BUILD REPORT (admin 2026-08-18: "build report jaise 'apk build report' bhi chahiye… jab app
+   * build fail ho to, pura likh kar aye, build kyu fail hui! jisko json me download kiya ja sake").
+   *
+   * A complete, downloadable JSON account of ONE build: what was built, its result and duration, every
+   * step in plain language, and — when it failed — the full written WHY (from the SAME classifier the
+   * self-healing loop uses, so the report and the repair can never tell two different stories) plus the
+   * real log lines of the failed step. Composition is pure (lib/mobileBuildReport.ts); this route only
+   * gathers what GitHub knows. The log excerpt is the user's own app's build output — the generated
+   * workflows never run or name an AI provider, so the White-Label Law holds by construction.
+   */
+  app.get('/api/mobile-ship/report', async (req: Request, res: Response) => {
+    const token = githubToken(req);
+    if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
+    const { owner, repo, runId, workflow } = req.query as Record<string, string>;
+    if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
+    if (!/^\d{1,20}$/.test(String(runId || ''))) return res.status(400).json({ error: 'A valid build id is required.' });
+    if (!isDispatchableWorkflow(workflow)) return res.status(400).json({ error: 'Unknown build workflow.' });
+
+    const headers = { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' };
+    try {
+      const [runRes, jobsRes] = await Promise.all([
+        axios.get(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}`, { headers }),
+        axios.get(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs`, { headers }),
+      ]);
+      const w = runRes.data as Record<string, unknown>;
+      const job = (jobsRes.data?.jobs || [])[0] as { steps?: Array<Record<string, unknown>> } | undefined;
+      const steps = mapRunSteps((job?.steps || []) as Array<{ name?: string; status?: string; conclusion?: string | null }>);
+
+      // The failed job's log is only fetched when the run genuinely failed — a green report needs none.
+      let log = '';
+      if (w.conclusion === 'failure') {
+        try { log = await failedJobLog(headers, String(owner), String(repo), String(runId)); }
+        catch { /* the report still says honestly that the reason could not be read */ }
+      }
+
+      res.json(buildMobileBuildReport({
+        owner: String(owner),
+        repo: String(repo),
+        workflow: String(workflow),
+        run: {
+          id: (w.id as number) ?? String(runId),
+          status: String(w.status || 'unknown'),
+          conclusion: (w.conclusion as string | null) ?? null,
+          startedAt: (w.run_started_at as string) || (w.created_at as string) || null,
+          completedAt: w.status === 'completed' ? ((w.updated_at as string) || null) : null,
+          htmlUrl: (w.html_url as string) || null,
+        },
+        steps,
+        log,
+      }));
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      res.status(status === 404 ? 404 : 502).json({
+        error: status === 404 ? 'That build could not be found.' : 'Could not read the build from GitHub.',
       });
     }
   });

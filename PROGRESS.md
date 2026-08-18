@@ -35351,3 +35351,26 @@ after). Comments are stripped before scanning — the files describe the broken 
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1314 files / 16497 tests passed** · `npm run build` OK.
+
+---
+
+## 2026-08-18 — APK builder: Stop button + full downloadable JSON build report (PR #2462, merged aa2ef53)
+
+Admin's three asks, all shipped in one batch:
+1. **Stop button** (APK/AAB/iPhone builds): `POST /api/mobile-ship/cancel` genuinely cancels the run on
+   GitHub's build machine (not just the UI). A stop pressed before the run even appears in the list
+   still lands (newest unfinished run is looked up). GitHub's 409 (already finished) is reported
+   honestly. A stopped build charges nothing by construction (₹1 fires only when an artifact exists),
+   and reports as "stopped", never "failed".
+2. **Build report as JSON**: `GET /api/mobile-ship/report` + a "Download build report (JSON)" button for
+   successful AND failed builds — what was built, result/duration, every step in plain language, and on
+   failure the full written WHY plus the failed step's real log lines (bounded, timestamps stripped).
+   Pure composition in `lib/mobileBuildReport.ts` (injected clock, 11 unit tests). The WHY comes from
+   the SAME classifier the self-heal uses, so the report and the repair can never tell two stories.
+3. **Failure written out in full, on screen**: a "Why this build failed" panel — which step stopped it,
+   the plain-language cause, log lines in a collapsible view.
+
+Refactor: `friendlyBuildStep` + step-collapse moved from the route into `lib/mobileBuildReport.ts` (ONE
+mapping for the live view and the report; re-exported so imports stand). AppKnowledgeBase `apk_builder`
+updated (stop + report + Hinglish keywords). White-Label test-locked. Gate: both tsc green, 16,512
+tests / 1,315 files, CI green before merge.

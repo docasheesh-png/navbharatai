@@ -57,6 +57,16 @@ export interface SubAgentDeps {
    */
   usageSink?: import('./UsageSink').UsageSink;
 
+  /**
+   * C2 — the project's protected paths, as a GETTER rather than a value.
+   *
+   * A sub-agent writes files exactly like the architect does, so a child dispatcher without the guard
+   * would be a hole straight through it. It is a thunk because the spawn is constructed BEFORE the
+   * ignore file is read — passing the array here would capture an empty one and silently disarm every
+   * sub-agent, which is the worst kind of bug: the feature would look present and protect nothing.
+   */
+  ignoreRules?: () => import('./ignoreRules').IgnoreRule[];
+
 }
 
 export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
@@ -66,6 +76,9 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     const childDispatcher = new ToolDispatcher(
       deps.actuator, deps.workspaceId, deps.state, deps.events, undefined, deps.checkpointer,
     );
+    // C2 — arm the guard on the child too. Read at SPAWN time via the thunk, so it sees the rules
+    // however late they were loaded.
+    try { childDispatcher.setIgnoreRules(deps.ignoreRules?.() ?? []); } catch { /* never block a spawn */ }
     // TERMINAL-EVENT ISOLATION — the sub-runner shares the build's event stream, so its own
     // `done`/`error` used to flow to every surface as if the WHOLE build finished: the client
     // reducer set done:true and overwrote the top-level summary (the "Step limit reached (40)"

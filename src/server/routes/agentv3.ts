@@ -347,6 +347,7 @@ import { buildRuntimeLogCommand, parseRuntimeLogOutput, runtimeLogGapNotice } fr
 import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeServiceStatus, extraPorts, portsSummary } from '../AgentV3/portsPanel';
 import { findProjectInstructionPath, normalizeProjectInstructions, projectInstructionsBlock, projectInstructionsNotice } from '../AgentV3/projectInstructions';
 import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '../AgentV3/fileMentions';
+import { parseIgnoreFile, ignoreRulesBlock, IGNORE_FILE } from '../AgentV3/ignoreRules';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
 import { abortBuild } from '../AgentV3/buildAbortCause';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
@@ -8670,7 +8671,11 @@ export function registerAgentV3Routes(app: Express): void {
       getWorkspaceMemory(workspaceId).recordRequest(prompt);
 
       // The Architect can delegate to specialist sub-agents via the task tool.
+      // C2 — declared here, BEFORE the spawn factory, so the thunk below can never capture a stale
+      // empty list. Filled in a few lines down once the actuator can read the project's ignore file.
+      let ignoreRulesForBuild: ReturnType<typeof parseIgnoreFile> = [];
       const spawnSubAgent = makeSubAgentSpawn({
+        ignoreRules: () => ignoreRulesForBuild,
         client, actuator, workspaceId, state, events, model, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
@@ -8796,6 +8801,15 @@ export function registerAgentV3Routes(app: Express): void {
       // "made by NavBharatAI" signature: default ON, off only when the user toggled it off in
       // Settings → General. The dispatcher bakes the badge into index.html on preview publish.
       dispatcher.setSignatureEnabled(appSignatureEnabled);
+      // C2 — load the project's own "never touch this" list and ARM THE GUARD before any tool runs.
+      // Reading the file into the prompt alone would be a wish, not a rule: a model told nicely still
+      // edits a protected folder during a big refactor, and the user finds out when their live payment
+      // flow breaks. The dispatcher refuses the write; the prompt block below only saves wasted turns.
+      try {
+        const ignoreRaw = await actuator.readFile(workspaceId, IGNORE_FILE).catch(() => '');
+        ignoreRulesForBuild = parseIgnoreFile(ignoreRaw);
+        dispatcher.setIgnoreRules(ignoreRulesForBuild);
+      } catch { /* no ignore file is the normal case — the guard stays off */ }
       // Vault → App pipe (admin 2026-07-17): inject the user's OWN saved keys (Settings → Secrets & API Keys)
       // into the .env of the app they build, so an app that needs an API key runs with the real key the
       // user stored — without ever pasting it into chat. Loaded from the user's ENCRYPTED vault only
@@ -9488,6 +9502,11 @@ export function registerAgentV3Routes(app: Express): void {
         const missNotice = unresolvedMentionsNotice(mentions);
         if (missNotice) events.emit({ type: 'narration', agent: 'architect', text: missNotice, ts: Date.now() });
 
+        // C2 — tell the builder what is off-limits so it does not walk into the guard. Advisory ONLY;
+        // the refusal in ToolDispatcher.assertWritable is what actually enforces it.
+        const ignoreBlock = ignoreRulesBlock(ignoreRulesForBuild);
+        if (ignoreBlock) buildPrompt = `${ignoreBlock}\n\n---\n\n${buildPrompt}`;
+
         const instrPath = findProjectInstructionPath(tree);
         if (instrPath) {
           const instr = normalizeProjectInstructions(instrPath, await actuator.readFile(workspaceId, instrPath).catch(() => ''));
@@ -9648,7 +9667,9 @@ export function registerAgentV3Routes(app: Express): void {
         const planGrok = pinnedOpus ? null : grokPlanRunner({ noClaude: noClaudeBuild });
         const planRunner = new AgentRunner({
           client: planGrok ?? client,
-          dispatcher: new ToolDispatcher(actuator, workspaceId, state, events),
+          // C2 — the plan runner has tool access too, so it gets the same guard. A planner that
+          // "helpfully" edits a protected file would be the same breach by a quieter route.
+          dispatcher: (() => { const d = new ToolDispatcher(actuator, workspaceId, state, events); d.setIgnoreRules(ignoreRulesForBuild); return d; })(),
           state,
           events,
           usageSink: buildUsage, // billing accounting fix — the plan step's tokens are billed too

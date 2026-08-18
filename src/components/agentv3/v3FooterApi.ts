@@ -38,10 +38,18 @@ export interface V3FooterApi {
  * "App ban gayi" signal for the footer's green dot (admin 2026-07-07): true when a live preview URL
  * exists (the server booted the app), OR the build finished successfully with real files (the
  * in-browser preview renders those). Honest by construction — no timer, no guess. Pure.
+ *
+ * `restoredIdle` (2026-08-17, the remix-arrival fix): a session that never built anything HERE can
+ * still be genuinely viewable — a remixed or reopened workspace's files are rehydrated from the
+ * durable store, and the in-browser preview compiles exactly those. `done` stayed false for such a
+ * session, so the dot said "nothing to see" about an app that renders fine — one more reason a
+ * fresh remix felt like nothing had happened. The signal stays honest: the flag is passed as
+ * "idle AND restored files actually loaded", never a guess.
  */
-export function previewReadySignal(hasPreviewUrl: boolean, done: boolean, ok: boolean | undefined, fileCount: number): boolean {
+export function previewReadySignal(hasPreviewUrl: boolean, done: boolean, ok: boolean | undefined, fileCount: number, restoredIdle = false): boolean {
   if (hasPreviewUrl) return true;
-  return done === true && ok !== false && fileCount > 0;
+  if (done === true && ok !== false && fileCount > 0) return true;
+  return restoredIdle && fileCount > 0;
 }
 
 /** The footer section that should highlight, from the panel's real surface state. Pure. */

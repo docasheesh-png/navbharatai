@@ -130,3 +130,39 @@ describe('BUY ONCE, COPY FOREVER — that app only (admin 2026-08-16)', () => {
     expect(read('src/components/ide/NavAppStore.tsx')).toContain('{owned.length > 0 && (');
   });
 });
+
+describe('the arrival moment — the copied app must be SEEN, not merely present (admin 2026-08-17)', () => {
+  // "Make it yours" worked end to end and still read as "kuch nahi hua": the files rehydrated
+  // silently, the chat stayed empty, the preview stayed closed. These pin the three visible
+  // things that now happen the moment the copied files actually arrive.
+  const panel = readFileSync(join(__dirname, '..', 'src', 'components', 'agentv3', 'AgentV3Panel.tsx'), 'utf8');
+
+  it('celebrates ONLY once the copied files have really arrived — an empty copy celebrates nothing', () => {
+    const at = panel.indexOf('const remixCelebratedRef');
+    expect(at).toBeGreaterThan(-1);
+    const body = panel.slice(at, at + 2200);
+    expect(body).toContain('if (count === 0) return;');
+    expect(body).toContain('remixCelebratedRef.current = true;');
+  });
+
+  it('a REAL agent message with the app name and the real file count enters the chat', () => {
+    const at = panel.indexOf('const remixCelebratedRef');
+    const body = panel.slice(at, at + 2200);
+    expect(body).toContain('setAgentHistory');
+    expect(body).toContain('${h.appName}');
+    expect(body).toContain('${count} files');
+  });
+
+  it('the preview opens by itself — seeing the app run IS the feel', () => {
+    const at = panel.indexOf('const remixCelebratedRef');
+    const body = panel.slice(at, at + 2200);
+    expect(body).toContain("openSurfaceFromFooter('preview')");
+  });
+
+  it('the banner carries an Open-preview button for whoever navigates away first', () => {
+    const at = panel.indexOf('remixArrived.owned');
+    const body = panel.slice(at, at + 1200);
+    expect(body).toContain('Open preview');
+    expect(body).toContain("openSurfaceFromFooter('preview')");
+  });
+});

@@ -34969,3 +34969,33 @@ block a compile; and the sticky session id is read from `localStorage` first, so
 days.
 
 Verification gate: `tsc --noEmit` clean · `vitest run` 1301 files / 16,202 tests green.
+## 2026-08-17 — "Make it yours" worked perfectly and felt like nothing happened
+
+Admin: *"App Mart me Make it yours par click karo — v5 khul to jaata hai, par user ko kuch show nahi
+hota. Feel aana chahiye ki app hamare v5 me aa gayi."*
+
+Nothing was broken. The baton carried the session, the files rehydrated from the durable store, the
+preview could compile them. The user simply **landed on an empty chat** — a real app, invisible.
+That is indistinguishable from failure, and the earlier fixes (#2407) had all been about making the
+copy CORRECT, never about making it VISIBLE. Correct-but-invisible is its own bug class.
+
+**Three visible things now happen the moment the copied files genuinely arrive:**
+1. A real agent message enters the chat — the app's name and its REAL file count ("all 24 files are
+   in this chat and ready to edit"), not a toast that vanishes.
+2. The preview surface OPENS by itself. Seeing the app running is the whole feel; no banner
+   substitutes for it.
+3. The banner gains an **▶ Open preview** button, for the user who dismissed it or navigated first.
+
+**Gated on `files.length > 0`, never on the handoff alone.** If a copy fails, nothing celebrates —
+the honest banner stays and the Files tab tells the truth. Celebrating an empty workspace would be
+the exact fake-success the second absolute rule forbids. Fires once per mount, and the baton is
+consumed on mount, so a reload cannot re-celebrate.
+
+**A fourth, quieter lie fixed with it:** the footer's green "app is ready" dot keyed off `done`,
+which only a build running IN THIS SESSION sets. A remixed (or reopened) session's restored files
+render perfectly in the in-browser preview, yet the dot said there was nothing to see.
+`previewReadySignal` now accepts `restoredIdle` — passed as the measured "idle AND restored files
+actually loaded", never a guess — and still refuses a green dot for zero files.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1285 files / 15981 tests passed** · `npm run build` OK.

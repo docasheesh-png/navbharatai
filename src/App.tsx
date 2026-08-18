@@ -1389,8 +1389,12 @@ export default function App() {
     runCode,
   } = usePreviewBundler({ files, setFiles, setGeneratedCode, activeFile, activeAgent, toggleTab, incrementDailyUsage, addLog, addToast });
 
-  const closeTab = useCallback((e: React.MouseEvent, view: ViewType) => {
-    e.stopPropagation();
+  // `e` is OPTIONAL so the SAME close runs from two places: the header tab's ✕ (which must stop the
+  // click from also selecting the tab) and a panel's own "Close" button, which has no tab click to
+  // stop. Giving the panel its own close would have meant a second copy of the tab/child/companion
+  // teardown below — the kind of duplicate that drifts and then disagrees.
+  const closeTab = useCallback((e: React.MouseEvent | undefined, view: ViewType) => {
+    e?.stopPropagation();
 
     // If user closes home tab, just go to it but don't close
     if (view === 'home') {
@@ -2812,6 +2816,7 @@ export default function App() {
               setSettingsScreen={setSettingsScreen}
               toggleTab={toggleTab}
               setActiveView={setActiveView}
+              onCloseSettings={() => closeTab(undefined, 'settings')}
               generatedCode={generatedCode}
               deviceMode={deviceMode}
               setDeviceMode={setDeviceMode}

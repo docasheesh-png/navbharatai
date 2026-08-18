@@ -35580,3 +35580,42 @@ no-double-prefix rule, the shared path asserted against E2BActuator's REAL sourc
 cannot drift apart again), and every branch of the page-check verdict.
 
 Gate: both tsc green, 16,608 tests / 1,324 files, CI green before merge.
+## 2026-08-18 — "Close Settings" neither closed Settings nor went where the user asked
+
+Admin: *"jab setting ko close (x) karte hai to NavBharatAI FREE open ho jata hai. yeh galat hai — home
+page khulna chahiye."*
+
+**Two independent wrongs met at the same click, and fixing only the reported one would have left the
+same surprise a click away.**
+
+1. **The panel's own ✕ ran `toggleTab('nbi_chat')`** — a hardcoded destination. So a button labelled
+   "Close Settings" did not close Settings at all (the tab stayed open) and navigated to the FREE chat
+   for no reason the user could see.
+2. **The tab bar's ✕ was no better.** `computeTabClose` falls back to the LAST REMAINING TAB, and with
+   a FREE chat open that is `nbi_chat` too. Same landing, different button.
+
+**The rule that was missing.** Falling back to the last remaining tab is right for an ORDINARY tab —
+close one chat and you land on the chat beside it. It is wrong for an OVERLAY like Settings, which is
+not a sibling of your work but a place you step into and back out of. `computeTabClose` now takes
+`returnsHome` (default `['settings']`): a view in that set returns to base instead of capturing
+whichever tab happened to be last. A parameter rather than a hardcoded `view === 'settings'`, so the
+policy is visible and testable — the test proves it by running the same call with and without it.
+
+**One close, not two.** The panel ✕ now calls the SAME `closeTab` the tab bar uses (its event argument
+became optional, since a panel button has no tab click to stop). Giving the panel a private close would
+have meant a second copy of the child/companion teardown and the per-tab state reset — the kind of
+duplicate that drifts and then disagrees. The 2026-07-11 behaviour (closing Settings also closes the
+options opened from inside it) is untouched and still tested.
+
+**An existing test expectation was changed, and it was not a stale test — it was the bug, one level
+deeper.** `closing SETTINGS also closes the options opened from inside it` asserted that a user sitting
+in Billing (a Settings child) lands on `nbi_chat` when Settings closes. That is the reported surprise
+reached from inside a child rather than from the panel, so the expectation moved to `home` while every
+other assertion in it — the closing set, the surviving tabs — was kept exactly as it was.
+
+**Deliberately NOT changed:** Professionals and Other AI are also parent tabs with children, and they
+still land on the last remaining tab. Only Settings was reported, and silently changing navigation that
+nobody complained about is how a fix becomes a new bug. `returnsHome` makes adding them a one-word
+change if the admin wants it.
+
+Verification gate: `tsc --noEmit` clean · `vitest run` 1301 files / 16,211 tests green.

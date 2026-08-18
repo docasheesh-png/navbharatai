@@ -348,7 +348,7 @@ import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/bui
 import { abortBuild } from '../AgentV3/buildAbortCause';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
-import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
+import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
 import {
   startVersionPreview,
   listLiveVersionsCommand,
@@ -4527,6 +4527,40 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     res.json({ checkpoints: await loadCheckpoints(workspaceId) });
+  });
+
+  // B5 — name a checkpoint. "14 unnamed checkpoints are unusable": a list of identical auto-messages
+  // gives the user no way to find the version they actually want to go back to, which makes the whole
+  // restore feature theoretical. A name is what turns it into a real safety net.
+  //
+  // Ownership-checked + rate-limited. An empty name CLEARS the label — no separate delete endpoint.
+  app.post('/api/agentv3/checkpoint/label', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const sha = typeof req.body?.sha === 'string' ? req.body.sha : '';
+    if (!workspaceId || !sha) {
+      res.status(400).json({ error: 'workspaceId and sha are required.' });
+      return;
+    }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const label = normalizeCheckpointLabel(req.body?.label);
+    const saved = await setCheckpointLabel(workspaceId, sha, label);
+    if (!saved) {
+      // HONEST: the UI must not show a name that was never stored — it would vanish on the next reload
+      // and the user would think the app lost their work.
+      res.status(503).json({ error: 'Could not save that name right now. Please try again.' });
+      return;
+    }
+    // Echo the STORED label (already normalised/capped), so the UI renders exactly what persisted.
+    res.json({ ok: true, label, maxLength: CHECKPOINT_LABEL_MAX });
   });
 
   // Phase G2 — wire git STATUS into the sync body: the real working-tree state from the live sandbox

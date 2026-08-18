@@ -13,6 +13,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
+import { normalizeCheckpointLabel } from '../../lib/checkpointLabel';
 
 const COLLECTION = 'workspace_checkpoints_v3';
 /** Cap how many checkpoints we return (newest first) so a long-lived project stays cheap to load. */
@@ -24,7 +25,20 @@ export interface DurableCheckpoint {
   sha: string;
   message: string;
   ts: number;
+  /**
+   * B5 — the user's OWN name for this checkpoint ("before I broke the login").
+   *
+   * OPTIONAL, and the key is OMITTED rather than set to undefined when there is no label. That is not
+   * style: Firestore REJECTS an undefined field value, and `saveCheckpoint` swallows its own errors —
+   * so writing `label: undefined` would silently stop persisting checkpoints at all, and the symptom
+   * would be a history that quietly stopped growing.
+   */
+  label?: string;
 }
+
+// The label rules live in src/lib/checkpointLabel.ts so the CLIENT can import them too (it cannot import
+// this module — firebase-admin). Re-exported so server callers keep a single import site.
+export { CHECKPOINT_LABEL_MAX, normalizeCheckpointLabel, checkpointDisplayName } from '../../lib/checkpointLabel';
 
 let _db: admin.firestore.Firestore | null = null;
 
@@ -95,12 +109,17 @@ export function normalizeCheckpoint(raw: unknown): DurableCheckpoint | null {
   const sha = typeof c.sha === 'string' ? c.sha : '';
   const id = typeof c.id === 'string' ? c.id : '';
   if (!sha && !id) return null;
-  return {
+  const out: DurableCheckpoint = {
     id: id || `cp_${sha.slice(0, 12)}`,
     sha,
     message: typeof c.message === 'string' ? c.message.slice(0, 300) : '',
     ts: typeof c.ts === 'number' && c.ts > 0 ? c.ts : Date.now(),
   };
+  // Only set the key when there is a real label — see the interface note: an undefined field value is
+  // rejected by Firestore, and saveCheckpoint's catch would hide that as a silently-empty history.
+  const label = normalizeCheckpointLabel(c.label);
+  if (label) out.label = label;
+  return out;
 }
 
 /** Persist a single checkpoint (idempotent by SHA). Best-effort — never throws, never blocks a build. */
@@ -118,6 +137,35 @@ export async function saveCheckpoint(workspaceId: string, raw: unknown): Promise
       .set(cp, { merge: true });
   } catch {
     /* best-effort — a persist failure never blocks anything */
+  }
+}
+
+/**
+ * B5 — set (or clear, with '') the user's name for one checkpoint. Idempotent, addressed by the SAME
+ * doc id `saveCheckpoint` uses, so a label always lands on the row it names.
+ *
+ * `merge: true` writes ONLY the label field. That matters both ways: naming a checkpoint cannot damage
+ * its commit data, and — because `normalizeCheckpoint` omits an absent label — a later build re-saving
+ * the same SHA cannot wipe a name the user gave it.
+ *
+ * Returns whether the write landed, so the caller can be honest rather than showing a name that was
+ * never stored.
+ */
+export async function setCheckpointLabel(workspaceId: string, sha: string, rawLabel: unknown): Promise<boolean> {
+  const id = checkpointDocId({ sha, id: sha });
+  if (!workspaceId || !id) return false;
+  const db = getDb();
+  if (!db) return false;
+  try {
+    await db
+      .collection(COLLECTION)
+      .doc(workspaceId)
+      .collection('items')
+      .doc(id)
+      .set({ label: normalizeCheckpointLabel(rawLabel) }, { merge: true });
+    return true;
+  } catch {
+    return false;
   }
 }
 

@@ -446,7 +446,7 @@ an `AppKnowledgeBase.ts` entry (user-facing capability change).
 | B2 | Ports + processes panel | minor 26 | `serviceGraph.ts` already models services/ports. Render it. |
 | B3 | Start / stop / restart one service | minor 25 | Today a stuck server needs a full rebuild. |
 | B4 | Re-run only the failing test | minor 28 | `run_tests` exists; add a filter argument. |
-| B5 | Name a checkpoint | minor 15 | 14 unnamed checkpoints are unusable. Tiny change, large usability gain. |
+| B5 | ✅ **DONE 2026-08-18 (#TBD)** — name a checkpoint | minor 15 | `lib/checkpointLabel.ts` (pure, SHARED by server + client — the client cannot import CheckpointStore, and two copies of the cap would drift) + `POST /api/agentv3/checkpoint/label` + inline rename in History. Label is OMITTED not undefined (Firestore rejects undefined and saveCheckpoint swallows errors — it would have silently stopped persisting history). Optimistic, but REVERTED with an honest message if the write did not land. |
 | B6 | Diff two checkpoints | minor 14 | Diff machinery already exists for the build diff view. |
 | B7 | Undo ONE edit without restoring a whole checkpoint | minor 13 | Needs per-edit granularity in the checkpoint store. |
 | B8 | Show context usage | minor 7 | Compaction already runs (`SessionTimeline.ts`); surface the number so quality drops have a visible cause. |

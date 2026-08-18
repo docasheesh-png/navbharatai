@@ -7,7 +7,7 @@ import { saveSecret, listSecrets } from '../../lib/secretsApi';
 // cannot drift into two behaviours. Lazy because most sessions never open it.
 const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ default: m.SecretManager })));
 import {
-  Bot, Send, Square, Loader2, Terminal, ScrollText, FileDiff, FolderOpen,
+  Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye,
   Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
@@ -64,6 +64,7 @@ import { PreviewSurface } from './PreviewSurface';
 import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './fullTeam';
 import { useRuntimeLogs } from '../../hooks/useRuntimeLogs';
+import { checkpointDisplayName } from '../../lib/checkpointLabel';
 import { runtimeLogEmptyMessage } from '../../lib/runtimeLogBuffer';
 import { db, sanitizeFirestoreData } from '../../App';
 
@@ -239,6 +240,57 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     if (atBottom) el.scrollTop = el.scrollHeight;
   }, [runtimeLogs.text]);
+  // B5 — naming a checkpoint. Pure view state: which row is being edited, what has been typed, and an
+  // override map so a rename shows instantly whether the checkpoint came from the durable history or
+  // from the live build's reducer state (allCheckpoints merges both).
+  const [labelEditSha, setLabelEditSha] = useState<string | null>(null);
+  const [labelDraft, setLabelDraft] = useState('');
+  const [labelError, setLabelError] = useState('');
+  const [labelOverrides, setLabelOverrides] = useState<Record<string, string>>({});
+  // The label the row had BEFORE this edit, captured when editing starts. A ref, not a lookup in
+  // allCheckpoints — that value is declared far below this point, so depending on it here would read it
+  // in its temporal dead zone and crash the render.
+  const labelPrevRef = useRef('');
+  const applyCheckpointLabel = useCallback((sha: string, label: string) => {
+    setLabelOverrides((prev) => ({ ...prev, [sha]: label }));
+  }, []);
+  const beginLabelEdit = useCallback((sha: string, current: string) => {
+    labelPrevRef.current = current;
+    setLabelDraft(current);
+    setLabelError('');
+    setLabelEditSha(sha);
+  }, []);
+  const saveCheckpointLabel = useCallback(async (sha: string) => {
+    setLabelEditSha(null);
+    const label = labelDraft.replace(/\s+/g, ' ').trim();
+    const wsId = state.workspaceId;
+    if (!wsId || !sha || label === labelPrevRef.current) return;
+    const previous = labelPrevRef.current;
+    // Optimistic, because the round trip is invisible to the user — but REVERTED below if the server
+    // did not store it. Showing a name that was never saved would look like the app lost their work
+    // when it vanished on the next reload.
+    applyCheckpointLabel(sha, label);
+    try {
+      const res = await fetch('/api/agentv3/checkpoint/label', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ userId, email, workspaceId: wsId, sha, label }),
+      });
+      if (!res.ok) {
+        applyCheckpointLabel(sha, previous);
+        const data = await res.json().catch(() => ({} as { error?: string }));
+        setLabelError(data?.error || 'Could not save that name. Please try again.');
+        return;
+      }
+      const data = await res.json().catch(() => ({} as { label?: string }));
+      // Render exactly what PERSISTED (the server normalises and caps), never the raw draft.
+      if (typeof data?.label === 'string' && data.label !== label) applyCheckpointLabel(sha, data.label);
+      setLabelError('');
+    } catch {
+      applyCheckpointLabel(sha, previous);
+      setLabelError('Network error — that name was not saved.');
+    }
+  }, [labelDraft, state.workspaceId, userId, email, applyCheckpointLabel]);
   const [previewEverOpened, setPreviewEverOpened] = useState(false);
   useEffect(() => {
     if (previewVisible(showWorkspace, tab)) setPreviewEverOpened(true);
@@ -773,7 +825,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       const key = c.sha || c.id;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push(c);
+      // B5 — an in-session rename wins over whichever source this row came from. `in`, not `||`,
+      // because '' is a real value here: it is how a name is CLEARED.
+      out.push(c.sha in labelOverrides ? { ...c, label: labelOverrides[c.sha] } : c);
     }
     return out;
   })();
@@ -4427,13 +4481,51 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   {restoreNote && (
                     <div className="mb-2 text-[11px] text-zinc-400 bg-zinc-800/60 border border-white/5 rounded px-2 py-1">{restoreNote}</div>
                   )}
+                  {/* B5 — a name that did NOT persist must say so. Silently reverting the row would look
+                      like the app ate the user's input. */}
+                  {labelError && (
+                    <div className="mb-2 text-[11px] text-amber-300 bg-amber-950/30 border border-amber-700/40 rounded px-2 py-1">{labelError}</div>
+                  )}
                   {allCheckpoints.length === 0 ? <Empty>No checkpoints yet.</Empty> : (
                     <ul className="space-y-1">
                       {allCheckpoints.map((c) => (
                         <li key={c.id} className="flex items-center gap-2">
                           <History className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                           <span className="text-zinc-500 shrink-0">{c.sha.slice(0, 7) || '—'}</span>
-                          <span className="flex-1 truncate">{c.message}</span>
+                          {/* B5 — a NAMED checkpoint shows the user's own words; the auto commit message
+                              moves to the tooltip rather than being thrown away. Editing swaps in an
+                              input in place, so naming never costs a dialog or a page change. */}
+                          {labelEditSha === c.sha ? (
+                            <input
+                              autoFocus
+                              value={labelDraft}
+                              maxLength={80}
+                              onChange={(e) => setLabelDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') { e.preventDefault(); void saveCheckpointLabel(c.sha); }
+                                if (e.key === 'Escape') { e.preventDefault(); setLabelEditSha(null); }
+                              }}
+                              onBlur={() => void saveCheckpointLabel(c.sha)}
+                              placeholder="Name this version…"
+                              className="flex-1 min-w-0 bg-zinc-900 border border-indigo-600 rounded px-1.5 py-0.5 text-zinc-100 focus:outline-none"
+                            />
+                          ) : (
+                            <span
+                              className={`flex-1 truncate ${c.label ? 'text-zinc-100' : ''}`}
+                              title={c.label ? `${c.label} — ${c.message}` : c.message}
+                            >
+                              {checkpointDisplayName(c)}
+                            </span>
+                          )}
+                          {c.sha && labelEditSha !== c.sha && (
+                            <button
+                              onClick={() => beginLabelEdit(c.sha, c.label ?? '')}
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 shrink-0"
+                              title={c.label ? 'Rename this version' : 'Give this version a name you will recognise'}
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                          )}
                           {c.sha && (
                             <>
                               {/* Look before you leap: Preview is non-destructive and sits BEFORE

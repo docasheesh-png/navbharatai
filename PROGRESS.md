@@ -35204,3 +35204,44 @@ paid/power prompts byte-for-byte unchanged. Tests lock all three rules + the gat
 the measure of success is the next real weak-tier build report showing fewer first-pass
 type/catch/a11y findings. Gate: frontend+server tsc green, full suite 16,228 tests / 1,301 files
 passed; CI green before merge.
+## 2026-08-17 — The chat ⇆ workspace border now moves (admin: drag on desktop, tap on tablet)
+
+The two panes were a hard-coded `w-1/2` each — a 50/50 nobody could change. Both halves of that are
+wrong for real work: reading a long chat wants a wide chat, judging a layout wants a wide preview,
+and only the user knows which they are doing right now. Admin chose option **C** (drag + snap
+buttons + double-click reset) and added the tablet requirement themselves.
+
+**Three ways in, one number underneath.** Drag (mouse), tap ◀ ▶ (tablet), arrow keys (keyboard) all
+drive a single `split` percentage. The tablet buttons are the admin's own suggestion and the correct
+one: a finger is ~44px across, so dragging a 1px border on a touch screen is guesswork — stepping
+through fixed stops is exact. They are **always visible**, not hover-revealed: our users are not IDE
+veterans, and a control that only appears on hover does not exist at all on a tablet.
+
+**The decisions worth recording:**
+- **The drag commits ONE layout change, on pointer-up.** The workspace hosts an `<iframe>`; relaying
+  it out on every `pointermove` re-renders the user's whole app dozens of times a second, so a drag
+  paints a cheap ghost line and applies the width once at the end. Tap/keyboard commit immediately —
+  discrete steps have nothing to smear.
+- **`setPointerCapture` on the divider**, or the preview iframe swallows the move events and the
+  border sticks the moment you drag across the app.
+- **The minimums are CSS `min-width`, not JS.** 280px per pane, enforced by the browser at every
+  window size with no resize listener — so a split saved on a wide monitor cannot squeeze the
+  composer flat on a laptop. 280 × 2 = 560 also fits inside the 640px breakpoint at which the panes
+  stop stacking, so the clamp can never fight its own layout (test-pinned).
+- **`showWorkspace` still owns "is it visible"; `split` only owns "how wide".** Letting the split
+  ALSO mean hidden (0 or 100) would be two states encoding one truth — the exact shape behind this
+  session's Resume-button report — so the ladder's last step to the right calls
+  `setShowWorkspace(false)`, reusing the path that already works. That is also literally what the
+  admin asked for: keep tapping ▶ and the border ends up "last right".
+- **The live px readout is not decoration.** Dragging the preview narrow is the fastest honest way to
+  see the app at a phone width, and the number turns an accidental gesture into a real check — the
+  same three-screen discipline the builder was taught the day before.
+
+**Mobile is deliberately untouched:** below `sm` the panes stack and each takes the full screen, so
+there is no border to move. The divider is `hidden sm:flex`. The admin called this correctly.
+
+`AppKnowledgeBase.ts` updated in the same change (the same-PR rule) so every AI in the app can answer
+"preview ko bada kaise karun?".
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1302 files / 16237 tests passed** · `npm run build` OK.

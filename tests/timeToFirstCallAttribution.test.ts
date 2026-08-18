@@ -7,8 +7,11 @@ import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
  * The report printed:
  *
  *     [warning] TIME_TO_FIRST_CALL: 107s passed before the build made its first model call —
- *               sandbox setup, project restore, dependency install and secrets loading all
- *               happen before this point
+ *               sandbox setup, project restore and secrets loading all happen before this point
+ *
+ * (The original wording also listed "dependency install" here; it was removed 2026-08-17 because
+ *  `npm install` runs in the background boot CONCURRENT with the build and does not gate the first
+ *  call — naming it was a second wrong-subsystem pointer of exactly the kind this test guards against.)
  *
  * The same report disproves it twice over:
  *
@@ -49,6 +52,15 @@ describe('the dukaan report\'s exact numbers', () => {
     expect(p.message).toMatch(/that is model time, not setup/);
   });
 
+  it('does NOT blame dependency install — it overlaps the build, it does not gate the first call', () => {
+    // Build-setup investigation 2026-08-17: `npm install` runs in the background boot, concurrent with
+    // the build (a resumed sandbox already has node_modules). Naming it as pre-first-call setup sent an
+    // autopsy to optimise install when the real cost was the cold sandbox and its round-trips.
+    const p = at(afterMs(107_000, 86_616))!;
+    expect(p.message).toMatch(/sandbox setup, project restore and secrets loading/);
+    expect(p.message).toMatch(/Dependency install is NOT part of this wait/i);
+  });
+
   it('20s of setup is no longer a WARNING — the warning was the model call\'s, not setup\'s', () => {
     /**
      * The severity is the part that actually misdirects. A warning saying "setup took 107s" sends the
@@ -79,7 +91,7 @@ describe('it never invents the split it cannot measure', () => {
     expect(p.message).toMatch(/107s passed/);
     expect(p.message).toMatch(/upper bound on setup/);
     expect(p.message).toMatch(/was not measured/);
-    expect(p.message).not.toMatch(/sandbox setup, project restore, dependency install and secrets loading all happen in it/);
+    expect(p.message).not.toMatch(/sandbox setup, project restore and secrets loading all happen in it/);
   });
 
   it('junk latency is treated as unmeasured, never subtracted', () => {

@@ -717,7 +717,13 @@ export class BuildDiagnostics {
       // NEVER INVENT THE SPLIT. Without a latency we cannot separate the two, so we say the number is
       // an upper bound rather than repeating the old confident, wrong attribution.
       ? `${seconds}s passed before the build's first model call was recorded — this includes the call's own duration, which was not measured, so treat it as an upper bound on setup.`
-      : `${seconds}s of preparation before the build's first model call began — sandbox setup, project restore, dependency install and secrets loading all happen in it, and the user waits through every second. The first call itself then took ${Math.round(lat / 1000)}s; that is model time, not setup.`;
+      // ATTRIBUTION MUST NAME THE REAL CRITICAL-PATH COSTS, not a plausible-sounding one that does not
+      // block (build-setup investigation 2026-08-17). The blocking steps are sandbox create/connect,
+      // project restore and secrets loading. Dependency install is DELIBERATELY not named: on a fresh
+      // build `npm install` runs in the background boot, CONCURRENT with the build — it does not gate
+      // this first call — and a resumed sandbox already carries node_modules. Naming it here sent an
+      // autopsy to optimise install when the real cost was the cold sandbox and its round-trips.
+      : `${seconds}s of preparation before the build's first model call began — sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) The first call itself then took ${Math.round(lat / 1000)}s; that is model time, not setup.`;
     // WHERE THE TIME WENT — see longestSilentGap. Appended rather than replacing the sentence above,
     // because the total and the biggest single stretch answer two different questions, and the second
     // one is what an autopsy actually acts on. Only stated when a real gap exists.

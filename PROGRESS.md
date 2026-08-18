@@ -35032,13 +35032,19 @@ So the build was NOT slow because a piano is hard, or because the tier is weak �
 ~5-6 minutes. **~6 minutes were burned by two hung provider connections that nothing killed fast enough.** The rest of
 the timeline (typecheck+one repair pass +516→592s, review) is normal post-build work.
 
-### THE ROOT CAUSE (open — rule 6): no fast per-call latency ceiling that abandons a hung call and re-races.
-A model call returning 248 tokens in 244 seconds should be killed and re-raced in ~30-60s, not left to hang for 4
-minutes. `raceTimeout` exists as a utility but is not enforced as a tight per-model-call ceiling on the build/shadow
-lane. **This is the single biggest lever on real build TIME — bigger than any model-quality change** — but it lives in
-the multi-provider routing/racing layer = the MOAT, so it needs the admin's explicit sign-off before being touched
-(CLAUDE.md). Recorded here; the targeted fix is a per-call timeout (abandon+re-race a hung call fast), not a routing
-rewrite.
+### THE ROOT CAUSE — FOUND AND FIXED (admin said "sab fix karo"): `OpenAiToolRunner` had NO per-call timeout.
+The exact hang was pinned to code: `OpenAiToolRunner.runTurn` — which serves **GLM + Kimi, the cheap floor that
+LEADS every build** — `await`ed `chat.completions.create(...)` with **no timeout, no AbortController, nothing**, while
+`GeminiToolRunner` and `ClaudeClient` both cap at 120s. So a hung GLM/Kimi call ran unbounded (244s), AND — because it
+never threw a timeout — the entire downstream resilience stack (the "2 consecutive timeouts → bench → re-race" logic in
+`MultiProviderTurnRunner`, keyed on `isTimeout`) was **blind** to it. The 2026-07-18 audit had called Gemini "the only
+provider family missing a timeout" — that was wrong; the most-used family was missing it too.
+**Fix:** `OpenAiToolRunner` now wraps the call in the SAME `withTimeout` helper Gemini uses — default **120000ms**
+(parity with Gemini/Claude; well above the longest REAL call in this build, 74s; env `timeoutMs`, 0 disables). The
+rejection message says "timed out" so `isTimeout` benches a repeatedly-stalling rung and re-races instead of hanging.
+A false timeout is transient → the orchestrator simply falls through to the next provider, so it can never fail a build.
++4 tests (rejects on overrun · message says "timed out" · timeoutMs:0 disables · a fast call is untouched). This is the
+single biggest lever on real build TIME, now closed at the source.
 
 ### The rest of the 5-bucket ledger (unchanged, for completeness)
 ✅ 5 self-healed (missing/duplicate imports fixed) · 🔀 4 provider fallbacks (KIMI 3 timeout, GLM 1 rate-limit) ·

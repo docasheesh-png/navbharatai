@@ -40,6 +40,15 @@ export function parseListeningPorts(stdout: string | null | undefined): number[]
  */
 const INFRA_PORTS = new Set([22, 53, 5432, 3306, 27017, 6379, 9229]);
 
+/**
+ * Is this port infrastructure rather than the user's app? Exported (B2) so the ports panel can LABEL a
+ * listening 5432 as "your database", instead of showing it as a mysterious extra process — the same
+ * knowledge, one source, rather than a second list that drifts.
+ */
+export function isInfraPort(port: number): boolean {
+  return INFRA_PORTS.has(port);
+}
+
 /** Common dev-server ports, in rough order of likelihood across the frameworks we build. */
 const COMMON_DEV_PORTS = [3000, 5173, 5000, 8080, 4000, 8000, 4200, 5174];
 

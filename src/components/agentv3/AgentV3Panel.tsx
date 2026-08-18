@@ -65,6 +65,7 @@ import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, To
 import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './fullTeam';
 import { useRuntimeLogs } from '../../hooks/useRuntimeLogs';
 import { checkpointDisplayName } from '../../lib/checkpointLabel';
+import { useAppServices } from '../../hooks/useAppServices';
 import { runtimeLogEmptyMessage } from '../../lib/runtimeLogBuffer';
 import { db, sanitizeFirestoreData } from '../../App';
 
@@ -231,6 +232,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // cost control: the log lives in a billed sandbox, so a closed pane must cost exactly zero requests.
   const logsActive = showWorkspace && tab === 'logs';
   const runtimeLogs = useRuntimeLogs(state.workspaceId ?? null, userId, email, logsActive);
+  // B2 — what is actually RUNNING sits above the log, because it usually IS the answer: a frontend that
+  // renders while its backend is down looks exactly like a broken app.
+  const appServices = useAppServices(state.workspaceId ?? null, userId, email, logsActive);
   const logPaneRef = useRef<HTMLPreElement>(null);
   // Follow the tail like a real log viewer — but only when the user is already AT the bottom, so
   // scrolling up to read an error is never yanked away by the next poll.
@@ -4436,6 +4440,34 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   silent" it is, because those three look identical and mean completely different things. */}
               {tab === 'logs' && (
                 <div className="space-y-2">
+                  {/* B2 — the running/not-running strip. Every row is MEASURED in the sandbox on each
+                      poll; a service the project expects is shown as expected-and-not-running, never as
+                      green because a config file said so. */}
+                  {appServices.available && (appServices.services.length > 0 || appServices.extras.length > 0) && (
+                    <div className="rounded border border-white/5 bg-zinc-900/60 px-2 py-1.5 space-y-1">
+                      {appServices.summary && <div className="text-[11px] text-zinc-300">{appServices.summary}</div>}
+                      {appServices.services.map((svc) => (
+                        <div key={svc.id} className="flex items-center gap-2 text-[11px]" title={svc.note}>
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                              svc.status === 'listening' ? 'bg-emerald-400'
+                                : svc.status === 'not_listening' ? 'bg-red-400' : 'bg-zinc-500'
+                            }`}
+                          />
+                          <span className="text-zinc-200 truncate">{svc.name}</span>
+                          <span className="text-zinc-500 shrink-0">{svc.port != null ? `:${svc.port}` : svc.kind}</span>
+                          <span className="text-zinc-500 truncate hidden sm:inline">{svc.note}</span>
+                        </div>
+                      ))}
+                      {appServices.extras.map((e) => (
+                        <div key={`extra-${e.port}`} className="flex items-center gap-2 text-[11px] text-zinc-400">
+                          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-sky-400/70" />
+                          <span className="shrink-0">:{e.port}</span>
+                          <span className="truncate">{e.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {runtimeLogs.notice && (
                     <div className="text-[11px] text-amber-300/90 border border-amber-700/40 bg-amber-950/30 rounded px-2 py-1">
                       {runtimeLogs.notice}

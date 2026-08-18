@@ -105,4 +105,36 @@ describe('OpenAiToolRunner', () => {
     await runner.runTurn(baseParams({ maxTokens: undefined }));
     expect(create.mock.calls[1][0].max_tokens).toBe(4096);
   });
+
+  // A HUNG GLM/KIMI CALL CANNOT BLOCK THE BUILD ANYMORE (autopsy of build a487e019, 2026-08-18). This
+  // runner serves GLM + Kimi — the cheap floor that LEADS every build — and had NO per-call timeout,
+  // so one call ran 244 SECONDS returning 248 tokens and ate ~6 min of a 12-min build, invisible to the
+  // "2 timeouts → bench" resilience because it never threw a timeout. Now it does, exactly like Gemini/Claude.
+  describe('per-call timeout — the missing bound that let a call hang 244s', () => {
+    const hanging = (): OpenAiChatClient => ({
+      chat: { completions: { create: () => new Promise(() => { /* never settles — a stalled connection */ }) } },
+    } as unknown as OpenAiChatClient);
+
+    it('rejects when the call exceeds timeoutMs, so the orchestrator can fall through', async () => {
+      const runner = new OpenAiToolRunner(hanging(), { timeoutMs: 20 });
+      await expect(runner.runTurn(baseParams())).rejects.toThrow();
+    });
+
+    it('the rejection SAYS "timed out", so isTimeout benches a repeatedly-stalling provider', async () => {
+      const runner = new OpenAiToolRunner(hanging(), { timeoutMs: 20 });
+      await expect(runner.runTurn(baseParams())).rejects.toThrow(/timed out/i);
+    });
+
+    it('timeoutMs: 0 disables the bound (a fast call still returns normally)', async () => {
+      const { client } = clientReturning({ choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }] });
+      const res = await new OpenAiToolRunner(client, { timeoutMs: 0 }).runTurn(baseParams());
+      expect(res.text).toBe('ok');
+    });
+
+    it('a normal fast call is untouched (the default 120s bound never fires on real work)', async () => {
+      const { client } = clientReturning({ choices: [{ message: { role: 'assistant', content: 'built it' }, finish_reason: 'stop' }] });
+      const res = await new OpenAiToolRunner(client).runTurn(baseParams());
+      expect(res.text).toBe('built it');
+    });
+  });
 });

@@ -36,6 +36,7 @@ const jsZipLoader = async (buf: Buffer) => {
   return await JSZip.loadAsync(buf) as unknown as { files: Record<string, { async: (t: 'nodebuffer') => Promise<Buffer> }> };
 };
 import { scanFile, isScanningConfigured, MAX_SCANNABLE_BYTES} from '../lib/malwareScan';
+import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 import {
   isStorageConfigured, putApk, getApk, deleteApk, saveApp, getApp, updateApp,
   listApps, listAppsByUid, toPublic,
@@ -300,8 +301,20 @@ export function registerNavStoreRoutes(app: Express): void {
     if (!parsed.ok) return res.status(400).json({ error: parsed.error });
 
     // The GitHub token is the USER's — we read their artifact on their behalf, exactly as the
-    // download button already does.
-    const token = typeof body.githubToken === 'string' ? body.githubToken : '';
+    // download button already does, and from the SAME place it does.
+    //
+    // ROOT CAUSE (admin 2026-08-19: "github connected hai fir bhi yeh error"). This line used to read
+    // `body.githubToken`, while the client — `PublishToNavStore.tsx`, sharing the download button's
+    // own `ghHeaders()` — sends it as the `X-GitHub-Token` HEADER. The token was therefore ALWAYS
+    // empty here, so "Send for review" failed 100% of the time with "Connect GitHub first", sending
+    // the user to reconnect an account that was already connected perfectly.
+    //
+    // This is the THIRD copy of "where does the GitHub token live", and `mobileShipAuth.ts` exists
+    // precisely because the first two disagreed — its header documents that exact outage. The lesson
+    // was written down and then missed anyway, because its test asserted only the two route files
+    // that existed at the time, and this route was written later. A rule that guards a fixed list of
+    // files does not guard the rule; the test now covers EVERY route that takes a GitHub token.
+    const token = githubTokenFromRequest(req) ?? '';
     const owner = String(body.owner ?? '');
     const repo = String(body.repo ?? '');
     const artifactId = String(body.artifactId ?? '');

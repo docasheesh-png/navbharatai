@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Request } from 'express';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { GITHUB_TOKEN_HEADER, githubTokenFromRequest, looksLikeFirebaseIdToken } from './mobileShipAuth';
 
@@ -52,19 +52,66 @@ describe('which header carries the GitHub token', () => {
   });
 });
 
-describe('both route files use the shared contract', () => {
-  // Grep-level, deliberately: the bug was a SECOND private copy of "which header?", and only reading the
-  // real source can prove a third one has not appeared.
-  const read = (p: string) => readFileSync(join(process.cwd(), 'src/server/routes', p), 'utf8');
+describe('EVERY route that needs a GitHub token uses the shared contract', () => {
+  // Grep-level, deliberately: the bug was a SECOND private copy of "which header?", and only reading
+  // the real source can prove another has not appeared.
+  //
+  // ⚠️ THIS BLOCK USED TO NAME TWO FILES, AND THAT IS EXACTLY HOW A THIRD COPY GOT IN (admin
+  // 2026-08-19: "github connected hai fir bhi yeh error"). `routes/navStore.ts` — written after this
+  // test — read the token from `body.githubToken` while its client sent the `X-GitHub-Token` HEADER,
+  // so "Send for review" failed 100% of the time and told the user to connect an account that was
+  // already connected. A guard over a FIXED LIST of files does not guard the rule; it guards the
+  // files that existed the day it was written.
+  //
+  // So the list is DISCOVERED now: every route file that fetches a GitHub artifact or calls the
+  // GitHub API must go through `githubTokenFromRequest`. A new route cannot opt out by being new.
+  const routesDir = join(process.cwd(), 'src/server/routes');
+  const read = (p: string) => readFileSync(join(routesDir, p), 'utf8');
 
-  it('routes/mobileShip.ts does not read the Authorization header itself', () => {
-    const src = read('mobileShip.ts');
-    expect(src).toContain('mobileShipAuth');
-    expect(src).not.toMatch(/req\.headers\.authorization/);
+  // Comments describe the broken shapes on purpose, so the scan must read CODE. A guard that fires
+  // on the documentation of its own fix is a guard someone deletes.
+  const codeOnly = (src: string): string =>
+    src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+  /**
+   * ⚠️ THE RULE IS NOT "never read the body" — and getting that wrong would have broken working
+   * features. The v5.0 client genuinely posts `githubToken` in the BODY to its own `/api/agentv3/*`
+   * routes (ship, revert, deploy), and those read it from the body. Client and server agree, so they
+   * work; a blanket ban would have "fixed" them into failure.
+   *
+   * The real invariant is AGREEMENT: whatever a client sends, its server must read. This family —
+   * the ship-to-stores and store-publish routes — has clients that send the dedicated HEADER
+   * (`ghHeaders()`, shared with the Download button), so their servers must use the shared helper.
+   */
+  const HEADER_FAMILY = ['mobileShip.ts', 'mobileSetup.ts', 'navStore.ts'];
+
+  it.each(HEADER_FAMILY)('routes/%s reads the token ONLY through the shared helper', (file) => {
+    const src = codeOnly(read(file));
+    expect(src, `${file} must import the one answer`).toContain('mobileShipAuth');
+    expect(src, `${file} must not read Authorization itself`).not.toMatch(/req\.headers\.authorization/);
+    // The navStore regression precisely: reaching into the BODY for a token this family's clients
+    // only ever put in a header.
+    expect(src, `${file} must not look for a body-carried GitHub token`).not.toMatch(/body\??\.githubToken/);
   });
 
-  it('routes/mobileSetup.ts does not grow its own second copy either', () => {
-    const src = read('mobileSetup.ts');
-    expect(src).not.toMatch(/req\.headers\.authorization/);
+  it('CLIENT AND SERVER AGREE for the store publish — the pair that actually broke', () => {
+    // The failure was never visible in either file alone: each was self-consistent, and only the
+    // PAIR was wrong. So the pair is what gets asserted.
+    const client = readFileSync(join(process.cwd(), 'src/components/ide/PublishToNavStore.tsx'), 'utf8');
+    expect(client, 'the publish form must send GitHub auth the way the Download button does').toContain('ghHeaders()');
+    expect(codeOnly(read('navStore.ts')), 'so the server must read that header').toContain('githubTokenFromRequest(req)');
+  });
+
+  it('every route that downloads a build artifact uses the shared helper', () => {
+    // Discovered, not listed: `fetchBuildArtifact` IS the header-based download path, so any route
+    // reaching for it inherits the header contract — including routes written after today.
+    const artifactRoutes = readdirSync(routesDir)
+      .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+      .filter((f) => /fetchBuildArtifact/.test(codeOnly(read(f))));
+    expect(artifactRoutes.length, 'a silent empty list would guard nothing').toBeGreaterThan(0);
+    for (const file of artifactRoutes) {
+      expect(codeOnly(read(file)), `${file} downloads an artifact but invents its own token source`)
+        .toContain('githubTokenFromRequest');
+    }
   });
 });

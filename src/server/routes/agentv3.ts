@@ -344,6 +344,7 @@ import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { makeFirstPaintHandler } from '../AgentV3/streamingFirstPaint';
 import { buildRuntimeLogCommand, parseRuntimeLogOutput, runtimeLogGapNotice } from '../AgentV3/runtimeLogs';
+import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeServiceStatus, extraPorts, portsSummary } from '../AgentV3/portsPanel';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
 import { abortBuild } from '../AgentV3/buildAbortCause';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
@@ -4670,6 +4671,55 @@ export function registerAgentV3Routes(app: Express): void {
       text: window.text,
       nextOffset: window.nextOffset,
       notice: runtimeLogGapNotice(window),
+    });
+  });
+
+  // B2 — what is actually RUNNING, and on which port. serviceGraph already answers what the project
+  // SHOULD consist of; nothing answered what is genuinely up. That gap is why a half-started project is
+  // so confusing: the frontend renders, its API calls fail, and the app looks broken in a way that sends
+  // the repair loop rewriting perfectly good code, when the real fact is "the backend is not listening".
+  //
+  // 🔒 Every status is MEASURED in the sandbox on each request (absolute rule 2). An expected service is
+  // reported as expected-and-not-listening, never as running because a config file said it would be.
+  app.get('/api/agentv3/services', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const exec = await execInSession(workspaceId, buildServicesProbeCommand(), userId ?? undefined);
+    if (exec.available === false) {
+      const fileCount = await countWorkspaceFiles(workspaceId).catch(() => 0);
+      res.json({ available: false, reason: fileCount > 0 ? 'dormant' : 'not_started', savedFileCount: fileCount });
+      return;
+    }
+    // parseListeningPorts is PortDiscovery's — the production-proven one, not a second parser.
+    const listening = parseListeningPorts(exec.stdout);
+    const processes = parseProcessList(splitProcsSection(exec.stdout));
+    // The EXPECTED half comes from the project's own package.json files (durable, so it works even
+    // right after a sandbox recycle). A load failure degrades to "no expected services" — the measured
+    // ports are still shown, which is strictly better than failing the whole panel.
+    const contents = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+    const mono = detectMonorepo(Object.keys(contents), contents);
+    const graph = buildServiceGraph({ contents, packageDirs: mono.packageDirs });
+    const rows = mergeServiceStatus(graph.services, listening);
+    res.json({
+      available: true,
+      services: rows,
+      listening,
+      extras: extraPorts(graph.services, listening),
+      processes,
+      summary: portsSummary(rows, listening),
     });
   });
 

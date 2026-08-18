@@ -11,7 +11,8 @@ import {
   revokeShare,
   addFeedback,
   listFeedback,
-  MAX_HTML,
+  effectiveMaxHtml,
+  isShareStorageConfigured,
 } from '../lib/ShareStore';
 
 /**
@@ -38,8 +39,12 @@ export function registerShareRoutes(app: Express): void {
     if (typeof html !== 'string' || !html.trim()) {
       return res.status(400).json({ error: 'Nothing to share yet — build an app first.' });
     }
-    if (html.length > MAX_HTML) {
-      return res.status(413).json({ error: `App is too large to share (max ${Math.round(MAX_HTML / 1000)} KB).` });
+    // Honest cap: with a Storage bucket, large snapshots offload there (up to MAX_HTML); without one the
+    // inline Firestore-safe limit is the real ceiling. Reject oversize rather than truncate a runnable
+    // app into a broken one.
+    const maxHtml = effectiveMaxHtml(isShareStorageConfigured());
+    if (html.length > maxHtml) {
+      return res.status(413).json({ error: `App is too large to share (max ${Math.round(maxHtml / 1000)} KB).` });
     }
 
     const token = crypto.randomBytes(24).toString('base64url');

@@ -505,8 +505,17 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
     }
     if (dataLines.length === 0) return;
-    let payload: { data?: string; cursor?: number; truncated?: boolean; exitCode?: number | null };
+    let payload: { data?: string; cursor?: number; truncated?: boolean; exitCode?: number | null; message?: string };
     try { payload = JSON.parse(dataLines.join('\n')); } catch { return; }
+
+    // A2 — the daily free terminal allowance ran out (or is about to). WRITE IT INTO THE TERMINAL:
+    // a session that just stops responding is indistinguishable from a broken one, and the user would
+    // reasonably conclude the feature is broken rather than that they used it up.
+    if (event === 'quota' || event === 'quota_warning') {
+      const text = payload.message || 'Your free terminal time for today is used up.';
+      term.write(`\r\n\x1b[33m${text}\x1b[0m\r\n`);
+      return;
+    }
 
     if (event === 'exit') {
       attachedShells.delete(sessionKey);

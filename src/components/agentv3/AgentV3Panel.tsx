@@ -6,6 +6,9 @@ import { saveSecret, listSecrets } from '../../lib/secretsApi';
 // THE SAME vault UI the Settings screen renders — imported, never reimplemented, so the two doors
 // cannot drift into two behaviours. Lazy because most sessions never open it.
 const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ default: m.SecretManager })));
+// A2 — the REAL shell. LAZY on purpose: it pulls xterm (~70 KB gz), which must never land on the
+// first-paint path for the many users who never open a terminal.
+const ShellTerminal = lazy(() => import('../ide/ShellTerminal').then((m) => ({ default: m.ShellTerminal })));
 import {
   Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye,
@@ -4517,9 +4520,38 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   {diffPaths.map((p) => <div key={p}><div className="text-zinc-400 mb-1">{p}</div><pre className="whitespace-pre-wrap">{colorizeDiff(state.diffs[p])}</pre></div>)}
                 </div>
               ))}
-              {tab === 'terminal' && (state.terminal.length === 0 ? <Empty>No terminal output yet.</Empty> : (
-                <pre className="whitespace-pre-wrap text-zinc-300">{state.terminal.join('\n')}</pre>
-              ))}
+              {/* A2 — the Terminal tab is SPLIT: what NavBharatAI ran while building on top, and a REAL
+                  shell you can type in below. The shell and its routes already existed and were only
+                  reachable from another screen; what gated this was the money question, now answered
+                  (free, 30 min/day — see terminalQuota.ts). */}
+              {tab === 'terminal' && (
+                <div className="flex flex-col gap-2 h-full">
+                  <div className="shrink-0 max-h-[35%] overflow-y-auto">
+                    <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Build log</div>
+                    {state.terminal.length === 0
+                      ? <Empty>No build output yet.</Empty>
+                      : <pre className="whitespace-pre-wrap text-zinc-300">{state.terminal.join('\n')}</pre>}
+                  </div>
+                  <div className="flex-1 min-h-[220px] flex flex-col">
+                    <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">
+                      Terminal — 30 free minutes a day
+                    </div>
+                    {state.workspaceId ? (
+                      <Suspense fallback={<div className="text-xs text-zinc-500">Loading terminal…</div>}>
+                        <ShellTerminal
+                          sessionKey={`v5-${state.workspaceId}`}
+                          workspaceId={state.workspaceId}
+                          userId={userId ?? undefined}
+                          email={email ?? undefined}
+                          active={showWorkspace && tab === 'terminal'}
+                        />
+                      </Suspense>
+                    ) : (
+                      <Empty>Build an app first — the terminal runs inside your app's own machine.</Empty>
+                    )}
+                  </div>
+                </div>
+              )}
               {/* B1 — APP LOGS: what the user's own server printed, live. Empty is never a blank pane:
                   runtimeLogEmptyMessage says which of "never built" / "not running" / "running but
                   silent" it is, because those three look identical and mean completely different things. */}

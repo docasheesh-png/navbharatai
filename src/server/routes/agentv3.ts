@@ -348,6 +348,8 @@ import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeSe
 import { findProjectInstructionPath, normalizeProjectInstructions, projectInstructionsBlock, projectInstructionsNotice } from '../AgentV3/projectInstructions';
 import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '../AgentV3/fileMentions';
 import { parseIgnoreFile, ignoreRulesBlock, IGNORE_FILE } from '../AgentV3/ignoreRules';
+import { terminalDailyLimitSeconds, decideTerminalAccess, accrualSeconds, type TerminalAccess } from '../AgentV3/terminalQuota';
+import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
 import { abortBuild } from '../AgentV3/buildAbortCause';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
@@ -4847,6 +4849,42 @@ export function registerAgentV3Routes(app: Express): void {
     return state;
   }
 
+  /**
+   * A2 — the terminal's daily free allowance (admin 2026-08-18: free, 30 min/day).
+   *
+   * A shell holds a BILLED VM (~₹7/hour) whose time NavBharatAI absorbs, so an uncapped terminal is an
+   * unbounded liability — one tab left open around the clock is ~₹5,000/month, and a miner is worse.
+   * The quota is checked against the VERIFIED identity, never a client-claimed one: a metering gate a
+   * caller can spoof by editing a request body is decoration.
+   */
+  async function terminalAccessFor(req: Request): Promise<{ access: TerminalAccess; uid: string | null }> {
+    const verified = await verifiedIdentity(req).catch(() => null);
+    const uid = verified?.uid ?? null;
+    const unlimited = isAgentV3FreeUser(uid, verified?.email ?? null);
+    // No verified user ⇒ nothing to meter against. The shell routes' own ownership checks already
+    // refuse an anonymous caller, so this cannot become a free-for-all.
+    const usedSeconds = uid ? await terminalUsageStore.getTodaySeconds(uid).catch(() => 0) : 0;
+    return {
+      uid,
+      access: decideTerminalAccess({ usedSeconds, limitSeconds: terminalDailyLimitSeconds(), unlimited }),
+    };
+  }
+
+  /**
+   * Charge elapsed terminal time for one attached stream tick.
+   *
+   * Accrual happens WHILE the terminal is attached, not only when it is closed — a user who shuts the
+   * tab never sends a close, and metering only on close would make the cap trivially bypassable by
+   * doing nothing. Honest limit: an abrupt disconnect loses at most one tick, so this UNDER-counts
+   * slightly. Under-counting costs us a little; over-counting would charge somebody for time they did
+   * not spend, which the billing law forbids outright.
+   */
+  async function accrueTerminalTime(uid: string | null, lastAt: number, now: number): Promise<number> {
+    const seconds = accrualSeconds(lastAt, now);
+    if (uid && seconds > 0) await terminalUsageStore.addSeconds(uid, seconds).catch(() => {});
+    return seconds > 0 ? now : lastAt;
+  }
+
   /** Open a shell. Honest available:false (with the dormant/not_started reason) when no warm sandbox. */
   app.post('/api/agentv3/shell/open', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
@@ -4862,6 +4900,13 @@ export function registerAgentV3Routes(app: Express): void {
     }
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    // A2 — the daily allowance, checked BEFORE any sandbox work: waking a VM for a user who cannot use
+    // it would spend the exact money the cap exists to protect.
+    const openQuota = await terminalAccessFor(req);
+    if (!openQuota.access.allowed) {
+      res.status(429).json({ available: false, reason: 'quota', error: openQuota.access.message, code: 'TERMINAL_DAILY_LIMIT' });
       return;
     }
     let host = ptyHostForSession(workspaceId, userId ?? undefined);
@@ -5020,6 +5065,27 @@ export function registerAgentV3Routes(app: Express): void {
     // Heartbeat: keeps intermediaries from closing an idle stream, and lets the client notice a dead
     // connection while a long build produces nothing for minutes.
     const beat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* client gone */ } }, 20_000);
+    // A2 — accrue the daily allowance WHILE the terminal is attached. Metering only on close would be
+    // bypassable by simply shutting the tab, which is what most people do. When the allowance runs out
+    // the stream is ended with an honest event rather than going quiet: a terminal that stops
+    // responding for no stated reason is indistinguishable from a broken one.
+    const quotaUid = (await verifiedIdentity(req).catch(() => null))?.uid ?? null;
+    let lastAccruedAt = Date.now();
+    const meter = setInterval(() => {
+      void (async () => {
+        const now = Date.now();
+        lastAccruedAt = await accrueTerminalTime(quotaUid, lastAccruedAt, now);
+        const q = await terminalAccessFor(req).catch(() => null);
+        if (q && !q.access.allowed) {
+          send('quota', { message: q.access.message, code: 'TERMINAL_DAILY_LIMIT' });
+          try { closeShell(shellId, userId ?? undefined); } catch { /* already gone */ }
+          cleanup();
+          res.end();
+        } else if (q?.access.warn) {
+          send('quota_warning', { message: q.access.message });
+        }
+      })();
+    }, 30_000);
     // Poll for exit so the UI can show "[process exited]" instead of a shell that just stops responding.
     const watch = setInterval(() => {
       const s = getShell(shellId, userId ?? undefined);
@@ -5032,6 +5098,9 @@ export function registerAgentV3Routes(app: Express): void {
       done = true;
       clearInterval(beat);
       clearInterval(watch);
+      clearInterval(meter);
+      // Final accrual so the seconds since the last tick are not silently forgiven.
+      void accrueTerminalTime(quotaUid, lastAccruedAt, Date.now());
       unsubscribe();
     };
     req.on('close', cleanup);

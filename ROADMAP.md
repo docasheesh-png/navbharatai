@@ -442,7 +442,7 @@ an `AppKnowledgeBase.ts` entry (user-facing capability change).
 
 | # | Item | Audit ref | Notes |
 |---|---|---|---|
-| B1 | Live runtime log viewer for the running app | minor 22 | Sandbox already streams; this is a surface, not a capability. Biggest single win in this tier — server bugs are currently invisible. |
+| B1 | ✅ **DONE 2026-08-18 (#TBD)** — "App Logs" tab | minor 22 | `AgentV3/runtimeLogs.ts` (pure) + `GET /api/agentv3/runtime-logs` + `hooks/useRuntimeLogs.ts`. Byte-offset POLLING, not SSE, and only while the tab is visible — the log is a file in a billed VM, so a held-open stream would spend money to watch a file. Detects restart (log shrank) and skipped bytes, and says so. Empty pane distinguishes never-built / dormant / running-but-silent. |
 | B2 | Ports + processes panel | minor 26 | `serviceGraph.ts` already models services/ports. Render it. |
 | B3 | Start / stop / restart one service | minor 25 | Today a stuck server needs a full rebuild. |
 | B4 | Re-run only the failing test | minor 28 | `run_tests` exists; add a filter argument. |

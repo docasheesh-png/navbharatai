@@ -343,6 +343,7 @@ import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWork
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { makeFirstPaintHandler } from '../AgentV3/streamingFirstPaint';
+import { buildRuntimeLogCommand, parseRuntimeLogOutput, runtimeLogGapNotice } from '../AgentV3/runtimeLogs';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
 import { abortBuild } from '../AgentV3/buildAbortCause';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
@@ -4593,6 +4594,49 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     res.json(execResult);
+  });
+
+  // B1 — the user's OWN app's runtime log, live. The dev server already writes everything it prints to
+  // DEV_SERVER_LOG_PATH and the ENGINE already reads it (E2BActuator tails it to diagnose a failed
+  // boot); the user never saw a byte. So a backend throwing on every request just looked like "the app
+  // doesn't work", with a rebuild as the only lever. This is a surface for an existing stream.
+  //
+  // POLLING, not SSE, on purpose: the log is a FILE in the sandbox, so a stream would mean holding a
+  // sandbox command open for as long as the pane is visible — billed VM time (~₹7/hr) spent to watch a
+  // file that a cheap byte-offset read covers exactly. Ownership-checked and rate-limited like /exec.
+  app.get('/api/agentv3/runtime-logs', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const offset = Number(req.query.offset);
+    const exec = await execInSession(workspaceId, buildRuntimeLogCommand(offset), userId ?? undefined);
+    // Same honest dormant states the terminal and git panel use — never an empty pane pretending the
+    // app is running silently when the sandbox simply is not warm.
+    if (exec.available === false) {
+      const fileCount = await countWorkspaceFiles(workspaceId).catch(() => 0);
+      res.json({ available: false, reason: fileCount > 0 ? 'dormant' : 'not_started', savedFileCount: fileCount });
+      return;
+    }
+    const window = parseRuntimeLogOutput(exec.stdout, offset);
+    res.json({
+      available: true,
+      hasLog: window.hasLog,
+      text: window.text,
+      nextOffset: window.nextOffset,
+      notice: runtimeLogGapNotice(window),
+    });
   });
 
   // ===============================================================================================

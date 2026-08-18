@@ -1514,6 +1514,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                  userId={v3UserId}
                  email={v3Email}
                  framework={v3Preview?.framework}
+                 // Always true here by construction: this mount sits inside `activeScreen === 'preview'`,
+                 // so it UNMOUNTS when the user switches screens and its timers stop with it.
+                 paneVisible
                  autoResume={!v3Preview?.running}
                  onFileEdited={(path, content) => onFilesChange({ ...files, [path]: content })}
                />

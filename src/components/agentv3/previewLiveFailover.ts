@@ -77,7 +77,53 @@ export function shouldFailoverToLive(s: LiveFailoverSignals): boolean {
  * that actually helps, without claiming anything that has not been verified.
  */
 export function noLiveRescueNotice(): string {
-  return 'The in-browser preview could not load this app’s packages, and the live server is not serving anything yet either. Tap Diagnose to start it — nothing here means your files are lost.';
+  // WORDING FIXED 2026-08-17 along with the bug that made this line nearly unreachable. It used to end
+  // "— nothing here means your files are lost", which parses as "there is nothing here, which means
+  // your files are lost" — the exact opposite of the reassurance intended. It could stay unnoticed
+  // while almost nobody saw it; now that the no-live case actually reaches it, it has to be right.
+  return 'The in-browser preview could not load this app’s packages, and the live server is not running. Tap Diagnose to start it — none of this means your files are lost.';
+}
+
+/**
+ * What to DO when the in-browser preview reports an error. One decision, so the caller cannot grow a
+ * second, subtly different copy of it.
+ *
+ * ── THE BUG THIS EXISTS FOR (admin 2026-08-17) ──────────────────────────────────────────────────
+ * Admin: *"jab koi user in-browser preview wali app ko 3 din baad open karta hai to preview chalta hi
+ * nahi hai, e2b me chalta hai."*
+ *
+ * The rescue was gated on a live URL ALREADY EXISTING. That hid the failure behind a clock:
+ *
+ *   • **Right after a build** the sandbox is warm and the build has emitted a live URL. A broken
+ *     in-browser preview failed over to it and the user saw their app. Everything looked fine.
+ *   • **Days later** the sandbox has long been paused and there is no live URL, so the entire rescue
+ *     block was skipped — no failover, and, worse, NOT EVEN THE NOTICE. The user got a blank or broken
+ *     preview and no explanation, while the Diagnose button one tap away would have started a live
+ *     server and worked.
+ *
+ * The giveaway that this was an oversight rather than a policy: `noLiveRescueNotice` was already
+ * written FOR this exact case — it says the live server is not running and to tap Diagnose — and the
+ * guard made it unreachable in precisely the situation it describes.
+ *
+ * 'check-live' means "a URL exists, go probe it and maybe fail over"; 'tell-user' means "there is
+ * nothing to fail over to, so say so"; 'none' means stay quiet. PURE.
+ */
+export function rescueActionForPreviewError(s: {
+  mode: string;
+  errorSource: 'in-browser' | 'live';
+  hasLiveUrl: boolean;
+  alreadyFailedOver: boolean;
+  userPickedInBrowser: boolean;
+}): 'check-live' | 'tell-user' | 'none' {
+  // A live-server error must never bounce back to live, and an error from a surface the user is not
+  // looking at is not theirs to be interrupted by.
+  if (s.mode !== 'inbrowser' || s.errorSource !== 'in-browser') return 'none';
+  // Their explicit choice wins over ours — but they still deserve to know why the view is broken, so
+  // this is 'tell-user', not 'none'. Being silent was the whole bug.
+  if (s.userPickedInBrowser) return 'tell-user';
+  if (!s.hasLiveUrl) return 'tell-user';
+  if (s.alreadyFailedOver) return 'tell-user';
+  return 'check-live';
 }
 
 /**

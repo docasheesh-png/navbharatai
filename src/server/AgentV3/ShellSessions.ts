@@ -44,6 +44,11 @@ export interface PtyHost {
   writePty(workspaceId: string, pid: number, data: string): Promise<void>;
   resizePty(workspaceId: string, pid: number, cols: number, rows: number): Promise<void>;
   killPty(workspaceId: string, pid: number): Promise<boolean>;
+  /**
+   * "Real work is happening in this sandbox right now" — see noteSandboxActivity below for why a
+   * terminal has to say this out loud. Optional so a host without an idle sweep needs no change.
+   */
+  noteActivity?(workspaceId: string): void;
 }
 
 /** Runtime type guard — a runner that also speaks PTY. Keeps the actuator interface optional. */
@@ -66,6 +71,14 @@ export const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 export const MAX_INPUT_CHARS = 8192;
 /** How long the sandbox keeps the PTY process alive. Refreshed on activity. */
 export const PTY_LIFETIME_MS = 60 * 60 * 1000;
+/**
+ * How often a shell tells its sandbox it is alive. See noteSandboxActivity.
+ *
+ * Comfortably under the tightest idle limit the sweep uses (5 minutes), and far above the rate at
+ * which PTY output arrives — `npm install` produces thousands of chunks a second, and one cheap call
+ * per chunk would be its own bug.
+ */
+export const ACTIVITY_NOTE_MS = 30_000;
 
 export interface ShellSnapshot {
   shellId: string;
@@ -92,6 +105,8 @@ interface ShellSession {
   exitCode?: number;
   createdAt: number;
   lastActivity: number;
+  /** When this shell last told the sandbox it was working. Throttles noteSandboxActivity. */
+  lastHostNote: number;
   subscribers: Set<(chunk: string, cursor: number) => void>;
 }
 
@@ -123,6 +138,38 @@ function touch(s: ShellSession): void {
 }
 
 /**
+ * Tell the SANDBOX that this terminal is doing real work.
+ *
+ * ── THE BUG THIS EXISTS FOR (found 2026-08-17) ──────────────────────────────────────────────────
+ * There are TWO independent idle clocks, and until now the terminal only wound one of them.
+ *
+ * The sandbox's clock (`E2BActuator._lastActivity`) is refreshed inside `getSandbox()`, so it moves
+ * when a build touches the VM — and, for a terminal, when the user TYPES, because `writePty` calls
+ * `getSandbox`. It does NOT move for output: PTY output arrives on a callback the SDK already holds,
+ * which reaches no actuator method at all. So a terminal that is producing output while the user
+ * simply READS it was, to that clock, perfectly idle.
+ *
+ * The idle limit is 5 minutes. `npm install`, a test run, a first `npm run build` — all of them
+ * routinely stream for longer than that without a keystroke. The sweep would pause the VM mid-work
+ * and the shell died under the user's cursor, on a command that was succeeding.
+ *
+ * ── WHY A SUBSCRIBER IS REQUIRED ────────────────────────────────────────────────────────────────
+ * "Output = alive" alone would be a cost leak wearing a bugfix's clothes: a forgotten `npm run dev`
+ * with nobody watching would hold a billed VM for as long as it chattered. The honest invariant is
+ * the one the shell reaper already uses — work nobody is watching is abandonment — so a note is sent
+ * only while a reader is genuinely attached. An abandoned noisy shell still goes idle exactly as it
+ * does today, and `sweepShells` still kills it on the same terms.
+ *
+ * Best-effort and swallowed: a cost optimisation must never be able to break a running shell.
+ */
+function noteSandboxActivity(s: ShellSession, now = Date.now()): void {
+  if (s.subscribers.size === 0) return;
+  if (now - s.lastHostNote < ACTIVITY_NOTE_MS) return;
+  s.lastHostNote = now;
+  try { s.host.noteActivity?.(s.workspaceId); } catch { /* never break the stream */ }
+}
+
+/**
  * Append PTY output to a session's scrollback and fan it out to live readers.
  *
  * The buffer is trimmed from the FRONT once it exceeds MAX_SCROLLBACK, which is what a terminal
@@ -134,6 +181,8 @@ function appendOutput(s: ShellSession, text: string): void {
   s.buf += text;
   s.cursor += text.length;
   if (s.buf.length > MAX_SCROLLBACK) s.buf = s.buf.slice(s.buf.length - MAX_SCROLLBACK);
+  // Output IS sandbox work — say so, or the idle sweep pauses the VM mid-`npm install`.
+  noteSandboxActivity(s);
   for (const notify of s.subscribers) {
     try { notify(text, s.cursor); } catch { /* one broken reader must never stall the shell */ }
   }
@@ -194,6 +243,9 @@ export async function openShell(
     alive: true,
     createdAt: now,
     lastActivity: now,
+    // 0, not `now`: a reader attaching to a brand-new shell must be able to send the first note
+    // immediately rather than waiting out a throttle window it never earned.
+    lastHostNote: 0,
     subscribers: new Set(),
   };
   // Registered BEFORE the PTY starts: output can arrive on the very first callback, and dropping the
@@ -271,6 +323,9 @@ export function subscribeShell(
   if (!s) return undefined;
   s.subscribers.add(onChunk);
   touch(s);
+  // A reader coming back (a phone unlocking, a tab waking) is activity too — and it is the moment a
+  // silent-but-running command most needs the sandbox held, before the next output chunk arrives.
+  noteSandboxActivity(s);
   return () => { s.subscribers.delete(onChunk); };
 }
 

@@ -245,6 +245,9 @@ export function ViewPanels({
             userId={user?.uid}
             email={user?.email ?? undefined}
             framework={v3Preview?.framework}
+            // Always true here by construction: this mount is inside `activeView === 'preview'`, so it
+            // UNMOUNTS when the user navigates away and its timers go with it.
+            paneVisible
             autoResume={!v3Preview?.running}
             onFixError={onV3FixError}
             onFileEdited={(path, content) => setFiles((prev: any) => ({ ...prev, [path]: content }))}

@@ -34723,3 +34723,249 @@ biggest historical contributors — the 226s node_modules walk and cold-rebuild-
 fixed.
 
 Gate: `tsc -p tsconfig.server.json` clean; full `vitest` green (16,172).
+## 2026-08-17 — Terminal: the sandbox paused itself mid-`npm install`
+
+Admin asked whether a user can run their own commands from v5's 3-dot → Terminal (they cannot — that
+tab renders `state.terminal.join('\n')`, a read-only log of what the AI ran), then asked for the
+terminal's bugs to be fixed and nothing else. This is that bug.
+
+**Two independent idle clocks, and the terminal only ever wound one.**
+
+The sandbox's clock (`E2BActuator._lastActivity`) is refreshed inside `getSandbox()`. A build winds it
+constantly. A terminal winds it when the user TYPES, because `writePty` calls `getSandbox`. It does
+**not** wind for OUTPUT: PTY output arrives on a callback the E2B SDK already holds and reaches no
+actuator method at all.
+
+The idle limit is 5 minutes (lowered from 15 on 2026-08-13 off the measured E2B bill). `npm install`,
+a test run, a first `npm run build` all stream for longer than that without a keystroke. To that
+clock the terminal looked perfectly idle, so `_sweepIdleSandboxes` paused the VM **in the middle of a
+command that was succeeding**, and the shell died under the user's cursor.
+
+The 5-minute limit is only safe because the sweep is build-aware (`setBuildActive`). Nobody made it
+terminal-aware — the terminal shipped 2026-08-04, the limit dropped to 5 on 2026-08-13, and the two
+were never reconciled.
+
+**The fix — terminals report their work through the same kind of channel builds do.** `PtyHost` gains
+an optional `noteActivity(workspaceId)`; `appendOutput` calls it; `E2BActuator` implements it as a
+cheap synchronous refresh of `_lastActivity` + the cloud-side timeout + the durable touch.
+
+**Three decisions that are the actual engineering, not the plumbing:**
+- **`noteActivity` must NOT call `getSandbox()`**, though that would have been one line and would
+  have refreshed activity for free. `getSandbox` CREATES a sandbox when none is warm — a passive
+  liveness note would have become a resurrection, spending real money for a workspace nobody asked to
+  wake. A note may only say "the VM you can already see is busy". It returns early with no warm handle.
+- **A subscriber is REQUIRED.** "Output = alive" alone is a cost leak wearing a bugfix's clothes: a
+  forgotten `npm run dev` with nobody watching would hold a billed VM for as long as it chattered.
+  Gating on an attached reader keeps the honest invariant the shell reaper already uses — work nobody
+  is watching is abandonment — so an unwatched shell goes idle exactly as it does today.
+- **Throttled to 30s per shell.** `npm install` emits thousands of chunks a second; a note per chunk
+  would have been its own bug. 30s is comfortably under the 5-minute floor it protects.
+
+`sweepShells` is deliberately unchanged: no-reader + no-input for 30 minutes still dies.
+
+**Not a sibling, checked:** the preview has its own 150s watchdog (`PreviewSurface` `WATCH_INTERVAL_MS`)
+that probes and self-heals, so it never went silent past the idle limit. The terminal was the one
+long-running surface with nothing.
+
+Regression tests encode the reported scenario on a fake clock — four minutes of install chatter with
+zero keystrokes yields four notes — plus the throttle, the unwatched case, a host with no
+`noteActivity` at all, and a `noteActivity` that throws.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+1300 files / 16,179 tests green.
+
+---
+
+## 2026-08-17 — Capability audit vs Claude Code, and the roadmap that closes it → **THIS IS THE NEXT WORK**
+
+Admin: *"navbharatai pro v5 ko scan / audit karo aur claude code se compare karo… kam se kam 10 badi
+aur 50 choti gaps dhundo"*, then *"in sare gaps ko fill karne ke liye ek detailed roadmap banao"*.
+
+**The plan lives in `ROADMAP.md` §8** ("THE CONTROL GAP"), not here — this file is the append-only
+record of what SHIPPED, and §8 is what is still to do. This entry exists so a session reading
+`PROGRESS.md` for the resume point is sent to the right place. **Next session: start at ROADMAP §8G,
+Sprint 1, item A1.**
+
+**The audit.** Sixty gaps, every one from code search across `src/server`, `src/components`,
+`src/hooks` at `main @ a599ea2` — never from recollection. Ten major, fifty minor, plus fourteen
+capabilities verified PRESENT so the gap count is read in proportion.
+
+**The finding, in one line: v5 is not behind on intelligence — it is behind on CONTROL.** Nearly every
+gap is the same shape: the engine can do the thing, the user cannot direct it, interrupt it, inspect it
+or extend it. v5 is an appliance — state a wish, receive an app — which is the right design for someone
+who cannot code, and stops being right the moment their app gets real.
+
+**The two cheapest items are already-written code behind a switch, which is the most useful thing the
+audit turned up:**
+- **Mid-build steering already exists** (`routes/agentv3.ts:1434–1438`) and is gated to the Full Team
+  (`'max'`) tier. Every other user's only option when a build goes wrong is Stop-and-rebuild. Ungating
+  it does not cost tokens — it SAVES them, because a steer is one prompt and a rebuild is a whole build.
+- **A real PTY shell already exists** (`ide/ShellTerminal.tsx`, xterm.js, owner-checked, rate-limited)
+  and is mounted in Code Studio. v5's own Terminal tab renders `state.terminal.join('\n')` — a read-only
+  log with no input box. It needs a door, not a feature. ⚠️ Blocked on one admin decision first
+  (ROADMAP §8F.1): terminal time holds a billed E2B VM and is charged to nobody today.
+
+**Honest method note, recorded because it changes how much this audit should be trusted.** The grep
+method produced **two false positives before publication**: `browser_action`/`screenshot` were recorded
+as missing (they are dispatched with an `if`, not a `case`) and so was GitHub repo import (it lives in
+`GithubApiTree.ts`). Both were caught and corrected before the list was written. This is exactly the
+failure mode `ROADMAP.md`'s own header warns about — grep the DOMAIN NOUN, not the expected file name —
+and it fired inside an audit whose whole purpose was accuracy. Treat any single "absent" in §8 as
+high-confidence but not proof; re-grep before building.
+
+**Where I disagreed with the request, stated rather than quietly obeyed (third absolute rule).** The
+admin asked for a roadmap covering all sixty. All sixty are in §8. But §8E carries an explicit
+recommendation to DEFER most of the extensibility cluster — hooks, skills, custom sub-agents, MCP
+client, per-tool permissions, a CLI. Together those are what make Claude Code a *developer platform*;
+building them turns NavBharatAI into a competitor to Cursor for an audience it does not have, while the
+India-first moat (Hindi, Cashfree, UPI, domain recipes, the App Store, mobile-first) goes unattended.
+The recommendation is: build 8A–8D, ship E1–E3, and leave E4–E15 open-but-unscheduled until a real user
+asks. Completeness was delivered; the priority call is recorded so it is a decision, not a drift.
+
+No code shipped in this entry — it is an audit and a plan. `ROADMAP.md` §8 is the deliverable.
+
+---
+
+## 2026-08-17 — "Cursor for India, in Hindi" — a recommendation of mine, corrected by the admin
+
+Follow-up to the entry above. The admin read §8E's advice to defer the extensibility cluster and pushed
+back: *"to ham indians ke liye bana rahe hai cursor aisa maan lo, hindi me 😂 kya yeh nahi ho sakta.
+agar sach me impossible hai…to chor do. agar koi rasta ho…to isko bhi roadmap me add kar dena!"*
+
+**The push-back was right, and §8E's reasoning was wrong.** Nothing in §8E was a feasibility claim —
+every item there is buildable — but it argued against them on the grounds that they serve "an audience
+we do not have". That does not survive the actual number: India has millions of people who CAN code but
+read English slowly (engineering students, polytechnic/ITI, tier-2/3 developers). Nobody serves them,
+and Cursor never will, because it has no incentive to. The plan is now `ROADMAP.md` §9.
+
+**What the re-examination turned up, which neither of us had: the moat item was missing from §8
+entirely.** NavBharatAI's Indic-language work is genuinely strong — `IndicLanguage.ts` separates Marathi
+from Hindi by real markers (ळ, आहे, नाही), catches romanized input, and is deliberately timid because
+building someone's app in the wrong language is worse than building it in English. **But all of it
+governs ONE thing: which language the GENERATED APP's UI is in.** Nowhere does the platform explain the
+user's OWN code, errors or concepts back to them in their language. "Ye error kya keh raha hai?" has no
+answer today. That capability (§9.1) is the cheapest thing in the section, needs no architecture
+decision, and is the only genuinely un-copyable item in the whole audit.
+
+**The strongest argument is not the admin's framing either, and §9 records the better one.** "Cursor but
+in Hindi" competes on someone else's turf. The compounding version: **this is the next step for the user
+we already have.** Someone who cannot code builds a shop app here; six months later it has real
+customers and they need to understand their own code. Same person, later — and today we lose them at
+exactly that moment.
+
+**The real obstacle is architecture, not features (§9.2).** Cursor runs on YOUR machine against YOUR
+repo; a browser cannot read a local folder. Three paths — a CLI (`npx navbharatai`), a VS Code
+extension, or staying in the browser — and they are not cheaply combinable. Recommendation is the CLI,
+which means **§8E's ranking of item E9 as a "near-non-goal" was wrong under this goal** and is corrected
+in §9.3 along with E11/E4/E6.
+
+**Two cautions kept rather than dropped to agree (§9.4).** This does not replace §8A–§8C and must not
+start before them — steering, a shell, runtime logs and a per-project instruction file serve BOTH
+audiences and are all smaller. And the real cost is focus: an app-builder for non-coders and a coding
+tool for coders are two products sharing one engine. Replit runs both, so it is not fatal, but it should
+be accepted knowingly rather than discovered later.
+
+**The measurable question that should decide §9.2:** do users who built an app here come back asking
+about their CODE? If yes, this is the graduation path. If they only ever ask for more app features, it
+is not — and §9.1 was still worth building.
+
+No code shipped. `ROADMAP.md` §9 is the deliverable; §8 remains the immediate work.
+
+---
+
+## 2026-08-17 — The preview left behind: a billed sandbox that could never be reaped
+
+Admin, on E2B cost: *"ek bar user ne app banaya, preview chala, fir user ne koi aur chat open kar li,
+preview aise hi chor diya! to kya billing me add hota rahega?"*
+
+**Yes — and to NavBharatAI, not the user.** Sandbox billing is capped at the build's own duration
+(`agentv3.ts` `Math.min(seconds, buildSeconds)`), so the user was never charged a rupee for it. We
+absorbed 100%.
+
+**The mechanism, and it is pure arithmetic.** Once opened, the preview pane is deliberately never
+unmounted — `previewKeepAlive.ts` hides it with CSS so a detour to chat cannot destroy a rendered
+iframe. That is correct and stays. But a mounted component keeps its timers: the Live watchdog polls
+`/api/agentv3/preview-health` every **150s**, that route runs a real command inside the sandbox
+(`actuator.runCommand`), every sandbox command refreshes the idle clock via `getSandbox()`, and the idle
+sweep pauses a VM at **300s**. 150 < 300, so **the sweep could never win.** A Live preview left behind
+held a billed E2B VM (~₹7/hour, measured) until the browser tab itself was closed.
+
+`probeAndMaybeHeal` already refused to run behind a hidden BROWSER TAB, and that guard was real — it
+just does not cover the reported case. Switching to chat inside NavBharatAI leaves
+`document.visibilityState` at `'visible'` while the pane sits at `display:none`. **The missing fact was
+already being computed one line away for the CSS class** (`previewVisible(showWorkspace, tab)`) and
+simply never reached the watchdog.
+
+**The fix:** `shouldWatchLivePreview` — one pure, tested rule consulted by BOTH the probe and the
+interval, so they cannot drift into "the interval fires while the probe declines", which would be the
+same leak with extra steps. `paneVisible` is threaded from the panel and is in the effect's deps, so
+leaving Preview tears the timer down and returning re-arms it with an immediate check.
+
+**`paneVisible` is REQUIRED, not optional, and that is the actual engineering.** Two of the three call
+sites unmount when hidden and pass a literal; only `AgentV3Panel` keeps the pane alive while hidden and
+must pass the real value. An optional prop defaulting to `true` would have been less code and would have
+let the next hidden-mount call site silently reintroduce the leak. The compiler now refuses.
+
+**What the user loses: nothing.** A returning user meets a paused sandbox and waits through a resume —
+the trade `sandboxReaper.ts` already documents in its own words ("slower, not broken"). What they gain
+is that this now actually happens.
+
+**Sibling hunt (rule 3).** Every other client poller was checked: `useAgentV3Build`'s stall detector
+runs only during a live build, and the rest are 1s UI clocks and a typewriter. The preview watchdog was
+the only timer touching a sandbox.
+
+**Also confirmed while investigating, because the admin proposed building them:** ideas #1 and #2 —
+cache the preview on the device, run the E2B VM only when the cache cannot cope — **are already built.**
+The In-browser preview is the DEFAULT (`useState<'live' | 'inbrowser'>('inbrowser')`), renders from the
+workspace files with no server, and "Live server" is explicitly labelled PAID in the UI. Nothing to
+build there; recorded here so no future session builds it twice (safeguard #6).
+
+Verification gate: `tsc --noEmit` clean · `vitest run` 1301 files / 16,193 tests green.
+
+---
+
+## 2026-08-17 — "3 din baad preview chalta hi nahi hai": a rescue that only worked while it was not needed
+
+Admin: *"jab koi user in-browser preview wali app ko 3 din baad open karta hai, to preview chalta hi
+nahi hai, e2b me chalta hai."*
+
+**The clock in that sentence is the whole bug.** The in-browser preview has an automatic rescue: when
+it fails to load an app's packages, it probes the live server and moves the user there. That rescue was
+gated on a live URL **already existing** — and whether one exists is purely a function of how long ago
+the build ran.
+
+- **Right after a build:** the sandbox is warm and the build has emitted a live URL. A broken
+  in-browser preview failed over to it, the user saw their app, and nothing looked wrong.
+- **Days later:** the sandbox has long been paused, so there is no live URL. The entire block was
+  skipped — no failover, and **not even the explanation.** The user got a blank or broken preview with
+  no message, while the Diagnose button one tap away would have started a live server and worked.
+
+**What proves this was an oversight and not a policy:** `noLiveRescueNotice()` was already written for
+exactly this case — it says the live server is not running and to tap Diagnose — and the guard made it
+unreachable in precisely the situation it describes. It could only fire when a live URL existed but was
+unhealthy.
+
+**Fix:** `rescueActionForPreviewError` — one pure decision returning `check-live` / `tell-user` /
+`none`. "No live URL" is now `tell-user`, never silence. So is a user who explicitly chose In-browser
+(their choice still wins — we just no longer leave them guessing why the view is broken) and a second
+error after one failover. The only silent outcomes left are the two that genuinely are not the user's
+problem: an error from the live surface, and an error from a surface they are not looking at.
+
+**Wording fixed in the same change, because the fix is what makes people see it.** The notice ended
+"— nothing here means your files are lost", which parses as *"there is nothing here, which means your
+files are lost"* — the opposite of the reassurance intended. Harmless while nearly unreachable; not once
+this path actually shows it. Now: "none of this means your files are lost."
+
+**A test was re-pinned, and the reason is recorded so it is not mistaken for weakening one.** An
+existing assertion matched the literal phrase `not serving`; the clearer sentence says `is not
+running`, which keeps the same guarantee. It now matches the FACT rather than the prose, and gained a
+new assertion that the notice may never claim the live server IS running.
+
+**Ruled out along the way, all by reading the code rather than guessing** — recorded so the next session
+does not re-investigate them: durable workspace files have no TTL (`WorkspaceFileStore`, Firestore,
+kept indefinitely); `collectFilesWithSavedFallback` already falls back from a dead sandbox to the saved
+files; `frameworkRunsInBrowser(undefined)` returns `true`, so a missing framework does not silently
+block a compile; and the sticky session id is read from `localStorage` first, so a workspace id survives
+days.
+
+Verification gate: `tsc --noEmit` clean · `vitest run` 1301 files / 16,202 tests green.

@@ -418,7 +418,13 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar py-2">
+      {/* min-h-0 is load-bearing, not cosmetic: this is a flex-1 child of a `flex flex-col h-full`
+          whose parent sidebar is `overflow-hidden`. A flex item defaults to `min-height:auto`, which
+          floors it at its CONTENT height — so a long file list grows past the sidebar instead of
+          scrolling, and the parent clips the overflow. On a short phone screen that means the files
+          below the fold are simply unreachable. `min-h-0` lets the item shrink so overflow-y-auto
+          actually engages. Locked by FileExplorer.scroll.test.tsx. */}
+      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar py-2">
         <AnimatePresence>
           {isAddingFile && (
             <motion.div 

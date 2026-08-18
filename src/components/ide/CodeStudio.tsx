@@ -981,7 +981,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                     </p>
                  )}
               </div>
-              <div className="flex-1 overflow-y-auto">
+              {/* min-h-0: same flexbox scroll trap as the file explorer — without it a long list of
+                  search results grows past the panel instead of scrolling within it. */}
+              <div className="flex-1 min-h-0 overflow-y-auto">
                  {results.map((r, i) => (
                     <button
                        key={`${r.path}:${r.line}:${i}`}

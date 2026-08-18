@@ -345,6 +345,7 @@ import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { makeFirstPaintHandler } from '../AgentV3/streamingFirstPaint';
 import { buildRuntimeLogCommand, parseRuntimeLogOutput, runtimeLogGapNotice } from '../AgentV3/runtimeLogs';
 import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeServiceStatus, extraPorts, portsSummary } from '../AgentV3/portsPanel';
+import { findProjectInstructionPath, normalizeProjectInstructions, projectInstructionsBlock, projectInstructionsNotice } from '../AgentV3/projectInstructions';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
 import { abortBuild } from '../AgentV3/buildAbortCause';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
@@ -9468,6 +9469,30 @@ export function registerAgentV3Routes(app: Express): void {
         // app (a plain client/API is already covered by the framework hint). Reads only a handful of files.
         const bootHint = await fullstackBootHint(tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''));
         if (bootHint) buildPrompt = `${bootHint}\n\n${buildPrompt}`;
+        // C1 — the project's OWN rules (NAVBHARATAI.md / AGENTS.md / CLAUDE.md / .cursorrules), so a
+        // user does not have to repeat "Hindi labels", "rupees not dollars", "never touch payments" in
+        // every single message. Prepended LAST so it lands nearest the top of the prompt, and the user
+        // is TOLD which file was used — a rule applied invisibly is indistinguishable from the AI doing
+        // something unasked. Deliberately in the per-turn USER message, never the static system prompt:
+        // that prompt is the cached prefix (AGENTV3_CACHE_PREFIX), and a per-project block at its head
+        // would bust the cache for every workspace and make every build more expensive.
+        const instrPath = findProjectInstructionPath(tree);
+        if (instrPath) {
+          const instr = normalizeProjectInstructions(instrPath, await actuator.readFile(workspaceId, instrPath).catch(() => ''));
+          const block = projectInstructionsBlock(instr);
+          if (block) {
+            buildPrompt = `${block}\n\n---\n\n${buildPrompt}`;
+            const notice = projectInstructionsNotice(instr);
+            if (notice) events.emit({ type: 'narration', agent: 'architect', text: notice, ts: Date.now() });
+            buildDiag.record({
+              phase: 'build',
+              severity: 'info',
+              code: 'PROJECT_RULES',
+              message: `Applied project rules from ${instrPath}${instr?.truncated ? ' (truncated to the cap)' : ''}`,
+              autoResolved: true,
+            });
+          }
+        }
       } catch { /* project context is best-effort — never blocks a build */ }
 
       // MEMORY FIX 2 (Claude-level conversation memory): load the most recent PRIOR build transcript

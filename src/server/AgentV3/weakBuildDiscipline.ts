@@ -15,6 +15,15 @@
 // architect prompt (systemPrompt.ts); the route prepends it exactly like every other per-build
 // context block, so the prompt-regression suite is untouched and non-weak builds are byte-for-byte
 // unchanged.
+//
+// EXTENDED 2026-08-18 (piano-autopsy proactive layer): the build-order half stops the app from ending
+// half-broken; it does NOT stop the specific FIRST-PASS defects the weak tier keeps shipping — type
+// errors, silently-swallowed errors (empty catch), and missing accessible names on icon-only controls.
+// Those are the recurring weak-tier items the paid gates would repair but the free/cheap tier never
+// gets a strong repair pass for. So a small "correctness & quality bar" is added to the SAME block
+// (single source — no new pass, no model call, no extra cost, weak builds only) to PREVENT them being
+// generated at all, per the 50/50 law: fixing the reported bug is half; killing the condition that let
+// it exist (the model was never told the bar) is the other half.
 
 /**
  * Env kill switch. The discipline is ON by default for weak builds (it only ever helps and cannot
@@ -57,5 +66,19 @@ export function weakBuildDisciplineBlock(
     '  browser code. Auth/JWT/hashing live on the server; the client only calls the API with a token.',
     '- If you are running low on remaining steps, STOP adding new features and make the existing app',
     '  compile and run cleanly instead of leaving work half-done.',
+    '',
+    '## CORRECTNESS & QUALITY BAR — get it right on the FIRST pass (no clean-up pass will run)',
+    '',
+    'This build is judged on being correct the first time. Follow these while you write each file, not',
+    'afterwards — there is no strong model coming behind you to fix them:',
+    '- TYPE-SAFE code only. Give every function parameter, return value, prop and state a real type. Do',
+    '  NOT reach for `any` or `as any` to silence the compiler — if you are unsure of a shape, declare a',
+    '  small interface/type for it. Leave ZERO TypeScript errors; the app must type-check.',
+    '- NEVER swallow an error. Every `try` must actually handle its `catch` — show the user a message,',
+    '  set an error state, or at minimum surface it — an empty `catch {}` (or a catch that only ignores)',
+    '  is forbidden. A hidden failure is worse than a visible one.',
+    '- ACCESSIBLE by default. Every icon-only button, link or input needs an accessible name',
+    '  (`aria-label` or visible text). Every form input needs an associated `<label>`. Do this as you',
+    '  create the control, not as a later fix.',
   ].join('\n');
 }

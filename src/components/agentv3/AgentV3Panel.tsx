@@ -4176,6 +4176,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   charCount={prompt.length}
                 />
               </div>
+              {/* B8 — CONTEXT METER. Compaction already runs silently; without this the user only sees the
+                  SYMPTOM (the AI forgetting things they said an hour ago) and concludes the product got
+                  worse. Shown ONLY once there is something true to say — a meter that always talks
+                  becomes wallpaper. Percentage only: the window size differs per engine, so showing it
+                  would leak which engine ran (White-Label Law). */}
+              {state.contextUsage?.note && (
+                <div
+                  className={`order-0 w-full mb-1 flex items-center gap-2 rounded px-2 py-1 text-[11px] border ${
+                    state.contextUsage.level === 'critical'
+                      ? 'border-amber-600/50 bg-amber-950/30 text-amber-200'
+                      : 'border-white/5 bg-zinc-800/60 text-zinc-400'
+                  }`}
+                >
+                  <div className="h-1 w-12 shrink-0 rounded bg-zinc-700 overflow-hidden" aria-hidden="true">
+                    <div
+                      className={`h-full ${state.contextUsage.level === 'critical' ? 'bg-amber-400' : 'bg-zinc-400'}`}
+                      style={{ width: `${state.contextUsage.pct}%` }}
+                    />
+                  </div>
+                  <span className="flex-1">{state.contextUsage.note}</span>
+                  {state.contextUsage.level === 'critical' && !running && (
+                    <button onClick={newChatFromHistory} className="shrink-0 px-1.5 py-0.5 rounded bg-amber-700/40 hover:bg-amber-600/50 text-amber-100">
+                      New chat
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="relative w-full order-1" data-tour="chat">
                 <textarea
                   ref={composerRef}

@@ -12,6 +12,12 @@ const MODEL_LIMITS: Array<{ re: RegExp; limit: number }> = [
   { re: /gpt-4o|gpt-4-turbo/i, limit: 128_000 },
   { re: /gemini.*1\.5|gemini.*pro/i, limit: 1_000_000 },
   { re: /grok/i, limit: 131_072 },
+  // B5.2/K2 lead most builds now (Model Routing Policy), so leaving them on the 200k DEFAULT would
+  // OVER-state how much room a build has and warn too late — the one direction that actually hurts.
+  // Kimi's 256k is documented in CLAUDE.md; GLM's is not verifiable here, so it takes the conservative
+  // 128k. Under-stating a window warns early (harmless); over-stating warns after the failure.
+  { re: /kimi/i, limit: 256_000 },
+  { re: /glm/i, limit: 128_000 },
 ];
 const DEFAULT_LIMIT = 200_000;
 

@@ -77,6 +77,9 @@ export type AgentV3WireEvent =
   // the encrypted vault by the client and never travels on this stream (see secretRequest.ts).
   | { type: 'secret_request'; agent: AgentRole; callId: string; prompt: string; secrets: Array<{ name: string; why: string }>; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
+  // B8 — how full the conversation's context is. Percentage + plain words ONLY: the window size differs
+  // per engine, so sending it would leak which engine ran (White-Label Law).
+  | { type: 'context_usage'; pct: number; level: 'ok' | 'high' | 'critical'; note: string; ts: number }
   | { type: 'preview'; url: string; ts: number }
   | { type: 'repo'; url: string; fullName: string; ts: number }
   // Own-repo working-branch storage is active: edits are on `workBranch` inside the user's REAL repo,
@@ -154,6 +157,8 @@ export interface AgentV3ClientState {
   terminal: string[];
   /** Git/History surface — checkpoints. */
   checkpoints: GitCheckpoint[];
+  /** B8 — latest context reading, or null while nothing has been measured. Never a guess. */
+  contextUsage: { pct: number; level: 'ok' | 'high' | 'critical'; note: string } | null;
   /** Plan-mode text. */
   plan: string;
   /** Live preview URL (the running app in the sandbox), once published. */
@@ -237,6 +242,7 @@ export function initialAgentV3State(): AgentV3ClientState {
     diffs: {},
     terminal: [],
     checkpoints: [],
+    contextUsage: null,
     plan: '',
     agents: {},
     pendingBash: {},

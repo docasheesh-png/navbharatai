@@ -190,6 +190,10 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'checkpoint':
       return { ...state, checkpoints: [...state.checkpoints, event.checkpoint] };
 
+    // B8 — replaces rather than accumulates: this is a CURRENT reading, not a log.
+    case 'context_usage':
+      return { ...state, contextUsage: { pct: event.pct, level: event.level, note: event.note } };
+
     case 'preview':
       return {
         ...state,

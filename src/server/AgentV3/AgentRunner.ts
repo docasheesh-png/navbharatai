@@ -18,6 +18,7 @@ import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarrati
 import { newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
+import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
 import { abortCauseOf, abortSummary } from './buildAbortCause';
 
 /**
@@ -260,6 +261,9 @@ interface ToolResultBlock {
 }
 
 export class AgentRunner {
+  /** B8 — last context reading SENT, so the meter only speaks when it meaningfully changed. */
+  private lastContextUsage: ContextUsage | null = null;
+
   constructor(private readonly opts: AgentRunnerOptions) {}
 
   async run(userPrompt: string): Promise<AgentRunResult> {
@@ -586,6 +590,18 @@ export class AgentRunner {
             latencyMs: Date.now() - llmStartedAt, ok: true,
           });
         } catch { /* diagnostics capture is best-effort */ }
+
+        // B8 — surface how full the context is. Compaction already silently trims old turns; without
+        // this the user only sees the SYMPTOM (the model forgetting things they said an hour ago) and
+        // concludes the product got worse. Uses the PROVIDER-REPORTED count, never an estimate, and
+        // only fires when the reading meaningfully changed.
+        try {
+          const ctx = describeContextUsage(turn.usage.inputTokens, turn.model ?? model);
+          if (shouldEmitContextUsage(this.lastContextUsage, ctx)) {
+            this.lastContextUsage = ctx;
+            events.emit({ type: 'context_usage', pct: ctx.pct, level: ctx.level, note: ctx.note, ts: Date.now() });
+          }
+        } catch { /* a meter must never be able to fail a build */ }
 
         usage.inputTokens += turn.usage.inputTokens;
         usage.outputTokens += turn.usage.outputTokens;

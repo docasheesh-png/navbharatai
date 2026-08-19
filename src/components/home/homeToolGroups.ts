@@ -12,7 +12,7 @@ import type { ComponentType } from 'react';
 import {
   Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitBranch, Gauge, Minimize2,
   Palette, Layout, Puzzle, LayoutTemplate, Moon, Figma, Rocket, Smartphone, CloudUpload, Search,
-  Package, IndianRupee, Users2, TrendingUp, Share2,
+  Package, IndianRupee, Users2, TrendingUp, Share2, Database,
 } from 'lucide-react';
 
 /** A lucide icon component (version-independent — the package's type export name has changed across releases). */
@@ -60,6 +60,10 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
     color: 'text-emerald-400',
     icon: Code,
     items: [
+      // Database Studio was fully built (browse your own DB + read-only SQL runner + edit + CSV) but had
+      // NO doorway — nothing set activeView='dbstudio', so users could not reach it. This tile is that
+      // doorway (D1 gap, 2026-08-19). "See your data" is a developer/data tool, so it lives here.
+      { id: 'dbstudio', label: 'Database Studio', icon: Database },
       { id: 'testing', label: 'Test Runner', icon: TestTube },
       { id: 'performance', label: 'Performance', icon: Gauge },
       { id: 'multipages', label: 'Multi-Page', icon: Layout },

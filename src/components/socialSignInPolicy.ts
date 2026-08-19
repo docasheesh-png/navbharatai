@@ -22,6 +22,34 @@ export function popupFailureAction(code: string | null | undefined): PopupFailur
   return 'error';
 }
 
+/**
+ * WHICH WEB FLOW A PROVIDER GETS: the popup, or a full-page redirect.
+ *
+ * ROOT CAUSE (admin 2026-08-19, reproduced on desktop Chrome AND iPhone Safari, with the popup's own
+ * DevTools attached). Apple sign-in reached Apple, and Apple COMPLETED it — the popup's network log
+ * showed Apple's `authorize` response carrying a real `grant_code` and `userId`. Yet the app stayed
+ * logged out and reported "didn't complete". The credential was never the problem; DELIVERING it back
+ * to the opener was. Apple returns via `response_mode=form_post` — a CROSS-SITE POST into the popup —
+ * and after it the popup navigated to the app instead of handing the result to the window that opened
+ * it. That relay is exactly what modern storage partitioning / ITP breaks, which is why it failed
+ * identically in two unrelated browsers. `popup-closed-by-user` was the only signal the SDK could give,
+ * so the UI honestly, and uselessly, said "cancelled".
+ *
+ * The redirect flow has no relay to break: the whole page goes to Apple and comes back, and
+ * `getRedirectResult` at the app root finalizes it. It is already wired (App.tsx) and already used as
+ * the popup-blocked fallback — and this app is the ideal case for it, because `authDomain` is our OWN
+ * origin (navbharatai.com). That was not an accident: firebase.ts records that the custom authDomain
+ * was adopted PRECISELY so `signInWithRedirect` returns SIGNED-IN rather than logged-out.
+ *
+ * Apple ONLY. Google and GitHub deliver through the popup correctly today, and a redirect there would
+ * trade a working, faster flow for a full page reload — a regression bought with someone else's bug.
+ */
+export type WebSignInStrategy = 'popup' | 'redirect';
+
+export function webSignInStrategy(providerId: string | null | undefined): WebSignInStrategy {
+  return providerId === 'apple.com' ? 'redirect' : 'popup';
+}
+
 /** The minimal auth surface waitForSignedInUser needs — injected so the helper is unit-testable. */
 export interface MinimalAuthLike {
   currentUser: unknown | null;

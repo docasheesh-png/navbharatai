@@ -35580,3 +35580,124 @@ no-double-prefix rule, the shared path asserted against E2BActuator's REAL sourc
 cannot drift apart again), and every branch of the page-check verdict.
 
 Gate: both tsc green, 16,608 tests / 1,324 files, CI green before merge.
+## 2026-08-18 — "Close Settings" neither closed Settings nor went where the user asked
+
+Admin: *"jab setting ko close (x) karte hai to NavBharatAI FREE open ho jata hai. yeh galat hai — home
+page khulna chahiye."*
+
+**Two independent wrongs met at the same click, and fixing only the reported one would have left the
+same surprise a click away.**
+
+1. **The panel's own ✕ ran `toggleTab('nbi_chat')`** — a hardcoded destination. So a button labelled
+   "Close Settings" did not close Settings at all (the tab stayed open) and navigated to the FREE chat
+   for no reason the user could see.
+2. **The tab bar's ✕ was no better.** `computeTabClose` falls back to the LAST REMAINING TAB, and with
+   a FREE chat open that is `nbi_chat` too. Same landing, different button.
+
+**The rule that was missing.** Falling back to the last remaining tab is right for an ORDINARY tab —
+close one chat and you land on the chat beside it. It is wrong for an OVERLAY like Settings, which is
+not a sibling of your work but a place you step into and back out of. `computeTabClose` now takes
+`returnsHome` (default `['settings']`): a view in that set returns to base instead of capturing
+whichever tab happened to be last. A parameter rather than a hardcoded `view === 'settings'`, so the
+policy is visible and testable — the test proves it by running the same call with and without it.
+
+**One close, not two.** The panel ✕ now calls the SAME `closeTab` the tab bar uses (its event argument
+became optional, since a panel button has no tab click to stop). Giving the panel a private close would
+have meant a second copy of the child/companion teardown and the per-tab state reset — the kind of
+duplicate that drifts and then disagrees. The 2026-07-11 behaviour (closing Settings also closes the
+options opened from inside it) is untouched and still tested.
+
+**An existing test expectation was changed, and it was not a stale test — it was the bug, one level
+deeper.** `closing SETTINGS also closes the options opened from inside it` asserted that a user sitting
+in Billing (a Settings child) lands on `nbi_chat` when Settings closes. That is the reported surprise
+reached from inside a child rather than from the panel, so the expectation moved to `home` while every
+other assertion in it — the closing set, the surviving tabs — was kept exactly as it was.
+
+**Deliberately NOT changed:** Professionals and Other AI are also parent tabs with children, and they
+still land on the last remaining tab. Only Settings was reported, and silently changing navigation that
+nobody complained about is how a fix becomes a new bug. `returnsHome` makes adding them a one-word
+change if the admin wants it.
+
+Verification gate: `tsc --noEmit` clean · `vitest run` 1301 files / 16,211 tests green.
+
+---
+
+## 2026-08-19 — The Publish dialog was phone-width on a 1920px screen
+
+Admin, while connecting a real app to their own domain: *"publish button press karne par jo tab khulta
+hai, woh mobile phone jaisa feel de raha hai — bas isko desktop jaisa kar do agar user desktop par hai
+to; phone par hai to phone jaisa (already theek hai)."*
+
+`HostingChooser`'s dialog was `max-w-lg` — 512px — at **every** breakpoint. The grid inside already went
+two-up at `sm`, so on a desktop the result was four content-rich cards squeezed into two narrow columns
+inside a phone-width box: labels wrapping, and vertical scrolling for content that had room to sit side
+by side. The same container holds the domain-connect flow with its DNS records, which is the view the
+narrow cap hurt most — exactly the screen the admin was about to use.
+
+Now `max-w-lg lg:max-w-4xl`. **Additive on purpose:** the base width is untouched because the admin said
+phone was already right, and widening at `lg` (≥1024px, genuinely a desktop) leaves phone and tablet
+exactly as they were. Replacing the base width would have "fixed" desktop by breaking the one surface
+that was not broken.
+
+**Sibling check (rule 3), and the honest result: no sweep needed.** Three other dialogs also cap at
+`max-w-sm`/`max-w-md` (`BillingPanel`'s confirm, `FilesPanel`'s prompt, `NavAppStore`'s sheet) — all
+genuinely small dialogs where narrow is correct. This was not a repo-wide pattern; it was one dialog
+that had outgrown its width.
+
+Pinned by `tests/publishModalWidth.test.ts`. A CSS class is not worth a rendering test, but the intent
+is: the failure mode is somebody collapsing the class list back to one width and nobody noticing until
+a screenshot.
+
+Verification gate: `tsc --noEmit` clean · `vitest run` 1313 files / 16,466 tests green.
+
+---
+
+## 2026-08-19 — "Your app did not build, so there was nothing to publish" — when the app was fine
+
+Admin, mid-flow while connecting a real app to their own domain. A piano app built at 10:20 and
+previewing correctly; Publish pressed at 16:11:
+
+```
+npm error path /home/user/workspace/package.json
+npm error enoent Could not read package.json
+```
+
+**Nothing was wrong with the app.** Its 21 files were safe in the durable store the whole time — the
+in-browser preview was rendering them *on the same screen*. What was missing was the SANDBOX.
+
+**Why it only happens after a while.** Publish ran `npm run build` straight through the actuator, which
+assumes the workspace's files are already in the sandbox. That holds for minutes after a build and then
+stops: the idle sweep pauses the sandbox (5 min) **and drops the actuator's in-memory `_fileCache` for
+that workspace** — the only thing the recreate-after-death restore replays from, and a cache that dies
+with the Cloud Run instance anyway, i.e. on every deploy. So the next sandbox comes back EMPTY, the
+build runs in an empty directory, and the user is shown npm's raw ENOENT for a mistake they did not
+make. **Publish worked only while the sandbox happened to still be warm — a clock, not a condition
+anyone can see or control.** Same shape as yesterday's preview-rescue bug.
+
+**The sibling hunt returned the proof, not just a check.** `preview-diagnose` ALREADY re-seeds the
+durable files before it does anything (`loadWorkspaceFiles` → write into the resumed sandbox). That is
+exactly why the admin's own words were *"e2b me chalta hai"* — Diagnose works **because** it does the
+thing Publish forgot. Publish was the outlier, one route away from the correct behaviour.
+
+**Fix:** `sandboxSeed.ts` — a shared, pure-cored helper that makes sure a workspace's saved files are in
+the sandbox before a deterministic operation runs a command in it. Publish calls it first and refuses
+with **our own sentence** when a workspace genuinely has nothing, so npm's ENOENT can never again be
+the user's error message.
+
+**Three decisions worth keeping:**
+- **The marker is `package.json`, not "any file at all".** A sandbox can come back with a stray
+  scaffold remnant or a lockfile and be non-empty while leaving `npm run build` exactly as broken. The
+  file the build actually opens is the file we check for. Static projects (no package.json) are judged
+  on emptiness instead.
+- **A FAILED listing seeds anyway.** "Could not look" is not "empty" — treating them alike would
+  reproduce this bug through a different door. Re-writing files that are already there is harmless.
+- **One unwritable file does not abort the restore.** A partial project builds far more often than an
+  empty one.
+
+**Recorded, not done:** `preview-diagnose` has its own older inline version of this re-seed. It works,
+and it does more than the helper (sandbox resume, foundation files), so it was NOT refactored under a
+bug fix — changing a working path to tidy a duplicate is how a fix becomes an outage. Centralising the
+two is a follow-up.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+1315 files / 16,482 tests green.

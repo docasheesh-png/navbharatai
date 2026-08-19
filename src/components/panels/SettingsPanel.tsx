@@ -69,6 +69,12 @@ export interface SettingsPanelProps {
   setSettingsScreen: (s: SettingsScreen) => void;
   toggleTab: (view: ViewType) => void;
   setActiveView: (view: ViewType) => void;
+  /**
+   * Genuinely close Settings — the SAME teardown the header tab's ✕ runs (children, companions, state
+   * reset, and where the user lands). Before this the header ✕ here only navigated to another tab, so
+   * a button labelled "Close Settings" neither closed Settings nor took you anywhere you asked for.
+   */
+  onCloseSettings: () => void;
 
   // The current app's generated code — passed through to the Multi-Cloud Deploy sub-screen so a real
   // deploy (NavBharat Hosting / Vercel-with-token) has the app bundle to publish (admin 2026-07-29).
@@ -336,6 +342,7 @@ export function SettingsPanel({
   setSettingsScreen,
   toggleTab,
   setActiveView,
+  onCloseSettings,
   generatedCode,
   deviceMode,
   setDeviceMode,
@@ -397,7 +404,7 @@ export function SettingsPanel({
           </h3>
         </div>
         <button
-          onClick={() => toggleTab('nbi_chat')}
+          onClick={onCloseSettings}
           aria-label="Close Settings"
           className="ml-auto p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-white/5 active:bg-white/10 rounded-xl text-[#8b949e] transition-all"
         >

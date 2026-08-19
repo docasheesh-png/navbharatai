@@ -35512,3 +35512,39 @@ to resume a paused sandbox) is the genuinely world-class version and is a separa
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1317 files / 16546 tests passed** · `npm run build` OK.
+
+---
+
+## 2026-08-19 — v5 split divider: the drag preview now lands where the border lands (PR #2472, merged 1ab4990)
+
+Admin report with a screenshot: dragging the chat/preview border showed the line somewhere other than
+the drag, and the px badge somewhere else again. THREE separate faults, all root-caused:
+
+1. **Line and label in two different places.** The badge was `absolute` inside the divider while the
+   line was `fixed` at the pointer — and the panes deliberately do not move until pointer-up, so the
+   divider (with the badge) stayed at the OLD border while the line moved. Both are now placed by ONE
+   `lineLeft`.
+2. **The geometry ignored the divider's own 11px.** Panes were sized `split%` / `(100-split)%` of the
+   container while the divider lives inside that same container, so flex was asked for 100% + 11px and
+   shrank both — the real border landed ~11px left of where the preview drew. `splitPane` now works on
+   a TRACK (container − divider): `DIVIDER_PX` / `trackWidth` / `dividerLeftPx`, pointer mapped to the
+   divider's CENTRE, and `paneWidthPx` DERIVED from `dividerLeftPx` so chat + divider + preview sum
+   exactly. Side effect worth noting: the device chips are now honest — "Phone" really is 390px (was
+   401).
+3. **`position: fixed` was unsafe here.** A fixed element is viewport-positioned only while no ancestor
+   creates a containing block; any transform/filter/backdrop-filter/contain/will-change re-parents it,
+   and this shell uses backdrop-blur. The preview is now a portal on `document.body` — class removed,
+   not dodged.
+
+Also: the container rect is captured ONCE per drag (it was measured inside the JSX on every render,
+forcing a layout mid-drag and making the position depend on React's timing), and the divider's width
+comes from the same constant the maths uses so CSS and geometry cannot drift again.
+
+Tests pin the two real invariants: the border's CENTRE equals the cursor x, and chat + divider +
+preview fill the container exactly at every stop. The old expectations encoded the missing divider and
+were corrected to the true widths.
+
+⚠️ Honest limit recorded: this was fixed from the code and locked by unit tests; it was NOT visually
+confirmed in a browser from this session. The admin was told so and asked to re-check after deploy.
+
+Gate: both tsc green, 16,569 tests / 1,320 files, CI green before merge.

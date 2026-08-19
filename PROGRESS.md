@@ -35775,3 +35775,55 @@ not a longer timeout.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 1327 files / 16,646 tests green.
+
+## 2026-08-19 — Admin-report batch + reachability triage: unlock the real, remove the fake
+
+A long session driven by real admin screenshots, then an autonomous "build everything except E3
+(background executor)" mandate. Shipped as many small verified PRs, each branch → CI green → merge.
+
+**From the admin's reports (real screenshots):**
+- **E1 share — completed** (#2459 size, #2465 discoverability). The read-only client share (P-COLLAB.3)
+  was already built but (a) rejected any app > ~600 KB because the whole snapshot lived in one Firestore
+  field — fixed by offloading large snapshots to Cloud Storage (ceiling → 5 MB, honest cap, revoke deletes
+  the bytes); and (b) was buried three levels deep in Settings → Deploy — surfaced as a Home →
+  Publish & Deploy → "Share for Review" tile (moved, not duplicated — the MultiCloudDeploy card was removed).
+- **Domain connect** (#2468, #2470): the app list now shows "Connected: <domain>" per app; DNS records are
+  REMEMBERED (were re-derived live every visit, so a record Firebase had accepted vanished and looked lost
+  after a multi-hour registrar wait) — now stored durably, shown ✓ done / ⏳ pending; and the wait copy is
+  honest about the real minutes-to-hours timeline + "your progress is saved, safe to leave".
+- **App Mart** (#2474 logo, #2476 screenshots): a published app showed the globe, never its logo — the
+  publish form never SENT the icon the server already accepted; fixed. Added optional app screenshots
+  (up to 3, browser-downscaled, stored in a subcollection to dodge the 1 MiB doc limit), shown in a new
+  App Mart detail view. Both optional.
+- **Preview** (#2479): removed a DUPLICATE Phone/Tablet/Full device-width control from the header — it
+  duplicated PreviewSurface's own device switcher. The draggable divider (with live px) stays.
+
+**Autonomous reachability triage — "unlock the real, remove the fake":** a ViewType audit found SEVEN
+screens rendered by ViewPanels that NO navigation could open (built but doorless). Each was verified
+against "real features only" before wiring — and half were fake:
+- **Wired (real):** Database Studio (#2480 — full DB browser + read-only SQL runner, was doorless),
+  API Marketplace (#2483 — inserts real API snippets), Localization + Test Generator + Plugins (#2485).
+- **De-faked first, then wired (#2485):** Localization (fake 800 ms "Translating…" delay → removed;
+  "Fill common strings" is honest about its real 18-language dictionary); AI Testing Suite → **Test
+  Generator** (its "Run All Tests" FAKED pass/fail with `Math.random()` + an invented error message —
+  removed; a browser can't run your Jest suite, so it only GENERATES real tests now); Plugins (fabricated
+  install/star counts removed; "Install" used to only flip a localStorage flag — "Add to app" now inserts
+  the integration's REAL setup code via onCodeInsert).
+- **Deleted (fully fake, #2483):** AI Project Manager — "generate an AI project plan" awaited a cosmetic
+  `setTimeout(1500)` and returned a HARDCODED 10-task list regardless of input, tagged "AI Generated".
+- **Left hidden (honest but not a user tool):** App Health Monitor reports NavBharatAI's PLATFORM uptime,
+  not the user's app — a "Health Monitor" tile would mislead.
+- Fake-hunt across the REACHABLE tools (SEOOptimizer, AIChat, …) came back clean — their `Math.random`
+  are IDs and their `setTimeout`s are copy/paste UI timers, not fabricated results. The orphan demo-screens
+  were the anomaly; production tools are genuine.
+
+Each wired tool got a Home tile + a homeToolGroups regression test + an AppKnowledgeBase entry.
+ROADMAP §8D/D1 corrected (false-open: built, was unreachable, now wired).
+
+**Honest boundary recorded:** the rest of §8D (D2 git-blame/history, D3 PR/CI, D5 two-branches,
+D4 merge-conflict) all depend on GitHub-storage / E2B infra that CANNOT be end-to-end verified in this
+environment — shipping them on green-tsc alone would risk fake-success, so they wait for either the infra
+decision or a real build report. E3 (server-driven background build executor) is paused by the admin: it
+is a real change to the core build loop + auth + billing and was not built autonomously.
+
+Verification gate on every PR: `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · relevant vitest green.

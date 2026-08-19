@@ -71,6 +71,8 @@ interface WebApp {
   remixes: number;
   publishedAt: number;
   priceInr?: number;
+  /** How many screenshots the creator uploaded — the detail view fetches the images themselves on open. */
+  screenshotCount?: number;
   /** Owner/admin views only. */
   status?: 'unlisted' | 'listed' | 'removed';
 }
@@ -89,6 +91,26 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [openApp, setOpenApp] = useState<PublicApp | null>(null);
+  // WEB-APP DETAIL — tap a listing to see its screenshots before opening it (admin report 2026-08-19).
+  // The images ship only here (on demand), never on the browse list, so the gallery stays light.
+  const [detailApp, setDetailApp] = useState<WebApp | null>(null);
+  const [detailShots, setDetailShots] = useState<string[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const openWebDetail = async (a: WebApp) => {
+    setDetailApp(a);
+    setDetailShots([]);
+    if ((a.screenshotCount ?? 0) <= 0) return;
+    setDetailLoading(true);
+    try {
+      const res = await fetch(`/api/nav-store/web/app/${encodeURIComponent(a.id)}`);
+      const data = await res.json().catch(() => null);
+      setDetailShots(Array.isArray(data?.screenshots) ? data.screenshots.filter((s: unknown): s is string => typeof s === 'string') : []);
+    } catch { /* the detail still shows name + description without the images */ } finally {
+      setDetailLoading(false);
+    }
+  };
+
   // WEB APPS — run in the viewer's browser, nothing to install. Deep link opens the player directly.
   const [webApps, setWebApps] = useState<WebApp[]>([]);
   const [webMine, setWebMine] = useState<WebApp[]>([]);
@@ -308,17 +330,27 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
             <div className="grid gap-3 sm:grid-cols-2">
               {webApps.map((a) => (
                 <div key={a.id} className="flex gap-3 p-3 rounded-xl bg-[#161b22] border border-white/10 hover:border-white/25 transition-colors">
-                  <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
-                    {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={18} className="text-white/30" />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold truncate flex items-center gap-1.5">
-                      {a.name}
-                      {a.requiresPassword && <Lock size={11} className="text-white/40 flex-shrink-0" />}
-                    </p>
-                    <p className="text-xs text-white/50 truncate">{a.description || 'A NavBharatAI-built app'}</p>
-                    <p className="text-[11px] text-white/30 mt-1">{a.runs} run{a.runs === 1 ? '' : 's'}{(a.priceInr ?? 0) > 0 && <span className="text-emerald-300"> · remix ₹{a.priceInr}</span>}</p>
-                  </div>
+                  <button
+                    onClick={() => void openWebDetail(a)}
+                    className="flex gap-3 min-w-0 flex-1 text-left"
+                    title="See details & screenshots"
+                  >
+                    <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
+                      {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={18} className="text-white/30" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold truncate flex items-center gap-1.5">
+                        {a.name}
+                        {a.requiresPassword && <Lock size={11} className="text-white/40 flex-shrink-0" />}
+                      </p>
+                      <p className="text-xs text-white/50 truncate">{a.description || 'A NavBharatAI-built app'}</p>
+                      <p className="text-[11px] text-white/30 mt-1">
+                        {a.runs} run{a.runs === 1 ? '' : 's'}
+                        {(a.screenshotCount ?? 0) > 0 && <span className="text-white/40"> · {a.screenshotCount} screenshot{a.screenshotCount === 1 ? '' : 's'}</span>}
+                        {(a.priceInr ?? 0) > 0 && <span className="text-emerald-300"> · remix ₹{a.priceInr}</span>}
+                      </p>
+                    </div>
+                  </button>
                   <button
                     onClick={() => setPlayingId(a.id)}
                     className="self-center flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex-shrink-0 transition-colors"
@@ -665,6 +697,44 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
       </div>
 
       {/* ── App detail ── */}
+      {detailApp && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDetailApp(null)}>
+          <div className="w-full sm:max-w-lg bg-[#0d1117] border border-white/10 rounded-t-2xl sm:rounded-2xl p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
+                {detailApp.iconDataUrl ? <img src={detailApp.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={20} className="text-white/30" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-lg font-bold truncate flex items-center gap-1.5">{detailApp.name}{detailApp.requiresPassword && <Lock size={12} className="text-white/40" />}</h2>
+                <p className="text-[11px] text-white/40">{detailApp.runs} run{detailApp.runs === 1 ? '' : 's'} · A NavBharatAI-built app</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-white/70 leading-relaxed whitespace-pre-wrap mb-4">{detailApp.description || 'A NavBharatAI-built app.'}</p>
+
+            {detailLoading ? (
+              <p className="flex items-center gap-2 text-xs text-white/40 py-6 justify-center"><Loader2 size={14} className="animate-spin" /> Loading screenshots…</p>
+            ) : detailShots.length > 0 ? (
+              <div className="flex gap-3 overflow-x-auto pb-2 mb-2 -mx-1 px-1">
+                {detailShots.map((s, i) => (
+                  <img key={i} src={s} alt={`${detailApp.name} screenshot ${i + 1}`} className="h-64 rounded-xl border border-white/10 object-cover flex-shrink-0" />
+                ))}
+              </div>
+            ) : (detailApp.screenshotCount ?? 0) === 0 ? (
+              <p className="text-[11px] text-white/30 mb-2">No screenshots yet.</p>
+            ) : null}
+
+            <button
+              onClick={() => { const id = detailApp.id; setDetailApp(null); setPlayingId(id); }}
+              className="w-full mt-2 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold flex items-center justify-center gap-2"
+            >
+              <Play size={14} /> Open the app
+            </button>
+            <button onClick={() => setDetailApp(null)} className="w-full mt-2 py-2 rounded-lg text-xs text-white/50 hover:text-white/80">Close</button>
+          </div>
+        </div>
+      )}
+
       {openApp && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setOpenApp(null)}>
           <div

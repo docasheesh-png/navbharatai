@@ -71,6 +71,10 @@ export interface WebStoreApp {
   apiVarsUsed?: string[];
   fileCount: number;
   sizeBytes: number;
+  /** How many screenshots the creator uploaded for the listing (0/absent = none). The images themselves
+   *  live in a `screenshots` subcollection (one doc each) so they never bloat this doc past Firestore's
+   *  1 MiB limit — the same reason files live in their own subcollection. */
+  screenshotCount?: number;
   /** Honest usage counters. `runs` increments on a served open, never on a page view of the listing. */
   runs: number;
   remixes: number;
@@ -85,13 +89,16 @@ export interface WebStoreApp {
 /** What a viewer may see. No uid, no password material, no internals. */
 export type PublicWebStoreApp = Pick<WebStoreApp,
   'id' | 'name' | 'description' | 'iconDataUrl' | 'visibility' | 'fileCount' | 'runs' | 'remixes' | 'publishedAt' | 'version'
-> & { requiresPassword: boolean; priceInr: number; apiVarsUsed: string[] };
+> & { requiresPassword: boolean; priceInr: number; apiVarsUsed: string[]; screenshotCount: number };
 
 export function toPublicWebApp(a: WebStoreApp): PublicWebStoreApp {
   return {
     id: a.id, name: a.name, description: a.description, iconDataUrl: a.iconDataUrl,
     visibility: a.visibility, fileCount: a.fileCount, runs: a.runs, remixes: a.remixes,
     publishedAt: a.publishedAt, version: a.version,
+    // So a browse card can show a "N screenshots" hint without shipping the images until the viewer
+    // actually opens the app's detail (where getWebAppScreenshots serves them).
+    screenshotCount: Math.max(0, a.screenshotCount ?? 0),
     requiresPassword: a.visibility === 'private',
     // While paid remix is parked, a stored price is not merely hidden — it is not SENT. A price the
     // client never receives cannot be rendered by any screen, present or future, so "free for now"
@@ -353,6 +360,60 @@ export async function getWebAppFiles(id: string): Promise<Record<string, string>
     if (typeof c === 'string') out[decPath(doc.id)] = c;
   }
   return out;
+}
+
+// ── Listing screenshots (admin report 2026-08-19: let a creator upload app screens shown in the store) ──
+
+const SCREENSHOTS_SUB = 'screenshots';
+/** At most this many screenshots per listing — enough to tell the story, bounded so a listing stays light. */
+export const MAX_SCREENSHOTS = 3;
+/** Each screenshot data URL must clear Firestore's 1 MiB per-document ceiling with headroom for the doc. */
+export const MAX_SCREENSHOT_LEN = 900_000;
+
+/**
+ * Keep only valid, in-limit screenshot data URLs, capped at MAX_SCREENSHOTS. Pure — the boundary of what
+ * may be stored, unit-tested without I/O. A non-image, oversize, or malformed entry is DROPPED (not
+ * truncated into a broken image); order is preserved so screenshot 1 stays screenshot 1.
+ */
+export function sanitizeScreenshots(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const out: string[] = [];
+  for (const s of input) {
+    if (out.length >= MAX_SCREENSHOTS) break;
+    if (typeof s === 'string' && s.startsWith('data:image/') && s.length <= MAX_SCREENSHOT_LEN) out.push(s);
+  }
+  return out;
+}
+
+/**
+ * Replace a listing's screenshots wholesale (same "no v1 haunting v2" discipline as saveWebApp's files).
+ * Stored one-per-doc, id = zero-padded index so `.get()` returns them in order. Best-effort caller-side.
+ */
+export async function saveWebAppScreenshots(id: string, screenshots: string[]): Promise<void> {
+  const d = db();
+  if (!d) throw new Error('no database');
+  const col = d.collection(COLLECTION).doc(id).collection(SCREENSHOTS_SUB);
+  const existing = await col.listDocuments();
+  const b1 = d.batch();
+  for (const doc of existing) b1.delete(doc);
+  await b1.commit();
+  if (screenshots.length === 0) return;
+  const b2 = d.batch();
+  screenshots.slice(0, MAX_SCREENSHOTS).forEach((dataUrl, i) => {
+    b2.set(col.doc(String(i).padStart(3, '0')), { dataUrl });
+  });
+  await b2.commit();
+}
+
+/** A listing's screenshots, in upload order. Empty when none / unreadable. */
+export async function getWebAppScreenshots(id: string): Promise<string[]> {
+  const d = db();
+  if (!d) return [];
+  const snap = await d.collection(COLLECTION).doc(id).collection(SCREENSHOTS_SUB).get();
+  return snap.docs
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((doc) => (doc.data() as { dataUrl?: unknown }).dataUrl)
+    .filter((u): u is string => typeof u === 'string' && u.startsWith('data:image/'));
 }
 
 /**

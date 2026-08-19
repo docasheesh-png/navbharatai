@@ -116,6 +116,53 @@ export function HostingChooser({
     reader.readAsDataURL(file);
   };
 
+  // Listing SCREENSHOTS (admin report 2026-08-19): shown inside the App Mart detail so a viewer sees the
+  // app before opening it. Up to 3. Each image is downscaled to ≤1280px and re-encoded as JPEG so it
+  // reliably clears the store's per-screenshot size cap — a raw phone screenshot is otherwise too big.
+  const MAX_STORE_SHOTS = 3;
+  const [storeShots, setStoreShots] = useState<string[]>([]);
+  const [storeShotError, setStoreShotError] = useState('');
+
+  const compressImage = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1280;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('no canvas')); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = () => reject(new Error('bad image'));
+      img.src = typeof reader.result === 'string' ? reader.result : '';
+    };
+    reader.onerror = () => reject(new Error('unreadable'));
+    reader.readAsDataURL(file);
+  });
+
+  const onStoreShotFiles = async (files: FileList | null) => {
+    setStoreShotError('');
+    if (!files || files.length === 0) return;
+    const room = MAX_STORE_SHOTS - storeShots.length;
+    if (room <= 0) { setStoreShotError(`You can add up to ${MAX_STORE_SHOTS} screenshots.`); return; }
+    const picked = Array.from(files).filter((f) => f.type.startsWith('image/')).slice(0, room);
+    if (picked.length === 0) { setStoreShotError('Pick image files (PNG or JPG).'); return; }
+    try {
+      const urls = await Promise.all(picked.map(compressImage));
+      const good = urls.filter((u) => u.startsWith('data:image/') && u.length <= 900_000);
+      if (good.length < urls.length) setStoreShotError('One image was too large even after shrinking and was skipped.');
+      setStoreShots((prev) => [...prev, ...good].slice(0, MAX_STORE_SHOTS));
+    } catch {
+      setStoreShotError('Could not read one of those images.');
+    }
+  };
+
   const publishToStore = async () => {
     if (storeBusy) return;
     // The chooser's own standing rule (and its test): NO DEAD BUTTONS. A publish that cannot start
@@ -132,7 +179,7 @@ export function HostingChooser({
       const res = await authedFetch('/api/nav-store/web/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId, name, visibility: 'public', ...(storeIcon ? { iconDataUrl: storeIcon } : {}) }),
+        body: JSON.stringify({ workspaceId, name, visibility: 'public', ...(storeIcon ? { iconDataUrl: storeIcon } : {}), ...(storeShots.length ? { screenshots: storeShots } : {}) }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
@@ -532,6 +579,28 @@ export function HostingChooser({
               )}
             </div>
             {storeIconError && <div className="text-[10px] text-amber-300">{storeIconError}</div>}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                {storeShots.map((s, i) => (
+                  <div key={i} className="relative w-14 h-14 rounded-md overflow-hidden border border-zinc-700 bg-zinc-900">
+                    <img src={s} alt={`Screenshot ${i + 1}`} className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => setStoreShots((prev) => prev.filter((_, j) => j !== i))}
+                      className="absolute top-0 right-0 bg-black/70 text-white text-[10px] leading-none px-1 py-0.5 rounded-bl"
+                      title="Remove"
+                    >✕</button>
+                  </div>
+                ))}
+                {storeShots.length < MAX_STORE_SHOTS && (
+                  <label className="cursor-pointer w-14 h-14 rounded-md border border-dashed border-zinc-600 hover:border-emerald-500 bg-zinc-900 flex items-center justify-center text-[10px] text-zinc-400 text-center leading-tight">
+                    <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onStoreShotFiles(e.target.files)} />
+                    + Screen&shy;shot
+                  </label>
+                )}
+              </div>
+              <span className="text-[10px] text-zinc-500">Add up to {MAX_STORE_SHOTS} screenshots — shown when someone opens your app on App Mart (optional).</span>
+              {storeShotError && <div className="text-[10px] text-amber-300">{storeShotError}</div>}
+            </div>
             <input
               value={storeName}
               onChange={(e) => setStoreName(e.target.value)}

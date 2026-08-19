@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   evaluateWebPublish, hashAppPassword, verifyAppPassword, toPublicWebApp,
   MAX_SNAPSHOT_FILES, MAX_SNAPSHOT_FILE_BYTES, MAX_SNAPSHOT_TOTAL_BYTES, describeOversizeFile,
+  sanitizeScreenshots, MAX_SCREENSHOTS, MAX_SCREENSHOT_LEN,
   type WebStoreApp,
 } from './navStoreWeb';
 import { scanTextForSecrets } from '../AgentV3/EnvSecretValueAnalysis';
@@ -247,5 +248,43 @@ describe('the oversize refusal must DIAGNOSE, not guess (admin report 2026-08-16
     const msg = describeOversizeFile('src/Big.tsx', 'x'.repeat(900 * 1024));
     expect(msg).toContain('"src/Big.tsx"');
     expect(msg).toMatch(/\d+ KB/);
+  });
+});
+
+describe('sanitizeScreenshots — the boundary of what may be stored on a listing', () => {
+  const img = (len = 100) => 'data:image/jpeg;base64,' + 'A'.repeat(len);
+
+  it('keeps valid image data URLs, in order, up to the cap', () => {
+    const out = sanitizeScreenshots([img(10), img(20), img(30)]);
+    expect(out).toHaveLength(3);
+    expect(out[0]).toBe(img(10));
+    expect(out[2]).toBe(img(30));
+  });
+
+  it('caps at MAX_SCREENSHOTS — an over-eager client cannot flood the listing', () => {
+    const out = sanitizeScreenshots([img(1), img(2), img(3), img(4), img(5)]);
+    expect(out).toHaveLength(MAX_SCREENSHOTS);
+  });
+
+  it('drops (never truncates) a non-image, an oversize image, and non-strings', () => {
+    const oversize = 'data:image/png;base64,' + 'A'.repeat(MAX_SCREENSHOT_LEN + 1);
+    const out = sanitizeScreenshots(['not-a-data-url', 'data:text/html,evil', oversize, 42, null, img(10)]);
+    expect(out).toEqual([img(10)]);
+  });
+
+  it('a non-array yields no screenshots (never throws)', () => {
+    expect(sanitizeScreenshots(undefined)).toEqual([]);
+    expect(sanitizeScreenshots('data:image/png;base64,AAA')).toEqual([]);
+    expect(sanitizeScreenshots(null)).toEqual([]);
+  });
+
+  it('the public view carries a screenshotCount so a card can hint before the images load', () => {
+    const base: WebStoreApp = {
+      id: 'a', status: 'listed', uid: 'u', name: 'n', description: '', visibility: 'public',
+      workspaceId: 'w', fileCount: 1, sizeBytes: 1, runs: 0, remixes: 0, publishedAt: 0, version: 1,
+      screenshotCount: 2,
+    };
+    expect(toPublicWebApp(base).screenshotCount).toBe(2);
+    expect(toPublicWebApp({ ...base, screenshotCount: undefined }).screenshotCount).toBe(0);
   });
 });

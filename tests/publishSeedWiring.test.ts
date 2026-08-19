@@ -37,4 +37,27 @@ describe('Publish seeds the sandbox before it builds', () => {
     expect(seg).toContain('prep.installFailed');
     expect(seg).toContain("dependencies could not be installed");
   });
+
+  it('a build that exits 0 but produces NO output directory is caught, with the build\'s own words', () => {
+    // Admin 2026-08-19, third failure in one flow: the build succeeded and the deploy then died on
+    // "Could not read the built site: exit status 1". Between those two facts the route knew nothing,
+    // because a SUCCESSFUL build's output was discarded — so the one piece of evidence that explains
+    // this class did not exist by the time anyone needed it.
+    const at = route.indexOf("'/api/agentv3/publish'");
+    const seg = route.slice(at, at + 9000);
+    expect(seg).toContain("ls -d dist out build");
+    expect(seg).toContain('produced no website files');
+    // The build's own output must reach the user — discarding it is what made this undiagnosable.
+    expect(seg).toContain('What the build printed');
+  });
+
+  it('the output check runs BETWEEN the build and the deploy', () => {
+    const at = route.indexOf("'/api/agentv3/publish'");
+    const seg = route.slice(at, at + 9000);
+    const build = seg.indexOf("runCommand(workspaceId, 'npm run build')");
+    const check = seg.indexOf("ls -d dist out build");
+    const deploy = seg.indexOf('new ToolDispatcher');
+    expect(build).toBeLessThan(check);
+    expect(check).toBeLessThan(deploy);
+  });
 });

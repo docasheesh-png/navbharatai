@@ -5314,6 +5314,32 @@ export function registerAgentV3Routes(app: Express): void {
         return;
       }
 
+      // 1b. THE BUILD SAID IT SUCCEEDED — CHECK THAT IT ACTUALLY PRODUCED SOMETHING.
+      //
+      // Admin report 2026-08-19, the third failure in this flow: the build exited 0 and the deploy then
+      // died on `Could not read the built site: exit status 1`. Between those two facts the route knew
+      // nothing, because a SUCCESSFUL build's output was thrown away — so the one piece of evidence that
+      // explains this class (what the build actually printed while producing no output directory) did
+      // not exist by the time anyone needed it.
+      //
+      // A build can exit 0 and still leave no site: a `build` script that only typechecks, a config
+      // whose outDir is somewhere we do not look, a sandbox recreated between the two steps (a fresh one
+      // replays SOURCE files, never dist/). This does not guess between them — it states the fact and
+      // hands over the build's own words, which is what makes the next report diagnosable instead of
+      // another round of hypotheses.
+      const outDirs = await actuator.runCommand(workspaceId, 'ls -d dist out build .output .next 2>/dev/null | head -5');
+      if (!outDirs.stdout.trim()) {
+        const buildSaid = (build.stdout || build.stderr || '').trim().split('\n').slice(-20).join('\n');
+        res.status(422).json({
+          error: 'Your app compiled without errors but produced no website files, so there is nothing to publish yet.',
+          detail: [
+            'Checked for: dist/, out/, build/, .output/, .next/ — none exist.',
+            buildSaid ? `\nWhat the build printed:\n${buildSaid}` : '',
+          ].join('\n').slice(0, 4000),
+        });
+        return;
+      }
+
       // 2. DEPLOY, through the SAME tool the agent uses — so the custom-domain republish, the
       //    production-database migration, the liveness probe and the durable record all still run.
       const dispatcher = new ToolDispatcher(

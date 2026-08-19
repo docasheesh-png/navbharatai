@@ -1897,7 +1897,20 @@ ${paintWaitJs('p')}
       `"`,
     ].join('');
 
-    const result = await sandbox.commands.run(script, { timeoutMs: 30_000 });
+    // ⚠️ THE SDK THROWS ON A NON-ZERO EXIT (E2B CommandExitError) — it does NOT return one.
+    //
+    // So the honest message below was UNREACHABLE for the exact case it was written for: the script
+    // exits 1 precisely when dist/ and out/ are missing, the SDK threw, and the caller reported the
+    // SDK's own words — `Could not read the built site: exit status 1` — to a user who then has no
+    // idea what to do. Reported by the admin 2026-08-19 on a real publish. Catching it here is what
+    // makes the explanation reachable at all.
+    const result = await sandbox.commands
+      .run(script, { timeoutMs: 30_000 })
+      .catch((err: any) => ({
+        exitCode: typeof err?.exitCode === 'number' ? err.exitCode : 1,
+        stdout: String(err?.stdout ?? ''),
+        stderr: String(err?.stderr ?? err?.message ?? err),
+      }));
     if (result.exitCode !== 0 || !result.stdout.trim()) {
       throw new Error(
         `No build output found in dist/ or out/. Run "npm run build" first (for Next.js static export add output:'export' to next.config.js).\n` +

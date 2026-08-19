@@ -35827,3 +35827,41 @@ decision or a real build report. E3 (server-driven background build executor) is
 is a real change to the core build loop + auth + billing and was not built autonomously.
 
 Verification gate on every PR: `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · relevant vitest green.
+---
+
+## 2026-08-19 — Publish, third report: `Could not read the built site: exit status 1`
+
+Third failure in one flow, and this entry is deliberately **not** a claim to have found the cause.
+
+**What is now known for certain:** the build genuinely exited 0 (`runCommand` recovers the real exit
+code from E2B's `CommandExitError`, so a failed build could not have passed the gate), and
+`downloadDistFiles` then found no `dist/` or `out/`.
+
+**A confirmed bug, fixed: the honest explanation was unreachable.** `downloadDistFiles` builds a
+careful message — *"No build output found in dist/ or out/. Run npm run build first…"* — behind
+`if (result.exitCode !== 0)`. But it calls `sandbox.commands.run` DIRECTLY, and the E2B SDK **throws**
+`CommandExitError` on a non-zero exit rather than returning one. The node probe exits 1 in exactly the
+case that message was written for, so the message could only ever be skipped, and the user received the
+SDK's own words instead: `exit status 1`. Now caught and converted, so the explanation is reachable.
+
+**The real blindness, and the actual reason there was a third round of guessing.** The route discarded a
+SUCCESSFUL build's output. So between "build exited 0" and "there is no site" it held no evidence at
+all — the one thing that would explain this class (what the build printed while producing nothing) was
+thrown away before anyone needed it. A post-build check now runs between the build and the deploy: it
+looks for `dist/ out/ build/ .output/ .next/`, and when none exist it says so and **hands over the
+build's own last 20 lines**.
+
+**What this deliberately does NOT do: guess.** A build can exit 0 and leave no site for several
+unrelated reasons — a `build` script that only typechecks, a config whose `outDir` is somewhere we do
+not look, or a sandbox recreated between the two steps (a fresh one replays SOURCE files from the
+in-memory cache, never `dist/`). Picking one and "fixing" it would be the fourth hypothesis in a row.
+This change makes the next report state which one it is.
+
+**Honest note on the two before this.** Reports one and two were root-caused correctly — Publish sat
+outside the durable re-seed and outside `ensureDependencies`, both guarantees that already existed
+elsewhere — and each fix moved the failure to a genuinely deeper layer. That is progress, not thrashing.
+But shipping the files half without the dependencies half is what created report two, and it should have
+been obvious that restoring source without `node_modules` leaves a build with no tools.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+1327 files / 16,655 tests green.

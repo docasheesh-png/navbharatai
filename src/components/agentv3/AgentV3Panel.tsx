@@ -35,7 +35,6 @@ import type { ReportPickerItem } from '../../lib/reportPicker';
 import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { SplitDivider } from './SplitDivider';
-import { PreviewWidthChips } from './PreviewWidthChips';
 import { loadSplit, saveSplit, clampSplit, MIN_PANE_PX } from './splitPane';
 import { NextSuggestionsBulb } from './NextSuggestionsBulb';
 import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
@@ -4425,9 +4424,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               them (admin 2026-08-17). */}
           <div className="hidden sm:flex shrink-0 items-center justify-between gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs">
             <span className="font-medium text-zinc-300 capitalize shrink-0">{tab}</span>
-            {tab === 'preview' && (
-              <PreviewWidthChips split={split} containerPx={splitContainerPx} onSplit={applySplit} />
-            )}
+            {/* The header Phone/Tablet/Full width chips were REMOVED (admin 2026-08-19): they duplicated
+                the device-width switcher already in PreviewSurface's own toolbar (Auto/Mobile/Tablet/
+                Desktop), so the same control appeared twice in one preview. The single remaining control
+                lives with the app in PreviewSurface; the draggable divider still resizes the pane. */}
             <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" className="flex items-center gap-1 text-zinc-400 hover:text-white">
               <X className="w-4 h-4" />
             </button>

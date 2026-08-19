@@ -65,6 +65,7 @@ import { SDAChat } from './components/sda/SDAChat';
 import { ProfessionalsView } from './components/professionals/ProfessionalsView';
 import { ProfessionalChat } from './components/professionals/ProfessionalChat';
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
+import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
 import { RepoAnalystTool } from './components/repoAnalyst/RepoAnalystTool';
 // EngineerAIChat retired — replaced by NavBharatAI Pro v5.0 (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -1465,6 +1466,15 @@ export default function App() {
         // Force SDAChat to fully remount, wiping all its internal state
         try { localStorage.removeItem('sda_messages'); } catch {}
         setSdaResetKey(k => k + 1);
+      } else if (PROFESSIONAL_CHATS[v]) {
+        // ✕ ENDS A PROFESSIONAL CHAT (admin 2026-08-19: "close (x) kar de, to chat close nahi hota").
+        // Every config-driven professional restores itself from localStorage on mount, so removing the
+        // tab alone left the conversation waiting to reappear on the next open. Doctor AI behaved
+        // correctly only because of its hand-written branch above — which is why this is a RULE over
+        // PROFESSIONAL_CHATS and not a 70th special case. The transcript is archived, not deleted: it
+        // stays in Professional History, where it can be reopened.
+        const store = professionalStore();
+        if (store) endProfessionalChat(store, v);
       }
     }
   }, [openTabs, activeView, tabOpeners, toggleTab, user, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setBuildVersionStack, setProBuildProgress, setCurrentSessionId, setCurrentProSessionId, setSdaResetKey, setSettingsScreen]);

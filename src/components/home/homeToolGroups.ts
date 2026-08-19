@@ -64,6 +64,15 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
       // NO doorway — nothing set activeView='dbstudio', so users could not reach it. This tile is that
       // doorway (D1 gap, 2026-08-19). "See your data" is a developer/data tool, so it lives here.
       { id: 'dbstudio', label: 'Database Studio', icon: Database },
+      // Built-but-unreachable tool verified to do REAL work (2026-08-19 orphan-view triage, same class as
+      // dbstudio): API Marketplace inserts real, working API-integration snippets into the app. It had NO
+      // doorway. The other orphans from the same audit were deliberately NOT surfaced: App Health Monitor
+      // is honest but only reports NAVBHARATAI's platform uptime, not the user's app (a misleading tile);
+      // AI Project Manager was FULLY FAKE (fake delay + a hardcoded task list tagged "AI Generated") and
+      // is being deleted; AI Test Suite / Plugin System / Localization have real cores but fabricated
+      // sub-parts (a Math.random test run, fake install counts, a fake auto-translate) and are wired only
+      // after that fakery is removed — never as-is, because "real features only" outranks "more tiles".
+      { id: 'apimarket', label: 'API Marketplace', icon: Package },
       { id: 'testing', label: 'Test Runner', icon: TestTube },
       { id: 'performance', label: 'Performance', icon: Gauge },
       { id: 'multipages', label: 'Multi-Page', icon: Layout },

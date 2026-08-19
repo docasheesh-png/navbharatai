@@ -12,7 +12,7 @@ import type { ComponentType } from 'react';
 import {
   Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitBranch, Gauge, Minimize2,
   Palette, Layout, Puzzle, LayoutTemplate, Moon, Figma, Rocket, Smartphone, CloudUpload, Search,
-  Package, IndianRupee, Users2, TrendingUp, Share2, Database,
+  Package, IndianRupee, Users2, TrendingUp, Share2, Database, Languages, FlaskConical,
 } from 'lucide-react';
 
 /** A lucide icon component (version-independent — the package's type export name has changed across releases). */
@@ -73,6 +73,20 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
       // sub-parts (a Math.random test run, fake install counts, a fake auto-translate) and are wired only
       // after that fakery is removed — never as-is, because "real features only" outranks "more tiles".
       { id: 'apimarket', label: 'API Marketplace', icon: Package },
+      // Localization: manage translation keys + export real per-language JSON (orphan-view triage,
+      // 2026-08-19). Wired only after its one fake bit — a cosmetic 800ms "Translating…" delay over a
+      // synchronous dictionary lookup — was removed and the button honestly says "Fill common strings".
+      { id: 'localization', label: 'Localization', icon: Languages },
+      // Test Generator: generates real Jest/Testing-Library test CODE from your app's code (orphan-view
+      // triage, 2026-08-19). Named "Generator" not "Suite" on purpose: its fake "Run All Tests" (which
+      // faked pass/fail with Math.random) was removed — a browser cannot run your Jest suite, so it
+      // generates tests you copy/export and run in your project or the Test Runner beside it.
+      { id: 'aitesting', label: 'Test Generator', icon: FlaskConical },
+      // Plugins: a catalogue of popular integrations (GA4, Stripe, Razorpay, Clerk, shadcn…) whose "Add
+      // to app" now inserts the integration's REAL setup code into your app (orphan-view triage,
+      // 2026-08-19). Wired only after its fakes were removed: fabricated install/star counts, and an
+      // "Install" button that used to just flip a localStorage flag without touching the app.
+      { id: 'plugins', label: 'Plugins', icon: Puzzle },
       { id: 'testing', label: 'Test Runner', icon: TestTube },
       { id: 'performance', label: 'Performance', icon: Gauge },
       { id: 'multipages', label: 'Multi-Page', icon: Layout },

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Languages, Globe, Plus, Trash2, Check, X, Copy, Download, Search, Edit2, ChevronRight, RefreshCw, Upload, FileCode } from 'lucide-react';
-import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface TranslationKey {
   key: string;
@@ -65,7 +64,6 @@ export function LocalizationManager() {
   const [previewLang, setPreviewLang] = useState('hi');
   const [importText, setImportText] = useState('');
   const [showImport, setShowImport] = useState(false);
-  const [autoTranslating, setAutoTranslating] = useState(false);
   const [copied, setCopied] = useState('');
 
   useEffect(() => {
@@ -131,9 +129,11 @@ export function LocalizationManager() {
     setEditingCell(null);
   };
 
-  const autoTranslate = async () => {
-    setAutoTranslating(true);
-    await new Promise(r => setTimeout(r, 800));
+  // Fills the translations we genuinely KNOW: AUTO_TRANSLATIONS is a real, hand-checked dictionary of
+  // common UI strings (welcome/login/save/…) in 18 languages. It is a synchronous lookup — there is no
+  // model call, so there is no artificial delay pretending one happened (that fake 800ms + "Translating…"
+  // spinner was removed 2026-08-19). Keys we do not recognise are left for the user to translate.
+  const autoTranslate = () => {
     const updated = translationKeys.map(tk => {
       const known = AUTO_TRANSLATIONS[tk.key];
       if (!known) return tk;
@@ -146,7 +146,6 @@ export function LocalizationManager() {
     });
     setTranslationKeys(updated);
     persist(activeLanguages, updated);
-    setAutoTranslating(false);
   };
 
   const exportLang = (lang: string) => {
@@ -259,10 +258,10 @@ export function LocalizationManager() {
           <div className="p-3 border-b border-white/5">
             <button
               onClick={autoTranslate}
-              disabled={autoTranslating}
-              className="w-full py-2 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 rounded-xl text-xs text-amber-300 flex items-center justify-center gap-1.5 disabled:opacity-50 transition-all"
+              title="Fills the built-in translations for common UI strings (Welcome, Login, Save, Search…) across every active language. Strings it doesn't recognise are left for you to translate."
+              className="w-full py-2 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 rounded-xl text-xs text-amber-300 flex items-center justify-center gap-1.5 transition-all"
             >
-              {autoTranslating ? <><TirangaLoader className="w-3.5 h-3.5" /> Translating...</> : <><Languages className="w-3.5 h-3.5" /> Auto Translate</>}
+              <Languages className="w-3.5 h-3.5" /> Fill common strings
             </button>
           </div>
 

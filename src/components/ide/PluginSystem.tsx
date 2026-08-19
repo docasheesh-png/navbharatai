@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Puzzle, Search, Star, Zap, Check, X, Plus, Trash2, Settings, Download, RefreshCw, Shield, Database, Globe, BarChart2, Layers, ChevronRight } from 'lucide-react';
+import { Puzzle, Search, Zap, Check, X, Plus, Settings, Download, RefreshCw, Shield, Database, Globe, BarChart2, Layers, ChevronRight } from 'lucide-react';
 
 interface Plugin {
   id: string;
@@ -200,7 +200,7 @@ if (!result.success) console.log(result.error.issues);`, configKeys: [], tags: [
 
 const CATEGORIES = ['All', 'Analytics', 'Authentication', 'Payments', 'Storage', 'UI Library', 'Performance', 'Security'];
 
-export function PluginSystem() {
+export function PluginSystem({ onCodeInsert }: { onCodeInsert?: (code: string) => void } = {}) {
   const [installed, setInstalled] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('navbharat_plugins') || '[]'); } catch { return []; }
   });
@@ -215,9 +215,14 @@ export function PluginSystem() {
     try { localStorage.setItem('navbharat_plugins', JSON.stringify(list)); } catch {}
   };
 
-  const toggleInstall = (id: string) => {
-    const updated = installed.includes(id) ? installed.filter(i => i !== id) : [...installed, id];
-    persistInstalled(updated);
+  // ADD = actually insert the plugin's REAL setup code into the app (2026-08-19: previously "install"
+  // only flipped a localStorage flag and did nothing to the app — a button that claimed to install but
+  // did not). When there is no insert callback (e.g. opened standalone), it falls back to copying the
+  // code so the action is never a no-op. The local list just remembers what was added, for the filter.
+  const addPlugin = (plugin: Plugin) => {
+    if (onCodeInsert) onCodeInsert('\n\n' + plugin.setupCode);
+    else copyCode(plugin.setupCode);
+    if (!installed.includes(plugin.id)) persistInstalled([...installed, plugin.id]);
   };
 
   const copyCode = (code: string) => {
@@ -246,7 +251,7 @@ export function PluginSystem() {
         </div>
         <div>
           <h2 className="font-semibold text-white text-base">Plugin System</h2>
-          <p className="text-xs text-white/40">{PLUGINS.length} plugins — install to add features to your app</p>
+          <p className="text-xs text-white/40">{PLUGINS.length} integrations — add one to drop its real setup code into your app</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => setShowInstalledOnly(!showInstalledOnly)} className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all ${showInstalledOnly ? 'border-violet-500/40 bg-violet-500/10 text-violet-300' : 'border-white/10 bg-white/5 text-white/40'}`}>
@@ -299,8 +304,7 @@ export function PluginSystem() {
                     <p className="text-[10px] text-white/40 mb-2 line-clamp-2">{plugin.description}</p>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className={`text-[9px] px-1.5 py-0.5 rounded-md border ${plugin.free ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-amber-400 bg-amber-500/10 border-amber-500/20'}`}>{plugin.free ? 'Free' : 'Paid'}</span>
-                      {plugin.popular && <span className="text-[9px] text-amber-400">⭐</span>}
-                      <span className="text-[9px] text-white/20 ml-auto">{plugin.installs.toLocaleString()} installs</span>
+                      <span className="text-[9px] text-white/20 ml-auto">{plugin.category}</span>
                     </div>
                   </button>
                 );
@@ -332,19 +336,14 @@ export function PluginSystem() {
                 <p className="text-xs text-white/50 mb-3">{selectedPlugin.description}</p>
                 <div className="flex gap-1.5 flex-wrap mb-3">
                   <span className={`text-[9px] px-2 py-0.5 rounded-full border ${selectedPlugin.free ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-amber-400 bg-amber-500/10 border-amber-500/20'}`}>{selectedPlugin.free ? 'Free' : 'Paid'}</span>
-                  <span className="text-[9px] text-amber-400">⭐ {selectedPlugin.stars}</span>
                   <span className="text-[9px] text-white/30 bg-white/5 px-2 py-0.5 rounded-full">{selectedPlugin.category}</span>
                   {selectedPlugin.tags.map(t => <span key={t} className="text-[9px] text-white/20 bg-white/5 px-1.5 py-0.5 rounded-md">{t}</span>)}
                 </div>
                 <button
-                  onClick={() => toggleInstall(selectedPlugin.id)}
-                  className={`w-full py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all ${
-                    installed.includes(selectedPlugin.id)
-                      ? 'bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20'
-                      : 'bg-violet-600 hover:bg-violet-500 text-white'
-                  }`}
+                  onClick={() => addPlugin(selectedPlugin)}
+                  className="w-full py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all bg-violet-600 hover:bg-violet-500 text-white"
                 >
-                  {installed.includes(selectedPlugin.id) ? <><Trash2 className="w-4 h-4" /> Uninstall</> : <><Plus className="w-4 h-4" /> Install Plugin</>}
+                  {installed.includes(selectedPlugin.id) ? <><Check className="w-4 h-4" /> Added — add again</> : <><Plus className="w-4 h-4" /> Add to app</>}
                 </button>
               </div>
 
@@ -377,8 +376,8 @@ export function PluginSystem() {
 
                 {installed.includes(selectedPlugin.id) && (
                   <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3">
-                    <p className="text-xs text-emerald-400 flex items-center gap-1.5 mb-1"><Check className="w-3.5 h-3.5" /> Plugin Installed</p>
-                    <p className="text-[10px] text-white/40">Add the setup code to your project and set the config keys in .env.</p>
+                    <p className="text-xs text-emerald-400 flex items-center gap-1.5 mb-1"><Check className="w-3.5 h-3.5" /> Added to your app</p>
+                    <p className="text-[10px] text-white/40">Its setup code was inserted into your project — now set this integration&apos;s keys in .env.</p>
                   </div>
                 )}
               </div>

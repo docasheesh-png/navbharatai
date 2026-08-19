@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldSeedSandbox, ensureWorkspaceFilesInSandbox, projectNeedsMarker, PROJECT_MARKER } from './sandboxSeed';
+import { shouldSeedSandbox, ensureWorkspaceFilesInSandbox, prepareSandboxForBuild, projectNeedsMarker, PROJECT_MARKER } from './sandboxSeed';
 
 /**
  * Admin 2026-08-19: an app built at 10:20 and previewing correctly failed to publish at 16:11 with
@@ -111,5 +111,78 @@ describe('ensureWorkspaceFilesInSandbox', () => {
 
   it('the marker is the file the build actually opens', () => {
     expect(PROJECT_MARKER).toBe('package.json');
+  });
+});
+
+describe('prepareSandboxForBuild — files AND dependencies, because half a fix produced the second report', () => {
+  const saved = { 'package.json': '{"scripts":{"build":"tsc && vite build"}}', 'src/App.tsx': 'x' };
+
+  function actuator(sandboxFiles: string[], dep?: { ok: boolean; ran: boolean; log: string } | Error) {
+    const written: Record<string, string> = {};
+    const calls: string[] = [];
+    return {
+      written, calls,
+      listFiles: async () => sandboxFiles,
+      writeFile: async (_w: string, p: string, c: string) => { written[p] = c; },
+      ensureDependencies: dep === undefined ? undefined : async (w: string) => {
+        calls.push(w);
+        if (dep instanceof Error) throw dep;
+        return dep;
+      },
+    };
+  }
+
+  it('THE SECOND REPORT: a seeded sandbox also gets its dependencies installed', async () => {
+    // Admin 2026-08-19, twenty minutes after the ENOENT fix shipped: `sh: 1: tsc: not found`.
+    // Restoring source files without node_modules leaves the build with no tools to run with.
+    const a = actuator([], { ok: true, ran: true, log: 'added 240 packages' });
+    const r = await prepareSandboxForBuild(a, 'ws1', async () => saved);
+    expect(r.ready).toBe(true);
+    expect(r.seeded).toBe(2);
+    expect(r.installed).toBe(true);
+    expect(a.calls).toEqual(['ws1']);   // the install really was asked for
+  });
+
+  it('a FAILED install does not block the build — the contract says carry on', async () => {
+    // ensureDependencies is documented optional + best-effort: "carry on and report honestly, never a
+    // hard stop". Blocking here would turn a recoverable install hiccup into a dead Publish button.
+    const a = actuator([], { ok: false, ran: true, log: 'ERR! network timeout' });
+    const r = await prepareSandboxForBuild(a, 'ws1', async () => saved);
+    expect(r.ready).toBe(true);
+    expect(r.installFailed).toBe(true);
+    expect(r.installLog).toContain('network timeout');
+  });
+
+  it('an install that THROWS is reported, never rethrown at a caller mid-publish', async () => {
+    const a = actuator([], new Error('sandbox died'));
+    const r = await prepareSandboxForBuild(a, 'ws1', async () => saved);
+    expect(r.ready).toBe(true);
+    expect(r.installFailed).toBe(true);
+    expect(r.installLog).toContain('sandbox died');
+  });
+
+  it('an actuator with no install support is fine — it is optional by design', async () => {
+    // Local/Docker actuators do not offer it. Absence must read as "nothing to do", not as failure.
+    const a = actuator([], undefined);
+    const r = await prepareSandboxForBuild(a, 'ws1', async () => saved);
+    expect(r.ready).toBe(true);
+    expect(r.installFailed).toBe(false);
+    expect(r.installed).toBe(false);
+  });
+
+  it('does not reach the install when there is nothing to build', async () => {
+    // No files means no publish; asking for an install first would spend sandbox time for nothing.
+    const a = actuator([], { ok: true, ran: true, log: '' });
+    const r = await prepareSandboxForBuild(a, 'ws1', async () => ({}));
+    expect(r.ready).toBe(false);
+    expect(a.calls).toEqual([]);
+  });
+
+  it('a warm, complete sandbox still confirms dependencies — node_modules can be pruned', async () => {
+    // Files present does not prove tools present, which is exactly the gap the second report found.
+    const a = actuator(['package.json', 'src/App.tsx'], { ok: true, ran: false, log: '' });
+    const r = await prepareSandboxForBuild(a, 'ws1', async () => saved);
+    expect(r.seeded).toBe(0);
+    expect(a.calls).toEqual(['ws1']);
   });
 });

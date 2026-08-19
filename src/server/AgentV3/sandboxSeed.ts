@@ -124,3 +124,72 @@ export async function ensureWorkspaceFilesInSandbox(
   }
   return { ready: true, seeded, reason: '' };
 }
+
+/** What preparing a sandbox for a build actually did — each half reported separately, and honestly. */
+export interface PrepareOutcome {
+  /** The files half. False ⇒ do not attempt a build; `reason` says why in words a user can act on. */
+  ready: boolean;
+  reason: string;
+  seeded: number;
+  /** True when a dependency install actually ran. */
+  installed: boolean;
+  /**
+   * The install FAILED (or the actuator does not offer one and the sandbox was cold). Deliberately
+   * NOT fatal — see the note in `prepareSandboxForBuild`.
+   */
+  installFailed: boolean;
+  /** The install's own output, for the caller to append to a build failure. Empty when it succeeded. */
+  installLog: string;
+}
+
+/**
+ * Get a sandbox genuinely ready to run a build: the project's FILES, then its DEPENDENCIES.
+ *
+ * ── WHY BOTH HALVES LIVE HERE (admin 2026-08-19, two reports, twenty minutes apart) ─────────────
+ * Publish failed twice in a row, and each failure was the same mistake at a different depth:
+ *
+ *   1. `npm error enoent ... package.json` — the sandbox had no FILES. The durable re-seed that
+ *      fixes this already existed, in `preview-diagnose`.
+ *   2. `sh: 1: tsc: not found` — the sandbox now had files but no NODE_MODULES. The workspace-level
+ *      install that fixes this already existed too, as `actuator.ensureDependencies`, added on
+ *      2026-08-09 for the identical shape (`sh: 1: drizzle-kit: not found`).
+ *
+ * **Publish was simply outside both guarantees.** Each had been added when a different path hit this
+ * class, and each was wired only into the path that hit it. Fixing the files half alone was what
+ * produced the second report — so the two are now ONE step that callers cannot take half of.
+ *
+ * ── WHY A FAILED INSTALL IS NOT FATAL ───────────────────────────────────────────────────────────
+ * `ensureDependencies` is documented as optional and best-effort: actuators without real isolation
+ * do not offer it, and callers must "carry on and report honestly, never a hard stop". So a failed
+ * install does not block the build — it is RECORDED, and the caller appends it to the build's own
+ * error if the build then fails. That way the user sees the real first cause ("dependencies could not
+ * be installed") instead of its symptom ("tsc: not found") — which is the whole reason this file exists.
+ */
+export async function prepareSandboxForBuild(
+  actuator: Pick<IEngineerActuator, 'listFiles' | 'writeFile'> & Pick<Partial<IEngineerActuator>, 'ensureDependencies'>,
+  workspaceId: string,
+  load: typeof loadWorkspaceFiles = loadWorkspaceFiles,
+): Promise<PrepareOutcome> {
+  const seed = await ensureWorkspaceFilesInSandbox(actuator, workspaceId, load);
+  if (!seed.ready) {
+    return { ready: false, reason: seed.reason, seeded: seed.seeded, installed: false, installFailed: false, installLog: '' };
+  }
+
+  let installed = false;
+  let installFailed = false;
+  let installLog = '';
+  try {
+    const dep = await actuator.ensureDependencies?.(workspaceId);
+    if (dep) {
+      installed = dep.ran === true;
+      installFailed = dep.ok === false;
+      if (dep.ok === false) installLog = String(dep.log ?? '').slice(-2000);
+    }
+  } catch (e) {
+    // Never throws at the caller: an install that blew up is reported, not rethrown mid-publish.
+    installFailed = true;
+    installLog = e instanceof Error ? e.message : String(e);
+  }
+
+  return { ready: true, reason: '', seeded: seed.seeded, installed, installFailed, installLog };
+}

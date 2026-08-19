@@ -35928,3 +35928,74 @@ Locked by `tests/distReaderScript.test.ts`, whose central assertion runs the gen
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 1328 files / 16,662 tests green.
+### 2026-08-19 — Two admin reports: the icon that could never paste, and the ✕ that never closed (PR #2489)
+
+Both fixed at the root, and in both cases the shallow version of the fix would have been worse than
+the bug.
+
+**1. App Mart publish — "add app icon ke sath 2 option aur add karo: make icon, paste".**
+
+The publish sheet had one way in: a file picker. On a phone there is usually no icon file lying
+around, so the control was theoretical for most users. It now offers the same three ways the APK
+Builder already offered — Upload / Paste / Make icon — running on the SAME shared pipeline
+(`src/lib/appIcon.ts`), so the two screens cannot drift into different answers about what an icon is.
+
+"Make icon" opens AI Image Gen as its own tab and deliberately LEAVES the publish sheet open. The APK
+jump beside it is a hand-off, so it closes the sheet; this one is a round trip. The v5 surface stays
+mounted while another tab is active, so the user makes an icon, copies it, and returns to the same
+half-filled form to paste. Closing it would have silently discarded the name and screenshots already
+entered.
+
+THE HALF THAT MADE IT REAL. The old handler REFUSED any icon at/over the route's 200KB cap. That reads
+as reasonable until you notice what it does to this feature: an icon out of AI Image Gen is a
+1024×1024 PNG, so "Paste" would have answered "too large" EVERY time — a button that can never
+succeed, which is precisely what rule 2 forbids. The pipeline now FITS the picture instead: square
+centre-crop (matching the store card's own `object-cover`, so the preview is what the card shows),
+resized and re-encoded down a ladder until it is under the cap. The decision half (`fitIconToLimit`)
+takes an injected encoder, so it is tested without a canvas.
+
+Honesty (rule 5): an oversized icon was SILENTLY DROPPED server-side — the creator published
+successfully and then found a listing with no icon and no explanation. It is now refused out loud.
+
+**2. Professionals — "close (x) kar de, to chat close nahi hota".**
+
+✕ removed the tab, but every config-driven professional restores itself from localStorage on mount,
+so reopening put the user back into the conversation they had just ended.
+
+ROOT CAUSE: Doctor AI behaved correctly ONLY because `App.closeTab` happened to carry a hand-written
+branch for it. The other ~70 professionals had none. Close was a per-screen special case instead of a
+rule. It now runs through one shared module keyed off `PROFESSIONAL_CHATS`, so a professional added
+tomorrow is covered on the day it ships.
+
+WHAT THE OBVIOUS FIX WOULD HAVE COST. `prof_<id>_messages` is not a cache — it is the ONLY copy of the
+user's professional history and exactly what `ProfessionalHistoryView` reads. Deleting it on ✕ would
+have made the close button quietly destroy history nobody asked to lose. (This was assumed safe in an
+earlier note in this session and was checked instead of trusted — the check is what caught it.) So
+closing ARCHIVES the conversation and clears the live one: the chat genuinely ends, the transcript
+stays in Professional History marked "Closed" with its date, and its Open button genuinely resumes it,
+parking whatever is live first so reopening an old chat can never cost a newer one. Five kept per
+professional, newest first.
+
+One deliberate trade-off, documented in the module: if the browser cannot store the archive at all
+(quota full), the live slot is STILL cleared — a close button that silently refuses to close is the
+exact complaint being fixed.
+
+SIBLING HUNT (rule 3). No professional is rendered outside `PROFESSIONAL_CHATS`, and Repo Analyst —
+which reuses the same chat UI — keeps nothing in localStorage, so its ✕ already worked. The screenshot
+path shares the icon's cap class but already reports skipped images honestly and matches the server's
+limit exactly; its server-side sanitizer still drops silently, but no client path can reach it, so it
+is recorded here rather than changed.
+
+Two bugs the new tests caught while being written, both fixed before push: emptying the archive never
+wrote (the shed-on-quota loop stopped at 1, so deleting the LAST ended conversation silently did
+nothing), and a source-scan assertion that matched its own help text — the third time in this session
+a guard has been fooled by the prose documenting its own fix.
+
+`AppKnowledgeBase.ts` updated for both user-facing changes, same PR, per the sync rule.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1329 files / 16,673 tests passed** · `npm run build` OK · CI green · merged as `6fe9bc00`.
+
+NOTE FOR THE NEXT SESSION: both changes are FRONTEND, so they reach the website immediately via Cloud
+Run but do NOT reach installed Play Store users until a fresh signed `.aab` is built and uploaded
+(bundled Capacitor shell — see the Play Store section of CLAUDE.md).

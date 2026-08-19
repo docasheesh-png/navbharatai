@@ -61,20 +61,24 @@ export function connectStage(
     return {
       headline: 'Waiting for your DNS records to spread across the internet.',
       action: 'check',
-      note: 'This usually takes a few minutes (sometimes longer). Tap Check — nothing is lost if it is not ready yet.',
+      // HONEST timeline (admin's real Hostinger experience 2026-08-19: records added, ~4-5 hours of
+      // waiting, page looked stuck). DNS propagation genuinely runs from minutes to a few HOURS at some
+      // registrars — under-promising "a few minutes" makes a normal wait look broken. And now that the
+      // records you added are remembered (never re-shuffled), we can honestly say leaving is safe.
+      note: 'This can take anywhere from a few minutes to a few hours to spread across the internet — some registrars (like Hostinger) are on the slower side. You can safely close this page: the records you added and your progress are saved. Come back anytime and tap Check — nothing is lost.',
     };
   }
   if (!hostDone) {
     return {
       headline: 'Ownership confirmed — now pointing your domain at your app.',
       action: 'check',
-      note: 'Almost done. Tap Check again in a minute.',
+      note: 'Almost done — this usually finishes within a few minutes, occasionally longer. It is safe to leave and come back; tap Check when you return.',
     };
   }
   return {
     headline: 'Almost there — issuing your free HTTPS certificate.',
     action: 'check',
-    note: 'The certificate is created automatically; this can take a few minutes. Tap Check.',
+    note: 'The certificate is created automatically — usually a few minutes, sometimes up to an hour. Your progress is saved, so you can safely leave and tap Check later.',
   };
 }
 

@@ -23,6 +23,30 @@ const gzip = promisify(zlib.gzip);
 const FIREBASE_PROJECT = process.env.FIREBASE_DEPLOY_PROJECT ?? 'gen-lang-client-0866594388';
 const HOSTING_API = 'https://firebasehosting.googleapis.com/v1beta1';
 
+/**
+ * The public URL a published app is served at. Pure + exported for tests.
+ *
+ * DEFAULT (no branded domain): the raw Firebase channel URL `https://<site>--<channelId>.web.app`.
+ * That host is already on the Public Suffix List, so it is the SAFE default — do not remove it.
+ *
+ * BRANDED (`PUBLISHED_APP_DOMAIN` set, e.g. `mitrify.in`): `https://<channelId>.<domain>`. This is a
+ * pure STRING change — it only produces the right host. It becomes REAL only once a Cloudflare Worker
+ * routes `*.<domain>` to the matching Firebase channel (deterministic: `<sub>.<domain>` →
+ * `https://<site>--<sub>.web.app`, because `site` is the constant project). Until that Worker is live
+ * the env MUST stay unset, or every published URL points at a host that does not resolve. See
+ * `infra/cloudflare/mitrify-apps-worker.js` and its runbook.
+ *
+ * ⚠️ Branded subdomains are NOT isolated from each other for COOKIES until `<domain>` is on the Public
+ * Suffix List (a separate, weeks-long registration). localStorage/IndexedDB are already per-origin, so
+ * apps are isolated for those from day one; PSL is what closes cookie-tossing between apps. Do not flip
+ * this on for apps that set `Domain=.<domain>` cookies before PSL lands.
+ */
+export function publishedAppUrl(channelId: string, site = FIREBASE_PROJECT, brandedDomain = process.env.PUBLISHED_APP_DOMAIN): string {
+  const domain = (brandedDomain || '').trim().replace(/^\.+|\.+$/g, '');
+  if (domain) return `https://${channelId}.${domain}`;
+  return `https://${site}--${channelId}.web.app`;
+}
+
 /** The injected deploy function the dispatcher calls: dist files → permanent public URL. */
 export type DeployFn = (workspaceId: string, files: Map<string, Buffer>) => Promise<string>;
 
@@ -44,7 +68,7 @@ export class FirebaseHostingDeployer {
       {},
       { headers },
     );
-    return `https://${site}--${channelId}.web.app`;
+    return publishedAppUrl(channelId, site);
   }
 
   /**

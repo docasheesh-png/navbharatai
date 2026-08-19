@@ -45,3 +45,38 @@ export function applyPreviewDomain(url: string, domain = previewDomain()): strin
   if (!url || domain === 'e2b.app') return url;
   return url.replace(/(:\/\/[^/]*?)\.e2b\.app(?=[:/]|$)/i, `$1.${domain}`);
 }
+
+/**
+ * The URL **WE** should fetch when verifying a preview — always the direct sandbox host, never the
+ * branded one.
+ *
+ * WHY THIS EXISTS (found auditing the branded-preview change before it was switched on, 2026-08-19).
+ * `applyPreviewDomain` is applied at every point a preview URL is produced, and the same URL is then
+ * handed to `browseUrl()` for the platform's own checks — the preview verify, the journey check, the
+ * runtime-error capture, the design gate. Once the branded domain is live, every one of those checks
+ * would travel from inside the sandbox, out to Cloudflare, through the Worker, and back to the very
+ * sandbox it started in. Three costs, one of them serious:
+ *
+ *   1. 🔴 A Worker that is misconfigured, mid-deploy, or waiting on DNS would fail every VERIFICATION
+ *      — so working builds would be reported as unverified. A cosmetic feature would be able to
+ *      break the build pipeline, which is not a trade anyone would accept if asked plainly.
+ *   2. Every check would spend Worker requests against the free tier for no user benefit.
+ *   3. Every check would take an internet round trip instead of a local one.
+ *
+ * So the two needs are separated, because they were never the same need: the user gets the branded
+ * URL, and we verify against the sandbox directly. The blast radius of a proxy problem shrinks from
+ * "builds start failing" to "the link does not open in the browser", which is where it belongs.
+ *
+ * Idempotent: a URL that is already a direct host (or not a preview at all) is returned unchanged.
+ * Pure.
+ */
+export function internalPreviewUrl(url: string, domain = previewDomain()): string {
+  if (!url || domain === 'e2b.app') return url;
+  // Only rewrite the `{port}-{sandboxId}` shape E2B actually serves — never a bare or nested host,
+  // so an unrelated URL passing through here cannot be redirected somewhere it never pointed.
+  const escaped = domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return url.replace(
+    new RegExp(`(://\\d{1,5}-[a-z0-9]{6,64})\\.${escaped}(?=[:/]|$)`, 'i'),
+    '$1.e2b.app',
+  );
+}

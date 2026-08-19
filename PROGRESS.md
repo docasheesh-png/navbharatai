@@ -35445,3 +35445,70 @@ rejects "pichhla"/"purani" — the inflected forms a doctor actually types. Caug
 fixed with prefix matching.
 
 Gate: both tsc green, 16,558 tests / 1,319 files, CI green before merge.
+## 2026-08-19 — Branded preview URLs: a Cloudflare Worker instead of the ₹1,350/month VM
+
+Admin asked to evaluate "deploy tunneling" from an external (ChatGPT) design brief, per the
+external-suggestion rule: adapt to this app, never transcribe.
+
+**The brief's core premise does not hold here.** It assumes our containers are localhost-only and
+need Cloudflare Tunnel to reach the internet. They are not: E2B already publishes every port at
+`{port}-{sandboxId}.e2b.app` (`E2BActuator.getPortUrl`). That IS the tunnel. Adding another would be
+a tunnel over a tunnel — more cost, one more thing to break, nothing gained.
+
+Most of the brief's 39 points describe things this codebase already does, verified in source:
+port detection (`detectDevPort`/`portSweep`), health-gated publishing (the "preview is EARNED" rule
+in `ToolDispatcher` — a dead URL is never emitted), session reuse ("already healthy on port N —
+reused it"), orphan cleanup (`sandboxReaper`), app-failure vs preview-failure separation, per-user
+isolation, and the publish-time secret scan. Building them again would be the rewrite the brief's own
+point 39 forbids.
+
+**But the audit found one real, live defect.** The preview URL is shown to users (`PreviewSurface`
+"Open in new tab") and it reads `…e2b.app` — naming our infrastructure vendor in the address bar,
+which the white-label law forbids on every user-facing surface. We anonymise the vendor in chat, in
+errors and in reports, and then print it in the URL.
+
+**Three ways to fix it, priced against evidence rather than preference:**
+
+| | Needs | Cost | Blast radius if it fails |
+|---|---|---|---|
+| E2B's own documented custom domain | a GCP VM running Caddy — *their* docs | ~₹1,350/mo (the VM deleted 2026-08-02) | one VM, one region → every preview |
+| **Cloudflare Worker (chosen)** | nothing to run | **₹0** free tier, $5/mo beyond | Cloudflare edge, 300+ locations |
+| Cloudflare Tunnel (the brief's choice) | `cloudflared` inside every sandbox | E2B CPU-hours, forever | worst of the three |
+
+So the brief's specific recommendation is the most expensive option for our architecture, and the
+"official" one is the bill the admin already cancelled. The Worker is cheaper AND more available —
+not a trade-off, which is the only thing that justifies changing a working system.
+
+Verified against primary sources rather than memory: Workers proxy WebSockets via
+`response.webSocket` (so Vite HMR survives the hop), free Universal SSL covers exactly one subdomain
+level (so the hostname must stay `{port}-{id}.mitrify.xyz`, not a deeper name), Workers free tier is
+100k req/day, and E2B's custom-domain doc does ask for a VM.
+
+**Domain:** `navbharatai.com` is on Google DNS; `mitrify.xyz` is already the Cloudflare zone this
+codebase talks to (`cloudflare.ts` defaults `CLOUDFLARE_SAAS_ZONE_NAME` to it). Using mitrify.xyz
+touches the production domain **not at all** — the alternative, moving navbharatai.com's nameservers,
+risks the live site's mail/verification records for a cosmetic gain and was rejected for now.
+
+**Shipped in this change (nothing deploys by itself):** `infra/preview-proxy/worker.js` plus a
+README with the exact dashboard steps. The server half already existed — `applyPreviewDomain()` — so
+the whole switch is one Cloud Run variable, `E2B_PREVIEW_DOMAIN=mitrify.xyz`, and **unsetting it
+reverts everything instantly**.
+
+**The pair is what is tested.** `applyPreviewDomain()` swaps e2b→mitrify; the Worker's
+`upstreamHostFor()` swaps back. Each is trivially correct alone and only together do they work —
+the same shape as the GitHub-token bug found the same day (client sent a header, server read the
+body; each file self-consistent, the pair broken). 19 tests: the round trip, nine specific
+open-proxy refusals (a nested label smuggling another host, a loop back to the upstream, a bad port,
+a short sandbox id), WebSocket passthrough, redirect rewriting, and that the sleep page never names
+the vendor.
+
+**🔒 Not an open proxy, and that is the load-bearing decision.** The Worker forwards ONLY to
+`{port}-{sandboxId}.e2b.app` with both parts validated. Anything looser and a stranger could serve
+their own page from `*.mitrify.xyz` under our valid certificate — a phishing page wearing our brand.
+
+**Open, deliberately not bundled:** the URL still changes with the sandbox and a shared link dies
+when the sandbox is reaped. A stable per-workspace slug + wake-on-demand (the Worker asking our API
+to resume a paused sandbox) is the genuinely world-class version and is a separate piece of work.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1317 files / 16546 tests passed** · `npm run build` OK.

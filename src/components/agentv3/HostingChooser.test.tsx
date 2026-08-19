@@ -122,6 +122,18 @@ describe('HostingChooser — "Make an Android app" (APK) path', () => {
   });
 });
 
+// ADMIN REPORT 2026-08-19: "app mart me sirf naam aata hai, logo nahi." The App Mart publish form never
+// sent an icon, so every listing fell back to the globe. The form must expose an icon control (which
+// the publish call then sends as iconDataUrl) so a published app can carry its logo.
+describe('HostingChooser — App Mart listing carries an app icon (logo bug fix)', () => {
+  it('the "Put it on App Mart" form offers an app-icon upload', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    expect(html).toContain('Put it on App Mart');
+    expect(html).toContain('Add app icon'); // the upload control that feeds iconDataUrl
+    expect(html).toContain('at least 512'); // honest sizing guidance
+  });
+});
+
 // ADMIN REPORT 2026-08-02 (phone, Publish surface): "niche scroll nahi ho raha. iske sabhi button
 // farzi hai, koi bhi kaam nahi kar raha hai." Two real defects, both locked here.
 describe('HostingChooser — the sheet must scroll on a phone (clipped-content fix)', () => {

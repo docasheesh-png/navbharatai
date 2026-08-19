@@ -35730,3 +35730,48 @@ one would have failed only when the Worker was unhealthy: the rarest and worst m
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 **1322 files / 16603 tests passed** · `npm run build` OK.
+
+---
+
+## 2026-08-19 — Publish, second report: `sh: 1: tsc: not found` — half a fix is what produced it
+
+Twenty minutes after the ENOENT fix shipped, the admin pressed Publish again and got a DIFFERENT,
+deeper error. That is the honest shape of this entry: **the first fix was incomplete, and the second
+report is its receipt.**
+
+Restoring a workspace's SOURCE files does not give the build its TOOLS. `node_modules` is deliberately
+not in the durable store (huge, and regenerable), so a freshly-seeded sandbox had `package.json` and no
+`tsc`. `npm run build` resolved the script and died on the first binary.
+
+**The finding that ties both reports into one root cause:** Publish was built OUTSIDE both
+workspace-level guarantees that already existed.
+
+| The guarantee | Already lived in | Publish had it? |
+|---|---|---|
+| Durable file re-seed | `preview-diagnose` | ✗ → report 1 (ENOENT) |
+| `actuator.ensureDependencies` | the import path (its ONLY caller) | ✗ → report 2 (`tsc: not found`) |
+
+Each was added when a different path hit this class — `ensureDependencies` on 2026-08-09 for the
+identical shape, `sh: 1: drizzle-kit: not found` — and each was wired only into the path that hit it.
+Fixing one half was therefore guaranteed to produce the other half's report.
+
+**So the two are now ONE step callers cannot take half of:** `prepareSandboxForBuild` does files, then
+dependencies. A future deterministic sandbox operation inherits both instead of re-learning this a
+third time.
+
+**A failed install is deliberately NOT fatal**, per `ensureDependencies`' own documented contract
+("carry on and report honestly — never a hard stop"): actuators without real isolation do not offer it
+at all. But the failure is RECORDED, and when the build then fails the route names it as the FIRST
+CAUSE — *"Your app's dependencies could not be installed, so the build had no tools to run with"* —
+above the compiler's own message. Otherwise the user reads `sh: 1: tsc: not found` and goes hunting
+through their own code for a fault that is not there.
+
+**Open risk, stated rather than discovered later:** the publish route has no wall-clock bound. On a
+cold workspace it now does sandbox create + file seed + `npm install` + `npm run build` in one HTTP
+request. Each step is individually bounded (the actuator's command timeout is 5 minutes) but the total
+is not, and a slow cold start could approach the platform request timeout. The first real publish after
+this will tell us; if it bites, the fix is a bounded prepare with an honest "still preparing" response,
+not a longer timeout.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+1327 files / 16,646 tests green.

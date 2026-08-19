@@ -14,7 +14,7 @@ describe('Publish seeds the sandbox before it builds', () => {
     const at = route.indexOf("'/api/agentv3/publish'");
     expect(at).toBeGreaterThan(-1);
     const seg = route.slice(at, at + 6000);
-    const seed = seg.indexOf('ensureWorkspaceFilesInSandbox');
+    const seed = seg.indexOf('prepareSandboxForBuild');
     const build = seg.indexOf("runCommand(workspaceId, 'npm run build')");
     expect(seed).toBeGreaterThan(-1);
     expect(build).toBeGreaterThan(-1);
@@ -25,7 +25,16 @@ describe('Publish seeds the sandbox before it builds', () => {
   it('a not-ready workspace is refused with OUR sentence, before npm can produce ENOENT', () => {
     const at = route.indexOf("'/api/agentv3/publish'");
     const seg = route.slice(at, at + 6000);
-    expect(seg).toContain('if (!seed.ready)');
-    expect(seg).toContain('res.status(422).json({ error: seed.reason })');
+    expect(seg).toContain('if (!prep.ready)');
+    expect(seg).toContain('res.status(422).json({ error: prep.reason })');
+  });
+
+  it('a failed dependency install is named as the FIRST CAUSE on a build failure', () => {
+    // Without this the user is shown `sh: 1: tsc: not found` and goes hunting through their own code
+    // for a fault that is not there. The install's failure is what they actually need to see.
+    const at = route.indexOf("'/api/agentv3/publish'");
+    const seg = route.slice(at, at + 6000);
+    expect(seg).toContain('prep.installFailed');
+    expect(seg).toContain("dependencies could not be installed");
   });
 });

@@ -200,6 +200,7 @@ import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
+import { ensureWorkspaceFilesInSandbox } from '../AgentV3/sandboxSeed';
 import { pickerItems } from '../../lib/reportPicker';
 import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } from '../AgentV3/SpaFallbackAnalysis';
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
@@ -5280,6 +5281,21 @@ export function registerAgentV3Routes(app: Express): void {
 
     try {
       const actuator = buildActuator();
+      // 0. MAKE SURE THE FILES ARE ACTUALLY THERE (admin report 2026-08-19).
+      //
+      //    Publish used to go straight to `npm run build`, which assumes the sandbox already holds the
+      //    workspace. That holds for a few minutes after a build and then stops: the idle sweep pauses
+      //    the sandbox AND drops the actuator's in-memory file cache, so the next sandbox comes back
+      //    EMPTY. The user then saw npm's raw `ENOENT ... package.json` for an app that was completely
+      //    fine — its files sitting safe in the durable store, being rendered by the in-browser preview
+      //    on the same screen. Publishing worked only while the sandbox happened to still be warm,
+      //    which is a clock, not a condition anyone can see.
+      const seed = await ensureWorkspaceFilesInSandbox(actuator, workspaceId);
+      if (!seed.ready) {
+        // An honest 422 naming the real situation, never npm's error for a mistake the user did not make.
+        res.status(422).json({ error: seed.reason });
+        return;
+      }
       // 1. BUILD. Deterministic, and its real output is returned on failure — the user gets the
       //    compiler's own reason instead of "publish failed".
       const build = await actuator.runCommand(workspaceId, 'npm run build');

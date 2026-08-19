@@ -35649,3 +35649,55 @@ is: the failure mode is somebody collapsing the class list back to one width and
 a screenshot.
 
 Verification gate: `tsc --noEmit` clean · `vitest run` 1313 files / 16,466 tests green.
+
+---
+
+## 2026-08-19 — "Your app did not build, so there was nothing to publish" — when the app was fine
+
+Admin, mid-flow while connecting a real app to their own domain. A piano app built at 10:20 and
+previewing correctly; Publish pressed at 16:11:
+
+```
+npm error path /home/user/workspace/package.json
+npm error enoent Could not read package.json
+```
+
+**Nothing was wrong with the app.** Its 21 files were safe in the durable store the whole time — the
+in-browser preview was rendering them *on the same screen*. What was missing was the SANDBOX.
+
+**Why it only happens after a while.** Publish ran `npm run build` straight through the actuator, which
+assumes the workspace's files are already in the sandbox. That holds for minutes after a build and then
+stops: the idle sweep pauses the sandbox (5 min) **and drops the actuator's in-memory `_fileCache` for
+that workspace** — the only thing the recreate-after-death restore replays from, and a cache that dies
+with the Cloud Run instance anyway, i.e. on every deploy. So the next sandbox comes back EMPTY, the
+build runs in an empty directory, and the user is shown npm's raw ENOENT for a mistake they did not
+make. **Publish worked only while the sandbox happened to still be warm — a clock, not a condition
+anyone can see or control.** Same shape as yesterday's preview-rescue bug.
+
+**The sibling hunt returned the proof, not just a check.** `preview-diagnose` ALREADY re-seeds the
+durable files before it does anything (`loadWorkspaceFiles` → write into the resumed sandbox). That is
+exactly why the admin's own words were *"e2b me chalta hai"* — Diagnose works **because** it does the
+thing Publish forgot. Publish was the outlier, one route away from the correct behaviour.
+
+**Fix:** `sandboxSeed.ts` — a shared, pure-cored helper that makes sure a workspace's saved files are in
+the sandbox before a deterministic operation runs a command in it. Publish calls it first and refuses
+with **our own sentence** when a workspace genuinely has nothing, so npm's ENOENT can never again be
+the user's error message.
+
+**Three decisions worth keeping:**
+- **The marker is `package.json`, not "any file at all".** A sandbox can come back with a stray
+  scaffold remnant or a lockfile and be non-empty while leaving `npm run build` exactly as broken. The
+  file the build actually opens is the file we check for. Static projects (no package.json) are judged
+  on emptiness instead.
+- **A FAILED listing seeds anyway.** "Could not look" is not "empty" — treating them alike would
+  reproduce this bug through a different door. Re-writing files that are already there is harmless.
+- **One unwritable file does not abort the restore.** A partial project builds far more often than an
+  empty one.
+
+**Recorded, not done:** `preview-diagnose` has its own older inline version of this re-seed. It works,
+and it does more than the helper (sandbox resume, foundation files), so it was NOT refactored under a
+bug fix — changing a working path to tidy a duplicate is how a fix becomes an outage. Centralising the
+two is a follow-up.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+1315 files / 16,482 tests green.

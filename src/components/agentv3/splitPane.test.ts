@@ -287,16 +287,8 @@ describe('one-tap device widths — the divider becomes a real responsive check'
     expect(matchedDevice(paneWidthPx(55, 1400), 1400)).toBeNull();
   });
 
-  it('the chips read the MEASURED pane, never the button that was pressed', () => {
-    const chips = readFileSync(join(__dirname, 'PreviewWidthChips.tsx'), 'utf8');
-    expect(chips).toContain('const paneWidth = paneWidthPx(split, containerPx)');
-    // The label must come from that measurement, so an unsatisfiable request self-corrects on screen.
-    expect(chips).toContain('${paneWidth}px');
-  });
-
-  it('a device that cannot fit is DISABLED, not silently approximated', () => {
-    const chips = readFileSync(join(__dirname, 'PreviewWidthChips.tsx'), 'utf8');
-    expect(chips).toContain('!exact');
-    expect(chips).toContain('disabled={disabled}');
-  });
+  // The two source-reading tests for PreviewWidthChips.tsx were removed with that component (admin
+  // 2026-08-19): the header width chips duplicated PreviewSurface's own device-width switcher, so the
+  // chips were deleted. The pure splitPane logic below/above still powers the draggable divider and
+  // stays fully tested.
 });

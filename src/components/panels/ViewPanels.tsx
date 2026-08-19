@@ -54,7 +54,6 @@ const DatabaseStudio    = _lz(() => import('../ide/DatabaseStudio'),     'Databa
 const CICDPipeline      = _lz(() => import('../ide/CICDPipeline'),       'CICDPipeline');
 const PluginSystem      = _lz(() => import('../ide/PluginSystem'),       'PluginSystem');
 const WhitelabelBranding= _lz(() => import('../ide/WhitelabelBranding'), 'WhitelabelBranding');
-const AIProjectManager  = _lz(() => import('../ide/AIProjectManager'),   'AIProjectManager');
 const DesignSystem      = _lz(() => import('../ide/DesignSystem'),       'DesignSystem');
 const AppHealthMonitor  = _lz(() => import('../ide/AppHealthMonitor'),   'AppHealthMonitor');
 const APITester         = lazy(() => import('../ide/APITester'));
@@ -665,12 +664,6 @@ export function ViewPanels({
       {activeView === 'whitelabel' && (
         <div className="flex-1 h-full overflow-hidden">
           <WhitelabelBranding />
-        </div>
-      )}
-
-      {activeView === 'projectmgr' && (
-        <div className="flex-1 h-full overflow-hidden">
-          <AIProjectManager />
         </div>
       )}
 

@@ -12,7 +12,11 @@ import {
   customDomainErrorMessage,
   sanitizeDomainErrorDetail,
 } from '../lib/firebaseCustomDomain';
-import { linkWorkspaceDomain, firebaseDomainsForWorkspace } from '../lib/firebaseDomainLink';
+import {
+  linkWorkspaceDomain, firebaseDomainsForWorkspace, firebaseDomainLinksForUser,
+  rememberDomainDnsRecords, getStoredDomainDnsRecords,
+} from '../lib/firebaseDomainLink';
+import { mergeStableRecords, type StableDnsRecord } from '../lib/domainDnsRecords';
 import {
   managedDnsConfigured, ensureZone, zoneStatus, applyRecords, sanitizeManagedDnsError,
 } from '../lib/cloudflareManagedDns';
@@ -39,6 +43,24 @@ const DOMAIN_RE = /^([a-z0-9-]+\.)+[a-z]{2,}$/;
 // domain must attach to a real, verified owner — an anon workspace has nobody to own it.
 const ownsWorkspace = (verifiedUid: string | null, workspaceId: unknown): workspaceId is string =>
   ownedByVerifiedUid(verifiedUid, workspaceId);
+
+/**
+ * Turn a live status into a STABLE record view the UI can trust (admin 2026-08-19: "DNS record bhulne
+ * nahi chahiye"). It remembers every record shown so far and returns the union — added ✓ + still-needed
+ * ⏳ — so nothing the user already entered ever disappears. Best-effort: if the store is unavailable it
+ * falls back to the live pending set tagged not-done, which is exactly today's behaviour. The live
+ * `records` field is left untouched so the auto-DNS / Hostinger / Cloudflare appliers keep acting only
+ * on what is actually pending.
+ */
+async function stableRecordsFor(domain: string, liveRecords: { type: string; name: string; value: string; note?: string }[]): Promise<StableDnsRecord[]> {
+  try {
+    await rememberDomainDnsRecords(domain, liveRecords);
+    const stored = await getStoredDomainDnsRecords(domain);
+    return mergeStableRecords(stored, liveRecords);
+  } catch {
+    return liveRecords.map((r) => ({ ...r, done: false }));
+  }
+}
 
 export function registerNbaiDomainsRoutes(app: Express): void {
   app.post('/api/domains/nbai/connect', domainOpsRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
@@ -86,9 +108,11 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       const status = await attachCustomDomain(workspaceId, host);
       // Persist the link so the deploy path publishes future builds to this workspace's dedicated site.
       await linkWorkspaceDomain({ domain: host, workspaceId, userId: verifiedUid });
+      // Remember these records + return the STABLE (never-forgotten) view alongside the live set.
+      const displayRecords = await stableRecordsFor(host, status.records);
       // autoDns tells the client whether the zero-copy-paste path (nameserver delegation) exists on
       // this server — the UI offers it only when a tap can actually deliver it.
-      res.json({ ...status, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() });
+      res.json({ ...status, displayRecords, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() });
     } catch (err: any) {
       // HONEST failure (admin 2026-08-02): a permanent problem (server not permitted, domain taken)
       // must NOT tell the user to "try again" — that loops them forever on something a retry can
@@ -122,7 +146,8 @@ export function registerNbaiDomainsRoutes(app: Express): void {
         res.status(404).json({ error: 'This domain has not been connected yet.' });
         return;
       }
-      res.json(status);
+      const displayRecords = await stableRecordsFor(host, status.records);
+      res.json({ ...status, displayRecords });
     } catch (err: any) {
       sendSafeError(res, 500, 'Failed to check domain status. Please try again.', err, 'nbai domain status');
     }
@@ -188,7 +213,8 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       const fb = await customDomainStatusLive(workspaceId, host);
       if (!fb) { res.status(404).json({ error: 'Connect the domain first, then run automatic setup.' }); return; }
       const applied = await applyRecords(zone.id, fb.records);
-      res.json({ zoneStatus: zone.status, nameServers: zone.nameServers, applied, domain: fb });
+      const displayRecords = await stableRecordsFor(host, fb.records);
+      res.json({ zoneStatus: zone.status, nameServers: zone.nameServers, applied, domain: { ...fb, displayRecords } });
     } catch (err) {
       console.error(`[HTTP 500] auto-dns sync: ${err instanceof Error ? err.stack || err.message : String(err)}`);
       res.status(500).json({ error: 'Could not apply the DNS records automatically.', detail: sanitizeManagedDnsError(err) });
@@ -222,16 +248,38 @@ export function registerNbaiDomainsRoutes(app: Express): void {
         return;
       }
       const status = await customDomainStatusLive(workspaceId as string, domain).catch(() => null);
+      const displayRecords = status ? await stableRecordsFor(domain, status.records) : [];
       // Zone lookup is best-effort: a missing/errored zone must not hide the rest of the state.
       const zone = managedDnsConfigured() ? await zoneStatus(domain).catch(() => null) : null;
       res.json({
         domain,
-        status: status ? { ...status, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() } : null,
+        status: status ? { ...status, displayRecords, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() } : null,
         zone: zone ? { nameServers: zone.nameServers, status: zone.status } : null,
       });
     } catch (err) {
       sendSafeError(res, 500, 'Could not load the saved domain state.', err, 'nbai domain state');
     }
+  });
+
+  /**
+   * The signed-in user's connected domains, as a workspaceId → domain[] map (admin 2026-08-19: the
+   * "Connect my website" list gave no way to tell which app was already connected). Read-only,
+   * verified-owner-scoped (only the caller's own links), and fail-open ([] on any store hiccup) — it
+   * only decorates the picker, so a lapse hides the badge, never blocks the flow.
+   */
+  app.get('/api/domains/nbai/links', domainOpsRateLimiter(), async (req: Request, res: Response) => {
+    const verifiedUid = await verifyFirebaseToken(req);
+    if (!verifiedUid) {
+      res.status(401).json({ error: 'Please sign in.' });
+      return;
+    }
+    const links = await firebaseDomainLinksForUser(verifiedUid);
+    const byWorkspace: Record<string, string[]> = {};
+    for (const l of links) {
+      if (l.suspended) continue; // a plan-lapsed domain isn't actively serving — don't badge it "connected"
+      (byWorkspace[l.workspaceId] ??= []).push(l.domain);
+    }
+    res.json({ byWorkspace });
   });
 
   /**

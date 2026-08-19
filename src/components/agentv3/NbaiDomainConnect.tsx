@@ -14,7 +14,7 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { REGISTRARS, registrarById, detectRegistrarId, registrarNameFromRdap } from '../../lib/registrarGuide';
 import { authJsonHeaders as authHeaders } from '../../lib/authHeaders';
 
-interface DnsRecord { type: string; name: string; value: string; note?: string; }
+interface DnsRecord { type: string; name: string; value: string; note?: string; done?: boolean; }
 interface DomainStatus {
   /** Server capability: the zero-copy-paste nameserver-delegation path is available. */
   autoDns?: boolean;
@@ -28,6 +28,10 @@ interface DomainStatus {
   hostState: string;
   sslState: string;
   records: DnsRecord[];
+  /** STABLE, never-forgotten record view: everything ever shown, each tagged done (✓ added & accepted)
+   *  or not (⏳ still needed). Preferred over `records` for display; `records` stays the live pending set
+   *  the auto-setup appliers act on. Absent on an older server → fall back to `records`. */
+  displayRecords?: DnsRecord[];
 }
 
 export interface NbaiDomainConnectProps {
@@ -368,7 +372,13 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
             );
           })()}
           <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Add these DNS records at your registrar</span>
-          {result.records.length === 0 && (
+          {/* STABLE record list (admin 2026-08-19: "DNS record bhulne nahi chahiye"). Prefer the server's
+              never-forgotten `displayRecords` — records you already added stay visible with a ✓ instead of
+              silently vanishing when the internet accepts them, and any newly-needed record shows as ⏳. An
+              older server without the field falls back to the live pending `records`. */}
+          {(() => { const shown = result.displayRecords ?? result.records; const pendingCount = shown.filter((r) => !r.done).length; const doneCount = shown.length - pendingCount; return (
+          <>
+          {shown.length === 0 && (
             // Freshly-attached domains often report their records a few seconds AFTER create (the
             // hosting API prepares them asynchronously). "No records needed" read as "done" while
             // ownership sat pending — admin screenshot 2026-08-06. Say what is actually happening.
@@ -378,7 +388,18 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
                 : 'Your records are being prepared — tap "Check" below in a few seconds to load them.'}
             </p>
           )}
-          {result.records.map((rec, i) => (
+          {doneCount > 0 && (
+            <p className="text-[10px] text-green-300/90">✓ {doneCount} record{doneCount === 1 ? '' : 's'} you added {doneCount === 1 ? 'is' : 'are'} verified{pendingCount > 0 ? ` — ${pendingCount} more to add below.` : ' — nothing more to add.'}</p>
+          )}
+          {shown.map((rec, i) => rec.done ? (
+            // Already added & accepted — kept visible so the user's work is never "lost", shown compact.
+            <div key={i} className="px-3 py-1.5 rounded-lg bg-green-500/5 border border-green-500/20 flex items-center gap-2">
+              <Check className="w-3.5 h-3.5 text-green-400 shrink-0" />
+              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-green-500/15 text-green-300">{rec.type}</span>
+              <span className="text-[11px] text-zinc-400 font-mono truncate">{relativeRecordName(rec.name, cleanDomain)}</span>
+              <span className="ml-auto text-[10px] text-green-300 shrink-0">Verified</span>
+            </div>
+          ) : (
             <div key={i} className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">{rec.type}</span>
@@ -402,6 +423,8 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
               </p>
             </div>
           ))}
+          </>
+          ); })()}
 
           {result.autoDns && (
             <div className="px-3 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex flex-col gap-2">

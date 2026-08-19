@@ -8,7 +8,8 @@
 // safe default (false / []) on any error — the honest cost is a domain that serves the app only
 // after the NEXT publish, never a broken build.
 
-import { doc, setDoc, collection, query, where, getDocs, getServerDb as getDb } from './serverDb';
+import { doc, getDoc, setDoc, collection, query, where, getDocs, getServerDb as getDb } from './serverDb';
+import { dedupeRecords } from './domainDnsRecords';
 
 const COLLECTION = 'custom_domains';
 
@@ -99,4 +100,40 @@ export async function firebaseDomainsForWorkspace(workspaceId: string): Promise<
 /** True when the workspace has at least one Firebase-connected custom domain (fail-open → false). */
 export async function workspaceHasFirebaseDomain(workspaceId: string): Promise<boolean> {
   return (await firebaseDomainsForWorkspace(workspaceId)).length > 0;
+}
+
+// ── DNS record memory (admin 2026-08-19: "DNS record bhulne nahi chahiye") ──────────────────────
+//
+// The records NavBharatAI shows are derived live from Firebase and only list what is STILL pending, so
+// a record the user already added silently vanishes once Firebase accepts it — reading as "everything
+// changed". We remember every record we ever showed, so the flow can display a STABLE list (added ✓ +
+// still-needed ⏳) that only grows. Best-effort like the rest of this store — a hiccup just means the
+// screen falls back to the live pending set, never a broken flow.
+
+export interface RememberedDnsRecord { type: string; name: string; value: string; note?: string; }
+
+/** Union `records` into `custom_domains/{domain}.dnsRecords`, so a record is never forgotten once shown. */
+export async function rememberDomainDnsRecords(domain: string, records: readonly RememberedDnsRecord[]): Promise<void> {
+  try {
+    const db = getDb() as any;
+    if (!db || !domain || !records.length) return;
+    const ref = doc(db, COLLECTION, docId(domain));
+    const snap = await getDoc(ref);
+    const existing = (snap.exists() ? (snap.data() as any)?.dnsRecords : []) as RememberedDnsRecord[] | undefined;
+    const merged = dedupeRecords([...(Array.isArray(existing) ? existing : []), ...records]);
+    await setDoc(ref, { dnsRecords: merged, updatedAt: Date.now() }, { merge: true });
+  } catch { /* best-effort — the live pending set is still shown if this fails */ }
+}
+
+/** The records ever shown for a domain (empty on any error — fail-open to the live set). */
+export async function getStoredDomainDnsRecords(domain: string): Promise<RememberedDnsRecord[]> {
+  try {
+    const db = getDb() as any;
+    if (!db || !domain) return [];
+    const snap = await getDoc(doc(db, COLLECTION, docId(domain)));
+    const recs = snap.exists() ? (snap.data() as any)?.dnsRecords : [];
+    return Array.isArray(recs) ? dedupeRecords(recs) : [];
+  } catch {
+    return [];
+  }
 }

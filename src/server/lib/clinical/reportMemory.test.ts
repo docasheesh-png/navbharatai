@@ -2,7 +2,7 @@
 // doctor asked "ecg me lead V2 dekh ke batao" and Doctor AI answered it could not see the image.
 
 import { describe, it, expect } from 'vitest';
-import { SessionReportStore, isVisionReportType, referencesAttachedReport } from './reportMemory';
+import { SessionReportStore, isVisionReportType, referencesAttachedReport, asksForComparison } from './reportMemory';
 
 const NOW = 1_000_000;
 const HOURS = 60 * 60 * 1000;
@@ -97,5 +97,46 @@ describe('SessionReportStore', () => {
     store.sweep(NOW + 25 * HOURS);
     expect(store.latest('s1', NOW + 25 * HOURS)).toBeNull();
     expect(store.latest('s2', NOW + 25 * HOURS)).not.toBeNull();
+  });
+});
+
+describe('asksForComparison — the question that changes management', () => {
+  it('matches English and Hinglish comparison asks', () => {
+    for (const q of [
+      'compare this with the previous ECG',
+      'purane ecg se compare karo',
+      'is this a new change from the earlier film?',
+      'old vs new, kya fark hai',
+      'pichhla report bhi dekho',
+      'serial comparison batao',
+    ]) {
+      expect(asksForComparison(q), q).toBe(true);
+    }
+  });
+
+  it('does not fire on a plain first reading — one film stays one film', () => {
+    for (const q of [
+      'please analyse this ecg and make a diagnosis',
+      'lead v2 dekh ke batao',
+      'is xray me fracture hai kya',
+    ]) {
+      expect(asksForComparison(q), q).toBe(false);
+    }
+  });
+});
+
+describe('SessionReportStore.all — what a comparison needs', () => {
+  it('returns every fresh report, oldest first', () => {
+    const store = new SessionReportStore();
+    store.remember('s1', { fileData: 'old', fileType: 'image/jpeg', fileName: 'ecg-old.jpg' }, NOW);
+    store.remember('s1', { fileData: 'new', fileType: 'image/jpeg', fileName: 'ecg-new.jpg' }, NOW + 60_000);
+    expect(store.all('s1', NOW + 120_000).map((f) => f.fileName)).toEqual(['ecg-old.jpg', 'ecg-new.jpg']);
+  });
+
+  it('drops expired reports and is empty for an unknown session', () => {
+    const store = new SessionReportStore();
+    store.remember('s1', { fileData: 'x', fileType: 'image/png', fileName: 'a.png' }, NOW);
+    expect(store.all('s1', NOW + 25 * HOURS)).toEqual([]);
+    expect(store.all('nope', NOW)).toEqual([]);
   });
 });

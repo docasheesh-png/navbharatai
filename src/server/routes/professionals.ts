@@ -16,9 +16,19 @@ import {
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import { professionalUsageStore } from '../professionals/ProfessionalUsageStore';
 import { gateProfessionalTurn } from '../professionals/passGate';
+// ATTACHMENT RECALL (admin 2026-08-19) — the sibling of Doctor AI's report memory: a file's
+// vision-derived text is remembered for this conversation so the NEXT turn can still answer from it.
+import {
+  AttachmentRecallStore, referencesEarlierAttachment, buildRecallBlock,
+} from '../lib/clinical/attachmentRecall';
 
 /** Max attachments accepted per turn (defense against oversized payload loops). */
 const MAX_PROFESSIONAL_ATTACHMENTS = 4;
+
+// What each conversation's attachments SAID, so a follow-up ("us report me kya likha tha?") is not
+// answered blind. Text only — the description was already paid for on the turn that produced it.
+const professionalRecall = new AttachmentRecallStore();
+setInterval(() => professionalRecall.sweep(Date.now()), 60 * 60 * 1000);
 
 /**
  * Generic config-driven professional chat (Teacher, and future Lawyer/CA/etc.).
@@ -83,6 +93,8 @@ export function registerProfessionalsRoutes(app: Express): void {
 
     // Turn files into text the (text-only) professional engine can actually read.
     let effectiveMessage = typeof message === 'string' ? message.trim() : '';
+    /** What this turn's attachments said — remembered below so a LATER turn can still answer from it. */
+    let attachmentBlock = '';
     if (rawAttachments.length > 0) {
       const parts: string[] = [];
       try {
@@ -96,7 +108,8 @@ export function registerProfessionalsRoutes(app: Express): void {
         }
       } catch { /* best-effort — a bad image never blocks the turn */ }
       if (parts.length > 0) {
-        effectiveMessage = `${parts.join('\n\n')}\n\n---\n${effectiveMessage || 'Please review the attached file(s) above and respond.'}`;
+        attachmentBlock = parts.join('\n\n');
+        effectiveMessage = `${attachmentBlock}\n\n---\n${effectiveMessage || 'Please review the attached file(s) above and respond.'}`;
       } else {
         // Honest state: never pretend the file was read when nothing could be extracted.
         effectiveMessage = `[The user attached ${rawAttachments.length} file(s) (${rawAttachments.map((a) => a.name).join(', ')}) but their content could not be read. Say so honestly and ask for the content in a supported format.]\n\n${effectiveMessage}`;
@@ -113,6 +126,21 @@ export function registerProfessionalsRoutes(app: Express): void {
     // (trusting it would let anyone read another user's remembered facts).
     const identity = await verifyFirebaseIdentity(req);
     const verifiedUserId = identity?.uid || null;
+
+    // ── ATTACHMENT RECALL ────────────────────────────────────────────────────────────────────────
+    // Keyed by the VERIFIED user + this professional, so one person's file can never surface in
+    // someone else's conversation, and a signed-out caller (no key) simply gets today's behaviour.
+    const recallKey = verifiedUserId ? `${verifiedUserId}:${config.id}` : '';
+    if (recallKey) {
+      if (attachmentBlock) {
+        professionalRecall.remember(recallKey, attachmentBlock, Date.now());
+      } else if (rawAttachments.length === 0 && typeof message === 'string' && referencesEarlierAttachment(message)) {
+        // No file this turn, but the user is asking about one they sent earlier — hand back what we
+        // read from it rather than answering blind. Costs nothing: the text already exists.
+        const block = buildRecallBlock(professionalRecall.recall(recallKey, Date.now()));
+        if (block) effectiveMessage = `${block}\n\n---\n${effectiveMessage}`;
+      }
+    }
 
     // Professional Pass gate (flag-off = no-op). Blocks anonymous / out-of-free-quota users honestly.
     const gate = await gateProfessionalTurn(verifiedUserId, identity?.email || null);

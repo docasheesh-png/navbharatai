@@ -58,6 +58,21 @@ export function referencesAttachedReport(message: string): boolean {
   return patterns.some((re) => re.test(m));
 }
 
+/**
+ * Is the doctor asking to COMPARE this report with an earlier one?
+ *
+ * Clinically this is the question that changes management — "is this RBBB new or was it already there?"
+ * — so when it is asked, the earlier report of the session travels to the model alongside the new one.
+ */
+export function asksForComparison(message: string): boolean {
+  const m = ` ${String(message || '').toLowerCase()} `;
+  if (!m.trim()) return false;
+  // Hinglish stems are prefix-matched (no trailing \b): a doctor writes "pichhla", "purani", "pehle
+  // wala" — a word boundary after the stem would reject every one of those inflections.
+  return /\b(compare|comparison|comparative|versus|vs|previous|prior|earlier|old|older|last (one|report|ecg|film|scan)|serial|interval change|new change|tulna)\b/.test(m)
+    || /\b(puran\w*|pichhl\w*|pichl\w*|pehle wal\w*|purane wal\w*)/.test(m);
+}
+
 /** How long a session's report files stay re-attachable. Matches the clinical store's own 24h TTL. */
 const REPORT_TTL_MS = 24 * 60 * 60 * 1000;
 /** Most-recent files kept per session — a case discussion rarely juggles more at once. */
@@ -89,6 +104,21 @@ export class SessionReportStore {
       return null;
     }
     return { fileData: fresh.fileData, fileType: fresh.fileType, fileName: fresh.fileName };
+  }
+
+  /**
+   * Every still-fresh report of this session, oldest first — what a COMPARISON needs ("purane ECG se
+   * compare karo"): the earlier film and the new one go to the model together.
+   */
+  all(sessionId: string, now: number): StoredReportFile[] {
+    const list = this.files.get(sessionId);
+    if (!list?.length) return [];
+    const fresh = list.filter((f) => now - f.ts <= REPORT_TTL_MS);
+    if (!fresh.length) {
+      this.files.delete(sessionId);
+      return [];
+    }
+    return fresh.map((f) => ({ fileData: f.fileData, fileType: f.fileType, fileName: f.fileName }));
   }
 
   /** Drop every session whose newest file has expired. Called from the route's existing sweep timer. */

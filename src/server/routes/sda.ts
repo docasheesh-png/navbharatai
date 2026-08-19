@@ -16,7 +16,7 @@ import type { ChatTurnUsage } from '../lib/chatSpend';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { getServerDb } from '../lib/serverDb';
 import { detectImageIntent, imageGenGuidance } from '../lib/imageIntent';
-import { SessionReportStore, isVisionReportType, referencesAttachedReport } from '../lib/clinical/reportMemory';
+import { SessionReportStore, isVisionReportType, referencesAttachedReport, asksForComparison, type StoredReportFile } from '../lib/clinical/reportMemory';
 import { buildAuditPrompt, buildAuditContents, type AuditReportFile } from '../lib/clinical/reportAudit';
 
 /**
@@ -155,6 +155,9 @@ export function registerSdaRoutes(app: Express): void {
         sdaRecentMessages.set(sdaSessionId, storedMsgs);
       }
 
+      // Set when the doctor asked about a report this server no longer holds — the client re-sends it.
+      let reportResendNeeded = false;
+
       // ── REPORT MEMORY (admin 2026-08-18) ─────────────────────────────────────
       // A report sent this turn is remembered for the session; a follow-up turn WITHOUT a file that
       // plainly asks about the report gets it RE-ATTACHED, so "ecg me lead V2 dekho" puts the actual
@@ -171,12 +174,42 @@ export function registerSdaRoutes(app: Express): void {
           fileType = prior.fileType;
           fileName = prior.fileName;
           message = `${message}\n\n[The report "${prior.fileName}" the doctor sent earlier in this session is re-attached above. Answer their question by examining it directly — never say you cannot see it.]`;
+        } else {
+          // THE MEMORY MISS (admin 2026-08-19). This store is in-memory, and the server runs on
+          // several Cloud Run instances that recycle on every deploy — so a follow-up can legitimately
+          // land where the report was never held, and the doctor would meet the exact "I cannot see the
+          // image" failure this feature exists to kill. The CLIENT still has the file, so we say so
+          // honestly and it re-sends the same question with the report attached. One extra round trip
+          // in the rare miss case beats storing medical images in a database we would then have to
+          // protect and expire.
+          reportResendNeeded = true;
         }
       }
 
       const hasFile = !!(fileData && fileType);
       const isImage = hasFile && fileType.startsWith('image/');
       const isPDF = hasFile && fileType === 'application/pdf';
+
+      // ── COMPARISON: the earlier report travels WITH the new one (admin 2026-08-19) ──────────────
+      // "Is this RBBB new, or was it already there?" is the question that actually changes management,
+      // and it cannot be answered from one film. When the doctor asks to compare, every still-fresh
+      // report of this session goes to the model together with today's, oldest first, each labelled.
+      // No client change is needed: report memory is already holding the earlier films.
+      const reportFiles: StoredReportFile[] = [];
+      if (hasFile && (isImage || isPDF)) {
+        if (typeof message === 'string' && asksForComparison(message)) {
+          for (const f of sdaReportStore.all(sdaSessionId, now)) {
+            // The current file is already in the store (remembered above) — keep it last, as "today's".
+            if (f.fileData !== fileData) reportFiles.push(f);
+          }
+        }
+        reportFiles.push({ fileData, fileType, fileName: fileName || 'report' });
+      }
+      /** More than one report in this turn ⇒ the model is being asked to compare them. */
+      const isComparison = reportFiles.length > 1;
+      if (isComparison) {
+        message = `${message}\n\n[${reportFiles.length} reports are attached, oldest first: ${reportFiles.map((f, i) => `(${i + 1}) ${f.fileName}`).join(', ')}. Compare them explicitly: state what has CHANGED between them and what is unchanged, and say which finding is NEW — that is what decides management.]`;
+      }
       // Any non-image, non-PDF file → extract real text (plain text/code AND Word,
       // Excel, PowerPoint, ZIP) via the shared extractor and prepend to the message,
       // so the document is readable by every provider at zero API cost. Images/PDFs
@@ -253,6 +286,7 @@ MEDICAL REPORT & IMAGE ANALYSIS (ECG, X-ray, USG, CT/MRI films, lab reports, pre
   • RE-VERIFY every number you quote against what is actually printed on the report before you write it; a transcription slip becomes a wrong dose downstream.
   • If the report carries the machine's own printed interpretation, form YOUR OWN reading first, then compare — and state plainly where you agree and where you disagree with the machine.
   • Before finishing, do one deliberate second pass over the report asking "what did I miss?" — only then give the provisional diagnosis.
+- COMPARING TWO REPORTS (when more than one is attached, they are labelled and ordered oldest → newest): read EACH one on its own first, then state explicitly what has CHANGED and what is unchanged, and say clearly which finding is NEW. In serial reports the change is the diagnosis — a bundle branch block or an ST shift that was already present carries a completely different urgency from one that appeared today. Never blend the two films into one reading.
 
 RED FLAG DETECTION (always active):
 Screen continuously for: Shock, Sepsis, Respiratory failure, ACS, Stroke, Meningitis, Severe dehydration, Status epilepticus, GI bleed, Severe anemia, DKA, Obstetric emergencies, Pediatric emergencies.
@@ -408,12 +442,12 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // NOTE: @google/genai SDK uses camelCase: inlineData/mimeType (NOT inline_data/mime_type)
       const buildGeminiContents = () => {
         const userParts: any[] = [];
-        if ((isImage || isPDF) && fileData)
-          userParts.push(
-            { inlineData: { mimeType: fileType, data: fileData } },
-            { text: `[${isPDF ? 'PDF Report' : 'Image'}: ${fileName}]\n${message}` }
-          );
-        else
+        if (reportFiles.length > 0) {
+          // Every report of this turn, oldest first, each with its own label so the model can name
+          // which film a finding came from (a comparison is useless if the two get mixed up).
+          for (const f of reportFiles) userParts.push({ inlineData: { mimeType: f.fileType, data: f.fileData } });
+          userParts.push({ text: `[${reportFiles.map((f) => f.fileName).join(', ')}]\n${message}` });
+        } else
           userParts.push({ text: message });
         // Gemini requires contents to start with 'user' — drop any leading model turns
         const geminiHistory = historyForAI.map((m: any) => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
@@ -441,10 +475,11 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         // For images: use current Grok vision-capable models (shared list, env-overridable)
         // For text: use standard Grok-3 models
         const models = isImage ? grokVisionModels() : ['grok-3', 'grok-3-fast'];
-        const userContent: any = isImage && fileData
+        const grokImages = reportFiles.filter((f) => f.fileType.startsWith('image/'));
+        const userContent: any = grokImages.length > 0
           ? [
-              { type: 'image_url', image_url: { url: `data:${fileType};base64,${fileData}` } },
-              { type: 'text', text: `[Image: ${fileName}]\n${message}` },
+              ...grokImages.map((f) => ({ type: 'image_url', image_url: { url: `data:${f.fileType};base64,${f.fileData}` } })),
+              { type: 'text', text: `[${grokImages.map((f) => f.fileName).join(', ')}]\n${message}` },
             ]
           : message;
 
@@ -569,10 +604,13 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           try {
             // Native Anthropic SDK only — the aicredits OpenAI-proxy path removed.
             const A = (await import('@anthropic-ai/sdk')).default;
-            const userContent = isImage
-              ? [{ type: 'image', source: { type: 'base64', media_type: fileType, data: fileData } }, { type: 'text', text: `[Document: ${fileName}]\n${message}` }]
-              : isPDF
-              ? [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData } }, { type: 'text', text: `[PDF Report: ${fileName}]\n${message}` }]
+            const userContent = reportFiles.length > 0
+              ? [
+                  ...reportFiles.map((f) => (f.fileType === 'application/pdf'
+                    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.fileData } }
+                    : { type: 'image', source: { type: 'base64', media_type: f.fileType, data: f.fileData } })),
+                  { type: 'text', text: `[${reportFiles.map((f) => f.fileName).join(', ')}]\n${message}` },
+                ]
               : message;
             const r = await new A({ apiKey: anthropicKey }).messages.create({
               model: claudeVisionAnswerModel(), max_tokens: 2000, system: SDA_SYSTEM_FINAL,
@@ -631,7 +669,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           const caseContext = `Recorded case data: ${JSON.stringify(clinicalEntry.patientData)}\nRecorded red flags: ${clinicalEntry.redFlags.join(', ') || 'none'}\nDoctor's latest message: ${message}`;
           const audit = await auditSdaReply(
             caseContext, cleanReply, sdaGeminiKey,
-            isReportTurn ? { fileData, fileType, fileName: fileName || 'report' } : null,
+            isReportTurn ? (reportFiles[reportFiles.length - 1] || { fileData, fileType, fileName: fileName || 'report' }) : null,
           );
           if (audit) {
             finalReply = `${cleanReply}\n\n---\n**⚠️ Automated safety cross-check (second AI):**\n${audit}\n\n_This is an automated double-check, not a substitute for your clinical judgment._`;
@@ -669,7 +707,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         usdInrRate(),
         Date.now(),
       );
-      return res.json({ reply: finalReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: sdaSessionId });
+      return res.json({ reply: finalReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: sdaSessionId, reportResendNeeded });
 
     } catch (err: any) {
       // Full detail to the server log (admin diagnostics); a safe, on-brand message to the doctor —

@@ -281,6 +281,16 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [patient, setPatient] = useState<PatientSnapshot>({});
   const [activeRedFlags, setActiveRedFlags] = useState<string[]>([]);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
+  /**
+   * The last REPORT (image/PDF) sent in this case — the client's own copy.
+   *
+   * The server remembers reports in memory so follow-ups can re-examine them, but it runs on several
+   * instances that recycle on every deploy, so a follow-up can legitimately reach a server that never
+   * held the file. When that happens the server says so (`reportResendNeeded`) and we silently re-send
+   * this copy with the same question. That keeps the guarantee absolute without storing anyone's
+   * medical images in a database.
+   */
+  const lastReportRef = useRef<AttachedFile | null>(null);
   // Mic renders only where the Web Speech API exists — absent on iOS/iPadOS WKWebView so it is never a
   // dead "unresponsive" button (Apple App Review 2.1(a), 2026-08-02). See src/lib/voiceInput.ts.
   const [suggestPDF, setSuggestPDF] = useState(false);
@@ -444,15 +454,21 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
   // ── File Select ──────────────────────────────────────────────────────────
 
-  // Downscale large images to ≤1568px / JPEG so the payload stays small and vision quality stays high
-  const downscaleImage = (file: File, maxDim = 1568, quality = 0.85): Promise<{ base64: string; type: string; preview: string }> =>
+  // REPORT-GRADE IMAGE QUALITY (admin 2026-08-19: "har chhoti bariki dhyan se dekh kar reply kare").
+  //
+  // Every image attached HERE is a medical report — an ECG's twelve traces across one wide strip, or an
+  // X-ray. At the old 1568px / JPEG 0.85 those thin lines smear: a 1mm ST shift or a small q wave can be
+  // compression artefact rather than signal, and the doctor may start treatment from that reading. So
+  // report images keep 2400px and quality 0.92. The payload grows to roughly 1-2 MB, which is nothing
+  // against a wrong reading, and the model still sees a single image so the token cost barely moves.
+  const downscaleImage = (file: File, maxDim = 2400, quality = 0.92): Promise<{ base64: string; type: string; preview: string }> =>
     new Promise(resolve => {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
         try {
           const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-          if (scale === 1 && file.size <= 900 * 1024) {
+          if (scale === 1 && file.size <= 2 * 1024 * 1024) {
             URL.revokeObjectURL(url);
             const r = new FileReader();
             r.onload = () => { const res = r.result as string; resolve({ base64: res.split(',')[1] || '', type: file.type, preview: res }); };
@@ -576,6 +592,10 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
     const fileForMsg = attachedFile;
     setAttachedFile(null);
+    // Keep our own copy of a report so a server that never held it can ask us to re-send (see lastReportRef).
+    if (fileForMsg?.base64 && (fileForMsg.type.startsWith('image/') || fileForMsg.type === 'application/pdf')) {
+      lastReportRef.current = fileForMsg;
+    }
 
     const displayText = text || (fileForMsg ? `📎 ${fileForMsg.name}` : '');
     const userMsg: SDAMessage = {
@@ -605,7 +625,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         content: m.text,
       }));
 
-      const res = await fetch('/api/sda-chat', {
+      const postTurn = async (file: AttachedFile | null) => fetch('/api/sda-chat', {
         method: 'POST',
         signal: controller.signal,
         // Send the verified Firebase ID token so the server resolves a REAL identity for the Professional
@@ -620,11 +640,13 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           // Isolate this patient's clinical store (server keys on sessionId; without it every case for
           // one doctor would share the userId key and contaminate each other).
           sessionId: caseIdRef.current,
-          fileData: fileForMsg?.base64 || null,
-          fileType: fileForMsg?.type || null,
-          fileName: fileForMsg?.name || null,
+          fileData: file?.base64 || null,
+          fileType: file?.type || null,
+          fileName: file?.name || null,
         }),
       });
+
+      let res = await postTurn(fileForMsg);
 
       // Surface the server's REAL reason instead of a blanket "unavailable" (which made a sign-in
       // prompt, a free-limit paywall, or a keys/busy error all look identically like "not responding").
@@ -647,7 +669,19 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         }]);
         return;
       }
-      const data = await res.json();
+      let data = await res.json();
+
+      // THE MEMORY MISS. The doctor asked about a report this server no longer holds (a different
+      // instance, or a deploy in between). We still have the file, so re-send the same question with it
+      // attached — the doctor sees one answer, never "I cannot see the image". Exactly ONE retry, so a
+      // server that keeps missing can never put the client in a loop.
+      if (data?.reportResendNeeded && lastReportRef.current?.base64 && !fileForMsg) {
+        const retry = await postTurn(lastReportRef.current);
+        if (retry.ok) {
+          const retryData = await retry.json().catch(() => null);
+          if (retryData?.reply) { res = retry; data = retryData; }
+        }
+      }
 
       const sdaMsg: SDAMessage = {
         id: (Date.now() + 1).toString(),

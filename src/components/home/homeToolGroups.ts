@@ -12,7 +12,7 @@ import type { ComponentType } from 'react';
 import {
   Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitBranch, Gauge, Minimize2,
   Palette, Layout, Puzzle, LayoutTemplate, Moon, Figma, Rocket, Smartphone, CloudUpload, Search,
-  Package, IndianRupee, Users2, TrendingUp,
+  Package, IndianRupee, Users2, TrendingUp, Share2,
 } from 'lucide-react';
 
 /** A lucide icon component (version-independent — the package's type export name has changed across releases). */
@@ -79,6 +79,10 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
       // 'APK Builder' MOVED to AI Tools (admin 2026-08-14).
       { id: 'domain', label: 'Custom Domain', icon: Globe },
       { id: 'seo', label: 'SEO Optimizer', icon: Search },
+      // 'Share for Review' PROMOTED here (E1 trust sprint): the read-only client link used to be buried
+      // inside Settings → Deploy → Multi-Cloud, where nobody found it. This is now its ONE doorway —
+      // the card was REMOVED from MultiCloudDeploy in the same change, so there are not two rooms.
+      { id: 'sharereview', label: 'Share for Review', icon: Share2 },
       // 'Nav App Store' MOVED to Monetization & Team (admin 2026-08-14): publishing there is about
       // reaching users and earning, not about shipping a build.
     ],

@@ -6,8 +6,8 @@ import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
 /**
  * Polish campaign — Collaboration (4) + Settings/Connections (16), rock-solid verification.
  *
- * Fixes: share_for_review pointed at "Deploy panel → Deploy tab" but ShareForReview lives inside
- * MultiCloudDeploy, which moved to Settings → App Settings → Hosting & Deploy this session. And ~13 KB
+ * Fixes: share_for_review pointed at "Deploy panel → Deploy tab". ShareForReview was later PROMOTED
+ * (2026-08-19) to its own Home tool tile — its one discoverable doorway. And ~13 KB
  * entries said "Secrets & Keys" while the real tile is labelled "Secrets & API Keys". The rest of the
  * App Settings hub (built this session) is verified against the real SettingsPanel tiles.
  */
@@ -20,10 +20,12 @@ const topnav = read('src/components/panels/TopNav.tsx');
 const kb = (id: string) => APP_KNOWLEDGE_BASE.find((f) => f.id === id);
 
 describe('Collaboration', () => {
-  it('Share for Review points at the REAL location (Hosting & Deploy), not the old Deploy panel', () => {
+  it('Share for Review points at its REAL location — the Home tool tile — not the old buried Deploy panel', () => {
+    // Promoted 2026-08-19 (E1 trust sprint) from Settings → Deploy (three levels deep, undiscoverable)
+    // to its own Home tool tile, with the duplicate removed from MultiCloudDeploy — one doorway.
     const e = kb('share_for_review')!;
     expect(e.path).not.toMatch(/Deploy panel/);
-    expect(e.path).toMatch(/Hosting & Deploy/);
+    expect(e.path).toMatch(/Share for Review/);      // the Home tool tile is now the one doorway
     expect(shareForReview).toContain('Create review link'); // the real control
   });
   it('Team Collaboration, @Mentions (bell), and Team Library are real', () => {

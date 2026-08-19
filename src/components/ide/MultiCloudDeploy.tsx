@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { ShareForReview } from './ShareForReview';
 import { CloudUpload, ServerCog, CloudCheck, CloudCog, Globe, Rocket, Check, X, Loader2, ChevronRight, RefreshCw, ExternalLink, Terminal, Shield, Zap, Clock, AlertCircle, CheckCircle2, Copy } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 
@@ -346,8 +345,9 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
               </div>
             )}
 
-            {/* P-COLLAB.3 — share a read-only preview with a client + collect feedback */}
-            <ShareForReview generatedCode={generatedCode} />
+            {/* P-COLLAB.3 "Share for review" MOVED OUT (E1 trust sprint) to its own Home tool tile
+                (Publish & Deploy → Share for Review), so it is discoverable and has exactly ONE doorway.
+                It is intentionally not duplicated here — a second door made users think there were two. */}
           </div>
         )}
 

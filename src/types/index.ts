@@ -73,7 +73,7 @@ export type ViewType =
   | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api'
   | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot'
   | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components'
-  | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier'
+  | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier' | 'sharereview'
   | 'darkmode' | 'monetize' | 'imagegen' | 'versioning' | 'apimarket'
   | 'appstore' | 'collab' | 'aitesting' | 'localization' | 'codereview'
   | 'dbstudio' | 'cicd' | 'plugins' | 'whitelabel' | 'projectmgr'

@@ -46,6 +46,7 @@ const CodeVersioning    = _lz(() => import('../ide/CodeVersioning'),     'CodeVe
 const APIMarketplace    = _lz(() => import('../ide/APIMarketplace'),     'APIMarketplace');
 const NavAppStore       = _lz(() => import('../ide/NavAppStore'),        'NavAppStore');
 const LiveCollaboration = _lz(() => import('../ide/LiveCollaboration'),  'LiveCollaboration');
+const ShareForReview    = _lz(() => import('../ide/ShareForReview'),     'ShareForReview');
 const AITestingSuite    = _lz(() => import('../ide/AITestingSuite'),     'AITestingSuite');
 const LocalizationManager = _lz(() => import('../ide/LocalizationManager'), 'LocalizationManager');
 const AICodeReview      = _lz(() => import('../ide/AICodeReview'),       'AICodeReview');
@@ -611,6 +612,14 @@ export function ViewPanels({
             userName={user?.displayName || user?.email?.split('@')[0]}
             userEmail={user?.email || undefined}
           />
+        </div>
+      )}
+
+      {/* E1 (trust sprint) — Share for review: a read-only client link, surfaced as its own tool so the
+          feature is discoverable instead of buried three levels deep in Settings → Deploy. */}
+      {activeView === 'sharereview' && (
+        <div className="flex-1 h-full overflow-auto p-4">
+          <ShareForReview generatedCode={generatedCode} />
         </div>
       )}
 

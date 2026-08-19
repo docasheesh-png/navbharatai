@@ -35865,3 +35865,66 @@ been obvious that restoring source without `node_modules` leaves a build with no
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 1327 files / 16,655 tests green.
+
+---
+
+## 2026-08-19 — Publish, fourth report: THE root cause. A shell quote that broke three sandbox scripts
+
+The diagnostic shipped in the third round did its job on the very next attempt. The new message carried
+the evidence the old one had thrown away:
+
+```
+No build output found in dist/ or out/.
+[eval]:1
+const fs=require('fs'),path=require('path');…let out={};cons
+```
+
+`[eval]:1` plus a source that stops mid-word is node reporting a **SyntaxError on a truncated script** —
+not a missing directory.
+
+**The bug.** `downloadDistFiles` ran its reader as `node -e "<script>"`, a DOUBLE-quoted shell string,
+with the search paths interpolated by `JSON.stringify()`. JSON.stringify emits **double quotes**, so the
+first path CLOSED the shell string. Node received everything up to `const dirs=[` and nothing after it.
+
+**Proven, not reasoned.** The exact shape was rebuilt and run in a shell before anything was changed:
+
+```
+node -e "
+const t="https://abc123.e2b.app";
+...
+[eval]:2  const t=https://abc123.e2b.app;  SyntaxError: Unexpected token ':'
+```
+
+`WORKSPACE_ROOT` is a constant, so **there was no input for which this worked** — the deploy step could
+only ever fail. This is very likely the unexplained half of the 2026-08-09 autopsy (build aed2906d),
+where deploy "succeeded" twice, emitted no URL, and left the agent running `ls -la dist/` trying to
+understand why. That fix made the failure VISIBLE by throwing; it never found this cause.
+
+**The sibling hunt found two more, and one of them matters more than the deploy bug.**
+`browseUrl` and `screenshot` build the identical shape — `${JSON.stringify(url)}` inside a
+double-quoted `node -e` — so **the browser path has never run either.** `browseUrl` degrades silently to
+`source: 'curl'` on failure, which is precisely the platform's own documented `PREVIEW_UNVERIFIED`:
+*"fetched without running its JavaScript."* The fallback is what kept a total failure invisible for
+months. Every one of these is now written to a file and run as `node /tmp/….cjs`, which removes the
+shell from the path entirely — the class cannot return via a quote, a newline or an apostrophe.
+
+**The fix already existed here too, exactly like the two rounds before it.** This same file's
+browser-daemon path does it correctly — `shellQuote(payload)`, and the script itself in a FILE
+(`browser-action.js`). Its comment even records the neighbouring lesson: *"The screenshot comes from a
+FILE, never stdout — stdout is capped at 64KB."* The three broken sites simply never used either
+practice. So the dist reader now returns its JSON through a file as well: a base64'd `dist/` is easily
+megabytes, and a truncated stdout would fail `JSON.parse` with a message that looks nothing like its
+cause — the same lesson, one layer along.
+
+**What the four rounds actually were.** Each was a real, separate defect on one path, and each fix moved
+the failure deeper: no files → no dependencies → no evidence → this. The first three were Publish
+sitting outside guarantees that already existed elsewhere (`preview-diagnose`'s re-seed,
+`ensureDependencies`, `shellQuote`). **The honest lesson is not "we guessed four times" — it is that
+round three should have come first:** the route was discarding a successful build's output, and the one
+change that made the cause visible ended the guessing immediately.
+
+Locked by `tests/distReaderScript.test.ts`, whose central assertion runs the generated reader through
+`new Function()` — a syntax error there is the bug, and no amount of reading the string proves it absent.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+1328 files / 16,662 tests green.

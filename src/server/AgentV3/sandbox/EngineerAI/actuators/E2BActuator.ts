@@ -1406,7 +1406,20 @@ export class E2BActuator implements IEngineerActuator {
       // bounded deadline. A fast app is snapshotted SOONER than the old fixed sleep; a slow one is no
       // longer libelled. Whether it ever painted is reported, because "I looked and nothing had
       // painted" and "the app crashed" are different facts and only one of them is a defect.
-      const playwrightScript = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node -e "
+      // ⚠️ THE SCRIPT GOES TO A FILE, NOT `node -e "…"` (root cause proven 2026-08-19).
+      //
+      // This was a double-quoted shell string with `${JSON.stringify(url)}` inside it. JSON.stringify
+      // emits DOUBLE quotes, so the URL closed the shell string and node received a fragment:
+      //
+      //     [eval]:2  const t=https://abc123.e2b.app;  SyntaxError: Unexpected token ':'
+      //
+      // Reproduced exactly, in a shell, before this was changed — it is not a reading of the code.
+      // There is no URL for which it worked, so THE BROWSER PATH HAS NEVER RUN: every call landed in
+      // the `source: 'curl'` fallback below, which is the platform's own documented
+      // `PREVIEW_UNVERIFIED` — "fetched without running its JavaScript". The fallback is what kept it
+      // invisible. Same bug, same file, found via the deploy failure the admin reported.
+      const browsePath = '/tmp/nb_browse.cjs';
+      const playwrightBody = `
 const {chromium}=require('playwright');
 (async()=>{
   const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
@@ -1417,7 +1430,9 @@ ${paintWaitJs('p')}
   console.log((await p.content()).slice(0,30000));
   await b.close();
 })().catch(e=>{process.stderr.write(e.message);process.exit(1)});
-" 2>/dev/null`;
+`;
+      await sandbox.files.write(browsePath, playwrightBody);
+      const playwrightScript = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${browsePath} 2>/dev/null`;
       const pw = await sandbox.commands.run(playwrightScript, {
         cwd: TOOLS_DIR, timeoutMs: BROWSE_PAINT_DEADLINE_MS + 20_000,
       }).catch(() => null);
@@ -1471,7 +1486,11 @@ ${paintWaitJs('p')}
     // domcontentloaded + settle, never networkidle: a Vite dev server's HMR socket never goes idle, so
     // networkidle times out and captures the un-hydrated shell (the exact false-negative that made the
     // preview self-check report "Present: none" for every React build).
-    const script = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node -e "
+    // Same shell-quoting root cause as browseUrl above — `${JSON.stringify(url)}` inside a
+    // double-quoted `node -e "…"` closed the string, so this screenshot script has never run either.
+    // Proven by reproducing the exact shape in a shell, not by reading it. The script goes to a file.
+    const shotPath = '/tmp/nb_shot.cjs';
+    const shotBody = `
 const {chromium}=require('playwright');
 (async()=>{
   const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
@@ -1509,7 +1528,9 @@ ${paintWaitJs('p')}
   process.stdout.write(JSON.stringify(out));
   await b.close();
 })().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1)});
-" 2>/dev/null`;
+`;
+    await sandbox.files.write(shotPath, shotBody);
+    const script = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${shotPath} 2>/dev/null`;
     const run = await sandbox.commands.run(script, { cwd: TOOLS_DIR, timeoutMs: 30_000 }).catch(() => null);
     if (!run || run.exitCode !== 0 || !run.stdout.trim()) return { elements: [], scanned: false };
     try {
@@ -1875,50 +1896,72 @@ ${paintWaitJs('p')}
     const distPath = `${WORKSPACE_ROOT}/dist`;
     const outPath = `${WORKSPACE_ROOT}/out`;
 
-    // Use a Node.js one-liner inside the sandbox to recursively read all files
-    // in the output directory as base64, output as JSON {relativePath: base64string}.
-    // Node.js is always available (it's the E2B base template runtime).
-    const script = [
-      `node -e "`,
-      `const fs=require('fs'),path=require('path');`,
-      `function walk(d,b,o){`,
-      `  try{for(const f of fs.readdirSync(d)){`,
-      `    const a=path.join(d,f),r=(b?b+'/':'')+f;`,
-      `    if(fs.statSync(a).isDirectory()) walk(a,r,o);`,
-      `    else o[r]=fs.readFileSync(a).toString('base64');`,
-      `  }}catch(e){}`,
-      `  return o;`,
-      `}`,
-      `let out={};`,
-      `const dirs=[${JSON.stringify(distPath)},${JSON.stringify(outPath)}];`,
-      `for(const d of dirs){const r=walk(d,'',{});if(Object.keys(r).length){out=r;break;}}`,
-      `if(!Object.keys(out).length) throw new Error('dist/ and out/ are empty or do not exist');`,
-      `console.log(JSON.stringify(out));`,
-      `"`,
-    ].join('');
+    // ── WHY THIS RUNS FROM A FILE AND NOT `node -e "…"` ─────────────────────────────────────────
+    //
+    // It used to be a shell one-liner: `node -e "<script>"`, with the directory paths interpolated by
+    // `JSON.stringify()`. JSON.stringify emits DOUBLE quotes, and the wrapper was double-quoted too, so
+    // the first interpolated path CLOSED the shell string. Node received everything up to
+    // `const dirs=[` and nothing after it, and answered with a SyntaxError — reported to the user as
+    // `Could not read the built site: exit status 1`.
+    //
+    // WORKSPACE_ROOT is a constant, so there was no input for which this worked: the deploy step could
+    // only ever fail. That is very likely the unexplained half of the 2026-08-09 autopsy (build
+    // aed2906d), where deploy "succeeded" twice, emitted no URL, and left the agent running `ls -la
+    // dist/` trying to understand why — that fix made the failure VISIBLE by throwing, but never found
+    // this cause. Reported for real by the admin on 2026-08-19, on the fourth attempt of one publish.
+    //
+    // Writing the script to a file removes the shell from the path entirely, so the whole class of
+    // quoting bug cannot come back — not by adding a path, a quote, a newline, or an apostrophe.
+    //
+    // The RESULT also goes to a file rather than stdout. A dist/ is easily megabytes once base64'd, and
+    // a captured stdout has limits we do not control; a truncated JSON would fail `JSON.parse` with a
+    // message that looks nothing like its cause. This is the same lesson one layer along.
+    const readerPath = '/tmp/nb_read_dist.cjs';
+    const resultPath = '/tmp/nb_dist.json';
+    const readerScript = [
+      "const fs=require('fs'),path=require('path');",
+      "function walk(d,b,o){",
+      "  try{for(const f of fs.readdirSync(d)){",
+      "    const a=path.join(d,f),r=(b?b+'/':'')+f;",
+      "    if(fs.statSync(a).isDirectory()) walk(a,r,o);",
+      "    else o[r]=fs.readFileSync(a).toString('base64');",
+      "  }}catch(e){}",
+      "  return o;",
+      "}",
+      "let out={};",
+      `const dirs=${JSON.stringify([distPath, outPath])};`,
+      "for(const d of dirs){const r=walk(d,'',{});if(Object.keys(r).length){out=r;break;}}",
+      "if(!Object.keys(out).length){console.error('dist/ and out/ are empty or do not exist');process.exit(2);}",
+      `fs.writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify(out));`,
+    ].join('\n');
+
+    await sandbox.files.write(readerPath, readerScript);
 
     // ⚠️ THE SDK THROWS ON A NON-ZERO EXIT (E2B CommandExitError) — it does NOT return one.
     //
     // So the honest message below was UNREACHABLE for the exact case it was written for: the script
-    // exits 1 precisely when dist/ and out/ are missing, the SDK threw, and the caller reported the
-    // SDK's own words — `Could not read the built site: exit status 1` — to a user who then has no
-    // idea what to do. Reported by the admin 2026-08-19 on a real publish. Catching it here is what
-    // makes the explanation reachable at all.
+    // exits non-zero precisely when dist/ and out/ are missing, the SDK threw, and the caller reported
+    // the SDK's own words — `exit status 1` — to a user with no idea what to do.
     const result = await sandbox.commands
-      .run(script, { timeoutMs: 30_000 })
+      .run(`node ${readerPath}`, { timeoutMs: 60_000 })
       .catch((err: any) => ({
         exitCode: typeof err?.exitCode === 'number' ? err.exitCode : 1,
         stdout: String(err?.stdout ?? ''),
         stderr: String(err?.stderr ?? err?.message ?? err),
       }));
-    if (result.exitCode !== 0 || !result.stdout.trim()) {
+    if (result.exitCode !== 0) {
       throw new Error(
         `No build output found in dist/ or out/. Run "npm run build" first (for Next.js static export add output:'export' to next.config.js).\n` +
         (result.stderr || result.stdout).slice(0, 300),
       );
     }
 
-    const data: Record<string, string> = JSON.parse(result.stdout.trim());
+    const raw = await sandbox.files.read(resultPath).catch(() => '');
+    if (!raw.trim()) {
+      throw new Error('The build output could not be read back from the sandbox — nothing was written to collect.');
+    }
+
+    const data: Record<string, string> = JSON.parse(raw.trim());
     const files = new Map<string, Buffer>();
     for (const [relPath, base64] of Object.entries(data)) {
       files.set(relPath, Buffer.from(base64, 'base64'));

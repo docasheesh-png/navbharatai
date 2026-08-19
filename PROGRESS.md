@@ -35999,3 +35999,40 @@ Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean �
 NOTE FOR THE NEXT SESSION: both changes are FRONTEND, so they reach the website immediately via Cloud
 Run but do NOT reach installed Play Store users until a fresh signed `.aab` is built and uploaded
 (bundled Capacitor shell — see the Play Store section of CLAUDE.md).
+
+---
+
+## 2026-08-19 — Apple sign-in on the WEB: the popup could never hand back the credential (PR #2491, merged e5113bd)
+
+Admin report, reproduced on desktop Chrome AND iPhone Safari: Apple's page appeared, the user signed
+in, and the app still said "Apple sign-in didn't complete" and stayed logged out. **Native iOS worked
+throughout** — which was the first real clue (native uses the device's own Apple sheet, never this path).
+
+**THE EVIDENCE THAT SETTLED IT** (admin captured it with DevTools attached to the POPUP itself, which
+is the only place these requests appear — the main page's Network tab never shows them): Apple's own
+`authorize` response carried a real `grant_code` and `userId`. The credential was never the problem;
+DELIVERING it back to the opener was. Apple returns by `response_mode=form_post` — a cross-site POST
+into the popup — and afterwards the popup navigated to the app instead of handing the result to the
+window that opened it. That relay is exactly what storage partitioning / ITP breaks, which is why two
+unrelated browsers failed identically. `popup-closed-by-user` was the only signal the SDK could give,
+so the UI honestly — and uselessly — reported a cancel.
+
+**FIX:** on WEB, Apple goes straight to `signInWithRedirect` (`webSignInStrategy()` in the existing
+tested policy module). The redirect has no relay to break, and `getRedirectResult` at the app root
+already finalizes it (App.tsx, provider-agnostic). Apple ONLY (Google/GitHub popups work and a redirect
+there would be a slower regression) and WEB ONLY (native is untouched). Note for later: this app is the
+ideal case for redirect because `authDomain` is our OWN origin — `firebase.ts` records the custom
+authDomain was adopted PRECISELY so `signInWithRedirect` returns signed-in rather than logged-out.
+
+**ADMIN-SIDE HALF, NOW DONE (closes a long-standing open root cause).** Apple Developer portal →
+Service ID `com.navbharatai.web` → Sign In with Apple → Configure now carries domain `navbharatai.com`
+and Return URL `https://navbharatai.com/__/auth/handler`. The `invalid_request — Invalid web redirect
+url` error is gone.
+
+⚠️ **Two corrections recorded rather than quietly dropped, both mine:** (1) I first advised adding
+`gen-lang-client-…firebaseapp.com` as a second domain — Apple rejects it (you cannot host its
+verification file on Google's domain) and it is not needed, since native never uses a web return URL.
+(2) I carried "the return URL isn't registered" as the whole story; the registration was only half —
+the delivery-back was the other half and it was ours.
+
+Gate: both tsc green, 16,616 tests / 1,324 files, CI green before merge.

@@ -63,6 +63,16 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 /** What an upload costs today. One value, so raising it later is a one-line change. */
 export const UPLOAD_FEE_INR = 0;
 
+/**
+ * The largest listing icon a store record may carry, as data-URL characters.
+ *
+ * A Firestore document is capped at 1 MiB and the icon rides inside the record, so this is a real
+ * limit rather than a preference. The CLIENT fits every icon well under it before sending
+ * (`STORE_ICON_MAX_CHARS` in `src/lib/appIcon.ts`, deliberately lower so the two can never meet at the
+ * boundary) — this is the server's own guarantee, not a duplicate of that one.
+ */
+export const STORE_ICON_MAX_CHARS = 200_000;
+
 export const STORE_CATEGORIES = [
   'Business', 'Education', 'Entertainment', 'Finance', 'Food & Drink', 'Games',
   'Health & Fitness', 'Lifestyle', 'News', 'Productivity', 'Shopping', 'Social', 'Tools', 'Travel',
@@ -490,7 +500,19 @@ export function registerNavStoreRoutes(app: Express): void {
 
     const name = (typeof req.body?.name === 'string' ? req.body.name : '').trim().slice(0, 60);
     const description = (typeof req.body?.description === 'string' ? req.body.description : '').trim().slice(0, 600);
-    const iconDataUrl = typeof req.body?.iconDataUrl === 'string' && req.body.iconDataUrl.startsWith('data:image/') && req.body.iconDataUrl.length < 200_000 ? req.body.iconDataUrl : undefined;
+    // AN ICON IS EITHER USED OR REFUSED OUT LOUD — never silently dropped (rule 5, honesty).
+    // This used to fall back to `undefined` for anything oversized, so a creator who added an icon
+    // published successfully and then found a listing with no icon and no explanation. The client now
+    // fits every icon under the cap before sending (src/lib/appIcon.ts), so reaching this refusal means
+    // something genuinely unusable arrived — and saying so beats a blank card.
+    const rawIcon = typeof req.body?.iconDataUrl === 'string' ? req.body.iconDataUrl : '';
+    if (rawIcon && !rawIcon.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'That app icon could not be read as an image. Pick a PNG or JPG.' });
+    }
+    if (rawIcon.length >= STORE_ICON_MAX_CHARS) {
+      return res.status(400).json({ error: 'That app icon is too large. Use a smaller square picture — or press "Make icon" and let NavBharatAI create one.' });
+    }
+    const iconDataUrl = rawIcon || undefined;
     // Listing screenshots (admin report 2026-08-19). The sanitizer is the boundary of what may be stored
     // — anything non-image / oversize / over the count is dropped, never truncated into a broken image.
     const screenshots = sanitizeScreenshots(req.body?.screenshots);

@@ -21,7 +21,8 @@
 // (static = Free); it is the single place to change when the admin sets real numbers.
 
 import { useEffect, useState } from 'react';
-import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, Store } from 'lucide-react';
+import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, Store, Clipboard, Sparkles, Loader2 } from 'lucide-react';
+import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
 
@@ -70,6 +71,14 @@ export interface HostingChooserProps {
   onOpenDatabaseSettings?: () => void;
   /** Open the APK Builder (Other AI → APK Builder), pre-targeted to this app, to make an Android app. */
   onOpenApkBuilder?: () => void;
+  /**
+   * Open AI Image Gen (Other AI) so the user can MAKE a listing icon.
+   *
+   * It opens as its own tab and this sheet stays exactly as it is — the user makes an icon, copies it,
+   * comes back to this same half-filled publish form and presses Paste. Closing the sheet would throw
+   * away the name and screenshots they already entered, which is the opposite of helping.
+   */
+  onMakeIcon?: () => void;
 }
 
 /** What the server knows about this app's data needs — see GET /api/agentv3/database-readiness. */
@@ -86,6 +95,7 @@ const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI
 export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled,
   ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
+  onMakeIcon,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost'>('choose');
   // ── Nav App Store one-click publish (Kadam 1, admin: "1 click release/publish … v5 ke publish ke
@@ -100,20 +110,29 @@ export function HostingChooser({
   const [storeIcon, setStoreIcon] = useState('');
   const [storeIconError, setStoreIconError] = useState('');
 
-  const onStoreIconFile = (file: File | null | undefined) => {
+  // THREE WAYS TO AN ICON (admin 2026-08-19: "waha 2 option aur add karo — 1. make icon 2. paste").
+  // Upload, Paste, and Make icon — the SAME three the APK Builder already offers, running on the same
+  // shared pipeline (`src/lib/appIcon.ts`) so the two screens can never drift into different answers.
+  //
+  // The old handler refused anything at/over the route's 200KB limit. That reads as reasonable until you
+  // notice what it does to THIS feature: an icon out of AI Image Gen is a 1024×1024 PNG, so "Paste"
+  // would have answered "too large" every single time. The pipeline now FITS the picture instead —
+  // square, shrunk, re-encoded until it is under the cap — so all three ways end in a working icon.
+  const [storeIconBusy, setStoreIconBusy] = useState(false);
+  const acceptStoreIcon = async (run: () => Promise<IconCheck>) => {
+    setStoreIconBusy(true);
     setStoreIconError('');
+    try {
+      const r = await run();
+      if (!r.ok || !r.dataUrl) { setStoreIconError(r.error || 'That image could not be used.'); return; }
+      setStoreIcon(r.dataUrl);
+    } finally {
+      setStoreIconBusy(false);
+    }
+  };
+  const onStoreIconFile = (file: File | null | undefined) => {
     if (!file) return;
-    if (!file.type.startsWith('image/')) { setStoreIconError('Pick an image file (PNG or JPG).'); return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = typeof reader.result === 'string' ? reader.result : '';
-      if (!url.startsWith('data:image/')) { setStoreIconError('That file could not be read as an image.'); return; }
-      // The server refuses an icon ≥ 200KB; catch it here so the user sees why instead of a silent drop.
-      if (url.length >= 200_000) { setStoreIconError('That image is too large — use a smaller square icon (under ~150 KB).'); return; }
-      setStoreIcon(url);
-    };
-    reader.onerror = () => setStoreIconError('Could not read that file.');
-    reader.readAsDataURL(file);
+    void acceptStoreIcon(() => readStoreIcon(file));
   };
 
   // Listing SCREENSHOTS (admin report 2026-08-19): shown inside the App Mart detail so a viewer sees the
@@ -575,12 +594,40 @@ export function HostingChooser({
                   ? <img src={storeIcon} alt="App icon" className="w-full h-full object-cover" />
                   : <Store className="w-4 h-4 text-white/25" />}
               </div>
-              <div className="flex flex-col gap-1">
-                <label className="cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[11px] text-zinc-200 border border-zinc-700 w-fit">
-                  <input type="file" accept="image/*" className="hidden" onChange={(e) => onStoreIconFile(e.target.files?.[0])} />
-                  {storeIcon ? 'Change icon' : 'Add app icon'}
-                </label>
-                <span className="text-[10px] text-zinc-500">Shows on the store card — square, at least 512×512 (optional).</span>
+              <div className="flex flex-col gap-1 min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <label className={`cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[11px] text-zinc-200 border border-zinc-700 w-fit ${storeIconBusy ? 'opacity-40 pointer-events-none' : ''}`}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={storeIconBusy}
+                      onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; onStoreIconFile(f); }}
+                    />
+                    {storeIcon ? 'Change icon' : 'Add app icon'}
+                  </label>
+                  <button
+                    onClick={() => void acceptStoreIcon(() => readStoreIconFromClipboard())}
+                    disabled={storeIconBusy}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-[11px] text-zinc-200 border border-zinc-700"
+                  >
+                    {storeIconBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Clipboard className="w-3 h-3" />} Paste
+                  </button>
+                  {onMakeIcon && (
+                    <button
+                      onClick={onMakeIcon}
+                      aria-label="Make icon with AI Image Gen"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-[11px] font-semibold text-white border border-indigo-500"
+                    >
+                      <Sparkles className="w-3 h-3" /> Make icon
+                    </button>
+                  )}
+                </div>
+                <span className="text-[10px] text-zinc-500">
+                  Shows on the store card (optional) — a square picture of at least 512×512 looks best;
+                  anything else is fitted automatically. "Make icon" opens AI Image Gen in its own tab —
+                  copy the picture it makes, come back here and press Paste. This form stays as you left it.
+                </span>
               </div>
               {storeIcon && (
                 <button onClick={() => { setStoreIcon(''); setStoreIconError(''); }} className="ml-auto text-[10px] text-zinc-400 hover:text-zinc-200 underline">Remove</button>

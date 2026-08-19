@@ -12,6 +12,7 @@ import { ChatToolbar } from '../chat/ChatToolbar';
 import { MessageEditActions } from '../chat/MessageEditActions';
 import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage, editedLabel } from '../../lib/chatMessageActions';
+import { activeKey } from '../../lib/professionalChatStore';
 
 /**
  * Generic, config-driven chat UI for the "Professional AI" framework. One
@@ -80,7 +81,10 @@ async function fileToAttachment(file: File): Promise<{ name: string; type: strin
 }
 
 export function ProfessionalChat({ config, userId }: { config: ProfessionalChatConfig; userId?: string }) {
-  const storeKey = `prof_${config.id}_messages`;
+  // ONE definition of where a professional's conversation lives (professionalChatStore) — this string
+  // used to be spelled out here AND in ProfessionalHistoryView, and App's ✕ close now has to agree with
+  // both. Three hand-written copies of a key is how a close button ends up clearing the wrong thing.
+  const storeKey = activeKey(config.id);
   const [messages, setMessages] = useState<Msg[]>(() => {
     try { const s = localStorage.getItem(storeKey); if (s) { const p = JSON.parse(s); if (Array.isArray(p) && p.length) return p; } } catch { /* ignore */ }
     return [{ role: 'assistant', content: config.welcome }];

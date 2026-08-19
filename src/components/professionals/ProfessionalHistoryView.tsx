@@ -3,6 +3,10 @@ import { motion } from 'motion/react';
 import { Briefcase, MessageSquare, LogIn, Trash2, Search, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { PROFESSIONAL_CHATS } from './professionalConfigs';
+import {
+  browserStore, readActive, readArchive, hasRealExchange, resumeArchived, deleteArchived, activeKey,
+  type ProfMsg,
+} from '../../lib/professionalChatStore';
 
 // PROFESSIONAL-SCOPED HISTORY (admin 2026-08-11: "Professional ki History sirf Professional ki dikhaye,
 // puri NavBharatAI ki nahi").
@@ -13,7 +17,6 @@ import { PROFESSIONAL_CHATS } from './professionalConfigs';
 // sessions here (unrelated) and ZERO of the professional's real chats. This view reads the RIGHT source:
 // the localStorage buffers, one row per professional the user has actually talked to.
 
-interface Msg { role: 'user' | 'assistant'; content: string; }
 interface ProfHistoryItem {
   id: string;
   name: string;
@@ -21,31 +24,43 @@ interface ProfHistoryItem {
   preview: string;
   /** How many messages the user + assistant have exchanged (excludes the opening welcome). */
   turns: number;
+  /**
+   * Set when the user has ENDED this conversation with ✕ — it is archived rather than live.
+   * Doubles as the conversation's id within its professional (see professionalChatStore).
+   */
+  endedAt?: number;
 }
 
-const storeKey = (id: string) => `prof_${id}_messages`;
-
-/** Read every professional's saved conversation and keep only those with a REAL exchange (a user has
- *  actually written something — a lone opening welcome is not "history"). Pure but reads localStorage. */
+/**
+ * Read every professional's conversations — the live one AND the ones the user has closed — keeping
+ * only those with a REAL exchange (a lone opening welcome is not "history").
+ *
+ * ENDED CONVERSATIONS APPEAR HERE (admin 2026-08-19). Before ✕ genuinely closed a professional chat,
+ * there was only ever one conversation per professional and this read a single key. Now closing one
+ * archives it, so a user can have several — and if this view still read only the live slot, pressing ✕
+ * would have looked exactly like deleting the conversation. Reads localStorage.
+ */
 export function readProfessionalHistory(): ProfHistoryItem[] {
+  const store = browserStore();
+  if (!store) return [];
   const items: ProfHistoryItem[] = [];
+  const describe = (msgs: ProfMsg[]) => ({
+    preview: String(msgs[msgs.length - 1]?.content || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+    turns: msgs.filter((m) => m?.role === 'user').length,
+  });
   for (const [id, config] of Object.entries(PROFESSIONAL_CHATS)) {
-    let msgs: Msg[] = [];
-    try {
-      const raw = localStorage.getItem(storeKey(id));
-      if (!raw) continue;
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) msgs = parsed as Msg[];
-    } catch { continue; }
-    // A real conversation has at least one USER message — otherwise it is just the greeting.
-    if (!msgs.some((m) => m?.role === 'user' && String(m.content || '').trim())) continue;
-    const last = msgs[msgs.length - 1];
-    const preview = String(last?.content || '').replace(/\s+/g, ' ').trim().slice(0, 120);
-    const turns = msgs.filter((m) => m?.role === 'user').length;
-    items.push({ id, name: config.name, preview, turns });
+    const live = readActive(store, id);
+    if (hasRealExchange(live)) items.push({ id, name: config.name, ...describe(live) });
+    for (const past of readArchive(store, id)) {
+      if (!hasRealExchange(past.messages)) continue;
+      items.push({ id, name: config.name, endedAt: past.endedAt, ...describe(past.messages) });
+    }
   }
   return items;
 }
+
+/** A stable React key / identity for a row — a professional can now hold several conversations. */
+const rowId = (item: ProfHistoryItem) => `${item.id}#${item.endedAt ?? 'live'}`;
 
 export function ProfessionalHistoryView({
   onOpen,
@@ -65,9 +80,24 @@ export function ProfessionalHistoryView({
     return all.filter((i) => i.name.toLowerCase().includes(q) || i.preview.toLowerCase().includes(q));
   }, [all, searchQuery]);
 
-  const clearOne = (id: string) => {
-    try { localStorage.removeItem(storeKey(id)); } catch { /* ignore */ }
+  const clearOne = (item: ProfHistoryItem) => {
+    const store = browserStore();
+    if (!store) return;
+    if (item.endedAt === undefined) {
+      try { store.removeItem(activeKey(item.id)); } catch { /* ignore */ }
+    } else {
+      deleteArchived(store, item.id, item.endedAt);
+    }
     setReloadKey((k) => k + 1);
+  };
+
+  // "Open" must open the conversation the user clicked, not a blank chat. An ENDED conversation is
+  // therefore made live again first — and whatever is live at that moment is archived rather than
+  // overwritten, so resuming an old chat can never cost the user a newer one.
+  const openOne = (item: ProfHistoryItem) => {
+    const store = browserStore();
+    if (store && item.endedAt !== undefined) resumeArchived(store, item.id, item.endedAt);
+    onOpen(item.id);
   };
 
   return (
@@ -134,7 +164,7 @@ export function ProfessionalHistoryView({
         ) : (
           items.map((item) => (
             <motion.div
-              key={item.id}
+              key={rowId(item)}
               layout
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -146,19 +176,24 @@ export function ProfessionalHistoryView({
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border bg-teal-500/10 text-teal-400 border-teal-500/25">
                     <MessageSquare className="w-2.5 h-2.5" /> {item.turns} message{item.turns !== 1 ? 's' : ''}
                   </span>
+                  {item.endedAt !== undefined && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border bg-white/5 text-[#8b949e] border-white/10">
+                      Closed {new Date(item.endedAt).toLocaleDateString()}
+                    </span>
+                  )}
                 </div>
                 {item.preview && <p className="text-[12px] text-[#8b949e] leading-relaxed line-clamp-2">{item.preview}</p>}
               </div>
 
               <div className="flex items-center gap-3 shrink-0 self-start sm:self-auto">
                 <button
-                  onClick={() => onOpen(item.id)}
+                  onClick={() => openOne(item)}
                   className="flex items-center justify-center gap-2 px-5 py-2.5 bg-teal-600 hover:bg-teal-500 active:scale-95 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg shrink-0"
                 >
                   Open <LogIn className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  onClick={() => clearOne(item.id)}
+                  onClick={() => clearOne(item)}
                   aria-label={`Delete ${item.name} conversation`}
                   className={cn(
                     'p-2.5 rounded-xl border transition-all flex items-center justify-center',

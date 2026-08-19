@@ -3168,6 +3168,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             setShowHostingChooser(false);
             window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'apk' } }));
           }}
+          // "Make icon" → AI Image Gen opens as its OWN tab and this sheet is deliberately LEFT OPEN
+          // (unlike the APK jump above, which is a hand-off — this one is a round trip). The v5 surface
+          // stays mounted while another tab is active, so the user makes an icon, copies it, comes back
+          // and presses Paste into the same half-filled publish form. Closing it would silently discard
+          // the name and screenshots they had already typed in (admin 2026-08-19).
+          onMakeIcon={() => {
+            window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'imagegen' } }));
+          }}
           onClose={() => setShowHostingChooser(false)}
           // STAYS OPEN, always. Closing on a successful start made sense while publishing streamed
           // into the chat — the user was sent somewhere that showed progress. Now the publish runs

@@ -4,9 +4,9 @@ import { HostingChooser, type HostingProvider, type OwnRepoInfo } from './Hostin
 
 const P = (id: string, name: string, configured: boolean): HostingProvider => ({ id, name, configured, requirement: '' });
 
-function render(providers: HostingProvider[]) {
+function render(providers: HostingProvider[], extra: Partial<React.ComponentProps<typeof HostingChooser>> = {}) {
   return renderToStaticMarkup(
-    <HostingChooser providers={providers} onDeploy={() => {}} onClose={() => {}} busy={false} />,
+    <HostingChooser providers={providers} onDeploy={() => {}} onClose={() => {}} busy={false} {...extra} />,
   );
 }
 
@@ -131,6 +131,22 @@ describe('HostingChooser — App Mart listing carries an app icon (logo bug fix)
     expect(html).toContain('Put it on App Mart');
     expect(html).toContain('Add app icon'); // the upload control that feeds iconDataUrl
     expect(html).toContain('at least 512'); // honest sizing guidance
+  });
+
+  // ADMIN 2026-08-19: "waha 2 option aur add karo — 1. make icon 2. pest". A user on a phone has no
+  // icon file lying around; the two ways that actually fit that user are the clipboard and making one.
+  it('also offers Paste — the way an icon copied from AI Image Gen gets in', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    expect(html).toContain('Paste');
+  });
+
+  it('shows "Make icon" only when something can actually open AI Image Gen', () => {
+    // Same honesty rule the APK button follows: never render an action that cannot happen.
+    // Matched on the BUTTON's label, not the words "Make icon" — the help text below the row explains
+    // the round trip and says them too, which is exactly what a looser assertion would trip over.
+    const label = 'aria-label="Make icon with AI Image Gen"';
+    expect(render([P('firebase', 'Firebase Hosting', true)])).not.toContain(label);
+    expect(render([P('firebase', 'Firebase Hosting', true)], { onMakeIcon: () => {} })).toContain(label);
   });
 });
 

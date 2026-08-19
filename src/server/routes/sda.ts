@@ -16,6 +16,7 @@ import type { ChatTurnUsage } from '../lib/chatSpend';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { getServerDb } from '../lib/serverDb';
 import { detectImageIntent, imageGenGuidance } from '../lib/imageIntent';
+import { SessionReportStore, isVisionReportType, referencesAttachedReport } from '../lib/clinical/reportMemory';
 
 /**
  * Senior Doctor Assistant (SDA) chat route extracted from the server.ts monolith
@@ -39,6 +40,10 @@ interface SdaClinicalEntry {
 }
 const sdaClinicalStore = new Map<string, SdaClinicalEntry>();
 const sdaRecentMessages = new Map<string, Array<{ role: 'user' | 'assistant'; content: string; ts: number }>>();
+// REPORT MEMORY (admin 2026-08-18): the session's recently-sent report files (ECG/X-ray/USG images and
+// PDFs), so a follow-up like "lead V2 dekho" can RE-ATTACH the report to the model instead of honestly
+// admitting the pipeline dropped it — which is exactly what a real transcript showed. See reportMemory.ts.
+const sdaReportStore = new SessionReportStore();
 setInterval(() => {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
   for (const [id, entry] of sdaClinicalStore.entries()) {
@@ -47,6 +52,7 @@ setInterval(() => {
   for (const [id] of sdaRecentMessages.entries()) {
     if (!sdaClinicalStore.has(id)) sdaRecentMessages.delete(id);
   }
+  sdaReportStore.sweep(Date.now());
 }, 60 * 60 * 1000);
 
 /**
@@ -153,6 +159,25 @@ export function registerSdaRoutes(app: Express): void {
         sdaRecentMessages.set(sdaSessionId, storedMsgs);
       }
 
+      // ── REPORT MEMORY (admin 2026-08-18) ─────────────────────────────────────
+      // A report sent this turn is remembered for the session; a follow-up turn WITHOUT a file that
+      // plainly asks about the report gets it RE-ATTACHED, so "ecg me lead V2 dekho" puts the actual
+      // ECG in front of the vision model again with the doctor's specific question beside it. Without
+      // this, the attachment lived exactly one turn and every follow-up honestly failed ("main image
+      // dekh nahi sakta" — the real reported transcript). Generous matching on purpose: a false match
+      // costs a fraction of a paisa of cheap vision; a miss reproduces the failure.
+      if (fileData && fileType && isVisionReportType(fileType)) {
+        sdaReportStore.remember(sdaSessionId, { fileData, fileType, fileName: fileName || 'report' }, now);
+      } else if (!fileData && typeof message === 'string' && referencesAttachedReport(message)) {
+        const prior = sdaReportStore.latest(sdaSessionId, now);
+        if (prior) {
+          fileData = prior.fileData;
+          fileType = prior.fileType;
+          fileName = prior.fileName;
+          message = `${message}\n\n[The report "${prior.fileName}" the doctor sent earlier in this session is re-attached above. Answer their question by examining it directly — never say you cannot see it.]`;
+        }
+      }
+
       const hasFile = !!(fileData && fileType);
       const isImage = hasFile && fileType.startsWith('image/');
       const isPDF = hasFile && fileType === 'application/pdf';
@@ -214,6 +239,18 @@ QUESTIONING RULES:
 - Offer structured answer options when it speeds the doctor up (e.g., severity 0–10, anatomical regions).
 - For SAFETY-CRITICAL values only, insist on an exact figure (e.g., "Please give the exact SpO2 value, e.g. 94%") — do not nitpick non-critical answers.
 - Adapt the next question entirely to the previous answer; never repeat a line of questioning that has been answered.
+
+MEDICAL REPORT & IMAGE ANALYSIS (ECG, X-ray, USG, CT/MRI films, lab reports, prescriptions — ANY report the doctor sends):
+- You CAN see and analyse attached images and PDF reports. When a report is attached to this turn — including one re-attached from earlier in this session — examine it DIRECTLY and answer from what is actually visible. NEVER say you cannot see an attached file.
+- ALWAYS give a STRUCTURED reading:
+  1) Report type + patient identifiers exactly as printed on it (name, age, date) — flag any mismatch with the case being discussed.
+  2) SYSTEMATIC findings. ECG: rate, rhythm, axis, intervals (PR/QRS/QTc), then morphology lead by lead where relevant (P, QRS pattern, ST, T). X-ray: systematic anatomical review (e.g. CXR: airway → bones → cardiac silhouette → diaphragm → lung fields → soft tissue). USG/CT/MRI: organ-by-organ as shown. Labs: each value vs reference range, graded.
+  3) PROVISIONAL DIAGNOSIS: your working diagnosis with ranked differentials, the evidence for and against each, and how confident you are.
+  4) RED FLAGS on the report needing urgent action, stated first and prominently if present.
+  5) NEXT STEPS: what to correlate clinically, which confirmatory investigation, and the manage-here vs refer decision.
+- You are advising a QUALIFIED DOCTOR: commit to a genuine provisional diagnosis with reasoning — never hide behind "consult a doctor" (they ARE the doctor). It remains provisional and theirs to confirm.
+- Be honest about image limits: if a region/lead is blurred or cut off, say WHICH one is unreadable ("V5 is not clearly readable in this image") and interpret the rest — never guess the unreadable part and never let one bad region block the whole reading.
+- When the doctor asks about a SPECIFIC part (one lead, one lung zone, one value), look at that exact region of the attached report and describe what is actually there before interpreting it.
 
 RED FLAG DETECTION (always active):
 Screen continuously for: Shock, Sepsis, Respiratory failure, ACS, Stroke, Meningitis, Severe dehydration, Status epilepticus, GI bleed, Severe anemia, DKA, Obstetric emergencies, Pediatric emergencies.

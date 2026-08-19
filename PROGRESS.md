@@ -35619,3 +35619,33 @@ nobody complained about is how a fix becomes a new bug. `returnsHome` makes addi
 change if the admin wants it.
 
 Verification gate: `tsc --noEmit` clean · `vitest run` 1301 files / 16,211 tests green.
+
+---
+
+## 2026-08-19 — The Publish dialog was phone-width on a 1920px screen
+
+Admin, while connecting a real app to their own domain: *"publish button press karne par jo tab khulta
+hai, woh mobile phone jaisa feel de raha hai — bas isko desktop jaisa kar do agar user desktop par hai
+to; phone par hai to phone jaisa (already theek hai)."*
+
+`HostingChooser`'s dialog was `max-w-lg` — 512px — at **every** breakpoint. The grid inside already went
+two-up at `sm`, so on a desktop the result was four content-rich cards squeezed into two narrow columns
+inside a phone-width box: labels wrapping, and vertical scrolling for content that had room to sit side
+by side. The same container holds the domain-connect flow with its DNS records, which is the view the
+narrow cap hurt most — exactly the screen the admin was about to use.
+
+Now `max-w-lg lg:max-w-4xl`. **Additive on purpose:** the base width is untouched because the admin said
+phone was already right, and widening at `lg` (≥1024px, genuinely a desktop) leaves phone and tablet
+exactly as they were. Replacing the base width would have "fixed" desktop by breaking the one surface
+that was not broken.
+
+**Sibling check (rule 3), and the honest result: no sweep needed.** Three other dialogs also cap at
+`max-w-sm`/`max-w-md` (`BillingPanel`'s confirm, `FilesPanel`'s prompt, `NavAppStore`'s sheet) — all
+genuinely small dialogs where narrow is correct. This was not a repo-wide pattern; it was one dialog
+that had outgrown its width.
+
+Pinned by `tests/publishModalWidth.test.ts`. A CSS class is not worth a rendering test, but the intent
+is: the failure mode is somebody collapsing the class list back to one width and nobody noticing until
+a screenshot.
+
+Verification gate: `tsc --noEmit` clean · `vitest run` 1313 files / 16,466 tests green.

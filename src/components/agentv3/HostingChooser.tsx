@@ -281,7 +281,15 @@ export function HostingChooser({
           including the "Set up" button and the full-stack note — was CLIPPED with no way to reach it
           ("niche scroll nahi ho raha"). Cap the card at the viewport and scroll the BODY (the header
           stays put); `overscroll-contain` keeps the swipe inside the sheet instead of scrolling the page. */}
-      <div className="w-full max-w-lg max-h-[85vh] flex flex-col bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
+      {/* WIDTH IS RESPONSIVE (admin 2026-08-19: "publish button press karne par jo tab khulta hai woh
+          mobile phone jaisa feel de raha hai — desktop par desktop jaisa karo, phone par phone jaisa").
+          This dialog was capped at max-w-lg (512px) at EVERY size, so on a 1920px screen it stayed
+          phone-width: four content-rich cards squeezed into two narrow columns, every label wrapping,
+          and the whole thing scrolling vertically for content that had room to sit side by side.
+          Phone and tablet keep 512px — that was already right and is deliberately untouched — and only
+          lg (≥1024px, genuinely a desktop) opens up. The same container also holds the domain-connect
+          flow with its DNS records table, which is the view that suffered most from the narrow cap. */}
+      <div className="w-full max-w-lg lg:max-w-4xl max-h-[85vh] flex flex-col bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-5 py-3.5 border-b border-zinc-800">
           <div className="flex items-center gap-2">

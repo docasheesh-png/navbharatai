@@ -35701,3 +35701,32 @@ two is a follow-up.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 1315 files / 16,482 tests green.
+### Same day — the branded preview must NOT be in our own verification path
+
+Auditing the change above BEFORE the switch was flipped, a real defect surfaced in it.
+
+`applyPreviewDomain` is applied wherever a preview URL is produced — and that same URL is then handed
+to `browseUrl()` for the platform's OWN checks: preview verify, journey check, runtime-error capture,
+design gate, route fingerprinting. Once the branded domain went live, every one of those would have
+travelled from inside the sandbox, out to Cloudflare, through the Worker, and back to the sandbox it
+started in.
+
+The detour is the small part. **The serious part: a Worker that was misconfigured, mid-deploy, or
+waiting on DNS would have failed every VERIFICATION** — so working builds would have been reported
+as unverified. A cosmetic feature would have been able to break the build pipeline, which is not a
+trade anyone would accept if asked plainly.
+
+`internalPreviewUrl()` separates two needs that were never the same need: the USER gets the branded
+URL, and WE verify against the sandbox directly. A proxy problem now costs "the link does not open
+in a browser" instead of "builds start failing".
+
+It rewrites ONLY the `{port}-{sandboxId}` shape — the same reasoning that keeps the Worker from
+being an open proxy, applied inbound, so an unrelated host on our domain can never be redirected to
+a sandbox. It is a no-op while `E2B_PREVIEW_DOMAIN` is unset, so today's behaviour is untouched.
+
+**A source test asserts EVERY `browseUrl` call goes through it — and it immediately earned its keep**,
+catching a sixth call site (route fingerprinting, line 13306) that the manual pass had missed. That
+one would have failed only when the Worker was unhealthy: the rarest and worst moment to find out.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+**1322 files / 16603 tests passed** · `npm run build` OK.

@@ -304,7 +304,7 @@ import {
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
-import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
+import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { loadUserVaultSecrets } from '../lib/secrets';
@@ -3710,7 +3710,7 @@ export function registerAgentV3Routes(app: Express): void {
           try { url = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, cand), 10_000, 'preview-diagnose-url')); } catch { /* URL resolution best-effort — the boot itself already succeeded */ }
           // No URL ⇒ keep the pre-flip semantics (port up, page unverifiable, benefit of the doubt).
           if (!url) return { served: { rendered: true, problems: [] } };
-          try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, url), 30_000, 'preview-diagnose-verify')).html) }; }
+          try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(url)), 30_000, 'preview-diagnose-verify')).html) }; }
           catch { return { url, served: { rendered: false, problems: ['the preview could not be reached to verify it'] } }; }
         };
         let winner = await visit(boundPort);
@@ -7108,7 +7108,7 @@ export function registerAgentV3Routes(app: Express): void {
                 try { url = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, candidate), 10_000, 'import-preview-url')); }
                 catch { /* URL resolution is best-effort — the boot itself already succeeded */ }
                 if (!url) return { url: '', served: { rendered: true, problems: [] as string[] } };
-                try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, url), 30_000, 'import-preview-verify')).html) }; }
+                try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(url)), 30_000, 'import-preview-verify')).html) }; }
                 catch { return { url, served: { rendered: false, problems: ['the preview could not be reached to verify it'] } }; }
               };
               let winner = await visit(bootPort);
@@ -11782,7 +11782,7 @@ export function registerAgentV3Routes(app: Express): void {
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 30_000)
       ) {
         try {
-          const shot = await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl');
+          const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl');
           const verdict = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
           let consoleErrs: string[] = [];
           try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
@@ -11839,7 +11839,7 @@ export function registerAgentV3Routes(app: Express): void {
         for (let attempt = 0; attempt <= healMax && !abort.signal.aborted; attempt++) {
           let shot: { html: string; painted?: boolean; source?: 'browser' | 'curl' };
           try {
-            shot = await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl');
+            shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl');
           } catch { break; /* couldn't open the preview (no browser / timeout) — skip silently */ }
           const html = shot.html;
           const verdict = analyzePreviewHtml(html, { painted: shot.painted, source: shot.source });
@@ -11938,7 +11938,7 @@ export function registerAgentV3Routes(app: Express): void {
                     if (healed.ok) {
                       result = healed;
                       try {
-                        const after = (await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl')).html;
+                        const after = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl')).html;
                         const afterCoverage = checkFeaturePresence(prompt, after);
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       } catch { /* re-open best-effort — keep the pre-heal coverage */ }
@@ -13341,7 +13341,7 @@ export function registerAgentV3Routes(app: Express): void {
                 if (abort.signal.aborted) break;
                 const url = r === '/' ? lastPreviewUrl : `${lastPreviewUrl.replace(/\/$/, '')}${r}`;
                 try {
-                  const html = (await withTimeout(actuator.browseUrl(workspaceId, url), 20_000, 'route-fingerprint')).html;
+                  const html = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(url)), 20_000, 'route-fingerprint')).html;
                   routeChecks.push({ route: r, rendered: analyzePreviewHtml(html).rendered });
                 } catch { /* unreachable ≠ broken by this turn — simply not measured */ }
               }

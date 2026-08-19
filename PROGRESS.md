@@ -35548,3 +35548,35 @@ were corrected to the true widths.
 confirmed in a browser from this session. The admin was told so and asked to re-check after deploy.
 
 Gate: both tsc green, 16,569 tests / 1,320 files, CI green before merge.
+
+---
+
+## 2026-08-19 — Runtime evidence: the two "unverified" items were NOT infra-blocked (PR #2475, merged e98d990)
+
+⚠️ **CORRECTION to an earlier record.** `RUNTIME_UNCHECKED` and `TEST_SUITE_UNVERIFIED` had been
+carried as "infra-blocked — needs a live-execution harness". Reading the code to answer the admin's
+"isko bana dene se kya badlega" showed that was WRONG: every sandbox already downloads Chromium in the
+background (`E2BActuator` → `npm install playwright --prefix /home/user/.e-tools` +
+`PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers playwright install chromium`), and the platform's own
+`PageRouteCheck` already loads every page in it WITH `pageerror` + `console` listeners attached. Both
+gaps were ours, not the infrastructure's. Recording the correction rather than quietly moving on.
+
+1. **The user's suite could not see the browser we had already installed.** It sits under
+   `.e-tools/.browsers`; a suite run as `playwright test` looks in Playwright's DEFAULT cache and dies
+   with "Executable doesn't exist at …", which we reported honestly but uselessly as
+   TEST_SUITE_UNVERIFIED. New `withSandboxBrowsers()` prefixes `PLAYWRIGHT_BROWSERS_PATH` for browser
+   suites (playwright + the opaque npm "test" script; inert elsewhere), applied at BOTH call sites —
+   the agent's `run_tests` tool and the readiness/vaccine gate. Nothing is downloaded ⇒ no time, no money.
+2. **The runtime verdict discarded a real browser's answer.** It rode the live preview console only.
+   New `runtimeRecordFromPageChecks()` reads the page-check measurement when that console is
+   unavailable: clean loads ⇒ honest RUNTIME_VERIFIED naming its source; loads that reported errors ⇒
+   still UNCHECKED with what was seen, deliberately NOT RUNTIME_ERRORS_REMAIN (those loads happen
+   BEFORE the repair pass, so an error may already be fixed — reporting a repaired error as surviving
+   is its own dishonesty); nothing loaded ⇒ null, existing wording stands.
+
+Effect: builds stop reporting "could not verify" for reasons that were ours, and RELEASE_GATE can reach
+GREEN on evidence instead of sitting at UNKNOWN. Tests pin the per-framework hand-off, the
+no-double-prefix rule, the shared path asserted against E2BActuator's REAL source (so the two copies
+cannot drift apart again), and every branch of the page-check verdict.
+
+Gate: both tsc green, 16,608 tests / 1,324 files, CI green before merge.

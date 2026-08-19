@@ -470,7 +470,7 @@ an `AppKnowledgeBase.ts` entry (user-facing capability change).
 
 | # | Item | Audit ref | Notes |
 |---|---|---|---|
-| D1 | Database browser + read-only SQL runner | minor 23, 24 | ⚠️ Runs against the USER'S OWN database. Read-only first; writes need their own confirmation. Closes "did my data actually save?" — today unanswerable without building a screen. |
+| D1 | Database browser + read-only SQL runner | minor 23, 24 | ✅ **ALREADY BUILT — was just UNREACHABLE; wired 2026-08-19.** `DatabaseStudio.tsx` (ROADMAP #1 Phase 2.1–2.5) browses the user's OWN Supabase/Postgres tables + rows + columns + schema, runs READ-ONLY SQL (`/api/integrations/supabase/query` defaults to `readOnlyQuery`, write only on explicit `allowWrite` + a client confirm — Postgres-enforced via `sqlSafety.ts`, not text-parsing), edits rows only when a real primary key exists, and does CSV import/export. The ONE gap: nothing set `activeView='dbstudio'`, so the whole screen had no doorway (AppKnowledgeBase even claimed "Sidebar → Database Studio", which never existed). Fixed by adding the **Home → Developer Tools → Database Studio** tile. Another false-open of the exact kind this file's header warns about — the screen was done, only the nav was missing. |
 | D2 | Git blame / file history, partial commit, revert one commit | minor 37, 38, 39 | `GitManager` exists; these are surfaces on it. |
 | D3 | Open a PR, read CI, reply to review comments | minor 33, 34, 35 | Needs the GitHub App token path that already exists for storage. |
 | D4 | Merge-conflict resolution | minor 36 | Hard. Blocks all real collaboration — do it only if 8E's team tier is actually pursued. |

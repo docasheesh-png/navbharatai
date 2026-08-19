@@ -8,6 +8,7 @@ import {
   appleSignInFailureMessage,
   APPLE_WEB_RETURN_URL,
   APPLE_SERVICE_ID,
+  webSignInStrategy,
   type MinimalAuthLike,
 } from './socialSignInPolicy';
 
@@ -177,5 +178,29 @@ describe('AuthComponent wiring — Apple speaks up, Google and GitHub stay quiet
     for (const handler of ['handleGoogleSignIn', 'handleGithubSignIn']) {
       expect(cancelledBranchAfter(handler), handler).not.toMatch(/setError\(/);
     }
+  });
+});
+
+// APPLE ON WEB USES THE REDIRECT FLOW (admin 2026-08-19).
+//
+// Reproduced on desktop Chrome and iPhone Safari with the popup's own DevTools attached: Apple's
+// `authorize` returned a real grant_code and userId — the sign-in genuinely completed — and the app
+// still said "didn't complete". Apple returns by cross-site form_post, and that result never reached
+// the window that opened the popup. The redirect flow has no such relay.
+describe('webSignInStrategy — which web flow each provider gets', () => {
+  it('Apple goes by REDIRECT — its form_post return cannot reach the opener', () => {
+    expect(webSignInStrategy('apple.com')).toBe('redirect');
+  });
+
+  it('Google and GitHub KEEP the popup — theirs works, and a redirect would be a slower regression', () => {
+    expect(webSignInStrategy('google.com')).toBe('popup');
+    expect(webSignInStrategy('github.com')).toBe('popup');
+  });
+
+  it('an unknown or missing provider defaults to the popup, never a surprise navigation', () => {
+    expect(webSignInStrategy(undefined)).toBe('popup');
+    expect(webSignInStrategy(null)).toBe('popup');
+    expect(webSignInStrategy('')).toBe('popup');
+    expect(webSignInStrategy('microsoft.com')).toBe('popup');
   });
 });

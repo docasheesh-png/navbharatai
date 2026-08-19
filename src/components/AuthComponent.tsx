@@ -26,7 +26,7 @@ import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
 import { signOutEverywhere } from '../lib/firebase';
 import { explainAuthReason, shouldDeepDiagnose } from '../lib/authDiagnostics';
-import { popupFailureAction, waitForSignedInUser, settleNativeSignIn, appleSignInFailureMessage } from './socialSignInPolicy';
+import { popupFailureAction, waitForSignedInUser, settleNativeSignIn, appleSignInFailureMessage, webSignInStrategy } from './socialSignInPolicy';
 
 /**
  * Force-logout the old session BEFORE a new login — WEB ONLY, and never let it block the sign-in.
@@ -623,6 +623,14 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         }
         throw nativeErr;
       }
+    }
+    // APPLE ON WEB GOES STRAIGHT TO THE REDIRECT FLOW — see webSignInStrategy for the evidence.
+    // Apple's form_post return cannot reliably hand the credential back to the opener, so the popup
+    // completed the sign-in and the app never heard about it. The redirect has no relay to break, and
+    // getRedirectResult at the app root already finalizes it.
+    if (webSignInStrategy(providerId) === 'redirect') {
+      await signInWithRedirect(auth, provider);
+      return 'redirecting';   // the page navigates away; nothing after this runs
     }
     try {
       // (The old session was already fully cleared by signOutEverywhere() at the top of socialSignIn.)

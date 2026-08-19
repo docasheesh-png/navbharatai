@@ -96,7 +96,7 @@ steps:
   # Step 5 — COST: prune old container images from the registry. Every merge pushes a new
   # immutable :$COMMIT_SHA image; without pruning they accumulate forever and Artifact Registry
   # storage became the single biggest monthly bill line (~32%). This keeps the newest
-  # _KEEP_IMAGES digests (default 5, incl. the live one + a few rollback targets) and deletes the
+  # _KEEP_IMAGES digests (plus everything still in use, and everything recent) and deletes the
   # rest, tags and all. Fully NON-FATAL (`set +e` … `exit 0`): a cleanup hiccup must NEVER fail a
   # deploy that already succeeded. Runs last, after the new revision is already live.
   #
@@ -116,12 +116,50 @@ steps:
         set +e
         KEEP=${_KEEP_IMAGES}
         MAX=${_PRUNE_MAX}
-        echo "Artifact Registry cleanup: keep newest $$KEEP, prune up to $$MAX oldest this deploy (bounded)…"
-        gcloud container images list-tags gcr.io/$PROJECT_ID/navbharat-cloud-run \
-          --sort-by=~TIMESTAMP --format='get(digest)' 2>/dev/null \
+        MINAGE=${_PRUNE_MIN_AGE}
+        IMAGE=gcr.io/$PROJECT_ID/navbharat-cloud-run
+        # 🔒 IF WE CANNOT PROVE AN IMAGE IS UNUSED, WE DO NOT DELETE IT (2026-08-19).
+        #
+        # Two guards, because the cheap one is not sufficient on its own:
+        #
+        # (1) IN-USE GUARD — every image any Cloud Run revision still references is protected. Cloud
+        #     Run runs at --min-instances 0, so a cold start RE-PULLS the image of whichever revision
+        #     holds traffic; deleting it kills the site at the next cold start, and nothing in the
+        #     code would explain why. This matters MOST exactly when a deploy has failed, because
+        #     traffic then stays on an OLDER revision that a count-based rule would happily delete.
+        #     If the revision list cannot be read, we prune NOTHING this run — refusing to clean is
+        #     free, and guessing is not.
+        #
+        # (2) AGE FLOOR — a second line of defence for anything not yet attached to a revision (an
+        #     image pushed seconds ago by a CONCURRENT build, which is real here: PRs land minutes
+        #     apart and their builds overlap). Note the honest limit of this one: `--sort-by=TIMESTAMP`
+        #     is the image's CREATED time out of its config, and BuildKit cache reuse can make a
+        #     freshly pushed image carry an older creation time — so age alone could still mis-rank a
+        #     new image. That is precisely why guard (1) exists and is not optional.
+        echo "Registry cleanup: protect in-use + anything newer than $$MINAGE, keep newest $$KEEP, prune at most $$MAX…"
+        INUSE=$$(timeout 60 gcloud run revisions list --service navbharat-ai-prod \
+          --region asia-southeast1 --platform managed \
+          --format='value(spec.containers[0].image)' 2>/dev/null)
+        if [ -z "$$INUSE" ]; then
+          echo "  could not read the service's revisions — pruning NOTHING this run (safe by default)."
+          exit 0
+        fi
+        echo "$$INUSE" | sed 's/^/  in use: /'
+        gcloud container images list-tags $$IMAGE \
+          --filter="timestamp.datetime < -$$MINAGE" \
+          --sort-by=~TIMESTAMP --format='get(digest,tags)' 2>/dev/null \
           | tail -n +$$((KEEP + 1)) | head -n $$MAX | \
-        while read -r digest; do
+        while read -r digest tags; do
           [ -n "$$digest" ] || continue
+          # Skip if ANY tag on this digest is referenced by a revision, or is the rollback pointer.
+          skip=""
+          for t in $$(echo "$$tags" | tr ',;' '  '); do
+            [ -n "$$t" ] || continue
+            case "$$t" in latest) skip="latest tag" ;; esac
+            echo "$$INUSE" | grep -q ":$$t$$" && skip="revision uses :$$t"
+          done
+          echo "$$INUSE" | grep -q "@$$digest$$" && skip="revision uses this digest"
+          if [ -n "$$skip" ]; then echo "  KEEP   $$digest ($$skip)"; continue; fi
           timeout 25 gcloud container images delete "gcr.io/$PROJECT_ID/navbharat-cloud-run@$$digest" \
             --quiet --force-delete-tags 2>/dev/null \
             && echo "  pruned $$digest" || echo "  skip   $$digest"
@@ -135,9 +173,17 @@ substitutions:
   # Build trigger (set _VITE_PREVIEW_ORIGIN = https://mitrify.xyz) once the preview subdomain is live.
   _VITE_PREVIEW_ORIGIN: ''
   # COST — how many newest container images to KEEP in the registry on each deploy (Step 5 prunes the
-  # rest). 5 = the live image + a handful of rollback targets. Raise for more rollback history (more
-  # storage $), lower to spend less. Override in the Cloud Build trigger without a code change.
-  _KEEP_IMAGES: '5'
+  # rest). Raise for more rollback history (more storage $), lower to spend less. Override in the
+  # Cloud Build trigger without a code change.
+  #
+  # RAISED 5 → 15 (2026-08-19). Five was too tight for how this repo actually merges: several PRs can
+  # land within minutes, so five deploys is sometimes ONE evening — and the fifth one silently deleted
+  # the rollback targets you would want on the evening a deploy breaks. Fifteen images of storage is a
+  # rounding error next to the cost of not being able to roll back.
+  _KEEP_IMAGES: '15'
+  # SAFETY — the minimum AGE an image must reach before it is even considered for deletion, as an ISO-8601
+  # duration (P1D = one day). This is the guard that actually protects the running site; see Step 5.
+  _PRUNE_MIN_AGE: 'P1D'
   # SAFETY BOUND — the MAX number of old images Step 5 deletes per deploy, so cleanup can never run away
   # and blow the build timeout (the 2026-08-02 regression). 20 keeps each deploy's cleanup to ~1 min; a
   # large pre-existing backlog drains over a few deploys. For a big one-shot drain, prefer a native

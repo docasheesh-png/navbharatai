@@ -47,6 +47,7 @@ import {
   saveWebApp, getWebApp, getWebAppFiles, listListedWebApps, listMyWebApps, listUnlistedWebApps,
   updateWebApp, makeWebAppPublic, bumpWebAppCounter, removeWebApp, reportWebApp,
   recordRemixOrigin, getRemixOrigin, keyShapedEnvVars,
+  sanitizeScreenshots, saveWebAppScreenshots, getWebAppScreenshots,
   type WebStoreApp,
 } from '../lib/navStoreWeb';
 import { generateEnvExample } from '../AgentV3/EnvExampleGenerator';
@@ -490,6 +491,9 @@ export function registerNavStoreRoutes(app: Express): void {
     const name = (typeof req.body?.name === 'string' ? req.body.name : '').trim().slice(0, 60);
     const description = (typeof req.body?.description === 'string' ? req.body.description : '').trim().slice(0, 600);
     const iconDataUrl = typeof req.body?.iconDataUrl === 'string' && req.body.iconDataUrl.startsWith('data:image/') && req.body.iconDataUrl.length < 200_000 ? req.body.iconDataUrl : undefined;
+    // Listing screenshots (admin report 2026-08-19). The sanitizer is the boundary of what may be stored
+    // — anything non-image / oversize / over the count is dropped, never truncated into a broken image.
+    const screenshots = sanitizeScreenshots(req.body?.screenshots);
     const visibility = req.body?.visibility === 'private' ? 'private' as const : 'public' as const;
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
     if (!name) return res.status(400).json({ error: 'Give your app a name.' });
@@ -565,10 +569,15 @@ export function registerNavStoreRoutes(app: Express): void {
           if (typeof rows === 'number' && rows > 0) carried.dataRows = rows;
           return carried;
         })(),
+        screenshotCount: screenshots.length,
         publishedAt: Date.now(),
         version: (existing?.version ?? 0) + 1,
       };
       await saveWebApp(record, gate.files);
+      // Screenshots replace wholesale, in their own subcollection — best-effort so a screenshot write
+      // failure never fails a publish whose app + files already saved. screenshotCount above stays
+      // honest to what was ACCEPTED; getWebAppScreenshots is what the detail view actually serves.
+      try { await saveWebAppScreenshots(id, screenshots); } catch (e) { logStoreError('web/publish screenshots', e); }
       webPlayerCache.delete(id); // the old version's compiled page must not survive the update
       res.json({
         ok: true, id, status: record.status, version: record.version, shareUrl: `/store/app/${id}`,
@@ -588,7 +597,10 @@ export function registerNavStoreRoutes(app: Express): void {
     try {
       const found = await getWebApp(String(req.params.id || ''));
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
-      res.json({ app: toPublicWebApp(found) });
+      // The detail view is the ONE place the screenshot bytes ship — never on the browse list, so a
+      // gallery of listings stays light. Best-effort: a screenshot read failure still returns the app.
+      const screenshots = (found.screenshotCount ?? 0) > 0 ? await getWebAppScreenshots(found.id).catch(() => []) : [];
+      res.json({ app: toPublicWebApp(found), screenshots });
     } catch (e) {
       logStoreError('web/app meta', e);
       res.status(502).json({ error: 'Could not load that app.' });

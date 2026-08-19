@@ -657,7 +657,7 @@ export function ViewPanels({
 
       {activeView === 'plugins' && (
         <div className="flex-1 h-full overflow-hidden">
-          <PluginSystem />
+          <PluginSystem onCodeInsert={(code: string) => setGeneratedCode(generatedCode + code)} />
         </div>
       )}
 

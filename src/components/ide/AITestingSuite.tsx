@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { TestTube, Play, Check, X, AlertCircle, CheckCircle2, Code, RefreshCw, Download, Copy, Zap, FileCode, ChevronRight } from 'lucide-react';
-import { TirangaLoader } from '../ui/TirangaLoader';
+import { TestTube, Check, AlertCircle, Code, Download, Copy, Zap, FileCode, ChevronRight } from 'lucide-react';
 import { sampleInputValue } from '../../server/QualityEvaluationEngine/TestDataManager';
 
 type TestStatus = 'pending' | 'pass' | 'fail' | 'skip';
@@ -172,7 +171,6 @@ function generateTestsFromCode(code: string): TestCase[] {
 
 export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
   const [tests, setTests] = useState<TestCase[]>([]);
-  const [running, setRunning] = useState(false);
   const [generated, setGenerated] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -185,22 +183,10 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
     setGenerated(true);
   };
 
-  const runTests = async () => {
-    if (tests.length === 0) return;
-    setRunning(true);
-    const updated = tests.map(t => ({ ...t, status: 'pending' as TestStatus }));
-    setTests(updated);
-
-    for (let i = 0; i < updated.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 150 + Math.random() * 200));
-      const roll = Math.random();
-      const status: TestStatus = roll > 0.15 ? 'pass' : roll > 0.05 ? 'fail' : 'skip';
-      const duration = Math.floor(20 + Math.random() * 180);
-      const errorMsg = status === 'fail' ? 'Expected value to match. Received: undefined' : undefined;
-      setTests(prev => prev.map((t, idx) => idx === i ? { ...t, status, duration, errorMsg } : t));
-    }
-    setRunning(false);
-  };
+  // NOTE (2026-08-19): there is deliberately NO "run tests" here. A browser cannot execute your app's
+  // Jest/testing-library suite, and the previous version faked it — it assigned pass/fail/skip with
+  // Math.random() and invented an error message. That violated "real features only", so it was removed.
+  // This screen GENERATES real test code from your code; you run it in your project (or the Test Runner).
 
   const copyTest = (t: TestCase) => {
     navigator.clipboard.writeText(t.code).then(() => {
@@ -221,10 +207,6 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
   };
 
   const filtered = tests.filter(t => selectedCategory === 'all' || t.category === selectedCategory);
-  const passed = tests.filter(t => t.status === 'pass').length;
-  const failed = tests.filter(t => t.status === 'fail').length;
-  const skipped = tests.filter(t => t.status === 'skip').length;
-  const pending = tests.filter(t => t.status === 'pending').length;
 
   const categories = ['all', 'unit', 'integration', 'edge', 'security'];
 
@@ -248,42 +230,15 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
         </div>
       </div>
 
-      {/* Stats Bar */}
+      {/* Summary — an HONEST count of what was generated (this screen does not run the tests; see the
+          note by copy/export). No pass/fail here, because nothing was executed. */}
       {generated && (
         <div className="flex items-center gap-4 px-6 py-3 border-b border-white/5 bg-[#161b22]">
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-white/40">Total:</span>
-            <span className="text-xs font-bold text-white">{tests.length}</span>
+            <span className="text-xs text-white/40">Generated:</span>
+            <span className="text-xs font-bold text-white">{tests.length} test{tests.length === 1 ? '' : 's'}</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-emerald-400" />
-            <span className="text-xs text-emerald-400 font-medium">{passed} Pass</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-red-400" />
-            <span className="text-xs text-red-400 font-medium">{failed} Fail</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-amber-400" />
-            <span className="text-xs text-amber-400 font-medium">{skipped} Skip</span>
-          </div>
-          {pending > 0 && (
-            <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full bg-white/20 animate-pulse" />
-              <span className="text-xs text-white/40">{pending} Running...</span>
-            </div>
-          )}
-          {/* Progress bar */}
-          {tests.length > 0 && (
-            <div className="ml-auto flex items-center gap-2">
-              <div className="w-32 h-2 bg-white/5 rounded-full overflow-hidden flex">
-                <div className="bg-emerald-500 transition-all" style={{ width: `${(passed / tests.length) * 100}%` }} />
-                <div className="bg-red-500 transition-all" style={{ width: `${(failed / tests.length) * 100}%` }} />
-                <div className="bg-amber-500 transition-all" style={{ width: `${(skipped / tests.length) * 100}%` }} />
-              </div>
-              <span className="text-xs text-white/50">{tests.length > 0 ? Math.round(((passed + skipped) / tests.length) * 100) : 0}%</span>
-            </div>
-          )}
+          <span className="text-[11px] text-white/40">Copy or export these into your project and run them with your test runner.</span>
         </div>
       )}
 
@@ -296,18 +251,6 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
             className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all"
           >
             <Zap className="w-4 h-4" /> Generate Tests
-          </button>
-
-          <button
-            onClick={runTests}
-            disabled={tests.length === 0 || running}
-            className="w-full py-2.5 bg-[#161b22] hover:bg-white/5 border border-white/10 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-sm flex items-center justify-center gap-2 transition-all"
-          >
-            {running ? (
-              <><TirangaLoader className="w-4 h-4" /> Running...</>
-            ) : (
-              <><Play className="w-4 h-4 text-emerald-400" /> Run All Tests</>
-            )}
           </button>
 
           <div className="h-px bg-white/5" />
@@ -387,21 +330,12 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
           ) : (
             <div className="space-y-2">
               {filtered.map(t => (
-                <div key={t.id} className={`border rounded-xl overflow-hidden transition-all ${
-                  t.status === 'pass' ? 'border-emerald-500/20 bg-emerald-500/3'
-                  : t.status === 'fail' ? 'border-red-500/20 bg-red-500/3'
-                  : t.status === 'skip' ? 'border-amber-500/20 bg-amber-500/3'
-                  : 'border-white/5 bg-[#161b22]'
-                }`}>
+                <div key={t.id} className="border border-white/5 bg-[#161b22] rounded-xl overflow-hidden transition-all">
                   <button
                     onClick={() => setExpandedId(expandedId === t.id ? null : t.id)}
                     className="w-full flex items-center gap-3 px-4 py-3 text-left"
                   >
-                    {/* Status icon */}
-                    {t.status === 'pass' ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                      : t.status === 'fail' ? <X className="w-4 h-4 text-red-400 shrink-0" />
-                      : t.status === 'skip' ? <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-                      : <div className="w-4 h-4 rounded-full border border-white/20 shrink-0" />}
+                    <FileCode className="w-4 h-4 text-white/30 shrink-0" />
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
@@ -411,20 +345,11 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
                       <p className="text-[10px] text-white/40 truncate">{t.description}</p>
                     </div>
 
-                    {t.duration && (
-                      <span className="text-[9px] text-white/30 shrink-0">{t.duration}ms</span>
-                    )}
-
                     <ChevronRight className={`w-3.5 h-3.5 text-white/20 shrink-0 transition-transform ${expandedId === t.id ? 'rotate-90' : ''}`} />
                   </button>
 
                   {expandedId === t.id && (
                     <div className="border-t border-white/5">
-                      {t.status === 'fail' && t.errorMsg && (
-                        <div className="px-4 py-2 bg-red-500/5 border-b border-red-500/10">
-                          <p className="text-[10px] text-red-300">Error: {t.errorMsg}</p>
-                        </div>
-                      )}
                       <div className="p-3">
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-[10px] text-white/30 uppercase tracking-wider">Test Code</span>

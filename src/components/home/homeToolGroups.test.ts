@@ -25,9 +25,9 @@ describe('HOME_TOOL_GROUPS — the builder tools moved from Settings to the Home
     // exact set that must still be reachable, whatever the grouping becomes.
     const ids = HOME_TOOL_GROUPS.flatMap((g) => g.items.map((i) => i.id)).sort();
     expect(ids).toEqual([
-      'analytics', 'api', 'apimarket', 'apk', 'botbuilder', 'cicd', 'codereview', 'collab',
+      'aitesting', 'analytics', 'api', 'apimarket', 'apk', 'botbuilder', 'cicd', 'codereview', 'collab',
       'components', 'darkmode', 'dbstudio', 'debugger', 'designsys', 'domain', 'figma', 'gallery', 'imagegen',
-      'insights', 'minifier', 'monetize', 'multipages', 'performance', 'seo', 'sharereview', 'team', 'testing',
+      'insights', 'localization', 'minifier', 'monetize', 'multipages', 'performance', 'plugins', 'seo', 'sharereview', 'team', 'testing',
       'versioning', 'whitelabel',
     ]);
   });

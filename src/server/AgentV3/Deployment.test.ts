@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
-import { makeChannelId } from './Deployment';
+import { makeChannelId, publishedAppUrl } from './Deployment';
 import { CATALOG_TOOL_NAMES, defaultToolCatalog } from './ToolCatalog';
 import { roleConfig } from './AgentRegistry';
 import type { ToolUse } from './ClaudeClient';
@@ -22,6 +22,26 @@ class DistActuator extends BareActuator {
 const okDeploy: DeployFn = async (ws) => `https://gen-lang-client-0866594388--v3-${ws}.web.app`;
 const dispatcher = (act: ActuatorPort, deploy?: DeployFn) =>
   new ToolDispatcher(act, 'ws-1', undefined, undefined, undefined, undefined, undefined, undefined, undefined, deploy);
+
+describe('publishedAppUrl — branded published-app host (Step 3, env-flagged)', () => {
+  it('defaults to the SAFE raw Firebase channel host when no branded domain is set', () => {
+    expect(publishedAppUrl('v3-abc-123', 'gen-lang-client-0866594388', undefined))
+      .toBe('https://gen-lang-client-0866594388--v3-abc-123.web.app');
+    expect(publishedAppUrl('v3-abc-123', 'gen-lang-client-0866594388', ''))
+      .toBe('https://gen-lang-client-0866594388--v3-abc-123.web.app');
+  });
+
+  it('uses the branded subdomain when a domain is set — the channelId IS the subdomain', () => {
+    // The Cloudflare Worker maps <sub>.mitrify.in -> <site>--<sub>.web.app, so the channelId alone
+    // is the branded subdomain and the site prefix lives only in the Worker.
+    expect(publishedAppUrl('v3-abc-123', 'gen-lang-client-0866594388', 'mitrify.in'))
+      .toBe('https://v3-abc-123.mitrify.in');
+  });
+
+  it('tolerates a domain given with stray leading/trailing dots', () => {
+    expect(publishedAppUrl('v3-x', 'site', '.mitrify.in.')).toBe('https://v3-x.mitrify.in');
+  });
+});
 
 describe('deploy tool', () => {
   it('is registered in the catalog and the architect tool-set', () => {

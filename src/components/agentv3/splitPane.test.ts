@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import {
   SPLIT_DEFAULT, MIN_PANE_PX, SPLIT_STEPS,
   splitBounds, clampSplit, splitFromPointer, nextSplitAction, paneWidthPx, loadSplit, saveSplit,
-  DEVICE_WIDTHS, splitForPaneWidth, matchedDevice,
+  DEVICE_WIDTHS, splitForPaneWidth, matchedDevice, dividerLeftPx, DIVIDER_PX, trackWidth,
 } from './splitPane';
 
 /**
@@ -59,15 +59,49 @@ describe('clampSplit', () => {
 
 describe('splitFromPointer', () => {
   const rect = { left: 100, width: 1000 };
+  // The track is the container MINUS the divider (1000 - 11 = 989), and the pointer holds the
+  // divider's CENTRE, so the chat ends at clientX - left - 5.5.
 
-  it('translates a pointer position into a percentage', () => {
-    expect(splitFromPointer(600, rect)).toBe(50);
-    expect(splitFromPointer(400, rect)).toBe(30);
+  it('translates a pointer position into a percentage of the real track', () => {
+    // 600 → chat 494.5 of 989 → 50%. The old maths said 50% too, but by ignoring the divider — which
+    // is what let the previewed line drift away from the border it was promising.
+    expect(splitFromPointer(600, rect)).toBeCloseTo(50, 1);
+    expect(splitFromPointer(400, rect)).toBeCloseTo(29.8, 1);
+  });
+
+  it('the pointer lands on the divider CENTRE, so the border follows the cursor exactly', () => {
+    // Whatever the cursor's x, the committed border's centre must be that same x.
+    for (const x of [400, 600, 800]) {
+      const pct = splitFromPointer(x, rect);
+      const centre = rect.left + dividerLeftPx(pct, rect.width) + DIVIDER_PX / 2;
+      expect(Math.abs(centre - x)).toBeLessThanOrEqual(1);
+    }
   });
 
   it('dragging past either edge stops at the minimum pane, never past it', () => {
-    expect(splitFromPointer(-9999, rect)).toBeCloseTo(28, 0); // 280 of 1000
-    expect(splitFromPointer(9999, rect)).toBeCloseTo(72, 0);
+    expect(splitFromPointer(-9999, rect)).toBeCloseTo(28.3, 0); // 280 of the 989px track
+    expect(splitFromPointer(9999, rect)).toBeCloseTo(71.7, 0);
+  });
+});
+
+describe('dividerLeftPx — the ONE number the drag preview may draw at', () => {
+  it('is measured on the track, so it matches where flex will actually put the border', () => {
+    // 1200 container → 1189 track. At 50% the border's left edge is 594 (not 600).
+    expect(dividerLeftPx(50, 1200)).toBe(595);
+    expect(dividerLeftPx(0, 1200)).toBe(0);
+    expect(dividerLeftPx(100, 1200)).toBe(1189);
+  });
+
+  it('the two panes plus the divider exactly fill the container — no overflow, no gap', () => {
+    for (const pct of [25, 33, 50, 67, 75]) {
+      const chat = dividerLeftPx(pct, 1200);
+      const pane = paneWidthPx(pct, 1200);
+      expect(chat + DIVIDER_PX + pane).toBe(1200);
+    }
+  });
+
+  it('is safe with no measured container', () => {
+    expect(dividerLeftPx(50, 0)).toBe(0);
   });
 });
 
@@ -114,8 +148,10 @@ describe('nextSplitAction — the ◀ ▶ ladder (the tablet path)', () => {
 
 describe('paneWidthPx — the live readout while dragging', () => {
   it('reports the WORKSPACE pane width, which is what the user is judging', () => {
-    expect(paneWidthPx(50, 1200)).toBe(600);
-    expect(paneWidthPx(70, 1200)).toBe(360);
+    // 1200 container − 11px divider = 1189px shared by the panes. Reporting 600 here (half the whole
+    // container) over-stated the preview by 6px, on the very readout the device-width check relies on.
+    expect(paneWidthPx(50, 1200)).toBe(594);
+    expect(paneWidthPx(70, 1200)).toBe(357);
   });
   it('is safe with no measured container', () => {
     expect(paneWidthPx(50, 0)).toBe(0);
@@ -225,7 +261,7 @@ describe('one-tap device widths — the divider becomes a real responsive check'
     // 1000px cannot show a 768px tablet AND keep the chat above its 280px minimum.
     const { pct, exact } = splitForPaneWidth(768, 1000);
     expect(exact).toBe(false);
-    expect(paneWidthPx(pct, 1000)).toBe(720);        // the widest honestly available…
+    expect(paneWidthPx(pct, 1000)).toBe(709);        // the widest honestly available (989 track − 280 chat)…
     expect(paneWidthPx(pct, 1000)).toBeLessThan(768); // …and visibly NOT the tablet width claimed
   });
 

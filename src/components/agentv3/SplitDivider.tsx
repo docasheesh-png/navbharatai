@@ -1,6 +1,10 @@
 import React, { useCallback, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { nextSplitAction, splitFromPointer, paneWidthPx, SPLIT_DEFAULT, type SplitAction } from './splitPane';
+import {
+  nextSplitAction, splitFromPointer, paneWidthPx, dividerLeftPx, DIVIDER_PX, SPLIT_DEFAULT,
+  type SplitAction,
+} from './splitPane';
 
 /**
  * The movable border between the v5.0 chat and its workspace (admin 2026-08-17).
@@ -26,6 +30,20 @@ import { nextSplitAction, splitFromPointer, paneWidthPx, SPLIT_DEFAULT, type Spl
  * The live px readout is not decoration. Dragging the preview narrow is the fastest honest way to
  * see the app at a phone width, and the number turns an accidental gesture into a real check —
  * which is the same three-screen discipline the builder was taught on the same day.
+ *
+ * WHY THE DRAG PREVIEW IS A PORTAL ON document.body, AND WHY LINE + LABEL SHARE ONE NUMBER
+ * (bug reported 2026-08-19: "line ko move karte hai to line kahi aur dikh rahi hai"). Two faults put
+ * the preview in the wrong place, and both are fixed here by construction:
+ *   1. The label was `absolute` INSIDE this divider while the line was `fixed` at the pointer. The
+ *      panes deliberately do not move until pointer-up, so the divider — and with it the label — stayed
+ *      at the OLD border while the line moved: one gesture, two positions, and the number pinned to
+ *      the wrong one. Now a single `lineLeft` places both, so they cannot disagree again.
+ *   2. A `position: fixed` element is only positioned against the VIEWPORT while no ancestor creates a
+ *      containing block. Any ancestor with a transform, filter, backdrop-filter, contain or
+ *      will-change silently re-parents it, and viewport coordinates then land wherever that ancestor
+ *      happens to be. This app's shell uses backdrop-blur in places, so that was a live hazard rather
+ *      than a theoretical one. Rendering into document.body removes the whole class — there is no
+ *      ancestor left to re-parent it.
  */
 export function SplitDivider({ split, onSplit, onCollapse, containerRef }: {
   /** Chat's share of the width, in percent. */
@@ -42,6 +60,15 @@ export function SplitDivider({ split, onSplit, onCollapse, containerRef }: {
   const [ghost, setGhost] = useState<number | null>(null);
   const dragging = ghost !== null;
   const pointerIdRef = useRef<number | null>(null);
+  /**
+   * The container's rect, measured ONCE when the drag starts.
+   *
+   * Two reasons it is captured rather than re-read (bug 2026-08-19). It was being read inside the JSX,
+   * so the preview line's position depended on WHEN React re-rendered instead of on where the pointer
+   * is — and each read forces a layout while the user is dragging. The panes cannot move mid-drag by
+   * design, so this rect cannot go stale within one gesture.
+   */
+  const dragRectRef = useRef<{ left: number; width: number } | null>(null);
 
   const containerWidth = (): number => containerRef.current?.getBoundingClientRect().width ?? 0;
 
@@ -56,19 +83,20 @@ export function SplitDivider({ split, onSplit, onCollapse, containerRef }: {
   }, [apply, split]);
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    const box = containerRef.current?.getBoundingClientRect();
+    if (!box) return;
     pointerIdRef.current = e.pointerId;
+    dragRectRef.current = { left: box.left, width: box.width };
     // Capture so the drag survives the pointer crossing the iframe — without this the preview
     // swallows the move events and the divider sticks the moment you drag over the app.
     e.currentTarget.setPointerCapture(e.pointerId);
-    setGhost(splitFromPointer(e.clientX, rect));
+    setGhost(splitFromPointer(e.clientX, dragRectRef.current));
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (pointerIdRef.current !== e.pointerId || ghost === null) return;
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (rect) setGhost(splitFromPointer(e.clientX, rect));
+    const rect = dragRectRef.current;
+    if (pointerIdRef.current !== e.pointerId || ghost === null || !rect) return;
+    setGhost(splitFromPointer(e.clientX, rect));
   };
 
   const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -76,6 +104,7 @@ export function SplitDivider({ split, onSplit, onCollapse, containerRef }: {
     pointerIdRef.current = null;
     if (ghost !== null) onSplit(ghost);   // the one and only layout commit of the whole gesture
     setGhost(null);
+    dragRectRef.current = null;
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -103,10 +132,12 @@ export function SplitDivider({ split, onSplit, onCollapse, containerRef }: {
       // Double-click is the universal "put it back" — cheaper to discover than any reset button.
       onDoubleClick={() => onSplit(SPLIT_DEFAULT)}
       title="Drag to resize · double-click for 50/50 · ← → to step"
-      className={`hidden sm:flex relative shrink-0 w-[11px] cursor-col-resize select-none touch-none
+      className={`hidden sm:flex relative shrink-0 cursor-col-resize select-none touch-none
         items-center justify-center group focus:outline-none
         ${dragging ? 'bg-indigo-500/20' : 'hover:bg-indigo-500/10'}`}
-      style={{ touchAction: 'none' }}
+      // The width comes from the SAME constant the geometry uses — a hardcoded `w-[11px]` here and an
+      // 11 in the maths are two copies of one fact, and the drifted one is what misplaced the line.
+      style={{ touchAction: 'none', width: DIVIDER_PX, flexBasis: DIVIDER_PX }}
     >
       {/* The visible line stays 1px — the generous part is the invisible hit area around it. */}
       <div className={`absolute inset-y-0 left-1/2 -translate-x-1/2 w-px transition-colors
@@ -130,15 +161,25 @@ export function SplitDivider({ split, onSplit, onCollapse, containerRef }: {
         ><ChevronRight className="w-3 h-3" /></button>
       </div>
 
-      {/* Mid-drag: the ghost line the panes will snap to, and the width the preview will end up. */}
-      {dragging && (
-        <>
-          <div className="fixed inset-y-0 w-px bg-indigo-400 pointer-events-none z-[60]"
-            style={{ left: (containerRef.current?.getBoundingClientRect().left ?? 0) + containerWidth() * (shown / 100) }} />
-          <div className="absolute -top-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-mono whitespace-nowrap pointer-events-none">
-            {paneWidthPx(shown, containerWidth())}px
-          </div>
-        </>
+      {/* Mid-drag preview — see the block comment above for why it is a PORTAL sharing ONE x. */}
+      {dragging && dragRectRef.current && typeof document !== 'undefined' && createPortal(
+        (() => {
+          const rect = dragRectRef.current!;
+          // ONE number places both the line and its label: the exact left edge the border will take.
+          const lineLeft = rect.left + dividerLeftPx(shown, rect.width) + DIVIDER_PX / 2;
+          return (
+            <div className="fixed inset-0 z-[60] pointer-events-none">
+              <div className="absolute inset-y-0 w-px bg-indigo-400" style={{ left: lineLeft }} />
+              <div
+                className="absolute top-2 -translate-x-1/2 px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-mono whitespace-nowrap shadow"
+                style={{ left: lineLeft }}
+              >
+                {paneWidthPx(shown, rect.width)}px
+              </div>
+            </div>
+          );
+        })(),
+        document.body,
       )}
     </div>
   );

@@ -35408,3 +35408,40 @@ Open sibling (recorded, not yet built): the config-driven Professionals route al
 one turn (different architecture — client-owned history, vision-describe text not persisted).
 
 Gate: both tsc green, 16,544 tests / 1,318 files, CI green before merge.
+
+---
+
+## 2026-08-19 — Doctor AI round 2: guaranteed recall, report-grade images, serial comparison + the Professionals sibling (PR #2469, merged c77c4c2)
+
+Admin: "sab fix karo" on the four improvements proposed after the report-memory batch — and
+explicitly "free tier me sasta hi chahiye", so vision ROUTING IS UNCHANGED (no tier escalation
+anywhere in this change; the fifth proposal was declined by the admin and is closed, not deferred).
+
+1. **Reliability.** Report memory is in-memory and Cloud Run runs several instances that recycle on
+   every deploy — so a follow-up could reach a server that never held the file and reproduce the exact
+   "I cannot see the image" failure. The server now reports `reportResendNeeded` and the CLIENT, which
+   still holds the file, silently re-sends the same question with it attached. Exactly ONE retry so a
+   missing server cannot loop. Chosen over persisting medical images in a database we would then have
+   to protect and expire.
+2. **Quality.** Report images were downscaled to 1568px / JPEG 0.85 — on an ECG's twelve thin traces
+   that is where a 1mm ST shift or a small q wave becomes indistinguishable from a compression
+   artefact, on a path where treatment may start from the reading. Now 2400px / 0.92, send-as-is bar
+   raised in step.
+3. **Serial comparison.** When the doctor asks to compare, every fresh report of the session goes to
+   the model WITH today's, oldest first and labelled, and the prompt demands an explicit
+   changed/unchanged/NEW reading ("is this RBBB new?" is the question that changes management). No
+   client change needed — report memory already held the earlier films. All three provider branches
+   (Gemini/Vertex, Grok, Claude) now build attachments from ONE shared array so they cannot drift.
+4. **The sibling, fixed.** Config-driven Professionals (Teacher/Lawyer/CA/…) had the same class one
+   architecture over: an attachment's vision-derived TEXT was prepended to one turn, and the
+   client-owned history stores what the user typed, so the next turn answered blind.
+   `AttachmentRecallStore` (pure, tested) keeps that text per verified-user+professional (6h TTL, 3
+   files, bounded, isolated) and re-injects it when the follow-up refers to the file. Text only — the
+   description was already paid for; re-describing would spend money to recover what we had. This
+   closes the open sibling recorded in the previous entry.
+
+Test note worth keeping: the Hinglish comparison matcher initially used `\b`-terminated stems, which
+rejects "pichhla"/"purani" — the inflected forms a doctor actually types. Caught by its own test and
+fixed with prefix matching.
+
+Gate: both tsc green, 16,558 tests / 1,319 files, CI green before merge.

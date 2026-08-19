@@ -32,7 +32,7 @@ import { robustTscCommand } from './tscCommand';
 import { parseTscErrors } from './EndgameRepair';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
-import { detectTestPlan, parseTestOutcome } from './testRunner';
+import { detectTestPlan, parseTestOutcome, withSandboxBrowsers } from './testRunner';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
 import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision } from './SyntaxCheck';
@@ -3696,8 +3696,12 @@ export class ToolDispatcher {
           return msg;
         }
         const started = Date.now();
-        const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, plan.command);
-        try { this.onCommand?.({ command: plan.command, exitCode, stdout, stderr, durationMs: Date.now() - started }); } catch { /* diagnostics best-effort */ }
+        // Make the browser the sandbox ALREADY downloaded visible to a browser suite — without it a
+        // perfectly good Playwright run dies on "Executable doesn't exist at …" and we report the
+        // app's tests as unverifiable for a reason that was ours, not the app's.
+        const testCommand = withSandboxBrowsers(plan.command, plan.framework);
+        const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, testCommand);
+        try { this.onCommand?.({ command: testCommand, exitCode, stdout, stderr, durationMs: Date.now() - started }); } catch { /* diagnostics best-effort */ }
         const outcome = parseTestOutcome(plan, exitCode, stdout, stderr);
         const mem = getWorkspaceMemory(this.workspaceId);
         if (outcome.ok) {

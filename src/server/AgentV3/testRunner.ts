@@ -28,6 +28,41 @@ export interface TestPlan {
   reason: string;
 }
 
+/**
+ * The sandbox's OWN Playwright browser directory.
+ *
+ * Every sandbox downloads chromium here in the background as it starts (E2BActuator), because the
+ * platform's own page checks and user-journey runs need a real browser. The user's app never learns
+ * about it: a suite run as `playwright test` looks in Playwright's DEFAULT cache
+ * (~/.cache/ms-playwright) and dies with "Executable doesn't exist at …".
+ *
+ * Kept in step with E2BActuator's TOOLS_DIR by `sandboxBrowsersPath.test.ts` — two hardcoded copies of
+ * one path is exactly how this class of bug returns.
+ */
+export const SANDBOX_BROWSERS_PATH = '/home/user/.e-tools/.browsers';
+
+/**
+ * The test command, with the sandbox's already-downloaded browser made visible to it.
+ *
+ * ROOT CAUSE THIS CLOSES (Shiv Medical Store, 2026-08-10, and every browser suite since): the readiness
+ * gate could not run a user's Playwright suite and had to report TEST_SUITE_UNVERIFIED — not because
+ * the sandbox lacked a browser, but because the browser we had already installed sat under a path the
+ * user's suite never looks in. One environment variable makes the existing binary visible; nothing is
+ * downloaded, so this costs no time and no money.
+ *
+ * Applied to BROWSER suites only. A vitest/jest/pytest run has no use for the variable, and prefixing
+ * every command would mean a Windows-shell-unsafe string travelling where it earns nothing.
+ */
+export function withSandboxBrowsers(command: string, framework: TestFramework): string {
+  const needsBrowser = framework === 'playwright'
+    // An npm "test" script is opaque — it may well BE a playwright run, and the variable is inert
+    // when it is not, so the safe choice is to provide it.
+    || framework === 'npm-script';
+  if (!needsBrowser) return command;
+  if (command.includes('PLAYWRIGHT_BROWSERS_PATH')) return command;   // already carries it — never double it
+  return `PLAYWRIGHT_BROWSERS_PATH=${SANDBOX_BROWSERS_PATH} ${command}`;
+}
+
 export interface TestOutcome {
   framework: TestFramework;
   command: string;

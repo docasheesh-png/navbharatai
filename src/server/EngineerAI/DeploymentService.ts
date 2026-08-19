@@ -127,9 +127,12 @@ export class DeploymentService {
     headers: Record<string, string>,
   ): Promise<void> {
     try {
+      // ONLY valid `Channel` fields here — a Channel has no `type` field. `type: 'LIVE'` used to be
+      // silently ignored but Firebase's API now REJECTS unknown fields (HTTP 400), which broke publish.
+      // No expiry set ⇒ the channel is never auto-deleted (permanent URL). (Sibling of Deployment.ts.)
       await axios.post(
         `${HOSTING_API}/sites/${site}/channels?channelId=${channelId}`,
-        { type: 'LIVE', retainedReleaseCount: 3 },
+        { retainedReleaseCount: 3 },
         { headers },
       );
     } catch (err) {

@@ -192,9 +192,14 @@ export class FirebaseHostingDeployer {
 
   private async ensureChannel(site: string, channelId: string, headers: Record<string, string>): Promise<void> {
     try {
+      // Channel-create payload: ONLY valid `Channel` fields. There is NO `type` field on a Channel —
+      // sending `type: 'LIVE'` used to be silently ignored, but Firebase's proto3 JSON parser now
+      // REJECTS unknown fields (HTTP 400 "Unknown name \"type\" at 'channel'"), which broke publishing.
+      // Omitting `expireTime`/`ttl` is deliberate: per the Hosting API a channel with no expiry "will
+      // not be automatically deleted", i.e. the published app URL stays permanent (the whole promise).
       await axios.post(
         `${HOSTING_API}/sites/${site}/channels?channelId=${channelId}`,
-        { type: 'LIVE', retainedReleaseCount: 3 },
+        { retainedReleaseCount: 3 },
         { headers },
       );
     } catch (err) {

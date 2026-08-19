@@ -17,6 +17,7 @@ import { usdInrRate } from '../lib/UsdInrRate';
 import { getServerDb } from '../lib/serverDb';
 import { detectImageIntent, imageGenGuidance } from '../lib/imageIntent';
 import { SessionReportStore, isVisionReportType, referencesAttachedReport } from '../lib/clinical/reportMemory';
+import { buildAuditPrompt, buildAuditContents, type AuditReportFile } from '../lib/clinical/reportAudit';
 
 /**
  * Senior Doctor Assistant (SDA) chat route extracted from the server.ts monolith
@@ -61,32 +62,27 @@ setInterval(() => {
  * before it reaches the doctor. Best-effort + fail-open: any error/timeout/missing
  * key returns null (no note) and never blocks the reply.
  */
-async function auditSdaReply(caseContext: string, reply: string, geminiKey: string): Promise<string | null> {
+async function auditSdaReply(
+  caseContext: string,
+  reply: string,
+  geminiKey: string,
+  // TREATMENT-GRADE CROSS-CHECK (admin 2026-08-18): when the turn analysed a report, the auditor gets
+  // the SAME image/PDF and re-reads it — a text-only audit was checking a reading it could not see.
+  reportFile?: AuditReportFile | null,
+): Promise<string | null> {
   if (!geminiKey) return null;
-  const auditPrompt = `You are a senior physician performing a SAFETY AUDIT of another AI assistant's reply to a doctor. Review ONLY for genuinely dangerous problems:
-- wrong or unsafe drug dose / frequency / route
-- a missed contraindication (allergy, pregnancy/breastfeeding, renal/hepatic, age/weight)
-- a missed red flag / emergency needing urgent action
-- a factually dangerous or clearly incorrect clinical statement
-
-CASE CONTEXT:
-${caseContext}
-
-AI REPLY TO AUDIT:
-${reply}
-
-If you find NO safety issue, output EXACTLY: OK
-Otherwise output up to 3 short bullet points, each naming the issue and the correction. Do NOT rewrite the whole reply. Be terse.`;
+  const auditPrompt = buildAuditPrompt(caseContext, reply, !!(reportFile?.fileData));
   try {
     const { GoogleGenAI } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey: geminiKey });
     const r: any = await Promise.race([
       ai.models.generateContent({
         model: 'gemini-2.5-flash',
-        contents: [{ role: 'user', parts: [{ text: auditPrompt }] }],
+        contents: buildAuditContents(auditPrompt, reportFile),
         config: { thinkingConfig: { thinkingBudget: 0 } },
       } as any),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('audit timeout')), 12000)),
+      // A little more headroom than the text audit's 12s — the auditor now reads an image too.
+      new Promise((_, rej) => setTimeout(() => rej(new Error('audit timeout')), reportFile?.fileData ? 18000 : 12000)),
     ]);
     const text = String(r?.text || r?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
     // Drop ONLY an exact "OK" pass — NEVER a warning that merely starts with "OK" (e.g. an overdose note).
@@ -251,6 +247,12 @@ MEDICAL REPORT & IMAGE ANALYSIS (ECG, X-ray, USG, CT/MRI films, lab reports, pre
 - You are advising a QUALIFIED DOCTOR: commit to a genuine provisional diagnosis with reasoning — never hide behind "consult a doctor" (they ARE the doctor). It remains provisional and theirs to confirm.
 - Be honest about image limits: if a region/lead is blurred or cut off, say WHICH one is unreadable ("V5 is not clearly readable in this image") and interpret the rest — never guess the unreadable part and never let one bad region block the whole reading.
 - When the doctor asks about a SPECIFIC part (one lead, one lung zone, one value), look at that exact region of the attached report and describe what is actually there before interpreting it.
+- TREATMENT-GRADE DILIGENCE — the doctor may START TREATMENT from your reading, so examine EVERY detail, never skim:
+  • Read the report EDGE TO EDGE: headers, patient identifiers, date/time, technical/calibration parameters (ECG: gain, sweep, filters; imaging: view, position, exposure), every lead/zone/organ/value — including the NORMAL ones, stated as normal, so the doctor knows each was actually checked and not skipped.
+  • Report every abnormality HOWEVER SMALL, and incidental findings too — a "minor" finding you omit may be the one that changes the treatment.
+  • RE-VERIFY every number you quote against what is actually printed on the report before you write it; a transcription slip becomes a wrong dose downstream.
+  • If the report carries the machine's own printed interpretation, form YOUR OWN reading first, then compare — and state plainly where you agree and where you disagree with the machine.
+  • Before finishing, do one deliberate second pass over the report asking "what did I miss?" — only then give the provisional diagnosis.
 
 RED FLAG DETECTION (always active):
 Screen continuously for: Shock, Sepsis, Respiratory failure, ACS, Stroke, Meningitis, Severe dehydration, Status epilepticus, GI bleed, Severe anemia, DKA, Obstetric emergencies, Pediatric emergencies.
@@ -621,9 +623,16 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       if (process.env.SDA_VERIFY !== '0') {
         const isJustQuestion = cleanReply.trim().endsWith('?') && cleanReply.length < 400;
         const adviceRe = /\b(mg|mcg|ml|dose|dosage|tablet|capsule|syrup|inject|\biv\b|\bim\b|prescrib|treatment|manage|diagnos|differential|administer|refer|admit|start\b|give\b)/i;
-        if (!isJustQuestion && adviceRe.test(cleanReply)) {
+        // A turn that analysed a report (image/PDF, sent or re-attached) is ALWAYS audited — the doctor
+        // may start treatment from that reading (admin 2026-08-18) — and the auditor gets the SAME file
+        // so it re-reads the report itself instead of only sanity-checking the prose.
+        const isReportTurn = hasFile && (isImage || isPDF);
+        if (!isJustQuestion && (adviceRe.test(cleanReply) || isReportTurn)) {
           const caseContext = `Recorded case data: ${JSON.stringify(clinicalEntry.patientData)}\nRecorded red flags: ${clinicalEntry.redFlags.join(', ') || 'none'}\nDoctor's latest message: ${message}`;
-          const audit = await auditSdaReply(caseContext, cleanReply, sdaGeminiKey);
+          const audit = await auditSdaReply(
+            caseContext, cleanReply, sdaGeminiKey,
+            isReportTurn ? { fileData, fileType, fileName: fileName || 'report' } : null,
+          );
           if (audit) {
             finalReply = `${cleanReply}\n\n---\n**⚠️ Automated safety cross-check (second AI):**\n${audit}\n\n_This is an automated double-check, not a substitute for your clinical judgment._`;
           }

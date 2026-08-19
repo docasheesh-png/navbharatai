@@ -229,7 +229,7 @@ import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
-import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing } from '../AgentV3/testRunner';
+import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd } from '../AgentV3/providerRates';
@@ -274,7 +274,7 @@ import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, type RuntimeError } from '../AgentV3/AutoFix';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
@@ -12107,6 +12107,9 @@ export function registerAgentV3Routes(app: Express): void {
       // tools. No download, no npm install, no model call — one browser navigation per route, capped at
       // MAX_PAGE_ROUTES, with home skipped because the preview verifier already proved it.
       //
+      /** Real-browser runtime evidence from the page checks — read by the runtime verdict further down. */
+      let pageConsoleEvidence: { routesChecked: number; errors: string[] } | null = null;
+
       // EVIDENCE, NEVER A GATE — same rule as the route smoke check: a working build is never marked
       // failed by a probe that could be wrong about a route it does not fully understand.
       if (
@@ -12123,6 +12126,14 @@ export function registerAgentV3Routes(app: Express): void {
             );
             const pageResults = parsePageCheck(out.stdout);
             const pageSummary = summarizePageCheck(pageResults, pageRoutes.length);
+            // KEEP this measurement. Every page here was loaded in the sandbox's own real browser with
+            // `pageerror` + `console` listeners attached, so it is genuine runtime evidence — and the
+            // runtime verdict below can use it when the live preview console is not available, instead
+            // of reporting "unchecked" while a real browser's answer sat unread (admin 2026-08-19).
+            pageConsoleEvidence = {
+              routesChecked: pageResults.length,
+              errors: pageResults.flatMap((r) => r.errors || []),
+            };
             // Only when the browser really returned results — an empty parse means the script never
             // produced a line, which is "we do not know", not "every page is fine".
             if (pageResults.length > 0) gateEvidence.pages = pageSummary.ok ? 'passed' : 'failed';
@@ -12340,7 +12351,10 @@ export function registerAgentV3Routes(app: Express): void {
             }
             let outcome;
             try {
-              const { exitCode, stdout, stderr } = await withTimeout(actuator.runCommand(workspaceId, plan.command), 180_000, 'vaccine-run-tests');
+              // Same browser hand-off as the agent's run_tests tool: the sandbox's chromium is already
+              // on disk, it was just invisible to the user's suite (see withSandboxBrowsers).
+              const testCommand = withSandboxBrowsers(plan.command, plan.framework);
+              const { exitCode, stdout, stderr } = await withTimeout(actuator.runCommand(workspaceId, testCommand), 180_000, 'vaccine-run-tests');
               outcome = parseTestOutcome(plan, exitCode, stdout, stderr);
             } catch { break; /* couldn't run the suite (timeout / no sandbox) — skip silently */ }
             if (outcome.ok) {
@@ -12619,7 +12633,15 @@ export function registerAgentV3Routes(app: Express): void {
             if (apiHint) events.emit({ type: 'narration', agent: 'architect', text: apiHint, ts: Date.now() });
             buildDiag.record(runtimeErrorsRemainRecord(remaining));
           } else if (!captureAvailable) {
-            buildDiag.record(runtimeUncheckedRecord({ previewRendered: previewVerifiedRendered }));
+            // The live preview console was unavailable — but the page checks may already have loaded
+            // every page in a real browser. Use that measurement rather than discarding it; it returns
+            // null when there is genuinely nothing to conclude, and the honest "unchecked" stands.
+            const fromPages = runtimeRecordFromPageChecks(
+              pageConsoleEvidence?.routesChecked ?? 0,
+              pageConsoleEvidence?.errors ?? [],
+              { previewRendered: previewVerifiedRendered },
+            );
+            buildDiag.record(fromPages ?? runtimeUncheckedRecord({ previewRendered: previewVerifiedRendered }));
           } else {
             buildDiag.record(runtimeVerifiedRecord());
           }

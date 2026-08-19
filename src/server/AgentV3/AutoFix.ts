@@ -294,6 +294,56 @@ export function runtimeVerifiedRecord(): RuntimeVerifyRecord {
 }
 
 /**
+ * THE SECOND SOURCE OF RUNTIME TRUTH (admin 2026-08-19: "isko bana dene se kya badlega").
+ *
+ * The console capture above rides the LIVE PREVIEW session. When that session is not up at the moment
+ * the verdict is taken, the build could only say "runtime UNCHECKED" — even though, minutes earlier,
+ * the page-route check had loaded every page of the same app in the sandbox's own real Chromium and
+ * listened to `pageerror` + `console` on each one. The evidence existed; nothing was reading it.
+ *
+ * So when the preview console is unavailable, the page checks answer instead:
+ *   • routes loaded, no errors seen  → RUNTIME_VERIFIED, worded to say WHERE the proof came from.
+ *   • routes loaded, errors seen     → still UNCHECKED, and it names what those loads saw. It must not
+ *     claim RUNTIME_ERRORS_REMAIN: the page check ran BEFORE the repair loop, so an error it saw may
+ *     already be fixed, and reporting a repaired error as surviving is its own dishonesty.
+ *   • nothing loaded                 → unchanged; no evidence is no evidence.
+ *
+ * Costs nothing: the browser is already in the sandbox and the pages were already loaded. This only
+ * stops the platform from throwing away a measurement it had already paid for.
+ */
+export function runtimeRecordFromPageChecks(
+  routesChecked: number,
+  pageErrors: string[],
+  opts?: { previewRendered?: boolean },
+): RuntimeVerifyRecord | null {
+  if (!(routesChecked > 0)) return null;   // no pages loaded ⇒ nothing to conclude
+  const errors = pageErrors.filter((e) => String(e || '').trim());
+  if (errors.length === 0) {
+    return {
+      phase: 'autofix',
+      severity: 'info',
+      code: 'RUNTIME_VERIFIED',
+      message:
+        `Runtime verified — every one of the ${routesChecked} page(s) was loaded in a real browser and ` +
+        'produced no page or console errors. (Measured by the page checks; the live preview console was ' +
+        'not available for this run.)',
+      autoResolved: true,
+    };
+  }
+  return {
+    phase: 'autofix',
+    severity: 'warning',
+    code: 'RUNTIME_UNCHECKED',
+    message:
+      `The live preview console could not be captured, so the FINAL runtime state was not verified. ` +
+      `Earlier, loading the app's ${routesChecked} page(s) in a real browser did report: ` +
+      `${errors.slice(0, 3).join(' · ').slice(0, 300)}. Those loads happened before the repair pass, so ` +
+      'they may already be fixed — this is not a clean-runtime guarantee either way.',
+    autoResolved: false,
+  };
+}
+
+/**
  * The browser console could not be captured, so runtime was NOT verified — never a clean guarantee.
  *
  * `previewRendered` exists because the flat version of this record CONTRADICTED the rest of the report

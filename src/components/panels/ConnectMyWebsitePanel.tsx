@@ -40,6 +40,9 @@ export function ConnectMyWebsitePanel({ onBack, uid }: ConnectMyWebsitePanelProp
   const [apps, setApps] = useState<ProApp[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // workspaceId → connected domain(s), so each app can show whether it's already on a domain
+  // (admin 2026-08-19: "list me connected likh kar aana chahiye — pata hi nahi lagta kaun si connected hai").
+  const [connected, setConnected] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +71,15 @@ export function ConnectMyWebsitePanel({ onBack, uid }: ConnectMyWebsitePanelProp
       } finally {
         if (!cancelled) setLoading(false);
       }
+    })();
+    // Which apps already have a connected domain — best-effort, only decorates the list.
+    (async () => {
+      try {
+        const res = await fetch('/api/domains/nbai/links', { headers: await authJsonHeaders() });
+        if (cancelled || !res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        if (data?.byWorkspace && typeof data.byWorkspace === 'object') setConnected(data.byWorkspace);
+      } catch { /* the badge is optional — a failure just hides it */ }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -125,10 +137,18 @@ export function ConnectMyWebsitePanel({ onBack, uid }: ConnectMyWebsitePanelProp
                     <FileCode2 className="w-4 h-4 text-emerald-400 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="text-[12px] font-medium text-white truncate">{a.label}</div>
-                      {a.workspaceId === currentWorkspaceId && (
+                      {connected[a.workspaceId]?.length ? (
+                        <div className="text-[10px] text-green-400 flex items-center gap-1 truncate">
+                          <Globe className="w-3 h-3 shrink-0" />
+                          <span className="truncate">Connected: {connected[a.workspaceId].join(', ')}</span>
+                        </div>
+                      ) : a.workspaceId === currentWorkspaceId ? (
                         <div className="text-[10px] text-emerald-400">Currently open</div>
-                      )}
+                      ) : null}
                     </div>
+                    {connected[a.workspaceId]?.length ? (
+                      <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-green-500/15 text-green-300 shrink-0">Connected</span>
+                    ) : null}
                     <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                   </button>
                 ))}

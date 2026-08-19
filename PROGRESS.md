@@ -35374,3 +35374,37 @@ Refactor: `friendlyBuildStep` + step-collapse moved from the route into `lib/mob
 mapping for the live view and the report; re-exported so imports stand). AppKnowledgeBase `apk_builder`
 updated (stop + report + Hinglish keywords). White-Label test-locked. Gate: both tsc green, 16,512
 tests / 1,315 files, CI green before merge.
+
+---
+
+## 2026-08-19 — Doctor AI report upgrade: report memory + treatment-grade reading (PR #2466, merged a2f4e82)
+
+Two admin asks, one Doctor AI batch:
+
+**1. Report memory (the real transcript failure).** The doctor sent an ECG, got a full first-pass
+analysis, then asked "ecg me lead V2 dekh ke batao" — and Doctor AI said it could not see the image.
+ROOT CAUSE: `fileData` travelled only in the turn it was sent; the server-side session history stores
+TEXT only, so every follow-up reached the model with no image. Fix: `lib/clinical/reportMemory.ts`
+(pure, 11 tests) — per-session store of sent report files (image/PDF, 24h TTL, 3/session, isolated) +
+a generous English+Hinglish matcher; a follow-up about the report gets the file RE-ATTACHED to the
+model call with the doctor's specific question. Test-locked on the exact transcript sentence. All
+provider branches unchanged; vision stays cheap-tier for free users.
+
+**2. Treatment-grade diligence ("doctor isi report se treatment start kar sakta hai").**
+- System prompt: MEDICAL REPORT & IMAGE ANALYSIS protocol (systematic per-modality reading → genuine
+  provisional diagnosis with ranked differentials + confidence → red flags first → next steps) plus
+  TREATMENT-GRADE DILIGENCE (edge-to-edge reading including normals stated as checked, every small/
+  incidental abnormality, re-verify quoted numbers against the print, own reading vs the machine's
+  printed interpretation with explicit agree/disagree, a deliberate "what did I miss?" second pass).
+- `lib/clinical/reportAudit.ts` (pure, 6 tests): the independent second-AI safety audit was TEXT-only —
+  on report turns it checked a reading it could not see. Now every image/PDF report turn is audited and
+  the auditor receives the SAME file, re-reading the report itself (wrong quoted values, missed obvious
+  abnormality, misread lead/region → flagged before the doctor acts). Fail-open unchanged; flash tier.
+
+AppKnowledgeBase doctor_ai entry updated. Honest boundary recorded: reading depth is the vision
+model's capability (cheap tier on free, per the routing policy) — the pipeline, protocol, memory and
+second-eyes are what this batch fixes; the diagnosis stays provisional and the doctor's to confirm.
+Open sibling (recorded, not yet built): the config-driven Professionals route also drops images after
+one turn (different architecture — client-owned history, vision-describe text not persisted).
+
+Gate: both tsc green, 16,544 tests / 1,318 files, CI green before merge.

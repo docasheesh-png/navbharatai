@@ -94,6 +94,27 @@ export function HostingChooser({
   const [storeName, setStoreName] = useState('');
   const [storeBusy, setStoreBusy] = useState(false);
   const [storeResult, setStoreResult] = useState<{ ok: boolean; message: string; shareUrl?: string } | null>(null);
+  // App icon for the store LISTING (admin report 2026-08-19: "app mart me sirf naam aata hai, logo nahi").
+  // The publish route already accepts + stores + renders `iconDataUrl` — it was simply never sent. A data
+  // URL under the route's 200KB cap; anything larger is refused inline rather than silently dropped.
+  const [storeIcon, setStoreIcon] = useState('');
+  const [storeIconError, setStoreIconError] = useState('');
+
+  const onStoreIconFile = (file: File | null | undefined) => {
+    setStoreIconError('');
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setStoreIconError('Pick an image file (PNG or JPG).'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = typeof reader.result === 'string' ? reader.result : '';
+      if (!url.startsWith('data:image/')) { setStoreIconError('That file could not be read as an image.'); return; }
+      // The server refuses an icon ≥ 200KB; catch it here so the user sees why instead of a silent drop.
+      if (url.length >= 200_000) { setStoreIconError('That image is too large — use a smaller square icon (under ~150 KB).'); return; }
+      setStoreIcon(url);
+    };
+    reader.onerror = () => setStoreIconError('Could not read that file.');
+    reader.readAsDataURL(file);
+  };
 
   const publishToStore = async () => {
     if (storeBusy) return;
@@ -111,7 +132,7 @@ export function HostingChooser({
       const res = await authedFetch('/api/nav-store/web/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId, name, visibility: 'public' }),
+        body: JSON.stringify({ workspaceId, name, visibility: 'public', ...(storeIcon ? { iconDataUrl: storeIcon } : {}) }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
@@ -493,6 +514,24 @@ export function HostingChooser({
               <li>• Free — for you and for them</li>
               <li>• Your keys &amp; source stay private</li>
             </ul>
+            <div className="flex items-center gap-2.5">
+              <div className="w-11 h-11 shrink-0 rounded-lg overflow-hidden border border-zinc-700 bg-zinc-900 flex items-center justify-center">
+                {storeIcon
+                  ? <img src={storeIcon} alt="App icon" className="w-full h-full object-cover" />
+                  : <Store className="w-4 h-4 text-white/25" />}
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[11px] text-zinc-200 border border-zinc-700 w-fit">
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => onStoreIconFile(e.target.files?.[0])} />
+                  {storeIcon ? 'Change icon' : 'Add app icon'}
+                </label>
+                <span className="text-[10px] text-zinc-500">Shows on the store card — square, at least 512×512 (optional).</span>
+              </div>
+              {storeIcon && (
+                <button onClick={() => { setStoreIcon(''); setStoreIconError(''); }} className="ml-auto text-[10px] text-zinc-400 hover:text-zinc-200 underline">Remove</button>
+              )}
+            </div>
+            {storeIconError && <div className="text-[10px] text-amber-300">{storeIconError}</div>}
             <input
               value={storeName}
               onChange={(e) => setStoreName(e.target.value)}

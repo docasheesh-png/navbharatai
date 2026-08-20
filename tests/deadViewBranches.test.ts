@@ -38,12 +38,18 @@ describe('🔒 unreachable view branches stay removed', () => {
     expect(viewType).not.toContain("'cloudeploy'");
   });
 
-  it('🔒 but SettingsScreen KEEPS cloudeploy — it is a different union and a live screen', () => {
-    // The same trap as 'shell': two unions, one shared name. Deleting the wrong one would blank the
-    // real Hosting & Deploy screen.
+  it('🔒 SettingsScreen no longer carries cloudeploy either — the screen itself was removed', () => {
+    // This case used to assert the OPPOSITE, and it was right to: 'cloudeploy' lived in TWO unions
+    // (the same trap as 'shell'), and deleting the wrong one would have blanked a live screen. On
+    // 2026-08-20 the screen was removed outright — it duplicated the v5.0 Publish sheet and could
+    // not see a v5.0 app at all — so BOTH unions must now be clean. The guard's purpose is unchanged:
+    // the union and the screen must agree, because a member nothing can navigate to is how the
+    // 'modules' dead branch survived unnoticed for months.
     const settingsScreen = types.slice(types.indexOf('SettingsScreen'));
-    expect(settingsScreen).toContain("'cloudeploy'");
-    expect(codeOnly(read('src/components/panels/SettingsPanel.tsx'))).toContain("settingsScreen === 'cloudeploy'");
+    expect(settingsScreen).not.toContain("'cloudeploy'");
+    const panel = codeOnly(read('src/components/panels/SettingsPanel.tsx'));
+    expect(panel).not.toContain("settingsScreen === 'cloudeploy'");
+    expect(panel).not.toContain('MultiCloudDeploy');
   });
 
   it('Home has no cloudeploy tile either — that is why the branch was unreachable', () => {

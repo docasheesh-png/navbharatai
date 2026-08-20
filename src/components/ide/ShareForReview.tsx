@@ -1,4 +1,5 @@
-// P-COLLAB.3 — creator side of the Share Portal (rendered inside MultiCloudDeploy's Deploy tab).
+// P-COLLAB.3 — creator side of the Share Portal. Reached from Home -> Other AI -> Share for Review
+// (its own tile since 2026-08-19; the old MultiCloudDeploy Deploy-tab home was removed 2026-08-20).
 //
 // Lets the owner create a read-only "review link" for the current app and collect client feedback.
 // Self-contained (own styles + auth) so it needs only `generatedCode`.

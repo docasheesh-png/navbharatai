@@ -58,7 +58,6 @@ describe('Settings — Secrets tile label is consistent', () => {
 describe('Settings — App Settings hub tiles are real', () => {
   it.each([
     ['domain', 'Domain'],
-    ['cloudeploy', 'Hosting & Deploy'],
     ['database', 'Database'],
     ['auth', 'Authentication'],
     ['storage', 'Storage'],

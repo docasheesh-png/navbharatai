@@ -44,7 +44,8 @@ describe('the new General Settings group', () => {
     const appSettings = code.slice(at, code.indexOf("title: 'Legal & Trust'", at));
     expect(appSettings).not.toContain("{ id: 'general'");
     // …and everything that genuinely IS an app setting stayed.
-    for (const id of ['domain', 'cloudeploy', 'database', 'auth', 'storage', 'secrets', 'logs']) {
+    // 'cloudeploy' left this list on 2026-08-20 — the tile was removed (duplicate publish surface).
+    for (const id of ['domain', 'database', 'auth', 'storage', 'secrets', 'logs']) {
       expect(appSettings, id).toContain(`id: '${id}'`);
     }
   });

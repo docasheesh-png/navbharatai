@@ -36424,3 +36424,63 @@ to clear all seven to reach Firebase at all, which is exactly why every site in 
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 1339 files / 16,782 tests green.
+
+---
+
+## 2026-08-20 — Hosting & Deploy (Cloudeploy) REMOVED, on the admin's call
+
+Follow-up to the fake-success found hours earlier (#2508). The admin asked whether the screen could
+simply be deleted and whether that would break anything; the audit said no, and they chose removal
+over repair ("a").
+
+WHY REMOVAL WAS THE RIGHT CALL (not just the cheap one):
+ • Its one real capability — deploy to the user's OWN Vercel/Netlify/Cloudflare — ALREADY exists in
+   the v5.0 Publish sheet under "Host somewhere else", with properly connected provider tokens.
+ • It read the retired v2.0 `generatedCode` channel, so it could not see a v5.0 app AT ALL. The thing
+   it existed to do was broken for every current user.
+ • Five of its seven targets never deployed — they printed CLI text anyone can look up.
+ • Its tokens lived only in its own localStorage; nothing else ever read them, so no configuration
+   was lost with it.
+ • It had just produced a fake success (publishing the "Waiting for magic…" placeholder to a real
+   URL). A duplicate surface is where that class comes back — the same lesson as the removed
+   'modules' screen and the 'hosting' info-screen merged into it in July.
+
+REMOVED: MultiCloudDeploy.tsx (+ its guard test, now moot), the Settings tile, the settings render
+branch, the lazy import, the now-unused CloudUpload icon import, and the `cloudeploy` member of the
+SettingsScreen union (a member nothing can navigate to invites the bug back — the 'modules' lesson,
+quoted in types/index.ts).
+
+KEPT DELIBERATELY: `/api/pwa/save` — PreviewPanel uses it too, so the route is not Cloudeploy's to
+take with it.
+
+APPKNOWLEDGEBASE (mandatory for a user-facing change): the `settings_multicloud` entry is gone, but
+its KEYWORDS ('deploy', 'hosting', 'vercel', 'live kaise kare', 'host karo') are exactly what users
+type — deleting alone would have left every AI unable to answer them. Verified first that
+`agentv3_deploy` and `pro_chat_multi_deploy` already carry the same keywords and point at the REAL
+Publish flow, so the answer improves rather than disappears. The App Settings hub description now
+states plainly that there is no Hosting/Deploy tile any more and where publishing really happens.
+Stale comments in ShareForReview / SettingsPanel / homeToolGroups that referenced the old screen as
+a live home were corrected in the same change.
+
+Gate: both tsc green; component + AppContext suites 504/504 (47 files).
+
+### Same day — the removal's second half: four guard tests, and the answer that had to survive
+
+CI went RED on the removal, which is the tests doing their job: FOUR files guarded the tile
+(`websiteHub`, `deadViewBranches`, `polishCollabSettings`, `settingsGeneralGroup`). They were not
+deleted — each was INVERTED so it now locks the removal instead of the tile. `deadViewBranches` is the
+sharpest: it used to assert the OPPOSITE ("SettingsScreen KEEPS cloudeploy — two unions, one name,
+deleting the wrong one blanks a live screen"), and that was correct at the time; it now asserts BOTH
+unions are clean, with its purpose unchanged — the union and the screen must agree, because a member
+nothing can navigate to is how the 'modules' dead branch survived for months.
+
+ONE TEST REFUSED TO BE INVERTED, AND WAS RIGHT. `websiteHub` guarded the honest reassurance the old
+screen carried — "your app is already hosted". Deleting the screen deleted that ANSWER, so a user
+opening App Settings to look for hosting would have found silence. The reassurance is now an honest
+INFO LINE in the hub (the same pattern as "Frontend & Backend — built for you"), pointing at the
+Publish button that genuinely publishes a v5.0 app, and at the Domain tile. Only the broken second
+doorway is gone; the useful thing it said stays.
+
+MY GATE SLIP, RECORDED: I first ran only `src/` suites, not the full `npx vitest run` the constitution
+requires — which is exactly why CI caught four failures I should have caught locally. Full suite now:
+16,773 tests / 1,338 files green, both tsc clean.

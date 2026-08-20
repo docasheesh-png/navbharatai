@@ -36073,3 +36073,24 @@ OPEN: an end-to-end publish of a real app on a branded URL is still unverified �
 successful publish is the test.
 
 Gate: both tsc green; publishBuild 13 new tests + sandboxHealth 30 + agentv3 route 313 + seed 20 green.
+
+---
+
+## 2026-08-20 — Supabase one-tap connect NEVER worked: the callback demanded a header a browser cannot send
+
+Admin: "superbase login connect ke baad wapas wahi aa jata hai, jahan se start kiya tha." Root cause:
+the OAuth callback (`/api/integrations/supabase/callback`) required `verifyFirebaseToken(req)` — but
+that reads the `Authorization: Bearer` HEADER, and the callback is a top-level browser NAVIGATION from
+supabase.com, which never carries one. So `uid` was null on EVERY callback, every consent failed with
+"sign in as the same account", and the flow was architecturally impossible for every user since it
+shipped (2026-08-04). Tests passed because they mocked the verifier — hiding exactly this.
+
+Fix (same security property, on a channel that can carry the proof): the callback now verifies the
+signed state + PKCE, exchanges the code, and STASHES the tokens keyed by the state's nonce, bound to
+the uid the signed state names (`stashPendingConnection`). The popup hands the nonce to the opener
+(our origin only); the opener calls the new authenticated `POST /complete`, where the verified uid
+must equal the stashed one (`claimPendingConnection` — single-use, TTL'd, and a wrong-uid attempt
+consumes the entry). Client (`SupabaseConnectCard`) completes + shows the org name or the honest error.
+
+7 new tests lock the claim (same-uid only, single-use, attacker-uid consumes, TTL, empty-uid).
+Gate: both tsc green; claim 7 + supabaseOAuth 23 green.

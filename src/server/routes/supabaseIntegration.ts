@@ -96,22 +96,77 @@ export function nonceFromState(state: string): string {
   return parts.length === 4 ? parts[2] : '';
 }
 
+// ── Pending connections awaiting their authenticated completion ─────────────────────────────────
+//
+// ROOT CAUSE (admin 2026-08-20, "supabase login connect ke baad wapas wahi aa jata hai"): the
+// callback used to demand `verifyFirebaseToken(req)` — but the callback is a top-level BROWSER
+// NAVIGATION from supabase.com, and a navigation never carries an Authorization header. So `uid`
+// was null on EVERY callback, every consent failed with "sign in as the same account", and the
+// flow was architecturally impossible for every user since the day it shipped. (The tests passed
+// because they handed the route a mocked verifier — hiding exactly this.)
+//
+// THE FIX keeps the same security property on a channel that actually works: the callback verifies
+// the signed state + PKCE and exchanges the code, then STASHES the result keyed by the state's
+// nonce, bound to the uid the signed state names. The popup hands that nonce to the opener (our
+// origin only), and the OPENER — a normal authenticated fetch WITH a Bearer token — calls
+// `/complete`, where the verified uid must equal the stashed one. A consent still can only ever
+// attach to the account that began it; the proof just moved to the request that can carry it.
+interface PendingConnection {
+  userId: string;
+  payload: Parameters<typeof saveConnection>[1];
+  orgName: string;
+  expiresAtMs: number;
+}
+
+const pendingConnections = new Map<string, PendingConnection>();
+
+/** Short-lived on purpose: the opener claims it within seconds; minutes is already generous. */
+export const PENDING_CONNECTION_TTL_MS = 5 * 60 * 1000;
+
+export function stashPendingConnection(
+  nonce: string, userId: string, payload: Parameters<typeof saveConnection>[1], orgName: string, nowMs: number,
+): void {
+  for (const [k, v] of pendingConnections) if (v.expiresAtMs <= nowMs) pendingConnections.delete(k);
+  pendingConnections.set(nonce, { userId, payload, orgName, expiresAtMs: nowMs + PENDING_CONNECTION_TTL_MS });
+}
+
+/**
+ * Single-use claim: only the SAME verified uid the signed state named may take it. A wrong-uid
+ * attempt consumes the entry too — a value that failed an ownership check must not stay claimable.
+ */
+export function claimPendingConnection(
+  nonce: string, verifiedUid: string, nowMs: number,
+): { payload: Parameters<typeof saveConnection>[1]; orgName: string } | null {
+  const hit = pendingConnections.get(nonce);
+  pendingConnections.delete(nonce);
+  if (!hit || hit.expiresAtMs <= nowMs) return null;
+  if (!verifiedUid || hit.userId !== verifiedUid) return null;
+  return { payload: hit.payload, orgName: hit.orgName };
+}
+
 /** The signing key for OAuth state. Absent ⇒ the feature is unavailable (never a guessable default). */
 function stateSecret(): string {
   return process.env.SECRET_ENCRYPTION_KEY || '';
 }
 
-/** A small self-closing page for the popup — never renders untrusted text as HTML. */
-function closingPage(ok: boolean, message: string): string {
+/**
+ * A small self-closing page for the popup — never renders untrusted text as HTML.
+ *
+ * On success it also carries the completion NONCE to the opener. The message goes to OUR origin
+ * only, and the nonce is useless without a Bearer token for the exact account that began the flow
+ * (see `claimPendingConnection`) — so handing it to the same-origin opener leaks nothing.
+ */
+function closingPage(ok: boolean, message: string, nonce = ''): string {
   const safe = String(message).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
   const origin = (process.env.APP_ORIGIN || 'https://navbharatai.com').replace(/\/$/, '');
+  const payload = JSON.stringify({ __nbaiSupabaseConnect: true, ok, nonce });
   return `<!doctype html><html><head><meta charset="utf-8"><title>Supabase</title></head>
 <body style="font-family:system-ui;padding:32px;text-align:center;color:#c9d1d9;background:#0d1117">
 <p style="font-size:15px">${safe}</p>
 <p style="font-size:13px;color:#8b949e">You can close this window.</p>
 <script>
-  try { (window.opener||window.parent).postMessage({ __nbaiSupabaseConnect: true, ok: ${ok ? 'true' : 'false'} }, ${JSON.stringify(origin)}); } catch (e) {}
+  try { (window.opener||window.parent).postMessage(${payload}, ${JSON.stringify(origin)}); } catch (e) {}
   setTimeout(function(){ try { window.close(); } catch (e) {} }, ${ok ? 1200 : 4000});
 </script>
 </body></html>`;
@@ -172,14 +227,11 @@ export function registerSupabaseIntegrationRoutes(
     const stateCheck = verifyOAuthState(stateSecret(), parsed.state, now);
     if (!stateCheck.ok) { fail(connectFailureMessage(stateCheck.reason)); return; }
 
-    // The signed state proves WHO began the flow; the session proves who is here now. Requiring both
-    // to match is what stops a consent completed in someone else's browser from attaching there.
-    const uid = await verifyFirebaseToken(req);
-    if (!uid || uid !== stateCheck.userId) {
-      fail('Please sign in as the same account that started this connection, then try again.');
-      return;
-    }
-
+    // ⚠️ Deliberately NO `verifyFirebaseToken(req)` here — this is a top-level browser navigation
+    // from supabase.com, and a navigation NEVER carries an Authorization header, so that check made
+    // the whole flow impossible for every user (the 2026-08-20 root cause; see the pending-store
+    // note above). The signed state still proves WHO began the flow; the OWNERSHIP proof happens at
+    // `/complete`, on a request that can actually carry a Bearer token.
     const verifier = takeVerifier(nonceFromState(parsed.state), now);
     if (!verifier) {
       fail('This connection attempt timed out or was already used. Please tap "Connect database" again.');
@@ -213,18 +265,38 @@ export function registerSupabaseIntegrationRoutes(
     if (!orgs.ok) { fail(orgs.message); return; }
 
     const expiresIn = typeof body?.expires_in === 'number' ? body.expires_in : 3600;
-    const saved = await saveConnection(uid, {
+    // STASH, don't save: the save happens at `/complete`, on an authenticated request from the
+    // opener, where the verified uid is required to equal the uid this signed state names.
+    const nonce = nonceFromState(parsed.state);
+    stashPendingConnection(nonce, stateCheck.userId, {
       accessToken,
       refreshToken,
       expiresAtMs: now + expiresIn * 1000,
       orgId: orgs.orgs[0].id,
       orgName: orgs.orgs[0].name,
       connectedAtMs: now,
-    });
-    if (!saved) { fail('We could not save the connection. Please try again in a moment.'); return; }
+    }, orgs.orgs[0].name, now);
+    res.status(200).type('html').send(closingPage(true, `Connected to ${orgs.orgs[0].name}. Finishing up…`, nonce));
+  });
 
+  // The authenticated half of the callback: the opener claims the stashed consent with its Bearer
+  // token, and only the account that BEGAN the flow can claim it. This is the request the old
+  // callback-side session check pretended to be — on a channel that can actually carry the proof.
+  app.post('/api/integrations/supabase/complete', async (req: Request, res: Response) => {
+    const uid = await verifyFirebaseToken(req);
+    if (!uid) { res.status(401).json({ error: 'Please sign in first.' }); return; }
+    const nonce = typeof req.body?.nonce === 'string' ? req.body.nonce : '';
+    const pending = nonce ? claimPendingConnection(nonce, uid, Date.now()) : null;
+    if (!pending) {
+      res.status(410).json({
+        error: 'This connection attempt expired or belongs to a different account. Please tap "Connect Supabase" again.',
+      });
+      return;
+    }
+    const saved = await saveConnection(uid, pending.payload);
+    if (!saved) { res.status(500).json({ error: 'We could not save the connection. Please try again in a moment.' }); return; }
     try { audit('SUPABASE_CONNECTED', { userId: uid, ok: true }); } catch { /* audit never blocks */ }
-    res.status(200).type('html').send(closingPage(true, `Connected to ${orgs.orgs[0].name}.`));
+    res.json({ ok: true, orgName: pending.orgName });
   });
 
   // Spend the connection: create a real database in the user's account and wire it into their app.

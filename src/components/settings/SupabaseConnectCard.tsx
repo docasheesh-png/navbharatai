@@ -52,12 +52,34 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // The popup tells us when consent finished, so the card updates without the user hunting for a
-  // refresh button. Origin is checked because any page can post to an opener.
+  // The popup hands back the completion nonce; THIS authenticated call is what actually attaches
+  // the consent to the signed-in account. (The callback itself is a browser navigation and cannot
+  // carry our auth header — demanding it there is the bug that made connecting impossible.)
+  // Origin is checked because any page can post to an opener.
   useEffect(() => {
     const onMsg = (e: MessageEvent): void => {
       if (e.origin !== window.location.origin) return;
-      if ((e.data as { __nbaiSupabaseConnect?: boolean })?.__nbaiSupabaseConnect) void refresh();
+      const data = e.data as { __nbaiSupabaseConnect?: boolean; ok?: boolean; nonce?: string } | null;
+      if (!data?.__nbaiSupabaseConnect) return;
+      if (data.ok && typeof data.nonce === 'string' && data.nonce) {
+        void (async () => {
+          try {
+            const res = await authedFetch('/api/integrations/supabase/complete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ nonce: data.nonce }),
+            });
+            const out = await res.json().catch(() => ({}));
+            if (!res.ok) setError(out?.error || 'Could not finish connecting. Please try again.');
+            else setDone(out?.orgName ? `Connected to ${out.orgName}.` : 'Connected.');
+          } catch {
+            setError('Could not finish connecting. Check your connection and try again.');
+          }
+          void refresh();
+        })();
+        return;
+      }
+      void refresh(); // a failed consent still refreshes so the card shows the true state
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);

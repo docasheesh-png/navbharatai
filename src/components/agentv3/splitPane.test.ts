@@ -203,8 +203,24 @@ describe('the wiring the layout depends on', () => {
   });
 
   it('both panes carry the minimum width, so a shrinking WINDOW cannot squeeze one flat', () => {
-    const uses = panel.match(/minWidth: MIN_PANE_PX/g) ?? [];
-    expect(uses.length).toBe(2);
+    // The guarantee is unchanged; how it is expressed moved (2026-08-20). It used to be an inline
+    // `minWidth: MIN_PANE_PX` on each pane — but an inline style applies on BOTH axes, and the same
+    // container is `flex-col` on a phone, which is how the split silently became a HEIGHT CAP there.
+    // Both panes now declare it as a `sm:`-scoped utility fed by paneSplitVars, so it applies only in
+    // the row layout it was written for. Two panes ⇒ two of each.
+    expect((panel.match(/sm:min-w-\[var\(--nbai-pane-min\)\]/g) ?? []).length).toBe(2);
+    expect((panel.match(/paneSplitVars\(/g) ?? []).length).toBe(2);
+  });
+
+  it('REGRESSION: neither pane ships the split as an inline flex/minWidth (it would cap the phone height)', () => {
+    // The exact shape of the mobile bug: `style={{ flex: '0 1 30%', minWidth: … }}` on a container
+    // that is a COLUMN on a phone. Nothing may reintroduce an axis-blind inline sizing style here.
+    expect(panel).not.toMatch(/style=\{[^}]*flex:\s*`0 1/);
+    expect(panel).not.toContain('minWidth: MIN_PANE_PX');
+  });
+
+  it('the phone keeps a plain fill: the open workspace pane is flex-1, with the split only at sm:', () => {
+    expect(panel).toContain('flex flex-1 sm:flex-[0_1_var(--nbai-pane)]');
   });
 
   it('the divider is hidden on mobile, where the panes stack instead of sharing', () => {

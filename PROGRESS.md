@@ -36214,3 +36214,38 @@ Found while writing the tests: the coverage table names features with every syno
 form; the id keeps the full label so two features cannot collide.
 
 Gate: both tsc green, 16,706 tests / 1,331 files, CI green before merge.
+
+---
+
+## 2026-08-20 — Preview fine on desktop, broken on a phone: a WIDTH split applied to a COLUMN
+
+Admin: "navbharatai pro v5 ka preview desktop me theek chal raha. mobile phone me gadbad hai!"
+Screenshot: the preview squeezed into a strip at the top of the phone, a large dead black area below.
+
+ROOT CAUSE. Both panes shipped the user's split as an inline style:
+
+    style={{ flex: `0 1 ${pct}%`, minWidth: MIN_PANE_PX }}
+
+The split is a WIDTH concept — it exists because the desktop layout is `sm:flex-row`, two panes side by
+side. But the SAME container is `flex flex-col sm:flex-row` (line ~3370): on a phone the main axis is
+VERTICAL, so `flex-basis: <pct>%` silently became a HEIGHT CAP and `flex-grow: 0` forbade the pane
+taking the rest. The workspace pane got only (100 − split)% of the screen height. The class meant to
+make it fill on mobile (`flex-1`) never had a chance — an inline style always beats a class. The
+iframe was `w-full h-full` and ResponsiveFrame was correct all along; they were filling a box that had
+been told to be small.
+
+FIX. `paneSplitVars(pct)` returns ONLY custom properties (`--nbai-pane`, `--nbai-pane-min`), which are
+inert on their own; `sm:flex-[0_1_var(--nbai-pane)]` and `sm:min-w-[var(--nbai-pane-min)]` consume
+them, so the percentage exists ONLY in the row layout it was designed for and the phone keeps plain
+`flex-1`. Desktop behaviour is unchanged, including the drag and the saved split.
+
+VERIFIED IN THE BUILT CSS, not assumed: `npx vite build` then grepped `dist/assets/*.css` — both
+utilities are emitted AND both sit inside `@media(min-width:40rem)`, which is what keeps them off the
+phone. (Worth doing: this was a new Tailwind arbitrary-value utility in a v4 CSS-first setup with no
+JS config, so "it will surely generate" was not evidence.)
+
+An existing source-text test asserted `minWidth: MIN_PANE_PX` appeared twice. Rather than delete it,
+it was rewritten to assert the SAME guarantee in its new (better-scoped) form, plus a regression test
+that neither pane may reintroduce an axis-blind inline sizing style.
+
+Gate: both tsc green; component suites 504/504 (47 files); production build clean.

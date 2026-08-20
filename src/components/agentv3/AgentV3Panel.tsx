@@ -35,7 +35,7 @@ import type { ReportPickerItem } from '../../lib/reportPicker';
 import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { SplitDivider } from './SplitDivider';
-import { loadSplit, saveSplit, clampSplit, MIN_PANE_PX } from './splitPane';
+import { loadSplit, saveSplit, clampSplit, MIN_PANE_PX, paneSplitVars } from './splitPane';
 import { NextSuggestionsBulb } from './NextSuggestionsBulb';
 import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
 import { clampComposerHeight } from './composerHeight';
@@ -3375,8 +3375,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             keeps the promise when the WINDOW shrinks: the browser enforces it with no listener, so
             a split saved on a wide monitor cannot squeeze the composer on a laptop. */}
         <div
-          className={`${showWorkspace ? 'hidden sm:flex' : 'flex flex-1'} flex-col min-h-0`}
-          style={showWorkspace ? { flex: `0 1 ${split}%`, minWidth: MIN_PANE_PX } : undefined}
+          className={`flex-col min-h-0 ${showWorkspace
+            ? 'hidden sm:flex sm:flex-[0_1_var(--nbai-pane)] sm:min-w-[var(--nbai-pane-min)]'
+            : 'flex flex-1'}`}
+          style={showWorkspace ? paneSplitVars(split) : undefined}
         >
           {/* 3 PAGES: Build · Plan · Advise — one shared session + project memory, each its OWN
               visible thread. The switcher moved BACK to the composer's left column as a dropup
@@ -4426,8 +4428,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           />
         )}
         <div
-          className={`flex-1 sm:flex-none flex-col min-h-0 ${showWorkspace ? 'flex' : 'hidden'}`}
-          style={showWorkspace ? { flex: `0 1 ${100 - split}%`, minWidth: MIN_PANE_PX } : undefined}
+          className={`flex-col min-h-0 ${showWorkspace
+            ? 'flex flex-1 sm:flex-[0_1_var(--nbai-pane)] sm:min-w-[var(--nbai-pane-min)]'
+            : 'hidden'}`}
+          style={showWorkspace ? paneSplitVars(100 - split) : undefined}
         >
           {/* DESKTOP: title + close on their own row, exactly as before — plus, on the Preview tab,
               the one-tap device widths. They sit HERE, next to the app itself, because that is where

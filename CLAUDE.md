@@ -574,6 +574,68 @@ the code (it is actually read somewhere) on 2026-07-11.
   traffic this needs either a VirusTotal paid plan or another scanner (e.g. MetaDefender). Recorded
   here as an open item rather than left silent.
 
+### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
+
+The admin sent the complete list of env-var NAMES from the live Cloud Run service, and every one was
+cross-checked against the code. This is the first time the registry above has been reconciled against
+the actual deployment rather than maintained hand-to-hand, and it found four things.
+
+**🔴 1. SIX KEYS ARE SET TWICE. This is the urgent one.**
+
+| Key | Positions in the console |
+|---|---|
+| `AGENTV3_ESCALATION` | #33, #37, #44 — **three times** |
+| `AGENTV3_CHEAP_FLOOR` | #26, #34 |
+| `AGENTV3_ENABLED` | #15, #41 |
+| `AGENTV3_PAID_PUBLIC` | #42, #48 |
+| `AGENTV3_CREDIT_GATE` | #43, #49 |
+| `AGENTV3_STREAMING_PREVIEW` | #60, #80 |
+
+**A duplicate is not cosmetic: the LAST entry wins.** So a correct value can sit in the console, be
+visible to whoever set it, and never reach the process. `AGENTV3_CHEAP_FLOOR` is the sharpest example —
+this file already records that an ENV value ALWAYS beats the code default, so one stale or empty
+duplicate silently switches the whole GLM/Kimi floor off while the console still shows the good value
+a few rows up. `AGENTV3_ENABLED` and `AGENTV3_PAID_PUBLIC` carry the same risk for the feature gate and
+for billing. **Compare each pair's VALUES and delete the wrong one — do not assume they match.**
+
+**🟡 2. `PUBLISHED_APP_DOMAIN` — CORRECTED WITHIN THE HOUR, and the correction is the useful part.**
+The audit first reported it as DEAD CONFIG: set in Cloud Run, read nowhere. That was true of the code I
+had, and **false of `main`** — another session had just landed `publishedAppUrl()` in `Deployment.ts`
+plus a Cloudflare Worker (`infra/cloudflare/mitrify-apps-worker.js`). The rebase conflict is what
+surfaced it; the audit alone would have shipped a wrong claim and had the admin delete a live key.
+
+**The lesson is safeguard #1, hitting an audit rather than a roadmap:** a cross-check is only true as of
+the commit it ran against, and `main` moves under you. Anything this file asserts about the CODE must be
+re-grepped against current `main`, not against a session's working tree.
+
+What it actually does: with the env UNSET a published app is served at `https://<site>--<channel>.web.app`
+— already on the Public Suffix List, which is why it is the safe default. With it SET (e.g. `mitrify.in`)
+the URL becomes `https://<channel>.<domain>`, and that is a **pure string change** — it only becomes real
+once the Cloudflare Worker routes `*.<domain>` to the matching Firebase channel. ⚠️ **Leave it unset until
+that Worker is live**, or every published URL points at a host that does not resolve. And branded
+subdomains are NOT cookie-isolated from each other until `<domain>` is on the PSL (a separate,
+weeks-long registration) — localStorage/IndexedDB are per-origin from day one, cookies are not.
+
+**🟢 3. Four keys were missing from this registry** — now recorded:
+- **`PROFESSIONAL_PAID_ENABLED`** — the Professionals paid gate (`professionals/professionalPaid.ts`).
+  Reads exactly `'true'`; anything else is off.
+- **`PUBLIC_BASE_URL`** — the public origin used to build bot/webhook URLs (`routes/bots.ts`).
+- **`SEMANTIC_MEMORY`** — master switch for semantic memory. Companion tunables
+  `SEMANTIC_MEMORY_MAX_CHUNKS` (60) and `SEMANTIC_MEMORY_TOP_K` (5) are code-defaulted.
+- **`PUBLISHED_APP_DOMAIN`** — the branded published-app host; see item 2 for why it must stay
+  unset until the Cloudflare Worker is live.
+
+**🔵 4. `FIREBASE_DEPLOY_PROJECT` is NOT set — and that CLOSES a live hypothesis.** While diagnosing the
+2026-08-19 publish 404 I proposed that the deploy might be pointing at the wrong project, since that env
+overrides `FIREBASE_PROJECT` and this file records the exact `navbharatai-3395f` / `gen-lang-client-…`
+confusion. It is absent from all 84, so the code default `gen-lang-client-0866594388` is in use — which
+matches the project whose Hosting console the admin checked. **That theory is dead; the 404 is
+elsewhere**, and the per-call diagnostics added the same day will name it.
+
+**The other direction was checked too and is fine.** 331 env names the code reads are unset — that is by
+design, not drift: nearly all are optional tunables whose absence means "today's behaviour", exactly as
+the flag entries above promise.
+
 **Known valid VALUES (from the code, for the admin to cross-check):**
 - `AGENTV3_CHEAP_FLOOR` accepts exactly: `off` | `glm` (GLM only) | `kimi` (Kimi only) | `on`/`both`
   (GLM + Kimi together) | `bedrock`. It must hold ONE value.

@@ -103,9 +103,20 @@ describe('the allowlist — the user\'s own requests still write to a green app'
   //   • on the normal path it runs BEFORE the preview is browsed, so no latch exists yet and this entry
   //     is not what lets it write — it is here so a RESUMED already-green session behaves the same way
   //     instead of silently doing nothing on one path and working on the other.
-  it('the allowlist is exactly the four user-request / safety passes', () => {
+  it('the allowlist is exactly the five user-request / safety / restore passes', () => {
+    // This test IS the deliberate act the module header asks for — the list may only grow when someone
+    // has to come here and say why. 'sandbox-file-restore' was added 2026-08-20 after the freeze broke
+    // a real publish: re-seeding an EMPTY sandbox from the durable store writes through the same
+    // `actuator.writeFile` every pass uses, so on a green app every write was refused and the user was
+    // told their files could not be restored — on a workspace where the files were perfectly safe.
+    //
+    // It qualifies for the same reason 'green-guard-restore' does: the freeze exists to stop a pass
+    // ALTERING a working app, and a restore alters nothing. It copies the app's own durable bytes into
+    // a machine that has none, and only ever when that machine is empty. Refusing it did not protect
+    // the app; it stranded it.
     expect([...ALLOWED_PASSES].sort()).toEqual([
-      'design-consistency-heal', 'feature-presence-heal', 'green-guard-restore', 'runtime-error-autofix',
+      'design-consistency-heal', 'feature-presence-heal', 'green-guard-restore',
+      'runtime-error-autofix', 'sandbox-file-restore',
     ]);
   });
 });

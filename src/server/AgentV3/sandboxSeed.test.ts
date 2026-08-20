@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { shouldSeedSandbox, ensureWorkspaceFilesInSandbox, prepareSandboxForBuild, projectNeedsMarker, PROJECT_MARKER } from './sandboxSeed';
 
 /**
@@ -184,5 +186,56 @@ describe('prepareSandboxForBuild — files AND dependencies, because half a fix 
     const r = await prepareSandboxForBuild(a, 'ws1', async () => saved);
     expect(r.seeded).toBe(0);
     expect(a.calls).toEqual(['ws1']);
+  });
+});
+
+describe('the restore must survive Green Freeze — the defect that broke a real publish', () => {
+  /**
+   * Admin 2026-08-20: *"Your files could not be restored to the build machine."* — which is MY message
+   * from the fix shipped the day before, and it was firing on a workspace whose files were perfectly
+   * safe.
+   *
+   * Every sandbox write passes through `assertWriteAllowed`, which refuses to touch a verified-working
+   * app from a pass it does not recognise. The seed wrote through `actuator.writeFile` from no pass at
+   * all, so on a GREEN app — the ones most worth publishing — every single write was refused, `seeded`
+   * stayed 0, and the honest-sounding message blamed the restore instead of naming the refusal.
+   */
+  it('runs inside the allowlisted pass, so a green app can still be restored', async () => {
+    const { ALLOWED_PASSES } = await import('./greenFreeze');
+    expect(ALLOWED_PASSES.has('sandbox-file-restore')).toBe(true);
+  });
+
+  it('the seed declares that pass — the allowlist alone does nothing', () => {
+    // A pass identifies itself by wrapping its work in runInPass; being on the list without wrapping
+    // is the same as not being on the list.
+    const src = readFileSync(join(__dirname, 'sandboxSeed.ts'), 'utf8');
+    expect(src).toContain("runInPass('sandbox-file-restore'");
+  });
+
+  it('a failed restore now NAMES its cause instead of shrugging', async () => {
+    // The swallowed exception is what hid the Green Freeze refusal for a day. The first real reason is
+    // kept and reported, while later files still get their turn.
+    const a = {
+      listFiles: async () => [] as string[],
+      writeFile: async () => { throw new Error('Green freeze: refused to overwrite "src/App.tsx"'); },
+    };
+    const r = await ensureWorkspaceFilesInSandbox(a, 'ws1', async () => ({ 'package.json': '{}', 'src/App.tsx': 'x' }));
+    expect(r.ready).toBe(false);
+    expect(r.reason).toContain('could not be restored');
+    expect(r.reason).toContain('Green freeze');   // the actual cause, not a shrug
+  });
+
+  it('one bad file still does not abort the rest', async () => {
+    const written: string[] = [];
+    const a = {
+      listFiles: async () => [] as string[],
+      writeFile: async (_w: string, p: string) => {
+        if (p === 'bad.ts') throw new Error('nope');
+        written.push(p);
+      },
+    };
+    const r = await ensureWorkspaceFilesInSandbox(a, 'ws1', async () => ({ 'package.json': '{}', 'bad.ts': 'x', 'ok.ts': 'y' }));
+    expect(r.ready).toBe(true);
+    expect(written).toEqual(['package.json', 'ok.ts']);
   });
 });

@@ -148,12 +148,25 @@ export class FirebaseHostingDeployer {
     const versionName = await this.createVersion(site, headers);
     const versionId = versionName.split('/').pop() ?? '';
 
+    // ⚠️ THE HASH IS OF THE GZIPPED BYTES, NOT THE FILE (admin 2026-08-20, and Google said it plainly:
+    // `Firebase Hosting file upload failed (HTTP 400): "content hash doesn't match content"`).
+    //
+    // Hosting's upload contract is: gzip the file, and the hash declared in populateFiles is the SHA256
+    // of THAT gzipped payload — the same bytes you then PUT. This hashed the RAW buffer and uploaded
+    // its gzip, so the two could never agree and every file of every publish was rejected. It is the
+    // LAST of the reasons the Hosting console showed every site reading "Waiting for your first
+    // release"; the `:populateFiles` colon fix above cleared the 404 that used to mask it.
+    //
+    // Gzipping ONCE here is also what keeps the hash and the payload provably the same object — a
+    // re-gzip at upload time is not guaranteed byte-identical (compression level and OS header can
+    // differ), and computing the two apart is the exact shape that made this bug possible.
     const fileHashes: Record<string, string> = {};
-    const hashToBuffer = new Map<string, Buffer>();
+    const hashToGzip = new Map<string, Buffer>();
     for (const [relPath, buf] of files) {
-      const hash = crypto.createHash('sha256').update(buf).digest('hex');
+      const gz = await gzip(buf);
+      const hash = crypto.createHash('sha256').update(gz).digest('hex');
       fileHashes['/' + relPath.replace(/\\/g, '/')] = hash;
-      hashToBuffer.set(hash, buf);
+      hashToGzip.set(hash, gz);
     }
 
     // ⚠️ `:populateFiles`, NOT `/populateFiles`. This is a Google API CUSTOM METHOD, which is addressed
@@ -171,9 +184,9 @@ export class FirebaseHostingDeployer {
 
     if (uploadUrl && uploadRequiredHashes.length > 0) {
       for (const hash of uploadRequiredHashes) {
-        const buf = hashToBuffer.get(hash);
-        if (!buf) continue;
-        const gz = await gzip(buf);
+        // The SAME buffer the hash was taken from — never a second gzip. See the note above.
+        const gz = hashToGzip.get(hash);
+        if (!gz) continue;
         await this.hostingCall('file upload', () =>
           axios.post(`${uploadUrl}/${hash}`, gz, {
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },

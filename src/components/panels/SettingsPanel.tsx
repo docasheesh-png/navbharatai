@@ -4,7 +4,7 @@ import {
   Settings, X, ChevronRight, ChevronLeft, Monitor, LayoutDashboard, Lock, Database,
   GitFork, Terminal, Activity, GitBranch, Bot, MessageSquare, Wand2, Bug, Code,
   TestTube, Globe, GitMerge, Gauge, Minimize2, Moon, Layout, Puzzle, LayoutTemplate,
-  Figma, Rocket, Smartphone, CloudUpload, Package, IndianRupee, Users2, Palette, TrendingUp,
+  Figma, Rocket, Smartphone, Package, IndianRupee, Users2, Palette, TrendingUp,
   BarChart2, Cpu, Sparkles, Eye, EyeOff, Github, List, LogOut, GitBranch as GitBranchIcon,
   Folder, Check, Search, RefreshCw, Box, Zap, Globe as GlobeIcon, Search as SearchIcon,
   Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail, Scale, FileText,
@@ -33,9 +33,6 @@ const SecretManager    = _lz(() => import('../SecretManager'),             'Secr
 const DatabaseSettings = _lz(() => import('../settings/DatabaseSettings'), 'DatabaseSettings');
 const StorageSettings  = _lz(() => import('../settings/StorageSettings'),  'StorageSettings');
 const AuthSettings     = _lz(() => import('../settings/AuthSettings'),     'AuthSettings');
-// Multi-Cloud Deploy — moved into App Settings (admin 2026-07-29). Deploy the built app to
-// NavBharat Hosting, Vercel, Netlify, Firebase, Cloud Run, Railway or Render.
-const MultiCloudDeploy = _lz(() => import('../ide/MultiCloudDeploy'),      'MultiCloudDeploy');
 // "Your Website" hub (admin 2026-07-29): the ONE real domain-connect flow, now reachable from
 // App Settings → Domain (it already existed for Sidebar → More and Home → Other AI → Custom Domain).
 const ConnectMyWebsitePanel = _lz(() => import('./ConnectMyWebsitePanel'), 'ConnectMyWebsitePanel');
@@ -76,8 +73,7 @@ export interface SettingsPanelProps {
    */
   onCloseSettings: () => void;
 
-  // The current app's generated code — passed through to the Multi-Cloud Deploy sub-screen so a real
-  // deploy (NavBharat Hosting / Vercel-with-token) has the app bundle to publish (admin 2026-07-29).
+  // The current app's generated code — still threaded for the screens that analyse the built app.
   generatedCode?: string;
 
   // settings state
@@ -511,7 +507,6 @@ export function SettingsPanel({
                       // also provides login + storage when you connect Firebase/Supabase; the dedicated
                       // Authentication (Clerk/Auth0) + Storage (S3/Cloudinary) tiles cover standalone providers.
                       { id: 'domain', label: 'Domain', icon: Globe },
-                      { id: 'cloudeploy', label: 'Hosting & Deploy', icon: CloudUpload },
                       { id: 'database', label: 'Database', icon: Database },
                       { id: 'auth', label: 'Authentication', icon: ShieldCheck },
                       { id: 'storage', label: 'Storage', icon: HardDrive },
@@ -936,36 +931,6 @@ export function SettingsPanel({
               </motion.div>
             )}
 
-            {/* Hosting & Deploy (admin 2026-07-29): the ONE publish surface. The standalone "Hosting &
-                Publish" info-screen was a duplicate of this (admin: "koi option duplicate to nahi hai?")
-                — it only explained auto-hosting and linked here — so it was merged in. The honest
-                auto-hosting note now sits atop the real Multi-Cloud Deploy component (NavBharat Hosting &
-                Vercel deploy for real; other platforms show honest CLI steps). Needs the app's
-                generatedCode to have a bundle to publish, threaded from App.tsx. */}
-            {settingsScreen === 'cloudeploy' && (
-              <motion.div
-                key="cloudeploy"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="space-y-4"
-              >
-                <div className="bg-[#161b22] border border-emerald-500/20 rounded-2xl p-4 flex items-start gap-3">
-                  <div className="p-2 bg-emerald-500/10 rounded-lg shrink-0">
-                    <CloudUpload className="w-5 h-5 text-emerald-400" />
-                  </div>
-                  <p className="text-[11px] text-[#8b949e] font-medium leading-relaxed">
-                    <span className="text-white font-bold">Your app is already hosted.</span> Every app you build on
-                    NavBharatAI gets a live, shareable URL with HTTPS/SSL the moment it builds — no server to set up.
-                    Use the options below to deploy it elsewhere (Vercel, Netlify, Firebase…), or connect your own
-                    domain from the <span className="text-white font-bold">Domain</span> tile.
-                  </p>
-                </div>
-                <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading deploy…</div>}>
-                  <MultiCloudDeploy generatedCode={generatedCode} />
-                </Suspense>
-              </motion.div>
-            )}
 
 
             {/* REAL workspace logs (admin 2026-07-20): live build events from the durable v5.0 live

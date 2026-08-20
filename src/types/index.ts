@@ -88,8 +88,11 @@ export type SettingsScreen =
   | 'github_repos' | 'sharing' | 'deploy' | 'access'
   | 'git' | 'logs' | 'report' | 'metrics' | 'profile'
   // "Your Website" hub (admin 2026-07-29): the real-website essentials, brought into App Settings.
-  // ('hosting' info-screen was merged into 'cloudeploy' as a duplicate — admin 2026-07-29.)
-  | 'domain' | 'auth' | 'storage' | 'cloudeploy'
+  // 'hosting' was merged into 'cloudeploy' as a duplicate (2026-07-29); 'cloudeploy' itself was then
+  // REMOVED 2026-08-20 — the v5.0 Publish sheet already deploys to the user's own Vercel/Netlify/
+  // Cloudflare, while that screen still read the retired v2.0 channel and so could not see a v5.0 app
+  // at all. Same lesson as 'modules' above: a duplicate surface is where this bug class comes back.
+  | 'domain' | 'auth' | 'storage'
   // Legal & Trust pages (admin 2026-08-08): one screen per document, driven by the legal registry.
   | 'legal_privacy' | 'legal_terms' | 'legal_dpa' | 'legal_security' | 'legal_nda';
 

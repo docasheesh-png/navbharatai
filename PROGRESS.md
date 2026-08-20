@@ -36178,3 +36178,39 @@ is something else is not sent to delete a project for nothing.
 Gate: both tsc green; 8 new tests; server lib suite 2411/2411 (253 files).
 NOTE the underlying provisioning failure is now VISIBLE but not yet diagnosed — the next attempt will
 name it, and that is the point.
+
+---
+
+## 2026-08-20 — 💡 suggestions linked to the app's own memory (PR #2502, merged 2999772)
+
+Admin: "suggesting 💡 ko us app memory (jo app ban rahi hai) se link karo".
+
+**The gap.** The bulb's ideas came from `nextBuildSuggestions`, which reads the app's FILES and nothing
+else — every suggestion was inferred from what the app IS. It never read the app's memory of what the
+USER ASKED FOR. Someone who wrote "and add a search box" in turn 3, on a build where the search never
+got made, was offered "add a dark mode" — our guess, while their own unmet words sat unread in the
+workspace's episode log.
+
+**Now.** `memoryLinkedSuggestions.ts` (pure, 12 tests) reads `WorkspaceMemory.recentRequests(5)`, checks
+each against what was built, and any unmet ask becomes the FIRST suggestion in the user's own words.
+`mergeSuggestions` dedupes by id AND title (the same feature can arrive from both sides) with memory
+winning. Wired into `/api/agentv3/next-suggestions`, best-effort: memory restore is raced to 3s and any
+failure leaves the file-derived list byte-identical.
+
+**Reuse, not a copy:** detection is `analyzeRequirementCoverage` — the SAME analyser the build's
+coverage gate runs, so the bulb and the build report can never disagree about what the app contains.
+
+⚠️ **The honesty decision, recorded because a later session will be tempted to "tighten" it.** The
+analyser grades absence twice: `confirmedMissing` (the feature has an `evidence` fingerprint, the file
+BODIES were searched, it is not there — a checked fact) and the rest of `missing` (nothing is NAMED for
+it; a chat built inline in App.tsx lands here too). Only FIVE features in the table carry a fingerprint,
+so `confirmedMissing` alone would have meant the feature almost never fired — shipped and dead, which
+rule 2 forbids. Both grades are used, checked-facts ranked first, and the WORDING carries the
+difference: unconfirmed says "I could not find it — ignore this if it is already there". Do NOT narrow
+this to `confirmedMissing` without also giving the coverage table many more `evidence` patterns.
+
+Found while writing the tests: the coverage table names features with every synonym
+("chat / messaging"), so titles read "Finish the chat / messaging". Titles/prompts now use the spoken
+form; the id keeps the full label so two features cannot collide.
+
+Gate: both tsc green, 16,706 tests / 1,331 files, CI green before merge.

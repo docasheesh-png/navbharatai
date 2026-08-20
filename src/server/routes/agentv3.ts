@@ -5,6 +5,7 @@ import { redactProviderError, redactProvidersText } from '../lib/providerRedacti
 import { honestResultEvent } from '../lib/responseEmoji';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
+import { memoryLinkedSuggestions, mergeSuggestions } from '../AgentV3/memoryLinkedSuggestions';
 import { analyzeAppScope } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint } from '../lib/fullstackBootHint';
@@ -3166,7 +3167,24 @@ export function registerAgentV3Routes(app: Express): void {
       const appText = `${Object.keys(files).join(' ')}\n${source}`.slice(0, 20000);
       // A larger pool than the ~4 shown at once, so the 💡's ♻️ refresh can rotate through genuinely
       // different, still-app-relevant ideas (domain gaps + code-derived contextual + universal polish).
-      const suggestions = nextBuildSuggestions({ appText, source, max: 12 });
+      const derived = nextBuildSuggestions({ appText, source, max: 12 });
+
+      // 💡 LINKED TO THE APP'S MEMORY (admin 2026-08-20). Everything above is inferred from what the app
+      // IS. The user's own past requests are the one signal that says what they WANTED — so anything they
+      // asked for that is genuinely not in the app becomes the FIRST suggestion, in their own words.
+      // Best-effort throughout: memory is restored with a short timeout and any failure simply leaves the
+      // file-derived list exactly as it was.
+      let suggestions = derived;
+      try {
+        const mem = getWorkspaceMemory(workspaceId);
+        await raceTimeout(restoreWorkspaceMemory(workspaceId, mem), 3_000, 'restoreMemoryForSuggestions');
+        const requests = mem.recentRequests(5);
+        if (requests.length > 0) {
+          const sources = Object.entries(files).map(([path, content]) => ({ path, content: String(content || '') }));
+          const fromMemory = memoryLinkedSuggestions({ requests, graph: mem.snapshot().graph, sources });
+          suggestions = mergeSuggestions(fromMemory, derived, 12);
+        }
+      } catch { /* the bulb must never fail because memory was unavailable */ }
 
       // MEGA-APP ROADMAP (Phase 4): if this workspace is on a guided step-by-step journey, surface it in
       // the 💡 too. User-facing, so every string is provider-redacted (White-Label law) and the internal

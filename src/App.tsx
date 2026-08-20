@@ -23,6 +23,7 @@ import { SettingsPanel } from './components/panels/SettingsPanel';
 import { ProV3Surface } from './components/agentv3/ProV3Surface';
 import { v3MobileFooterActive, type V3FooterApi } from './components/agentv3/v3FooterApi';
 import { shouldRenderV3Surface, v3SurfaceDisplayClass } from './components/agentv3/v3SurfaceMount';
+import { restoreV3Tab, v3TabIsOpen, v3IsActive, V3_TAB_FLAG, V3_ACTIVE_FLAG } from './components/agentv3/v3TabPersistence';
 import { clearStickySession } from './components/agentv3/v3SessionContinuity';
 import { NBIChatPanel } from './components/panels/NBIChatPanel';
 // Lazy — keeps the bundled AppKnowledgeBase (imported by the Offline AI) OUT of the main index chunk,
@@ -406,7 +407,14 @@ export default function App() {
   // reload within the same tab but not a brand-new tab. This restore path deliberately bypasses
   // toggleTab, which is how AgentV3Panel tells a RELOAD (restore) apart from a fresh OPEN (new chat).
   const readV3ViewFlag = (): boolean => {
-    try { return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('nbi_v3_open') === '1'; } catch { return false; }
+    try { return typeof sessionStorage !== 'undefined' && sessionStorage.getItem(V3_ACTIVE_FLAG) === '1'; } catch { return false; }
+  };
+  // SEPARATE from the view flag above: "is the v5.0 TAB open?", which must survive a round trip
+  // through another tab. Switching to Settings used to erase the single old flag, so a full page load
+  // on the way back (the Supabase consent redirect) returned with NO v5.0 tab at all and the user had
+  // to reopen their app from scratch. See v3TabPersistence.ts for the full root cause.
+  const readV3TabFlag = (): boolean => {
+    try { return typeof sessionStorage !== 'undefined' && sessionStorage.getItem(V3_TAB_FLAG) === '1'; } catch { return false; }
   };
   // Admin access moved OFF the sidebar to a dedicated URL (admin 2026-07-15): /admin deep-links straight
   // into the existing admin view (login → MFA → dashboard). Keeping it a URL (not a visible menu item)
@@ -731,7 +739,10 @@ export default function App() {
   const [pendingProvider, setPendingProvider] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [openTabs, setOpenTabs] = useState<ViewType[]>(() => (readV3ViewFlag() ? ['nbi_pro_chat'] : []));
+  // The v5.0 tab is restored when its TAB flag is set — or when only the legacy active-view flag is
+  // present (a session that began before the split), so this fix can never itself close someone's app.
+  const [openTabs, setOpenTabs] = useState<ViewType[]>(() =>
+    (restoreV3Tab(readV3TabFlag(), readV3ViewFlag()) ? ['nbi_pro_chat'] : []));
   // child→parent tab map: which tab opened each option, so ✕-closing Settings/Professionals also closes
   // the options launched from inside it (admin bug 2026-07-11). Populated in toggleTab, pruned in closeTab.
   const [tabOpeners, setTabOpeners] = useState<Partial<Record<ViewType, ViewType>>>({});
@@ -1323,10 +1334,22 @@ export default function App() {
   // view clears the flag, so leaving v5.0 and reloading correctly returns to Home.
   useEffect(() => {
     try {
-      if (activeView === 'nbi_pro_chat') sessionStorage.setItem('nbi_v3_open', '1');
-      else sessionStorage.removeItem('nbi_v3_open');
+      if (v3IsActive(activeView)) sessionStorage.setItem(V3_ACTIVE_FLAG, '1');
+      else sessionStorage.removeItem(V3_ACTIVE_FLAG);
     } catch { /* storage unavailable (private mode) — reload just falls back to Home */ }
   }, [activeView]);
+
+  // …and SEPARATELY persist whether the v5.0 TAB is open, which is a different question (window
+  // semantics: a tab stays open while another tab is in front). This is what carries v5.0 across a
+  // full-page round trip — the Supabase consent redirect above being the one that exposed it: with
+  // only the active-view flag, opening Settings erased v5.0 and the user had to reload their whole
+  // app to get back. ✕-closing the tab removes it from openTabs, which clears the flag here.
+  useEffect(() => {
+    try {
+      if (v3TabIsOpen(openTabs)) sessionStorage.setItem(V3_TAB_FLAG, '1');
+      else sessionStorage.removeItem(V3_TAB_FLAG);
+    } catch { /* storage unavailable (private mode) — degrades to the old behaviour, never worse */ }
+  }, [openTabs]);
 
   // After login, navigate to any view that was gated behind auth (e.g. History)
   useEffect(() => {

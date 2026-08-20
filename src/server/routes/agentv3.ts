@@ -201,6 +201,7 @@ import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
+import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
 import { pickerItems } from '../../lib/reportPicker';
 import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } from '../AgentV3/SpaFallbackAnalysis';
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
@@ -5298,9 +5299,29 @@ export function registerAgentV3Routes(app: Express): void {
       }
       // 1. BUILD. Deterministic, and its real output is returned on failure — the user gets the
       //    compiler's own reason instead of "publish failed".
-      const build = await actuator.runCommand(workspaceId, 'npm run build');
+      let build = await actuator.runCommand(workspaceId, 'npm run build');
+      let typecheckWarning = '';
       if (build.exitCode !== 0) {
-        let detail = (build.stderr || build.stdout || '').trim().split('\n').slice(-12).join('\n');
+        // PUBLISH MUST NOT BE STRICTER THAN PREVIEW (admin 2026-08-20, five days of "exit status 2").
+        // The scaffold's build script is `tsc … && vite build`, but the preview dev server transpiles
+        // WITHOUT typechecking — so an app that runs flawlessly in the preview can be unpublishable
+        // over a type warning that changes nothing at runtime. When the script has that shape, retry
+        // the bundler alone (the same transpile the preview runs); succeed WITH an honest warning.
+        let fallback: ReturnType<typeof bundlerFallbackCommand> = null;
+        try { fallback = bundlerFallbackCommand(await actuator.readFile(workspaceId, 'package.json')); }
+        catch { /* no readable package.json ⇒ no safe fallback — the original failure stands */ }
+        if (fallback) {
+          const retry = await actuator.runCommand(workspaceId, fallback.command);
+          if (retry.exitCode === 0) {
+            typecheckWarning = TYPECHECK_SKIPPED_WARNING;
+            build = retry;
+          }
+        }
+      }
+      if (build.exitCode !== 0) {
+        // BOTH channels, honestly — compilers split output (tsc → stdout, vite/npm → stderr), and the
+        // old `stderr || stdout` is exactly what reduced five days of failures to a bare "exit status 2".
+        let detail = composeBuildFailureDetail(build.stdout, build.stderr);
         // NAME THE FIRST CAUSE, NOT ITS SYMPTOM. When the dependency install failed, the build's own
         // message is a missing binary (`sh: 1: tsc: not found`) — which sends the user hunting through
         // their code for a fault that is not there. The install's failure is what they need to see.
@@ -5360,7 +5381,7 @@ export function registerAgentV3Routes(app: Express): void {
         const m = result.content.match(/https?:\/\/[^\s)]+/);
         url = m ? m[0] : '';
       }
-      res.json({ ok: true, url, message: result.content });
+      res.json({ ok: true, url, message: result.content, ...(typecheckWarning ? { warning: typecheckWarning } : {}) });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Could not publish your app. Please try again.' });
     }

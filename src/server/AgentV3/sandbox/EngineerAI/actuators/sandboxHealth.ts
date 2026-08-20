@@ -50,6 +50,29 @@ export function resolveThrownCommandExit(err: unknown): number {
   return -1; // truly could not run (no exit info) — the dead-sandbox path owns this
 }
 
+/**
+ * Recover the REAL output channels from a thrown command error — the sibling of
+ * `resolveThrownCommandExit`, for the OTHER half of what the throw carries.
+ *
+ * ROOT CAUSE (admin 2026-08-20, "Publish" failing for five days with a bare "exit status 2"):
+ * E2B's CommandExitError carries `.stdout`/`.stderr` getters, but the actuator's catch built
+ * `stderr: err.stderr || err.message` — so whenever the failing program wrote everything to STDOUT
+ * and nothing to stderr, the synthesized "exit status 2" DISPLACED the real diagnostics. `tsc` is
+ * exactly that program: it prints every type error to STDOUT and exits 2 with an empty stderr. The
+ * user was shown the exit-status string instead of the compiler's own list of what to fix.
+ *
+ * The rule: each channel keeps its own real content; the error MESSAGE only stands in when the
+ * command produced NO output at all (an SDK/network throw), where it is genuinely all we know. PURE.
+ */
+export function thrownCommandOutput(err: unknown): { stdout: string; stderr: string } {
+  const e = err as { stdout?: unknown; stderr?: unknown; message?: unknown } | null | undefined;
+  const stdout = e && typeof e.stdout === 'string' ? e.stdout : '';
+  const stderr = e && typeof e.stderr === 'string' ? e.stderr : '';
+  if (stdout || stderr) return { stdout, stderr };
+  const msg = e && typeof e.message === 'string' && e.message ? e.message : String(err);
+  return { stdout: '', stderr: msg };
+}
+
 // ── Silent DB-unreachable failure (MediConnect autopsy 2026-07-19) ────────────────────────────────
 //
 // ROOT CAUSE (App #14, Remix + Prisma + Postgres): `npx prisma migrate dev` returned **exit 0** while

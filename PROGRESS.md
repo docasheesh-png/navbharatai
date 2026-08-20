@@ -36249,3 +36249,29 @@ it was rewritten to assert the SAME guarantee in its new (better-scoped) form, p
 that neither pane may reintroduce an axis-blind inline sizing style.
 
 Gate: both tsc green; component suites 504/504 (47 files); production build clean.
+
+---
+
+## 2026-08-20 — publish 404: one character. `/populateFiles` should have been `:populateFiles`
+
+Admin, on mobile: publish now gets past the build (#2496 working) and dies on
+*"Error: Request failed with status code 404"* — axios's own words, naming nothing.
+
+ROOT CAUSE: `publishVersion` called `POST /sites/{site}/versions/{id}/populateFiles`. That endpoint is
+a Google API **custom method**, addressed with a **COLON** (`:populateFiles`); the slash form is not a
+route and 404s. Confirmed against the Hosting API reference, not guessed.
+
+WHY IT SURVIVED THIS LONG: the channel-create bug fixed this morning (#2495, the invalid `type` field)
+threw BEFORE this line ever ran, so the publish path had a second, independent break queued behind the
+first. Each fix exposes the next — which is an argument for fixing the honesty at the same time, not
+after the next report.
+
+WHY IT COST A ROUND TRIP: only `ensureChannel` had a real error message; the four calls after it threw
+raw axios errors, so a one-character URL bug arrived as an unattributed "404". Every Hosting call now
+goes through `hostingCall(step, …)`, which names the STEP and the STATUS and re-attaches the IAM hint
+on a 403 — so the next failure here is diagnosable from the first screenshot.
+
+Also fixed while in the file: the finalize PATCH now uses the documented `updateMask` (was
+`update_mask`). Sibling swept: EngineerAI/DeploymentService.ts had the identical slash bug.
+
+Gate: both tsc green; Deployment suites 18/18 (4 new, pinning every deploy URL + the honest errors).

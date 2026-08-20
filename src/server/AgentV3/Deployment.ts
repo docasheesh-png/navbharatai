@@ -63,11 +63,12 @@ export class FirebaseHostingDeployer {
 
     await this.ensureChannel(site, channelId, headers);
     const versionName = await this.publishVersion(site, files, token, headers);
-    await axios.post(
-      `${HOSTING_API}/sites/${site}/channels/${channelId}/releases?versionName=${encodeURIComponent(versionName)}`,
-      {},
-      { headers },
-    );
+    await this.hostingCall('release', () =>
+      axios.post(
+        `${HOSTING_API}/sites/${site}/channels/${channelId}/releases?versionName=${encodeURIComponent(versionName)}`,
+        {},
+        { headers },
+      ));
     return publishedAppUrl(channelId, site);
   }
 
@@ -88,12 +89,37 @@ export class FirebaseHostingDeployer {
     const { token, headers } = await this.authHeaders();
     const versionName = await this.publishVersion(siteId, files, token, headers);
     // Release to the site's default LIVE channel (a site release, not a named preview channel).
-    await axios.post(
-      `${HOSTING_API}/sites/${siteId}/releases?versionName=${encodeURIComponent(versionName)}`,
-      {},
-      { headers },
-    );
+    await this.hostingCall('site release', () =>
+      axios.post(
+        `${HOSTING_API}/sites/${siteId}/releases?versionName=${encodeURIComponent(versionName)}`,
+        {},
+        { headers },
+      ));
     return `https://${siteId}.web.app`;
+  }
+
+  /**
+   * Every Hosting API call goes through here so a failure NAMES ITSELF.
+   *
+   * ROOT CAUSE this closes (admin 2026-08-20): publishing died on `Error: Request failed with status
+   * code 404` — axios's own words, which say nothing about WHICH of the five deploy calls failed. Only
+   * `ensureChannel` had a real message; the four calls after it threw raw. That is why a genuinely
+   * simple URL bug (see `publishVersion`) cost a whole round trip to identify instead of being obvious
+   * from the first report.
+   */
+  private async hostingCall<T>(step: string, run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (err) {
+      const status = (err as AxiosError)?.response?.status;
+      if (status === undefined) throw err; // not an HTTP failure (network/DNS) — keep the original
+      const data = (err as AxiosError)?.response?.data;
+      const detail = data ? JSON.stringify(data).slice(0, 400) : String((err as Error)?.message ?? err);
+      throw new Error(
+        `Firebase Hosting ${step} failed (HTTP ${status}): ${detail}`
+        + (status === 403 ? '\nEnsure the Cloud Run service account has the "Firebase Hosting Admin" IAM role.' : ''),
+      );
+    }
   }
 
   /** Obtain a Google auth token + JSON headers, or throw an honest error (never a fake success). */
@@ -130,11 +156,17 @@ export class FirebaseHostingDeployer {
       hashToBuffer.set(hash, buf);
     }
 
-    const populateResp = await axios.post<{ uploadRequiredHashes?: string[]; uploadUrl?: string }>(
-      `${HOSTING_API}/sites/${site}/versions/${versionId}/populateFiles`,
-      { files: fileHashes },
-      { headers },
-    );
+    // ⚠️ `:populateFiles`, NOT `/populateFiles`. This is a Google API CUSTOM METHOD, which is addressed
+    // with a COLON — the slash form is not a route at all and returns 404. That single character was
+    // the "Request failed with status code 404" that killed every publish (admin 2026-08-20). It went
+    // unnoticed for so long because the channel-create bug above (#2495) threw first, so execution
+    // never reached this line. Docs: sites.versions.populateFiles.
+    const populateResp = await this.hostingCall('file registration', () =>
+      axios.post<{ uploadRequiredHashes?: string[]; uploadUrl?: string }>(
+        `${HOSTING_API}/sites/${site}/versions/${versionId}:populateFiles`,
+        { files: fileHashes },
+        { headers },
+      ));
     const { uploadRequiredHashes = [], uploadUrl } = populateResp.data;
 
     if (uploadUrl && uploadRequiredHashes.length > 0) {
@@ -142,18 +174,21 @@ export class FirebaseHostingDeployer {
         const buf = hashToBuffer.get(hash);
         if (!buf) continue;
         const gz = await gzip(buf);
-        await axios.post(`${uploadUrl}/${hash}`, gz, {
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
-          maxBodyLength: 50 * 1024 * 1024,
-        });
+        await this.hostingCall('file upload', () =>
+          axios.post(`${uploadUrl}/${hash}`, gz, {
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
+            maxBodyLength: 50 * 1024 * 1024,
+          }));
       }
     }
 
-    await axios.patch(
-      `${HOSTING_API}/sites/${site}/versions/${versionId}?update_mask=status`,
-      { status: 'FINALIZED' },
-      { headers },
-    );
+    // `updateMask` is the documented parameter name (the API also defaults the mask to `status`).
+    await this.hostingCall('version finalize', () =>
+      axios.patch(
+        `${HOSTING_API}/sites/${site}/versions/${versionId}?updateMask=status`,
+        { status: 'FINALIZED' },
+        { headers },
+      ));
     return versionName;
   }
 
@@ -216,7 +251,7 @@ export class FirebaseHostingDeployer {
   }
 
   private async createVersion(site: string, headers: Record<string, string>): Promise<string> {
-    const resp = await axios.post<{ name: string }>(
+    const resp = await this.hostingCall('version create', () => axios.post<{ name: string }>(
       `${HOSTING_API}/sites/${site}/versions`,
       {
         config: {
@@ -225,7 +260,7 @@ export class FirebaseHostingDeployer {
         },
       },
       { headers },
-    );
+    ));
     return resp.data.name;
   }
 }

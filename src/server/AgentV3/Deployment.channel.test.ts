@@ -60,3 +60,54 @@ describe('FirebaseHostingDeployer — channel-create payload is valid (no `type`
     expect(body).not.toHaveProperty('ttl');
   });
 });
+
+/**
+ * REGRESSION (admin 2026-08-20): publishing died on `Error: Request failed with status code 404`.
+ * `populateFiles` is a Google API CUSTOM METHOD, addressed with a COLON — the slash form we used is
+ * not a route at all. It stayed hidden because the channel-create bug (#2495) threw before reaching
+ * it. These tests pin every deploy URL, so the next character-level slip fails here, not in prod.
+ */
+describe('FirebaseHostingDeployer - the deploy URLs are exactly what the Hosting API defines', () => {
+  const urls = () => (axios.post as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String((c as unknown[])[0]));
+
+  it('THE BUG: populateFiles is addressed with a COLON, never a slash', async () => {
+    await new FirebaseHostingDeployer().deployStatic('ws-url', new Map([['index.html', Buffer.from('x')]]));
+    const populate = urls().find((u) => u.includes('populateFiles'));
+    expect(populate).toBeTruthy();
+    expect(populate).toContain(':populateFiles');
+    expect(populate).not.toContain('/populateFiles');
+  });
+
+  it('the version finalize uses the documented updateMask parameter', async () => {
+    await new FirebaseHostingDeployer().deployStatic('ws-mask', new Map([['index.html', Buffer.from('x')]]));
+    const patch = (axios.patch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String((c as unknown[])[0]))[0];
+    expect(patch).toContain('updateMask=status');
+  });
+
+  it('a failing deploy call NAMES ITS STEP and status - never a bare axios message', async () => {
+    (axios.post as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url.includes('populateFiles')) {
+        throw Object.assign(new Error('Request failed with status code 404'), {
+          response: { status: 404, data: { error: { message: 'not found' } } },
+        });
+      }
+      if (url.includes('/versions')) return { data: { name: 'sites/s/versions/v1' } };
+      return { data: {} };
+    });
+    await expect(
+      new FirebaseHostingDeployer().deployStatic('ws-err', new Map([['index.html', Buffer.from('x')]])),
+    ).rejects.toThrow(/file registration failed \(HTTP 404\)/);
+  });
+
+  it('a 403 on any step still points at the missing IAM role', async () => {
+    (axios.post as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url.includes('/versions') && !url.includes('populateFiles')) {
+        throw Object.assign(new Error('boom'), { response: { status: 403, data: {} } });
+      }
+      return { data: {} };
+    });
+    await expect(
+      new FirebaseHostingDeployer().deployStatic('ws-403', new Map([['index.html', Buffer.from('x')]])),
+    ).rejects.toThrow(/Firebase Hosting Admin/);
+  });
+});

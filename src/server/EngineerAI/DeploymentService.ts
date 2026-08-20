@@ -75,8 +75,10 @@ export class DeploymentService {
     }
 
     // 4. Tell the server which files we have; it returns which hashes still need uploading.
+    // `:populateFiles` — a Google API CUSTOM METHOD is addressed with a COLON; the slash form is not a
+    // route and 404s. Sibling of the same bug in AgentV3/Deployment.ts (admin 2026-08-20).
     const populateResp = await axios.post<{ uploadRequiredHashes?: string[]; uploadUrl?: string }>(
-      `${HOSTING_API}/sites/${site}/versions/${versionId}/populateFiles`,
+      `${HOSTING_API}/sites/${site}/versions/${versionId}:populateFiles`,
       { files: fileHashes },
       { headers: authHeaders },
     );

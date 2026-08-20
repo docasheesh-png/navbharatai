@@ -150,26 +150,23 @@ function stateSecret(): string {
 }
 
 /**
- * A small self-closing page for the popup — never renders untrusted text as HTML.
+ * Where the callback sends the browser next: back into the app, which reopens Settings → Database
+ * and finishes (or explains) the connection there.
  *
- * On success it also carries the completion NONCE to the opener. The message goes to OUR origin
- * only, and the nonce is useless without a Bearer token for the exact account that began the flow
- * (see `claimPendingConnection`) — so handing it to the same-origin opener leaks nothing.
+ * A REDIRECT, not a popup page. The flow used to end on a page that postMessage'd the opener — but
+ * the consent chain routinely passes through a GitHub sign-in, whose COOP headers sever
+ * `window.opener`, and popup blockers eat the window entirely; either way the message never arrives
+ * and the user lands back on an unchanged card (admin 2026-08-20, the second report on this flow).
+ * A same-tab redirect has none of those failure modes: the app loads, reads the query, and completes
+ * over an authenticated fetch. The nonce in the URL is useless without a Bearer token for the exact
+ * account that began the flow (see `claimPendingConnection`), and it is single-use + TTL'd.
  */
-function closingPage(ok: boolean, message: string, nonce = ''): string {
-  const safe = String(message).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+function appRedirect(res: Response, params: { nonce?: string; error?: string }): void {
   const origin = (process.env.APP_ORIGIN || 'https://navbharatai.com').replace(/\/$/, '');
-  const payload = JSON.stringify({ __nbaiSupabaseConnect: true, ok, nonce });
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Supabase</title></head>
-<body style="font-family:system-ui;padding:32px;text-align:center;color:#c9d1d9;background:#0d1117">
-<p style="font-size:15px">${safe}</p>
-<p style="font-size:13px;color:#8b949e">You can close this window.</p>
-<script>
-  try { (window.opener||window.parent).postMessage(${payload}, ${JSON.stringify(origin)}); } catch (e) {}
-  setTimeout(function(){ try { window.close(); } catch (e) {} }, ${ok ? 1200 : 4000});
-</script>
-</body></html>`;
+  const q = new URLSearchParams();
+  if (params.nonce) q.set('sbconnect', params.nonce);
+  if (params.error) q.set('sberror', params.error);
+  res.redirect(302, `${origin}/?${q.toString()}`);
 }
 
 export function registerSupabaseIntegrationRoutes(
@@ -214,10 +211,10 @@ export function registerSupabaseIntegrationRoutes(
     });
   });
 
-  // Where Supabase sends the user back. Renders a small page (this is a browser navigation, not an
-  // API call), so every failure below must be readable by a human, not a JSON blob.
+  // Where Supabase sends the user back. This is a browser navigation, so both outcomes REDIRECT
+  // into the app (Settings → Database), which shows the result where the user is actually looking.
   app.get('/api/integrations/supabase/callback', async (req: Request, res: Response) => {
-    const fail = (msg: string): void => { res.status(200).type('html').send(closingPage(false, msg)); };
+    const fail = (msg: string): void => { appRedirect(res, { error: msg }); };
     if (!supabaseOAuthConfigured() || !stateSecret()) { fail(connectFailureMessage('not-configured')); return; }
 
     const parsed = parseCallbackParams(req.query as Record<string, unknown>);
@@ -276,7 +273,7 @@ export function registerSupabaseIntegrationRoutes(
       orgName: orgs.orgs[0].name,
       connectedAtMs: now,
     }, orgs.orgs[0].name, now);
-    res.status(200).type('html').send(closingPage(true, `Connected to ${orgs.orgs[0].name}. Finishing up…`, nonce));
+    appRedirect(res, { nonce });
   });
 
   // The authenticated half of the callback: the opener claims the stashed consent with its Bearer

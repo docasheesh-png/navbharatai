@@ -36094,3 +36094,20 @@ consumes the entry). Client (`SupabaseConnectCard`) completes + shows the org na
 
 7 new tests lock the claim (same-uid only, single-use, attacker-uid consumes, TTL, empty-uid).
 Gate: both tsc green; claim 7 + supabaseOAuth 23 green.
+
+---
+
+## 2026-08-20 (later) — Supabase connect, round 2: the popup itself was the failure mode → same-tab redirect
+
+The /complete fix (above) was necessary but not sufficient — the admin retried and still landed back
+on an unchanged card. The popup+postMessage transport is inherently fragile: the consent chain often
+passes through a GitHub sign-in whose COOP severs `window.opener`, and popup blockers eat the window —
+either way the completion message never reaches the card. The admin also explicitly specced the right
+UX: same tab out, same screen back, card flips to Connected.
+
+Now: "Connect Supabase" navigates the SAME TAB (`window.location.assign`); the callback 302-redirects
+back to the app with `?sbconnect=<nonce>` (or `?sberror=<honest message>`); App.tsx stashes it,
+cleans the URL, and reopens Settings → Database; SupabaseConnectCard completes over the authenticated
+`/complete` and shows "Connected to <org>". A 401 (auth still restoring) KEEPS the nonce for a retry —
+the server-side stash is untouched because an unauthenticated request never reaches the claim.
+closingPage/postMessage removed entirely (dead transport). Claim security unchanged (7 tests stand).

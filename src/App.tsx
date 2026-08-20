@@ -2456,6 +2456,26 @@ export default function App() {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
 
+    // Supabase one-tap connect, returning from the SAME-TAB consent redirect. The callback bounces
+    // here with either the completion nonce or an honest error; stash it for SupabaseConnectCard
+    // (which does the authenticated /complete call), clean the URL, and land the user straight back
+    // on Settings → Database — the exact screen they left — instead of the home view.
+    const searchParams = new URLSearchParams(window.location.search);
+    const sbNonce = searchParams.get('sbconnect');
+    const sbError = searchParams.get('sberror');
+    if (sbNonce || sbError) {
+      try {
+        if (sbNonce) sessionStorage.setItem('nbai.sbConnectNonce', sbNonce);
+        if (sbError) sessionStorage.setItem('nbai.sbConnectError', sbError);
+      } catch { /* private mode — the card's status refresh still shows the true state */ }
+      searchParams.delete('sbconnect');
+      searchParams.delete('sberror');
+      const qs = searchParams.toString();
+      window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
+      toggleTab('settings');
+      setSettingsScreen('database');
+    }
+
     return () => {
       window.removeEventListener('message', handleMessage);
       window.removeEventListener('storage', handleStorageChange);

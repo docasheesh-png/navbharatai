@@ -52,37 +52,47 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // The popup hands back the completion nonce; THIS authenticated call is what actually attaches
-  // the consent to the signed-in account. (The callback itself is a browser navigation and cannot
-  // carry our auth header — demanding it there is the bug that made connecting impossible.)
-  // Origin is checked because any page can post to an opener.
+  // Returning from the SAME-TAB consent redirect: App.tsx stashed the completion nonce (or the
+  // callback's honest error) and reopened this screen. THIS authenticated call is what actually
+  // attaches the consent to the signed-in account — the callback itself is a browser navigation and
+  // cannot carry our auth header (the bug that made connecting impossible), and the earlier popup +
+  // postMessage attempt died to popup blockers and to GitHub-login pages severing `window.opener`.
   useEffect(() => {
-    const onMsg = (e: MessageEvent): void => {
-      if (e.origin !== window.location.origin) return;
-      const data = e.data as { __nbaiSupabaseConnect?: boolean; ok?: boolean; nonce?: string } | null;
-      if (!data?.__nbaiSupabaseConnect) return;
-      if (data.ok && typeof data.nonce === 'string' && data.nonce) {
-        void (async () => {
-          try {
-            const res = await authedFetch('/api/integrations/supabase/complete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ nonce: data.nonce }),
-            });
-            const out = await res.json().catch(() => ({}));
-            if (!res.ok) setError(out?.error || 'Could not finish connecting. Please try again.');
-            else setDone(out?.orgName ? `Connected to ${out.orgName}.` : 'Connected.');
-          } catch {
-            setError('Could not finish connecting. Check your connection and try again.');
-          }
-          void refresh();
-        })();
-        return;
+    let nonce = '';
+    let storedError = '';
+    try {
+      nonce = sessionStorage.getItem('nbai.sbConnectNonce') || '';
+      storedError = sessionStorage.getItem('nbai.sbConnectError') || '';
+      sessionStorage.removeItem('nbai.sbConnectError');
+    } catch { return; }
+    if (storedError) setError(storedError);
+    if (!nonce) return;
+    setBusy('connect');
+    void (async () => {
+      try {
+        const res = await authedFetch('/api/integrations/supabase/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nonce }),
+        });
+        const out = await res.json().catch(() => ({}));
+        if (res.status === 401) {
+          // Not signed in yet (auth still restoring) — KEEP the nonce so reopening this screen after
+          // sign-in retries; the server-side stash is untouched because an unauthenticated request
+          // never reaches the claim.
+          setError(out?.error || 'Please sign in, then open Settings → Database again to finish connecting.');
+          return;
+        }
+        try { sessionStorage.removeItem('nbai.sbConnectNonce'); } catch { /* best effort */ }
+        if (!res.ok) setError(out?.error || 'Could not finish connecting. Please try again.');
+        else setDone(out?.orgName ? `Connected to ${out.orgName}.` : 'Connected.');
+        await refresh();
+      } catch {
+        setError('Could not finish connecting. Check your connection and try again.');
+      } finally {
+        setBusy(null);
       }
-      void refresh(); // a failed consent still refreshes so the card shows the true state
-    };
-    window.addEventListener('message', onMsg);
-    return () => window.removeEventListener('message', onMsg);
+    })();
   }, [refresh]);
 
   const connect = async (): Promise<void> => {
@@ -90,11 +100,12 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
     try {
       const res = await authedFetch('/api/integrations/supabase/start', { method: 'POST' });
       const data = await res.json();
-      if (!res.ok || !data?.url) { setError(data?.error || 'Could not start the connection.'); return; }
-      window.open(data.url, 'nbai-supabase', 'width=560,height=760');
+      if (!res.ok || !data?.url) { setError(data?.error || 'Could not start the connection.'); setBusy(null); return; }
+      // SAME-TAB on purpose: the consent chain often passes through a GitHub sign-in, and popups die
+      // to blockers and opener-severing there. The callback redirects straight back to this screen.
+      window.location.assign(data.url);
     } catch {
       setError('Could not reach NavBharatAI. Check your connection and try again.');
-    } finally {
       setBusy(null);
     }
   };

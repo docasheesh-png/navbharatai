@@ -36463,3 +36463,24 @@ Stale comments in ShareForReview / SettingsPanel / homeToolGroups that reference
 a live home were corrected in the same change.
 
 Gate: both tsc green; component + AppContext suites 504/504 (47 files).
+
+### Same day — the removal's second half: four guard tests, and the answer that had to survive
+
+CI went RED on the removal, which is the tests doing their job: FOUR files guarded the tile
+(`websiteHub`, `deadViewBranches`, `polishCollabSettings`, `settingsGeneralGroup`). They were not
+deleted — each was INVERTED so it now locks the removal instead of the tile. `deadViewBranches` is the
+sharpest: it used to assert the OPPOSITE ("SettingsScreen KEEPS cloudeploy — two unions, one name,
+deleting the wrong one blanks a live screen"), and that was correct at the time; it now asserts BOTH
+unions are clean, with its purpose unchanged — the union and the screen must agree, because a member
+nothing can navigate to is how the 'modules' dead branch survived for months.
+
+ONE TEST REFUSED TO BE INVERTED, AND WAS RIGHT. `websiteHub` guarded the honest reassurance the old
+screen carried — "your app is already hosted". Deleting the screen deleted that ANSWER, so a user
+opening App Settings to look for hosting would have found silence. The reassurance is now an honest
+INFO LINE in the hub (the same pattern as "Frontend & Backend — built for you"), pointing at the
+Publish button that genuinely publishes a v5.0 app, and at the Domain tile. Only the broken second
+doorway is gone; the useful thing it said stays.
+
+MY GATE SLIP, RECORDED: I first ran only `src/` suites, not the full `npx vitest run` the constitution
+requires — which is exactly why CI caught four failures I should have caught locally. Full suite now:
+16,773 tests / 1,338 files green, both tsc clean.

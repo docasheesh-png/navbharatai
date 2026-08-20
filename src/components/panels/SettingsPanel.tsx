@@ -584,6 +584,28 @@ export function SettingsPanel({
                     (the UI code) and the BACKEND (the API/server code) are not settings you configure —
                     NavBharatAI Pro builds them for you. So they get an honest info line here, not a fake
                     tile that does nothing (real-features rule). */}
+                {/* HOSTING — an honest info line, not a tile (the same rule as Frontend & Backend below).
+                    The "Hosting & Deploy" tile was REMOVED on 2026-08-20: it duplicated the v5.0 Publish
+                    sheet, could not see a v5.0 app at all, and had published a placeholder to a real URL
+                    as a success. But the REASSURANCE it carried — "your app is already hosted" — was the
+                    genuinely useful part of that screen, and a user opening App Settings looking for
+                    hosting deserves an answer here rather than silence. So the answer stays; only the
+                    broken second doorway is gone. */}
+                <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4 flex items-start gap-3">
+                  <div className="p-2 bg-emerald-600/10 rounded-lg shrink-0">
+                    <Globe className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-bold text-white leading-relaxed">Hosting — your app is already hosted</p>
+                    <p className="text-[10px] text-[#586069] font-bold mt-0.5 leading-relaxed">
+                      Every app you build gets a live HTTPS link the moment it builds — no server to set up.
+                      To publish a permanent version, or to deploy to your own Vercel / Netlify / Cloudflare
+                      account, use the <span className="text-[#8b949e]">Publish</span> button inside NavBharatAI
+                      Pro v5.0. For your own domain, use the <span className="text-[#8b949e]">Domain</span> tile above.
+                    </p>
+                  </div>
+                </div>
+
                 <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4 flex items-start gap-3">
                   <div className="p-2 bg-indigo-600/10 rounded-lg shrink-0">
                     <Sparkles className="w-4 h-4 text-indigo-400" />

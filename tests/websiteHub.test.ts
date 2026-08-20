@@ -6,7 +6,8 @@ import type { SettingsScreen } from '../src/types';
 
 /**
  * "Your Website" hub (admin 2026-07-29): Settings → App Settings now brings the real-website
- * essentials into ONE place — Domain (+ DNS + SSL), Hosting & Publish, Database, Secrets & API Keys
+ * essentials into ONE place — Domain (+ DNS + SSL), Database, Secrets & API Keys (the Hosting &
+ * Deploy tile was removed 2026-08-20; publishing lives in the v5.0 Publish sheet)
  * — with Build & Debug (General/Terminal/Logs) split out, and an honest note that Frontend + Backend
  * CODE is built by NavBharatAI (not a fake tile). Source-level lock (the hub lives inline in
  * SettingsPanel.tsx) + KB/navigation lock.
@@ -20,7 +21,6 @@ describe('App Settings — Your Website hub', () => {
     expect(start).toBeGreaterThan(-1);
     const block = src.slice(start, start + 1800);
     expect(block).toContain("id: 'domain'");
-    expect(block).toContain("id: 'cloudeploy'"); // Hosting & Deploy (single publish surface)
     expect(block).toContain("id: 'database'");
     expect(block).toContain("id: 'auth'");
     expect(block).toContain("id: 'storage'");
@@ -29,10 +29,18 @@ describe('App Settings — Your Website hub', () => {
     // once General Settings became its own group, "your app" was ambiguous between the app the user
     // built and NavBharatAI itself, which is the exact confusion the split exists to end.
     expect(block).toContain('Everything your BUILT APP needs');
-    // No duplicate publish surface: the old standalone "Hosting & Publish" tile/screen is gone,
-    // merged into Hosting & Deploy (admin 2026-07-29).
+    // NO DUPLICATE PUBLISH SURFACE — the point this hub keeps being pulled towards, twice now.
+    // 2026-07-29: the standalone "Hosting & Publish" tile was merged into "Hosting & Deploy".
+    // 2026-08-20: "Hosting & Deploy" (cloudeploy) was REMOVED OUTRIGHT on the admin's call — the
+    // v5.0 Publish sheet already deploys to the user's own Vercel/Netlify/Cloudflare, while that
+    // screen still read the retired v2.0 channel and so could not see a v5.0 app at all. It had
+    // just published the "Waiting for magic..." placeholder to a real URL as a success. Publishing
+    // now has exactly ONE home, and these guards keep it that way.
     expect(block).not.toContain("id: 'hosting'");
     expect(src).not.toContain("settingsScreen === 'hosting'");
+    expect(block).not.toContain("id: 'cloudeploy'");
+    expect(src).not.toContain("settingsScreen === 'cloudeploy'");
+    expect(src).not.toContain('MultiCloudDeploy');
   });
 
   it('🔒 LOGS stays inside App Settings (admin 2026-07-29: "hatana mat") — and General no longer does', () => {
@@ -65,14 +73,18 @@ describe('App Settings — Your Website hub', () => {
     expect(src).toContain("onBack={() => setSettingsScreen('root')}");
   });
 
-  it('the Hosting & Deploy screen keeps the honest auto-hosting note (merged from the old screen)', () => {
-    const start = src.indexOf("settingsScreen === 'cloudeploy'");
-    expect(start).toBeGreaterThan(-1);
-    const block = src.slice(start, start + 1600);
-    // The honest "your app is already hosted" reassurance was folded in — not lost.
-    expect(block).toContain('already hosted');
-    // The real deploy component still renders below it with the app bundle.
-    expect(block).toContain('<MultiCloudDeploy generatedCode={generatedCode} />');
+  it('the honest auto-hosting ANSWER survives the removed screen — as an info line, not a tile', () => {
+    // Removing the Hosting & Deploy screen must not remove the useful thing it said. A user opening
+    // App Settings to look for hosting still gets an answer here; only the broken second doorway is
+    // gone. Same rule as Frontend & Backend: an honest info line beats a tile that does nothing.
+    expect(src).toContain('Hosting — your app is already hosted');
+    const start = src.indexOf('Hosting — your app is already hosted');
+    const block = src.slice(start, start + 900);
+    // …and it points at the path that genuinely publishes a v5.0 app.
+    expect(block).toContain('Publish');
+    expect(block).toContain('Pro v5.0');
+    // It is an info line, NOT a clickable settings tile.
+    expect(src).not.toContain("id: 'hosting'");
   });
 
   it('the Storage sub-screen mounts the real StorageSettings connection panel', () => {
@@ -85,15 +97,6 @@ describe('App Settings — Your Website hub', () => {
     expect(src).toContain('<AuthSettings');
   });
 
-  it('Multi-Cloud Deploy is an App Settings tile mounting the real component with the app code', () => {
-    const start = src.indexOf("title: 'App Settings'");
-    const block = src.slice(start, start + 1800);
-    expect(block).toContain("id: 'cloudeploy'");
-    expect(src).toContain("settingsScreen === 'cloudeploy'");
-    // Real deploy needs the app bundle — generatedCode is threaded through, not stubbed.
-    expect(src).toContain('<MultiCloudDeploy generatedCode={generatedCode} />');
-  });
-
   it('Frontend & Backend get an honest info line, NOT a fake tile', () => {
     expect(src).toContain('Frontend &amp; Backend — built for you');
     // They are NOT clickable settings tiles (no settingsScreen ids for them).
@@ -101,13 +104,17 @@ describe('App Settings — Your Website hub', () => {
     expect(src).not.toContain("id: 'backend'");
   });
 
-  it('SettingsScreen type carries the new hub screens', () => {
-    // 'hosting' was merged into 'cloudeploy' (Hosting & Deploy) — no longer a SettingsScreen member.
+  it('SettingsScreen type carries the hub screens — and no longer carries the removed ones', () => {
+    // 'hosting' was merged into 'cloudeploy' (2026-07-29); 'cloudeploy' was removed (2026-08-20).
+    // A union member nothing can navigate to is how the 'modules' dead screen survived unnoticed,
+    // so the type is kept in step with the tiles rather than left carrying ghosts.
     const domain: SettingsScreen = 'domain';
-    const cloudeploy: SettingsScreen = 'cloudeploy';
     const auth: SettingsScreen = 'auth';
     const storage: SettingsScreen = 'storage';
-    expect([domain, cloudeploy, auth, storage]).toEqual(['domain', 'cloudeploy', 'auth', 'storage']);
+    expect([domain, auth, storage]).toEqual(['domain', 'auth', 'storage']);
+    // @ts-expect-error 'cloudeploy' was removed from SettingsScreen on 2026-08-20.
+    const gone: SettingsScreen = 'cloudeploy';
+    expect(gone).toBe('cloudeploy'); // the value still exists at runtime; the TYPE must not accept it
   });
 });
 
@@ -127,15 +134,20 @@ describe('App Settings hub — KB awareness', () => {
     expect(d!.path).toContain('Settings → App Settings → Domain');
   });
 
-  it('settings_multicloud KB entry exists, is honest about real-vs-CLI, and moved out of Other AI', () => {
-    const m = kb('settings_multicloud');
-    expect(m).toBeTruthy();
-    expect(m!.path).toContain('Settings → App Settings → Hosting & Deploy');
-    expect(m!.description).toMatch(/NavBharat Hosting/);
-    expect(m!.description).toMatch(/Vercel/);
-    // Honest: some platforms are real in-app, others show CLI steps — nothing faked.
-    expect(m!.description.toLowerCase()).toContain('cli');
-    expect(m!.description.toLowerCase()).toContain('faked');
+  it('the removed Hosting & Deploy KB entry is gone — but "deploy"/"hosting" still find the REAL path', () => {
+    // Deleting the entry alone would have been the wrong half of the job: its keywords ('deploy',
+    // 'hosting', 'vercel', 'live kaise kare') are exactly what users type, and every AI answers from
+    // this file. So the entry goes AND the same questions must still resolve — to the Publish flow
+    // that genuinely publishes a v5.0 app.
+    expect(kb('settings_multicloud')).toBeFalsy();
+    const publish = kb('agentv3_deploy');
+    expect(publish).toBeTruthy();
+    for (const word of ['deploy', 'hosting', 'vercel', 'go live']) {
+      expect(publish!.keywords).toContain(word);
+    }
+    expect(publish!.path.toLowerCase()).toContain('publish');
+    // And the hub description must not still advertise a tile that no longer exists.
+    expect(kb('settings_root')!.description).not.toMatch(/Hosting & Deploy \(your app is auto-hosted/);
   });
 
   it('settings_auth KB entry exists, names Clerk/Auth0, and is honest about DB-bundled auth', () => {

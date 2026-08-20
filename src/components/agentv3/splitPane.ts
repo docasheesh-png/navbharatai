@@ -1,3 +1,4 @@
+import type React from 'react';
 // The chat ⇆ workspace split (admin 2026-08-17: "preview aur chat ke bich ka border move ho sake —
 // user jab chahe jisko bada ya chota kar le", plus "tablet me tap karke left/right").
 //
@@ -220,4 +221,27 @@ export function saveSplit(pct: number, storage?: Pick<Storage, 'setItem'>): void
     const store = storage ?? (typeof localStorage !== 'undefined' ? localStorage : undefined);
     store?.setItem(STORAGE_KEY, String(Math.round(pct)));
   } catch { /* best-effort */ }
+}
+
+/**
+ * The split as CSS VARIABLES, not as a `flex` declaration.
+ *
+ * ── THE BUG THIS FIXES (admin 2026-08-20: "preview desktop me theek, mobile phone me gadbad") ────
+ * Both panes carried `style={{ flex: `0 1 ${pct}%`, minWidth: MIN_PANE_PX }}`. The split is a
+ * WIDTH concept — it exists because the desktop layout is `sm:flex-row`, two panes side by side.
+ * But the SAME container is `flex-col` on a phone, where the main axis is VERTICAL, so that
+ * `flex-basis: <pct>%` silently became a HEIGHT CAP, and `flex-grow: 0` forbade the pane from
+ * taking the rest. The workspace pane therefore got only (100 − split)% of the screen's height —
+ * the preview squeezed into a strip with a large empty area beneath it — while the class that was
+ * supposed to make it fill (`flex-1`) lost, because an inline style always beats a class.
+ *
+ * The fix is to stop shipping the split as a property that both axes honour. These variables are
+ * inert on their own; a `sm:`-prefixed utility consumes them, so the percentage exists ONLY in the
+ * row layout it was designed for, and the phone keeps plain `flex-1` (fill). PURE.
+ */
+export function paneSplitVars(pct: number): React.CSSProperties {
+  return {
+    '--nbai-pane': `${pct}%`,
+    '--nbai-pane-min': `${MIN_PANE_PX}px`,
+  } as React.CSSProperties;
 }

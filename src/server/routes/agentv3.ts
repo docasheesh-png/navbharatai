@@ -6,6 +6,7 @@ import { honestResultEvent } from '../lib/responseEmoji';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { memoryLinkedSuggestions, mergeSuggestions } from '../AgentV3/memoryLinkedSuggestions';
+import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
 import { analyzeAppScope } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint } from '../lib/fullstackBootHint';
@@ -3174,15 +3175,30 @@ export function registerAgentV3Routes(app: Express): void {
       // asked for that is genuinely not in the app becomes the FIRST suggestion, in their own words.
       // Best-effort throughout: memory is restored with a short timeout and any failure simply leaves the
       // file-derived list exactly as it was.
+      // THE ORDER IS THE FEATURE (admin 2026-08-20: "us app ki memory ke hisab se … aise random nahi").
+      // Three layers, ranked by how GROUNDED each one is in this specific app:
+      //   1. what the USER ASKED FOR and still does not have — their own words, the strongest signal;
+      //   2. what the LAST BUILD MEASURED and left unresolved — facts about this app, not guesses;
+      //   3. what the FILES imply (domain gaps, then universal polish) — inference, so it goes last.
+      // Layer 3 was previously the whole list, which is exactly why the bulb felt random.
       let suggestions = derived;
       try {
         const mem = getWorkspaceMemory(workspaceId);
         await raceTimeout(restoreWorkspaceMemory(workspaceId, mem), 3_000, 'restoreMemoryForSuggestions');
         const requests = mem.recentRequests(5);
-        if (requests.length > 0) {
-          const sources = Object.entries(files).map(([path, content]) => ({ path, content: String(content || '') }));
-          const fromMemory = memoryLinkedSuggestions({ requests, graph: mem.snapshot().graph, sources });
-          suggestions = mergeSuggestions(fromMemory, derived, 12);
+        const sources = Object.entries(files).map(([path, content]) => ({ path, content: String(content || '') }));
+        const fromAsks = requests.length > 0
+          ? memoryLinkedSuggestions({ requests, graph: mem.snapshot().graph, sources })
+          : [];
+        // The last build's own report for THIS workspace. Best-effort and separately guarded: a missing
+        // or unreadable report simply contributes no findings, it never costs us the asks layer.
+        let fromFindings: ReturnType<typeof buildFindingSuggestions> = [];
+        try {
+          const report = await raceTimeout(loadDiagnostics(workspaceId), 3_000, 'diagnosticsForSuggestions');
+          fromFindings = buildFindingSuggestions(report?.issues);
+        } catch { /* no report → no findings layer */ }
+        if (fromAsks.length > 0 || fromFindings.length > 0) {
+          suggestions = mergeSuggestions([...fromAsks, ...fromFindings], derived, 12);
         }
       } catch { /* the bulb must never fail because memory was unavailable */ }
 

@@ -38,7 +38,7 @@ const jsZipLoader = async (buf: Buffer) => {
 import { scanFile, isScanningConfigured, MAX_SCANNABLE_BYTES} from '../lib/malwareScan';
 import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 import {
-  isStorageConfigured, putApk, getApk, deleteApk, saveApp, getApp, updateApp,
+  isStorageConfigured, putApk, getApk, getApkStream, deleteApk, saveApp, getApp, updateApp,
   listApps, listAppsByUid, toPublic,
   type StoreApp, type SubmissionStatus,
 } from '../lib/navStoreStore';
@@ -59,6 +59,7 @@ import { verifiedWorkspaceReadOk } from '../lib/workspaceIdentity';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { renderPreview } from '../runtime/renderPreview';
 import { VirtualFileSystem } from '../project/ProjectModel';
+import { escapeHtml } from '../../lib/escapeHtml';
 
 /** What an upload costs today. One value, so raising it later is a one-line change. */
 export const UPLOAD_FEE_INR = 0;
@@ -395,19 +396,57 @@ export function registerNavStoreRoutes(app: Express): void {
    * download instead of leaving a link alive somewhere.
    */
   app.get('/api/nav-store/download/:id', async (req: Request, res: Response) => {
+    // A DOWNLOAD IS A NAVIGATION, SO A FAILURE MUST READ LIKE A PAGE (admin report 2026-08-19:
+    // "app mart se apk download hi nahi hoti"). This route is opened by the browser itself, not by
+    // fetch — so answering a failure with a JSON body showed the user a line of raw code, or nothing
+    // at all, and the button simply looked dead. Say what happened, in words.
+    const fail = (code: number, message: string) => {
+      if (String(req.headers.accept || '').includes('application/json')) {
+        return res.status(code).json({ error: message });
+      }
+      res.status(code).type('html').send(
+        `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">` +
+        `<body style="margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;` +
+        `background:#0d1117;color:#e6edf3;font:16px/1.6 system-ui,sans-serif;padding:24px;text-align:center">` +
+        `<div><p style="font-weight:700;margin:0 0 8px">${escapeHtml(message)}</p>` +
+        `<p style="color:#8b949e;margin:0;font-size:14px">Go back to App Mart and try again.</p></div>`,
+      );
+    };
+
+    let found: Awaited<ReturnType<typeof getApp>> = null;
     try {
-      const found = await getApp(String(req.params.id || ''));
-      if (!found || found.status !== 'approved') return res.status(404).json({ error: 'That app is not available.' });
-      const bytes = await getApk(found.storagePath);
-      await updateApp(found.id, { downloads: (found.downloads || 0) + 1 }).catch(() => { /* a count is never worth failing a download */ });
-      const safeName = found.appName.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 40) || 'app';
-      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-      res.setHeader('Content-Disposition', `attachment; filename="${safeName}-${found.versionName}.apk"`);
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.send(bytes);
+      found = await getApp(String(req.params.id || ''));
     } catch {
-      res.status(502).json({ error: 'Could not download that app.' });
+      return fail(502, 'Could not reach the store just now.');
     }
+    if (!found || found.status !== 'approved') return fail(404, 'That app is not available.');
+
+    const safeName = found.appName.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 40) || 'app';
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}-${found.versionName}.apk"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    // Known from the record, so the phone can show a real progress bar instead of an unknown size.
+    if (typeof found.sizeBytes === 'number' && found.sizeBytes > 0) {
+      res.setHeader('Content-Length', String(found.sizeBytes));
+    }
+
+    // STREAMED, not buffered: an app is 5–50 MB, and holding all of it in the server's memory before
+    // sending a byte is both slow to start and a real memory risk under two concurrent downloads.
+    let stream: NodeJS.ReadableStream;
+    try {
+      stream = getApkStream(found.storagePath);
+    } catch {
+      return fail(502, 'This app’s file could not be opened.');
+    }
+    stream.on('error', () => {
+      // Once bytes are on the wire the status is already sent, so the only honest signal left is to
+      // break the connection — a truncated file the user believes is complete would be worse.
+      if (res.headersSent) res.destroy();
+      else fail(502, 'This app’s file could not be read.');
+    });
+    stream.pipe(res);
+    // The count is updated once the file is genuinely on its way, and never allowed to fail it.
+    await updateApp(found.id, { downloads: (found.downloads || 0) + 1 }).catch(() => { /* a count is never worth failing a download */ });
   });
 
   // ── Admin review ───────────────────────────────────────────────────────────

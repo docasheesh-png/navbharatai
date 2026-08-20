@@ -97,6 +97,37 @@ export function resolveWebSocketUrl(
 }
 
 /**
+ * The URL to put in a LINK or hand to `window.open` for an `/api/…` path — the SECOND transport the
+ * fetch/XHR rewrite cannot reach.
+ *
+ * ADMIN REPORT 2026-08-19: "App Mart se apk download hi nahi hoti." The store's Download button was a
+ * plain `<a href="/api/nav-store/download/…">`. On the web that is correct and works. In the BUNDLED
+ * app it resolves against the shell's own origin (https://localhost), where no such route exists — so
+ * the button could never download anything on a phone.
+ *
+ * 🔑 THE SAME HOLE, A THIRD TIME. This module patches `fetch` and `XMLHttpRequest`; `new WebSocket()`
+ * escaped it (see `resolveWebSocketUrl` above, written after Sonic voice silently failed on every
+ * phone), and so does a NAVIGATION — an `<a href>`, a `window.open`, a `form action`. None of those go
+ * through fetch. Rather than fix this one button, the answer belongs here, so the next feature that
+ * links to an API path gets it right for free instead of rediscovering the same failure a fourth time.
+ *
+ * Returns the path UNCHANGED on the web, which keeps the link same-origin exactly as today.
+ * Pure and dependency-injected, so the native case is testable without a device.
+ */
+export function resolveApiHref(
+  path: string,
+  w: Pick<ShellWindow, 'Capacitor'> & { location: { origin: string } },
+  apiOrigin: string = NATIVE_API_ORIGIN,
+): string {
+  // An absolute URL is the caller's own decision — never second-guess it.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) return path;
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return needsApiRewrite(isNativeShell(w), w.location.origin, apiOrigin)
+    ? apiOrigin + normalized
+    : normalized;
+}
+
+/**
  * Install the transport-layer rewrite on a window-like object. Returns true only when actually
  * installed (bundled native shell); false = no-op (web / hosted shell). Patches:
  *   • fetch — string, URL, and Request inputs (a Request's absolute local-origin /api URL is

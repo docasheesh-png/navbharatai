@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import JSZip from 'jszip';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 // This store hands one person's Android app to other people's phones. The single most important
 // property, tested from several angles below, is that NOTHING can make an app public except an
@@ -373,5 +375,48 @@ describe('isStoreAdmin', () => {
     expect(isStoreAdmin('B@Y.COM')).toBe(true);
     expect(isStoreAdmin('c@z.com')).toBe(false);
     expect(isStoreAdmin(null)).toBe(false);
+  });
+});
+
+// ── APK DOWNLOAD (admin report 2026-08-19: "app mart se apk download hi nahi hoti") ──────────────
+//
+// Source guards, because the two defects were both about WIRING — a link pointing at the wrong origin
+// and a whole file buffered into memory. Neither can be caught by testing the pieces in isolation:
+// every function involved worked perfectly on its own the entire time the button was dead.
+describe('App Mart download — the button has to reach the server, and the file has to flow', () => {
+  const codeOnly = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const store = codeOnly(readFileSync(join(process.cwd(), 'src/components/ide/NavAppStore.tsx'), 'utf8'));
+  const route = codeOnly(readFileSync(join(process.cwd(), 'src/server/routes/navStore.ts'), 'utf8'));
+
+  it('the download link is resolved for the app, not left as a bare /api path', () => {
+    // A relative /api URL inside the bundled shell points at the shell itself, where nothing answers.
+    expect(store).toContain('resolveApiHref');
+    expect(store).not.toMatch(/href=\{`\/api\/nav-store\/download/);
+  });
+
+  it('inside the app the download is handed to the system browser', () => {
+    // A WebView has no download manager: an <a> to an attachment does nothing at all, which is
+    // precisely what the user reported seeing.
+    const at = store.indexOf('nav-store/download');
+    expect(at).toBeGreaterThan(-1);
+    const button = store.slice(at, at + 600);
+    expect(button).toContain('isNativeApp()');
+    expect(button).toContain("window.open");
+  });
+
+  it('the route STREAMS the apk instead of holding 5–50 MB in memory first', () => {
+    const at = route.indexOf("'/api/nav-store/download/:id'");
+    expect(at).toBeGreaterThan(-1);
+    const handler = route.slice(at, route.indexOf('app.get(', at + 10));
+    expect(handler).toContain('getApkStream');
+    expect(handler).toContain('.pipe(res)');
+    expect(handler).not.toContain('res.send(bytes)');
+  });
+
+  it('a failure answers a BROWSER in words — this URL is opened by navigation, not by fetch', () => {
+    const at = route.indexOf("'/api/nav-store/download/:id'");
+    const handler = route.slice(at, route.indexOf('app.get(', at + 10));
+    expect(handler).toContain('text/html'.slice(5)); // .type('html')
+    expect(handler).toMatch(/not available/);
   });
 });

@@ -133,6 +133,22 @@ export async function getApk(storagePath: string): Promise<Buffer> {
   return buf;
 }
 
+/**
+ * The same bytes as a STREAM, for serving a download.
+ *
+ * An app is 5–50 MB. `getApk` pulls all of it into the server's memory before a single byte reaches
+ * the user, so two people downloading a large app at once cost more RAM than the instance may have —
+ * and the user stares at a button that has visibly done nothing while it buffers. Streaming hands the
+ * bytes straight through, so memory is flat regardless of file size and the download starts at once.
+ *
+ * `getApk` is kept for the callers that genuinely need the whole file in hand (the malware scan).
+ */
+export function getApkStream(storagePath: string): NodeJS.ReadableStream {
+  const name = bucketName();
+  if (!name) throw new Error('no bucket configured');
+  return admin.storage().bucket(name).file(storagePath).createReadStream();
+}
+
 /** Delete the bytes — used when an app is removed, so a takedown is real and not just a flag. */
 export async function deleteApk(storagePath: string): Promise<void> {
   const name = bucketName();

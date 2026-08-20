@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { isNativeShell, needsApiRewrite, rewriteApiUrl, installNativeApiRewrite, NATIVE_API_ORIGIN, type ShellWindow } from './apiBase';
+import { isNativeShell, needsApiRewrite, rewriteApiUrl, resolveApiHref, installNativeApiRewrite, NATIVE_API_ORIGIN, type ShellWindow } from './apiBase';
 
 const fakeWindow = (over: Partial<ShellWindow> & { origin?: string } = {}): ShellWindow & { fetch: ReturnType<typeof vi.fn> } => {
   const fetch = vi.fn(async () => new Response('ok'));
@@ -109,5 +109,36 @@ describe('installNativeApiRewrite — transport-layer patch', () => {
     expect(opened[0][1]).toBe(`${NATIVE_API_ORIGIN}/api/secrets/u1`);
     expect(opened[1][1]).toBe(`${NATIVE_API_ORIGIN}/api/x`);
     expect(opened[2][1]).toBe('/logo.png');
+  });
+});
+
+// ADMIN REPORT 2026-08-19: "app mart se apk download hi nahi hoti." The store's Download button was a
+// plain <a href="/api/nav-store/download/…>. Correct on the web, dead in the bundled app — a relative
+// path there resolves against the shell's own origin, where no such route exists. Same hole as the
+// WebSocket one above: a navigation goes through neither fetch nor XHR.
+describe('resolveApiHref — the URL a LINK or window.open may use for an /api path', () => {
+  const web = { Capacitor: undefined, location: { origin: 'https://navbharatai.com' } };
+  const bundled = { Capacitor: { isNativePlatform: () => true }, location: { origin: 'https://localhost' } };
+  const hosted = { Capacitor: { isNativePlatform: () => true }, location: { origin: NATIVE_API_ORIGIN } };
+
+  it('web: unchanged, so the link stays same-origin exactly as before', () => {
+    expect(resolveApiHref('/api/nav-store/download/abc', web)).toBe('/api/nav-store/download/abc');
+  });
+
+  it('bundled app: absolute, because a relative path there points at the shell, not at us', () => {
+    expect(resolveApiHref('/api/nav-store/download/abc', bundled))
+      .toBe(`${NATIVE_API_ORIGIN}/api/nav-store/download/abc`);
+  });
+
+  it('hosted shell: unchanged — its origin already IS the API origin', () => {
+    expect(resolveApiHref('/api/x', hosted)).toBe('/api/x');
+  });
+
+  it('an absolute URL is the caller\'s own decision and is never second-guessed', () => {
+    expect(resolveApiHref('https://example.com/api/x', bundled)).toBe('https://example.com/api/x');
+  });
+
+  it('a path without a leading slash still produces a valid URL', () => {
+    expect(resolveApiHref('api/x', bundled)).toBe(`${NATIVE_API_ORIGIN}/api/x`);
   });
 });

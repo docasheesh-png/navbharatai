@@ -36275,3 +36275,41 @@ Also fixed while in the file: the finalize PATCH now uses the documented `update
 `update_mask`). Sibling swept: EngineerAI/DeploymentService.ts had the identical slash bug.
 
 Gate: both tsc green; Deployment suites 18/18 (4 new, pinning every deploy URL + the honest errors).
+
+---
+
+## 2026-08-20 — 💡 fully memory-driven: the last build's own findings + grounded-before-inferred order (PR #2505, merged 0b0b9b8)
+
+Admin: "us app ki memory ke hisab se suggestion ane chahiye, aise random nahi" — after the previous
+slice, which read only ONE part of memory (the user's unmet asks) and left the file-derived list as
+most of the bulb. That remainder was the "random" the admin was pointing at. This completes it.
+
+**THREE LAYERS, AND THE ORDER IS THE FEATURE:**
+1. **What the user ASKED FOR** and still does not have — their own words (shipped in #2502).
+2. **What the LAST BUILD MEASURED** and left unresolved — NEW. `buildFindingSuggestions.ts` (pure, 9
+   tests) reads the workspace's saved diagnostics report: runtime errors, data that did not survive a
+   reload, a page that failed to load, plain inner pages, vulnerable dependencies, failing tests,
+   accessibility gaps, circular imports, missing SPA fallback.
+3. **What the FILES imply** — domain gaps then universal polish. Inference, so LAST. This used to be
+   the entire list.
+
+**Curated code→sentence table, deliberately.** A diagnostic message is written for an engineer reading
+an autopsy — it names files, tools and sometimes providers. Raw, it would be unreadable AND a
+White-Label risk. Each code maps to a user-facing sentence, and **a code with no entry yields NOTHING**
+— a finding we cannot phrase honestly is better omitted than paraphrased by guesswork. Test-locked,
+including that no user-facing string names a vendor or tool.
+
+**Four exclusions, each a bug if included:** `autoResolved` (the build already fixed it), observations
+(the user's pre-existing code), summary codes (`RELEASE_GATE` — would duplicate its parts), and OUR OWN
+missing measurements (`RUNTIME_UNCHECKED`, `TEST_SUITE_UNVERIFIED`, `JOURNEY_NOT_DERIVED`,
+`TIME_TO_FIRST_CALL`) — asking the user to "fix" what the PLATFORM could not verify would be dishonest.
+
+Both memory layers are separately guarded and raced to 3s: no report ⇒ no findings layer, and it never
+costs the asks layer; a total memory failure leaves the file-derived list byte-identical. Nothing
+auto-runs. AppKnowledgeBase updated so every AI can explain the new ordering. An end-to-end test locks
+the final rank (ask → finding → generic).
+
+⚠️ For a later session: do NOT "simplify" by folding layer 3 back to the top, and do not surface a
+finding's raw `message` in place of the table — both were the specific failures this change fixed.
+
+Gate: both tsc green, 16,765 tests / 1,337 files, CI green before merge.

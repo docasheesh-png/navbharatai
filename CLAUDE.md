@@ -598,12 +598,23 @@ duplicate silently switches the whole GLM/Kimi floor off while the console still
 a few rows up. `AGENTV3_ENABLED` and `AGENTV3_PAID_PUBLIC` carry the same risk for the feature gate and
 for billing. **Compare each pair's VALUES and delete the wrong one — do not assume they match.**
 
-**🟡 2. `PUBLISHED_APP_DOMAIN` is DEAD CONFIG.** It is set in Cloud Run and **nothing in the repository
-reads it** — verified by exact-match search across `src/`, `.github/` and `cloudbuild.yaml`, not a
-substring grep (a substring grep is what nearly let `SEMANTIC_MEMORY` be mis-filed as dead, when in fact
-its master switch is read at `semanticMemory.ts:57`). Either it is a leftover, or it is the name someone
-INTENDED for a branded published-app domain that was never wired. Nothing breaks either way; it should
-be deleted or implemented, not left looking meaningful.
+**🟡 2. `PUBLISHED_APP_DOMAIN` — CORRECTED WITHIN THE HOUR, and the correction is the useful part.**
+The audit first reported it as DEAD CONFIG: set in Cloud Run, read nowhere. That was true of the code I
+had, and **false of `main`** — another session had just landed `publishedAppUrl()` in `Deployment.ts`
+plus a Cloudflare Worker (`infra/cloudflare/mitrify-apps-worker.js`). The rebase conflict is what
+surfaced it; the audit alone would have shipped a wrong claim and had the admin delete a live key.
+
+**The lesson is safeguard #1, hitting an audit rather than a roadmap:** a cross-check is only true as of
+the commit it ran against, and `main` moves under you. Anything this file asserts about the CODE must be
+re-grepped against current `main`, not against a session's working tree.
+
+What it actually does: with the env UNSET a published app is served at `https://<site>--<channel>.web.app`
+— already on the Public Suffix List, which is why it is the safe default. With it SET (e.g. `mitrify.in`)
+the URL becomes `https://<channel>.<domain>`, and that is a **pure string change** — it only becomes real
+once the Cloudflare Worker routes `*.<domain>` to the matching Firebase channel. ⚠️ **Leave it unset until
+that Worker is live**, or every published URL points at a host that does not resolve. And branded
+subdomains are NOT cookie-isolated from each other until `<domain>` is on the PSL (a separate,
+weeks-long registration) — localStorage/IndexedDB are per-origin from day one, cookies are not.
 
 **🟢 3. Four keys were missing from this registry** — now recorded:
 - **`PROFESSIONAL_PAID_ENABLED`** — the Professionals paid gate (`professionals/professionalPaid.ts`).
@@ -611,7 +622,8 @@ be deleted or implemented, not left looking meaningful.
 - **`PUBLIC_BASE_URL`** — the public origin used to build bot/webhook URLs (`routes/bots.ts`).
 - **`SEMANTIC_MEMORY`** — master switch for semantic memory. Companion tunables
   `SEMANTIC_MEMORY_MAX_CHUNKS` (60) and `SEMANTIC_MEMORY_TOP_K` (5) are code-defaulted.
-- **`PUBLISHED_APP_DOMAIN`** — see item 2; recorded so nobody re-discovers it as a mystery.
+- **`PUBLISHED_APP_DOMAIN`** — the branded published-app host; see item 2 for why it must stay
+  unset until the Cloudflare Worker is live.
 
 **🔵 4. `FIREBASE_DEPLOY_PROJECT` is NOT set — and that CLOSES a live hypothesis.** While diagnosing the
 2026-08-19 publish 404 I proposed that the deploy might be pointing at the wrong project, since that env

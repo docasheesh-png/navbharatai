@@ -1,6 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { CloudUpload, ServerCog, CloudCheck, CloudCog, Globe, Rocket, Check, X, Loader2, ChevronRight, RefreshCw, ExternalLink, Terminal, Shield, Zap, Clock, AlertCircle, CheckCircle2, Copy } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { isPlaceholderHtml } from '../../lib/workspaceSource';
+
+/**
+ * What this screen refuses to publish, and why (admin question 2026-08-20: "yeh kya kaam karta hai …
+ * kaam kar bhi raha hai ya nahi?" — the audit that question triggered found a real fake-success).
+ *
+ * ROOT CAUSE. Both deploy paths guarded with `!generatedCode`. But `generatedCode` is the retired v2.0
+ * channel, and in v5.0 it sits at the "Waiting for magic…" PLACEHOLDER — a truthy string. So the guard
+ * never fired: pressing Deploy on a v5.0 app uploaded the placeholder page to a REAL live URL and
+ * reported "✅ Deployed successfully". A live link showing "Waiting for magic…" is the worst kind of
+ * fake success, because the URL is genuine.
+ *
+ * The repo already had the fix — `isPlaceholderHtml` in lib/workspaceSource.ts, written for exactly
+ * this class in the 2026-07-21 tools autopsy and adopted by Test Runner, Performance and Dark Mode.
+ * This screen was the sibling that was missed. It now shares that one implementation rather than
+ * carrying a fourth copy of the rule.
+ *
+ * WHY NOT "just publish the v5 app from here" instead: `/api/pwa/save` stores ONE html string. A v5.0
+ * React app is a multi-file project that must be BUILT first, which is precisely what the Publish
+ * button in Pro v5.0 does (build → dist → Firebase Hosting → permanent URL). Shipping index.html alone
+ * would produce a broken site — a worse lie than the one being fixed. So a v5.0 app is pointed at the
+ * path that genuinely publishes it.
+ */
+const V5_APP_GUIDANCE = '> ℹ️ This screen publishes a single-page app (or a loaded template). '
+  + 'Your NavBharatAI Pro v5.0 app is published from the Publish button inside Pro v5.0 — '
+  + 'it builds your project first and gives you a permanent live URL.';
 
 type Platform = 'vercel' | 'netlify' | 'firebase' | 'cloudrun' | 'railway' | 'render' | 'navbharat';
 type DeployStatus = 'idle' | 'building' | 'deploying' | 'success' | 'failed';
@@ -135,9 +161,11 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
 
     // NavBharat Hosting: real deploy via /api/pwa/save
     if (selectedPlatform === 'navbharat') {
-      if (!generatedCode) {
+      // isPlaceholderHtml, not `!generatedCode` — see V5_APP_GUIDANCE above. The placeholder is a
+      // truthy string, so the old guard published "Waiting for magic…" to a real URL as a success.
+      if (isPlaceholderHtml(generatedCode)) {
         setDeployStatus('failed');
-        setLogs(['> ❌ No app code found. Build something with NavBharat AI first.']);
+        setLogs(['> ❌ There is no single-page app loaded here to publish.', V5_APP_GUIDANCE]);
         return;
       }
       setLogs(['> Preparing NavBharat Hosting upload...']);
@@ -181,9 +209,11 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
     // existing /api/pro/deploy backend (deployVercel) instead of only printing CLI text. Honest: no token
     // → falls through to the CLI instructions below (never a faked success).
     if (selectedPlatform === 'vercel' && (envVars['VERCEL_TOKEN'] || '').trim()) {
-      if (!generatedCode) {
+      // Same guard as the NavBharat path: a real Vercel URL serving the placeholder would be a fake
+      // success on the user's OWN account, which is worse — it looks like their deploy is broken.
+      if (isPlaceholderHtml(generatedCode)) {
         setDeployStatus('failed');
-        setLogs(['> ❌ No app code found. Build something with NavBharat AI first.']);
+        setLogs(['> ❌ There is no single-page app loaded here to publish.', V5_APP_GUIDANCE]);
         return;
       }
       setDeployStatus('deploying');

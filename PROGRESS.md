@@ -36111,3 +36111,40 @@ cleans the URL, and reopens Settings → Database; SupabaseConnectCard completes
 `/complete` and shows "Connected to <org>". A 401 (auth still restoring) KEEPS the nonce for a retry —
 the server-side stash is untouched because an unauthenticated request never reaches the claim.
 closingPage/postMessage removed entirely (dead transport). Claim security unchanged (7 tests stand).
+
+---
+
+## 2026-08-20 — v5.0 "closed" when the user went to Settings: one flag was answering two questions
+
+Admin: "v5 → publish → connect domain → database connect → Settings ka Database page khulta hai — yeh
+ek dam sahi hai. PAR NavBharatAI Pro v5 band ho kar Settings open hota hai, jisse user ko wapas v5 me
+aa kar app wapas load karni padti hai. Jabki hamare app me multi window/tab system hai."
+
+ROOT CAUSE. v5.0 already survives tab switches while the page lives (v3SurfaceMount.ts — window
+semantics). What did not survive was a full PAGE LOAD, because the single flag that restores v5.0 was
+written from the ACTIVE VIEW:
+
+    if (activeView === 'nbi_pro_chat') set('nbi_v3_open') else remove('nbi_v3_open')
+
+Switching to Settings ERASED it. The Supabase consent is a same-tab redirect (shipped hours earlier,
+#2498), so the app reloads on the way back — and with the flag already gone `openTabs` came back
+EMPTY. The v5.0 tab was not inactive, it did not exist: the only way back was to open v5.0 fresh from
+the menu and wait for the whole app to load. Exactly the report. NOTE this bug predates #2498; the
+same-tab redirect is what made it fire on every database connect instead of rarely.
+
+FIX (v3TabPersistence.ts): "is the v5.0 TAB open?" and "is v5.0 the ACTIVE view?" are two questions
+and now have two flags. The tab flag is written from `openTabs` (so it survives any round trip and is
+cleared only by a ✕-close, which is already the one deliberate way a v5.0 chat ends); the active flag
+KEEPS its original key and meaning, so where a plain reload lands is byte-identical to before.
+`restoreV3Tab` also accepts the legacy flag alone, so a browser mid-session when this deploys does not
+lose its app to the fix itself. Sibling swept: WebAppPlayer's remix hand-off now writes both flags via
+the shared constants instead of the bare string.
+
+Also: SupabaseConnectCard gains a "Back to your app" return after a successful connect, rendered ONLY
+when the v5.0 tab is genuinely open — the other end of the round trip, never a dead link.
+
+DELIBERATELY NOT DONE: leaving the publish sheet open across the jump. HostingChooser reads database
+readiness ONCE per workspace, so a sheet left open would show a stale "your app needs a database"
+after the user connected one — trading a navigation bug for a lying warning.
+
+Gate: both tsc green; v3TabPersistence 6 new; agentv3 + settings suites 410/410.

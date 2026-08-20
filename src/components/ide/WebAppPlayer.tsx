@@ -5,6 +5,7 @@ import { authedHeaders } from '../../App';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { auth } from '../../lib/firebase';
 import { clientWorkspaceId, v3SessionStorageKey, writeRemixHandoff } from '../agentv3/v3SessionContinuity';
+import { V3_ACTIVE_FLAG, V3_TAB_FLAG } from '../agentv3/v3TabPersistence';
 
 // WEB APP PLAYER — a store app running FULL SCREEN in the viewer's own browser (Kadam 1).
 //
@@ -236,7 +237,12 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
       writeRemixHandoff({ sessionId: sid, workspaceId: target, appName: meta?.name || 'Your app', owned: data.alreadyOwned === true });
       const key = v3SessionStorageKey(uid);
       try { localStorage.setItem(key, sid); } catch { try { sessionStorage.setItem(key, sid); } catch { /* both blocked */ } }
-      try { sessionStorage.setItem('nbi_v3_open', '1'); } catch { /* view falls back to home */ }
+      // Both flags: v5.0 is the view to land on AND its tab is open. Writing only the active one
+      // would lean on the legacy-compat shim in v3TabPersistence rather than saying what it means.
+      try {
+        sessionStorage.setItem(V3_ACTIVE_FLAG, '1');
+        sessionStorage.setItem(V3_TAB_FLAG, '1');
+      } catch { /* view falls back to home */ }
       window.location.href = '/';
     } catch {
       if (liveRef.current) setError('Could not reach the store. Check your connection and try again.');

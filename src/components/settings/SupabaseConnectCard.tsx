@@ -15,8 +15,9 @@
 //  • Disconnect says plainly that Supabase must be told separately; we do not imply we revoked it.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Database, Check, Loader2, ExternalLink, AlertTriangle } from 'lucide-react';
+import { Database, Check, Loader2, ExternalLink, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
+import { V3_TAB_FLAG, V3_VIEW } from '../agentv3/v3TabPersistence';
 
 interface Status {
   available: boolean;
@@ -38,6 +39,10 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
   const [busy, setBusy] = useState<'connect' | 'create' | 'disconnect' | null>(null);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
+  // Read once at mount: is Pro v5.0 open behind this screen? Drives the "Back to your app" return.
+  const [v3TabOpen] = useState<boolean>(() => {
+    try { return sessionStorage.getItem(V3_TAB_FLAG) === '1'; } catch { return false; }
+  });
 
   const refresh = useCallback(async () => {
     try {
@@ -221,6 +226,19 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
         </p>
       )}
       {done && <p className="mt-3 text-[11px] text-emerald-300 leading-snug">{done}</p>}
+
+      {/* The other end of the round trip. Most people arrive here mid-publish from Pro v5.0, and
+          finishing the database left them to find their own way back. Shown ONLY when the v5.0 tab is
+          genuinely open, so it can never advertise a destination that is not there. */}
+      {done && v3TabOpen && (
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: V3_VIEW } }))}
+          className="mt-3 flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          Back to your app
+        </button>
+      )}
     </div>
   );
 }

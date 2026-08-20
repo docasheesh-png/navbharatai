@@ -31,6 +31,7 @@
 
 import type { IEngineerActuator } from './sandbox/EngineerAI/actuators/IEngineerActuator';
 import { loadWorkspaceFiles } from './WorkspaceFileStore';
+import { runInPass } from './greenFreeze';
 
 /** What a seed attempt did — returned so callers can report honestly instead of guessing. */
 export interface SeedOutcome {
@@ -112,15 +113,32 @@ export async function ensureWorkspaceFilesInSandbox(
   }
 
   let seeded = 0;
-  for (const [path, content] of Object.entries(saved)) {
-    try {
-      await actuator.writeFile(workspaceId, path, content);
-      seeded += 1;
-    } catch { /* one bad file must not abort the restore */ }
-  }
+  // WHY THE PASS NAME MATTERS: every sandbox write goes through Green Freeze, which refuses to touch a
+  // verified-working app from a pass it does not recognise. Without this wrapper the restore was
+  // refused on exactly the apps most worth publishing — a green one — and the user was told their
+  // files could not be restored, on a workspace where the files were perfectly safe. See the entry
+  // for 'sandbox-file-restore' in greenFreeze.ts for why a restore is not an alteration.
+  let firstFailure = '';
+  await runInPass('sandbox-file-restore', async () => {
+    for (const [path, content] of Object.entries(saved)) {
+      try {
+        await actuator.writeFile(workspaceId, path, content);
+        seeded += 1;
+      } catch (e) {
+        // One bad file must not abort the restore — but the FIRST reason is kept, because a message
+        // that says "could not be restored" without saying why is the exact failure this file was
+        // written to end. Swallowing it silently is what hid the Green Freeze refusal for a day.
+        if (!firstFailure) firstFailure = e instanceof Error ? e.message : String(e);
+      }
+    }
+  });
 
   if (seeded === 0) {
-    return { ready: false, seeded: 0, reason: 'Your files could not be restored to the build machine. Try again in a moment.' };
+    return {
+      ready: false,
+      seeded: 0,
+      reason: `Your files could not be restored to the build machine.${firstFailure ? ` ${firstFailure}` : ''}`,
+    };
   }
   return { ready: true, seeded, reason: '' };
 }

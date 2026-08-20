@@ -36345,3 +36345,45 @@ Publish button in Pro v5.0 does. Shipping index.html alone would produce a broke
 than the one being fixed.
 
 Gate: tsc frontend clean; 4 new tests pinning the decision on the real placeholder strings.
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+1329 files / 16,668 tests green.
+
+---
+
+## 2026-08-20 — "Your files could not be restored to the build machine" — my own fix, refused by Green Freeze
+
+The message the admin hit is MINE, from the seed shipped the day before, and it was firing on a
+workspace whose files were perfectly safe.
+
+**Root cause: the restore wrote through a door a green app deliberately locks.** Every sandbox write
+passes `assertWriteAllowed`, which refuses to touch a verified-working app from a pass it does not
+recognise. `ensureWorkspaceFilesInSandbox` called `actuator.writeFile` from **no pass at all**, so on a
+GREEN app — the ones most worth publishing — *every single write* was refused, `seeded` stayed 0, and my
+honest-sounding sentence blamed the restore instead of naming the refusal.
+
+**Why the freeze was wrong to refuse it, not merely inconvenient.** Green Freeze exists to stop a pass
+ALTERING a working app. A re-seed alters nothing: it copies the app's own durable bytes into a machine
+that has none, and only ever when that machine is empty or missing `package.json`. Refusing it did not
+protect the app — it stranded it, and made a green app the one kind that could not be published. So
+`sandbox-file-restore` joins `green-guard-restore` on the allowlist for the same stated reason: the
+safety mechanism putting the app's own files back.
+
+**The second half is the one I should not have needed twice.** The write failure was swallowed by a bare
+`catch { }`, so the message could say "could not be restored" and nothing else — the exact shape I had
+spent the previous two days telling the admin was unacceptable (`exit status 1`, `Request failed with
+status code 404`). The first real reason is now kept and reported, while later files still get their
+turn. Had it been there yesterday, this would have read `Green freeze: refused to overwrite "src/App.tsx"`
+and cost one minute instead of a round trip.
+
+**A test earned its keep.** `greenFreeze.test.ts` pins the allowlist to an exact set, precisely so a
+fifth entry cannot appear without someone coming here to justify it. It failed, as designed; the
+justification is now written into it rather than the assertion loosened.
+
+**Also corrected today, from the rebase rather than from the audit:** `PUBLISHED_APP_DOMAIN` was reported
+as dead config in the 2026-08-20 CLAUDE.md audit. It is not — another session had just landed
+`publishedAppUrl()` plus a Cloudflare Worker on `main` while that audit ran against an older tree. The
+claim is corrected in `CLAUDE.md` with the lesson attached: a cross-check is only true as of the commit
+it ran against.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+1335 files / 16,735 tests green.

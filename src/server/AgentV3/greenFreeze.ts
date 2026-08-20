@@ -52,6 +52,17 @@ export const ALLOWED_PASSES: ReadonlySet<string> = new Set([
   'runtime-error-autofix', // the app renders but throws — the user wants a working app
   'feature-presence-heal', // a feature the user explicitly asked for is missing
   'green-guard-restore',   // puts the last-known-good files back — the safety mechanism itself
+  // Re-seeding an EMPTY sandbox from the durable store before a build (sandboxSeed.ts). Added
+  // 2026-08-20 after it broke a real publish: the seed writes through `actuator.writeFile`, the freeze
+  // refused every write on a green app, and the user was told "your files could not be restored".
+  //
+  // It belongs here for the same reason `green-guard-restore` does, and the distinction matters: the
+  // freeze exists to stop a pass ALTERING a working app. This alters nothing — it copies the app's own
+  // durable bytes into a machine that has none, which is what makes a green app publishable at all.
+  // Refusing it does not protect the app; it strands it. The seed also only runs when the sandbox is
+  // empty or missing package.json, never against a populated warm one, so there is no path by which it
+  // can overwrite live work with something older.
+  'sandbox-file-restore',
   // The design repair runs BEFORE the preview is browsed, so on the normal path the workspace is not
   // latched yet and this entry is not what lets it write. It is here for the case where a latch DOES
   // exist by then (a resumed session that was already proven green), so the pass behaves the same either

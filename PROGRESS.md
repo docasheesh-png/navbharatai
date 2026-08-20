@@ -36148,3 +36148,33 @@ readiness ONCE per workspace, so a sheet left open would show a stale "your app 
 after the user connected one — trading a navigation bug for a lying warning.
 
 Gate: both tsc green; v3TabPersistence 6 new; agentv3 + settings suites 410/410.
+
+---
+
+## 2026-08-20 — "Create database" said nothing: the same honesty bug as "exit status 2", in another feature
+
+Admin screenshot: Supabase CONNECTED ("Connected to aashishcpmt093-ui's Org" — #2497/#2498 confirmed
+working, and the v5.0 tab stayed open, confirming #2499) — then "Create database" failed with
+*"Supabase could not complete this request. Please try again in a moment."* and nothing else.
+
+ROOT CAUSE: `classifyStatus` handles 401/402/403/429 with real instructions, but EVERY other status
+collapsed into that one sentence — while Supabase's own reason (the thing only the user can act on: a
+region their org cannot use, a missing payment method, a name already taken) went to `detail`, which
+is admin-only. The system knew and did not say. Identical in shape to the build reporting a bare
+"exit status 2" fixed hours earlier (#2496): a real diagnosis discarded at the last step.
+
+FIX: `supabaseReason()` extracts the human field Supabase writes for humans (`message` /
+`error_description` / `error` / `msg`) and the unclassified branch shows it. Three guards keep the
+existing policy intact rather than trading one bug for another:
+ • ONLY a structured JSON field is surfaced — an HTML proxy page or a stack trace still never becomes
+   the user's message (the pre-existing rule, now narrowed rather than reversed; its test still passes).
+ • The generated DB password is stripped at the boundary in `createProject`, because a validation
+   error is entitled to echo back the one request that carries a secret.
+ • Control characters removed, capped at 200 chars, and with no readable reason the user at least gets
+   the status code instead of a shrug.
+The plan-limit message keeps its instruction AND gains Supabase's words, so a user whose real problem
+is something else is not sent to delete a project for nothing.
+
+Gate: both tsc green; 8 new tests; server lib suite 2411/2411 (253 files).
+NOTE the underlying provisioning failure is now VISIBLE but not yet diagnosed — the next attempt will
+name it, and that is the point.

@@ -56,6 +56,44 @@ const authHeaders = (token: string): Record<string, string> => ({
 });
 
 /**
+ * Supabase's OWN reason for a failure, in a form safe to show the user.
+ *
+ * ROOT CAUSE this closes (admin 2026-08-20, "Create database" dead-ending on *"Supabase could not
+ * complete this request"*): every unclassified status collapsed into one sentence that says nothing,
+ * while the actual reason — which Supabase DID send, and which is usually something only the user can
+ * fix (a region their org cannot use, a missing payment method, a name already taken) — went to a
+ * server log the user will never read. That is the same failure class as a build reporting "exit
+ * status 2": the system knew, and did not say.
+ *
+ * SAFETY: `secret` (the generated database password) is stripped, because a validation error can echo
+ * the request back. Length is capped and control characters removed, so nothing here can wreck the UI.
+ * PURE.
+ */
+export function supabaseReason(body: string, secret?: string): string {
+  const raw = String(body ?? '').trim();
+  if (!raw) return '';
+  // ONLY a structured message is surfaced. An arbitrary body — a proxy's HTML error page, a stack
+  // trace — tells the user nothing and would wreck the card, so the long-standing rule that the raw
+  // body never becomes the user's message stands; this narrows it to "except the field Supabase
+  // writes FOR humans", which is the part that was worth showing all along.
+  let text: string;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const field = ['message', 'error_description', 'error', 'msg']
+      .map((k) => parsed?.[k])
+      .find((v) => typeof v === 'string' && v.trim());
+    if (typeof field !== 'string') return '';
+    text = field;
+  } catch {
+    return '';
+  }
+  if (secret && secret.length >= 8) text = text.split(secret).join('[redacted]');
+  // eslint-disable-next-line no-control-regex
+  text = text.replace(/[\u0000-\u001F\u007F]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return text.length > 200 ? `${text.slice(0, 199)}…` : text;
+}
+
+/**
  * Turn an HTTP status into an outcome the caller can act on.
  *
  * 402/403 on a CREATE is the free-plan cap far more often than a permissions problem, because the
@@ -64,6 +102,7 @@ const authHeaders = (token: string): Record<string, string> => ({
  */
 export function classifyStatus(status: number, body: string, phase: 'create' | 'read'): ProvisionError {
   const detail = body?.slice(0, 500) || undefined;
+  const reason = supabaseReason(body);
   if (status === 401) {
     return { ok: false, failure: 'unauthorized', detail,
       message: 'Your Supabase connection has expired. Please connect Supabase again from Settings → Database.' };
@@ -71,7 +110,10 @@ export function classifyStatus(status: number, body: string, phase: 'create' | '
   if ((status === 402 || status === 403) && phase === 'create') {
     return { ok: false, failure: 'plan-limit', detail,
       message: 'Your Supabase account has no room for another project — the free plan allows 2. '
-        + 'Delete a project you no longer need in Supabase, or upgrade there, then try again.' };
+        + 'Delete a project you no longer need in Supabase, or upgrade there, then try again.'
+        // The cap is the usual cause, but not the only 402/403 — carrying Supabase's own words means a
+        // user whose real problem is something else is not sent to delete a project for nothing.
+        + (reason ? ` (Supabase said: ${reason})` : '') };
   }
   if (status === 403) {
     return { ok: false, failure: 'unauthorized', detail,
@@ -81,8 +123,12 @@ export function classifyStatus(status: number, body: string, phase: 'create' | '
     return { ok: false, failure: 'rate-limited', detail,
       message: 'Supabase is busy right now. Please try again in a minute.' };
   }
+  // THE UNCLASSIFIED CASE — say what Supabase said. This branch used to end the flow with a sentence
+  // that told the user nothing they could act on, while the actionable reason sat in a server log.
   return { ok: false, failure: 'api-error', detail,
-    message: 'Supabase could not complete this request. Please try again in a moment.' };
+    message: reason
+      ? `Supabase could not ${phase === 'create' ? 'create the database' : 'complete this request'}: ${reason}`
+      : `Supabase could not complete this request (error ${status}). Please try again in a moment.` };
 }
 
 /**
@@ -152,7 +198,13 @@ export async function createProject(
     return { ok: false, failure: 'api-error', detail: String(e),
       message: 'We could not reach Supabase. Please check your connection and try again.' };
   }
-  if (!res.ok) return classifyStatus(res.status, await res.text().catch(() => ''), 'create');
+  if (!res.ok) {
+    // Strip the generated database password BEFORE the body can reach a message or a log: a validation
+    // error is entitled to echo the request it rejected, and this is the one request that carries a
+    // secret. Redacting at the boundary means no downstream reader has to remember to.
+    const raw = (await res.text().catch(() => '')).split(input.dbPass).join('[redacted]');
+    return classifyStatus(res.status, raw, 'create');
+  }
   const body = (await res.json().catch(() => null)) as { id?: unknown; name?: unknown; region?: unknown } | null;
   const id = typeof body?.id === 'string' ? body.id : '';
   if (!id) {

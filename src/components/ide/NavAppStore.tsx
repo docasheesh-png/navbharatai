@@ -5,6 +5,8 @@ import {
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../App';
+import { resolveApiHref } from '../../lib/apiBase';
+import { isNativeApp } from '../../lib/mobileNative';
 
 // Nav App Store — publish your Android app, and install other people's.
 //
@@ -762,8 +764,22 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
               </div>
             )}
 
+            {/* DOWNLOAD (admin report 2026-08-19: "app mart se apk download hi nahi hoti").
+                Two different jobs, so two paths — a single `<a href>` could not do both:
+                  • WEB — a normal link. The browser streams a 30 MB file straight to disk; pulling it
+                    into a blob first would hold the whole APK in the tab's memory for no gain.
+                  • APP — the WebView has no download manager, so a link to an attachment does exactly
+                    nothing (which is what the user saw). Handing it to the system browser gives the
+                    file to Android's real downloader, the same `_blank` route UpdateBanner already
+                    relies on. The URL is resolved through resolveApiHref because in the bundled app a
+                    relative /api path points at the shell itself, not at our server. */}
             <a
-              href={`/api/nav-store/download/${encodeURIComponent(openApp.id)}`}
+              href={resolveApiHref(`/api/nav-store/download/${encodeURIComponent(openApp.id)}`, window)}
+              onClick={(e) => {
+                if (!isNativeApp()) return; // web: let the browser do what it already does well
+                e.preventDefault();
+                window.open(e.currentTarget.href, '_blank');
+              }}
               className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-base font-bold transition-colors"
             >
               <Download size={17} /> Download .apk

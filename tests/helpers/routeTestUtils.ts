@@ -56,7 +56,13 @@ export interface MockResponse {
   status(code: number): MockResponse;
   json(payload: any): MockResponse;
   send(payload: any): MockResponse;
+  /** Express's content-type shortcut. Modelled because real routes use it (a download that fails must
+   *  answer a BROWSER in HTML, not JSON) — a mock missing it fails a route that is perfectly correct. */
+  type(t: string): MockResponse;
   end(): MockResponse;
+  /** Abrupt close, used when a stream fails after the headers have already gone out. */
+  destroy(): MockResponse;
+  headersSent?: boolean;
   setHeader(k: string, v: string): void;
   header(k: string, v: string): MockResponse;
   get(k: string): string | undefined;
@@ -72,8 +78,11 @@ export function mockRes(): MockResponse {
     sent: undefined,
     status(code: number) { this.statusCode = code; return this; },
     json(payload: any) { this.body = payload; return this; },
-    send(payload: any) { this.sent = payload; this.body = payload; return this; },
+    send(payload: any) { this.sent = payload; this.body = payload; this.headersSent = true; return this; },
+    type(t: string) { this.headers['content-type'] = t.includes('/') ? t : `text/${t}`; return this; },
     end() { this.ended = true; return this; },
+    destroy() { this.ended = true; return this; },
+    headersSent: false,
     setHeader(k: string, v: string) { this.headers[k.toLowerCase()] = v; },
     header(k: string, v: string) { this.headers[k.toLowerCase()] = v; return this; },
     get(k: string) { return this.headers[k.toLowerCase()]; },

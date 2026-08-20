@@ -574,6 +574,56 @@ the code (it is actually read somewhere) on 2026-07-11.
   traffic this needs either a VirusTotal paid plan or another scanner (e.g. MetaDefender). Recorded
   here as an open item rather than left silent.
 
+### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
+
+The admin sent the complete list of env-var NAMES from the live Cloud Run service, and every one was
+cross-checked against the code. This is the first time the registry above has been reconciled against
+the actual deployment rather than maintained hand-to-hand, and it found four things.
+
+**🔴 1. SIX KEYS ARE SET TWICE. This is the urgent one.**
+
+| Key | Positions in the console |
+|---|---|
+| `AGENTV3_ESCALATION` | #33, #37, #44 — **three times** |
+| `AGENTV3_CHEAP_FLOOR` | #26, #34 |
+| `AGENTV3_ENABLED` | #15, #41 |
+| `AGENTV3_PAID_PUBLIC` | #42, #48 |
+| `AGENTV3_CREDIT_GATE` | #43, #49 |
+| `AGENTV3_STREAMING_PREVIEW` | #60, #80 |
+
+**A duplicate is not cosmetic: the LAST entry wins.** So a correct value can sit in the console, be
+visible to whoever set it, and never reach the process. `AGENTV3_CHEAP_FLOOR` is the sharpest example —
+this file already records that an ENV value ALWAYS beats the code default, so one stale or empty
+duplicate silently switches the whole GLM/Kimi floor off while the console still shows the good value
+a few rows up. `AGENTV3_ENABLED` and `AGENTV3_PAID_PUBLIC` carry the same risk for the feature gate and
+for billing. **Compare each pair's VALUES and delete the wrong one — do not assume they match.**
+
+**🟡 2. `PUBLISHED_APP_DOMAIN` is DEAD CONFIG.** It is set in Cloud Run and **nothing in the repository
+reads it** — verified by exact-match search across `src/`, `.github/` and `cloudbuild.yaml`, not a
+substring grep (a substring grep is what nearly let `SEMANTIC_MEMORY` be mis-filed as dead, when in fact
+its master switch is read at `semanticMemory.ts:57`). Either it is a leftover, or it is the name someone
+INTENDED for a branded published-app domain that was never wired. Nothing breaks either way; it should
+be deleted or implemented, not left looking meaningful.
+
+**🟢 3. Four keys were missing from this registry** — now recorded:
+- **`PROFESSIONAL_PAID_ENABLED`** — the Professionals paid gate (`professionals/professionalPaid.ts`).
+  Reads exactly `'true'`; anything else is off.
+- **`PUBLIC_BASE_URL`** — the public origin used to build bot/webhook URLs (`routes/bots.ts`).
+- **`SEMANTIC_MEMORY`** — master switch for semantic memory. Companion tunables
+  `SEMANTIC_MEMORY_MAX_CHUNKS` (60) and `SEMANTIC_MEMORY_TOP_K` (5) are code-defaulted.
+- **`PUBLISHED_APP_DOMAIN`** — see item 2; recorded so nobody re-discovers it as a mystery.
+
+**🔵 4. `FIREBASE_DEPLOY_PROJECT` is NOT set — and that CLOSES a live hypothesis.** While diagnosing the
+2026-08-19 publish 404 I proposed that the deploy might be pointing at the wrong project, since that env
+overrides `FIREBASE_PROJECT` and this file records the exact `navbharatai-3395f` / `gen-lang-client-…`
+confusion. It is absent from all 84, so the code default `gen-lang-client-0866594388` is in use — which
+matches the project whose Hosting console the admin checked. **That theory is dead; the 404 is
+elsewhere**, and the per-call diagnostics added the same day will name it.
+
+**The other direction was checked too and is fine.** 331 env names the code reads are unset — that is by
+design, not drift: nearly all are optional tunables whose absence means "today's behaviour", exactly as
+the flag entries above promise.
+
 **Known valid VALUES (from the code, for the admin to cross-check):**
 - `AGENTV3_CHEAP_FLOOR` accepts exactly: `off` | `glm` (GLM only) | `kimi` (Kimi only) | `on`/`both`
   (GLM + Kimi together) | `bedrock`. It must hold ONE value.

@@ -36313,3 +36313,35 @@ the final rank (ask → finding → generic).
 finding's raw `message` in place of the table — both were the specific failures this change fixed.
 
 Gate: both tsc green, 16,765 tests / 1,337 files, CI green before merge.
+
+---
+
+## 2026-08-20 — Cloudeploy published the "Waiting for magic…" PLACEHOLDER to a real URL, and called it success
+
+Not a bug report — the admin asked what the Settings → App Settings → Hosting & Deploy screen does and
+"kaam kar bhi raha hai ya nahi?". Auditing it to answer honestly found a live fake-success.
+
+WHAT THE SCREEN REALLY IS (for the record): three tabs — Deploy / History / Config. Of its seven
+targets only TWO deploy in-app: NavBharat Hosting (real, POST /api/pwa/save) and Vercel (real, only
+when the user pastes their own VERCEL_TOKEN in Config, POST /api/pro/deploy). The other five
+(Netlify / Firebase / Cloud Run / Railway / Render) never claimed to deploy — they print honest CLI
+steps to run yourself. That part was already truthful.
+
+ROOT CAUSE. Both real paths guarded with `!generatedCode`. `generatedCode` is the retired v2.0 channel
+and in v5.0 it sits at the "Waiting for magic…" PLACEHOLDER — a TRUTHY string — so the guard never
+fired. Pressing Deploy on a v5.0 app uploaded the placeholder page to a REAL live URL and reported
+"✅ Deployed successfully". A genuine URL serving "Waiting for magic…" is the worst kind of fake
+success, and on the Vercel path it lands on the USER'S OWN account.
+
+The repo already had the fix: `isPlaceholderHtml` (lib/workspaceSource.ts), written for exactly this
+class in the 2026-07-21 tools autopsy and adopted by Test Runner, Performance and Dark Mode.
+Cloudeploy was the sibling that was missed — it now shares that one implementation instead of a
+fourth copy of the rule. The refusal is also USEFUL now: "Build something first" was factually wrong
+for a user who had just built an app, so it names where a v5.0 app actually publishes from.
+
+DELIBERATELY NOT DONE: making Cloudeploy publish a v5.0 app directly. `/api/pwa/save` stores ONE html
+string; a v5.0 React app is a multi-file project that must be BUILT first — which is exactly what the
+Publish button in Pro v5.0 does. Shipping index.html alone would produce a broken site: a worse lie
+than the one being fixed.
+
+Gate: tsc frontend clean; 4 new tests pinning the decision on the real placeholder strings.

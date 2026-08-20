@@ -5,6 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { memoryLinkedSuggestions, mergeSuggestions, MAX_MEMORY_SUGGESTIONS } from './memoryLinkedSuggestions';
+import { buildFindingSuggestions } from './buildFindingSuggestions';
 import type { NextSuggestion } from './nextBuildSuggestions';
 import type { ProjectGraph } from './WorkspaceMemory';
 
@@ -140,5 +141,38 @@ describe('mergeSuggestions — the user\'s ask outranks our inference', () => {
     expect(mergeSuggestions(mem, derived, 1)).toHaveLength(1);
     expect(mergeSuggestions([null as unknown as NextSuggestion], derived, 5).map((s) => s.id))
       .toEqual(['dark-mode', 'domain-search']);
+  });
+});
+
+// THE WHOLE POINT, end to end (admin 2026-08-20: "us app ki memory ke hisab se … aise random nahi").
+//
+// The bulb has three layers and the ORDER is the feature: what the user asked for, then what the build
+// measured, then what the files merely imply. Layer 3 used to be the entire list — which is exactly why
+// the suggestions felt random. This test locks the ranking the route assembles.
+describe('the bulb\'s final order — grounded before inferred', () => {
+  const GRAPH = { files: ['src/App.tsx'], components: [], routes: [] } as never;
+  const SOURCES = [{ path: 'src/App.tsx', content: 'export default function App(){ return <div/> }' }];
+
+  it('the user\'s own unmet ask outranks a measured finding, which outranks a generic idea', () => {
+    const asks = memoryLinkedSuggestions({ requests: ['add a search box'], graph: GRAPH, sources: SOURCES });
+    const found = buildFindingSuggestions([{ code: 'RUNTIME_ERRORS_REMAIN' }]);
+    const generic: NextSuggestion[] = [
+      { id: 'dark-mode', title: 'Add a dark mode', detail: 'd', prompt: 'p', kind: 'enhancement' },
+    ];
+
+    expect(asks.length).toBeGreaterThan(0);
+    expect(found.length).toBeGreaterThan(0);
+
+    const final = mergeSuggestions([...asks, ...found], generic, 12);
+    expect(final[0].id).toBe('asked-search');              // 1) the user's own words
+    expect(final[1].id).toBe('found-runtime-errors-remain'); // 2) what the build measured
+    expect(final[final.length - 1].id).toBe('dark-mode');    // 3) our inference, last
+  });
+
+  it('with nothing in memory the generic ideas still show — the bulb is never empty for no reason', () => {
+    const generic: NextSuggestion[] = [
+      { id: 'dark-mode', title: 'Add a dark mode', detail: 'd', prompt: 'p', kind: 'enhancement' },
+    ];
+    expect(mergeSuggestions([], generic, 12).map((s) => s.id)).toEqual(['dark-mode']);
   });
 });

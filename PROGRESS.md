@@ -36036,3 +36036,40 @@ verification file on Google's domain) and it is not needed, since native never u
 the delivery-back was the other half and it was ours.
 
 Gate: both tsc green, 16,616 tests / 1,324 files, CI green before merge.
+
+---
+
+## 2026-08-20 — Publish "exit status 2" for five days: two root causes, both killed
+
+Admin (mobile, mid-branded-domain rollout): "publish on navbharat me error aa raha hai. aur isko
+5 din se fix kiya ja raha hai" — the dialog showed only *"Your app did not build… exit status 2"*.
+
+**Why five days were blind (the honesty bug):** tsc prints every type error to STDOUT and exits 2
+with an EMPTY stderr. Two `||` fallbacks in a row erased that evidence: the E2B actuator's catch
+built `stderr: err.stderr || err.message` (so stderr became the synthesized "exit status 2"), and
+the publish route showed `stderr || stdout` (so the real diagnostics sitting in stdout were
+discarded). Every failure in this class reduced to the same three useless words.
+Fix: `thrownCommandOutput` in `sandboxHealth.ts` (each channel keeps its own real content; the
+message only stands in when the command produced NO output at all — the sibling of
+`resolveThrownCommandExit`, which had already fought exactly this fight for the exit CODE), and
+`composeBuildFailureDetail` in the new `publishBuild.ts` (BOTH channels, diagnostics first).
+
+**Why the build failed at all (the product bug):** the scaffold's build script is
+`tsc -p tsconfig.build.json && vite build`, but the PREVIEW dev server transpiles with esbuild and
+never typechecks — so an app can run flawlessly in the preview and still be unpublishable over a
+type warning that changes nothing at runtime. Publish was silently STRICTER than preview.
+Fix: `bundlerFallbackCommand` — when `npm run build` fails and the script is a typecheck-gated
+bundler, publish retries the bundler alone (the SAME transpile the preview runs) and succeeds with
+an honest user-facing warning (`TYPECHECK_SKIPPED_WARNING`, provider-anonymous, shown by the
+client). The tsc gate is untouched inside the AGENT's build loop, where it is what makes the model
+fix type errors during generation. No fallback exists for scripts without that shape — the original
+failure (now with real diagnostics) stands.
+
+Also this session: PR #2495 (Firebase channel-create 400 — invalid `type` field, both engines) and
+PR #2492 (branded published-app URLs, `PUBLISHED_APP_DOMAIN=mitrify.in` now set in Cloud Run;
+Cloudflare Worker + route `*.mitrify.in/*` + wildcard DNS deployed and transport-verified by the
+admin — `https://test.mitrify.in` returns Firebase's Site Not Found through the proxy).
+OPEN: an end-to-end publish of a real app on a branded URL is still unverified — the next
+successful publish is the test.
+
+Gate: both tsc green; publishBuild 13 new tests + sandboxHealth 30 + agentv3 route 313 + seed 20 green.

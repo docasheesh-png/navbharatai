@@ -2674,7 +2674,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           return;
         }
         if (typeof data?.url === 'string' && data.url) setLiveUrl(data.url);
-        setPublishMsg(data?.url ? `Your app is live at ${data.url}` : (data?.message || 'Published.'));
+        // `warning` is the server's honest note when the publish succeeded via the preview-equivalent
+        // transpile (type warnings present but not blocking) — shown, never swallowed.
+        const warning = typeof data?.warning === 'string' && data.warning ? `\n\n${data.warning}` : '';
+        setPublishMsg(data?.url ? `Your app is live at ${data.url}${warning}` : (data?.message || 'Published.') + warning);
       } catch (e) {
         setPublishMsg(e instanceof Error ? e.message : String(e));
       } finally {

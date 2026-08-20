@@ -14,7 +14,7 @@ import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, d
 import { dbProvisionScript, parseDbProvision, provisionOutcomeNote, provisionDiagnostics, CANONICAL_DB_URL, type DbProvisionOutcome } from '../../dbProvisionVerify';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
-import { isDeadSandboxSignal, isDeadSandboxError, resolveThrownCommandExit, recordCommandLatency, newSandboxLatencyState } from './sandboxHealth';
+import { isDeadSandboxSignal, isDeadSandboxError, resolveThrownCommandExit, thrownCommandOutput, recordCommandLatency, newSandboxLatencyState } from './sandboxHealth';
 import { postgresWatchdogCommand, mergeEnvVar } from '../../../postgresProvision';
 import { resolveTemplateId } from './fullstackRouting';
 import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
@@ -1362,7 +1362,11 @@ export class E2BActuator implements IEngineerActuator {
           try { sb = await this.getSandbox(workspaceId); continue; } // recreate (replays source) + retry once
           catch { /* recreate itself failed (E2B down) → fall through to an honest error */ }
         }
-        return { exitCode: realExit, stdout: err.stdout || '', stderr: err.stderr || err.message || String(err) };
+        // Each channel keeps its OWN real content — `err.stderr || err.message` used to replace an
+        // empty stderr with "exit status 2" even when the real diagnostics sat in stdout (tsc prints
+        // type errors to STDOUT), which is how Publish showed a bare exit-status for five days.
+        const thrown = thrownCommandOutput(err);
+        return { exitCode: realExit, stdout: thrown.stdout, stderr: thrown.stderr };
       }
     }
     return { exitCode: -1, stdout: '', stderr: 'sandbox unavailable after recreate attempt' };

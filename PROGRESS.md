@@ -36387,3 +36387,40 @@ it ran against.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 1335 files / 16,735 tests green.
+
+---
+
+## 2026-08-20 — Publish: the last root cause (the hash), and two of my fixes dropped as duplicates
+
+Google finally named it: `Firebase Hosting file upload failed (HTTP 400): "content hash doesn't match
+content"`.
+
+**Hosting's upload contract:** gzip the file, and the hash declared in `populateFiles` is the SHA256 of
+**that gzipped payload** — the same bytes you then PUT. The code hashed the RAW buffer and uploaded its
+gzip, so the two could never agree and every file of every publish was rejected. The fix gzips ONCE and
+hashes that; the upload sends the same buffer rather than re-gzipping, because re-compression is not
+guaranteed byte-identical and computing the hash and the payload apart is the shape that made this
+possible.
+
+**TWO of my commits were dropped before this landed, both genuinely redundant — a parallel session got
+there first.** Checking rather than assuming is the only reason they did not ship as duplicate work:
+
+| Mine | Why dropped |
+|---|---|
+| `fix(v5): mobile preview fills the screen` | `main` #2504 fixed it, same root cause (*"a WIDTH split was capping COLUMN height"*), with a cleaner `paneSplitVars` helper. |
+| `fix(deploy): make every Hosting API failure name itself` | `main` #2496 added `hostingCall('file registration', …)` — the same per-call naming — **and found the 404 itself**: `:populateFiles` is a Google CUSTOM METHOD, addressed with a COLON. The slash form is not a route at all. |
+
+That second one is worth sitting with. I spent a round shipping diagnostics *instead of* a fix, on the
+argument that a failure which will not name itself must be made to name itself first. That argument was
+right and it worked — but another session reached the same cause by reading the API contract, faster.
+**Both halves of the lesson stand:** the diagnostics were the correct move from where I stood, and
+reading the contract would have been better still.
+
+**Why five rounds of real bugs stacked up on one flow.** Each was genuine and each hid the next: no files
+in a cold sandbox → no dependencies → no evidence → a shell quote truncating the dist reader → Green
+Freeze refusing the restore → a 404 from a slash that should have been a colon → this hash. A publish had
+to clear all seven to reach Firebase at all, which is exactly why every site in the console read
+*"Waiting for your first release"* — it was true, and had been true for as long as the code existed.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+1339 files / 16,782 tests green.

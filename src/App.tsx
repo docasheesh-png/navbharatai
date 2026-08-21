@@ -67,6 +67,8 @@ import { ProfessionalsView } from './components/professionals/ProfessionalsView'
 import { ProfessionalChat } from './components/professionals/ProfessionalChat';
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
+import { ReportSheet } from './components/ReportSheet';
+import { useShakeToReport } from './hooks/useShakeToReport';
 import { RepoAnalystTool } from './components/repoAnalyst/RepoAnalystTool';
 // EngineerAIChat retired — replaced by NavBharatAI Pro v5.0 (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -282,6 +284,11 @@ export default function App() {
     return 'auto';
   });
   const [effectiveDeviceMode, setEffectiveDeviceMode] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
+  // REPORT A PROBLEM, FROM ANYWHERE (admin 2026-08-21). Shake opens it on a phone; the visible entry
+  // in the sidebar opens the same sheet, because an invisible gesture cannot be the only way in (and
+  // iOS will not give a page motion access unasked). `reportOpen` lives at the app root so the sheet
+  // is available on every screen rather than being re-implemented per surface.
+  const [reportOpen, setReportOpen] = useState(false);
   // Persist the chosen View Mode so it survives reloads (Settings → View Mode).
   useEffect(() => { try { localStorage.setItem('navbharat_device_mode', deviceMode); } catch { /* ignore */ } }, [deviceMode]);
 
@@ -1329,6 +1336,10 @@ export default function App() {
     window.addEventListener('navbharat:navigate', onNavigate as EventListener);
     return () => window.removeEventListener('navbharat:navigate', onNavigate as EventListener);
   }, [toggleTab, setSettingsScreen]);
+
+  // A shake anywhere in the app opens the report sheet. The hook is a no-op on desktop and wherever
+  // the device will not give a page motion access — see useShakeToReport for why iOS is deliberate.
+  useShakeToReport(useCallback(() => setReportOpen(true), []));
 
   // Persist ONLY the v5.0 view so a reload lands back in Pro v5.0 (see activeView init). Any other
   // view clears the flag, so leaving v5.0 and reloading correctly returns to Home.
@@ -2785,6 +2796,7 @@ export default function App() {
       <div className={`flex flex-1 w-full min-h-0`}>
 
       <SidebarNav
+        onReportProblem={() => setReportOpen(true)}
         themeClasses={themeClasses}
         effectiveDeviceMode={effectiveDeviceMode}
         isSidebarCollapsed={isSidebarCollapsed}
@@ -2945,6 +2957,10 @@ export default function App() {
               setMessages={setMessages}
             />
           )}
+
+          {/* Reachable from every screen: shake, or the sidebar's "Report a problem". It portals to
+              document.body, so being rendered here costs nothing in layout. */}
+          <ReportSheet open={reportOpen} onClose={() => setReportOpen(false)} view={activeView} />
 
           {shouldRenderV3Surface(activeView, v3Preview.running === true, openTabs.includes('nbi_pro_chat')) && (
             /* NavBharatAI Pro v5.0 — replaces the retired Pro v2.0 builder. ProV3Surface shows the

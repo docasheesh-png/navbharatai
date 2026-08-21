@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2 } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, Image as PictureIcon } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
@@ -15,7 +15,7 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
-type TabId = 'overview' | 'users' | 'engines' | 'revenue' | 'reports' | 'security' | 'settings';
+type TabId = 'overview' | 'users' | 'engines' | 'revenue' | 'reports' | 'userreports' | 'security' | 'settings';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   { id: 'overview',  label: 'Overview',    icon: Activity },
@@ -23,6 +23,10 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   { id: 'engines',   label: 'AI Engines',   icon: Cpu },
   { id: 'revenue',   label: 'Revenue',      icon: IndianRupee },
   { id: 'reports',   label: 'Build Reports', icon: FileText },
+  // USER REPORTS — a SEPARATE page from Build Reports on purpose (admin 2026-08-21). One is the
+  // engine telling us about a build; this is a person telling us about the product or about another
+  // person. Mixing them would bury the complaints that need a human.
+  { id: 'userreports', label: 'User Reports', icon: Flag },
   { id: 'security',  label: 'Security',     icon: Shield },
   { id: 'settings',  label: 'Settings',     icon: Settings },
 ];
@@ -82,6 +86,11 @@ const statCard = (label: string, value: string | number, sub: string, color: str
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLogout }) => {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
+  // ── User reports (admin 2026-08-21) ──────────────────────────────────────
+  const [userReports, setUserReports] = useState<any[]>([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [openReport, setOpenReport] = useState<any>(null);
+  const [reportFilter, setReportFilter] = useState<'open' | 'all'>('open');
   const [analytics, setAnalytics] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [promos, setPromos] = useState<any[]>([]);
@@ -309,6 +318,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     finally { setUpdateBusy(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken, updateCohort, fetchUpdateCohort]);
+
+  /** Every user report, newest first. `open` by default — the queue that still needs a person. */
+  const fetchUserReports = useCallback(async () => {
+    setReportsLoading(true);
+    try {
+      const q = reportFilter === 'open' ? '?status=open' : '';
+      const r = await fetch(`/api/admin/reports${q}`, { headers });
+      const d = await r.json();
+      setUserReports(Array.isArray(d?.reports) ? d.reports : []);
+    } catch (e) { console.error(e); setUserReports([]); }
+    finally { setReportsLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, reportFilter]);
+
+  /** One report in full — the screenshot is fetched HERE, never in the list, so the list stays light. */
+  const openUserReport = useCallback(async (id: string) => {
+    setOpenReport({ loading: true });
+    try {
+      const r = await fetch(`/api/admin/reports/${encodeURIComponent(id)}`, { headers });
+      const d = await r.json();
+      setOpenReport(r.ok ? d : { error: d?.error || 'Could not open that report.' });
+    } catch { setOpenReport({ error: 'Could not open that report.' }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const markUserReport = useCallback(async (id: string, status: string) => {
+    try {
+      await fetch(`/api/admin/reports/${encodeURIComponent(id)}/status`, {
+        method: 'POST', headers, body: JSON.stringify({ status }),
+      });
+      setOpenReport(null);
+      void fetchUserReports();
+    } catch { /* the row stays as it was; the admin can retry */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, fetchUserReports]);
 
   const fetchBuildReports = useCallback(async () => {
     setBuildReportsLoading(true);
@@ -673,6 +717,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => { if (activeTab === 'settings') { fetchPromos(); fetchUpdateCohort(); } }, [activeTab, fetchPromos, fetchUpdateCohort]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
   useEffect(() => { if (activeTab === 'reports') { fetchBuildReports(); fetchFirstPass(); } }, [activeTab, fetchBuildReports, fetchFirstPass]);
+  useEffect(() => { if (activeTab === 'userreports') fetchUserReports(); }, [activeTab, fetchUserReports]);
   const fetchLatencyAnomaly = useCallback(async () => {
     setAnomalyLoading(true);
     try {
@@ -1501,6 +1546,134 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           )}
 
           {/* ── BUILD REPORTS TAB (admin 2026-07-29) — the reports users submit via "Report" ── */}
+          {activeTab === 'userreports' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <h3 className="flex items-center gap-2 text-lg font-black text-white tracking-tight">
+                  <Flag size={18} className="text-rose-400" /> User Reports
+                  {userReports.length > 0 && (
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-rose-500/40 text-rose-300">
+                      {userReports.length}
+                    </span>
+                  )}
+                </h3>
+                <div className="flex items-center gap-2">
+                  {(['open', 'all'] as const).map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => setReportFilter(f)}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${reportFilter === f ? 'bg-rose-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}
+                    >{f === 'open' ? 'Needs a person' : 'All'}</button>
+                  ))}
+                  <button onClick={() => void fetchUserReports()} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/60" aria-label="Refresh">
+                    <RefreshCw size={14} className={reportsLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+              </div>
+
+              {reportsLoading && userReports.length === 0 ? (
+                <p className="text-xs text-white/40">Loading reports…</p>
+              ) : userReports.length === 0 ? (
+                <p className="text-xs text-white/40">
+                  {reportFilter === 'open' ? 'Nothing waiting. Every report has been handled.' : 'No reports yet.'}
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {userReports.map((r: any) => (
+                    <button
+                      key={r.id}
+                      onClick={() => void openUserReport(r.id)}
+                      className="w-full text-left rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] p-3 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-white/15 text-white/60">
+                          {r.target?.kind === 'app' ? 'App' : r.target?.kind === 'user' ? 'User' : 'Problem'}
+                        </span>
+                        {r.status !== 'open' && (
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/30 text-emerald-300">{r.status}</span>
+                        )}
+                        {r.hasScreenshot && <PictureIcon size={12} className="text-white/40" />}
+                        <span className="text-[10px] text-white/35 ml-auto">{new Date(r.at).toLocaleString()}</span>
+                      </div>
+                      <p className="text-sm text-white mt-1.5 line-clamp-2">{r.message}</p>
+                      <p className="text-[11px] text-white/40 mt-1">
+                        From {r.reporter?.email || r.reporter?.name || r.reporter?.shortUid || 'unknown'}
+                        {r.reported && <> · about {r.reported.email || r.reported.name || r.reported.shortUid}</>}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* One report, in full. BOTH people are named, and the actions an admin actually needs
+                  are right here — reading a complaint and then hunting for the account in another tab
+                  is how reports stop getting handled. */}
+              {openReport && (
+                <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setOpenReport(null)}>
+                  <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto bg-[#161b22] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+                    {openReport.loading ? (
+                      <p className="text-sm text-white/60">Opening…</p>
+                    ) : openReport.error ? (
+                      <p className="text-sm text-amber-300">{openReport.error}</p>
+                    ) : (
+                      <>
+                        <div className="flex items-start justify-between gap-3">
+                          <h4 className="text-base font-bold text-white">Report</h4>
+                          <button onClick={() => setOpenReport(null)} className="text-white/40 hover:text-white p-1" aria-label="Close">✕</button>
+                        </div>
+                        <p className="text-sm text-white whitespace-pre-wrap mt-3 bg-black/30 rounded-xl p-3">{openReport.report?.message}</p>
+
+                        <div className="grid grid-cols-2 gap-3 mt-4 text-[11px]">
+                          <div className="rounded-xl border border-white/10 p-3">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Reported by</p>
+                            <p className="text-white break-all">{openReport.reporter?.email || openReport.reporter?.shortUid || '—'}</p>
+                            <p className="text-white/40 break-all">{openReport.report?.reporterUid}</p>
+                          </div>
+                          <div className="rounded-xl border border-white/10 p-3">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">About</p>
+                            {openReport.reported ? (
+                              <>
+                                <p className="text-white break-all">{openReport.reported.email || openReport.reported.shortUid}</p>
+                                <p className="text-white/40 break-all">{openReport.report?.target?.ownerUid}</p>
+                                {openReport.reportsAgainstReported > 1 && (
+                                  <p className="text-rose-300 mt-1 font-semibold">{openReport.reportsAgainstReported} reports about this account</p>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-white/40">Not about a person</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {openReport.report?.context && (
+                          <p className="text-[10px] text-white/35 mt-3">
+                            Screen: {openReport.report.context.view || '—'} · {openReport.report.context.platform || '—'}
+                          </p>
+                        )}
+
+                        {openReport.screenshot && (
+                          <img src={openReport.screenshot} alt="Screenshot from the reporter" className="mt-3 w-full rounded-xl border border-white/10" />
+                        )}
+
+                        <div className="flex flex-wrap gap-2 mt-5">
+                          <button onClick={() => void markUserReport(openReport.report.id, 'actioned')} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white">Acted on it</button>
+                          <button onClick={() => void markUserReport(openReport.report.id, 'reviewed')} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-bold text-white">Read it</button>
+                          <button onClick={() => void markUserReport(openReport.report.id, 'dismissed')} className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-white/60">Dismiss</button>
+                          {openReport.report?.target?.ownerUid && (
+                            <button
+                              onClick={() => { void handleBan(openReport.report.target.ownerUid, true); void markUserReport(openReport.report.id, 'actioned'); }}
+                              className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white"
+                            ><Shield size={13} /> Suspend this account</button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === 'reports' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">

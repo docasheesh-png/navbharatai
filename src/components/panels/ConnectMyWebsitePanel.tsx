@@ -21,6 +21,8 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { NbaiDomainConnect } from '../agentv3/NbaiDomainConnect';
+import { usePublishState } from '../../hooks/usePublishState';
+import { auth } from '../../lib/firebase';
 
 interface ProApp {
   workspaceId: string;
@@ -88,11 +90,73 @@ export function ConnectMyWebsitePanel({ onBack, uid }: ConnectMyWebsitePanelProp
 
   const pickApp = useCallback((workspaceId: string) => setSelected(workspaceId), []);
 
+  /**
+   * PUBLISH FROM HERE TOO (2026-08-21).
+   *
+   * This panel is the OTHER documented way into the same domain flow (Sidebar → Connect my website,
+   * and Other AI → Publish & Deploy → Custom Domain) — the file header calls it "one real flow, not
+   * three different screens". When the Publish button and its red dot were added to the domain screen,
+   * this entry point would have silently been the one without them: the same screen, missing the step
+   * it now tells people to take. That is the exact divergence this panel was created to end.
+   *
+   * It drives the SAME server publish the build panel uses (`POST /api/agentv3/publish`) for the app
+   * the user selected here, so it is a second caller of one pipeline, never a second pipeline.
+   */
+  const [publishing, setPublishing] = useState(false);
+  const [publishMsg, setPublishMsg] = useState('');
+  const publishState = usePublishState(selected, publishing);
+
+  const publishSelected = (): string | null => {
+    if (!selected) return 'Choose an app first.';
+    if (publishing) return 'Your app is already being published — one moment.';
+    setPublishing(true);
+    setPublishMsg('Building your app…');
+    void (async () => {
+      try {
+        const res = await fetch('/api/agentv3/publish', {
+          method: 'POST',
+          headers: await authJsonHeaders(),
+          // The identity gate reads these from the BODY (the ownership check separately verifies the
+          // real token, so this is not a trust boundary). Omitting them would 404 for every account on
+          // an allowlisted deployment — a button that is dead for exactly the people who use it.
+          body: JSON.stringify({
+            workspaceId: selected,
+            userId: uid ?? auth.currentUser?.uid ?? undefined,
+            email: auth.currentUser?.email ?? undefined,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        // The server's own words, verbatim — a generic "publish failed" is what makes a button feel
+        // dead, and a build error carries the compiler output the user actually needs.
+        if (!res.ok) { setPublishMsg(data?.detail ? `${data.error}\n\n${data.detail}` : (data?.error || 'Could not publish your app.')); return; }
+        setPublishMsg(typeof data?.url === 'string' && data.url ? `Your app is live at ${data.url}` : (data?.message || 'Published.'));
+      } catch {
+        setPublishMsg('Could not reach NavBharatAI. Check your connection and try again.');
+      } finally {
+        setPublishing(false);
+      }
+    })();
+    return null;
+  };
+
   return (
     <div className="h-full overflow-y-auto custom-scrollbar bg-[#0d1117] text-white">
       <div className="max-w-2xl mx-auto px-3 sm:px-5 py-5 sm:py-6">
         {selected ? (
-          <NbaiDomainConnect workspaceId={selected} onBack={() => setSelected(null)} />
+          <div className="flex flex-col gap-2">
+            <NbaiDomainConnect
+              workspaceId={selected}
+              onBack={() => setSelected(null)}
+              onPublish={publishSelected}
+              publishBusy={publishing}
+              publishFreshness={publishState?.freshness}
+            />
+            {/* The publish RESULT, shown here because this panel owns the request. Verbatim, and it
+                stays put until the next attempt — a message that vanishes is a message nobody read. */}
+            {publishMsg && (
+              <p className="text-[11px] text-zinc-300 whitespace-pre-wrap leading-relaxed px-1">{publishMsg}</p>
+            )}
+          </div>
         ) : (
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">

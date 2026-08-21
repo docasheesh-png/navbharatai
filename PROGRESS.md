@@ -38246,3 +38246,19 @@ but the label — a correction arriving mid-build that reset files or the previe
 than the one it fixes — and that ABSENCE means "nothing was corrected", never "reset to default".
 
 Gate: both tsc + build + FULL vitest — 1,368 files / 17,179 passing, 1 skipped.
+
+**Follow-up the same session — the OTHER entry to the same screen would have shipped without it.**
+
+`ConnectMyWebsitePanel` (Sidebar → Connect my website, and Other AI → Publish & Deploy → Custom
+Domain) renders the SAME `NbaiDomainConnect`. Its own file header calls it "one real flow, not three
+different screens" — the panel exists precisely because two half-working domain screens once did. So
+adding the Publish button and its dot only in the Hosting chooser would have re-created that split:
+the same screen, reached the other way, missing the step it now tells people to take.
+
+It now passes `onPublish` (the SAME `POST /api/agentv3/publish` the build panel uses, for the app the
+user selected here), `publishBusy`, and the measured freshness. One pipeline, two callers.
+
+⚠️ **A dead-button trap avoided on the way:** the endpoint reads `userId`/`email` from the BODY for
+its availability gate (`isAgentV3Enabled`), and an allowlisted deployment returns **404** for a null
+identity — so a publish sending only `workspaceId` would have failed for exactly the accounts that
+use it. The ownership check is separate and verifies the real token, so this is not a trust boundary.

@@ -1254,12 +1254,25 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // reconciles the two. Read-only; it changes nothing.
   app.get('/api/admin/hosting/channels', verifyAdminToken, async (_req: Request, res: Response) => {
     try {
-      const [channels, records] = await Promise.all([
-        new FirebaseHostingDeployer().listChannels(),
-        deploymentStore.list({ limit: 500 }),
+      // BOTH sides carry completeness now, because this screen REASONS ABOUT ABSENCE — a channel with
+      // no record is called orphaned waste and gets a delete button. That inference is only valid if
+      // the registry was genuinely read in full; when it was not, `classifyChannels` returns
+      // 'indeterminate' and nothing is offered for reclaim. See the 2026-08-21 note on ChannelState.
+      const [chan, reg] = await Promise.all([
+        new FirebaseHostingDeployer().listChannelsWithCompleteness(),
+        deploymentStore.listWithCompleteness({ limit: 500 }),
       ]);
-      const classified = classifyChannels(channels, records);
-      res.json({ verdict: channelCeilingVerdict(classified), channels: classified });
+      const classified = classifyChannels(chan.channels, reg.records, reg.complete);
+      res.json({
+        verdict: channelCeilingVerdict(classified),
+        channels: classified,
+        registryComplete: reg.complete,
+        channelsComplete: chan.complete,
+        ...(reg.complete && chan.complete ? {} : {
+          warning: 'This inventory is INCOMPLETE, so nothing is offered for reclaim: a channel missing '
+            + 'a record here may simply be a record we could not read. Reload before acting.',
+        }),
+      });
     } catch (e: any) {
       // Honest: an unreadable list is NOT "zero channels in use". Reporting a made-up all-clear on
       // the one number this endpoint exists for would be worse than reporting nothing.
@@ -1285,12 +1298,22 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const { channelId } = req.params;
     if (!channelId) return res.status(400).json({ error: 'channelId required' });
     try {
-      const [channels, records] = await Promise.all([
-        new FirebaseHostingDeployer().listChannels(),
-        deploymentStore.list({ limit: 500 }),
+      const [chan, reg] = await Promise.all([
+        new FirebaseHostingDeployer().listChannelsWithCompleteness(),
+        deploymentStore.listWithCompleteness({ limit: 500 }),
       ]);
-      const target = classifyChannels(channels, records).find((c) => c.channelId === channelId);
+      // Re-derived here rather than trusted from the client, and re-checked for completeness for the
+      // same reason: this call DELETES, and a delete decided from a half-read registry is how a live
+      // app disappears. An incomplete read refuses rather than guessing.
+      const target = classifyChannels(chan.channels, reg.records, reg.complete).find((c) => c.channelId === channelId);
       if (!target) return res.status(404).json({ error: 'No such channel on this hosting site.' });
+      if (!reg.complete) {
+        return res.status(409).json({
+          error: 'The deployment registry could not be read in full, so it is impossible to tell whether '
+            + 'this channel is waste or a live app whose record we simply did not see. Nothing was deleted.',
+          state: target.state,
+        });
+      }
       if (!target.reclaimable) {
         return res.status(409).json({
           error: 'That channel is a LIVE app. Use takedown for a live app — it also blocks republish; reclaim is only for channels no live app is using.',

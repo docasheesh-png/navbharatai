@@ -34,7 +34,7 @@ describe('channelIdFromResourceName', () => {
 
 describe('classifyChannels — reconciling what EXISTS against what we know about', () => {
   it('a channel whose record is live is LIVE, and is NOT reclaimable', () => {
-    const [c] = classifyChannels([ch(makeChannelId('ws-a'))], [rec('ws-a')]);
+    const [c] = classifyChannels([ch(makeChannelId('ws-a'))], [rec('ws-a')], true);
     expect(c.state).toBe('live');
     expect(c.workspaceId).toBe('ws-a');
     expect(c.reclaimable).toBe(false);
@@ -44,7 +44,7 @@ describe('classifyChannels — reconciling what EXISTS against what we know abou
     // This is the damage the old purge did — an app still serving that nothing points at. The channel
     // id is a one-way hash of the workspace id, so it genuinely cannot be traced back; saying so
     // honestly is what lets it be cleaned up rather than quietly tolerated.
-    const [c] = classifyChannels([ch('v3-gone-deadbeef1234')], [rec('ws-a')]);
+    const [c] = classifyChannels([ch('v3-gone-deadbeef1234')], [rec('ws-a')], true);
     expect(c.state).toBe('unknown');
     expect(c.workspaceId).toBeNull();
     expect(c.reclaimable).toBe(true);
@@ -54,7 +54,7 @@ describe('classifyChannels — reconciling what EXISTS against what we know abou
     // Unpublish and takedown both delete the channel BEFORE touching the registry, so this state
     // means one of those deletes failed and reported success somewhere.
     for (const status of ['unpublished', 'taken_down', 'held']) {
-      const [c] = classifyChannels([ch(makeChannelId('ws-b'))], [rec('ws-b', status)]);
+      const [c] = classifyChannels([ch(makeChannelId('ws-b'))], [rec('ws-b', status)], true);
       expect(c.state, status).toBe('stale');
       expect(c.reclaimable, status).toBe(true);
     }
@@ -64,6 +64,7 @@ describe('classifyChannels — reconciling what EXISTS against what we know abou
     const out = classifyChannels(
       [ch(makeChannelId('ws-a')), ch('v3-orphan-000000000000'), ch(makeChannelId('ws-b'))],
       [rec('ws-a'), rec('ws-b', 'unpublished')],
+      true,
     );
     expect(out.map((c) => c.state)).toEqual(['unknown', 'stale', 'live']);
   });
@@ -72,14 +73,14 @@ describe('classifyChannels — reconciling what EXISTS against what we know abou
     // The count is the whole point of this module; counting one channel twice would raise a false
     // alarm, and the fix for a false alarm is usually to stop trusting the alarm.
     const id = makeChannelId('ws-a');
-    expect(classifyChannels([ch(id), ch(id)], [rec('ws-a')])).toHaveLength(1);
+    expect(classifyChannels([ch(id), ch(id)], [rec('ws-a')], true)).toHaveLength(1);
   });
 
   it('survives empty and malformed input rather than throwing at the admin', () => {
-    expect(classifyChannels([], [])).toEqual([]);
-    expect(classifyChannels(null, null)).toEqual([]);
-    expect(classifyChannels([{ channelId: '' }], [])).toEqual([]);
-    expect(classifyChannels([ch('v3-x')], [{ status: 'active' } as never])).toHaveLength(1);
+    expect(classifyChannels([], [], true)).toEqual([]);
+    expect(classifyChannels(null, null, true)).toEqual([]);
+    expect(classifyChannels([{ channelId: '' }], [], true)).toEqual([]);
+    expect(classifyChannels([ch('v3-x')], [{ status: 'active' } as never], true)).toHaveLength(1);
   });
 });
 
@@ -111,7 +112,7 @@ describe('channelCap — a number we are honest about not knowing', () => {
 describe('channelCeilingVerdict — the warning must arrive BEFORE the wall', () => {
   const live = (n: number) => Array.from({ length: n }, (_, i) => ch(makeChannelId(`w${i}`)));
   const recs = (n: number) => Array.from({ length: n }, (_, i) => rec(`w${i}`));
-  const at = (n: number) => classifyChannels(live(n), recs(n));
+  const at = (n: number) => classifyChannels(live(n), recs(n), true);
 
   it('is quiet while there is real room', () => {
     const v = channelCeilingVerdict(at(10), 50);
@@ -130,6 +131,7 @@ describe('channelCeilingVerdict — the warning must arrive BEFORE the wall', ()
     const classified = classifyChannels(
       [...live(3), ch('v3-orphan-aaaaaaaaaaaa'), ch('v3-orphan-bbbbbbbbbbbb')],
       recs(3),
+      true,
     );
     const v = channelCeilingVerdict(classified, 50);
     expect(v.used).toBe(5);
@@ -193,5 +195,56 @@ describe('HOSTING_FULL_MESSAGE — honest, and white-label clean', () => {
 
   it('does not blame the user for a platform limit', () => {
     expect(HOSTING_FULL_MESSAGE).not.toMatch(/you have (reached|used)|your limit|too many apps/i);
+  });
+});
+
+/**
+ * THE DESTRUCTIVE BUG THIS STATE EXISTS FOR (found 2026-08-21 by sweeping for the class).
+ *
+ * `deploymentStore.list()` caps at 500 AND returns `[]` on a Firestore error, so "no record for this
+ * channel" meant either "genuinely orphaned" or "the database did not answer" — and both produced
+ * `unknown`, which is `reclaimable`, which the admin reclaim endpoint DELETES. One Firestore hiccup
+ * on that screen therefore listed EVERY published app as reclaimable waste, one click each from
+ * taking a real user's live site down permanently.
+ *
+ * Same class as the rest of this week's fixes: an artifact standing in for its validity — here, a
+ * returned list standing in for a COMPLETE list.
+ */
+describe('an incomplete registry can never condemn a live app', () => {
+  const live = (n: number) => Array.from({ length: n }, (_, i) => ch(makeChannelId(`w${i}`)));
+
+  it('THE BUG: Firestore returning nothing must NOT make every published app reclaimable', () => {
+    const out = classifyChannels(live(5), [], false);
+    expect(out.map((c) => c.state)).toEqual(Array(5).fill('indeterminate'));
+    expect(out.some((c) => c.reclaimable), 'a delete button was offered on unread data').toBe(false);
+  });
+
+  it('the SAFE default is incomplete — a caller that forgot to think about it gets no delete buttons', () => {
+    // Deliberately called with two arguments, exactly as every pre-fix call site did.
+    const out = classifyChannels(live(3), []);
+    expect(out.every((c) => c.state === 'indeterminate' && !c.reclaimable)).toBe(true);
+  });
+
+  it('a KNOWN record is still classified normally on an incomplete read — only absence is doubted', () => {
+    // Completeness changes what SILENCE means, nothing else. A record we actually hold is evidence
+    // whether or not we hold every other one.
+    const [liveCh] = classifyChannels([ch(makeChannelId('ws-a'))], [rec('ws-a')], false);
+    expect(liveCh.state).toBe('live');
+    const [staleCh] = classifyChannels([ch(makeChannelId('ws-b'))], [rec('ws-b', 'unpublished')], false);
+    expect(staleCh.state).toBe('stale');
+    expect(staleCh.reclaimable).toBe(true);
+  });
+
+  it('with a complete read the orphan is still found — the fix must not blind the tool', () => {
+    const out = classifyChannels([...live(2), ch('v3-orphan-cccccccccccc')], [rec('w0'), rec('w1')], true);
+    expect(out.filter((c) => c.reclaimable)).toHaveLength(1);
+  });
+
+  it('an indeterminate channel still COUNTS against the ceiling — it is occupying a slot either way', () => {
+    // The two questions are different: "is this waste?" is unknowable here, but "does it use a slot?"
+    // is answered by the channel existing. Under-counting would hide the ceiling we built this for.
+    const v = channelCeilingVerdict(classifyChannels(live(5), [], false), 50);
+    expect(v.used).toBe(5);
+    expect(v.reclaimable).toBe(0);
   });
 });

@@ -3,12 +3,13 @@ import {
   ShieldAlert, ShieldCheck, Play, Search, 
   Download, History, AlertTriangle, Info, 
   Bug, Lock, FileCode, CheckCircle2, Loader2,
-  RefreshCcw, Globe, FileJson, Terminal, Shield, ChevronUp, ChevronDown
+  RefreshCcw, Globe, Terminal, Shield, ChevronUp, ChevronDown
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
+import { deliverTextFile } from '../../lib/downloadFile';
 
 interface SecurityFinding {
   id: string;
@@ -201,11 +202,30 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
                 Scan Report
               </h3>
               <div className="flex items-center gap-2">
-                 <button className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 rounded-lg text-[10px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors">
-                    <FileJson className="w-3.5 h-3.5" /> JSON
-                 </button>
-                 <button className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 rounded-lg text-[10px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors">
-                    <Download className="w-3.5 h-3.5" /> PDF
+                 {/* WAS TWO DEAD BUTTONS, "JSON" and "PDF" (admin 2026-08-21) — neither had an
+                     onClick, so a user who scanned their app and pressed either got nothing.
+                     Neither format was honest to offer, which is the deeper reason they were never
+                     wired: the scan returns `data.reply`, a MARKDOWN STRING. There is no structured
+                     findings object to serialise as JSON (wrapping the same markdown in a JSON
+                     envelope names a format without providing one), and nothing here can generate a
+                     PDF — that needs a renderer this app does not ship.
+
+                     So the report is offered as what it actually IS: markdown. `deliverTextFile`
+                     is the existing iOS-safe path (the `<a download>` trick silently saves nothing
+                     on iOS Safari — the admin hit that on iPhone in 2026-07), so this really lands
+                     on a phone as well as a desktop. Disabled until a report exists, because there
+                     is nothing to save before then. */}
+                 <button
+                    onClick={() => {
+                      if (!report) return;
+                      const slug = (target || 'app').replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'app';
+                      const stamp = new Date().toISOString().slice(0, 10);
+                      void deliverTextFile(`security-scan-${slug}-${stamp}.md`, report, 'text/markdown');
+                    }}
+                    disabled={!report}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 rounded-lg text-[10px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-[#8b949e]"
+                 >
+                    <Download className="w-3.5 h-3.5" /> Download Report
                  </button>
               </div>
             </div>

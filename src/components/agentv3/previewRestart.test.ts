@@ -84,3 +84,30 @@ describe('restartStatusLine — a 30-90s reboot has to say what it is doing', ()
     expect(l.kind).toBe('progress');
   });
 });
+
+describe('restartStatusLine — the WORDS match the button that was pressed (admin 2026-08-21)', () => {
+  it('a wake-up says it is waking, not restarting', () => {
+    expect(restartStatusLine({ diagnosing: true, stage: null, result: null, intent: 'wake' }).text)
+      .toBe('Waking your preview…');
+    expect(restartStatusLine({ diagnosing: true, stage: { label: 'Booting', seconds: 3 }, result: null, intent: 'wake' }).text)
+      .toBe('Waking your preview — Booting…');
+  });
+
+  it('a successful wake-up reports the preview awake', () => {
+    const l = restartStatusLine({ diagnosing: false, stage: null, result: { ok: true, reason: '' }, intent: 'wake' });
+    expect(l.kind).toBe('ok');
+    expect(l.text).toBe('Your preview is awake and your app is responding.');
+  });
+
+  it('a FAILED wake-up still reports failure — the intent changes the words, never the verdict', () => {
+    const l = restartStatusLine({ diagnosing: false, stage: null, result: { ok: false, reason: 'the port never came up' }, intent: 'wake' });
+    expect(l.kind).toBe('failed');
+    expect(l.text).toBe('the port never came up');
+  });
+
+  it('omitting the intent keeps the toolbar’s existing restart wording', () => {
+    expect(restartStatusLine({ diagnosing: true, stage: null, result: null }).text).toBe('Restarting the server…');
+    expect(restartStatusLine({ diagnosing: false, stage: null, result: { ok: true, reason: '' } }).text)
+      .toBe('The server restarted and your app is responding.');
+  });
+});

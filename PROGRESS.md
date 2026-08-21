@@ -37396,3 +37396,77 @@ where it matters (the returning user, the stale checkout) while looking correct 
 guard tests "is it there?", ask what it is really trying to know.
 
 Gate: both tsc green, 17,016 passed + 1 honest skip, CI green before each merge.
+
+---
+
+## 2026-08-21 — The 100% wake-up guarantee: the preview recipe is proven at FIRST run (PR #2539)
+
+**Admin, verbatim:** *"sleep cunt down choro. bas 'wake-up' ko strong banao. itna strong ki- '100%
+preview guarantee' aur is guarantee ka confirmation tabhi ho jana chahiye jab preview pahli bar chale.
+(abhi yeh ho raha hai-> ek bar live preview chal jata hai, app band kar ke wapas aye, to preview chalta
+hi nahi hai chahe kuch kar lo, koi bhi cammand de do, kitna bhi edit karwa lo)"*
+
+**The clause that gave the diagnosis away** was the parenthetical one. *Chahe kitna bhi edit karwa lo*
+means a fresh build could not bring the preview back either — so this was never merely a sleeping
+sandbox, and the revival path was not short of a wake-up call. It was short of KNOWLEDGE.
+
+**Root cause.** `SandboxRecord` held `{workspaceId, userId, sandboxId, updatedAt, pausedAt}` and nothing
+else. No dev command, no port, no framework. So once that sandbox was gone, every later attempt had to
+REDISCOVER how to run the app: re-read package.json, guess the framework, guess the port, walk a ladder
+of candidate ports hoping one rendered. That is guesswork, and guesswork has a failure rate — which is
+precisely what the admin was hitting, over and over, on a path where the right answer had already been
+known once.
+
+Because at the moment the preview FIRST came up, none of it was a guess: a specific command had started
+the server and a specific port had genuinely rendered the app. Both facts were used once to build a URL
+and then discarded.
+
+**This is the third instance of one bug class, now named for the third time in this file: THE EXISTENCE
+OF AN ARTIFACT STANDING IN FOR ITS VALIDITY.** A stale URL stood in for a live preview (2026-08-21,
+earlier today). A stale `dist/` stood in for a current build (`cssLegacy.test.ts`, same day). Here a
+sandbox id stood in for "revivable". Each was cheap to write and each failed exactly where it mattered
+while looking correct everywhere else. **The recurring question to ask of any guard: when it tests "is
+it there?", what is it really trying to know?**
+
+**The fix — capture at SUCCESS, confirm it there, replay it at need.**
+- `previewRevival.ts` (new, pure): `PreviewRecipe` = command + port + framework + provenAt, and
+  `buildRecipe()` which REFUSES a partial recipe. A half-recipe is worse than none — it would pass the
+  guarantee check at first run and fail at revival, i.e. reproduce the exact failure it was meant to end.
+- `devServerLaunchLog.ts` (new): the actuator is the only place that both LAUNCHES the dev server and
+  OBSERVES the port it bound, so it records that pair once, in one place, rather than three call sites
+  re-deriving it (rule-4 step 2: fix the class, centralize). Both actuator success paths record it —
+  the fresh launch AND the "already healthy, reused it" fast path, because a server we adopted is as
+  much a proven launch as one we started. A FAILED launch records nothing, or a later revival would
+  faithfully replay the command that did not work.
+- `SandboxStore.saveRecipe()` writes the recipe and then READS IT BACK, returning whether it is
+  genuinely retrievable. "We wrote it" and "it is there" are different facts; an unverified guarantee is
+  a hope that surfaces as a dead preview days later, when the user can do nothing about it.
+- The BUILD stores the recipe the moment a real browser renders the app (right after
+  `recordPreviewVerified()`), and says so to the user THEN — "Preview saved — it can be brought back any
+  time, even after it sleeps" — or, honestly, "the start command could not be recorded — if it sleeps,
+  restarting it may take longer". Said at first run because that is the only moment it is actionable.
+- The WAKE path replays instead of rediscovering: the proven command and port lead, while the live health
+  check still outranks the stored port (an observation beats a memory). A preview that has never
+  succeeded falls back to today's derivation byte-for-byte.
+- `PREVIEW_REVIVAL_RECIPE` in the admin report, so "the preview would not come back" is answerable from
+  evidence next time rather than re-argued from the symptom (rule 5, fix the system's honesty).
+
+**The user's words are the admin's own.** The banner is now **"Preview is in sleep mode"** with a
+**"Wake up"** button, and `restartStatusLine` gained an `intent` so the progress line says "Waking your
+preview…" / "Your preview is awake" when that is the button pressed. A user who presses Wake up and
+reads "Restarting the server" has to work out for themselves that it is the same thing. Intent changes
+the WORDS only — a failed wake still reports failure, tested explicitly.
+
+**Honest limits, encoded in the module rather than implied away** (rule 6): this cannot promise the
+preview is INSTANT — a paused sandbox resumes in seconds, one that is gone is rebuilt from durable files
+in minutes — and it cannot promise anything while the sandbox host itself is down. What it promises is
+that reviving is never again a GUESS.
+
+**One invariant test caught a real ordering mistake.** `greenGuard.test.ts` asserts every
+`previewGreen = true` sits within 1400 chars of a `recordPreviewVerified()` call — my capture block,
+inserted between them, pushed them apart. The test was right and the fix was to move the block AFTER the
+recording, not to widen the window: the earned-green association is the thing being protected.
+
+Gate: `tsc --noEmit` green, `tsc -p tsconfig.server.json` green, **vitest 1360 files / 17,097 passed /
+1 honest skip**. New: `previewRevival.test.ts` (10), `devServerLaunchLog.test.ts` (6), +4 in
+`previewRestart.test.ts`.

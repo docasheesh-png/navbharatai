@@ -223,6 +223,8 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
 
   // Returns whether the app actually came up, so a caller that SWITCHED the view to Live in order to
   // show this boot can put the view back when it fails instead of stranding the user on a dead tab.
+  // Which button started this, so the progress line uses that button's own words (see previewRestart).
+  const [wakeIntent, setWakeIntent] = useState(false);
   const runDiagnose = useCallback(async (): Promise<boolean> => {
     if (!workspaceId) return false;
     setDiagnosing(true);
@@ -348,6 +350,9 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     if (sandbox?.livePreviewAvailable !== true) return; // no live backend here → nothing to resume
     if (autoResumedFor.current === workspaceId) return;
     autoResumedFor.current = workspaceId;
+    // The automatic restore is a wake-up too, so the progress line says so rather than announcing a
+    // "restart" the user never asked for.
+    setWakeIntent(true);
     void runDiagnose();
   }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox, health, runDiagnose]);
 
@@ -952,7 +957,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
               a 90-second sandbox reboot — is how a user learns to distrust both. */}
           {canOfferRestart({ mode, url: effectiveUrl, workspaceId }) && (
             <button
-              onClick={() => void runDiagnose()}
+              onClick={() => { setWakeIntent(false); void runDiagnose(); }}
               disabled={diagnosing}
               aria-label="Restart the server"
               className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-50"
@@ -970,7 +975,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             a restart that quietly failed would leave the user staring at the same broken preview
             believing it had been fixed. */}
         {(() => {
-          const line = restartStatusLine({ diagnosing, stage: diagStage, result: diagResult });
+          const line = restartStatusLine({ diagnosing, stage: diagStage, result: diagResult, intent: wakeIntent ? 'wake' : 'restart' });
           if (line.kind === 'none') return null;
           if (line.kind === 'progress') {
             return (
@@ -1023,15 +1028,18 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           <div className="flex items-start gap-2 px-3 py-2 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-sky-200">
             <span className="flex-1">
               <span className="font-semibold">
-                {health === 'sleeping' ? 'Your preview went to sleep.' : 'Your preview stopped.'}
+                {health === 'sleeping' ? 'Preview is in sleep mode.' : 'Your preview stopped.'}
               </span>{' '}
               {health === 'sleeping'
-                ? 'It pauses after a while of no activity so it is not billed while nobody is looking. Your app and its files are safe — it just needs a moment to start again.'
-                : 'The app stopped running. Your files are safe — starting it again usually fixes it.'}{' '}
-              <button onClick={() => void runDiagnose()} className="underline hover:text-sky-100 font-semibold">
-                Start it again
-              </button>
+                ? 'It pauses after a while of no activity so it is not billed while nobody is looking. Your app and its files are safe — waking it up brings back exactly what you had.'
+                : 'The app stopped running. Your files are safe — waking it up usually brings it straight back.'}
             </span>
+            <button
+              onClick={() => { setWakeIntent(true); void runDiagnose(); }}
+              className="shrink-0 rounded-md bg-sky-600 px-2.5 py-1 font-semibold text-white hover:bg-sky-500"
+            >
+              Wake up
+            </button>
           </div>
         )}
         {liveLoading && (

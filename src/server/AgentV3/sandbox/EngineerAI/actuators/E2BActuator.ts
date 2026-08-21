@@ -11,6 +11,7 @@ import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDe
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
+import { recordDevServerLaunch } from '../../../devServerLaunchLog';
 import { dbProvisionScript, parseDbProvision, provisionOutcomeNote, provisionDiagnostics, CANONICAL_DB_URL, type DbProvisionOutcome } from '../../dbProvisionVerify';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
@@ -1043,6 +1044,10 @@ export class E2BActuator implements IEngineerActuator {
             // A server we ADOPTED needs the keepalive exactly as much as one we started — arguably
             // more, since nobody in this process has been watching it so far.
             await armKeepalive(boundPort);
+            // A server we ADOPTED is as much a proven launch as one we started — this command, on this
+            // port, is serving right now. Recording it here too is what stops the revival recipe from
+            // depending on which of the two paths a build happened to take. See devServerLaunchLog.ts.
+            recordDevServerLaunch(workspaceId, command, boundPort);
             return { exitCode: 0, stdout: `[health-check] dev server already healthy on port ${boundPort} — reused it (no relaunch; edits apply via HMR).\n${devServerHealthLine(true, boundPort)}`, stderr: '' };
           }
         }
@@ -1314,6 +1319,9 @@ export class E2BActuator implements IEngineerActuator {
       }
       // Honest health line: the verified port when UP, the REAL root cause when DOWN.
       stdout += `\n${devServerHealthLine(portUp, livePort, portUp ? undefined : (lastDiagnosis ?? classifyDevServerFailure(devLog)))}`;
+      // Only a launch that came UP is evidence. A failed one must leave no trace, or a later revival
+      // would faithfully replay the command that did not work.
+      if (portUp) recordDevServerLaunch(workspaceId, command, livePort);
 
       return { exitCode: 0, stdout, stderr };
     }

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Share2, Flag, Lock, Check, Sparkles, Gamepad2, Type } from 'lucide-react';
+import { X, Flag, Lock, Check, Sparkles, Gamepad2, Type } from 'lucide-react';
 import { authedHeaders } from '../../App';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { auth } from '../../lib/firebase';
@@ -101,7 +101,6 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
   const [password, setPassword] = useState('');
   const [needsPassword, setNeedsPassword] = useState(false);
   const [opening, setOpening] = useState(false);
-  const [shared, setShared] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [reportText, setReportText] = useState('');
   const [reportDone, setReportDone] = useState(false);
@@ -181,15 +180,6 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
     })();
     return () => { cancelled = true; };
   }, [appId, open]);
-
-  const share = useCallback(() => {
-    // The share link is the store page itself — opening it lands the receiver right here.
-    const url = `${window.location.origin}/store/app/${encodeURIComponent(appId)}`;
-    void navigator.clipboard?.writeText(url).then(() => {
-      setShared(true);
-      setTimeout(() => { if (liveRef.current) setShared(false); }, 1600);
-    }).catch(() => { /* clipboard denied — the URL bar still has it via the deep link */ });
-  }, [appId]);
 
   /**
    * REMIX — the viewer becomes a creator in one tap (Kadam 2).
@@ -306,9 +296,11 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
             {gameMode ? <Gamepad2 size={15} /> : <Type size={15} />}
           </button>
         )}
-        <button onClick={share} title="Copy the app's link" className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors">
-          {shared ? <Check size={15} className="text-emerald-400" /> : <Share2 size={15} />}
-        </button>
+        {/* SHARE REMOVED (admin 2026-08-21: "app mart ke play se yeh jo share button hai, isko hata do").
+            It was real — it copied the store link — but it could fail silently when the browser refused
+            the clipboard, which on a phone is indistinguishable from a dead button. The creator's own
+            "Copy link" in My apps is unaffected. ⚠️ A VIEWER now has no way to share an app they liked;
+            if that is ever wanted back, the app's DETAIL sheet is the calmer home for it, not this bar. */}
         <button onClick={() => setReporting(true)} title="Report this app" className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors">
           <Flag size={15} />
         </button>

@@ -107,3 +107,24 @@ export function adminRequestOk(req: Request): boolean {
   if (!token) return false;
   return verifyAdminTokenValue(token, adminPassword(), adminUsername(), Date.now(), adminTokenTtlMs(process.env.ADMIN_TOKEN_TTL_HOURS));
 }
+
+/**
+ * The admin gate as EXPRESS MIDDLEWARE, for route files other than admin.ts.
+ *
+ * WHY THIS EXISTS (2026-08-21, adding the user-reports admin routes): `admin.ts` builds its gate as a
+ * local `const` inside its register function, so it is unreachable from any other file. The next route
+ * that needs admin protection therefore has exactly two options — move into that 1,000-line file, or
+ * hand-roll a second check. This module's own header already calls that out: "any route can import the
+ * REAL gate instead of hand-rolling a weaker one." It could not, until now.
+ *
+ * Built on `adminRequestOk`, so there is ONE verification and a change to it cannot protect one screen
+ * and miss another. A 401 (not 403) on failure, matching admin.ts, so the client prompts for login
+ * instead of showing a permissions error.
+ */
+export function requireAdmin(req: Request, res: { status: (n: number) => { json: (b: unknown) => unknown } }, next: () => void): void {
+  if (!adminRequestOk(req)) {
+    res.status(401).json({ error: 'Admin session expired — please log in again.' });
+    return;
+  }
+  next();
+}

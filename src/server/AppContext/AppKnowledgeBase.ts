@@ -2067,6 +2067,15 @@ NOTE: Does NOT build apps (use NavBharatAI Pro v5.0 for that).`,
 
   // ─── SETTINGS ─────────────────────────────────────────────────────────────
   {
+    id: 'report_problem',
+    name: 'Report a problem — tell NavBharatAI what went wrong',
+    path: 'Sidebar menu → "Report a problem" · or SHAKE your phone anywhere in the app',
+    description: 'One place to report anything in NavBharatAI: a bug, a screen that misbehaves, an app on App Mart, or another person. Write what happened and optionally attach a SCREENSHOT (it is shrunk automatically, so a normal phone screenshot is never refused). NavBharatAI attaches the screen you were on and your device type so the problem can be found — nothing else is collected. Sign-in is required, because a report nobody can be asked about cannot be followed up. A REAL PERSON READS EVERY REPORT: they land in the admin panel\'s User Reports page, where they can be read, acted on, and — for a report about a person — the account can be suspended. If sending fails, NavBharatAI says why instead of pretending it worked. SHAKE TO REPORT: on Android, shaking the phone opens the same sheet from any screen; it only reacts to a real back-and-forth shake, so a bumpy journey does not trigger it, and it never fires twice in a row. On iPhone the shake shortcut is unavailable (Apple does not let a page read motion without permission), so use the sidebar entry there.',
+    howToUse: 'Open the sidebar menu and tap "Report a problem" — or, on an Android phone, just shake the device. Type what happened (one line is enough), tap "Add screenshot" if you have one, then "Send report". You will see "Sent. Thank you." when it has genuinely been saved.',
+    relatedFeatures: ['settings_root', 'nav_store_instant_apps', 'app_store'],
+    keywords: ['report', 'report a problem', 'complaint', 'shikayat', 'bug', 'bug report', 'problem batao', 'kuch kaam nahi kar raha', 'shake', 'phone hilao', 'screenshot bhejo', 'report user', 'report app', 'abuse', 'galat app'],
+  },
+  {
     id: 'home_other_ai_tools',
     name: 'Other AI — Builder Tools (Home page)',
     path: 'Home → "Other AI" card  (opens the Other AI page)',

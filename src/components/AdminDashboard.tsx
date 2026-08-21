@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2 } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, Image as PictureIcon } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
@@ -15,7 +15,7 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
-type TabId = 'overview' | 'users' | 'engines' | 'revenue' | 'reports' | 'security' | 'settings';
+type TabId = 'overview' | 'users' | 'engines' | 'revenue' | 'reports' | 'userreports' | 'security' | 'settings';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   { id: 'overview',  label: 'Overview',    icon: Activity },
@@ -23,6 +23,10 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   { id: 'engines',   label: 'AI Engines',   icon: Cpu },
   { id: 'revenue',   label: 'Revenue',      icon: IndianRupee },
   { id: 'reports',   label: 'Build Reports', icon: FileText },
+  // USER REPORTS — a SEPARATE page from Build Reports on purpose (admin 2026-08-21). One is the
+  // engine telling us about a build; this is a person telling us about the product or about another
+  // person. Mixing them would bury the complaints that need a human.
+  { id: 'userreports', label: 'User Reports', icon: Flag },
   { id: 'security',  label: 'Security',     icon: Shield },
   { id: 'settings',  label: 'Settings',     icon: Settings },
 ];
@@ -82,6 +86,14 @@ const statCard = (label: string, value: string | number, sub: string, color: str
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLogout }) => {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
+  // ── User reports (admin 2026-08-21) ──────────────────────────────────────
+  const [userReports, setUserReports] = useState<any[]>([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [openReport, setOpenReport] = useState<any>(null);
+  const [reportFilter, setReportFilter] = useState<'open' | 'all'>('open');
+  /** The account sheet: opened FROM a report (or from the Users tab), so a decision is made with the
+   *  whole picture in front of the admin rather than from a complaint alone. */
+  const [account, setAccount] = useState<any>(null);
   const [analytics, setAnalytics] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [promos, setPromos] = useState<any[]>([]);
@@ -309,6 +321,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     finally { setUpdateBusy(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken, updateCohort, fetchUpdateCohort]);
+
+  /** Every user report, newest first. `open` by default — the queue that still needs a person. */
+  const fetchUserReports = useCallback(async () => {
+    setReportsLoading(true);
+    try {
+      const q = reportFilter === 'open' ? '?status=open' : '';
+      const r = await fetch(`/api/admin/reports${q}`, { headers });
+      const d = await r.json();
+      setUserReports(Array.isArray(d?.reports) ? d.reports : []);
+    } catch (e) { console.error(e); setUserReports([]); }
+    finally { setReportsLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, reportFilter]);
+
+  /** One report in full — the screenshot is fetched HERE, never in the list, so the list stays light. */
+  const openUserReport = useCallback(async (id: string) => {
+    setOpenReport({ loading: true });
+    try {
+      const r = await fetch(`/api/admin/reports/${encodeURIComponent(id)}`, { headers });
+      const d = await r.json();
+      setOpenReport(r.ok ? d : { error: d?.error || 'Could not open that report.' });
+    } catch { setOpenReport({ error: 'Could not open that report.' }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const markUserReport = useCallback(async (id: string, status: string) => {
+    try {
+      await fetch(`/api/admin/reports/${encodeURIComponent(id)}/status`, {
+        method: 'POST', headers, body: JSON.stringify({ status }),
+      });
+      setOpenReport(null);
+      void fetchUserReports();
+    } catch { /* the row stays as it was; the admin can retry */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, fetchUserReports]);
+
+  /** One person's whole account. Every section says whether it was READ — see the route. */
+  const openAccount = useCallback(async (uid: string) => {
+    setAccount({ loading: true, uid });
+    try {
+      const r = await fetch(`/api/admin/users/${encodeURIComponent(uid)}/account`, { headers });
+      const d = await r.json();
+      setAccount(r.ok ? { ...d, uid } : { error: d?.error || 'Could not open that account.', uid });
+    } catch { setAccount({ error: 'Could not open that account.', uid }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
 
   const fetchBuildReports = useCallback(async () => {
     setBuildReportsLoading(true);
@@ -673,6 +731,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => { if (activeTab === 'settings') { fetchPromos(); fetchUpdateCohort(); } }, [activeTab, fetchPromos, fetchUpdateCohort]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
   useEffect(() => { if (activeTab === 'reports') { fetchBuildReports(); fetchFirstPass(); } }, [activeTab, fetchBuildReports, fetchFirstPass]);
+  useEffect(() => { if (activeTab === 'userreports') fetchUserReports(); }, [activeTab, fetchUserReports]);
   const fetchLatencyAnomaly = useCallback(async () => {
     setAnomalyLoading(true);
     try {
@@ -1110,8 +1169,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       {users.map((u: any) => (
                         <tr key={u.userId} className={`hover:bg-white/5 transition-colors ${u.banned ? 'bg-red-950/20' : ''}`}>
                           <td className="py-3 px-4">
-                            <div className="text-white font-bold text-[11px]">{u.name}</div>
-                            <div className="text-[#8b949e] text-[9px] font-mono">{u.email}</div>
+                            {/* The same account sheet a report opens — one place where a person's whole
+                                picture lives, reachable from both surfaces rather than rebuilt in each. */}
+                            <button onClick={() => void openAccount(u.userId)} className="text-left group">
+                              <div className="text-white font-bold text-[11px] group-hover:underline">{u.name}</div>
+                              <div className="text-[#8b949e] text-[9px] font-mono group-hover:text-white/80">{u.email}</div>
+                            </button>
                           </td>
                           <td className="py-3 px-4 font-mono text-amber-400 font-black">{(u.tokenBalance || 0).toLocaleString()}</td>
                           <td className="py-3 px-4 font-mono text-violet-400">{(u.totalTokensUsed || 0).toLocaleString()}</td>
@@ -1501,6 +1564,235 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           )}
 
           {/* ── BUILD REPORTS TAB (admin 2026-07-29) — the reports users submit via "Report" ── */}
+
+      {/* ONE PERSON'S WHOLE ACCOUNT (admin 2026-08-21). Opened from a report, or from the Users tab —
+          the point is that a suspension is decided WITH the account in front of you, not from a
+          complaint alone. Rendered at the dashboard root so it can sit above either surface. */}
+      {account && (
+        <div className="fixed inset-0 z-[60] bg-black/75 flex items-center justify-center p-4" onClick={() => setAccount(null)}>
+          <div className="w-full max-w-2xl max-h-[88vh] overflow-y-auto bg-[#0d1117] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+            {account.loading ? (
+              <p className="text-sm text-white/60">Opening account…</p>
+            ) : account.error ? (
+              <p className="text-sm text-amber-300">{account.error}</p>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h4 className="text-base font-bold text-white break-all">{account.identity?.email || account.identity?.name || account.uid}</h4>
+                    <p className="text-[11px] text-white/40 break-all">{account.uid}</p>
+                  </div>
+                  <button onClick={() => setAccount(null)} className="text-white/40 hover:text-white p-1" aria-label="Close">✕</button>
+                </div>
+
+                {account.wallet?.banned && (
+                  <p className="mt-3 text-[11px] px-3 py-2 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/30">
+                    Suspended{account.wallet.banReason ? ` — ${account.wallet.banReason}` : ''}
+                  </p>
+                )}
+
+                {/* The few flags worth a second look. Not accusations. */}
+                {Array.isArray(account.flags) && account.flags.length > 0 && (
+                  <ul className="mt-3 space-y-1">
+                    {account.flags.map((f: string) => (
+                      <li key={f} className="text-[11px] px-3 py-2 rounded-lg bg-amber-500/10 text-amber-200 border border-amber-500/25">{f}</li>
+                    ))}
+                  </ul>
+                )}
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
+                  {[
+                    { label: 'Tokens', value: account.wallet?.ok ? Number(account.wallet.tokenBalance).toLocaleString('en-IN') : null },
+                    { label: 'Balance', value: account.wallet?.ok ? `₹${Number(account.wallet.remainingBalanceInr).toFixed(2)}` : null },
+                    { label: 'Apps built', value: account.builds?.ok ? String(account.builds.apps?.length ?? 0) : null },
+                    { label: 'Recharges', value: account.payments?.ok ? String(account.payments.successful) : null },
+                  ].map((c) => (
+                    <div key={c.label} className="rounded-xl border border-white/10 p-3">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-white/40">{c.label}</p>
+                      {/* NOT ZERO WHEN WE COULD NOT READ IT — see the route. An admin who reads "0
+                          recharges" from a failed query sees someone who never paid us. */}
+                      <p className={`text-lg font-black ${c.value === null ? 'text-white/30' : 'text-white'}`}>
+                        {c.value ?? 'unread'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="mt-3 text-[11px] text-white/50">
+                  Spent on builds: {account.builds?.ok ? `₹${Number(account.builds.spentInr).toFixed(2)}` : 'could not be read'}
+                  {account.payments?.ok && <> · Paid in: ₹{Number(account.payments.totalInr).toFixed(2)} over {account.payments.successful} recharge{account.payments.successful === 1 ? '' : 's'}</>}
+                  {account.builds?.ok && <> · {account.builds.totalBuilds} builds ({account.builds.failed} failed)</>}
+                </p>
+
+                {/* PER APP — one app is many builds, so this is grouped by app, not by build. The unit
+                    is ₹ because that is what the record holds and what actually left the wallet;
+                    deriving a token figure from a changing rate would be an invented number. */}
+                {account.builds?.ok && account.builds.apps?.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-2">Per app</p>
+                    <div className="space-y-1.5">
+                      {account.builds.apps.slice(0, 15).map((a: any) => (
+                        <div key={a.sessionId} className="flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2">
+                          <span className="text-xs text-white truncate flex-1">{a.title}</span>
+                          <span className="text-[11px] text-white/40 shrink-0">{a.builds} build{a.builds === 1 ? '' : 's'}{a.failed > 0 ? ` · ${a.failed} failed` : ''}</span>
+                          <span className="text-xs font-bold text-white shrink-0">₹{Number(a.spentInr).toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {account.publishedApps?.ok && account.publishedApps.count > 0 && (
+                  <p className="mt-3 text-[11px] text-white/50">{account.publishedApps.count} published app{account.publishedApps.count === 1 ? '' : 's'} live</p>
+                )}
+
+                <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-white/10">
+                  <button
+                    onClick={() => { void handleBan(account.uid, !account.wallet?.banned); setAccount(null); }}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white ${account.wallet?.banned ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-rose-600 hover:bg-rose-500'}`}
+                  >
+                    <Shield size={13} /> {account.wallet?.banned ? 'Lift the suspension' : 'Suspend this account'}
+                  </button>
+                  <button onClick={() => setAccount(null)} className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-white/60">Close</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+          {activeTab === 'userreports' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <h3 className="flex items-center gap-2 text-lg font-black text-white tracking-tight">
+                  <Flag size={18} className="text-rose-400" /> User Reports
+                  {userReports.length > 0 && (
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-rose-500/40 text-rose-300">
+                      {userReports.length}
+                    </span>
+                  )}
+                </h3>
+                <div className="flex items-center gap-2">
+                  {(['open', 'all'] as const).map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => setReportFilter(f)}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${reportFilter === f ? 'bg-rose-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}
+                    >{f === 'open' ? 'Needs a person' : 'All'}</button>
+                  ))}
+                  <button onClick={() => void fetchUserReports()} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/60" aria-label="Refresh">
+                    <RefreshCw size={14} className={reportsLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+              </div>
+
+              {reportsLoading && userReports.length === 0 ? (
+                <p className="text-xs text-white/40">Loading reports…</p>
+              ) : userReports.length === 0 ? (
+                <p className="text-xs text-white/40">
+                  {reportFilter === 'open' ? 'Nothing waiting. Every report has been handled.' : 'No reports yet.'}
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {userReports.map((r: any) => (
+                    <button
+                      key={r.id}
+                      onClick={() => void openUserReport(r.id)}
+                      className="w-full text-left rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] p-3 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-white/15 text-white/60">
+                          {r.target?.kind === 'app' ? 'App' : r.target?.kind === 'user' ? 'User' : 'Problem'}
+                        </span>
+                        {r.status !== 'open' && (
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/30 text-emerald-300">{r.status}</span>
+                        )}
+                        {r.hasScreenshot && <PictureIcon size={12} className="text-white/40" />}
+                        <span className="text-[10px] text-white/35 ml-auto">{new Date(r.at).toLocaleString()}</span>
+                      </div>
+                      <p className="text-sm text-white mt-1.5 line-clamp-2">{r.message}</p>
+                      <p className="text-[11px] text-white/40 mt-1">
+                        From {r.reporter?.email || r.reporter?.name || r.reporter?.shortUid || 'unknown'}
+                        {r.reported && <> · about {r.reported.email || r.reported.name || r.reported.shortUid}</>}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* One report, in full. BOTH people are named, and the actions an admin actually needs
+                  are right here — reading a complaint and then hunting for the account in another tab
+                  is how reports stop getting handled. */}
+              {openReport && (
+                <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setOpenReport(null)}>
+                  <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto bg-[#161b22] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+                    {openReport.loading ? (
+                      <p className="text-sm text-white/60">Opening…</p>
+                    ) : openReport.error ? (
+                      <p className="text-sm text-amber-300">{openReport.error}</p>
+                    ) : (
+                      <>
+                        <div className="flex items-start justify-between gap-3">
+                          <h4 className="text-base font-bold text-white">Report</h4>
+                          <button onClick={() => setOpenReport(null)} className="text-white/40 hover:text-white p-1" aria-label="Close">✕</button>
+                        </div>
+                        <p className="text-sm text-white whitespace-pre-wrap mt-3 bg-black/30 rounded-xl p-3">{openReport.report?.message}</p>
+
+                        <div className="grid grid-cols-2 gap-3 mt-4 text-[11px]">
+                          <div className="rounded-xl border border-white/10 p-3">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Reported by</p>
+                            <button onClick={() => void openAccount(openReport.report.reporterUid)} className="text-left text-white break-all underline decoration-white/20 hover:decoration-white">
+                              {openReport.reporter?.email || openReport.reporter?.shortUid || '—'}
+                            </button>
+                            <p className="text-white/40 break-all">{openReport.report?.reporterUid}</p>
+                          </div>
+                          <div className="rounded-xl border border-white/10 p-3">
+                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">About</p>
+                            {openReport.reported ? (
+                              <>
+                                <button onClick={() => void openAccount(openReport.report.target.ownerUid)} className="text-left text-white break-all underline decoration-white/20 hover:decoration-white">
+                                  {openReport.reported.email || openReport.reported.shortUid}
+                                </button>
+                                <p className="text-white/40 break-all">{openReport.report?.target?.ownerUid}</p>
+                                {openReport.reportsAgainstReported > 1 && (
+                                  <p className="text-rose-300 mt-1 font-semibold">{openReport.reportsAgainstReported} reports about this account</p>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-white/40">Not about a person</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {openReport.report?.context && (
+                          <p className="text-[10px] text-white/35 mt-3">
+                            Screen: {openReport.report.context.view || '—'} · {openReport.report.context.platform || '—'}
+                          </p>
+                        )}
+
+                        {openReport.screenshot && (
+                          <img src={openReport.screenshot} alt="Screenshot from the reporter" className="mt-3 w-full rounded-xl border border-white/10" />
+                        )}
+
+                        <div className="flex flex-wrap gap-2 mt-5">
+                          <button onClick={() => void markUserReport(openReport.report.id, 'actioned')} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white">Acted on it</button>
+                          <button onClick={() => void markUserReport(openReport.report.id, 'reviewed')} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-bold text-white">Read it</button>
+                          <button onClick={() => void markUserReport(openReport.report.id, 'dismissed')} className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-white/60">Dismiss</button>
+                          {openReport.report?.target?.ownerUid && (
+                            <button
+                              onClick={() => { void handleBan(openReport.report.target.ownerUid, true); void markUserReport(openReport.report.id, 'actioned'); }}
+                              className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white"
+                            ><Shield size={13} /> Suspend this account</button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === 'reports' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">

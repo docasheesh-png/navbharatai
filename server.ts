@@ -55,6 +55,7 @@ import { registerMinifyRoutes } from './src/server/routes/minify';
 import { registerWorkspaceFileRoutes } from './src/server/routes/workspaceFiles';
 import { registerMobileSetupRoutes } from './src/server/routes/mobileSetup';
 import { registerNavStoreRoutes } from './src/server/routes/navStore';
+import { registerReportRoutes } from './src/server/routes/reports';
 import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
 // RETIRED — AppMaker telemetry routes (old engine). Unregistered in the v3.0 cutover; no frontend uses them.
 // import { registerAppmakerRoutes } from './src/server/routes/appmaker';
@@ -483,6 +484,9 @@ setInterval(() => {
   // + per-dependency checks); it still returns status:'ok' when healthy, so existing probes keep working.
   // The old inline shallow /api/health ({status,uptime,port}) was removed so it can't shadow the deep one.
   registerHealthRoutes(app);
+  // User reports (admin 2026-08-21): one submit route for everyone, and the admin routes that READ them
+  // — deliberately registered together, because a report nobody can read is what this replaced.
+  registerReportRoutes(app);
 
   // P3.3 — keep-warm: GET /api/warm pre-warms the heavy PRO/SDA singletons. Hit by an
   // external Cloud Scheduler so min-instances=0 stays (see docs/SCALABILITY.md).

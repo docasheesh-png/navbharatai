@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Info, Lock, Settings, Heart, X, Globe, Download } from 'lucide-react';
+import { Info, Lock, Settings, Heart, X, Globe, Download, Flag } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { shouldShowDownloadApp, apkDownloadUrl } from '../../lib/appDownload';
 import { TextSizeSlider } from './TextSizeSlider';
@@ -41,6 +41,8 @@ export interface SidebarNavProps {
   setIsThemePickerOpen: (v: boolean) => void;
   setShowVishwakarmaChooser: (v: boolean) => void;
   setErrorContext: (v: any) => void;
+  /** Open the app-wide "Report a problem" sheet (the same one a phone shake opens). */
+  onReportProblem?: () => void;
   /** Reopen a past chat (routes v5.0 → Pro v5.0, others → their own surface). Unused by this
    *  component (the "Recent Chats" menu block was removed 2026-07-01, admin request) — kept on the
    *  props interface only so App.tsx's existing call site doesn't need touching. */
@@ -109,7 +111,7 @@ export function SidebarNav({
   isMenuOpen, setIsMenuOpen, menuItems, enabledModules,
   activeView, toggleTab, setActiveView, hasGeneratedCode, user, setShowAuth,
   addLog, theme, setTheme, isThemePickerOpen, setIsThemePickerOpen,
-  setShowVishwakarmaChooser, setErrorContext,
+  setShowVishwakarmaChooser, setErrorContext, onReportProblem,
 }: SidebarNavProps) {
   // Git lives in App Settings now (admin 2026-08-01: "Git option sidebar se App Settings me move karo"),
   // so it is excluded from the rail/drawer here. It stays in `menuItems` so its header tab + view still
@@ -265,6 +267,20 @@ export function SidebarNav({
                       <Download className="w-4.5 h-4.5 group-hover:scale-110 transition-transform" />
                       <span className="text-sm font-bold tracking-tight">Download app</span>
                     </a>
+                  )}
+
+                  {/* REPORT A PROBLEM (admin 2026-08-21). The same sheet a phone SHAKE opens — and the
+                      reason it exists: nobody discovers an invisible gesture, and iOS will not give a
+                      page motion access unasked, so shake alone would leave the feature unreachable
+                      for the people most likely to need it. */}
+                  {onReportProblem && (
+                    <button
+                      onClick={() => { onReportProblem(); setIsMenuOpen(false); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group border border-white/10 bg-white/[0.03] text-[#8b949e] hover:text-white hover:bg-white/[0.06]"
+                    >
+                      <Flag className="w-4.5 h-4.5 group-hover:scale-110 transition-transform" />
+                      <span className="text-sm font-bold tracking-tight">Report a problem</span>
+                    </button>
                   )}
 
                   {/* Theme picker moved to Settings → General (admin 2026-07-16). */}

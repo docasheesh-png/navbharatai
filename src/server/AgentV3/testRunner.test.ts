@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, type TestPlan, suitePresentButRunnerMissing } from './testRunner';
+import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, type TestPlan, type TestFramework, suitePresentButRunnerMissing, withTestFilter, withSandboxBrowsers } from './testRunner';
 
 // B4: detection + parsing of the project's OWN test suite. Both functions are pure, so we exercise
 // every framework branch with real-shaped tool output — no sandbox needed.
@@ -259,5 +259,71 @@ describe('testOutcomeRepairPrompt', () => {
     const bad = parseTestOutcome(planFor('vitest'), 1, 'crashed before running', 'stack');
     const p = testOutcomeRepairPrompt(bad);
     expect(p).toMatch(/fix the source/i);
+  });
+});
+
+/**
+ * B4 (ROADMAP §8B) — run ONE test instead of the whole suite while iterating on a failure.
+ *
+ * THE WASTE IT REMOVES: a build fixing one failing test re-ran the ENTIRE suite after every attempt —
+ * the user's sandbox minutes (real money at $0.083/hour) and the wall clock they sit through, spent
+ * re-proving tests that already passed.
+ */
+describe('withTestFilter', () => {
+  const plan = (framework: TestFramework, command: string): TestPlan => ({ framework, command, reason: 'test' });
+
+  it('uses each runner\'s OWN name-filter flag', () => {
+    expect(withTestFilter(plan('vitest', 'npx vitest run'), 'adds two').command).toBe("npx vitest run -t 'adds two'");
+    expect(withTestFilter(plan('jest', 'npx jest --ci'), 'adds two').command).toBe("npx jest --ci -t 'adds two'");
+    expect(withTestFilter(plan('playwright', 'npx playwright test'), 'login').command).toBe("npx playwright test -g 'login'");
+    expect(withTestFilter(plan('pytest', 'python -m pytest -q'), 'test_add').command).toBe("python -m pytest -q -k 'test_add'");
+    expect(withTestFilter(plan('go', 'go test ./...'), 'TestAdd').command).toBe("go test ./... -run 'TestAdd'");
+    expect(withTestFilter(plan('gradle', 'gradle test'), 'AddTest').command).toBe("gradle test --tests 'AddTest'");
+    // Surefire takes ONE argument, so the whole -Dtest=<pattern> is quoted together.
+    expect(withTestFilter(plan('maven', 'mvn -q -B test'), 'AddTest').command).toBe("mvn -q -B test '-Dtest=AddTest'");
+  });
+
+  it('🔒 SHELL INJECTION: a filter is an ARGUMENT, never a command', () => {
+    // `filter` is written by a MODEL and pasted into a shell command running in the user's sandbox.
+    const r = withTestFilter(plan('vitest', 'npx vitest run'), "'; rm -rf / #");
+    expect(r.command).toBe("npx vitest run -t ''\\''; rm -rf / #'");
+    // The dangerous bytes survive as TEXT inside quotes; none of them starts a new command.
+    expect(r.command.startsWith('npx vitest run -t ')).toBe(true);
+    expect(withTestFilter(plan('pytest', 'pytest'), '$(whoami)').command).toBe("pytest -k '$(whoami)'");
+  });
+
+  it('THE HONESTY RULE: an npm "test" script is left ALONE, and says so', () => {
+    // The script could be any runner — vitest, jest, a shell pipeline, a Makefile. A filter that lands
+    // in the wrong runner silently runs everything, and the agent would then read a green full-suite
+    // run as proof its one fix worked.
+    const r = withTestFilter(plan('npm-script', 'npm test'), 'adds two');
+    expect(r.command).toBe('npm test');
+    expect(r.applied).toBe(false);
+    expect(r.note).toContain('NOT applied');
+    expect(r.note).toContain('FULL suite');
+  });
+
+  it('no filter is a plain no-op — the default path is untouched', () => {
+    for (const f of [undefined, null, '', '   ']) {
+      const r = withTestFilter(plan('vitest', 'npx vitest run'), f);
+      expect(r.command).toBe('npx vitest run');
+      expect(r.applied).toBe(false);
+      expect(r.note).toBe('');
+    }
+  });
+
+  it('`applied` is true ONLY when the filter is genuinely in the command', () => {
+    // The caller labels the run PARTIAL from this flag, so a wrong value here would let a one-test
+    // pass be recorded in project memory as a whole-suite pass.
+    expect(withTestFilter(plan('vitest', 'npx vitest run'), 'x').applied).toBe(true);
+    expect(withTestFilter(plan('npm-script', 'npm test'), 'x').applied).toBe(false);
+    expect(withTestFilter(plan('vitest', 'npx vitest run')).applied).toBe(false);
+  });
+
+  it('the filter survives withSandboxBrowsers, so a filtered Playwright run still finds its browser', () => {
+    const r = withTestFilter(plan('playwright', 'npx playwright test'), 'login');
+    const cmd = withSandboxBrowsers(r.command, 'playwright');
+    expect(cmd).toContain('PLAYWRIGHT_BROWSERS_PATH=');
+    expect(cmd).toContain("-g 'login'");
   });
 });

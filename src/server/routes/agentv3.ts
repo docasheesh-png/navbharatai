@@ -5722,7 +5722,21 @@ export function registerAgentV3Routes(app: Express): void {
       const actuator = buildActuator();
       const { files } = await collectFilesWithSavedFallback(actuator, workspaceId, { liveTimeoutMs: 2_500 });
       if (Object.keys(files).length === 0) {
-        res.status(404).json({ error: 'No files to preview yet — build something first.' });
+        // "YOU HAVE NOT BUILT ANYTHING YET" IS NOT A FAILURE (admin 2026-08-21). This used to answer 404
+        // with an error string, and the client — which has no other way to tell the two apart — rendered
+        // it in its error lane: a red panel offering to "Fix with AI" an app that was never built, after
+        // a spinner claiming the app was being prepared. Both were false.
+        //
+        // The question this endpoint was asked is "what should I show?", and "nothing has been built
+        // here yet" is a correct and successful answer to it. So it is a 200 carrying an explicit
+        // `empty` flag, which the client turns into a real first-time state. `error` is kept alongside
+        // for any older client that only knows how to read that field — it must not regress to a blank
+        // screen, and this line is the reason it will not.
+        res.json({
+          html: '', kind: '', count: 0, empty: true,
+          error: 'No files to preview yet — build something first.',
+          hasBackend: false, backendReason: '', browserRunnable: null, browserBlockers: [], browserBlockedReason: '', envVarsUsed: [],
+        });
         return;
       }
       // HONEST FULL-STACK STATE (Task #64): the in-browser preview compiles only the FRONTEND. If the

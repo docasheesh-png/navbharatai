@@ -60,3 +60,52 @@ describe('relativeRecordName — registrar add-record form names', () => {
     expect(relativeRecordName('', 'example.com')).toBe('');
   });
 });
+
+/**
+ * 🔒 "LIVE!" MUST BE EARNED (admin 2026-08-21, mitrify.com).
+ *
+ * The screen said, in green, "✅ Live! Your domain is connected, with HTTPS · ownership: active ·
+ * host: active · SSL: active" — while opening mitrify.com gave Firebase's "Site Not Found". Both were
+ * true: those three states describe DNS and a CERTIFICATE, not whether anything was ever published to
+ * the site the domain points at. A domain connected AFTER the last publish points at an empty site.
+ *
+ * The old copy DID say "publish your app once" — but under a green ✅ Live headline that reads as a
+ * tip, not as "your domain shows an error page until you do this". The headline is what people act
+ * on, so the headline is what had to change.
+ */
+describe('connectStage — the word "Live" is earned by SERVING, not by DNS', () => {
+  const ACTIVE = { active: true, ownershipState: 'ACTIVE', hostState: 'ACTIVE', sslState: 'ACTIVE' };
+
+  it('THE BUG: active but nothing published ⇒ NOT "Live", and it names the one step left', () => {
+    const s = connectStage({ ...ACTIVE, serving: { state: 'nothing_published', note: '' } });
+    expect(s.headline).not.toMatch(/Live/i);
+    expect(s.headline).toMatch(/press Publish/i);
+    expect(s.tone).toBe('warn');          // never a green tick over an error page
+    expect(s.action).toBe('publish');      // and a real way to get there
+  });
+
+  it('active but the domain answers with an error ⇒ also not "Live"', () => {
+    const s = connectStage({ ...ACTIVE, serving: { state: 'error', note: 'HTTP 503' } });
+    expect(s.headline).not.toMatch(/^Live/i);
+    expect(s.tone).toBe('warn');
+  });
+
+  it('active AND serving ⇒ genuinely Live', () => {
+    const s = connectStage({ ...ACTIVE, serving: { state: 'serving', note: '' } });
+    expect(s.headline).toMatch(/Live/i);
+    expect(s.tone).toBe('ok');
+    expect(s.action).toBe('none');
+  });
+
+  it('UNKNOWN still says Live, deliberately — our failed check must not demote a working domain', () => {
+    expect(connectStage({ ...ACTIVE, serving: { state: 'unknown', note: '' } }).headline).toMatch(/Live/i);
+    // An older server sends no `serving` at all; it must behave exactly as before, not warn.
+    expect(connectStage(ACTIVE).headline).toMatch(/Live/i);
+    expect(connectStage(ACTIVE).tone).toBe('ok');
+  });
+
+  it('a domain that is not active yet is unaffected by any serving result', () => {
+    const s = connectStage({ active: false, ownershipState: 'PENDING', hostState: 'PENDING', sslState: 'PENDING', serving: { state: 'nothing_published', note: '' } });
+    expect(s.action).toBe('check');
+  });
+});

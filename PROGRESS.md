@@ -37304,3 +37304,57 @@ forwarding `ui/Button.tsx`, test fixtures, and icon buttons whose parent handles
 ⚠️ Still open from part 2, unchanged: **`SecurityScan`'s progress bar is fake** (timer-driven
 percentage and canned phase strings over a single `fetch`). Logged as an open root cause; fixing it
 honestly needs real streamed progress or an indeterminate spinner.
+
+---
+
+## 2026-08-21 — "✅ Live!" over a domain showing "Site Not Found" (admin: mitrify.com)
+
+The connect flow from the previous entry WORKED — Firebase re-checked and `ownership: active · host:
+active · SSL: active`. The admin then opened `mitrify.com` and got Firebase's **"Site Not Found"**
+page, and reasonably reported the connection as still broken.
+
+**Both screens were telling the truth.** Those three states describe **DNS and a certificate** — not
+whether anything was ever published to the site the domain points at. A custom domain gets its own
+dedicated Firebase site, and `deployToSite` runs only DURING a publish, only when the workspace
+already has a connected domain (`makeDeployFn`, `routes/agentv3.ts`). The admin connected the domain
+AFTER their last publish, so that site has never had a release: the domain pointed at an empty site.
+
+**The user-facing defect is ours, and it is rule 2.** We printed a green ✅ **"Live! Your domain is
+connected, with HTTPS."** over a domain that answers with an error page. The old copy did carry
+"Publish your app once so the domain serves your latest build" — but underneath a green Live headline
+that reads as a tip, not as *"your domain shows an error page until you do this"*. **The headline is
+what people act on, so the headline is what had to change.**
+
+### What shipped
+
+ • **`domainServingCheck.ts`** — the platform now OPENS the domain and reports what it actually
+   serves. The same "preview is EARNED" discipline the build path already follows: the only honest way
+   to claim a domain is live is to visit it.
+ • **`connectStage` no longer says "Live" on DNS alone.** Active + demonstrably nothing published now
+   reads **"Connected — one last step: press Publish."**, in amber, with a **"Go to Publish"** button
+   that actually takes them there — telling someone to press a button two screens away is an
+   instruction, not a path.
+ • **The card's COLOUR follows the stage, not `active`.** A green tick over an error page is the exact
+   combination that produced this report.
+ • 🔒 **`unknown` still claims Live, deliberately.** If our server cannot reach the domain, the three
+   active states remain the best evidence we have; demoting a genuinely working domain because OUR
+   egress failed would trade one wrong answer for another. Only positive evidence of an empty site
+   takes the word away.
+ • 🔒 **SSRF.** The domain is user-supplied, so every fetch goes through the shared
+   `assertPublicHttpUrl` (resolves every A/AAAA, refuses private/loopback/link-local). Ownership
+   verification proves the domain is theirs — **not** that the target is safe to fetch. Test-locked.
+ • The empty-site page is matched on **two** markers together ("site not found" AND "haven't
+   deployed"), because either alone could match a user's own 404 and mislabel a working app as
+   unpublished — sending them to press Publish forever.
+ • Only a 404 reads its body. A working app's HTML can be megabytes, and downloading it on every
+   status poll would be a cost with no answer in it.
+
+### Still open, recorded
+
+A domain connected AFTER the last publish requires a manual re-publish to start serving. The engine
+COULD deploy to the new site the moment a domain goes active — it already has the durable files — and
+that would remove this step entirely. Not built; it needs care (which build is "current" for a
+workspace whose sandbox is gone) and is a change to the publish path, which has been fragile.
+
+Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
+`vitest run` — **1,358 files / 17,071 tests, all passing** (27 new).

@@ -24,6 +24,7 @@ import { checkDomainConnect, domainConnectEnabled } from '../lib/domainConnect';
 import { hostingerDnsEnabled, applyHostingerRecords } from '../lib/hostingerDns';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 import { verifyRecordsLive } from '../lib/domainDnsVerify';
+import { checkDomainServing } from '../lib/domainServingCheck';
 
 /**
  * Firebase-NATIVE custom-domain routes (Slice 2) — connect a user's own domain directly to their
@@ -156,7 +157,14 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       // is still working), or correct and live (nothing left for them to do but wait for Firebase).
       // Best-effort and bounded — a DNS hiccup must never turn a working status screen into an error.
       const dnsCheck = await verifyRecordsLive(displayRecords).catch(() => null);
-      res.json({ ...status, displayRecords, dnsCheck });
+      // DOES THE DOMAIN ACTUALLY SHOW THE APP? (admin 2026-08-21, mitrify.com.) The screen said
+      // "Live! Your domain is connected, with HTTPS" while opening mitrify.com gave Firebase's "Site
+      // Not Found" — both true at once, because ownership/host/SSL describe DNS and a certificate,
+      // NOT whether anything was ever published to the site the domain points at. A domain connected
+      // AFTER the last publish points at an empty site. The only honest way to claim a domain is live
+      // is to OPEN it. Bounded, best-effort, and SSRF-guarded (the domain is user-supplied).
+      const serving = status.active ? await checkDomainServing(host).catch(() => null) : null;
+      res.json({ ...status, displayRecords, dnsCheck, serving });
     } catch (err: any) {
       sendSafeError(res, 500, 'Failed to check domain status. Please try again.', err, 'nbai domain status');
     }

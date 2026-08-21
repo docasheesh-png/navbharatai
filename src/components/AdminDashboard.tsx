@@ -348,6 +348,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }, [adminToken]);
 
   /**
+   * THE PUBLISH CEILING (ROADMAP §10) — how close publishing is to stopping for EVERYONE.
+   *
+   * Every published app holds one Firebase Hosting channel and the pool is capped per site. Past the
+   * cap, the next publish fails for whoever happens to be next, and every one after that. Nothing on
+   * our side could see it coming, because our registry counts apps we know about while the cap counts
+   * channels that EXIST — and those drifted apart the moment a purge deleted a record and left its
+   * channel serving.
+   *
+   * It loads WITH the overview rather than behind a button, unlike the two panels below: a warning
+   * nobody clicks is not a warning, and the cost is one channel list, not 500 build documents.
+   */
+  const [channels, setChannels] = useState<{
+    verdict: { used: number; cap: number; remaining: number; reclaimable: number; level: 'ok' | 'warn' | 'critical'; message: string };
+    channels: Array<{ channelId: string; url: string; updateTime: string | null; state: 'live' | 'stale' | 'unknown'; workspaceId: string | null; reclaimable: boolean }>;
+  } | null>(null);
+  const [channelsError, setChannelsError] = useState('');
+  const [reclaiming, setReclaiming] = useState('');
+
+  const fetchChannels = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/hosting/channels', { headers });
+      const d = await r.json();
+      if (d?.verdict) { setChannels(d); setChannelsError(''); return; }
+      // An unreadable list is NOT "zero in use". Say UNKNOWN rather than show a false all-clear on
+      // the one number this panel exists for.
+      setChannels(null);
+      setChannelsError(d?.error || 'Could not read the hosting channel list — the ceiling is UNKNOWN, not clear.');
+    } catch (e) { console.error(e); setChannels(null); setChannelsError('Could not read the hosting channel list — the ceiling is UNKNOWN, not clear.'); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
+
+  const reclaimChannel = useCallback(async (channelId: string) => {
+    setReclaiming(channelId);
+    try {
+      const r = await fetch(`/api/admin/hosting/channels/${encodeURIComponent(channelId)}/reclaim`, { method: 'POST', headers });
+      const d = await r.json();
+      if (d?.ok) { toast(`Reclaimed ${channelId}.`); await fetchChannels(); }
+      else toast(d?.error || 'Reclaim failed — the channel was NOT removed.');
+    } catch (e) { console.error(e); toast('Reclaim failed — the channel was NOT removed.'); }
+    finally { setReclaiming(''); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, fetchChannels]);
+
+  /**
    * SANDBOX HANDOVER (Phase 0 of IN_BROWSER_PREVIEW_PLAN.md) — where a sandbox's billed life goes.
    *
    * The companion to Server necessity, and deliberately capable of returning bad news: if post-build
@@ -668,7 +712,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }, [adminToken, insightQuestion]);
 
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
-  useEffect(() => { if (activeTab === 'overview') { fetchHealthScore(); fetchInsights(); } }, [activeTab, fetchHealthScore, fetchInsights]);
+  useEffect(() => { if (activeTab === 'overview') { fetchHealthScore(); fetchInsights(); fetchChannels(); } }, [activeTab, fetchHealthScore, fetchInsights, fetchChannels]);
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
   useEffect(() => { if (activeTab === 'settings') { fetchPromos(); fetchUpdateCohort(); } }, [activeTab, fetchPromos, fetchUpdateCohort]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
@@ -878,6 +922,73 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Paid transactions', 'bg-pink-500', Tag)}
                 {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Direct provider cost', 'bg-orange-500', Cpu)}
               </div>
+
+              {/* ── THE PUBLISH CEILING (ROADMAP §10) ────────────────────────────────────────
+                  Every published app holds one Firebase Hosting channel, and the pool is capped per
+                  site. Past the cap, publishing stops for EVERY user at once. This is the only place
+                  that number is visible — and the only place a channel orphaned by a deleted chat
+                  can be found at all, since its id is a one-way hash with no record left to trace. */}
+              {(channels || channelsError) && (
+                <div className={`rounded-[1.5rem] p-6 border ${
+                  channelsError ? 'bg-[#161b22] border-white/10'
+                  : channels?.verdict.level === 'critical' ? 'bg-red-500/5 border-red-500/30'
+                  : channels?.verdict.level === 'warn' ? 'bg-amber-500/5 border-amber-500/30'
+                  : 'bg-[#161b22] border-white/10'}`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Publish Capacity</h3>
+                    <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
+                      channelsError ? 'bg-white/5 border-white/10 text-[#8b949e]'
+                      : channels?.verdict.level === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                      : channels?.verdict.level === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                      : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}>
+                      {channelsError ? 'unknown' : channels?.verdict.level}
+                    </span>
+                  </div>
+
+                  {channelsError ? (
+                    <p className="text-xs text-[#8b949e] leading-relaxed">{channelsError}</p>
+                  ) : channels && (
+                    <>
+                      <p className="text-xs text-white/80 leading-relaxed">{channels.verdict.message}</p>
+                      <p className="text-[11px] text-[#8b949e] mt-1.5 leading-relaxed">
+                        {channels.verdict.remaining} more app{channels.verdict.remaining === 1 ? '' : 's'} can be published before
+                        the limit. The cap of {channels.verdict.cap} is a working figure — Google does not publish this number —
+                        so treat it as approximate until a real &quot;quota reached&quot; confirms it.
+                      </p>
+
+                      {channels.channels.some((c) => c.reclaimable) && (
+                        <div className="mt-4 space-y-2">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-[#8b949e]">
+                            Wasted channels — no live app is using these
+                          </p>
+                          {channels.channels.filter((c) => c.reclaimable).map((c) => (
+                            <div key={c.channelId} className="flex items-center justify-between gap-3 rounded-xl bg-black/20 border border-white/5 px-3 py-2">
+                              <div className="min-w-0">
+                                <p className="text-[11px] font-mono text-white/80 truncate">{c.channelId}</p>
+                                <p className="text-[10px] text-[#8b949e] truncate">
+                                  {c.state === 'unknown'
+                                    /* No record anywhere — a purge deleted it and left the app serving. */
+                                    ? 'Its chat and record are gone, but the app is still live'
+                                    /* Both unpublish and takedown delete the channel BEFORE the registry,
+                                       so this state means one of those deletes failed and said success. */
+                                    : `Marked not-live, but the channel still exists${c.workspaceId ? ` · ${c.workspaceId}` : ''}`}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => void reclaimChannel(c.channelId)}
+                                disabled={reclaiming === c.channelId}
+                                className="shrink-0 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-red-600/20 text-[10px] font-black uppercase tracking-wider text-white/70 hover:text-red-300 disabled:opacity-40"
+                              >
+                                {reclaiming === c.channelId ? 'Reclaiming…' : 'Reclaim'}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* ── P-MON.4 Composite platform health (real, from /api/admin/health-score) ── */}
               {healthScore?.score && (

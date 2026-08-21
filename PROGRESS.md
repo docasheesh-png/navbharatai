@@ -36928,3 +36928,73 @@ chat was deleted. Hindi/Hinglish keywords included.
 
 Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
 `vitest run` — **1,349 files / 16,905 tests, all passing** (17 new).
+
+---
+
+## 2026-08-21 — THE PUBLISH CEILING IS NO LONGER SILENT (ROADMAP §10, step 1)
+
+The ceiling was recorded yesterday as the failure that would take publishing down for EVERY user at
+once, with no warning. This does not raise it. It makes it **visible**, makes the wasted slots
+**recoverable**, and makes hitting it **honest** — which is what step 1 of §10.3 was actually for.
+
+### Step 1 asked for the cap to be verified. It could not be — so I said so, and measured instead.
+
+Google does not publish the channels-per-site number on its Hosting quota page; `firebase.google.com`
+is blocked by this environment's egress proxy; the ~50 figure traces to one 2020 community report; and
+"publish into a scratch project until it refuses" needs gcloud, which a Claude session does not have.
+Guessing harder was not an option worth taking. **What the cap number was WANTED for is knowing how
+close we are — and that can be measured directly.**
+
+ • `GET /api/admin/hosting/channels` reconciles the channels that EXIST (Hosting API, paginated —
+   a partial count would be a false all-clear on the one number this is for) against the deployment
+   registry. Surfaced as **Admin Dashboard → Overview → Publish Capacity**, loaded WITH the tab rather
+   than behind a button: a warning nobody clicks is not a warning, and the cost is one channel list,
+   not 500 build documents.
+ • **Warn at 70%, critical at 90% — deliberately early**, while publishing still works. A warning that
+   arrives once publishing is broken is not a warning.
+ • An unreadable list reports **UNKNOWN**, never "zero in use". A false all-clear on this number would
+   be worse than no panel.
+
+### It found the class the registry alone could never see
+
+`classifyChannels` (pure, 21 tests) sorts every channel into three states:
+ • **live** — a channel doing its job. Never reclaimable through this tool.
+ • **stale** — we hold a record and it is NOT live, yet the channel still exists. Reported as a **bug
+   signal**, not just waste: unpublish and takedown both delete the channel BEFORE touching the
+   registry, so this state means one of those deletes failed and reported success somewhere.
+ • **unknown** — no record at all. This is the damage a purge did before `markOrphaned` (yesterday):
+   the record was deleted and the channel left serving. The channel id is a one-way hash of the
+   workspace id, so **nothing could trace it back** — reconciling against Firebase's own list is the
+   only way these were ever findable.
+
+`POST /api/admin/hosting/channels/:channelId/reclaim` frees one, addressed by CHANNEL id because that
+is the only handle an orphan has left. It **REFUSES a live channel** (409): taking a working app down
+belongs to its owner (Unpublish) or to a deliberate takedown, which also blocks republish. A tool that
+could do both would eventually do the wrong one.
+
+### The user-facing half — the leak nobody had looked at
+
+At the cap, `ensureChannel` threw *"Firebase Hosting channel creation failed (HTTP …) … ensure the
+service account has the Firebase Hosting Admin IAM role"* — and that text is handed to the agent to
+paraphrase back to the user. So the one failure that is **entirely our fault** would have reached a
+real person as a confusing accusation AND as a white-label violation naming the vendor.
+
+`isChannelQuotaError` catches it and returns `HOSTING_FULL_MESSAGE`: no vendor, no blame, what is NOT
+lost, and their own free host as a way forward that works this minute. The server logs it loudly as a
+platform outage, because that is what it is. The match is honestly a SUPERSET (the exact wording is
+undocumented and has never been seen in production) — a miss degrades to the old generic error, while
+a false positive would send a user away over our bug, so nothing but 429 qualifies on status alone.
+
+### Honestly recorded
+
+ • `HOSTING_CHANNEL_CAP` (default 50) is env-tunable **because the number is a guess**. The first real
+   "quota reached" settles it, and that value belongs in ROADMAP §10.
+ • ⚠️ **This does not remove the ceiling.** §10.3 (serve published apps from Cloud Storage through the
+   Worker we already run) is still what removes it. This makes the wall visible and recoverable.
+ • Next cheap follow-on if the panel ever shows warn/critical: a push/email alert at 'warn' — the
+   dashboard is only seen when the admin looks.
+ • ROADMAP §10.4(b) is now **RESOLVED**: the recommended (ii)+(iii) shipped in #2524/#2526, and this
+   change covers what neither option could — channels orphaned before `markOrphaned` existed.
+
+Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
+`vitest run` — **1,350 files / 16,926 tests, all passing** (21 new).

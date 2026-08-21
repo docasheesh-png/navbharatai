@@ -229,6 +229,19 @@ export class FirebaseHostingDeployer {
    * Admin role). Returns true when the channel is gone (deleted or already absent).
    */
   async deleteChannel(workspaceId: string): Promise<boolean> {
+    return this.deleteChannelById(makeChannelId(workspaceId));
+  }
+
+  /**
+   * The same takedown, addressed by CHANNEL id rather than workspace id.
+   *
+   * WHY BOTH EXIST: a channel can outlive every record that points at it. Purges before
+   * `markOrphaned` (2026-08-21) deleted the deployment record outright, so those channels are still
+   * serving with no workspaceId left anywhere to derive them from — and each one holds a slot in the
+   * scarce per-site channel pool (ROADMAP §10). Reclaiming them needs an id-addressed delete; without
+   * one they are unreachable forever. `deleteChannel` is now a thin wrapper, so there is ONE delete.
+   */
+  async deleteChannelById(channelId: string): Promise<boolean> {
     const token = await this.auth.getAccessToken();
     if (!token) {
       throw new Error(
@@ -237,7 +250,7 @@ export class FirebaseHostingDeployer {
       );
     }
     const site = FIREBASE_PROJECT;
-    const channelId = makeChannelId(workspaceId);
+    if (!channelId) throw new Error('A channel id is required to delete a channel.');
     try {
       await axios.delete(`${HOSTING_API}/sites/${site}/channels/${channelId}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -253,6 +266,39 @@ export class FirebaseHostingDeployer {
         'Ensure the Cloud Run service account has the "Firebase Hosting Admin" IAM role.',
       );
     }
+  }
+
+  /**
+   * Every channel that exists on our Hosting site, right now.
+   *
+   * WHY THIS EXISTS (ROADMAP §10). Each published app holds ONE preview channel, the pool is capped
+   * per site, and until now nothing on our side could see how much of it was spent — so the wall
+   * ("channel quota reached", publishing stops for EVERYBODY) would have arrived with no warning at
+   * all. This turns a guessed limit into a measured number.
+   *
+   * Paginated deliberately: a partial count would understate usage, and an understated count is worse
+   * than none — it is a false all-clear on the one number this is for.
+   */
+  async listChannels(): Promise<Array<{ channelId: string; url: string; updateTime: string | null }>> {
+    const { headers } = await this.authHeaders();
+    const site = FIREBASE_PROJECT;
+    const out: Array<{ channelId: string; url: string; updateTime: string | null }> = [];
+    let pageToken = '';
+    // Bounded so a malformed nextPageToken can never spin forever; 20 × 100 is far past any real cap.
+    for (let page = 0; page < 20; page += 1) {
+      const resp = await this.hostingCall('channel list', () =>
+        axios.get<{ channels?: Array<{ name?: string; url?: string; updateTime?: string }>; nextPageToken?: string }>(
+          `${HOSTING_API}/sites/${site}/channels?pageSize=100${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`,
+          { headers },
+        ));
+      for (const c of resp.data?.channels ?? []) {
+        const channelId = channelIdFromResourceName(c?.name);
+        if (channelId) out.push({ channelId, url: typeof c?.url === 'string' ? c.url : '', updateTime: typeof c?.updateTime === 'string' ? c.updateTime : null });
+      }
+      pageToken = typeof resp.data?.nextPageToken === 'string' ? resp.data.nextPageToken : '';
+      if (!pageToken) break;
+    }
+    return out;
   }
 
   /**
@@ -289,6 +335,15 @@ export class FirebaseHostingDeployer {
       if (status !== 409) {
         const data = (err as AxiosError)?.response?.data;
         const msg = data ? JSON.stringify(data) : String(err);
+        // THE CEILING, ARRIVING (ROADMAP §10). Every published app holds one channel and the pool is
+        // capped per site; past the cap this is where every user's publish lands. The raw text names
+        // the vendor and an IAM role, and it is handed to the agent to paraphrase back to the user —
+        // so the one failure that is entirely OUR problem would have reached them as a confusing
+        // accusation. Loud in the server log because it is a platform outage, not one user's bad day.
+        if (isChannelQuotaError(status, data)) {
+          console.error(`[HOSTING] CHANNEL POOL EXHAUSTED — publishing is failing for ALL users. HTTP ${status}: ${msg}`);
+          throw new Error(HOSTING_FULL_MESSAGE);
+        }
         throw new Error(
           `Firebase Hosting channel creation failed (HTTP ${status}): ${msg}\n` +
           'Ensure the Cloud Run service account has the "Firebase Hosting Admin" IAM role.',
@@ -338,6 +393,48 @@ export class FirebaseHostingDeployer {
  * prefix + a hash of the full id keeps each workspace's channel unique AND stable (same workspace →
  * same channel on redeploy).
  */
+/**
+ * The message a user sees when the channel pool is exhausted (ROADMAP §10).
+ *
+ * WHY IT IS A CONSTANT AND NOT AN INLINE STRING: this is the ONE moment the ceiling becomes visible
+ * to a real person, and two rules meet on it. The white-label law says the user must never learn
+ * which vendor hosts their app — the raw failure names Firebase Hosting and an IAM role, and that
+ * text was previously handed straight to the agent to paraphrase back to them — and rule 2 says we
+ * do not pretend. So it names no vendor, blames no user, states plainly what is NOT lost, and gives
+ * a way forward that works this minute.
+ */
+export const HOSTING_FULL_MESSAGE =
+  'NavBharatAI hosting is full right now, so your app could not be published. Nothing was lost — your '
+  + 'app and its code are safe, and publishing will work again once space frees up. You can also publish '
+  + 'to your own free host (Vercel, Netlify or Cloudflare Pages) from the same Publish screen right now.';
+
+/**
+ * Does this Hosting failure mean the channel pool is FULL, rather than something we did wrong?
+ *
+ * ⚠️ HONESTLY A SUPERSET MATCH. The exact status and wording Firebase returns at the channel cap are
+ * not documented and this has never been observed in production, so it matches generously on the
+ * words a quota failure uses. A MISS degrades to the generic error — less friendly, still honest. A
+ * FALSE POSITIVE is the risk worth guarding, because it would tell a user the platform is full when
+ * the real problem was ours; that is why no 4xx status alone qualifies except 429, which means
+ * exactly this.
+ */
+export function isChannelQuotaError(status: number | null | undefined, body: unknown): boolean {
+  if (status === 429) return true;
+  const text = (typeof body === 'string' ? body : JSON.stringify(body ?? '')).toLowerCase();
+  return /resource_exhausted|quota|too many channels|maximum number of channels|channel limit/.test(text);
+}
+
+/**
+ * `sites/<site>/channels/<id>` → `<id>`. Returns '' for anything that is not a channel resource.
+ * The Hosting API only ever gives a channel's id inside its full resource `name`.
+ */
+export function channelIdFromResourceName(name: string | null | undefined): string {
+  const s = String(name ?? '').trim();
+  if (!s) return '';
+  const parts = s.split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
 export function makeChannelId(workspaceId: string): string {
   const safe = workspaceId.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase().slice(0, 17);
   const hash = crypto.createHash('sha256').update(workspaceId).digest('hex').slice(0, 12);

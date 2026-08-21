@@ -38262,3 +38262,40 @@ user selected here), `publishBusy`, and the measured freshness. One pipeline, tw
 its availability gate (`isAgentV3Enabled`), and an allowlisted deployment returns **404** for a null
 identity — so a publish sending only `workspaceId` would have failed for exactly the accounts that
 use it. The ownership check is separate and verifies the real token, so this is not a trust boundary.
+
+## 2026-08-21 — D3 (PR → CI → review comments): two thirds already existed; the missing third built
+
+**Safeguard #6 caught this before a line was written, and the ROADMAP row did not.** D3 read "Needs
+the GitHub App token path that already exists for storage", implying none of it was built. In fact
+`GitHubPrFlow.mergeViaPullRequest` has, since the git-native storage phase, opened the PR, read the
+combined CI verdict (commit statuses AND check-runs) and merged **only on green** — minors 33 and 34.
+Only minor 35 was genuinely missing: **nothing ever read what a human reviewer wrote.**
+
+**Built + tested:**
+- `GitHubAppClient.listReviewComments` — BOTH of GitHub's separate comment APIs. Reading only the
+  inline one would silently miss "the login page is broken" posted as a plain conversation comment,
+  which is how most non-developers review. `position === null` is carried through as `outdated`.
+- `GitHubAppClient.replyToReviewComment` — threaded, falling back to the conversation, because a
+  silent non-answer reads as being ignored.
+- `prReviewFeedback.ts` (PURE) — the triage that decides what is actually a change request, plus the
+  builder prompt and the user-facing summary.
+- `GitHubPrFlow.readReviewRound` / `replyToReviewRound` — the orchestration.
+
+**The design rule, and why it is conservative:** the expensive failure is a FALSE POSITIVE — acting
+on a comment that was praise, a question, or a bot's advisory means rewriting working code nobody
+asked to change, which breaks both the first and fourth absolute rules. So our own comments, bots,
+resolved threads, OUTDATED comments (their line no longer exists, so an edit would land in the wrong
+place), non-collaborators (a stranger must not direct changes to someone else's app) and pure praise
+are all SKIPPED — and reported to the USER with the reason, because the user is who can tell us a
+skip was wrong. The reviewer's words are FENCED and attributed, never presented as a system
+directive, and the round is explicitly scoped so a review cannot become a licence to refactor.
+A failed read yields an EMPTY round: editing on the strength of comments we never saw would be worse
+than doing nothing. A failed change is reported to the reviewer as failed, never as "done".
+
+⚠️ **HONEST STATUS: D3 is NOT done, and is not marked done.** A reviewer comments hours after the
+build ends, when nothing is running — so this needs a trigger (a user action, or a webhook) that does
+not exist yet. These are tested, capable building blocks with no user-facing claim attached: no
+AppKnowledgeBase entry, because there is no surface to describe. Recorded as an open next slice
+rather than quietly ticked off, which is the exact false-open the ROADMAP header warns about.
+
+Gate: both tsc + build + FULL vitest — 1,370 files / 17,219 passing, 1 skipped.

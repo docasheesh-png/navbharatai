@@ -9,7 +9,8 @@
 //
 // Pure orchestration over a small client port, so it is fully unit-testable without GitHub.
 
-import type { CiVerdict, PullRequestInfo } from './GitHubAppClient';
+import type { CiVerdict, PrComment, PullRequestInfo } from './GitHubAppClient';
+import { triageReviewComments, reviewFeedbackPrompt, reviewTriageSummary, type ReviewTriage } from './prReviewFeedback';
 import { envFlag } from '../lib/envFlag';
 
 /** The slice of GitHubAppClient this flow needs (so tests can pass a fake). */
@@ -69,6 +70,78 @@ export function planRevert(head: { sha: string; parents: Array<{ sha: string }> 
   if (head.parents.length === 1) return { canRevert: true, parentSha: head.parents[0].sha };
   if (head.parents.length === 0) return { canRevert: false, reason: 'The latest commit is the repository’s first commit — there is nothing before it to revert to.' };
   return { canRevert: false, reason: 'The latest commit is a multi-parent merge — revert it from GitHub’s “Revert” button on the merged pull request instead.' };
+}
+
+/** The slice of the client a REVIEW round needs (ROADMAP D3, final third). */
+export interface ReviewCapableClient {
+  listReviewComments(repo: string, number: number): Promise<PrComment[]>;
+  replyToReviewComment(repo: string, number: number, commentId: number, body: string): Promise<boolean>;
+}
+
+export interface ReviewRound {
+  /** Comments worth acting on, and everything skipped with its honest reason. */
+  triage: ReviewTriage;
+  /** The instruction block for the builder — '' when there is nothing to do. */
+  prompt: string;
+  /** One honest line for the user, including the skipped count. */
+  summary: string;
+}
+
+/**
+ * Read a PR's review comments and decide what to do about them. Best-effort — a failed read yields
+ * an EMPTY round, never a guess.
+ *
+ * 🔒 The empty case matters more than the full one. If we cannot see the comments, the correct
+ * behaviour is to do NOTHING and say so: a review round that half-read its input and started editing
+ * would change code on the strength of a comment it never saw.
+ */
+export async function readReviewRound(
+  client: ReviewCapableClient,
+  repo: string,
+  prNumber: number,
+  selfLogin: string,
+): Promise<ReviewRound> {
+  const empty: ReviewRound = { triage: { actionable: [], skipped: [] }, prompt: '', summary: reviewTriageSummary({ actionable: [], skipped: [] }) };
+  if (!repo || !prNumber) return empty;
+  try {
+    const comments = await client.listReviewComments(repo, prNumber);
+    const triage = triageReviewComments(comments, selfLogin);
+    return {
+      triage,
+      prompt: reviewFeedbackPrompt(triage.actionable, `pull request #${prNumber}`),
+      summary: reviewTriageSummary(triage),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+/**
+ * Tell the reviewer what happened, on their own threads.
+ *
+ * 🔒 REPLY ONLY TO WHAT WE ACTED ON. Posting on a thread we skipped would claim we handled something
+ * we deliberately did not — the skipped ones are surfaced to the USER, who is the person who can tell
+ * us the skip was wrong. And the reply carries the build's REAL outcome: telling a reviewer "done"
+ * when the change failed is exactly the fake success this codebase keeps rooting out.
+ *
+ * Returns how many replies actually landed. Never throws.
+ */
+export async function replyToReviewRound(
+  client: ReviewCapableClient,
+  repo: string,
+  prNumber: number,
+  round: ReviewRound,
+  outcome: { ok: boolean; summary: string },
+): Promise<number> {
+  if (!repo || !prNumber || round.triage.actionable.length === 0) return 0;
+  const note = outcome.ok
+    ? `Addressed in the latest commit on this pull request.${outcome.summary ? `\n\n${outcome.summary}` : ''}`
+    : `I could not complete this change.${outcome.summary ? `\n\n${outcome.summary}` : ''}`;
+  let landed = 0;
+  for (const c of round.triage.actionable) {
+    try { if (await client.replyToReviewComment(repo, prNumber, c.id, note)) landed += 1; } catch { /* one failed reply never stops the rest */ }
+  }
+  return landed;
 }
 
 /**

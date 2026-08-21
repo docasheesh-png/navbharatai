@@ -5,7 +5,7 @@ import {
   GitFork, Terminal, Activity, GitBranch, Bot, MessageSquare, Wand2, Bug, Code,
   TestTube, Globe, GitMerge, Gauge, Minimize2, Moon, Layout, Puzzle, LayoutTemplate,
   Figma, Rocket, Smartphone, Package, IndianRupee, Users2, Palette, TrendingUp,
-  BarChart2, Cpu, Sparkles, Eye, EyeOff, Github, List, LogOut, GitBranch as GitBranchIcon,
+  BarChart2, Cpu, Eye, EyeOff, Github, List, LogOut, GitBranch as GitBranchIcon,
   Folder, Check, Search, RefreshCw, Box, Zap, Globe as GlobeIcon, Search as SearchIcon,
   Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail, Scale, FileText,
 } from 'lucide-react';
@@ -580,44 +580,17 @@ export function SettingsPanel({
                   </div>
                 ))}
 
-                {/* Honest note (admin 2026-07-29): of the 10 things a real website needs, the FRONTEND
-                    (the UI code) and the BACKEND (the API/server code) are not settings you configure —
-                    NavBharatAI Pro builds them for you. So they get an honest info line here, not a fake
-                    tile that does nothing (real-features rule). */}
-                {/* HOSTING — an honest info line, not a tile (the same rule as Frontend & Backend below).
-                    The "Hosting & Deploy" tile was REMOVED on 2026-08-20: it duplicated the v5.0 Publish
-                    sheet, could not see a v5.0 app at all, and had published a placeholder to a real URL
-                    as a success. But the REASSURANCE it carried — "your app is already hosted" — was the
-                    genuinely useful part of that screen, and a user opening App Settings looking for
-                    hosting deserves an answer here rather than silence. So the answer stays; only the
-                    broken second doorway is gone. */}
-                <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4 flex items-start gap-3">
-                  <div className="p-2 bg-emerald-600/10 rounded-lg shrink-0">
-                    <Globe className="w-4 h-4 text-emerald-400" />
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-bold text-white leading-relaxed">Hosting — your app is already hosted</p>
-                    <p className="text-[10px] text-[#586069] font-bold mt-0.5 leading-relaxed">
-                      Every app you build gets a live HTTPS link the moment it builds — no server to set up.
-                      To publish a permanent version, or to deploy to your own Vercel / Netlify / Cloudflare
-                      account, use the <span className="text-[#8b949e]">Publish</span> button inside NavBharatAI
-                      Pro v5.0. For your own domain, use the <span className="text-[#8b949e]">Domain</span> tile above.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4 flex items-start gap-3">
-                  <div className="p-2 bg-indigo-600/10 rounded-lg shrink-0">
-                    <Sparkles className="w-4 h-4 text-indigo-400" />
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-bold text-white leading-relaxed">Frontend &amp; Backend — built for you</p>
-                    <p className="text-[10px] text-[#586069] font-bold mt-0.5 leading-relaxed">
-                      Your app&apos;s screens (frontend) and its server/API (backend) are written automatically by
-                      NavBharatAI Pro when you build. There&apos;s nothing to configure here — just describe your app.
-                    </p>
-                  </div>
-                </div>
+                {/* THE TWO EXPLAINER CARDS WERE REMOVED HERE (admin 2026-08-21: "yeh sab hatao delete
+                    karo. i need clear interface").
+                    They said hosting is automatic, and that the frontend/backend are written for you.
+                    Both were TRUE — and both were prose on a screen whose job is to be a set of
+                    controls. A settings page earns its clarity by holding things you can act on; a
+                    paragraph that asks to be read every visit, and can be acted on nowhere, is weight
+                    the user carries for us.
+                    NOTHING IS LOST, and that is why deleting was the right call rather than a
+                    trade-off: both facts are already in AppKnowledgeBase, so every AI in the app
+                    answers "where is my app hosted?" and "where do I configure the backend?" on
+                    demand — which is the surface a question belongs on. */}
 
                 {/* Support — direct email to the NavBharatAI team. An <a href="mailto:"> anchor is used
                     (not a JS handler) because Capacitor's native WebView opens the device mail app for

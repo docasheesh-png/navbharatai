@@ -10,14 +10,48 @@
 //   • AGENTV3_ESCALATION=on, no PCT  → 100% (every eligible build — identical to the old "on" semantics)
 //   • AGENTV3_ESCALATION=on + AGENTV3_ESCALATION_PCT=N → N% of builds, chosen deterministically by workspace.
 
+/**
+ * Read a canary percentage from an env value. ONE parser for every rollout flag.
+ *
+ * ⚠️ THE BUG THIS CLOSES (found 2026-08-21 while auditing the live `AGENTV3_FEATURE_HEAL_PCT=20`).
+ * A PCT that was PRESENT but unparseable used to mean **100%**. That is not backward compatibility —
+ * there was never a prior behaviour for `PCT=twenty` — it is a guess, and it guessed in the one
+ * direction that costs real money on every build. `Number('20%')` is NaN, so **a trailing percent
+ * sign, the single most likely thing to type into a field called PCT, silently meant EVERYONE.**
+ *
+ * The reasoning that fixes it: someone who wanted 100% would leave the value BLANK, which already
+ * means 100%. So a value that is present and unreadable is an intended PARTIAL rollout whose number
+ * we could not read, and 100% is the one answer it can never have been. We take the free, reversible
+ * side — 0% — and say so loudly in the server log rather than spending money on a guess.
+ *
+ * It also parses the forms an operator actually types: `20%`, ` 20 `, `20.0`. Only what survives all
+ * of that is treated as unreadable.
+ *
+ * `0` is a real, supported value and is how a canary is PAUSED while the flag stays on.
+ */
+export function parseRolloutPercent(raw: string | undefined | null, label = 'rollout'): number | null {
+  if (raw == null) return null;                                  // absent ⇒ caller's "no constraint"
+  const trimmed = String(raw).trim();
+  if (trimmed === '') return null;                               // blank ⇒ same as absent
+  const n = Number(trimmed.replace(/%$/, '').trim());            // tolerate "20%" and " 20 "
+  if (!Number.isFinite(n)) {
+    // LOUD, because the alternative is a silent behaviour change the admin cannot see. This is the
+    // only place that knows the value was meant to be a percentage and was not one.
+    console.error(
+      `[ROLLOUT] ${label} percentage is not a number (${JSON.stringify(trimmed)}). ` +
+      'Treating it as 0% — the feature is PAUSED rather than rolled out to everyone. ' +
+      'Set a plain number (e.g. 20), or clear the value entirely to mean 100%.',
+    );
+    return 0;
+  }
+  return Math.max(0, Math.min(100, Math.floor(n)));
+}
+
 /** The rollout percentage [0..100] escalation should apply to. See the file header for the semantics. */
 export function escalationRolloutPercent(env: NodeJS.ProcessEnv = process.env): number {
   if (env.AGENTV3_ESCALATION !== 'on') return 0;
-  const raw = env.AGENTV3_ESCALATION_PCT;
-  if (raw == null || String(raw).trim() === '') return 100; // "on" with no PCT = full rollout (unchanged)
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return 100; // malformed PCT but flag is explicitly on → default to full
-  return Math.max(0, Math.min(100, Math.floor(n)));
+  const pct = parseRolloutPercent(env.AGENTV3_ESCALATION_PCT, 'AGENTV3_ESCALATION_PCT');
+  return pct == null ? 100 : pct; // "on" with no PCT = full rollout (unchanged)
 }
 
 /** Deterministic 0..99 bucket for a stable key (FNV-1a). Same key → same bucket, so a project's builds
@@ -46,13 +80,22 @@ export function inEscalationRollout(key: string | undefined, pct: number): boole
  *   • on=true, pctRaw empty/unset → true  (100% — identical to a plain global "on")
  *   • on=true, pctRaw=N           → N% of builds, chosen deterministically by `key` (a stable id such
  *                                    as the workspaceId), so a project is consistently in or out.
+ *   • on=true, pctRaw=0           → false for everyone. This is how a canary is PAUSED while the flag
+ *                                    stays on — and it is the ONLY way, because CLEARING the value
+ *                                    means 100%, not "off". See `parseRolloutPercent`.
+ *   • on=true, pctRaw unreadable  → 0% and a loud server log (it used to mean 100%; see the bug note
+ *                                    on `parseRolloutPercent`).
  */
-export function inFlagRollout(on: boolean, pctRaw: string | undefined, key: string | undefined): boolean {
+export function inFlagRollout(
+  on: boolean,
+  pctRaw: string | undefined,
+  key: string | undefined,
+  label = 'feature rollout',
+): boolean {
   if (!on) return false;
-  if (pctRaw == null || String(pctRaw).trim() === '') return true;
-  const n = Number(pctRaw);
-  if (!Number.isFinite(n)) return true; // flag explicitly on but malformed PCT → full rollout
-  return inEscalationRollout(key, Math.max(0, Math.min(100, Math.floor(n))));
+  const pct = parseRolloutPercent(pctRaw, label);
+  if (pct == null) return true;         // on with no PCT = 100%, identical to a plain global "on"
+  return inEscalationRollout(key, pct);
 }
 
 /** The measurement cohort this build belongs to. Pure. */

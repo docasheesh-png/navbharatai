@@ -218,7 +218,7 @@ export function featurePresenceSummary(r: FeaturePresenceResult): string {
 export function featureHealEnabled(rolloutKey?: string): boolean {
   // Optional percentage canary: AGENTV3_FEATURE_HEAL_PCT=N enables it for N% of builds (keyed by
   // workspaceId) so the admin can measure before a global ramp. Unset PCT = 100% (a plain global "on").
-  return inFlagRollout(envFlag('AGENTV3_FEATURE_HEAL'), process.env.AGENTV3_FEATURE_HEAL_PCT, rolloutKey);
+  return inFlagRollout(envFlag('AGENTV3_FEATURE_HEAL'), process.env.AGENTV3_FEATURE_HEAL_PCT, rolloutKey, 'AGENTV3_FEATURE_HEAL_PCT');
 }
 
 /** An agent-facing repair instruction for the missing features (used only when a heal pass runs). */

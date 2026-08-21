@@ -37112,3 +37112,43 @@ on its own port) from the App Logs strip. B3's row now says so instead of readin
 
 Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
 `vitest run` — **1,354 files / 16,994 tests, all passing** (12 new).
+
+---
+
+## 2026-08-21 — A typo in a percentage field was worth money (rollout-canary parser)
+
+Found while auditing the flags the admin turned on this month, not from a failure. `AGENTV3_FEATURE_HEAL`
+is LIVE at `_PCT=20`, so this branch is running in production right now.
+
+**THE DEFECT.** A PCT that was PRESENT but unparseable meant **100%**. `Number('20%')` is NaN — so a
+trailing percent sign, the single most likely thing to type into a field called PCT, silently rolled
+the feature out to **every build** and billed an extra model pass on each one. `twenty` did the same.
+
+**WHY THE OLD ANSWER LOOKED RIGHT, AND WAS NOT.** The code's comment said "flag explicitly on but
+malformed PCT → full rollout", reasoning that an explicitly-on flag should never be silently disabled.
+But there was never a prior behaviour for `PCT=twenty`, so this was not backward compatibility — it
+was a **guess**, and it guessed in the one direction that spends real money and that the admin cannot
+see. The reasoning that settles it: **someone who wanted 100% would leave the value BLANK, which
+already means 100%.** A value that is present and unreadable is therefore an intended PARTIAL rollout
+whose number we could not read, and 100% is the one answer it can never have been.
+
+**THE FIX** (`parseRolloutPercent`, one parser for every rollout flag — rule 3, the siblings were
+`AGENTV3_ESCALATION_PCT` and `AGENTV3_VACCINE_PCT`):
+ • Parses the forms an operator actually types: `20%`, ` 20 `, `20.0`. That alone removes the most
+   likely real-world case rather than merely failing more safely on it.
+ • Anything still unreadable is **0% plus a loud `console.error` naming the exact env key** — the free,
+   reversible side of a guess. Costing nothing is recoverable; billing an extra pass on every build is
+   not, and a silent behaviour change is one the admin has no way to notice.
+ • Absent/blank still means 100%, unchanged — that IS how a flag with no percentage should behave, and
+   changing it would break every other canary.
+
+**TWO EXISTING TESTS ASSERTED THE OLD BEHAVIOUR AND WERE REVERSED.** Changing a test to match code is
+normally forbidden, so it is written down explicitly at both sites: these encoded the bug, and each now
+carries the reasoning above rather than a bare new expectation.
+
+`CLAUDE.md`'s flag registry corrected in the same change. It had documented the trap honestly
+("deleting the PCT key to pause the canary would ramp it to everyone") — that half is still TRUE for a
+CLEARED value and now says the supported way to pause is `_PCT=0` or unsetting the master flag.
+
+Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
+`vitest run` — **1,354 files / 16,997 tests, all passing**.

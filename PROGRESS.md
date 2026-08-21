@@ -37654,3 +37654,50 @@ genuinely new case, the fix is to teach it the distinction, never to widen its h
 Gate: both tsc green, **vitest 1362 files / 17,119 passed / 1 honest skip**. New:
 `previewWelcome.test.ts` (10), `appSignatureEntitlement.test.ts` (12). AppKnowledgeBase updated for
 both, so every AI answers "preview so gaya" and "badge kaise hataye" correctly.
+## 2026-08-21 — sibling hunt off the rate-limit fix: the @mention inbox was reading someone else's mailbox
+
+Found while completing rule-3 (hunt the siblings) on the publish 429 above. The poll sweep listed six
+endpoints a client timer hits; four were on sane buckets, and checking the fourth — `/api/notifications`,
+polled by both `NotificationBell` (90 s) and `MentionInbox` (60 s) — turned up something else entirely.
+
+### `GET /api/notifications` was registered TWICE, with incompatible shapes
+
+| File | Serves | Answers |
+|---|---|---|
+| `routes/notifications.ts:13` | admin broadcasts (`AdminNotificationStore`) | `{ notifications, unread }` |
+| `routes/teamLibrary.ts:66` | per-user @mentions (`MentionNotificationStore`) | `{ items, unread }` |
+
+Same for `POST /api/notifications/read`. **Express matches the FIRST registration and says nothing
+about the loser**, and `server.ts` registers notifications (~582) before teamLibrary (~636) — so the
+two mention handlers had been unreachable code for their entire life.
+
+**What shipped was worse than an empty popover.** `MentionInbox` reads `json.items` → always absent →
+list permanently empty; but it also trusts `json.unread`, which the *admin* handler does return — so
+the bell showed a real unread count that opened onto nothing. Meanwhile
+`POST /api/team/:teamId/mentions/notify` kept faithfully STORING mentions no reader could reach, and
+"mark all read" wrote into the admin store instead of the mention store. A feature that is mounted,
+visible, and does nothing is exactly what the second absolute rule forbids — and it passed every
+review because neither registration looks wrong on its own.
+
+### Fix
+
+Mentions move to their own paths — `GET /api/mentions`, `POST /api/mentions/read` — and
+`MentionInbox` follows. They stay two separate inboxes deliberately: an admin broadcast is not an
+@mention, and merging them would put platform announcements inside the IDE's team popover.
+`AppKnowledgeBase.ts` (`team-mentions`) documented the colliding paths and is corrected in the same
+change, including an honest note about what was actually happening — its claim that mentions "are now
+DELIVERED" had been true of the write path and false of everything the user could see.
+
+### The guard
+
+`tests/routeCollision.test.ts` fails when any method+path is registered more than once across
+`server.ts`, `src/server/routes/**` and `src/server/lib/**`, naming both files and lines. `GET *` (the
+per-mode SPA fallback) is the one intentional repeat and is excluded by name. Registrations are matched
+as STATEMENTS at line start, after comment stripping, so Express code quoted in documentation and in the
+scaffold INSTRUCTIONS strings we hand to generated apps (`app.post("/pay", idempotency(store), …)`) is
+not mistaken for a route — the first draft flagged exactly that and was tightened rather than
+allow-listed. Verified to bite: stashing the fix reproduces both collisions with file:line.
+
+A silent collision is invisible in review by construction, so it gets a test rather than a convention.
+
+Gate: both tsc green, 17,108 tests / 1,362 files green, CI green before merge.

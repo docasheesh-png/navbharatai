@@ -62,15 +62,33 @@ export function registerTeamLibraryRoutes(app: Express): void {
     res.json({ delivered, mentioned: notifications.length });
   });
 
-  // Per-user inbox (NOT team-scoped — the caller reads only their OWN notifications).
-  app.get('/api/notifications', async (req: Request, res: Response) => {
+  /**
+   * Per-user @mention inbox (NOT team-scoped — the caller reads only their OWN mentions).
+   *
+   * ⚠️ THE PATH IS `/api/mentions`, NOT `/api/notifications` — and that is the whole bug fix
+   * (2026-08-21). This pair used to be registered on `/api/notifications`, which
+   * `routes/notifications.ts` ALSO registers for the admin's broadcast inbox. Express hands a
+   * duplicated path to whoever registered FIRST and says nothing about the loser, and `server.ts`
+   * registers notifications (line ~582) before teamLibrary (~636) — so for every request ever made,
+   * these two handlers were unreachable code.
+   *
+   * What the user saw: `MentionInbox` asks for `json.items`, the admin handler answers with
+   * `{ notifications, unread }`, so the mention list was permanently EMPTY while the badge showed the
+   * admin inbox's unread count — a number that opened onto nothing. Meanwhile
+   * `/api/team/:teamId/mentions/notify` above kept genuinely storing mentions that no reader could
+   * ever reach, and "mark all read" wrote into the admin store instead of this one.
+   *
+   * They stay two separate inboxes on purpose: an admin broadcast is not an @mention, and merging
+   * them would put platform announcements inside the IDE's team-collaboration popover.
+   */
+  app.get('/api/mentions', async (req: Request, res: Response) => {
     const uid = await verifyFirebaseToken(req);
     if (!uid) return res.status(401).json({ error: 'Sign-in required.' });
     const items = await mentionNotificationStore.listForUser(uid);
     res.json({ items, unread: items.filter((n) => !n.read).length });
   });
 
-  app.post('/api/notifications/read', async (req: Request, res: Response) => {
+  app.post('/api/mentions/read', async (req: Request, res: Response) => {
     const uid = await verifyFirebaseToken(req);
     if (!uid) return res.status(401).json({ error: 'Sign-in required.' });
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: unknown): x is string => typeof x === 'string') : [];

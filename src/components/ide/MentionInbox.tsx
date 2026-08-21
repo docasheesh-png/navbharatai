@@ -1,5 +1,5 @@
 // T1-mention-inbox (client) — the per-user @mention inbox. Fetches the caller's delivered mention
-// notifications (GET /api/notifications), shows an unread badge, and marks them read. Self-contained;
+// notifications (GET /api/mentions), shows an unread badge, and marks them read. Self-contained;
 // reuses teamAuthHeader so there is one auth path (no drift). Best-effort — a fetch failure just shows
 // an empty inbox, never throws.
 
@@ -36,7 +36,10 @@ export const MentionInbox: React.FC = () => {
     const headers = await teamAuthHeader();
     if (!headers.Authorization) return; // signed out → nothing to show
     try {
-      const res = await fetch('/api/notifications', { headers });
+      // /api/mentions, NOT /api/notifications: that path belongs to the admin broadcast inbox, which
+      // answers `{ notifications }` and never `{ items }`. Asking it for mentions is exactly what kept
+      // this popover empty while its badge counted somebody else's messages (fixed 2026-08-21).
+      const res = await fetch('/api/mentions', { headers });
       if (!res.ok) return;
       const json = await res.json();
       setItems(Array.isArray(json.items) ? json.items : []);
@@ -66,7 +69,7 @@ export const MentionInbox: React.FC = () => {
     const headers = await teamAuthHeader();
     if (!headers.Authorization) return;
     try {
-      await fetch('/api/notifications/read', {
+      await fetch('/api/mentions/read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...headers },
         body: JSON.stringify({ ids }),

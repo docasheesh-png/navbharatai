@@ -38090,3 +38090,77 @@ depend on it being right (the connect call, the apex record names, and this link
 earned a test: the href is always built as `https://` + the CLEAN host, never from the raw input —
 pasting a scheme back into an href is how `https://https://…` reaches a user — and an empty input
 yields an empty string rather than a bare `https://` link.
+
+---
+
+## 2026-08-21 (night) — Apple sign-in: a file that could not be read, a loop that could not end (PR #2551)
+
+**Admin:** *"apple login abhi bhi nahi ho raha."*
+
+### The bug that would have wasted every future evening
+
+`appleDomainAssociation()` offers two sources: the Cloud Run env var, and a file committed at
+`public/.well-known/`. **The runtime Docker stage copies only `package.json`, `node_modules` and
+`dist/` — never `public/`.** So a committed file is absent from the container: the read throws, the
+route answers its honest 404, and the repository plainly shows the file sitting there.
+
+The failure mode is the cruel one — **nothing reports an error anywhere**, and the person debugging is
+staring at a file that exists everywhere except where it is read. Vite copies `publicDir` into the
+build output (dotfiles included), so the deployed copy really lives at `dist/.well-known/`; that path
+is now tried first, with `public/` kept for `npm run dev`.
+
+**The artifact-vs-validity class, one layer down: the file EXISTING in the repo stood in for the file
+being READABLE by the process that needs it.** Sixth instance.
+
+### The second fix is to the debugging loop, not the code
+
+Sign in with Apple on the web fails in about five independent ways that are **indistinguishable from a
+browser** — every one is a sheet that closes with nothing signed in. Most live where neither the admin
+nor a Claude session can look: Apple's portal, Cloud Run's env, and whatever sits in front of our
+domain. Each round of "try this, tell me what happened" costs an evening, and we had spent several.
+
+`GET /api/admin/apple-signin` ends it. The server fetches its OWN public association URL — exactly what
+Apple fetches — and compares it with what it believes it is serving: a 404 means not configured, HTML
+means something in front of us answers that path, a different body means a stale deploy or cache, and
+an exact match means **our side is provably correct and the cause is Apple-side**. That last verdict is
+the valuable one: it is the only way to say "stop looking at the code" with evidence rather than
+confidence. "Could not check" is its own verdict and is never reported as a failure.
+
+### Two things I got wrong, both corrected in the same PR
+
+1. **`domainServingCheck` — I called a fixable defect an environment limitation.** Four of its tests
+   failed in this sandbox (no DNS ⇒ the SSRF guard short-circuits before the injected fetcher). I tried
+   to fix it by skipping the guard when a fetcher is injected, which broke a real SSRF test, and
+   reverted — correctly. Then I concluded it could not be fixed without weakening security and reported
+   it as a quirk. **Another session fixed it properly within the hour by INJECTING the guard** (default:
+   the real one). **"My fix broke something, therefore this cannot be fixed" is not a conclusion — it is
+   one failed attempt.** The seam I needed was one parameter over from the one I reached for.
+2. Left a stale claim standing in the PR body until the rebase disproved it; corrected in place.
+
+### A repo-wide CI blocker, fixed rather than allowlisted
+
+CI went red for a reason unrelated to the branch: a new high-severity `tar` advisory (uncontrolled
+recursion → uncatchable stack-overflow DoS) that the dependency gate does not allow. **It was blocking
+every open PR**, so it was fixed here: `tar 7.5.20 → 7.5.22`, lockfile only, because npm reported a fix
+without a semver-major bump. Putting a real, patchable high-severity advisory into
+`.audit-allowlist.json` would be using the escape hatch to dodge a two-minute upgrade.
+
+⚠️ **The risk that was CHECKED rather than reasoned about.** The same fix lifted top-level
+`brace-expansion` to 5.0.9, and the allowlist records a real CI failure from 2026-07-25 when a 5.0.8
+pin broke glob's bundled minimatch. This resolution is structurally different (that was a `package.json`
+**overrides** pin forcing one version everywhere; here glob keeps its own nested 2.1.4) — **but
+structurally-different is an argument, not evidence.** So the exact path that broke last time was run:
+`npm run test:coverage`, which pulls `@vitest/coverage-v8 → test-exclude → glob → minimatch →
+brace-expansion`. 1367 files, 17,170 passing, coverage produced. Clean.
+
+The allowlist was deliberately left untouched: several entries describe the cascade this bump happens
+to resolve and are now stale, but they carry the root-cause notes that make the next triage cheap.
+
+Gate: both tsc clean; `vitest run` 1367 files / 17,170 passed / 1 honest skip; `test:coverage` clean;
+`audit:gate` clean.
+
+### Open, and it is the admin's to close
+
+The remaining Apple cause cannot be seen from code. After this deploys, the admin opens
+`/api/admin/apple-signin`; its verdict names which of the four causes it is, and the next step follows
+from that. Recorded here as an open item (rule 6) rather than as a fix.

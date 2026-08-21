@@ -37701,3 +37701,63 @@ allow-listed. Verified to bite: stashing the fix reproduces both collisions with
 A silent collision is invisible in review by construction, so it gets a test rather than a convention.
 
 Gate: both tsc green, 17,108 tests / 1,362 files green, CI green before merge.
+
+---
+
+## 2026-08-21 — the promo box that posted nowhere (client-wide dead-endpoint sweep)
+
+Third finding from the same afternoon's thread. The route-collision fix above raised an obvious next
+question: if a client can call a path that is SHADOWED, it can just as easily call one that was never
+built. So every `fetch` / `axios` / `useSWR` call in the client was checked against the routes the
+server actually registers.
+
+**The sweep is nearly clean — one real hit, and it is a bad one.**
+
+### `/api/payment/validate-mode-promo` does not exist. Anywhere.
+
+`AppModals.tsx` renders a **"Have a promo code?" input with an Apply button** inside the Professional
+Pass purchase modal. It calls `redeemVishwakarmaPromo`, which posts to
+`/api/payment/validate-mode-promo` — a path whose **only occurrence in the entire repository was that
+call**. Every user who ever typed a promo code there, valid or not, got **"Validation failed"**: a
+message that blames the user's code for an endpoint we never wrote. Money-adjacent, live, and visible.
+
+**It could not be honestly wired, so it was removed.** Two reasons, both about not inventing behaviour:
+
+- The nearest real route, `POST /api/payment/redeem-coupon`, credits **wallet ₹** from a fixed coupon
+  table. Pointing the pass promo at it would silently change what the button does — tokens instead of
+  a discounted pass. That is a different feature wearing the same label.
+- The handler's own success message promised *"Proceed to checkout to pay ₹1"*, and `create-order`
+  knows nothing about any such price. Making that true means designing a discounted-checkout flow the
+  admin never asked for.
+
+Rule 2 allows exactly two states — fully working, or not built yet — so it is now honestly not built.
+**The working promo redemption is untouched:** `redeemPromoCoupon` → `/api/payment/redeem-coupon`,
+surfaced in Wallet & Billing. A user with a code still has a real place to use it.
+
+### Also deleted: a generated-app template island inside our own `src/`
+
+`src/pages/InventoryPage.tsx` + `src/components/ProductTable.tsx` + `ProductForm.tsx` were sample code
+for apps we GENERATE, living in NavBharatAI's own source tree and imported by **nothing**.
+`BuildEngine/CodeGenerator.ts` carries its own copies keyed by those exact filenames, so deleting the
+files changes nothing for a generated app — it only stops our tree from carrying pages that call
+`/api/products`, a route we do not serve. Same call as `StatusBar.tsx` in #2518: dead code that would
+be wrong the day somebody mounted it.
+
+### The guard
+
+`tests/deadEndpointSweep.test.ts` walks every `fetch(…)` / `axios.<verb>(…)` / `useSWR(…)` in
+`src/App.tsx`, `src/components`, `src/hooks`, `src/lib`, `src/contexts` and fails when a path resolves
+to no registered route, naming the path and the file. Templated segments (`${id}`) are matched against
+`:param` routes in both directions, so a real dynamic URL is not reported.
+
+**The interesting part is what it must NOT report.** NavBharatAI ships a lot of Express and React code
+AS TEXT — plugin `setupCode` samples, the PWA push snippet, the payment-integration recipes in
+`paymentSetup.ts` — and that text is full of `fetch()` calls to endpoints in the *user's* generated
+app. A first draft flagged 16 of them. Two rules cut it to the one real hit: comments are stripped, and
+**multi-line template literals are stripped** (a genuine call in our own code always has its URL on one
+line, while a code sample never does). Two survivors — `/api/user` and `/api/verify` from the SWR
+plugin sample, which slip through because a nested `${}` desynchronises the scanner — are allow-listed
+by name with that reason written next to them. Verified to bite: stashing the fix reproduces
+`/api/payment/validate-mode-promo called from src/hooks/usePaymentEngine.ts`.
+
+Gate: both tsc green, 17,134 tests / 1,365 files green, CI green before merge.

@@ -203,6 +203,7 @@ import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
+import { hostingPlansEnabled, hostingPlanPriceInr } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
 import { pickerItems } from '../../lib/reportPicker';
 import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } from '../AgentV3/SpaFallbackAnalysis';
@@ -5436,6 +5437,18 @@ export function registerAgentV3Routes(app: Express): void {
       // Slice 3: tells the client whether the Firebase-native "connect your own domain" surface is
       // live, so the Publish flow only offers it when the backend feature flag is on.
       customDomains: firebaseCustomDomainsEnabled(),
+      // What connecting a domain COSTS this caller, so the button can say so before they tap it
+      // (admin 2026-08-21). NULL means they would not be charged — plans are off, or they are on the
+      // free list — and the button then shows no price rather than quoting one that will never apply.
+      //
+      // The identity here comes from the query string and is NOT verified, which is fine for a LABEL
+      // and only for a label: the real charge is enforced on the connect route against a verified
+      // identity. Claiming someone else's email can only hide a price from yourself; it cannot buy the
+      // plan. The number is read live from hostingPlanPriceInr() so an env price change needs no
+      // deploy and can never drift from what is actually charged.
+      customDomainPriceInr: hostingPlansEnabled() && !isAgentV3FreeUser(userId, email)
+        ? hostingPlanPriceInr()
+        : null,
     });
   });
 

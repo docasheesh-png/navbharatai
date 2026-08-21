@@ -37897,3 +37897,54 @@ Gate: both tsc green, **vitest 1364 files / 17,136 passed / 1 honest skip**.
 = current build; sandbox id = revivable; workspaceId = has an app; and now **an empty/truncated list =
 a complete list**. The first four were reported by the admin. This one was found by looking. That is
 the difference worth institutionalising.
+
+---
+
+## 2026-08-21 (sweep) — what the artifact-vs-validity audit checked, and what it did NOT find (PR #2548)
+
+After PR #2547 fixed the destructive one, the sweep continued into the rest of the class. Recording the
+NEGATIVE results too, because an audit whose clean findings go unrecorded gets re-run from scratch by
+the next session — and because "we checked and it was fine" is only useful if someone can see WHAT was
+checked.
+
+**The dangerous SHAPE, stated precisely.** `catch { return [] }` is everywhere and is mostly harmless:
+14 occurrences in `src/server`, nearly all in advisory ANALYSERS where "could not parse ⇒ no findings"
+is defensible and nothing is destroyed. The shape that actually bites is narrower:
+**absence used to justify a DESTRUCTIVE or MONEY action.** That is the filter worth applying — not the
+grep.
+
+**Audited, and CLEAN (with the reason each is safe, so it need not be re-derived):**
+- **`sandboxReaper`** — `listStale()` returns `[]` on failure, so a failed read reaps NOTHING. Absence
+  causes INACTION here, which is the safe direction, and the module says so ("errs entirely on the side
+  of letting a VM live").
+- **`HostingQuota`** — a failed/timed-out registry read yields `null` and the cap is SKIPPED (fail-open).
+  Documented intent: "a Firestore hiccup must never refuse a real publish". A quota can be bypassed
+  during an outage; that is the accepted trade, consistent with the wallet gate.
+- **Ban check** (`authMiddleware`) — fail-open, documented at the call site.
+- **Firebase channel TTL** — suspected behind the 2026-08-19 publish 404 and CHECKED: `ensureChannel`
+  deliberately omits `expireTime`/`ttl` with a comment saying why. **Lead dead, recorded as dead.**
+
+**The one that was NOT clean is PR #2547** (channel reclaim). It was the only DESTRUCTIVE consumer of an
+absence, which is exactly why it was the only dangerous one.
+
+### A second doc-vs-code drift, on the admin's money
+
+`AGENTV3_SANDBOX_IDLE_MINUTES`: CLAUDE.md said "default 15" and listed "15 → 5, ~₹1,500/month" as a
+**lever NOT taken, admin's call**. The code has defaulted to **5 since 2026-08-13**, with admin approval,
+per its own comment. The registry was never updated.
+
+**Why that is dangerous rather than untidy:** a later session reading "NOT taken" would either re-propose
+a shipped change, or "restore" the default to 15 believing 5 was a slip — quietly putting ₹1,500/month
+back on the bill, with nothing failing to reveal it. CLAUDE.md corrected, including what makes 5 safe
+(the sweep is BUILD-AWARE — it skips workspaces with a build in flight, which is why a long model call
+cannot be mistaken for an abandoned session) and the instruction not to lower it further without
+confirming that hold still exists.
+
+**This is the SECOND doc-vs-code drift this month** (the first: the `PUBLISHED_APP_DOMAIN` "dead config"
+claim, corrected within the hour on 2026-08-20). Same lesson both times, now stated in CLAUDE.md itself:
+**anything the constitution asserts about the CODE — a default, a flag's effect, whether something is
+wired — must be re-grepped against current `main` before being acted on.** A cross-check is only true as
+of the commit it ran against.
+
+Gate: both tsc green, vitest 1366 files / 17,147 passed / 1 honest skip (run after rebasing onto another
+session's three merges — #2542, #2545, #2546 — per safeguard #1).

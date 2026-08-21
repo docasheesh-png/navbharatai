@@ -414,8 +414,9 @@ the code (it is actually read somewhere) on 2026-07-11.
   charges ZERO rather than an invented number, an empty wallet is refused BEFORE any provider call, an
   unreadable balance fails OPEN, and the daily rollup is dated on the server clock.
   (Re-confirmed `on` by the admin 2026-08-10.)
-- **E2B sandbox cost control (shipped 2026-08-04):** `AGENTV3_SANDBOX_IDLE_MINUTES` (default 15, was a
-  hardcoded 45 — a 5-minute build was followed by 45 idle billed minutes), `AGENTV3_SANDBOX_TOUCH_MINUTES`
+- **E2B sandbox cost control (shipped 2026-08-04):** `AGENTV3_SANDBOX_IDLE_MINUTES` (**code default is
+  now 5** — see the ⚠️ correction below; it was 15, and before that a hardcoded 45, where a 5-minute build
+  was followed by 45 idle billed minutes), `AGENTV3_SANDBOX_TOUCH_MINUTES`
   (default 5 — how often a LIVE build refreshes its durable stamp so the cross-instance orphan reaper can
   tell it apart from an abandoned VM). The reaper reads the DURABLE record, so a sandbox orphaned by a
   Cloud Run instance recycle (i.e. by every deploy) is finally pausable; its cut-off is held a whole
@@ -435,9 +436,23 @@ the code (it is actually read somewhere) on 2026-07-11.
     single biggest cost lever in this file, and why the 45 → 15 change was not a tidy-up: at 1,260
     sandboxes, 45 idle minutes each is 945 billed hours (**~$78/month**) versus 315 hours (**~$26**) at
     15. That one default is saving roughly **₹4,500/month**.
-  - **Remaining lever, NOT taken (admin's call):** 15 → 5 idle minutes would save a further ~$17/month
-    (~₹1,500). The trade-off is real — a user returning after 6 minutes meets a cold sandbox and waits
-    through a slower first build — so it is a product decision, not an optimisation to apply quietly.
+  - ⚠️ **CORRECTION 2026-08-21 — THIS LEVER WAS TAKEN, AND THIS FILE DID NOT SAY SO FOR EIGHT DAYS.**
+    The lines above used to read "Remaining lever, NOT taken (admin's call): 15 → 5 idle minutes would
+    save a further ~$17/month (~₹1,500)". A session took it on **2026-08-13** with admin approval —
+    `idleLimitMs()` in `sandboxReaper.ts` now defaults to **5 minutes**, saving that ~₹1,500/month — and
+    updated the code comment but not this registry. **Why the drift was dangerous rather than untidy:** a
+    later session reading "NOT taken, admin's call" would either re-propose a change already shipped, or
+    "restore" the default to 15 believing 5 was a slip — quietly putting ₹1,500/month back on the bill
+    with nothing failing to show it.
+    **WHAT MAKES 5 MINUTES SAFE, and the thing not to break:** idle is measured from the last SANDBOX
+    operation, and a long model call is not one — while the AI thinks, nothing touches the sandbox, so at
+    five minutes that silence would look exactly like an abandoned session. The sweep is BUILD-AWARE: it
+    skips workspaces with a build in flight (`E2BActuator.setBuildActive`), so it can only ever pause a
+    sandbox nobody is building in. **Do not lower this further without first confirming that hold still
+    exists.** The accepted trade: a user returning after six minutes meets a PAUSED sandbox and waits
+    through a resume — slower, never lost, since it resumes by id with its files.
+    General lesson, since this is the second doc-vs-code drift found this month: **anything this file
+    asserts about a DEFAULT must be re-grepped against current `main` before being acted on.**
   - ⚠️ **This is ONE 30-day snapshot, not a forecast.** Cost scales with concurrent build hours, so it
     moves with usage. To recompute: E2B dashboard → Billing → Usage; per-hour = cost ÷ vCPU-hours.
     Re-measure before quoting these numbers as current.

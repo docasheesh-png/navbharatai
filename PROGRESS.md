@@ -36514,3 +36514,35 @@ always fine. Only the address we generated was wrong.
 
 Gate: both tsc green; FULL suite 16,785 tests / 1,339 files green (the previous change's gate was run
 on src/ only and missed tests/websiteHub.test.ts — a real slip, corrected here by running everything).
+## 2026-08-21 — Publish card: the "Free" badge off, the domain's real price on
+
+Admin: *"publish on navbharatai me se free tag hatao"* and *"connect your own domain me bracket me
+charge likho."* Two halves of one problem — the card carried a **FREE** badge at the top while
+offering a **paid** custom domain inside it, so the badge read as a promise about the whole card and
+the one genuinely priced action carried no price at all.
+
+**The badge is gone.** Hosting itself really is free to the user (verified: no wallet debit anywhere in
+the publish route), but a promise placed above a paid option is not a true one.
+
+**The button now reads `Connect your own domain (₹99/month)` — and the number is server-supplied.**
+Hardcoding it in the UI would have been one line, and wrong: `HOSTING_PLAN_PRICE_INR` is env-tunable
+precisely so a price change needs no deploy, and a label that can drift from what the connect route
+actually charges is the kind of small lie the billing law exists to prevent. `deploy-providers` now
+returns `customDomainPriceInr`, read live from `hostingPlanPriceInr()`.
+
+**It shows NOTHING to a user who would not be charged.** Plans off, or a free-list account — the server
+sends `null` and the client renders an empty string. Quoting ₹99 to someone exempt is a small lie on a
+money surface, and the exemption already exists in the connect route (`isAgentV3FreeUser`), so the label
+simply follows it.
+
+**On using the query identity for this:** `deploy-providers` takes `userId`/`email` from the query
+string, which is NOT verified. That is acceptable *for a label and only for a label* — the real charge
+is enforced on the connect route against a verified identity, so claiming another email can only hide a
+price from yourself, never buy the plan. Stated here because "unverified identity" is normally a red
+flag and the next reader deserves the reasoning rather than a rediscovery.
+
+**Forward-compatible by construction:** the client accepts only a real number, so an older server that
+omits the field leaves the label off instead of inventing a price.
+
+Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
+1341 files / 16,793 tests green.

@@ -59,6 +59,13 @@ export interface HostingChooserProps {
   workspaceId?: string;
   /** Whether the Firebase-native "connect your own domain" surface is live (server flag). */
   customDomainsEnabled?: boolean;
+  /**
+   * What connecting a domain costs THIS user per month, or null when they would not be charged
+   * (plans off, or a free-list account). Comes from the server so an env price change is reflected
+   * without a deploy — a hardcoded number here would drift from what is actually charged, which is
+   * exactly what the billing law forbids.
+   */
+  customDomainPriceInr?: number | null;
   /** Set once this workspace is storing its code in the user's OWN GitHub repo (git-native storage). */
   ownRepo?: OwnRepoInfo | null;
   /** Whether a GitHub account is already connected (token present) — governs the "I host it myself" CTA. */
@@ -93,7 +100,7 @@ interface DatabaseReadiness {
 const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI hosting"
 
 export function HostingChooser({
-  providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled,
+  providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr,
   ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
   onMakeIcon,
 }: HostingChooserProps) {
@@ -454,9 +461,12 @@ export function HostingChooser({
         <div className="p-4 grid gap-3 sm:grid-cols-2">
           {/* Path 1 — Host on NavBharatAI */}
           <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4 flex flex-col gap-2.5">
+            {/* The "Free" badge was REMOVED (admin 2026-08-21). Hosting itself costs the user nothing,
+                but the badge sat at the top of a card that also offers a PAID custom domain, so it read
+                as a promise about the whole card. The one line that is genuinely free-or-not — the
+                domain — now carries its own price instead. */}
             <div className="flex items-center justify-between">
               <span className="text-[13px] font-bold text-white">Host on NavBharatAI</span>
-              <span className="text-[9px] font-black uppercase tracking-widest text-emerald-300 bg-emerald-900/50 px-2 py-0.5 rounded-full">Free</span>
             </div>
             <p className="text-[11.5px] text-zinc-400 leading-relaxed">
               One click, no account. We host it and keep it online at a permanent link.
@@ -487,7 +497,7 @@ export function HostingChooser({
                 className="w-full py-1.5 rounded-lg border border-emerald-800/60 hover:border-emerald-600 text-emerald-300 hover:text-emerald-200 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
               >
                 <Link2 className="w-3.5 h-3.5" />
-                Connect your own domain
+                Connect your own domain{typeof customDomainPriceInr === 'number' ? ` (₹${customDomainPriceInr}/month)` : ''}
               </button>
             )}
           </div>

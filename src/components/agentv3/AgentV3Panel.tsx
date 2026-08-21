@@ -2598,6 +2598,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [deployProvider, setDeployProvider] = useState<string>('firebase');
   // Slice 3: whether the Firebase-native "connect your own domain" surface is live (server flag).
   const [customDomainsEnabled, setCustomDomainsEnabled] = useState(false);
+  /** ₹/month for a custom domain, or null when this user would not be charged. Server-supplied. */
+  const [customDomainPriceInr, setCustomDomainPriceInr] = useState<number | null>(null);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -2612,6 +2614,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           setProviders(data.providers);
           if (typeof data.default === 'string') setDeployProvider(data.default);
           if (typeof data.customDomains === 'boolean') setCustomDomainsEnabled(data.customDomains);
+          // Only a real number is accepted — an older server that does not send the field leaves this
+          // null, so the button shows no price rather than inventing one.
+          setCustomDomainPriceInr(typeof data.customDomainPriceInr === 'number' ? data.customDomainPriceInr : null);
         }
       } catch { /* best-effort — default to Firebase */ }
     })();
@@ -3155,6 +3160,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           publishStatus={publishMsg}
           workspaceId={state.workspaceId}
           customDomainsEnabled={customDomainsEnabled}
+          customDomainPriceInr={customDomainPriceInr}
           ownRepo={state.ownRepo}
           githubConnected={!!ghToken()}
           onConnectGitHub={() => void connectGitHub()}

@@ -19,6 +19,7 @@
 //   sandbox concurrently. Mirrors DeploymentStore: VITEST-skip, best-effort, never throws/blocks a build.
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
+import { isUsableRecipe, type PreviewRecipe } from './previewRevival';
 
 export interface SandboxRecord {
   workspaceId: string;
@@ -27,6 +28,16 @@ export interface SandboxRecord {
   updatedAt: number;
   /** Epoch ms the orphan reaper paused this sandbox, if it ever did. See sandboxReaper.ts. */
   pausedAt?: number;
+  /**
+   * How to bring this preview back WITHOUT guessing — the command that actually started the dev
+   * server and the port that actually rendered the app, captured the moment the preview first worked.
+   *
+   * It lives on THIS record, not in a second collection, on purpose: it shares the workspace's
+   * lifetime exactly, it is read at precisely the moment a resume is being attempted, and one record
+   * cannot drift out of step with itself. See previewRevival.ts for why it is captured at success
+   * rather than derived at revival.
+   */
+  recipe?: PreviewRecipe;
 }
 
 class SandboxStore {
@@ -66,6 +77,46 @@ class SandboxStore {
       if (!snap.exists) return null;
       const rec = snap.data() as SandboxRecord;
       return typeof rec?.sandboxId === 'string' && rec.sandboxId ? rec.sandboxId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Store the revival recipe proven by a successful boot, and CONFIRM it by reading it back.
+   *
+   * The read-back is the whole point. "We wrote it" and "it is there" are different facts, and a
+   * guarantee that was never verified is not a guarantee — it is a hope that shows up as a broken
+   * preview days later, when the user can do nothing about it. Verifying here, while the app is still
+   * running, is what makes the promise answerable at the only moment it can still be fixed.
+   *
+   * Returns whether the recipe is genuinely retrievable. Never throws — a storage failure is reported
+   * as `false` and surfaced honestly by the caller, never swallowed into a false promise.
+   */
+  async saveRecipe(workspaceId: string, recipe: PreviewRecipe): Promise<boolean> {
+    const db = this.getDb();
+    if (!db || !workspaceId || !isUsableRecipe(recipe)) return false;
+    try {
+      await db.collection('agentv3_sandboxes').doc(workspaceId).set(
+        { workspaceId, recipe, updatedAt: Date.now() },
+        { merge: true },
+      );
+      // CONFIRM — the round trip, not the write, is the guarantee.
+      return isUsableRecipe(await this.getRecipe(workspaceId));
+    } catch {
+      return false;
+    }
+  }
+
+  /** The stored revival recipe, or null when there is none / it is unusable. */
+  async getRecipe(workspaceId: string): Promise<PreviewRecipe | null> {
+    const db = this.getDb();
+    if (!db || !workspaceId) return null;
+    try {
+      const snap = await db.collection('agentv3_sandboxes').doc(workspaceId).get();
+      if (!snap.exists) return null;
+      const rec = (snap.data() as SandboxRecord)?.recipe;
+      return isUsableRecipe(rec) ? rec : null;
     } catch {
       return null;
     }

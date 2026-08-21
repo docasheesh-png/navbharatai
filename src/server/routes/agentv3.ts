@@ -290,6 +290,8 @@ function sessionCostCapUsd(): number {
 }
 import { deploymentStore, withDeploymentPersistence, isLiveDeployment, publishedAppList, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
+import { buildRecipe, revivalConfirmedMessage, revivalUnconfirmedMessage } from '../AgentV3/previewRevival';
+import { lastDevServerLaunch } from '../AgentV3/devServerLaunchLog';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
 import { firebaseCustomDomainsEnabled } from '../lib/firebaseCustomDomain';
@@ -3736,12 +3738,24 @@ export function registerAgentV3Routes(app: Express): void {
       // an imported app whose script is `start` (CoreUI) otherwise fails here with the same
       // `Missing script: "dev"` the automatic boot hit. Best-effort read; scaffold default on miss.
       const diagPkgRaw = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
-      const result = await withTimeout(actuator.runCommand(workspaceId, resolveDevRunCommand(diagPkgRaw)), 90_000, 'preview-diagnose');
+      // REPLAY, DON'T REDISCOVER (admin 2026-08-21). If this preview has already been proven once, the
+      // command that started it and the port that rendered it were stored at that moment — so a revival
+      // repeats a fact instead of guessing again. Re-deriving is what made "wapas aao to chalta hi
+      // nahi" possible at all: every attempt re-ran a guess that has a failure rate, on a path where
+      // the correct answer was already known. The derivation stays as the fallback for a preview that
+      // has never succeeded (nothing to replay yet), so a first-ever boot is byte-identical to today.
+      const proven = await raceTimeout(sandboxStore.getRecipe(workspaceId), 4_000, 'previewRecipe').catch(() => null);
+      // Named rather than inlined: this exact string is what gets stored as the revival recipe below,
+      // so the command that revives the preview is BY CONSTRUCTION the command that just started it.
+      const devRunCommand = proven?.devCommand || resolveDevRunCommand(diagPkgRaw);
+      const result = await withTimeout(actuator.runCommand(workspaceId, devRunCommand), 90_000, 'preview-diagnose');
       if (heartbeat) clearInterval(heartbeat);
       sendStage('Running the health check', 85);
       const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
       const { up, port } = parseDevServerHealthCheck(combined);
-      const boundPort = port ?? effectivePort;
+      // A port that ONCE genuinely rendered THIS app outranks any guess about it — the health check's
+      // own reading still wins, because that is a live observation rather than a memory.
+      const boundPort = port ?? proven?.port ?? effectivePort;
       if (up) {
         sendStage('Resolving the public preview URL', 95);
         // EARN IT (admin 2026-08-03): a bound port is not the app serving. VISIT the home route and only
@@ -3776,8 +3790,20 @@ export function registerAgentV3Routes(app: Express): void {
         }
         const previewUrl = winner.url;
         const served = winner.served;
+        // THE GUARANTEE IS MADE HERE, NOT WHEN IT IS NEEDED (admin 2026-08-21). This is the exact
+        // moment nothing is a guess: `winnerPort` is the port that genuinely RENDERED the app, and
+        // devRunCommand is the command that actually started it. Storing the pair now — and confirming
+        // the read-back — is what turns a later revival from rediscovery into replay. Best-effort by
+        // construction: a storage failure is reported honestly in `recipeSaved`, never swallowed into
+        // a promise we cannot keep. See previewRevival.ts.
+        let recipeSaved: boolean | null = null;
+        if (served.rendered) {
+          const check = buildRecipe({ devCommand: devRunCommand, port: winnerPort, framework, now: Date.now() });
+          recipeSaved = check.ok && check.recipe ? await sandboxStore.saveRecipe(workspaceId, check.recipe) : false;
+        }
         finish({
           ok: served.rendered,
+          recipeSaved,
           portListening: true,
           port: winnerPort,
           previewUrl,
@@ -12026,6 +12052,11 @@ export function registerAgentV3Routes(app: Express): void {
       // may — a build that merely "finished" is not proof the app works, and protecting a state we
       // never verified would be the same lie in a new place.
       let previewGreen = false;
+      // THE WAKE-UP GUARANTEE, as a fact rather than a hope. `true` = the revival recipe is stored AND
+      // was read back, so this preview can be brought up again without guessing. `false` = the preview
+      // works but the recipe could not be stored, which the user is told plainly at the only moment it
+      // is still actionable. `null` = no green preview happened, so there was nothing to promise.
+      let previewRecipeSaved: boolean | null = null;
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
         && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size })
@@ -12118,6 +12149,39 @@ export function registerAgentV3Routes(app: Express): void {
               }
             } catch { /* latching is best-effort — never affects a build */ }
             try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
+            // THE GUARANTEE IS MADE THE FIRST TIME THE PREVIEW WORKS (admin 2026-08-21: "jab pahli bar
+            // chale, tabhi pakka ho jana chahiye jo sleep ke bad wake up hona hai"). This is that moment
+            // and nothing here is a guess: a real browser just rendered the app, and the actuator
+            // recorded the exact command and port that are serving it. Storing the pair now — with the
+            // read-back confirmed — is what turns every later revival from rediscovery into replay.
+            // Best-effort and silent on failure: it can never affect a build that has already succeeded.
+            try {
+              const launch = lastDevServerLaunch(workspaceId);
+              const check = buildRecipe({ devCommand: launch?.command, port: launch?.port, framework: null, now: Date.now() });
+              previewRecipeSaved = check.ok && check.recipe ? await sandboxStore.saveRecipe(workspaceId, check.recipe) : false;
+              // Say it now, while the preview is up. A promise the user only discovers is broken days
+              // later, when the preview will not come back, is worse than one they were never given.
+              events.emit({
+                type: 'narration', agent: 'architect', ts: Date.now(),
+                text: previewRecipeSaved
+                  ? `🔒 ${revivalConfirmedMessage()}`
+                  : `⚠️ ${revivalUnconfirmedMessage(check.gaps)}`,
+              });
+              // In the admin report too, so "the preview would not come back" is answerable from
+              // evidence next time instead of re-argued from the symptom.
+              buildDiag.record({
+                phase: 'build',
+                severity: previewRecipeSaved ? 'info' : 'warning',
+                code: 'PREVIEW_REVIVAL_RECIPE',
+                message: previewRecipeSaved
+                  ? 'The revival recipe was stored and read back — this preview can be woken without rediscovery.'
+                  : 'The preview rendered, but no revival recipe could be stored — a later wake-up falls back to re-deriving the command and port.',
+                detail: previewRecipeSaved
+                  ? `command="${launch?.command}" port=${launch?.port}`
+                  : `gaps=${check.gaps.join(',') || 'storage-write-failed'}`,
+                autoResolved: previewRecipeSaved === true,
+              });
+            } catch { /* the recipe is insurance, never a build's problem */ }
             // APP HEALTH CULTURE (slice 1, admin 2026-07-12 "culture, not just stain"): the app RENDERS
             // — now check it actually has the interactive features the user asked for (Add/Delete/Filter…
             // present as real controls in the running DOM). Deterministic + ADVISORY: records an honest

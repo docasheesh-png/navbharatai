@@ -30,6 +30,13 @@ export interface RestartStatus {
   diagnosing: boolean;
   stage: { label: string; seconds: number } | null;
   result: { ok: boolean; reason: string } | null;
+  /**
+   * WHICH BUTTON the user pressed. The operation behind both is identical, but the words are not:
+   * someone who pressed "Wake up" on a sleeping preview and then reads "Restarting the server" has to
+   * work out for themselves that it is the same thing. Defaults to `restart`, which is what the
+   * toolbar button says, so every existing caller keeps today's wording.
+   */
+  intent?: 'restart' | 'wake';
 }
 
 export interface RestartLine {
@@ -54,12 +61,20 @@ export function restartStatusLine(s: RestartStatus): RestartLine {
       kind: 'progress',
       // Named as a RESTART, not a "diagnosis": the user pressed a button that says restart, and a
       // status line using a different word for the same action reads as something else happening.
-      text: label ? `Restarting the server — ${label}…` : 'Restarting the server…',
+      text: s.intent === 'wake'
+        ? (label ? `Waking your preview — ${label}…` : 'Waking your preview…')
+        : (label ? `Restarting the server — ${label}…` : 'Restarting the server…'),
       seconds: s.stage?.seconds ?? 0,
     };
   }
   if (!s.result) return { kind: 'none', text: '', seconds: 0 };
-  if (s.result.ok) return { kind: 'ok', text: 'The server restarted and your app is responding.', seconds: 0 };
+  if (s.result.ok) {
+    return {
+      kind: 'ok',
+      text: s.intent === 'wake' ? 'Your preview is awake and your app is responding.' : 'The server restarted and your app is responding.',
+      seconds: 0,
+    };
+  }
   return {
     kind: 'failed',
     text: s.result.reason?.trim()

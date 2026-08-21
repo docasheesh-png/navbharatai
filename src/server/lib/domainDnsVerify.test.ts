@@ -71,6 +71,11 @@ describe('verifyRecordsLive — telling the three real states apart', () => {
     expect(r.checks[0].found).toEqual(['1.2.3.4']);   // the wrong value is SHOWN, not just "missing"
     expect(r.summary).toContain('different value');
     expect(r.summary).toContain('Edit it at your registrar');
+    // A user who has ALREADY fixed it still sees "wrong", because the old value stays in the
+    // internet's caches for the record's TTL — hours on a registrar defaulting to 14400. Without this
+    // they conclude the fix failed and edit a correct record again: the same loop, one step later.
+    expect(r.summary).toContain('linger');
+    expect(r.summary).toContain('clears by itself');
   });
 
   it('NOT PUBLISHED YET: says the registrar is still working, and that nothing is wrong', async () => {

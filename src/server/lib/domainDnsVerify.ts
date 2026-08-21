@@ -145,8 +145,15 @@ export function summarize(checks: readonly RecordCheck[]): string {
 
   if (wrong.length > 0) {
     const w = wrong[0];
+    // THE SECOND LOOP THIS PREVENTS (admin's question, 2026-08-21: "sabhi user karenge?"). A user who
+    // has ALREADY fixed a wrong record still sees it reported as wrong, because the old value stays
+    // in the internet's caches for the record's TTL — hours, on a registrar that defaults to 14400.
+    // Without this sentence they conclude the fix did not work and edit a correct record again, which
+    // is the exact loop this whole module was written to end.
     return `Your ${w.type} record for ${w.name} has a different value than the one shown above. `
-      + `Edit it at your registrar so it matches exactly, then check again.`;
+      + `Edit it at your registrar so it matches exactly, then check again. `
+      + `If you have just fixed it, the old value can linger on the internet for a few hours — that is `
+      + `normal, it clears by itself, and you do not need to change anything again.`;
   }
   if (absent.length > 0) {
     const names = absent.map((c) => `${c.type} ${c.name}`).join(', ');

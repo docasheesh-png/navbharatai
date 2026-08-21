@@ -37069,3 +37069,46 @@ Console is the admin's step (rule 6 — no Play service account exists).
 
 Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
 `vitest run` — **1,353 files / 16,982 tests, all passing** (12 new).
+
+---
+
+## 2026-08-21 — A stuck preview no longer needs a whole rebuild (ROADMAP §8B B3)
+
+ADMIN CONTEXT: the preview has been a repeated pain point ("preview gadbad hai"). This is the part of
+it that was pure UI reachability, not engine behaviour.
+
+THE DEFECT, and it is a placement bug rather than a missing capability. The dev-server reboot has
+existed for a long time and is good: `preview-diagnose` hydrates the sandbox from durable files,
+installs, pre-kills, boots, and verifies the port — **with zero model calls**. But the only button
+that reached it lived inside the **"No live preview yet" EMPTY state**. So the one case where a user
+most needs it — the preview URL still resolves, the iframe is right there, and the server behind it
+has died (blank page, connection refused, stuck mid-boot) — was the one case the button was invisible
+for. The honest answer in that state was "rebuild the whole app", which is exactly what §8B B3
+described.
+
+WHAT SHIPPED.
+ • The same operation, offered from the preview **toolbar** while the preview is showing. No new
+   endpoint, no new rate limit, no new ownership path — `runDiagnose` verbatim, so the security and
+   cost properties are the ones already reviewed.
+ • **A separate button from the ↻ beside it, deliberately.** Reload only re-points the iframe;
+   restart is a real 30–90 second sandbox reboot. One button doing both is how a user learns to
+   distrust both.
+ • **It says what it is doing, and for how long.** A silent spinner for ninety seconds is
+   indistinguishable from a hang, so the toolbar shows the REAL stage events the empty state already
+   streams (never a time-faked bar) plus a live seconds count.
+ • 🔒 **A failed restart never reads as a fixed one.** `restartStatusLine` reports the server's own
+   reason on failure, and a failure with NO reason still reports failure — silence is not evidence of
+   success. Otherwise the user goes on staring at the same broken preview believing it was repaired.
+   Pulled into `previewRestart.ts` (pure) precisely so that rule is a test rather than an intention:
+   `PreviewSurface` is iframe- and network-bound and cannot be exercised by a static render.
+ • Offer rule is also pinned: live mode only (the in-browser preview has no server to restart), a URL
+   present (with none, the empty state already offers it), and a real workspace.
+
+`AppKnowledgeBase.ts` updated (mandatory — user-facing control), including the distinction between
+reload and restart and Hindi/Hinglish keywords ("preview atak gaya", "server restart karo").
+
+STILL OPEN, recorded rather than implied: starting/stopping an INDIVIDUAL non-dev service (a backend
+on its own port) from the App Logs strip. B3's row now says so instead of reading as fully done.
+
+Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
+`vitest run` — **1,354 files / 16,994 tests, all passing** (12 new).

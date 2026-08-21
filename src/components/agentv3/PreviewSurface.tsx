@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles } from 'lucide-react';
+import { canOfferRestart, restartStatusLine } from './previewRestart';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview } from './previewAutoReboot';
@@ -921,9 +922,55 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           {viewportSwitcher}
           <span className="truncate flex-1">{effectiveUrl}</span>
           <button onClick={() => setLiveReloadKey((k) => k + 1)} className="flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
+          {/* RESTART THE SERVER — reachable while the preview is SHOWING (ROADMAP §8B B3).
+              Diagnose only ever existed in the "No live preview yet" empty state, so a user whose
+              preview URL still resolves but whose dev server has died — a blank page, a connection
+              refused, a stuck app — had no way to reach it, and the honest answer was "rebuild the
+              whole app". This is the SAME model-free operation (`runDiagnose`: hydrate the sandbox
+              from durable files, install, pre-kill, boot, verify the port) offered where the user can
+              actually tell it is needed. Deliberately NOT merged with ↻ next to it: that one only
+              re-points the iframe, and one button doing two very different things — one instant, one
+              a 90-second sandbox reboot — is how a user learns to distrust both. */}
+          {canOfferRestart({ mode, url: effectiveUrl, workspaceId }) && (
+            <button
+              onClick={() => void runDiagnose()}
+              disabled={diagnosing}
+              aria-label="Restart the server"
+              className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-50"
+              title="Restart the server — reboots the dev server inside your sandbox and checks it really came up. Use this when the preview is blank or stuck."
+            >
+              {diagnosing ? <TirangaLoader className="w-3.5 h-3.5" /> : <Stethoscope className="w-3.5 h-3.5" />}
+            </button>
+          )}
           <a href={effectiveUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
         </div>
         {paidNote}
+        {/* A restart is a 30–90s sandbox reboot. A spinner alone for that long is indistinguishable
+            from a hang, so it says WHAT it is doing and for how long — the same real stage events the
+            empty state shows, never a time-faked bar. And when it finishes it says whether it WORKED:
+            a restart that quietly failed would leave the user staring at the same broken preview
+            believing it had been fixed. */}
+        {(() => {
+          const line = restartStatusLine({ diagnosing, stage: diagStage, result: diagResult });
+          if (line.kind === 'none') return null;
+          if (line.kind === 'progress') {
+            return (
+              <div className="flex items-center gap-2 px-3 py-1.5 border-b border-indigo-900/60 bg-indigo-950/30 text-[11px] text-indigo-200">
+                <TirangaLoader className="w-3 h-3 shrink-0" />
+                <span className="flex-1 truncate">{line.text}</span>
+                <span className="shrink-0 tabular-nums text-indigo-300/70">{line.seconds}s</span>
+              </div>
+            );
+          }
+          return (
+            <div className={`flex items-start gap-2 px-3 py-1.5 border-b text-[11px] ${
+              line.kind === 'ok' ? 'border-emerald-900/60 bg-emerald-950/30 text-emerald-200'
+                : 'border-amber-900/60 bg-amber-950/30 text-amber-200'}`}>
+              <span className="flex-1">{line.text}</span>
+              <button onClick={() => setDiagResult(null)} className="shrink-0 opacity-70 hover:opacity-100" title="Dismiss">✕</button>
+            </div>
+          );
+        })()}
         {failoverNote && (
           <div className="flex items-start gap-2 px-3 py-1.5 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-sky-200">
             <span className="flex-1">{failoverNote}</span>

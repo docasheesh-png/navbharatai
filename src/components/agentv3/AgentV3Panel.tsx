@@ -8,8 +8,7 @@ import { saveSecret, listSecrets } from '../../lib/secretsApi';
 const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ default: m.SecretManager })));
 // A2 — the REAL shell. LAZY on purpose: it pulls xterm (~70 KB gz), which must never land on the
 // first-paint path for the many users who never open a terminal.
-const ShellTerminal = lazy(() => import('../ide/ShellTerminal').then((m) => ({ default: m.ShellTerminal })));
-import { terminalRemainingLabel } from '../../server/AgentV3/terminalQuota';
+const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
 import {
   Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye,
@@ -2638,8 +2637,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
    */
   /** Live state of the direct publish, so the button can report honestly instead of vanishing. */
   const [publishing, setPublishing] = useState(false);
-  // The REAL remaining free terminal time today, reported by the server. null until it says.
-  const [terminalRemaining, setTerminalRemaining] = useState<number | null>(null);
   const [publishMsg, setPublishMsg] = useState('');
 
   /**
@@ -4600,34 +4597,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   shell you can type in below. The shell and its routes already existed and were only
                   reachable from another screen; what gated this was the money question, now answered
                   (free, 30 min/day — see terminalQuota.ts). */}
+              {/* MULTI-TERMINAL (admin 2026-08-21). Tab 1 is NavBharatAI's own build log — pinned,
+                  read-only, honestly labelled — and `+ New` opens the user's OWN shells, each with its
+                  own real PTY. This reuses Code Studio's TerminalPanel rather than growing a second
+                  `+` here: one implementation cannot drift from itself. No shell is opened until the
+                  user asks for one, so simply reading the log spends none of the daily allowance. */}
               {tab === 'terminal' && (
-                <div className="flex flex-col gap-2 h-full">
-                  <div className="shrink-0 max-h-[35%] overflow-y-auto">
-                    <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Build log</div>
-                    {state.terminal.length === 0
-                      ? <Empty>No build output yet.</Empty>
-                      : <pre className="whitespace-pre-wrap text-zinc-300">{state.terminal.join('\n')}</pre>}
-                  </div>
-                  <div className="flex-1 min-h-[220px] flex flex-col">
-                    <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">
-                      {terminalRemainingLabel(terminalRemaining)}
-                    </div>
-                    {state.workspaceId ? (
-                      <Suspense fallback={<div className="text-xs text-zinc-500">Loading terminal…</div>}>
-                        <ShellTerminal
-                          sessionKey={`v5-${state.workspaceId}`}
-                          workspaceId={state.workspaceId}
-                          userId={userId ?? undefined}
-                          email={email ?? undefined}
-                          active={showWorkspace && tab === 'terminal'}
-                          onRemainingSeconds={setTerminalRemaining}
-                        />
-                      </Suspense>
-                    ) : (
-                      <Empty>Build an app first — the terminal runs inside your app's own machine.</Empty>
-                    )}
-                  </div>
-                </div>
+                <Suspense fallback={<div className="text-xs text-zinc-500">Loading terminal…</div>}>
+                  <TerminalPanel
+                    workspaceId={state.workspaceId || undefined}
+                    userId={userId ?? undefined}
+                    email={email ?? undefined}
+                    pinnedTab={{
+                      label: 'NavBharatAI · build log',
+                      content: state.terminal.length === 0
+                        ? <Empty>No build output yet.</Empty>
+                        : <pre className="whitespace-pre-wrap text-zinc-300 text-xs p-2">{state.terminal.join('\n')}</pre>,
+                    }}
+                  />
+                </Suspense>
               )}
               {/* B1 — APP LOGS: what the user's own server printed, live. Empty is never a blank pane:
                   runtimeLogEmptyMessage says which of "never built" / "not running" / "running but

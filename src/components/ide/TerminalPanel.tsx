@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Terminal as TerminalIcon, X, Plus, Maximize2, Minimize2, ChevronDown } from 'lucide-react';
 import { ShellTerminal, closeShellSession } from './ShellTerminal';
+import { terminalRemainingLabel } from '../../server/AgentV3/terminalQuota';
+import { PINNED_ID, initialShellCount, initialActiveId, afterCloseTab } from './terminalTabs';
 
 /**
  * MULTI-TERMINAL panel (admin spec 2026-08-04): "jab user terminal open kare, to uske andar hi ek
@@ -26,10 +28,24 @@ export interface TerminalPanelProps {
   workspaceId?: string;
   userId?: string;
   email?: string;
-  /** Close the whole panel — called when the last session is closed. */
-  onClose: () => void;
+  /**
+   * Close the whole panel — called when the last session is closed. OPTIONAL because v5.0 renders
+   * this inside a TAB that owns its own closing, and because a `pinnedTab` means there is always
+   * something left to show.
+   */
+  onClose?: () => void;
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
+  /**
+   * A pinned, non-closable FIRST tab (v5.0: the build log — what NavBharatAI ran while building).
+   *
+   * WHY IT IS NOT A TERMINAL (admin 2026-08-21 asked for "1st terminal = AI's, rest = user's"): the
+   * builder does not run its commands through a PTY, it runs them through the build actuator. Styling
+   * its transcript as an interactive shell would be a prompt that cannot accept input — a lie of
+   * exactly the kind rule 2 forbids. Pinning it as a clearly-labelled READ-ONLY tab gives that mental
+   * model honestly: tab 1 is NavBharatAI's, everything `+` opens is yours.
+   */
+  pinnedTab?: { label: string; content: React.ReactNode };
 }
 
 interface Session { id: string; label: string }
@@ -41,14 +57,20 @@ const nextSession = (): Session => {
 };
 
 export const TerminalPanel: React.FC<TerminalPanelProps> = ({
-  workspaceId, userId, email, onClose, isMaximized, onToggleMaximize,
+  workspaceId, userId, email, onClose, isMaximized, onToggleMaximize, pinnedTab,
 }) => {
-  const [sessions, setSessions] = useState<Session[]>(() => [nextSession()]);
-  const [activeId, setActiveId] = useState<string>(() => '');
+  // With a pinned tab there is already something to show, so no shell is opened until the user asks
+  // for one — which also means the daily terminal allowance is not spent just by looking at the log.
+  const [sessions, setSessions] = useState<Session[]>(
+    () => Array.from({ length: initialShellCount(!!pinnedTab) }, () => nextSession()));
+  const [activeId, setActiveId] = useState<string>(
+    () => initialActiveId(!!pinnedTab, ''));
+  /** The REAL remaining daily allowance, reported by the server; shared by every terminal here. */
+  const [remaining, setRemaining] = useState<number | null>(null);
   const [listOpen, setListOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // First mount: make the initial session active.
+  // First mount: make the initial session active (skipped when a pinned tab already holds focus).
   useEffect(() => { if (!activeId && sessions[0]) setActiveId(sessions[0].id); }, [activeId, sessions]);
 
   // Click-away / Escape closes the dropdown.
@@ -73,14 +95,16 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
     // navigation must never kill a running build, so the kill lives here and not in an unmount.
     void closeShellSession(id, workspaceId, userId, email);
     setSessions((cur) => {
-      const next = cur.filter((s) => s.id !== id);
-      if (next.length === 0) { onClose(); return cur; } // last one closed → the panel goes away
-      if (id === activeId) setActiveId(next[next.length - 1].id);
-      return next;
+      const r = afterCloseTab(cur, id, activeId, !!pinnedTab);
+      if (r.closePanel) { onClose?.(); return r.next; }
+      setActiveId(r.nextActiveId);
+      return r.next;
     });
   };
 
   const active = sessions.find((s) => s.id === activeId) ?? sessions[0];
+  const pinnedActive = !!pinnedTab && activeId === PINNED_ID;
+  const headerLabel = pinnedActive ? pinnedTab!.label : (active?.label ?? 'Terminal');
 
   return (
     <div className="flex flex-col h-full bg-[#0d1117] text-white">
@@ -89,7 +113,12 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e] flex items-center gap-1.5 shrink-0">
             <TerminalIcon className="w-3.5 h-3.5 text-indigo-400" />
-            {active?.label ?? 'Terminal'}
+            {headerLabel}
+          </span>
+          {/* The REAL allowance left today — never the old hardcoded "30 free minutes a day", which
+              was true only for someone who had not opened a terminal yet. */}
+          <span className="text-[10px] text-[#6e7681] truncate hidden sm:inline">
+            {terminalRemainingLabel(remaining)}
           </span>
 
           <div className="relative" ref={menuRef}>
@@ -112,6 +141,19 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
 
             {listOpen && (
               <div className="absolute left-0 top-full mt-1 min-w-[220px] bg-[#1c2128] border border-white/10 rounded-lg shadow-2xl shadow-black/50 py-1 z-[9998]">
+                {pinnedTab && (
+                  <div
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] cursor-pointer transition-colors ${
+                      pinnedActive ? 'text-white bg-white/5' : 'text-white/75 hover:bg-indigo-600 hover:text-white'
+                    }`}
+                    onClick={() => { setActiveId(PINNED_ID); setListOpen(false); }}
+                  >
+                    <TerminalIcon className="w-3 h-3 shrink-0 opacity-70" />
+                    <span className="truncate">{pinnedTab.label}</span>
+                    {/* No ✕: this tab is NavBharatAI's own record, not a shell the user opened. */}
+                    <span className="ml-auto text-[9px] uppercase tracking-widest text-[#6e7681]">read-only</span>
+                  </div>
+                )}
                 {sessions.map((s) => (
                   <div
                     key={s.id}
@@ -162,6 +204,11 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
       {/* Every session stays MOUNTED — hidden, never destroyed — so scrollback, history and any
           running command survive switching away. */}
       <div className="flex-1 min-h-0 relative">
+        {pinnedTab && (
+          <div className={`absolute inset-0 overflow-auto ${pinnedActive ? '' : 'hidden'}`}>
+            {pinnedTab.content}
+          </div>
+        )}
         {sessions.map((s) => (
           <div key={s.id} className={`absolute inset-0 ${s.id === activeId ? '' : 'hidden'}`}>
             <ShellTerminal
@@ -170,6 +217,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
               workspaceId={workspaceId}
               userId={userId}
               email={email}
+              onRemainingSeconds={setRemaining}
             />
           </div>
         ))}

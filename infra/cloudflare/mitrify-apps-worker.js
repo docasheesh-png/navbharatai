@@ -17,6 +17,12 @@
  * localStorage / IndexedDB are already per-origin, so those are isolated from day one. Do not treat
  * mitrify.in as a security boundary for cookies until the PSL entry is live.
  *
+ * EDGE CACHING (added 2026-08-21): repeat visits are served from Cloudflare, not Firebase. Firebase
+ * bills egress past its free 10 GB while Cloudflare's bandwidth is free, so this is the cheapest
+ * saving available — and the app loads faster, because the edge is nearer than Firebase. Fingerprinted
+ * assets are held for a year (that URL can never mean anything else); index.html for 60s only, so a
+ * republish is visible within a minute instead of people seeing an old app.
+ *
  * DEPLOY (Cloudflare dashboard):
  *   1. Workers & Pages -> Create -> Worker. Paste this file. Deploy.
  *   2. The Worker -> Settings -> Triggers -> Add a Route:
@@ -36,7 +42,7 @@ const FIREBASE_PROJECT = 'gen-lang-client-0866594388';
 const APEX = 'mitrify.in';
 
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const host = url.hostname; // e.g. v3-abc-123.mitrify.in
 
@@ -58,6 +64,28 @@ export default {
     originUrl.protocol = 'https:';
     originUrl.port = '';
 
+    // ── EDGE CACHE ──────────────────────────────────────────────────────────────────────────────
+    // Without this every single visit reached Firebase, and Firebase bills egress ($0.15/GB past the
+    // free 10 GB) while Cloudflare's own bandwidth is free. Serving repeat hits from the edge is the
+    // cheapest change available: same bytes to the visitor, a fraction of the origin traffic — and a
+    // faster app, because the edge is nearer than Firebase.
+    //
+    // Only GET/HEAD are cacheable. Anything else (a form POST to an API the app talks to) goes
+    // straight through — caching a mutation would be a correctness bug, not a saving.
+    const cacheable = request.method === 'GET' || request.method === 'HEAD';
+    const cache = caches.default;
+    // Key by the ORIGIN url so two branded hosts can never read each other's entries.
+    const cacheKey = new Request(originUrl.toString(), { method: 'GET' });
+
+    if (cacheable) {
+      const hit = await cache.match(cacheKey);
+      if (hit) {
+        const h = new Headers(hit.headers);
+        h.set('x-nbai-cache', 'HIT');
+        return new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers: h });
+      }
+    }
+
     // Forward the request to Firebase with the ORIGIN host, so Firebase serves the right channel.
     // We do NOT forward the original Host header — Firebase routes by the .web.app hostname.
     const originReq = new Request(originUrl.toString(), {
@@ -69,11 +97,28 @@ export default {
     originReq.headers.delete('host');
 
     const resp = await fetch(originReq);
-    // Stream the response back unchanged. (No cookie rewriting here — see the PSL note above.)
-    return new Response(resp.body, {
-      status: resp.status,
-      statusText: resp.statusText,
-      headers: resp.headers,
-    });
+
+    if (!cacheable || resp.status !== 200) {
+      // Never cache an error: a 404 held at the edge would outlive the publish that fixes it.
+      return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: resp.headers });
+    }
+
+    // ── HOW LONG, AND WHY IT DIFFERS BY FILE ────────────────────────────────────────────────────
+    // A Vite build fingerprints its assets (`/assets/index-a1b2c3.js`), so that exact URL can never
+    // mean anything else — it is safe to hold for a year. index.html is the OPPOSITE: its URL stays
+    // the same while its contents change on every republish, so holding it long would leave people
+    // looking at an old app after the user pressed Publish. It gets a SHORT life, which still removes
+    // the vast majority of origin hits (a busy page is served thousands of times a minute) while a
+    // republish becomes visible within a minute.
+    const path = originUrl.pathname;
+    const fingerprinted = /\/assets\/|\.[0-9a-f]{8,}\.(js|css|woff2?|png|jpe?g|svg|webp|avif|gif|ico)$/i.test(path);
+    const headers = new Headers(resp.headers);
+    headers.set('cache-control', fingerprinted ? 'public, max-age=31536000, immutable' : 'public, max-age=60');
+    headers.set('x-nbai-cache', 'MISS');
+
+    const out = new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
+    // Store a COPY: the response body can only be read once, and the visitor gets the original.
+    ctx.waitUntil(cache.put(cacheKey, out.clone()));
+    return out;
   },
 };

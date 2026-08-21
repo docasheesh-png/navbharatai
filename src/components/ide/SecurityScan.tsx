@@ -5,6 +5,7 @@ import {
   Bug, Lock, FileCode, CheckCircle2, Loader2,
   RefreshCcw, Globe, Terminal, Shield, ChevronUp, ChevronDown
 } from 'lucide-react';
+import type { ScanFinding } from '../../server/lib/securityScan';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -37,57 +38,102 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
-  const scanSteps = [
-    'Security Auditor Activated...',
-    'Phase 1: Project Architecture Analysis...',
-    'Phase 2: Security Configuration Review...',
-    'Phase 3: Static Analysis (SAST) Patterns...',
-    'Phase 4: Best Practice Alignment Check...',
-    'Phase 5: Generating Defensive Audit Report...'
-  ];
+  /**
+   * THE PROGRESS IS THE SERVER'S, NOT A TIMER (admin 2026-08-21: "isko asli bana do").
+   *
+   * What was here: five hardcoded strings — "Phase 3: Static Analysis (SAST) Patterns…" — walked on a
+   * 1.5s `setInterval`, pushing the bar to 95% while the server did ONE AI call. No static analysis
+   * ever ran. A user watching those phases scroll past reasonably believed their code had been
+   * scanned; it had not. That is why this was not fixed by relabelling the bar.
+   *
+   * The route now performs three real stages and streams one event per stage AS IT FINISHES. The bar
+   * moves only on those events, so its percentage is a count of work genuinely completed.
+   */
+  const [stages, setStages] = useState<Array<{ id: string; label: string; state: 'waiting' | 'done' | 'failed'; found?: number; error?: string }>>([]);
+  const [findings, setFindings] = useState<ScanFinding[]>([]);
+  const [verdict, setVerdict] = useState('');
 
   const performScan = async () => {
     setIsScanning(true);
     setProgress(0);
     setReport(null);
-    
-    let step = 0;
-    const interval = setInterval(() => {
-      if (step < scanSteps.length) {
-        setStatus(scanSteps[step]);
-        setProgress((prev) => Math.min(prev + (100 / scanSteps.length), 95));
-        step++;
-      }
-    }, 1500);
+    setFindings([]);
+    setVerdict('');
+    setStages([]);
+    setStatus('Starting…');
 
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (userKeys?.gemini) {
-        headers['x-gemini-key'] = userKeys.gemini;
-      }
+      if (userKeys?.gemini) headers['x-gemini-key'] = userKeys.gemini;
 
       const response = await fetch('/api/security/scan', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ target, files })
+        body: JSON.stringify({ target, files }),
       });
 
-      if (!response.ok) {
+      if (!response.ok || !response.body) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || 'Scan failed');
       }
-      const data = await response.json();
-      
-      clearInterval(interval);
-      setReport(data.reply);
-      setHistory(prev => [{ date: new Date().toLocaleString(), target }, ...prev].slice(0, 10));
+
+      // Newline-delimited JSON: one event per line, read as it arrives. A partial line is kept in the
+      // buffer — a chunk boundary can land in the middle of an event, and parsing that would drop it.
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let sawDone = false;
+
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let ev: any;
+          try { ev = JSON.parse(line); } catch { continue; }
+
+          if (ev.type === 'start') {
+            setStages(ev.stages.map((s: { id: string; label: string }) => ({ ...s, state: 'waiting' as const })));
+            setStatus(ev.stages[0]?.label ?? 'Scanning…');
+          } else if (ev.type === 'stage') {
+            setStages((prev) => {
+              const next = prev.map((s) => s.id === ev.id
+                ? { ...s, state: (ev.ok ? 'done' : 'failed') as 'done' | 'failed', found: ev.found, error: ev.error }
+                : s);
+              const upcoming = next.find((s) => s.state === 'waiting');
+              setStatus(upcoming ? upcoming.label : 'Finishing…');
+              return next;
+            });
+            // The ONLY thing that moves the bar: a stage the server says has finished.
+            setProgress((ev.done / ev.total) * 100);
+          } else if (ev.type === 'done') {
+            sawDone = true;
+            setFindings(Array.isArray(ev.findings) ? ev.findings : []);
+            setVerdict(String(ev.verdict || ''));
+            setReport(ev.reviewOk
+              ? ev.reply
+              : `### ⚠️ The security review could not run\n${ev.reviewError || 'It was unavailable.'}\n\nThe automatic checks above still ran and their findings are real.`);
+            setHistory((prev) => [{ date: new Date().toLocaleString(), target }, ...prev].slice(0, 10));
+          } else if (ev.type === 'failed') {
+            sawDone = true;
+            setReport(`### ❌ Security Scan Failed\n${ev.error || 'An error occurred.'}`);
+          }
+        }
+      }
+
+      // The stream ended without a verdict: the connection dropped mid-scan. Say so, rather than
+      // leaving a half-filled bar that looks like a finished scan with nothing found.
+      if (!sawDone) {
+        setReport('### ❌ Security Scan Failed\nThe connection ended before the scan finished. Please try again.');
+      }
     } catch (error: any) {
       console.error(error);
       setReport(`### ❌ Security Scan Failed\n${error.message || 'An error occurred while communicating with the Security Auditor.'}`);
     } finally {
-      clearInterval(interval);
       setIsScanning(false);
-      setProgress(100);
     }
   };
 
@@ -190,6 +236,30 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
                   className="h-full bg-gradient-to-r from-indigo-600 to-indigo-400"
                 />
               </div>
+
+              {/* The REAL stages, named by the server that runs them. A stage says "waiting" until it
+                  genuinely finishes — and if it fails, it says that instead of quietly disappearing. */}
+              <div className="space-y-1.5">
+                {stages.map((st) => (
+                  <div key={st.id} className="flex items-center gap-2 text-[11px]">
+                    <span className={cn(
+                      'w-4 shrink-0 text-center',
+                      st.state === 'done' ? 'text-emerald-400' : st.state === 'failed' ? 'text-amber-400' : 'text-white/25',
+                    )}>
+                      {st.state === 'done' ? '✓' : st.state === 'failed' ? '!' : '·'}
+                    </span>
+                    <span className={cn(st.state === 'waiting' ? 'text-white/35' : theme === 'dark' ? 'text-white/80' : 'text-gray-700')}>
+                      {st.label}
+                    </span>
+                    {st.state === 'done' && typeof st.found === 'number' && (
+                      <span className={cn('ml-auto font-bold', st.found > 0 ? 'text-amber-300' : 'text-emerald-400')}>
+                        {st.found > 0 ? `${st.found} found` : 'clear'}
+                      </span>
+                    )}
+                    {st.state === 'failed' && <span className="ml-auto text-amber-300">could not run</span>}
+                  </div>
+                ))}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -229,6 +299,40 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
                  </button>
               </div>
             </div>
+
+            {/* THE DETERMINISTIC FINDINGS — shown ABOVE the AI review, and separately from it.
+                These come from a scanner that reads the actual files: every one has a real file and
+                line, and none of them can be invented. Keeping them apart from the AI's prose is the
+                point — a reader can tell which part of this report is a measurement and which part is
+                an opinion. The verdict line says how many of the checks completed, so "no issues" from
+                a scan that lost a stage can never read like a clean bill of health. */}
+            {verdict && !isScanning && (
+              <div className={cn('border rounded-3xl p-5 transition-colors', theme === 'dark' ? 'bg-[#161b22] border-white/5' : 'bg-white border-gray-200')}>
+                <p className={cn('text-sm font-black', findings.length ? 'text-amber-300' : 'text-emerald-400')}>{verdict}</p>
+                {findings.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {findings.slice(0, 40).map((f, i) => (
+                      <div key={`${f.file}:${f.line}:${i}`} className="rounded-xl border border-white/5 bg-black/20 p-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={cn(
+                            'text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border',
+                            f.severity === 'critical' ? 'border-rose-500/40 text-rose-300'
+                              : f.severity === 'high' ? 'border-amber-500/40 text-amber-300'
+                              : 'border-white/15 text-white/50',
+                          )}>{f.severity}</span>
+                          <span className="text-[11px] font-mono text-[#8b949e] break-all">{f.file}:{f.line}</span>
+                        </div>
+                        <p className={cn('text-xs mt-1.5', theme === 'dark' ? 'text-white' : 'text-gray-900')}>{f.problem}</p>
+                        <p className="text-[11px] text-[#8b949e] mt-1">{f.suggestion}</p>
+                      </div>
+                    ))}
+                    {findings.length > 40 && (
+                      <p className="text-[11px] text-[#8b949e]">…and {findings.length - 40} more.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {!report && !isScanning ? (
               <div className={cn("border rounded-3xl p-12 text-center space-y-4 transition-colors", theme === 'dark' ? "bg-[#161b22] border-white/5" : "bg-white border-gray-200 shadow-sm")}>

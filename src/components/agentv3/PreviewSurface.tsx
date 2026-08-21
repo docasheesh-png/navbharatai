@@ -21,6 +21,7 @@ import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/pre
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
 import { frameworkRunsInBrowser, serverFrameworkLabel } from '../../lib/frameworkDetect';
+import { inBrowserRefusal } from './inBrowserRefusal';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { LIVE_SERVER_PAID_NOTE, LIVE_SERVER_PAID_TAG, isLiveServerNoticeDismissed, dismissLiveServerNotice } from '../../lib/liveServerNotice';
 
@@ -307,6 +308,10 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // and SAW a page render — when it exists, it is the newest verified truth. A NEW build's published
   // `url` becomes the newest truth in its turn: the effect below clears `foundUrl` the moment the
   // `url` prop changes, so a stale diagnose result can never shadow a fresh build either.
+  // ONE refusal decision, shared by the render branch and the two banners below, so they can never
+  // disagree — a banner saying "switch to the Live server" over a preview that is still trying to
+  // render is exactly the contradiction the Mitrify report ended in.
+  const refusal = inBrowserRefusal({ framework, browserRunnable, browserBlockedReason, hasBackend, backendReason });
   const effectiveUrl = foundUrl || url;
   const lastUrlProp = useRef(url);
   useEffect(() => {
@@ -1301,7 +1306,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           package that only works on a server, code reaching for Node builtins). Without it those all
           rendered as a vaguely wrong app with no explanation, which is the state the second absolute
           rule calls "built but not really working". */}
-      {mode === 'inbrowser' && browserRunnable === false && !hasBackend && browserBlockedReason && (
+      {mode === 'inbrowser' && !refusal.refuse && browserRunnable === false && !hasBackend && browserBlockedReason && (
         <div className="px-3 py-1.5 text-[11px] text-amber-200 bg-amber-950/40 border-b border-amber-900 flex items-center justify-between gap-2">
           <span>ℹ️ Heads up — {browserBlockedReason}. What you see here may be incomplete.</span>
           <button onClick={() => setMode('live')} className="shrink-0 px-2 py-0.5 rounded bg-amber-800 hover:bg-amber-700 text-amber-100 font-semibold">Live server</button>
@@ -1318,7 +1323,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           your .env is never uploaded, so anything using them will be blank here.
         </div>
       )}
-      {mode === 'inbrowser' && hasBackend && (
+      {mode === 'inbrowser' && hasBackend && !refusal.refuse && (
         // Task #64 — honest full-stack state. The in-browser preview compiles only the frontend, so an
         // app with a backend renders here with its data/API features non-functional. Say so plainly and
         // point to the Live server (which actually boots the backend) instead of a silently-broken app.
@@ -1330,17 +1335,22 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           <button onClick={() => setMode('live')} className="shrink-0 px-2 py-0.5 rounded bg-sky-800 hover:bg-sky-700 text-sky-100 font-semibold">Live server</button>
         </div>
       )}
-      {mode === 'inbrowser' && !frameworkRunsInBrowser(framework) ? (
-        // SSR / meta framework (Next.js, Nuxt, …) or a backend — no browser SPA entry, so the in-browser
-        // bundler can't run it (it used to show a misleading "No React entry module found" as if the app
-        // were broken). Say so honestly and send the user to the Live server, which boots the real app.
+      {mode === 'inbrowser' && refusal.refuse ? (
+        /**
+         * DO NOT RENDER A BUNDLE THE SERVER ALREADY SAID CANNOT RUN (Mitrify report de674a44).
+         *
+         * This branch used to key ONLY on `!frameworkRunsInBrowser(framework)` — a client-side guess
+         * that starts as `useState('vite-react')` and is never told what the server detected. For a
+         * full-stack Express app the guess said "plain React", so the bundle rendered and spent NINE
+         * MINUTES fetching react-dom from a CDN before failing — while the server had already returned
+         * `browserRunnable: false, has-backend`. `inBrowserRefusal` now honours that verdict, which is
+         * the only one computed from the project's real files.
+         */
         <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
           <div className="w-12 h-12" dangerouslySetInnerHTML={{ __html: ashokChakraSvg(48, '#4f6ef7') }} />
-          <p className="text-zinc-200 font-medium">{serverFrameworkLabel(framework)} runs on the Live server</p>
+          <p className="text-zinc-200 font-medium">{refusal.title}</p>
           <p className="text-[12px] text-zinc-500 max-w-sm">
-            This is a {serverFrameworkLabel(framework)} app — it renders on a real Node/SSR server (pages,
-            API routes, server components), so the lightweight in-browser preview can&apos;t run it. Your app
-            isn&apos;t broken — switch to the Live server to see it fully.
+            {refusal.detail} Your app isn&apos;t broken — switch to the Live server to see it fully.
           </p>
           <button onClick={() => setMode('live')} className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">
             {effectiveUrl ? '● ' : ''}Open Live server

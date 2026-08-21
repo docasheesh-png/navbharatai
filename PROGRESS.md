@@ -37761,3 +37761,77 @@ by name with that reason written next to them. Verified to bite: stashing the fi
 `/api/payment/validate-mode-promo called from src/hooks/usePaymentEngine.ts`.
 
 Gate: both tsc green, 17,134 tests / 1,365 files green, CI green before merge.
+## 2026-08-21 — The preview burned 9 MINUTES on an app the server had already refused (Mitrify de674a44)
+
+Second Mitrify report of the day, and a DIFFERENT cause from the first — but the same family: the
+platform knew the right answer and did not act on it.
+
+### What happened
+
+A fresh GitHub import of Mitrify (a full-stack Express + PostgreSQL app). The survey turn worked. The
+preview did not:
+
+```
+PREVIEW_ERROR: in-browser preview failed: Could not load "react-dom/client" … from the CDN:
+  timed out after 180s | alt CDN: timed out after 180s | plain: timed out after 180s
+RELEASE_GATE: UNKNOWN — nothing here was ever proven to RUN
+```
+
+**Nine minutes of spinner, then a failure, on a preview that could never have worked** — the
+in-browser preview compiles only the frontend, and this app is a server.
+
+### Root cause 1 — the SERVER had already said no, and the UI rendered anyway
+
+`proveBrowserRunnable` returned `browserRunnable: false`, blocker `has-backend`, reason *"this
+project has its own server or database, which the live server has to run"*. That verdict is computed
+from the project's REAL files. The UI ignored it.
+
+It ignored it for an understandable reason that was still wrong. The honest-refusal panel was gated
+on `!frameworkRunsInBrowser(framework)` — a CLIENT-side belief that starts as
+`useState('vite-react')` and **is never told what the server detected**. And the one place the
+server's verdict WAS read carried `&& !hasBackend`, added so the friendlier backend BANNER could take
+that case instead of a duplicate refusal. But **a banner does not stop a render**: the user got a
+helpful blue note at the top of a preview that then span for nine minutes and died.
+
+`inBrowserRefusal.ts` (pure) now decides once, for the render branch and both banners, so they can
+never disagree. The server's verdict wins because it is the only one computed from the real files;
+the framework guess stays as a second trigger and supplies the better headline when it is right; and
+🔒 **`browserRunnable === null` is NOT a refusal** — a server that has not answered must never block a
+working preview, which would be a far worse bug than the one being fixed.
+
+### Root cause 2 — "the shared per-package deadline" was never shared
+
+The loader's own comment says *"each download carries its own generous deadline"* and calls it **"the
+shared per-package deadline"**. It was not shared: `nbaiPkgDeadline(spec)` created a FRESH 180 s timer
+on every call, and each package is tried on three rungs (esm.sh → fallback CDN → plain). So a package
+that never arrives cost **540 seconds**. The report's error line is that arithmetic, printed.
+
+The clock now starts at the first attempt for a spec and every later rung races what is LEFT of it —
+which is what the comment always claimed. A merely-slow CDN still gets the generous window the
+big-dependency case needs (firebase, @mui); a package that is never coming costs three minutes
+instead of nine, and the fallback rungs still get their chance INSIDE that window rather than after
+it.
+
+### The shared root, worth naming
+
+Both of today's Mitrify reports come back to one thing: **the server detects the framework
+(`node-express`, right there in the build manifest) and never tells the client.** The client's
+`framework` stays `'vite-react'` forever, and every preview decision keyed off it is then wrong for
+this app — the in-browser bundler ran (this report), and the dev-server health check watched port
+3000 while the app served 5000 (the earlier report). Fixing the refusal to key off the SERVER's
+verdict removes the dependence on that guess for the in-browser path.
+
+⚠️ **STILL OPEN:** the client is still never told the detected framework, so the PORT expectation on
+the live path still starts from a guess. The port sweep (`COMMON_DEV_PORTS` includes 5000) is the net
+under it and is why that path usually recovers. Recorded rather than silently half-fixed.
+
+### What was NOT wrong, and is worth recording
+
+ • `npm run db:push` ran **clean** (`[✓] Changes applied`, 50 s) — the `column "mobile" does not
+   exist` crash from the earlier report did not recur on a fresh import, because the tables are
+   created from the schema before the server boots.
+ • `RELEASE_GATE` was **honest**: "UNKNOWN — nothing here was ever proven to RUN". It did not claim a
+   working app. That gate is doing its job.
+
+Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
+`vitest run` — **1,359 files / 17,078 tests, all passing** (7 new).

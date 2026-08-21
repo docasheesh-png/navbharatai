@@ -483,9 +483,26 @@ ${babelTag}
   // deadline — which is what guarantees nbaiPending returns to 0 even against a CDN that accepts the
   // connection and then never answers (the one hang a stall check cannot otherwise see).
   var PKG_TIMEOUT_MS = 180000;
+  // ONE budget per PACKAGE, shared across every CDN rung — which is what the comment above always
+  // claimed ("the shared per-package deadline") and what the code did NOT do.
+  //
+  // THE REAL COST OF THAT GAP (Mitrify report de674a44, 2026-08-21): each rung called this fresh, so a
+  // package that never arrives burned 180 s on esm.sh, 180 s on the fallback CDN and 180 s on plain —
+  // 540 SECONDS, NINE MINUTES, of a user watching a spinner before being told it failed. The report's
+  // own error line spells it out: "timed out after 180s | alt CDN: timed out after 180s | plain:
+  // timed out after 180s".
+  //
+  // Now the clock starts at the FIRST attempt for a spec and every later rung races what is LEFT of
+  // it. A CDN that is merely slow still gets the generous window the big-dependency case needs
+  // (firebase, @mui); a package that is never coming costs three minutes instead of nine, and the
+  // fallback rungs still get their chance inside that window rather than after it.
+  var nbaiPkgStart = {};
   function nbaiPkgDeadline(spec) {
+    if (!nbaiPkgStart[spec]) nbaiPkgStart[spec] = Date.now();
+    var left = PKG_TIMEOUT_MS - (Date.now() - nbaiPkgStart[spec]);
+    var secs = Math.max(1, Math.round(PKG_TIMEOUT_MS / 1000));
     return new Promise(function (_res, rej) {
-      setTimeout(function () { rej(new Error('timed out after 180s')); }, PKG_TIMEOUT_MS);
+      setTimeout(function () { rej(new Error('timed out after ' + secs + 's')); }, Math.max(0, left));
     });
   }
   var missingLocal = {};   // resolved path → importer, for local files referenced but never created

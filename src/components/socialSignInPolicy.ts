@@ -50,6 +50,55 @@ export function webSignInStrategy(providerId: string | null | undefined): WebSig
   return providerId === 'apple.com' ? 'redirect' : 'popup';
 }
 
+/**
+ * WHY A REDIRECT SIGN-IN FAILED, said out loud (admin 2026-08-21).
+ *
+ * THE FAILURE THIS FIXES, and it is the SECOND time this exact class has cost real debugging time. The
+ * app-root `getRedirectResult` catch logged the real Firebase code to the console and then showed the
+ * user "Sign-in failed. Please try again." — a sentence that is true of every possible cause and useful
+ * for none of them. On a phone there is no console, so the one fact that would end the problem was
+ * thrown away at the moment it was learned. (The first instance of this class was Apple's popup, where
+ * a cancel and a misconfigured return URL produced the identical silent close.)
+ *
+ * So: every code we can act on gets its own honest sentence, and ANYTHING ELSE still carries the raw
+ * code. An unrecognised failure must never again look identical to a recognised one.
+ *
+ * Returns null ONLY for `auth/no-auth-event`, which is not a failure at all — it is what a normal page
+ * load reports when no redirect was pending, and it fires on nearly every visit.
+ */
+export function socialRedirectFailureMessage(code: string | null | undefined): string | null {
+  const c = String(code || '').trim();
+  // Not a failure: no redirect was in flight. Silent, exactly as before.
+  if (!c || c === 'auth/no-auth-event') return null;
+  switch (c) {
+    case 'auth/missing-initial-state':
+      // The classic proxied/partitioned-storage failure: the browser dropped the state this app saved
+      // before leaving for the provider, so the return cannot be matched to the request.
+      return 'Sign-in could not be completed because your browser cleared the sign-in data while you were away. '
+        + 'This is usually private browsing or blocked site data — try again in a normal window, or allow site data for this site.';
+    case 'auth/account-exists-with-different-credential':
+      return 'An account already exists with this email using a different sign-in method. Sign in with that method first, then link this one.';
+    case 'auth/unauthorized-domain':
+      return "This site's domain is not authorised for sign-in yet. Admin: add it in Firebase Console → Authentication → Settings → Authorized domains.";
+    case 'auth/operation-not-allowed':
+      return 'This sign-in method is not enabled for the app yet. Admin: enable it in Firebase Console → Authentication → Sign-in method.';
+    case 'auth/invalid-credential':
+    case 'auth/invalid-oauth-client-id':
+      return 'The sign-in provider rejected the request as invalid. Admin: check the provider’s client id / key and the return URL registered with it.';
+    case 'auth/network-request-failed':
+      return 'Could not reach the sign-in provider. Check your connection and try again.';
+    case 'auth/user-disabled':
+      return 'This account has been disabled. Contact support if you think this is a mistake.';
+    case 'auth/timeout':
+      return 'Sign-in timed out before it finished. Please try again.';
+    case 'auth/web-storage-unsupported':
+      return 'This browser is blocking the storage sign-in needs. Allow cookies/site data for this site, or try another browser.';
+    default:
+      // The code itself travels — this is the line that would have ended the Apple debugging in one round.
+      return `Sign-in could not be completed (${c}). Please try again — if it keeps happening, send us this code.`;
+  }
+}
+
 /** The minimal auth surface waitForSignedInUser needs — injected so the helper is unit-testable. */
 export interface MinimalAuthLike {
   currentUser: unknown | null;

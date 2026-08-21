@@ -158,6 +158,7 @@ import { Cashfree } from 'cashfree-pg';
 import path from 'path';
 import https from 'https';
 import fs from 'fs';
+import { appleDomainAssociation, APPLE_DOMAIN_ASSOCIATION_PATH } from './src/server/lib/appleDomainAssociation';
 import { auditEnv } from './src/server/audit_env';
 
 auditEnv();
@@ -411,6 +412,20 @@ setInterval(() => {
     upstream.on('error', () => { if (!res.headersSent) res.status(504).end('Auth proxy timeout'); });
     req.pipe(upstream, { end: true });
   };
+  // APPLE DOMAIN VERIFICATION (admin 2026-08-21) — mounted BEFORE the static handler, whose `dotfiles`
+  // default is 'ignore' and would skip a `.well-known` directory even if the file were on disk. See
+  // lib/appleDomainAssociation.ts for why Apple's own authorize endpoint 403s without this.
+  app.get(APPLE_DOMAIN_ASSOCIATION_PATH, (_req: any, res: any) => {
+    const body = appleDomainAssociation(process.env, (f) => fs.readFileSync(path.join(process.cwd(), f), 'utf8'));
+    if (!body) {
+      // Honest 404, never an empty 200 — Apple would read an empty body as a MISMATCHED file, and the
+      // admin would be debugging the wrong thing.
+      res.status(404).type('text/plain').send('Apple domain association file is not configured.');
+      return;
+    }
+    res.type('text/plain').send(body);
+  });
+
   app.use('/__/auth', proxyFirebaseAuth);
   app.use('/__/firebase', proxyFirebaseAuth);
 

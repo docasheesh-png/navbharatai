@@ -7,6 +7,7 @@ import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../App';
 import { resolveApiHref } from '../../lib/apiBase';
 import { isNativeApp } from '../../lib/mobileNative';
+import { mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsFor } from './storeReviewQueue';
 
 // Nav App Store — publish your Android app, and install other people's.
 //
@@ -90,6 +91,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
   const [apps, setApps] = useState<PublicApp[]>([]);
   const [mine, setMine] = useState<MineApp[]>([]);
   const [queue, setQueue] = useState<QueueApp[]>([]);
+  // The tab badge counts only what still needs a DECISION — approved apps are a record, not work.
+  const pendingCount = pendingReviewCount(queue);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [openApp, setOpenApp] = useState<PublicApp | null>(null);
@@ -171,11 +174,27 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
     } catch { /* shown as an empty list */ }
   }, []);
 
+  /**
+   * The review list: apps WAITING plus apps ALREADY APPROVED (admin 2026-08-21: "app waha se gayab na
+   * ho, 'approved' likh kar dikhti rahe").
+   *
+   * It used to ask for `status=pending` only, so the moment an admin approved an app it disappeared
+   * from the only screen that showed it — no way to see what had been approved, and no way to reach it
+   * again to take it down. Pending stays first, because that is the work; approved follows as a record.
+   */
   const loadQueue = useCallback(async () => {
     try {
-      const res = await fetch('/api/nav-store/admin/queue?status=pending', { headers: await authedHeaders() });
-      const data = await res.json().catch(() => null);
-      if (liveRef.current) setQueue(Array.isArray(data?.apps) ? data.apps : []);
+      const [pendingRes, approvedRes] = await Promise.all([
+        fetch('/api/nav-store/admin/queue?status=pending', { headers: await authedHeaders() }),
+        fetch('/api/nav-store/admin/queue?status=approved', { headers: await authedHeaders() }),
+      ]);
+      const pending = await pendingRes.json().catch(() => null);
+      const approved = await approvedRes.json().catch(() => null);
+      if (!liveRef.current) return;
+      setQueue(mergeReviewQueue<QueueApp>(
+        Array.isArray(pending?.apps) ? pending.apps : [],
+        Array.isArray(approved?.apps) ? approved.apps : [],
+      ));
     } catch { /* shown as an empty queue */ }
   }, []);
 
@@ -280,7 +299,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         {/* Tabs — scroll rather than overflow on a phone */}
         <div className="flex gap-1.5 mb-5 overflow-x-auto pb-1">
           {([['browse', 'Browse'], ['publish', 'Publish'], ['mine', 'My apps'],
-             ...(status?.isAdmin ? [['review', `Review${queue.length ? ` (${queue.length})` : ''}`]] : []),
+             ...(status?.isAdmin ? [['review', `Review${pendingCount ? ` (${pendingCount})` : ''}`]] : []),
             ] as Array<[Tab, string]>).map(([id, label]) => (
             <button
               key={id}
@@ -646,7 +665,15 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
             <div className="space-y-3">
               {queue.map((a) => (
                 <div key={a.id} className="p-3 rounded-xl bg-[#161b22] border border-white/10">
-                  <p className="text-sm font-semibold">{a.appName} <span className="text-xs font-normal text-white/40">v{a.versionName}</span></p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold">{a.appName} <span className="text-xs font-normal text-white/40">v{a.versionName}</span></p>
+                    {/* The app stays on this screen after approval, saying so — it used to vanish. */}
+                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
+                      a.status === 'approved' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'
+                    }`}>
+                      {reviewStatusLabel(a.status)}
+                    </span>
+                  </div>
                   <p className="text-xs text-white/50 mt-0.5">{a.shortDescription}</p>
                   <p className="text-[11px] text-white/40 mt-1.5">
                     {a.developer?.name} · {a.developer?.email}{a.developer?.phone ? ` · ${a.developer.phone}` : ''}
@@ -675,21 +702,35 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                     <p key={i} className="mt-1.5 text-[11px] text-white/40 leading-relaxed">• {w}</p>
                   ))}
 
+                  {/* An APPROVED app is live in the store, so "Publish" and "Reject" would be wrong
+                      buttons for it — the only thing left to decide is whether to take it down. */}
                   <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => void decide(a.id, 'approved')}
-                      disabled={reviewing === a.id}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold disabled:opacity-40"
-                    >
-                      {reviewing === a.id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} Publish
-                    </button>
-                    <button
-                      onClick={() => void decide(a.id, 'rejected')}
-                      disabled={reviewing === a.id}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-semibold text-white/70 disabled:opacity-40"
-                    >
-                      <X size={12} /> Reject
-                    </button>
+                    {reviewActionsFor(a.status) === 'remove' ? (
+                      <button
+                        onClick={() => void decide(a.id, 'removed')}
+                        disabled={reviewing === a.id}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-white/5 hover:bg-rose-600/20 text-xs font-semibold text-white/70 hover:text-rose-300 disabled:opacity-40"
+                      >
+                        {reviewing === a.id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />} Remove from store
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => void decide(a.id, 'approved')}
+                          disabled={reviewing === a.id}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold disabled:opacity-40"
+                        >
+                          {reviewing === a.id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} Publish
+                        </button>
+                        <button
+                          onClick={() => void decide(a.id, 'rejected')}
+                          disabled={reviewing === a.id}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-semibold text-white/70 disabled:opacity-40"
+                        >
+                          <X size={12} /> Reject
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}

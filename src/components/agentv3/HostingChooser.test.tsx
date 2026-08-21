@@ -235,3 +235,31 @@ describe('HostingChooser — the Unpublish control', () => {
     expect(html).toContain('Remove this app from NavBharatAI hosting');
   });
 });
+
+/**
+ * "YOUR PUBLISHED APPS" (admin 2026-08-21: "jisse user apni saari live apps ek jagah dekhe aur wahin
+ * se hata sake").
+ *
+ * THE GAP IT CLOSES: Unpublish only reaches the app whose chat you have open. Delete the chat and the
+ * app stays live forever with nothing pointing at it — while still occupying one of the user's five
+ * free slots. This list is keyed by USER, not by workspace, which is precisely what makes an orphaned
+ * app reachable again.
+ */
+describe('HostingChooser — "Your published apps"', () => {
+  it('offers the entry point whenever a loader is wired — even with nothing published', () => {
+    // The COUNT is the useful part ("3 of 5 used"), so the door must open before the limit bites.
+    const html = render([P('firebase', 'NavBharatAI', true)], { onLoadMyApps: async () => null });
+    expect(html).toContain('Your published apps');
+  });
+
+  it('is absent when nothing can load it — no button that cannot act', () => {
+    const html = render([P('firebase', 'NavBharatAI', true)]);
+    expect(html).not.toContain('Your published apps');
+  });
+
+  it('does not fetch anything just by rendering — the list loads only when opened', () => {
+    let calls = 0;
+    render([P('firebase', 'NavBharatAI', true)], { onLoadMyApps: async () => { calls += 1; return null; } });
+    expect(calls).toBe(0);
+  });
+});

@@ -36862,3 +36862,69 @@ Gate: both tsc green; 4 new UI tests + the suite; FULL run 16,887 tests / 1,348 
 (⚠️ `cssLegacy.test.ts` fails on a STALE local `dist/` — it reads the BUILT stylesheet. `npm run build`
 first; CI builds fresh so it is green there. Not a code failure, and it is not mine — it reproduces on
 clean main.)
+
+---
+
+## 2026-08-21 — "Your published apps", and an approved App Mart app that stopped vanishing
+
+Two admin asks, one change. The first closes the gap the LAST entry recorded as open, in the same day
+it was written; the second is a defect the admin found by using the review screen.
+
+### 1. THE OPEN GAP FROM THE ENTRY ABOVE IS CLOSED — "Your published apps"
+
+Admin: *"user apni saari live apps ek jagah dekhe aur wahin se hata sake. Ye us gap ko band karega ki
+chat delete karne ke baad app par control nahi rehta."*
+
+Unpublish only ever reached the app whose chat was open. Delete the chat and the app stayed live
+forever with nothing pointing at it — still serving to anyone holding the link, still occupying one of
+the user's five free slots and one of the platform's scarce Firebase channels, and unreachable by the
+only person entitled to take it down. The button was real; the route to it was not.
+
+ • `GET /api/agentv3/my-published-apps` — keyed by USER, not by workspace. That is the entire point:
+   a workspace-keyed lookup can only ever find an app you can already reach.
+ • `publishedAppList()` (`DeploymentStore.ts`) — pulled OUT of the route rather than left as a `.map()`
+   inside it, because two rules ride on it and neither was checkable where it was. Only LIVE apps are
+   listed (offering "take offline" on something already down is an action that does nothing), and its
+   count must equal what `liveAppCount` enforces — otherwise the screen says "3 of 5 used" while the
+   publish gate refuses, a limit that lies about itself. Both are now tests.
+ • An orphaned app is listed and SAYS it is orphaned: *"Its chat was deleted, so it cannot be opened
+   for editing — but it is still live, and you can take it down from here."* `markOrphaned` deliberately
+   does not change status, because the app really is still serving — hiding it would have rebuilt the
+   hole.
+ • The cap is shown WITH the list ("3 of 5 free slots used"), so the limit is visible before it
+   refuses a publish instead of arriving as a surprise.
+ • An unknown size renders as "size unknown", never "0.0 MB" — that would be a measurement we never
+   took, and legacy records genuinely have none.
+ • Loaded ON DEMAND. Most people opening Publish are there to publish; a list nobody asked for is a
+   request nobody needed. Test-pinned: rendering the sheet fires no fetch.
+
+### 2. APP MART — an approved app used to VANISH from the only screen that showed it
+
+Admin: *"app mart me, admin aprove kare uske bad, app waha se gayab na ho, 'aproved' likh kar dikhti
+rahe."*
+
+ROOT CAUSE, and it is one line: `loadQueue` asked for `?status=pending` only. So approval — the one
+action the screen exists for — made its own subject disappear. There was no record of what had been
+approved and no route back to an approved app to take it down. The approval was real; the record of it
+was not.
+
+ • The list is now built from BOTH `status=pending` and `status=approved`. Pending first (that is the
+   work), approved after (that is the record).
+ • Every card carries a status badge: **Approved** in emerald, **Waiting** in amber.
+ • An approved app offers **"Remove from store"** instead of Publish/Reject — those describe a decision
+   already made, and rule 2 forbids a button whose label does not match what it does. `removed` was
+   already a valid server decision and really deletes the APK, so the takedown is real.
+ • The tab badge counts only PENDING. Counting approved apps too would make it permanent, and a number
+   that never reaches zero stops meaning "there is work here".
+ • The rules moved to `storeReviewQueue.ts` (pure) — `NavAppStore` is network-backed, so a static
+   render only ever reaches its loading state and none of this was testable where it lived. That
+   extraction also caught a real race the inline version had: the two fetches are independent, so an
+   app approved BETWEEN them appeared twice, with the stale pending copy rendering first and offering
+   Publish/Reject on something already live. Now de-duplicated by id.
+
+`AppKnowledgeBase.ts` updated for the new screen (mandatory for a user-facing surface) — how to open
+it, what it lists, the slot count, "Take offline", and that it is the ONLY way to reach an app whose
+chat was deleted. Hindi/Hinglish keywords included.
+
+Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
+`vitest run` — **1,349 files / 16,905 tests, all passing** (17 new).

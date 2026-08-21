@@ -203,6 +203,7 @@ import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
+import { publishedAppCap } from '../lib/HostingQuota';
 import { hostingPlansEnabled, hostingPlanPriceInr } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
 import { pickerItems } from '../../lib/reportPicker';
@@ -287,7 +288,7 @@ function sessionCostCapUsd(): number {
   const v = parseFloat(process.env.SESSION_COST_CAP_USD ?? '');
   return Number.isFinite(v) && v > 0 ? v : 5.0;
 }
-import { deploymentStore, withDeploymentPersistence, isLiveDeployment, type DeploymentRecord } from '../AgentV3/DeploymentStore';
+import { deploymentStore, withDeploymentPersistence, isLiveDeployment, publishedAppList, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
@@ -5265,6 +5266,35 @@ export function registerAgentV3Routes(app: Express): void {
       fileCount: rec?.fileCount ?? 0,
       updatedAt: rec?.updatedAt ?? null,
       status: rec?.status ?? null,
+    });
+  });
+
+  /**
+   * MY PUBLISHED APPS — every app this user currently has live on NavBharatAI hosting.
+   *
+   * WHY (admin 2026-08-21). Unpublish lives in the Publish sheet, which needs the app's chat — so an
+   * app whose chat was deleted could not be taken down by its owner at all (ROADMAP §10.4). This is
+   * the screen that closes that: it lists apps by USER rather than by workspace, so a live app is
+   * always reachable even when nothing else points at it.
+   *
+   * It also makes the five-app limit legible. Being told "you have 5 published apps" is not much use
+   * without a list of which five.
+   */
+  app.get('/api/agentv3/my-published-apps', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const identity = await verifiedIdentity(req).catch(() => null);
+    if (!identity?.uid) {
+      res.status(401).json({ error: 'Please sign in to see your published apps.' });
+      return;
+    }
+    const records = await deploymentStore.listByUser(identity.uid, 200).catch(() => []);
+    // Only LIVE apps, and `orphaned` surfaced so the UI can say plainly why an app has no chat to
+    // open — the very case this endpoint exists for. See publishedAppList for both rules.
+    const apps = publishedAppList(records);
+    res.json({
+      apps,
+      // The cap is stated with the list so "5 of 5 used" is visible before a publish is refused.
+      cap: publishedAppCap(),
+      used: apps.length,
     });
   });
 

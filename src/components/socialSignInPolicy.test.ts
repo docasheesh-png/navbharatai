@@ -9,6 +9,7 @@ import {
   APPLE_WEB_RETURN_URL,
   APPLE_SERVICE_ID,
   webSignInStrategy,
+  socialRedirectFailureMessage,
   type MinimalAuthLike,
 } from './socialSignInPolicy';
 
@@ -202,5 +203,56 @@ describe('webSignInStrategy — which web flow each provider gets', () => {
     expect(webSignInStrategy(null)).toBe('popup');
     expect(webSignInStrategy('')).toBe('popup');
     expect(webSignInStrategy('microsoft.com')).toBe('popup');
+  });
+});
+
+// SAY WHY A REDIRECT SIGN-IN FAILED (admin 2026-08-21).
+//
+// The app-root catch logged the real Firebase code to the console and showed the user "Sign-in failed.
+// Please try again." — true of every cause, useful for none, and unreadable on a phone. This is the
+// second time that class cost real debugging time (the first was Apple's popup, where a cancel and a
+// misconfigured return URL closed identically).
+describe('socialRedirectFailureMessage', () => {
+  it('stays SILENT for auth/no-auth-event — a normal page load with no redirect pending', () => {
+    expect(socialRedirectFailureMessage('auth/no-auth-event')).toBeNull();
+    expect(socialRedirectFailureMessage('')).toBeNull();
+    expect(socialRedirectFailureMessage(undefined)).toBeNull();
+    expect(socialRedirectFailureMessage(null)).toBeNull();
+  });
+
+  it('names the browser-storage failure and what the user can actually do about it', () => {
+    const m = socialRedirectFailureMessage('auth/missing-initial-state')!;
+    expect(m).toMatch(/cleared the sign-in data/i);
+    expect(m).toMatch(/private browsing|site data/i);
+  });
+
+  it('names the causes only an admin can fix, and where to fix them', () => {
+    expect(socialRedirectFailureMessage('auth/unauthorized-domain')).toMatch(/Authorized domains/i);
+    expect(socialRedirectFailureMessage('auth/operation-not-allowed')).toMatch(/Sign-in method/i);
+    expect(socialRedirectFailureMessage('auth/invalid-credential')).toMatch(/return URL|client id/i);
+  });
+
+  it('tells a user with an existing account what to do instead', () => {
+    expect(socialRedirectFailureMessage('auth/account-exists-with-different-credential'))
+      .toMatch(/different sign-in method/i);
+  });
+
+  it('THE KEY RULE: an unknown code is never swallowed — it travels in the message', () => {
+    const m = socialRedirectFailureMessage('auth/some-brand-new-thing')!;
+    expect(m).toContain('auth/some-brand-new-thing');
+    // …and it asks for the code, so a user report carries the one fact that ends the investigation.
+    expect(m).toMatch(/send us this code/i);
+  });
+
+  it('every message is plain user language — no vendor or model names leak', () => {
+    for (const code of [
+      'auth/missing-initial-state', 'auth/account-exists-with-different-credential',
+      'auth/network-request-failed', 'auth/timeout', 'auth/web-storage-unsupported',
+      'auth/user-disabled', 'auth/unknown-x',
+    ]) {
+      const m = socialRedirectFailureMessage(code)!;
+      expect(m.length).toBeGreaterThan(20);
+      expect(m).not.toMatch(/GLM|Kimi|Claude|Sonnet|Opus|Gemini|Grok|Anthropic|Moonshot/i);
+    }
   });
 });

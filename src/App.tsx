@@ -73,6 +73,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, getRedirectResult, GithubAuthProvider, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
+// One shared, tested describer for social sign-in outcomes (see socialSignInPolicy).
+import { socialRedirectFailureMessage } from './components/socialSignInPolicy';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { firebaseConfig } from './config/firebase';
@@ -1154,10 +1156,13 @@ export default function App() {
         .catch((e) => {
           const code = e?.code || '';
           console.error('[auth] social redirect failed:', code || e?.message || e);
-          // auth/no-auth-event = no pending redirect (normal on most loads — ignore).
-          if (code && code !== 'auth/no-auth-event') {
-            addToast('Sign-in failed. Please try again.', 'error');
-          }
+          // SAY WHY (admin 2026-08-21). This used to show "Sign-in failed. Please try again." for every
+          // cause — true of all of them, useful for none, and on a phone there is no console to read the
+          // real code from. socialRedirectFailureMessage names the causes we can act on and carries the
+          // raw code for the rest; it returns null only for auth/no-auth-event, which is what a normal
+          // page load reports when no redirect was pending.
+          const message = socialRedirectFailureMessage(code);
+          if (message) addToast(message, 'error');
         });
     }
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {

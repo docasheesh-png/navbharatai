@@ -426,12 +426,68 @@ export function enforceNotBanned() {
 }
 
 /**
- * Workspace endpoints (`/restore`, `/import-files`, `/inbrowser-preview`, `/workspace-files`):
- * cheaper than a full build but still hit the sandbox / Firestore, so they get a more generous
- * but real ceiling — 60/hr authed, 30/hr anonymous — to stop abuse/hammering.
+ * Workspace endpoints (`/restore`, `/import-files`, `/workspace-files`, `/checkpoints`, …):
+ * cheaper than a full build but still hit the sandbox / Firestore, so they get a real ceiling.
+ *
+ * ROOT CAUSE OF THE 2026-08-21 PUBLISH 429 (admin: "1 publish kiya isi me rate limit", with 12 total
+ * users and 1 active). ~54 routes share this ONE bucket, and two of them were TIMER POLLS: the App
+ * Logs pane polls `/runtime-logs` every 2.5s (1440/hr) and `/services` every 6s (600/hr). Opening
+ * that tab therefore spent the WHOLE hourly budget in about 35 seconds, and from then on every other
+ * workspace route was dead for the rest of the hour — the user only found out when Publish, which had
+ * made exactly one request, came back "max 60 requests per hour". The publish was never the 61st
+ * anything; it was the first request after a poller had eaten the hour.
+ *
+ * Both fixes are below: the pollers moved to `workspacePollRateLimiter` (a poll must never share a
+ * bucket with a user action), and this ceiling was raised to a number a real IDE session actually
+ * needs. 60/hr across 54 routes was under one request a minute for the entire workspace surface —
+ * an afternoon of building spends that on checkpoint lists, git status, file reads and restores
+ * before the user ever reaches for a button. Nothing on this bucket costs provider money: the AI
+ * routes (`/api/debug`, `/api/app-debug/*`) debit the user's wallet, the `/api/workspace/*` analysers
+ * are deterministic and free, builds have their own 10/hr bucket, and publish/deploy now have theirs.
  */
+export const WORKSPACE_RATE: RateLimitOptions = { name: 'workspace', authed: 240, anon: 120, noun: 'requests' };
 export function workspaceRateLimiter() {
-  return rateLimiter({ name: 'workspace', authed: 60, anon: 30, noun: 'requests' });
+  return rateLimiter(WORKSPACE_RATE);
+}
+
+/**
+ * THE APP LOGS PANE (`/api/agentv3/runtime-logs`, `/api/agentv3/services`) — its own bucket, sized to
+ * the interval the client actually polls at. Fifth instance of the same lesson (zip chunks, terminal
+ * keystrokes, domain ops, preview polling, now this one).
+ *
+ * A limiter's budget has to be at least the rate the product itself generates, or the feature is
+ * fiction — and worse than fiction here, because the two pollers were spending a bucket that 52 OTHER
+ * routes needed. `pollBudgetPerHour` below is the arithmetic, and a test holds these numbers against
+ * the client's real interval constants so a future 1-second poll fails CI instead of a user's publish.
+ *
+ * `durable: false` for the same reason as the preview render: a Firestore write every 2.5 seconds is
+ * pure write-quota burn for a read that spends nothing. The real cost guard on these is the `active`
+ * flag in the hooks — a closed pane polls zero times.
+ */
+export const WORKSPACE_POLL_RATE: RateLimitOptions = { name: 'workspace-poll', authed: 3000, anon: 1500, noun: 'status checks', durable: false };
+export function workspacePollRateLimiter() {
+  return rateLimiter(WORKSPACE_POLL_RATE);
+}
+
+/** Requests per hour a client timer at `intervalMs` generates. The sizing arithmetic, in one place. */
+export function pollBudgetPerHour(intervalMs: number): number {
+  return Math.ceil(3_600_000 / intervalMs);
+}
+
+/**
+ * PUBLISH / BACKEND DEPLOY (`/api/agentv3/publish`, `/api/agentv3/deploy-backend`) — their own bucket.
+ *
+ * These are the expensive, outward-facing ones (a real build plus a real Hosting/Render deploy), and
+ * they are also the ones a user most needs to work on the first try. Sharing the general workspace
+ * bucket got them both wrong at once: they could be starved by cheap metadata calls, and they could
+ * starve those calls in return. A small dedicated budget nothing else can spend is strictly better in
+ * both directions — 30/hr is far more publishing than any real session does, and it is now 30 that
+ * belong to publishing alone. Durable (cross-instance), because unlike a poll this one is worth
+ * a Firestore write to enforce honestly.
+ */
+export const DEPLOY_OPS_RATE: RateLimitOptions = { name: 'deploy-ops', authed: 30, anon: 10, noun: 'publish requests' };
+export function deployOpsRateLimiter() {
+  return rateLimiter(DEPLOY_OPS_RATE);
 }
 
 /**

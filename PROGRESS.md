@@ -37470,3 +37470,90 @@ recording, not to widen the window: the earned-green association is the thing be
 Gate: `tsc --noEmit` green, `tsc -p tsconfig.server.json` green, **vitest 1360 files / 17,097 passed /
 1 honest skip**. New: `previewRevival.test.ts` (10), `devServerLaunchLog.test.ts` (6), +4 in
 `previewRestart.test.ts`.
+
+---
+
+## 2026-08-21 — "1 publish kiya isi me rate limit": a timer had already eaten the hour
+
+**Admin report (screenshot of the v5 Publish sheet):** *"1 publish kiya isi me rate limin. total
+navbharat ai user = 12 active=1 me"* — one publish attempt, on a platform with twelve registered
+users and one of them active, answered **"Rate limit exceeded: max 60 requests per hour."**
+
+**The report is the interesting part.** With one active user, a per-user hourly limit should be
+impossible to reach, so the number on screen was already telling us the limit was not counting what
+its message said it was counting. It wasn't counting publishes at all.
+
+### Root cause
+
+`workspaceRateLimiter` is one bucket — `authed: 60` per hour — shared by **54 routes**. Two of them
+are client TIMERS, not user actions:
+
+| Endpoint | Client | Interval | Requests/hour |
+|---|---|---|---|
+| `/api/agentv3/runtime-logs` | `useRuntimeLogs` | 2.5 s | 1,440 |
+| `/api/agentv3/services` | `useAppServices` | 6 s | 600 |
+
+Both are gated on the App Logs tab being open, so they run together: **2,040 requests/hour into a
+60/hour bucket.** Opening that pane spends the entire hourly budget for the whole workspace surface
+in **about 35 seconds**. Everything else on the bucket — checkpoints, git status, file reads,
+restore, import, revert, ship, and **publish** — is dead for the remainder of the hour.
+
+So the publish was never the 61st publish. It was the *first* request after a poller had spent the
+hour, and the user met the failure at the one moment it was most expensive: the button that puts
+their app on the internet. The 429's own wording ("max 60 requests per hour") actively misled,
+because the user had made one request.
+
+### The fix — three buckets where there was one
+
+- **`WORKSPACE_POLL_RATE`** (`workspace-poll`, 3000/1500, `durable: false`) — the two pollers move
+  here. Sized from the client's real intervals, not from a guess. In-memory for the same reason the
+  preview render is: a Firestore write every 2.5 s is pure write-quota burn on a read that spends
+  nothing. The genuine cost control on these was never the limiter — it is the `active` flag in the
+  hooks, and a closed pane still polls zero times.
+- **`DEPLOY_OPS_RATE`** (`deploy-ops`, 30/10, durable) — `/publish` and `/deploy-backend` get a
+  budget nothing else can spend, and can no longer spend anyone else's. Strictly better in both
+  directions: 30/hr is far more publishing than a real session does, and it is 30 that belong to
+  publishing alone.
+- **`WORKSPACE_RATE`** raised 60 → 240 authed, 30 → 120 anon. 60/hr across 54 routes was under one
+  request a minute for the entire IDE surface; an afternoon of building spends that on metadata
+  before the user reaches for a button. Nothing on this bucket costs provider money — the AI routes
+  (`/api/debug`, `/api/app-debug/*`) debit the wallet under the one-wallet law, the `/api/workspace/*`
+  analysers are deterministic and free, and builds keep their own 10/hr bucket.
+
+### The other half — why this keeps happening, and what now stops it (50/50 law)
+
+This is the **fifth** instance of one bug class: zip chunks (2000/hr), terminal keystrokes (7200/hr),
+domain ops (240/hr), preview polling (600/hr), and now the App Logs pane. Each was found the same way
+— a user reporting that an unrelated feature had stopped working. Fixing a fifth instance is not
+progress; the class had no guard, so a sixth was only a matter of which timer someone added next.
+
+`tests/pollRateLimit.test.ts` closes it mechanically:
+
+1. **It reads the client.** For every file under `src/hooks`, `src/components`, `src/lib`, `src/pages`
+   it finds each `setInterval`, follows the callback (including one hop through a named function — the
+   `setInterval(() => void poll())` shape every polling hook here uses), collects the `/api/...`
+   endpoints reachable that way, and **fails if any of them is registered with
+   `workspaceRateLimiter`**, naming the file and the path. Verified to bite: reverting one route makes
+   it fail with `src/hooks/useAppServices.ts polls /api/agentv3/services`.
+2. **It holds the arithmetic.** `pollBudgetPerHour(intervalMs)` is imported by the test alongside the
+   client's own `RUNTIME_LOG_POLL_MS` and `APP_SERVICES_POLL_MS` constants, and asserts the traffic
+   the product generates fits inside the bucket with 25% headroom. Shortening a poll interval without
+   resizing its budget now fails CI, instead of failing a user's publish an hour later.
+
+Bare-call matching (`(?<![.\w$])`) keeps it precise — an earlier draft resolved `Date.now()` to an
+unrelated `const now` and reported a false offender in `GitPanel.tsx`. Across the whole client it now
+finds exactly six polled endpoints and no false positives.
+
+### Open sibling, recorded not guessed (rule 6)
+
+`server.ts:351` sets **`app.set('trust proxy', true)`** — which our own shipped scanner flags
+(`express-trust-proxy-true` in `SecurityAnalysis.ts`): `req.ip` becomes the client-supplied
+`X-Forwarded-For` value, so every **anonymous** bucket is keyed on something the caller controls. The
+correct value is a hop count, not `true` — but which count depends on how many entries Cloud Run
+prepends versus appends, and getting it wrong keys every anonymous user to one shared value, which is
+worse than today. **Not changed here.** Verification step for whoever does it: log `req.ips` for one
+real request against the live service and read which entry is the true client. This did not cause the
+admin's report (the message said 60 — the *authed* limit — so the token resolved and the bucket was
+keyed by uid).
+
+Gate: both tsc green, 17,037 tests / 1,357 files green, CI green before merge.

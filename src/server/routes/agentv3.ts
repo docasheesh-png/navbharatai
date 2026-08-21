@@ -292,8 +292,7 @@ import { deploymentStore, withDeploymentPersistence, isLiveDeployment, published
 import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
 import { buildRecipe, revivalConfirmedMessage, revivalUnconfirmedMessage } from '../AgentV3/previewRevival';
 import { decideAppSignature, appSignatureNotice } from '../AgentV3/appSignatureEntitlement';
-import { professionalPassStore } from '../professionals/ProfessionalPassStore';
-import { professionalPassPriceInr } from '../professionals/professionalPaid';
+import { probeHostingPlan } from '../lib/hostingPlan';
 import { lastDevServerLaunch } from '../AgentV3/devServerLaunchLog';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
@@ -5728,21 +5727,21 @@ export function registerAgentV3Routes(app: Express): void {
     const uid = identity?.uid || null;
     const email = identity?.email || (uid ? await resolveVerifiedEmail(uid) : null);
     const freeListed = isAgentV3FreeUser(uid, email);
-    const hasActivePass = uid && !freeListed
-      ? await professionalPassStore.getStatus(uid).then((p) => p.active).catch(() => null)
+    const hasActivePlan = uid && !freeListed
+      ? await probeHostingPlan(uid).then((p) => (p.known ? p.active : null)).catch(() => null)
       : false;
     // Asked with `requestedRemoval: true` on purpose: the question is "IF they asked, would it come
     // off?" — so the screen learns the entitlement, not today's toggle position.
-    const decision = decideAppSignature({ requestedRemoval: true, signedIn: !!uid, hasActivePass, isFreeListed: freeListed });
+    const decision = decideAppSignature({ requestedRemoval: true, signedIn: !!uid, hasActivePlan, isFreeListed: freeListed });
     res.json({
       canRemove: decision.enabled === false,
       reason: decision.reason,
-      priceInr: professionalPassPriceInr(),
-      // HONEST, and the reason this field exists: the Pass was WITHDRAWN from sale by the admin on
-      // 2026-08-10 (payment order creation answers 410 `pass_withdrawn`). So a user who cannot remove
-      // the badge today also has no way to buy the entitlement, and the screen must say that plainly
-      // instead of showing an upgrade button that would fail at the gateway.
-      purchasable: false,
+      priceInr: hostingPlanPriceInr(),
+      // Whether the entitlement can actually be BOUGHT right now. It exists because the first version
+      // of this gate pointed at a subscription that had been withdrawn from sale, which made the lock
+      // unopenable — a screen must never offer an upgrade its payment path would refuse. The Custom
+      // Domain plan is live and sold from Billing → Plans, so this is true whenever plans are enabled.
+      purchasable: hostingPlansEnabled(),
     });
   });
 
@@ -6520,26 +6519,28 @@ export function registerAgentV3Routes(app: Express): void {
     // client is not enforced. The body can only ever express a PREFERENCE; whether it is honoured is
     // decided here, from the VERIFIED identity, and never from anything the browser touched.
     //
-    // Read against the Pass store directly rather than through the Professionals paywall flag: the
-    // badge entitlement is about whether this user PAID, which is true or false regardless of whether
-    // the Professionals section's own gate happens to be switched on.
+    // The entitlement is the ₹99/month CUSTOM DOMAIN PLAN — the same one that already removes the
+    // publish-time "Made with NavBharatAI" badge. Both badges therefore come off together, which is
+    // the point: gating them separately would let someone pay ₹99, watch one disappear, and have no
+    // way at all to reach the other. `probeHostingPlan` is cached and bounded, so this costs nothing
+    // on a build that is not asking for removal.
     const signatureRequestedRemoval = req.body?.appSignature === false;
     const signatureFreeListed = isAgentV3FreeUser(userId, email);
-    const signaturePass = signatureRequestedRemoval && !signatureFreeListed && userId
-      // `null` on failure — decideAppSignature FAILS CLOSED on it (keeps the badge), which is the
-      // opposite of the wallet gate beside it and deliberately so: see appSignatureEntitlement.ts.
-      ? await professionalPassStore.getStatus(userId).then((p) => p.active).catch(() => null)
+    // `known: false` becomes `null` — decideAppSignature FAILS CLOSED on it (keeps the badge), the
+    // opposite of the wallet gate beside it and deliberately so: see appSignatureEntitlement.ts.
+    const signaturePlan = signatureRequestedRemoval && !signatureFreeListed && userId
+      ? await probeHostingPlan(userId).then((p) => (p.known ? p.active : null)).catch(() => null)
       : false;
     const signatureDecision = decideAppSignature({
       requestedRemoval: signatureRequestedRemoval,
       signedIn: !!userId,
-      hasActivePass: signaturePass,
+      hasActivePlan: signaturePlan,
       isFreeListed: signatureFreeListed,
     });
     const appSignatureEnabled = signatureDecision.enabled;
     // A switch that appears to work and quietly does nothing is exactly the fake feature the second
     // absolute rule forbids — so when the answer is no, the user is told why, and where to fix it.
-    const appSignatureNoticeText = appSignatureNotice(signatureDecision.reason, professionalPassPriceInr());
+    const appSignatureNoticeText = appSignatureNotice(signatureDecision.reason, hostingPlanPriceInr());
 
     // NDJSON stream (mirrors the Engineer route's streaming contract).
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');

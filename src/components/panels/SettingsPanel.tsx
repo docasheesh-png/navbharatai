@@ -306,9 +306,10 @@ function FontScaleControl() {
  * every build (appSignatureEntitlement.ts). That split is the fix: while the decision lived here, the
  * paid outcome was one localStorage edit away for anybody.
  *
- * So the card asks the server what this user is entitled to and shows the truth — including the
- * uncomfortable part, that the entitlement is not currently on sale. A lock with a buy button that
- * would fail at the payment gateway is worse than a lock that explains itself.
+ * So the card asks the server what this user is entitled to and shows the truth, including whether the
+ * entitlement can actually be bought — a lock with a buy button the payment path would refuse is worse
+ * than a lock that explains itself. The entitlement is the ₹99/month Custom Domain plan, the SAME one
+ * that removes the publish-time badge, so a user who pays sees both go rather than one.
  */
 function AppSignatureToggle() {
   const KEY = 'navbharat_app_signature';
@@ -355,7 +356,7 @@ function AppSignatureToggle() {
           {locked && (
             <p className="text-[10px] text-amber-400/90 mt-1.5 leading-relaxed max-w-xs">
               {ent?.purchasable
-                ? `Removing the badge is a paid feature (₹${ent.priceInr}/month).`
+                ? `Removing the badge is part of the Custom Domain plan (₹${ent.priceInr}/month, paid from your wallet) — buy it from Billing → Plans, then turn this off.`
                 : 'Removing the badge is a paid feature. It is not on sale right now, so the badge stays on every app for now.'}
             </p>
           )}

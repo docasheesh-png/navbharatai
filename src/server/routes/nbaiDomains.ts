@@ -23,6 +23,7 @@ import {
 import { checkDomainConnect, domainConnectEnabled } from '../lib/domainConnect';
 import { hostingerDnsEnabled, applyHostingerRecords } from '../lib/hostingerDns';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
+import { verifyRecordsLive } from '../lib/domainDnsVerify';
 
 /**
  * Firebase-NATIVE custom-domain routes (Slice 2) — connect a user's own domain directly to their
@@ -147,7 +148,15 @@ export function registerNbaiDomainsRoutes(app: Express): void {
         return;
       }
       const displayRecords = await stableRecordsFor(host, status.records);
-      res.json({ ...status, displayRecords });
+      // DID THE USER'S RECORDS ACTUALLY LAND? (admin 2026-08-21, mitrify.com.) The screen used to
+      // show one word from Firebase — `ownership: missing` — while every required record was live and
+      // byte-perfect in public DNS. That state is indistinguishable from "you typed it wrong", so a
+      // user who had done everything right kept editing correct records. We now look ourselves and
+      // say which of the three it is: wrong value (they fix it), not published yet (their registrar
+      // is still working), or correct and live (nothing left for them to do but wait for Firebase).
+      // Best-effort and bounded — a DNS hiccup must never turn a working status screen into an error.
+      const dnsCheck = await verifyRecordsLive(displayRecords).catch(() => null);
+      res.json({ ...status, displayRecords, dnsCheck });
     } catch (err: any) {
       sendSafeError(res, 500, 'Failed to check domain status. Please try again.', err, 'nbai domain status');
     }

@@ -6,6 +6,7 @@ import {
   customDomainStatus,
   firebaseCustomDomainsEnabled,
   customDomainErrorMessage,
+  customDomainIssues,
 } from './firebaseCustomDomain';
 
 describe('firebaseCustomDomain — pure helpers', () => {
@@ -312,5 +313,66 @@ describe('isNotFound — the exact live failure of 2026-08-06, encoded', () => {
     const { isNotFound } = await import('./firebaseCustomDomain');
     expect(isNotFound(new Error('The caller does not have permission'))).toBe(false);
     expect(isNotFound(new Error('quota exceeded'))).toBe(false);
+  });
+});
+
+/**
+ * ROOT CAUSE (admin 2026-08-21, connecting mitrify.com): the screen said `ownership: missing` while
+ * all three required records were live and byte-perfect in public DNS. The API response carries an
+ * `issues[]` of `google.rpc.Status` saying exactly why a domain is stuck — and this module parsed the
+ * state enum and DROPPED that field. So a state with a printed reason reached the user as one
+ * unexplained word, and the only way to learn more was to resolve DNS by hand.
+ *
+ * Never diagnose from a status enum when the API also shipped the reason.
+ */
+describe('customDomainIssues — Firebase\'s own explanation is no longer thrown away', () => {
+  it('surfaces the domain\'s issues', () => {
+    expect(customDomainIssues({
+      issues: [{ code: 9, message: 'The TXT record was not found at mitrify.com.' }],
+    } as never)).toEqual(['The TXT record was not found at mitrify.com.']);
+  });
+
+  it('surfaces CERT issues too — SSL failures live in a different array', () => {
+    const out = customDomainIssues({
+      issues: [{ message: 'ownership problem' }],
+      cert: { issues: [{ message: 'ACME challenge failed' }] },
+    } as never);
+    expect(out).toEqual(['ownership problem', 'ACME challenge failed']);
+  });
+
+  it('de-duplicates and drops empty messages — never an empty bullet on screen', () => {
+    expect(customDomainIssues({
+      issues: [{ message: 'same' }, { message: 'same' }, { message: '   ' }, { code: 3 }],
+    } as never)).toEqual(['same']);
+  });
+
+  it('a clean domain has no issues, and an old API shape does not crash', () => {
+    expect(customDomainIssues({} as never)).toEqual([]);
+    expect(customDomainIssues({ issues: undefined, cert: undefined } as never)).toEqual([]);
+  });
+});
+
+describe('customDomainStatus — issues + lastCheckedAt reach the caller', () => {
+  it('carries the reason AND when the DNS was last looked at', () => {
+    // `lastCheckedAt` is what makes the "Check now" button honest: it re-reads the hosting service's
+    // answer and cannot force that service to re-run its own sweep. Without the timestamp the two are
+    // indistinguishable, so a user whose records were already correct pressed it over and over.
+    const s = customDomainStatus('mitrify.com', {
+      ownershipState: 'OWNERSHIP_MISSING',
+      hostState: 'HOST_ACTIVE',
+      cert: { state: 'CERT_VALIDATING', verification: { dns: { checkTime: '2026-08-21T09:00:00Z' } } },
+      requiredDnsUpdates: { checkTime: '2026-08-21T08:00:00Z' },
+      issues: [{ message: 'TXT record not found' }],
+    } as never);
+    expect(s.issues).toEqual(['TXT record not found']);
+    expect(s.lastCheckedAt).toBe('2026-08-21T09:00:00Z'); // the FRESHEST of the two, not the first
+    expect(s.active).toBe(false);
+  });
+
+  it('an older API response with neither field still produces a valid status', () => {
+    const s = customDomainStatus('a.com', { ownershipState: 'OWNERSHIP_ACTIVE', hostState: 'HOST_ACTIVE', cert: { state: 'CERT_ACTIVE' } } as never);
+    expect(s.active).toBe(true);
+    expect(s.issues).toEqual([]);
+    expect(s.lastCheckedAt).toBe('');
   });
 });

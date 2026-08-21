@@ -37192,3 +37192,68 @@ to `public/.well-known/`), then press Verify in the portal. Until that is done, 
 stays 403 — the code side is complete.
 
 Gate: both tsc green, 16,830 tests / 1,344 files, CI green before merge.
+## 2026-08-21 — "ownership: missing" while the DNS was perfect (admin: mitrify.com)
+
+The admin added all three records at Hostinger and the Publish sheet said `ownership: missing · host:
+active · SSL: validating`. I resolved the records myself, from the public internet, before touching
+any code:
+
+| Record | Live value | Correct? |
+|---|---|---|
+| A `mitrify.com` | `199.36.158.100` | ✅ |
+| TXT `mitrify.com` | `hosting-site=nbai-709e5932ecaaf74b9c63` | ✅ |
+| TXT `_acme-challenge.mitrify.com` | `y7xukjntdfGt5_a1CCdUm9f6EVYhhG6JQDgnOg3asi8` | ✅ |
+
+(NS = `ns1/ns2.dns-parking.com`, i.e. Hostinger really is authoritative and the records really are
+published.) **The user had done everything right, and the screen told them — in effect — that they had
+not.** That is our defect, not their DNS.
+
+### Two root causes, both ours
+
+**1. We PARSED the status enum and DROPPED the reason.** The Firebase CustomDomain resource carries an
+`issues[]` of `google.rpc.Status` — and `cert.issues[]` — saying exactly why a domain is stuck.
+`customDomainStatus` read `ownershipState`/`hostState`/`cert.state` and ignored both. So a state that
+Firebase had already explained in prose reached the user as ONE UNEXPLAINED WORD, and the only way to
+learn more was to resolve DNS by hand, which is what I had to do. **Never diagnose from a status enum
+when the API also shipped the reason.**
+
+**2. Three completely different situations looked identical.** `ownership: missing` covers:
+ 1. the record is wrong or absent → the USER must fix it at their registrar;
+ 2. the record is right but not published yet → wait for their registrar;
+ 3. the record is right AND live → wait for FIREBASE, which re-checks on its own schedule, and there
+    is nothing left for the user to do.
+Case 3 was indistinguishable from case 1 — which is exactly what makes a person edit correct records
+over and over.
+
+### What shipped
+
+ • **`domainDnsVerify.ts`** — the platform now resolves the required records ITSELF and says which of
+   the three it is. A wrong value is shown NEXT TO the right one (not merely called "missing"); an
+   absent record says the registrar is still publishing it and that nothing is wrong; and the
+   all-clear names the remaining wait as **ours**: *"All your DNS records are correct and live. Nothing
+   is left for you to do."*
+   🔒 **Honesty boundary, in the module header:** this reports what OUR resolver sees. It can never
+   promise what Firebase sees — different resolver, different cache, different moment — so a clean
+   result never says "this will work".
+   ⚠️ Test-locked detail that would otherwise have produced the same false alarm in reverse: Hostinger
+   **displays TXT values wrapped in double quotes**. That is DNS presentation syntax, not part of the
+   value; comparing naively marks a perfect record as wrong.
+ • **Firebase's `issues[]` and `cert.issues[]` are surfaced**, de-duplicated, empty messages dropped.
+ • **`lastCheckedAt` is shown** — and it is what makes the "Check now" button honest. That button
+   re-reads Firebase's answer; it CANNOT force Firebase to re-run its own DNS sweep. Without the
+   timestamp the two are indistinguishable, so a user whose records were already correct pressed it
+   repeatedly believing nothing was happening.
+ • Every new field is optional on the client, so an older server degrades to today's screen rather
+   than breaking.
+
+### Honestly recorded
+
+I could NOT read Firebase's API from this session (no GCP credentials here), so I cannot say which
+reason Firebase is holding for mitrify.com right now — only that the DNS side is provably correct. The
+next status poll after this deploys will PRINT that reason instead of hiding it, which is the point.
+The most likely remaining cause is Hostinger's **TTL of 14400 (4 hours)**: a wrong or absent earlier
+answer stays cached that long, for Firebase too. Lowering the TTL to 300 is the practical mitigation
+and is the admin's step at the registrar.
+
+Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
+`vitest run` — **1,355 files / 17,014 tests, all passing** (17 new).

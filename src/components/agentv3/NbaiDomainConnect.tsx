@@ -32,6 +32,16 @@ interface DomainStatus {
    *  or not (⏳ still needed). Preferred over `records` for display; `records` stays the live pending set
    *  the auto-setup appliers act on. Absent on an older server → fall back to `records`. */
   displayRecords?: DnsRecord[];
+  /** Firebase's OWN explanation of why the domain is stuck. Absent on an older server. */
+  issues?: string[];
+  /** When the hosting service last looked at the user's DNS (ISO). Absent on an older server. */
+  lastCheckedAt?: string;
+  /** What OUR resolver can see of the user's records right now. Absent on an older server. */
+  dnsCheck?: {
+    allSeen: boolean;
+    summary: string;
+    checks: Array<{ type: string; name: string; expected: string; seen: boolean; found: string[]; lookupError: string }>;
+  } | null;
 }
 
 export interface NbaiDomainConnectProps {
@@ -367,10 +377,39 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
                     {checking ? 'Checking…' : 'Check now'}
                   </button>
                 )}
+                {/* WHAT WE CAN SEE OF THEIR DNS (admin 2026-08-21, mitrify.com). The status line
+                    below said `ownership: missing` while all three records were live and byte-perfect
+                    in public DNS — a state indistinguishable from "you typed it wrong", so the user
+                    kept re-editing correct records. This sentence separates the three cases: a wrong
+                    value they must fix, a record their registrar has not published yet, or everything
+                    correct and the remaining wait being OURS, not theirs. */}
+                {result.dnsCheck?.summary && (
+                  <p className={`text-[11px] leading-relaxed rounded-lg px-2.5 py-2 border ${
+                    result.dnsCheck.allSeen
+                      ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-100'
+                      : 'bg-zinc-800/60 border-zinc-700 text-zinc-300'}`}>
+                    {result.dnsCheck.allSeen ? '✓ ' : ''}{result.dnsCheck.summary}
+                  </p>
+                )}
+
+                {/* FIREBASE'S OWN WORDS. We used to parse the state enum and DROP the `issues[]`
+                    array that carries the actual reason — so a stuck domain reached the user as one
+                    unexplained word while the API had already printed why. */}
+                {result.issues && result.issues.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    {result.issues.map((msg, i) => (
+                      <p key={i} className="text-[11px] leading-relaxed text-amber-100/90">• {msg}</p>
+                    ))}
+                  </div>
+                )}
+
                 {/* The raw states stay available — dim, small, owner-only diagnosis — because a
-                    support question is answered by them, but they must never be the headline. */}
+                    support question is answered by them, but they must never be the headline.
+                    `last checked` is what makes the button above honest: it re-reads the hosting
+                    service's answer, and cannot force that service to re-run its own DNS sweep. */}
                 <p className="text-[9px] text-zinc-500/80 font-mono">
                   ownership: {short(result.ownershipState)} · host: {short(result.hostState)} · SSL: {short(result.sslState)}
+                  {result.lastCheckedAt ? ` · last checked ${new Date(result.lastCheckedAt).toLocaleString()}` : ''}
                 </p>
               </div>
             );

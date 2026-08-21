@@ -48,6 +48,26 @@ export interface CustomDomainStatus {
   hostState: string;      // HOST_PENDING | HOST_ACTIVE | HOST_BROKEN | …
   sslState: string;       // CERT_PENDING | CERT_ACTIVE | CERT_BROKEN | …
   records: CustomDomainDnsRecord[]; // the records still needed to finish the connection
+  /**
+   * WHAT FIREBASE ITSELF SAYS IS WRONG — and until 2026-08-21 we threw it away.
+   *
+   * ROOT CAUSE (admin, connecting mitrify.com): the screen said `ownership: missing` while all three
+   * required records were live and byte-perfect in public DNS. The API response carries an `issues[]`
+   * of `google.rpc.Status` explaining exactly why a domain is stuck — and we parsed `ownershipState`
+   * and dropped the field that would have answered the question. So a state with a real, printed
+   * reason reached the user as one unexplained word, and the only way to find out more was to read
+   * DNS by hand. Never diagnose from a status enum when the API also shipped the reason.
+   */
+  issues: string[];
+  /**
+   * When Firebase LAST looked at the user's DNS (`requiredDnsUpdates.checkTime`).
+   *
+   * This is what makes the "Check now" button honest. That button re-reads Firebase's answer; it
+   * cannot force Firebase to re-run its own DNS sweep. Without this timestamp the two are
+   * indistinguishable, so a user whose records were already correct pressed it over and over,
+   * believing nothing was happening.
+   */
+  lastCheckedAt: string;
 }
 
 // ── Raw API shape (only the fields we read) ─────────────────────────────────────────────────
@@ -73,14 +93,18 @@ interface ApiDnsUpdates {
   /** Legacy tolerance — the field name this module INVENTED and read until 2026-08-06 (see below). */
   desiredDnsState?: ApiDnsRecordSet[];
 }
+/** `google.rpc.Status` — Firebase's own explanation of why a domain is stuck. */
+interface ApiIssue { code?: number; message?: string }
 interface ApiCustomDomain {
   name?: string;
   customDomainId?: string;
   ownershipState?: string;
   hostState?: string;
   /** `cert.verification.dns` carries the ACME challenge once ownership advances to cert issuance. */
-  cert?: { state?: string; verification?: { dns?: ApiDnsUpdates } };
+  cert?: { state?: string; verification?: { dns?: ApiDnsUpdates }; issues?: ApiIssue[] };
   requiredDnsUpdates?: ApiDnsUpdates;
+  /** The field this module ignored until 2026-08-21 — see `CustomDomainStatus.issues`. */
+  issues?: ApiIssue[];
 }
 
 // ── Pure helpers (unit-testable without any live API) ───────────────────────────────────────
@@ -164,6 +188,23 @@ export function customDomainRecords(cd: ApiCustomDomain): CustomDomainDnsRecord[
   return out;
 }
 
+/**
+ * Every reason Firebase gave, from BOTH places it puts them — the domain's own `issues[]` and the
+ * certificate's. De-duplicated and trimmed; an entry with no message is dropped rather than shown as
+ * an empty bullet. PURE.
+ */
+export function customDomainIssues(cd: ApiCustomDomain): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const i of [...(cd.issues ?? []), ...(cd.cert?.issues ?? [])]) {
+    const msg = String(i?.message ?? '').trim();
+    if (!msg || seen.has(msg)) continue;
+    seen.add(msg);
+    out.push(msg);
+  }
+  return out;
+}
+
 /** Map a CustomDomain API resource to an honest status (active only when genuinely live). */
 export function customDomainStatus(domain: string, cd: ApiCustomDomain): CustomDomainStatus {
   const ownershipState = cd.ownershipState || 'OWNERSHIP_PENDING';
@@ -173,7 +214,16 @@ export function customDomainStatus(domain: string, cd: ApiCustomDomain): CustomD
     ownershipState === 'OWNERSHIP_ACTIVE' &&
     hostState === 'HOST_ACTIVE' &&
     sslState === 'CERT_ACTIVE';
-  return { domain, active, ownershipState, hostState, sslState, records: customDomainRecords(cd) };
+  return {
+    domain, active, ownershipState, hostState, sslState,
+    records: customDomainRecords(cd),
+    issues: customDomainIssues(cd),
+    // Both sources carry a checkTime; the freshest one is the honest answer to "when did it last look?"
+    lastCheckedAt: [cd.requiredDnsUpdates?.checkTime, cd.cert?.verification?.dns?.checkTime]
+      .filter((t): t is string => typeof t === 'string' && t.length > 0)
+      .sort()
+      .pop() ?? '',
+  };
 }
 
 // ── Live API (needs ADC; cannot be exercised in the dev sandbox — fails honestly) ───────────

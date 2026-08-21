@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
 // ADMIN REPORT 2026-08-21, with a photo of a tablet: the installed app rendered as raw HTML — stacked
@@ -63,8 +63,35 @@ const builtCss = existsSync(assets)
   ? readdirSync(assets).filter((f) => f.startsWith('index-') && f.endsWith('.css')).map((f) => join(assets, f))
   : [];
 
-describe.runIf(builtCss.length > 0)('the built stylesheet itself', () => {
-  const css = builtCss.map((f) => readFileSync(f, 'utf8')).join('\n');
+// A BUILD THAT EXISTS IS NOT A BUILD THAT IS CURRENT (admin 2026-08-21).
+//
+// The guard used to be `builtCss.length > 0` — "there is a stylesheet, so check it". But a working
+// tree can easily hold a dist/ built BEFORE postcss.config.js gained these plugins, and then this
+// suite reads an artifact that predates the very fix it is testing and reports two failures that look
+// exactly like "the app is broken". That cost a real debugging detour, and the misdiagnosis was the
+// expensive part: the assertions were right, the code was right, and only the input was stale.
+//
+// So freshness is checked, not assumed: a stylesheet older than the config cannot be evidence about
+// that config. mtime is the honest signal here — CI clones and then builds, so its CSS is always
+// newer; a developer who edits or pulls the config without rebuilding gets the skip they deserve.
+//
+// (This is the same mistake as treating a stale preview URL as a live preview — "the artifact exists"
+// standing in for "the artifact is valid". Naming it here so the pattern is recognised next time.)
+const configMtimeMs = statSync(join(root, 'postcss.config.js')).mtimeMs;
+const freshCss = builtCss.filter((f) => statSync(f).mtimeMs >= configMtimeMs);
+const staleBuild = builtCss.length > 0 && freshCss.length === 0;
+
+// A SILENT skip is how a check quietly stops covering anything, so the skip states itself. This is the
+// suite-level version of the rule the build gates already follow: "could not run" is its own outcome,
+// and it must be visible — never dressed up as a pass, never as a failure.
+describe.runIf(staleBuild)('the built stylesheet — NOT CHECKED this run', () => {
+  it('dist/ predates postcss.config.js, so it cannot answer for it — run `npm run build` to check the real output', () => {
+    expect(staleBuild).toBe(true);
+  });
+});
+
+describe.runIf(freshCss.length > 0)('the built stylesheet itself', () => {
+  const css = freshCss.map((f) => readFileSync(f, 'utf8')).join('\n');
 
   it('contains no @layer at all — the one thing that took the whole app down', () => {
     expect(css).not.toContain('@layer');

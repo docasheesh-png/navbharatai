@@ -636,7 +636,8 @@ more features in the app, it is not — and 9.1 alone was still worth building.
 
 ---
 
-## 10 · 🔴 THE PUBLISH CEILING — every published app takes a Firebase channel (added 2026-08-21)
+## 10 · 🟡 THE PUBLISH CEILING — every published app takes a Firebase channel (added 2026-08-21;
+##      made VISIBLE + reclaimable 2026-08-21, still not REMOVED — see §10.3)
 
 **Found while answering the admin's cost question, not from a failure.** Publishing works; it simply
 does not scale, and the wall arrives sooner than anyone would guess.
@@ -669,13 +670,41 @@ Firebase Hosting stays exactly where it is genuinely better: `deployToSite` for 
 domain, where Firebase issues and renews the certificate for us. That is a handful of sites, nowhere
 near 36.
 
-**Sequencing (not started):**
-1. Verify the real channel cap — publish into a scratch project until it refuses, or read it off the
-   quota page if Google documents it. Guessing a number this load-bearing is not good enough.
+**Sequencing:**
+1. ✅ **SHIPPED 2026-08-21 — the wall is no longer silent, and waste can be reclaimed.** Step 1 asked
+   for the real cap to be verified first. It could NOT be: Google does not publish this number on its
+   Hosting quota page, `firebase.google.com` is blocked by this environment's egress proxy, and the
+   ~50 figure traces to a single 2020 community report. Publishing into a scratch project until it
+   refuses needs gcloud, which a Claude session does not have. So instead of guessing harder, the
+   platform now **MEASURES ITS OWN USAGE** — which is the thing the cap number was wanted for:
+   - `GET /api/admin/hosting/channels` reconciles the channels that EXIST (Hosting API, paginated)
+     against the deployment registry. **Admin Dashboard → Overview → Publish Capacity** shows it on
+     every visit, colour-coded, warning at 70% and critical at 90% — while publishing still works.
+   - It found the class the registry alone could never see: a channel with **no record at all**, left
+     by a purge before `markOrphaned`. Its id is a one-way hash of the workspace id, so nothing could
+     trace it back. Those are now listed and reclaimable one at a time
+     (`POST /api/admin/hosting/channels/:channelId/reclaim`), which **REFUSES a live channel** — that
+     belongs to Unpublish or to a takedown, which also blocks republish.
+   - A `stale` channel (record not live, channel still there) is reported as a **bug signal**, not
+     just waste: both delete paths remove the channel before touching the registry, so that state
+     means one of them failed and said success.
+   - **The user-facing half:** at the cap, the raw failure names the vendor and an IAM role and is
+     handed to the agent to paraphrase back — so the one failure that is entirely OUR fault reached
+     the user as a confusing accusation AND a white-label leak. `isChannelQuotaError` now catches it
+     and returns `HOSTING_FULL_MESSAGE`: no vendor, no blame, what is not lost, and their own free
+     host as a way forward that works this minute. The server logs it as a platform outage.
+   - `HOSTING_CHANNEL_CAP` (default 50) is env-tunable **because the number is a guess** — the first
+     real "quota reached" settles it, and that value belongs here.
+   ⚠️ **This does NOT raise the ceiling.** It makes it visible, recovers what is wasted, and makes
+   hitting it honest. §10.3 is still what removes it.
 2. Publish path writes the built files to the bucket under the channel-id key it already computes.
 3. Worker serves from the bucket, falling back to Firebase for anything not yet migrated — so the
    switch is reversible and no existing link breaks.
 4. Migrate existing channels lazily (on next publish), then reclaim them.
+
+**Next step after this, if the panel ever shows warn/critical:** the dashboard is only seen when the
+admin looks. A push/email alert at 'warn' (the alerting path already exists — `metricsAlerts.ts`) is
+the cheap follow-on that makes it genuinely unmissable.
 
 ### 10.4 · Two findings from wiring the 5-app free limit (2026-08-21)
 
@@ -691,16 +720,15 @@ from no longer lists it — an app nobody can find, manage or remove, still hold
 channels. That makes the ceiling arrive silently, and makes "remove an app you no longer need" only
 half-true: it frees the slot in OUR count, not in Firebase's.
 
-The fix is one line (delete the channel in the same purge), but it is DESTRUCTIVE and user-visible —
-someone who deletes a chat may still expect the link they shared to work — so it is the admin's call,
-not a silent change. Options: (i) purge unpublishes too, (ii) a real user-facing "Unpublish" button and
-purge leaves the app alone, (iii) purge keeps the record (marked orphaned) so takedown can still reach
-it. **Recommended: (ii) + (iii)** — the user gets an explicit way to take their own app down, and
-nothing goes offline by surprise.
+✅ **RESOLVED 2026-08-21 — the recommended (ii) + (iii) both shipped, plus the piece neither covered.**
+`purgeWorkspace` now calls `releaseDeployment` → `markOrphaned`, so the record is KEPT and marked
+rather than deleted (iii); the owner has a real **Unpublish** button (#2524) and a **"Your published
+apps"** list that reaches an app whose chat is gone (#2526) (ii). Nothing goes offline by surprise.
 
-**Until it ships this is an OPEN root cause (rule 6), not a solved problem.** It is not urgent today —
-the platform is far from 50 apps — but it must land before real users arrive, because the failure mode
-is "publishing stops working for everybody" with no warning.
+What neither option covered: channels orphaned by purges that happened BEFORE `markOrphaned` existed.
+Those have no record at all, and the channel id is a one-way hash — nothing could find them. The
+Publish Capacity panel (step 1 above) finds them by reconciling against Firebase's own list, and
+reclaims them. **That closes this root cause.**
 
 ## How to use this file
 

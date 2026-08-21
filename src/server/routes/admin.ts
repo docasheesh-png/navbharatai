@@ -52,6 +52,7 @@ import { rotateAllSecrets, getLatestKeyVersion, encrypt, decrypt } from '../lib/
 import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp';
 import { deploymentStore, type DeploymentStatus } from '../AgentV3/DeploymentStore';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
+import { classifyChannels, channelCeilingVerdict, channelCap } from '../AgentV3/channelInventory';
 import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
 
 /**
@@ -1242,6 +1243,66 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     } catch (e: any) {
       console.error('[ADMIN] Takedown error:', e?.message);
       res.status(502).json({ error: 'Takedown failed — the live site was NOT confirmed removed.', detail: e?.message || String(e) });
+    }
+  });
+
+  // ── THE PUBLISH CEILING — see how full it is, and reclaim what is wasted (ROADMAP §10) ─────
+  //
+  // Every published app holds ONE Firebase Hosting channel and the pool is capped per site. Past the
+  // cap, publishing stops for EVERY user at once — and nothing on our side could see it coming,
+  // because our registry counts apps we know about while the cap counts channels that EXIST. This
+  // reconciles the two. Read-only; it changes nothing.
+  app.get('/api/admin/hosting/channels', verifyAdminToken, async (_req: Request, res: Response) => {
+    try {
+      const [channels, records] = await Promise.all([
+        new FirebaseHostingDeployer().listChannels(),
+        deploymentStore.list({ limit: 500 }),
+      ]);
+      const classified = classifyChannels(channels, records);
+      res.json({ verdict: channelCeilingVerdict(classified), channels: classified });
+    } catch (e: any) {
+      // Honest: an unreadable list is NOT "zero channels in use". Reporting a made-up all-clear on
+      // the one number this endpoint exists for would be worse than reporting nothing.
+      console.error('[ADMIN] Channel inventory error:', e?.message);
+      res.status(502).json({
+        error: 'Could not read the hosting channel list, so the ceiling is UNKNOWN — not clear.',
+        detail: e?.message || String(e),
+        cap: channelCap(),
+      });
+    }
+  });
+
+  // Reclaim ONE wasted channel by its id.
+  //
+  // Addressed by CHANNEL id because that is the only handle these have left: a purge before
+  // `markOrphaned` (2026-08-21) deleted the deployment record and never the channel, so the app is
+  // still serving with no workspaceId anywhere to derive it from.
+  //
+  // ⚠️ It REFUSES a 'live' channel. Reclaim exists for waste; taking a working app down belongs to
+  // its owner (Unpublish) or to a deliberate takedown, which also marks the registry so it cannot
+  // silently republish. A tool that could do both would eventually do the wrong one.
+  app.post('/api/admin/hosting/channels/:channelId/reclaim', verifyAdminToken, async (req: Request, res: Response) => {
+    const { channelId } = req.params;
+    if (!channelId) return res.status(400).json({ error: 'channelId required' });
+    try {
+      const [channels, records] = await Promise.all([
+        new FirebaseHostingDeployer().listChannels(),
+        deploymentStore.list({ limit: 500 }),
+      ]);
+      const target = classifyChannels(channels, records).find((c) => c.channelId === channelId);
+      if (!target) return res.status(404).json({ error: 'No such channel on this hosting site.' });
+      if (!target.reclaimable) {
+        return res.status(409).json({
+          error: 'That channel is a LIVE app. Use takedown for a live app — it also blocks republish; reclaim is only for channels no live app is using.',
+          workspaceId: target.workspaceId,
+        });
+      }
+      await new FirebaseHostingDeployer().deleteChannelById(channelId);
+      audit('ADMIN_CHANNEL_RECLAIMED', { channelId, state: target.state, workspaceId: target.workspaceId || '', ip: req.ip });
+      res.json({ ok: true, channelId, state: target.state });
+    } catch (e: any) {
+      console.error('[ADMIN] Channel reclaim error:', e?.message);
+      res.status(502).json({ error: 'Reclaim failed — the channel was NOT confirmed removed.', detail: e?.message || String(e) });
     }
   });
 

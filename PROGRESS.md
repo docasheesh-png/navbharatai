@@ -37152,3 +37152,43 @@ CLEARED value and now says the supported way to pause is `_PCT=0` or unsetting t
 
 Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
 `vitest run` — **1,354 files / 16,997 tests, all passing**.
+
+---
+
+## 2026-08-21 — Apple web sign-in: the 403 is Apple's DOMAIN VERIFICATION (PR #2531, merged bb784c3)
+
+Web Apple sign-in still failed after the redirect fix (#2491). The admin's own DevTools captures —
+taken on the popup/redirect page itself, which is the only place these requests appear — settled it.
+
+**OUR HALF IS CORRECT, and the URL proves it:** `client_id=com.navbharatai.web`,
+`redirect_uri=https://navbharatai.com/__/auth/handler`. Apple then showed its consent sheet and ITS OWN
+endpoint answered **403 twice** (`appleid.apple.com/appleauth/auth/oauth/authorize`) with nothing of
+ours in the request. That is Apple's behaviour for a Service ID whose domain is registered but NOT
+VERIFIED.
+
+**Apple verifies by fetching `https://<domain>/.well-known/apple-developer-domain-association.txt`, and
+we served that path NOWHERE.** `express.static` would not have covered it either — its `dotfiles`
+default is `'ignore'`, so a `.well-known` directory is skipped even with the file on disk. Hence an
+EXPLICIT route mounted before the static handler (`lib/appleDomainAssociation.ts`, pure + 7 tests):
+env `APPLE_DOMAIN_ASSOCIATION` first (admin can verify with no code change), then a committed
+`public/.well-known/` copy, else an honest 404 — an empty 200 would read to Apple as a CONTENTS
+mismatch and send the next hour into the wrong problem.
+
+⚠️ **My earlier theory is retired, recorded so nobody re-runs it:** the redirect_uri is
+`navbharatai.com`, NOT the firebaseapp.com host. Registering that second domain was never needed (and
+Apple rejects it anyway — its verification file cannot be hosted on Google's domain).
+
+**Second fix, same investigation — the app hid the deciding fact.** The app-root `getRedirectResult`
+catch logged the real code to the console and showed "Sign-in failed. Please try again." — true of
+every cause, useful for none, and unreadable on a phone. SECOND instance of this class (the first was
+Apple's popup, where a cancel and a misconfigured return URL closed identically).
+`socialRedirectFailureMessage` now names every actionable code and CARRIES THE RAW CODE for anything
+unrecognised, so an unknown failure can never again look identical to a known one. Silent only for
+`auth/no-auth-event`.
+
+**ADMIN-SIDE STEP STILL OPEN (rule 6):** download the association file from the Apple portal
+(Configure → next to `navbharatai.com`), put its contents in `APPLE_DOMAIN_ASSOCIATION` (or commit it
+to `public/.well-known/`), then press Verify in the portal. Until that is done, browser Apple sign-in
+stays 403 — the code side is complete.
+
+Gate: both tsc green, 16,830 tests / 1,344 files, CI green before merge.

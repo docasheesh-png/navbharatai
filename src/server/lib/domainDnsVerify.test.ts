@@ -127,3 +127,55 @@ describe('verifyRecordsLive — telling the three real states apart', () => {
     expect(r.allSeen).toBe(false);
   });
 });
+
+/**
+ * ADMIN, 2026-08-21 (second connect attempt). They connected mitrify.com in the morning, added
+ * `hosting-site=nbai-709e5932ecaaf74b9c63`, and it VERIFIED. They then re-imported the app into a new
+ * chat, and the screen asked for `hosting-site=nbai-dd4fe67881426b5f258a` while calling the old one
+ * "a different value" — true, and baffling to someone who had added exactly what we asked for hours
+ * earlier.
+ *
+ * The cause is legitimate: every app gets its OWN hosting site, so moving a domain to a different app
+ * needs a different ownership record. But "you typed it wrong" is the wrong story to tell someone who
+ * typed it right.
+ */
+describe('summarize — an old ownership record of OURS is not a typo', () => {
+  const ownership = (found: string, expected: string): RecordCheck => ({
+    type: 'TXT', name: 'mitrify.com', expected, seen: false, found: [found], lookupError: '',
+  });
+
+  it('THE REAL CASE: names it as another of YOUR apps, and says to EDIT the existing record', () => {
+    const msg = summarize([ownership(
+      'hosting-site=nbai-709e5932ecaaf74b9c63',
+      'hosting-site=nbai-dd4fe67881426b5f258a',
+    )]);
+    expect(msg).toContain('DIFFERENT app of yours');
+    expect(msg).toContain('EDIT the existing');
+    // Never the accusation, which is what the generic wrong-value line reads as here.
+    expect(msg).not.toContain('has a different value than the one shown above');
+  });
+
+  it('survives a registrar that displays the value in quotes', () => {
+    const msg = summarize([ownership(
+      '"hosting-site=nbai-709e5932ecaaf74b9c63"',
+      'hosting-site=nbai-dd4fe67881426b5f258a',
+    )]);
+    expect(msg).toContain('DIFFERENT app of yours');
+  });
+
+  it('a genuinely unrelated TXT still gets the ordinary "fix it" message', () => {
+    // Only OUR ownership shape earns the softer story — otherwise a real typo would be excused.
+    const msg = summarize([ownership('v=spf1 include:example.com ~all', 'hosting-site=nbai-dd4fe6788142')]);
+    expect(msg).toContain('different value');
+    expect(msg).not.toContain('DIFFERENT app of yours');
+  });
+
+  it('a non-ownership record (a wrong A record) is unaffected', () => {
+    const msg = summarize([{
+      type: 'A', name: 'mitrify.com', expected: '199.36.158.100', seen: false,
+      found: ['1.2.3.4'], lookupError: '',
+    }]);
+    expect(msg).toContain('different value');
+    expect(msg).not.toContain('DIFFERENT app of yours');
+  });
+});

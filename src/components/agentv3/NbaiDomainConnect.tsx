@@ -480,13 +480,40 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
             <p className="text-[10px] text-green-300/90">✓ {doneCount} record{doneCount === 1 ? '' : 's'} you added {doneCount === 1 ? 'is' : 'are'} verified{pendingCount > 0 ? ` — ${pendingCount} more to add below.` : ' — nothing more to add.'}</p>
           )}
           {shown.map((rec, i) => rec.done ? (
-            // Already added & accepted — kept visible so the user's work is never "lost", shown compact.
-            <div key={i} className="px-3 py-1.5 rounded-lg bg-green-500/5 border border-green-500/20 flex items-center gap-2">
-              <Check className="w-3.5 h-3.5 text-green-400 shrink-0" />
-              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-green-500/15 text-green-300">{rec.type}</span>
-              <span className="text-[11px] text-zinc-400 font-mono truncate">{relativeRecordName(rec.name, cleanDomain)}</span>
-              <span className="ml-auto text-[10px] text-green-300 shrink-0">Verified</span>
-            </div>
+            /**
+             * Already added & accepted — COMPACT, but never a dead end.
+             *
+             * ADMIN, 2026-08-21: "jo jo DNS connect hai, us par bas green tick aa raha hai, DNS value
+             * show nahi ho rahi — mujhe wapas se copy karni padi to? kaise karu."
+             *
+             * A verified record collapsed to `✓ TXT @ Verified` and its VALUE disappeared, so there was
+             * no way to copy it again — and there are real reasons to need it: moving registrar, a DNS
+             * reset, an accidental delete, or simply checking that what is live matches what we asked
+             * for. Compact was right; LOSING the value was not. It now opens on click.
+             */
+            <details key={i} className="px-3 py-1.5 rounded-lg bg-green-500/5 border border-green-500/20 group/rec">
+              <summary className="flex items-center gap-2 cursor-pointer list-none marker:hidden">
+                <Check className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-green-500/15 text-green-300">{rec.type}</span>
+                <span className="text-[11px] text-zinc-400 font-mono truncate">{relativeRecordName(rec.name, cleanDomain)}</span>
+                <span className="ml-auto text-[10px] text-green-300 shrink-0">Verified</span>
+                {/* Says what the click DOES. A bare chevron on a row nobody expects to be clickable is
+                    how a feature stays undiscovered. */}
+                <span className="text-[10px] text-zinc-500 shrink-0 group-open/rec:hidden">show</span>
+                <span className="text-[10px] text-zinc-500 shrink-0 hidden group-open/rec:inline">hide</span>
+              </summary>
+              <div className="flex flex-col gap-1 pt-2">
+                {/* The SAME three copyable fields the pending card shows — a verified record is not a
+                    different kind of record, so it must not be a different kind of card. */}
+                <Field label="Type" value={rec.type} k={`dt${i}`} copied={copied} onCopy={copy} />
+                <Field label="Name" value={relativeRecordName(rec.name, cleanDomain)} k={`dn${i}`} copied={copied} onCopy={copy} />
+                <Field label="Value" value={rec.value} k={`dv${i}`} copied={copied} onCopy={copy} />
+                <p className="text-[10px] text-zinc-500">
+                  Already live at your registrar — this is here so you can copy it again if you ever
+                  need to re-add it.
+                </p>
+              </div>
+            </details>
           ) : (
             <div key={i} className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 flex flex-col gap-1">
               <div className="flex items-center gap-2">

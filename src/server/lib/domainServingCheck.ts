@@ -65,12 +65,26 @@ export async function checkDomainServing(
   domain: string,
   fetcher?: Fetcher,
   timeoutMs = 6000,
+  /**
+   * TEST SEAM for the SSRF guard — and a deliberately narrow one.
+   *
+   * ⚠️ WHY IT EXISTS (caught by the gate 2026-08-21, before CI): the tests used the real
+   * `mitrify.com`, so they ran a LIVE DNS lookup and passed only while that domain happened to
+   * resolve. The moment its A record changed at the registrar, four tests went red for a reason that
+   * had nothing to do with the code. A test whose verdict depends on somebody else's DNS is not a
+   * test — it is a weather report.
+   *
+   * The default is ALWAYS the real guard, so production behaviour is unchanged, and the test that
+   * proves a private address is refused deliberately does NOT pass a seam — that one must exercise the
+   * genuine article or it proves nothing.
+   */
+  guardFn: (url: string) => Promise<{ ok: boolean; reason?: string }> = assertPublicHttpUrl,
 ): Promise<ServingCheck> {
   const host = String(domain ?? '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   if (!host) return { state: 'unknown', status: 0, note: '' };
   const url = `https://${host}/`;
 
-  const guard = await assertPublicHttpUrl(url).catch(() => ({ ok: false, reason: 'check failed' }));
+  const guard = await guardFn(url).catch(() => ({ ok: false, reason: 'check failed' }));
   if (!guard.ok) return { state: 'unknown', status: 0, note: '' };
 
   const doFetch: Fetcher = fetcher ?? ((u, init) => fetch(u, init) as unknown as ReturnType<Fetcher>);

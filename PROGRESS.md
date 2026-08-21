@@ -37948,3 +37948,54 @@ of the commit it ran against.
 
 Gate: both tsc green, vitest 1366 files / 17,147 passed / 1 honest skip (run after rebasing onto another
 session's three merges — #2542, #2545, #2546 — per safeguard #1).
+
+---
+
+## 2026-08-21 — A verified DNS record you can never copy again, and "a different value" that was ours
+
+Admin, connecting mitrify.com a second time: *"jo jo DNS connect hai, us par bas green tick aa raha
+hai, DNS value show nahi ho rahi — mujhe wapas se copy karni padi to? kaise karu."*
+
+### 1. A verified record hid its own value
+
+Collapsing a verified record to `✓ TXT @ Verified` was right — the list stays readable and the user's
+work is visibly kept. **Dropping the VALUE was not.** There is no way to copy it again, and there are
+real reasons to need it: moving registrar, a DNS reset, an accidental delete, or simply checking that
+what is live matches what we asked for. The row now OPENS on click into the same three copyable fields
+the pending card shows — a verified record is not a different kind of record, so it must not be a
+different kind of card. The summary says "show"/"hide" rather than a bare chevron, because a clickable
+row nobody expects to be clickable is a feature that stays undiscovered.
+
+### 2. "A different value" was OUR OWN record, from their other app
+
+The same screen said *"Your TXT record for mitrify.com has a different value than the one shown
+above"* — **true, and baffling.** They had added exactly what we asked for that morning
+(`hosting-site=nbai-709e5932ecaaf74b9c63`) and it verified. Re-importing the app into a NEW chat gave
+it a NEW workspace, and every workspace gets its OWN hosting site, so the screen now wanted
+`hosting-site=nbai-dd4fe67881426b5f258a` and reported the old one as wrong.
+
+The cause is legitimate — moving a domain to a different app genuinely needs a different ownership
+record — but **"you typed it wrong" is the wrong story to tell someone who typed it right.** When the
+value we FOUND is unmistakably one of ours (`hosting-site=nbai-…`) and merely names another site, the
+message now says so and says what to do: EDIT the existing record's value, nothing else changes.
+Narrow on purpose: a genuinely unrelated TXT (an SPF record, a typo) still gets the ordinary
+"fix it" message, or a real mistake would be excused.
+
+### 3. 🔴 My own tests were a weather report — caught by the gate, before CI
+
+Four tests in `domainServingCheck.test.ts` went red on this run. **Not from any change to the code:**
+they used the real `mitrify.com`, so `assertPublicHttpUrl` ran a LIVE DNS lookup, and they had been
+passing only while that domain happened to resolve. Between the two runs its **A record disappeared**
+(verified directly: `NS` and `TXT` still answer, `A` returns NOERROR with zero answers).
+
+A test whose verdict depends on somebody else's DNS is not a test. `checkDomainServing` now takes a
+narrow guard seam, defaulted to the real `assertPublicHttpUrl` so production is unchanged — and the
+test that proves a PRIVATE address is refused deliberately does NOT use the seam, because that one
+must exercise the genuine article or it proves nothing.
+
+⚠️ **This would have gone green in CI and stayed a landmine** — it passed there yesterday for the same
+accidental reason. It is recorded because the class matters more than the instance: no test in this
+repo may depend on live third-party DNS.
+
+Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
+`vitest run` — **1,366 files / 17,151 passing, 1 skipped** (9 new).

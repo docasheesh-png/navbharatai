@@ -145,6 +145,25 @@ export function summarize(checks: readonly RecordCheck[]): string {
 
   if (wrong.length > 0) {
     const w = wrong[0];
+    /**
+     * OUR OWN OLD OWNERSHIP RECORD — a materially different situation, and the one the admin actually
+     * hit (2026-08-21). They connected mitrify.com in the morning, added `hosting-site=nbai-709e…`,
+     * and it verified. They then re-imported the app into a NEW chat, and the screen asked for
+     * `hosting-site=nbai-dd4fe…` and called the old one "a different value" — true, and baffling,
+     * because they had added exactly what we asked for a few hours earlier.
+     *
+     * The reason is real and legitimate: every app gets its OWN hosting site, so moving a domain to a
+     * different app means a different ownership record. But "you typed it wrong" is the wrong story to
+     * tell someone who typed it right — so when the value we FOUND is unmistakably one of ours from
+     * another app, say that instead, and say what to do.
+     */
+    const OURS = /^hosting-site=nbai-/i;
+    if (OURS.test(String(w.expected)) && w.found.some((v) => OURS.test(v.trim().replace(/^"+|"+$/g, '')))) {
+      return `This domain is still pointing at a DIFFERENT app of yours. Each app gets its own `
+        + `ownership record, so connecting it here needs the new value shown above. At your registrar, `
+        + `EDIT the existing ${w.type} record for ${w.name} — replace its value with the new one — then `
+        + `check again. Nothing else needs changing, and your other records stay as they are.`;
+    }
     // THE SECOND LOOP THIS PREVENTS (admin's question, 2026-08-21: "sabhi user karenge?"). A user who
     // has ALREADY fixed a wrong record still sees it reported as wrong, because the old value stays
     // in the internet's caches for the record's TTL — hours, on a registrar that defaults to 14400.

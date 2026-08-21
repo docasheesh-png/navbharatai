@@ -11,8 +11,7 @@ import { join } from 'node:path';
 import {
   appleDomainAssociation,
   APPLE_DOMAIN_ASSOCIATION_PATH,
-  APPLE_DOMAIN_ASSOCIATION_FILE,
-} from './appleDomainAssociation';
+  APPLE_DOMAIN_ASSOCIATION_FILE, APPLE_DOMAIN_ASSOCIATION_DIST_FILE, appleDomainAssociationSource } from './appleDomainAssociation';
 
 const throwing = () => { throw new Error('ENOENT'); };
 
@@ -22,11 +21,38 @@ describe('appleDomainAssociation', () => {
       .toBe('token-from-apple');
   });
 
-  it('falls back to the committed file, read from the documented path', () => {
-    let asked = '';
-    const read = (f: string) => { asked = f; return 'token-from-file'; };
+  it('falls back to the committed file, asking the BUILD OUTPUT first', () => {
+    // The order is the fix (2026-08-21). The runtime image copies `dist/` and NOT `public/`, so a file
+    // committed to public/.well-known was absent from the container: the read threw, the route answered
+    // 404, and the repo plainly showed the file sitting there. Vite copies publicDir into the build
+    // output, dotfiles included, so `dist/` is the only copy production ever has.
+    const asked: string[] = [];
+    const read = (f: string) => { asked.push(f); return 'token-from-file'; };
     expect(appleDomainAssociation({} as never, read)).toBe('token-from-file');
-    expect(asked).toBe(APPLE_DOMAIN_ASSOCIATION_FILE);
+    expect(asked[0]).toBe(APPLE_DOMAIN_ASSOCIATION_DIST_FILE);
+  });
+
+  it('THE PRODUCTION CASE: dist has it, public does not — and it is still found', () => {
+    const read = (f: string) => {
+      if (f === APPLE_DOMAIN_ASSOCIATION_DIST_FILE) return 'token-from-dist';
+      throw new Error('ENOENT'); // public/ is not in the runtime image
+    };
+    expect(appleDomainAssociation({} as never, read)).toBe('token-from-dist');
+  });
+
+  it('THE DEV CASE: no dist yet, public has it — still found', () => {
+    const read = (f: string) => {
+      if (f === APPLE_DOMAIN_ASSOCIATION_FILE) return 'token-from-public';
+      throw new Error('ENOENT');
+    };
+    expect(appleDomainAssociation({} as never, read)).toBe('token-from-public');
+  });
+
+  it('reports WHICH source answered, so a debugger is not guessing which copy they are looking at', () => {
+    expect(appleDomainAssociationSource({ APPLE_DOMAIN_ASSOCIATION: 'x' } as never, throwing)).toBe('env');
+    expect(appleDomainAssociationSource({} as never, (f) => (f === APPLE_DOMAIN_ASSOCIATION_DIST_FILE ? 'x' : ''))).toBe('dist-file');
+    expect(appleDomainAssociationSource({} as never, (f) => (f === APPLE_DOMAIN_ASSOCIATION_FILE ? 'x' : ''))).toBe('source-file');
+    expect(appleDomainAssociationSource({} as never, throwing)).toBeNull();
   });
 
   it('env WINS over the file, so a correction does not need a deploy', () => {

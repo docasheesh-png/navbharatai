@@ -8,8 +8,9 @@
 // throughout: it shows the real pending/active state and never claims a domain is connected when it
 // isn't. Gated by the server flag (the caller only renders this when custom domains are enabled).
 
-import { useState, useEffect } from 'react';
-import { Globe, ChevronLeft, CheckCircle2, Copy, Check, RefreshCw, Info, ExternalLink } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Globe, ChevronLeft, CheckCircle2, Copy, Check, RefreshCw, Info, ExternalLink, Rocket } from 'lucide-react';
+import { timeAgo, needsPublishDot, type PublishFreshness } from '../../lib/publishFreshness';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { REGISTRARS, registrarById, detectRegistrarId, registrarNameFromRdap } from '../../lib/registrarGuide';
 import { authJsonHeaders as authHeaders } from '../../lib/authHeaders';
@@ -34,6 +35,9 @@ interface DomainStatus {
   displayRecords?: DnsRecord[];
   /** What the domain ACTUALLY serves when opened. Absent on an older server. */
   serving?: { state: string; status: number; note: string } | null;
+  /** The app's publish state — is anything live, when did it go live, is it behind the app?
+   *  Absent on an older server, which `publishButton` renders as a plain, claimless "Publish". */
+  publish?: { live: boolean; url: string | null; publishedAt: number | null; freshness: PublishFreshness } | null;
   /** Firebase's OWN explanation of why the domain is stuck. Absent on an older server. */
   issues?: string[];
   /** When the hosting service last looked at the user's DNS (ISO). Absent on an older server. */
@@ -49,6 +53,26 @@ interface DomainStatus {
 export interface NbaiDomainConnectProps {
   workspaceId: string;
   onBack: () => void;
+  /**
+   * Publish this app — the SAME pipeline the main Publish button drives, passed in rather than
+   * re-implemented, so there is exactly one publish path in the product.
+   *
+   * Returns an HONEST reason string when the publish could not start (nothing built yet, a build
+   * already running, quota) — the chooser's standing no-dead-buttons rule. That reason is rendered
+   * right here, because the caller's own error line lives on a different view the user is not on.
+   * Absent ⇒ no button is rendered at all, which is correct for a host that has nothing to publish.
+   */
+  onPublish?: () => string | null | void;
+  /** A build/publish is already running — the button shows it instead of pretending to be idle. */
+  publishBusy?: boolean;
+  /**
+   * The freshness the CALLER already measured, used until this screen's own status call returns.
+   *
+   * It is what makes the dot trail continuous: the user follows a dot in from the Publish sheet, and
+   * the button here already carries it instead of appearing plain for the second it takes to check.
+   * The screen's own status response takes over as soon as it lands — it is the fresher reading.
+   */
+  publishFreshness?: PublishFreshness;
 }
 
 /**
@@ -143,6 +167,56 @@ export function connectStage(
 }
 
 /**
+ * What the connect screen's PUBLISH button should say (admin 2026-08-21: "Visit se pahle ek button
+ * banao — Publish. Is publish se app edit karne ke bad wapas publish ki jayegi").
+ *
+ * The button alone answers "how do I republish". The thing that actually leaves people with a stale
+ * public site is the other half — nobody tells them their live site is older than their app — so the
+ * button STATES which of the three situations they are in, and that is the whole point of it being
+ * computed instead of a fixed label:
+ *
+ *   • never published → this is the missing step; make it the loud primary action.
+ *   • changed         → their site is behind their app. The only case that needs urgency.
+ *   • up to date      → offer it quietly, and say when it last went out so the offer is informative.
+ *   • unknown         → we could not measure it. Offer the button, claim NOTHING about staleness.
+ *
+ * 🔒 `unknown` is silence, never a guess. A wrong "you have unpublished changes" would send people to
+ * re-publish a current site forever; a wrong "up to date" would leave a stale site up while promising
+ * it is not. The freshness verdict itself is the SHARED module the server computes with, so the label
+ * and the measurement can never drift apart. Pure, exported for tests.
+ */
+export function publishButton(
+  freshness: PublishFreshness | undefined,
+  publishedAt: number | null | undefined,
+  now: number,
+): { label: string; primary: boolean; note: string } {
+  const last = typeof publishedAt === 'number' && publishedAt > 0 ? `Last published ${timeAgo(publishedAt, now)}.` : '';
+  switch (freshness) {
+    case 'never_published':
+      return {
+        label: 'Publish now',
+        primary: true,
+        note: 'Your app has not been published yet — this is the step that puts it on your domain.',
+      };
+    case 'changed':
+      return {
+        label: 'Publish update',
+        primary: true,
+        note: `You have changed your app since it was published, so your domain is still showing the older version.${last ? ` ${last}` : ''}`,
+      };
+    case 'up_to_date':
+      return {
+        label: 'Republish',
+        primary: false,
+        note: `Your domain is showing your latest build.${last ? ` ${last}` : ''}`,
+      };
+    default:
+      // Includes `unknown` and an older server that sends no publish block at all.
+      return { label: 'Publish', primary: false, note: '' };
+  }
+}
+
+/**
  * A DNS record name the way a REGISTRAR's add-record form wants it (admin 2026-08-08, Hostinger
  * screenshot): those forms take names RELATIVE to the domain — the apex is "@", a subdomain is just
  * its prefix — while the hosting API hands back fully-qualified names. Pure, exported for tests.
@@ -157,8 +231,10 @@ export function relativeRecordName(name: string, domain: string): string {
 }
 
 
-export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProps) {
+export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy, publishFreshness }: NbaiDomainConnectProps) {
   const [domain, setDomain] = useState('');
+  /** The honest reason the last publish attempt did not start (no dead buttons). Cleared on retry. */
+  const [publishBlocked, setPublishBlocked] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -261,6 +337,27 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
       setChecking(false);
     }
   };
+
+  /**
+   * LOOK AGAIN AFTER PUBLISHING (admin 2026-08-21). Publishing changes the two things this screen is
+   * asserting — whether the domain serves anything, and whether the live site is behind the app — so
+   * when the publish finishes we re-check instead of leaving stale words on screen. Without this the
+   * user presses Publish, it succeeds, and the box above still reads "press Publish once": the only
+   * way out is a page reload, which is exactly the dead end this whole screen keeps being fixed for.
+   *
+   * Checked TWICE: once immediately, and once ~8s later, because hosting can take a moment to start
+   * serving the new release and a single early look would report the old state as if it were final.
+   */
+  const wasPublishing = useRef(false);
+  useEffect(() => {
+    const finished = wasPublishing.current && !publishBusy;
+    wasPublishing.current = !!publishBusy;
+    if (!finished || !domainValid) return;
+    void checkStatus();
+    const t = setTimeout(() => { void checkStatus(); }, 8_000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publishBusy]);
 
   const autoDnsStart = async () => {
     setAutoBusy(true); setError(null); setErrorDetail(null);
@@ -702,6 +799,45 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
               Shown for a CONNECTED domain regardless of what it currently serves: it is their domain,
               and the honest state box directly above already says what they will find there — so this
               never has to pretend, and never has to be withheld either. */}
+          {/* PUBLISH / REPUBLISH (admin 2026-08-21: "Visit se pahle ek button banao — publish. Is
+              publish se app edit karne ke bad wapas publish ki jayegi").
+
+              Placed directly ABOVE Visit because that is the real order of the two actions: publish
+              what you changed, then go and look at it. The label is computed, not fixed — see
+              `publishButton` for why the button has to say WHICH of the three situations you are in,
+              and why an unmeasurable state says nothing rather than guessing.
+
+              It drives the SAME pipeline as the main Publish button (passed in as `onPublish`), so
+              this is a second entry point to one implementation, never a second implementation. */}
+          {result.active && onPublish && (() => {
+            // This screen's own reading wins once it has one; until then the caller's, so the dot the
+            // user followed in here does not blink out and back.
+            const freshness = result.publish?.freshness ?? publishFreshness;
+            const p = publishButton(freshness, result.publish?.publishedAt, Date.now());
+            return (
+              <div className="flex flex-col gap-1.5">
+                <button
+                  onClick={() => { setPublishBlocked(null); const r = onPublish(); if (typeof r === 'string' && r) setPublishBlocked(r); }}
+                  disabled={!!publishBusy}
+                  className={`self-start flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13px] font-bold transition-colors disabled:opacity-50 ${
+                    p.primary
+                      ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                      : 'border border-zinc-700 text-zinc-200 hover:bg-zinc-800'
+                  }`}
+                >
+                  {publishBusy ? <TirangaLoader className="w-4 h-4" /> : <Rocket className="w-4 h-4" />}
+                  {publishBusy ? 'Publishing…' : p.label}
+                  {/* THE END OF THE DOT TRAIL — this is the button that clears it. */}
+                  {!publishBusy && needsPublishDot(freshness) && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-label="You have unpublished changes" />
+                  )}
+                </button>
+                {p.note && <p className="text-[11px] text-zinc-400 leading-relaxed">{p.note}</p>}
+                {publishBlocked && <p className="text-[11px] text-amber-300 leading-relaxed">{publishBlocked}</p>}
+              </div>
+            );
+          })()}
+
           {result.active && (
             <a
               href={visitUrl(cleanDomain)}

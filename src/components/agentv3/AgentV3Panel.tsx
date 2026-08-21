@@ -21,6 +21,8 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
 import { PublishCelebration } from './PublishCelebration';
 import { celebrationFor, type CelebrationKind } from '../../lib/firstPublish';
+import { usePublishState } from '../../hooks/usePublishState';
+import { needsPublishDot } from '../../lib/publishFreshness';
 import { getStoredMotionMode, resolveReduceMotion, systemPrefersReducedMotion } from '../../lib/a11y';
 import {  } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
@@ -2580,6 +2582,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Hosting Phase 1 — the "Publish" chooser (host on NavBharatAI vs bring-your-own), opened from Deploy.
   const [showHostingChooser, setShowHostingChooser] = useState(false);
 
+
   // Fetch the persisted live URL whenever the workspace changes or a build/deploy finishes.
   useEffect(() => {
     const wsId = state.workspaceId;
@@ -2644,6 +2647,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   /** Live state of the direct publish, so the button can report honestly instead of vanishing. */
   const [publishing, setPublishing] = useState(false);
   const [publishMsg, setPublishMsg] = useState('');
+  // THE RED DOT (admin 2026-08-21: "edit karte hai, ek red dot ana chahiye — publish (*) → connect
+  // your own domain (*) → publish (green)(*)"). This is the OUTERMOST step of that trail: the user is
+  // not on the Publish sheet when they edit, so this is the only place the change can be noticed at
+  // all. The BUTTON itself is deliberately untouched ("v5 ka jo publish button hai usko mat chero") —
+  // this adds a dot beside its label and changes nothing about what it does.
+  // Re-read when a build or a publish FINISHES, which are the only two things that can move it.
+  const publishState = usePublishState(state.workspaceId, `${running}|${publishing}`);
+  const showPublishDot = needsPublishDot(publishState?.freshness);
 
   /**
    * Start a real publish. Returns an HONEST reason when it could NOT start, null when it did.
@@ -3477,6 +3488,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           >
             <Rocket className="w-3.5 h-3.5" />
             Publish
+            {showPublishDot && <span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-label="You have unpublished changes" />}
           </button>
           {liveUrl && (
             <a
@@ -5005,6 +5017,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 >
                   <Rocket className="w-4 h-4 shrink-0" />
                   <span className="flex-1 text-left">Publish — host on NavBharatAI or your own provider</span>
+                  {showPublishDot && <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" aria-label="You have unpublished changes" />}
                 </button>
                 {liveUrl && (
                   <a

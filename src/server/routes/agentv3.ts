@@ -289,6 +289,8 @@ function sessionCostCapUsd(): number {
   return Number.isFinite(v) && v > 0 ? v : 5.0;
 }
 import { deploymentStore, withDeploymentPersistence, isLiveDeployment, publishedAppList, type DeploymentRecord } from '../AgentV3/DeploymentStore';
+import { resolvePublishState } from '../AgentV3/publishState';
+import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
 import { buildRecipe, revivalConfirmedMessage, revivalUnconfirmedMessage } from '../AgentV3/previewRevival';
 import { decideAppSignature, appSignatureNotice } from '../AgentV3/appSignatureEntitlement';
@@ -5328,6 +5330,29 @@ export function registerAgentV3Routes(app: Express): void {
       cap: publishedAppCap(),
       used: apps.length,
     });
+  });
+
+  /**
+   * PUBLISH STATE — "is my live site still the app I have?", for the red-dot trail.
+   *
+   * WHY (admin 2026-08-21): "aur edit karte hai, ek red dot ana chahiye — publish (*) → connect your
+   * own domain (*) → publish (green)(*)". The dot is a TRAIL: it appears on the outer Publish button
+   * so you notice, and repeats on each step so you can follow it to the button that fixes it. That
+   * only works if all three read the SAME answer, which is why this endpoint exists rather than each
+   * surface deciding for itself.
+   *
+   * 🔒 The dot means exactly one thing: PUBLISHED, then CHANGED. Not "never published" — an app the
+   * user has not chosen to publish is not a problem to nag about, and a dot that never goes away is
+   * a dot people stop seeing. Owner-only; unmeasurable state returns `unknown`, which shows nothing.
+   */
+  app.get('/api/agentv3/publish-state', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const identity = await verifiedIdentity(req).catch(() => null);
+    const workspaceId = req.query?.workspaceId;
+    if (!ownedByVerifiedUid(identity?.uid ?? null, workspaceId)) {
+      res.status(403).json({ error: 'You can only check your own app.' });
+      return;
+    }
+    res.json(await resolvePublishState(workspaceId));
   });
 
   /**

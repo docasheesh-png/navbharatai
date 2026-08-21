@@ -38164,3 +38164,51 @@ Gate: both tsc clean; `vitest run` 1367 files / 17,170 passed / 1 honest skip; `
 The remaining Apple cause cannot be seen from code. After this deploys, the admin opens
 `/api/admin/apple-signin`; its verdict names which of the four causes it is, and the next step follows
 from that. Recorded here as an open item (rule 6) rather than as a fix.
+## 2026-08-21 — Publish from the domain screen + the red-dot trail (admin request)
+
+**Admin:** *"v5 ka jo publish button hai usko mat chero — publish ke andar connect my domain ke andar
+ek aur publish button chahiye, jo press karne se app us domain par publish ho. Aur edit karte hai, ek
+red dot ana chahiye: publish (*) → connect your own domain (*) → publish (green)(*)."*
+
+**What shipped**
+
+1. **A Publish button on the domain screen**, directly above the Visit link — the real order of the
+   two actions (publish what you changed, then look at it). It drives the SAME pipeline as the main
+   Publish button, passed in as `onPublish`, so this is a second entry point to one implementation
+   and never a second implementation. The main v5 Publish button is untouched, as asked.
+2. **The button states the situation instead of just saying "Publish"** (`publishButton`): "Publish
+   now" when nothing was ever published, "Publish update" when the app changed after publishing,
+   a quiet "Republish" + "Last published 4 minutes ago" when the live site is current.
+3. **The red-dot trail** (`needsPublishDot`) on all three steps — the v5 Publish button, "Connect
+   your own domain", and the domain screen's Publish button — all reading ONE server answer
+   (`/api/agentv3/publish-state` → `resolvePublishState`).
+4. **The screen re-checks itself after a publish** (immediately + once at 8s, since hosting takes a
+   moment to serve a new release), so the state updates without a page reload.
+
+**Why the indicator, not just the button (the other half of the request)**
+
+A button answers *how do I republish*. What actually leaves people with a stale public site is that
+nobody tells them their live site is older than their app — they edit, they are happy, and the domain
+keeps serving last week's build. So the same measurement powers both.
+
+**The signal is measured, never inferred.** Two real timestamps off the SAME server clock:
+`DeploymentRecord.updatedAt` (when the bytes went live) and the durable workspace doc's `savedAt`
+(rewritten by every save/merge/remove — hence a true "the app changed" stamp, not a build marker).
+Either one missing ⇒ `unknown` ⇒ the UI says NOTHING about staleness. A wrong "you have unpublished
+changes" would send people to re-publish a current site forever; a wrong "up to date" would leave a
+stale site up while promising it is not. Silence is the honest third option.
+
+**Deliberate rules, test-locked** (`publishFreshness.test.ts`, `NbaiDomainConnect.logic.test.ts`):
+- The dot means published-then-changed ONLY. NOT `never_published` — an app the user has not chosen
+  to publish is not a problem to nag about, and a dot that never clears is a dot people stop seeing.
+- Equal timestamps read as up-to-date: a build saves then publishes, so a fast build landing both in
+  one millisecond must not be flagged as needing a republish it does not need.
+- Firebase's release count overrides a local record that says "live" — a deployment record outlives
+  the site it describes, and offering "Republish" for a site that never served anything is the exact
+  mitrify.com confusion, one screen over.
+
+**One answer, three surfaces.** `resolvePublishState` (server) and `usePublishState` (client) exist
+so the trail cannot disagree with itself — a dot on the outer button leading to an inner screen that
+says all is well is worse than no dot at all.
+
+Gate: both tsc + `npm run build` + FULL vitest — 1,367 files / 17,175 passing, 1 skipped.

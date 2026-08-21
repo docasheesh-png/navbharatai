@@ -37358,3 +37358,41 @@ workspace whose sandbox is gone) and is a change to the publish path, which has 
 
 Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
 `vitest run` — **1,358 files / 17,071 tests, all passing** (27 new).
+
+---
+
+## 2026-08-21 — "the artifact exists" standing in for "the artifact is valid" — the same bug, twice (PRs #2536 + #2537)
+
+Two separate reports in one hour turned out to be the SAME reasoning error, and naming the class is the
+useful part of this entry.
+
+**A. The returning user's preview (PR #2536, merged 54ec1c7).** Admin: "live preview ek bar chal jata
+hai. kuch der baad band kar ke wapas ao to yeh chalta hi nahi hai."
+1. The one-shot auto-restore bailed on `if (url || foundUrl) return`. A sandbox is PAUSED once idle —
+   deliberately, since it is billed by running time — so the user who returns holds the URL from BEFORE
+   the pause. "We have a URL" ≠ "the preview is alive"; treating the first as the second meant this
+   restore NEVER fired for the case it was written for. Now a pure, tested `shouldRestorePreview`:
+   restore with no URL, or when health actually says `sleeping`/`crashed`. Unknown health still does
+   nothing — rebooting on a guess spins up a BILLED sandbox for a preview that may be fine.
+2. `preview-health` had always returned `sleeping`/`crashed`, and that verdict was used only for the
+   auto-heal decision and NEVER SHOWN. The returning user met a blank frame and silence —
+   indistinguishable from "it just doesn't work", which is the exact sentence reported. There is now an
+   honest banner (it paused so it is not billed while nobody is looking; files are safe) plus a
+   "Start it again" button. ⚠️ The pause itself is NOT a bug and is unchanged — it is the single
+   biggest cost control in the product. The bug was hiding it and not undoing it on return.
+
+**B. The CSS suite's two failures (PR #2537, merged 523790e).** I first answered "it is just a stale
+build"; the admin pushed back, and was right — the MISDIAGNOSIS was the defect. The built-stylesheet
+checks were guarded by `builtCss.length > 0`, so a `dist/` built BEFORE postcss.config.js gained its
+plugins was read as evidence about that config and produced two failures that look like a broken app.
+Freshness is now checked by mtime (CI clones then builds, so its CSS is always newer and the checks
+always run), and the skip STATES ITSELF as a named passing test — "the built stylesheet — NOT CHECKED
+this run > dist/ predates postcss.config.js". A silent skip is how a check quietly stops covering
+anything; this is the suite-level form of the rule the build gates already follow.
+
+**THE CLASS, for whoever hits it next:** both were the EXISTENCE of an artifact standing in for its
+VALIDITY — a URL for a live server, a file for a current build. Cheap to write, and it fails exactly
+where it matters (the returning user, the stale checkout) while looking correct everywhere else. When a
+guard tests "is it there?", ask what it is really trying to know.
+
+Gate: both tsc green, 17,016 passed + 1 honest skip, CI green before each merge.

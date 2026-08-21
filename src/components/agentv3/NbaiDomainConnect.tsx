@@ -91,9 +91,28 @@ export function connectStage(
         note: s.serving.note || 'Publishing again usually fixes this.',
       };
     }
-    // 'serving' or 'unknown'. `unknown` still claims Live on purpose: if we could not reach the domain
-    // from our server, the three active states remain the best evidence we have, and downgrading a
-    // genuinely working domain because OUR check failed trades one wrong answer for another.
+    /**
+     * ⚠️ I GOT THIS WRONG THE FIRST TIME, and the admin's screenshot is the proof.
+     *
+     * The previous version printed "Live!" for `unknown` too, reasoning that if our server could not
+     * reach the domain, the three active states were still the best evidence we had. But that is not
+     * evidence the domain SHOWS THE APP — and on 2026-08-21 our check failed to reach mitrify.com
+     * while the admin was looking at Firebase's "Site Not Found" on that exact domain. We printed
+     * "Live!" over it. Claiming something we did not verify is the one thing rule 2 forbids.
+     *
+     * So `unknown` now says CONNECTED and admits what it could not check. It is not a warning — the
+     * connection genuinely is done, and there may well be nothing wrong — it simply stops asserting
+     * the half we never saw. Only a check that actually SAW the app earns the word "Live".
+     */
+    if (s.serving?.state !== 'serving') {
+      return {
+        headline: 'Connected, with HTTPS.',
+        action: 'none',
+        tone: 'ok',
+        note: 'We could not open your domain from here to confirm it is showing your app — open it '
+          + 'yourself to check. If it shows an error page, press Publish once.',
+      };
+    }
     return { headline: 'Live! Your domain is connected, with HTTPS.', action: 'none', tone: 'ok', note: 'Publish again any time to update what your domain shows.' };
   }
   const ownershipDone = /ACTIVE/i.test(s.ownershipState || '');

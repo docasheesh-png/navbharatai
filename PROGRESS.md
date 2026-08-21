@@ -37999,3 +37999,74 @@ repo may depend on live third-party DNS.
 
 Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
 `vitest run` — **1,366 files / 17,151 passing, 1 skipped** (9 new).
+
+---
+
+## 2026-08-21 — "Live!" printed directly above a browser tab showing "Site Not Found"
+
+The admin's screenshot, and the clearest proof of a wrong call I have made today. Their screen read:
+
+```
+✅ Live! Your domain is connected, with HTTPS.
+   ownership: active · host: active · SSL: active
+   ✓ 4 records you added are verified — nothing more to add.
+```
+
+…and the next browser tab, on that same `mitrify.com`, showed Firebase's **"Site Not Found"**.
+
+### The call I got wrong
+
+PR #2535 added a serving check for exactly this, with three outcomes — and I wrote the third one
+wrong, on purpose, with an argument I still had in the comment:
+
+> *"`unknown` still claims Live on purpose: if we could not reach the domain from our server, the three
+> active states remain the best evidence we have, and downgrading a genuinely working domain because
+> OUR check failed trades one wrong answer for another."*
+
+That argument sounds balanced and is not. **"The best evidence we have" is not the same as "we saw it
+work", and only the second one earns the word Live.** Our check could not reach mitrify.com at that
+moment, `unknown` came back, and the platform asserted the one thing it had specifically failed to
+verify. There was a third option I did not take: **say we could not check.**
+
+`unknown` (and a server that sends no verdict at all) now reads **"Connected, with HTTPS."** with the
+note *"We could not open your domain from here to confirm it is showing your app — open it yourself to
+check. If it shows an error page, press Publish once."* It stays `tone: 'ok'` — the connection genuinely
+IS done, and nothing may be wrong; it simply stops asserting the half nobody saw.
+
+### The real fix: stop needing to reach the domain at all
+
+An HTTP fetch of the user's domain works when it works, and here it did not. But **we never needed
+it**: a custom domain attaches to the app's own Hosting SITE, and a site with **zero releases** has
+unambiguously never been published to.
+
+`siteHasRelease(workspaceId)` asks FIREBASE that question with credentials we already hold — no
+egress to the user's domain, no CDN, no cache. A 404 site is a real `false` (never published); anything
+else unreadable is `null`, because **silence is not a verdict**. The status route consults it FIRST and
+the HTTP fetch stays as a second opinion for what a release count cannot see (a release exists but the
+page errors).
+
+### Two tests reversed, and why that is allowed here
+
+`tests/domainConnectStage.test.ts` and `NbaiDomainConnect.logic.test.ts` both asserted `Live!` for a
+merely-active domain. Changing a test to match code is normally forbidden, so both sites now carry the
+reason: they encoded the bug. Each also gained the positive case — the word **is** earned the moment a
+check actually sees the app serving.
+
+### Also in this change
+
+ • A **verified DNS record now opens on click** to its three copyable fields (admin: *"green tick to
+   aa raha hai, DNS value show nahi ho rahi — wapas se copy karni padi to?"*). Compact was right;
+   losing the value was not.
+ • A mismatch whose found value is **one of ours** (`hosting-site=nbai-…` naming another site) now
+   says so — *"this domain is still pointing at a DIFFERENT app of yours, EDIT the existing record"* —
+   instead of "you typed it wrong" to someone who typed it right. Re-importing an app into a new chat
+   gives it a new workspace, hence a new site, hence a new ownership record.
+ • 🔴 **Four of my own tests were a weather report.** They used the real `mitrify.com`, so the SSRF
+   guard ran a LIVE DNS lookup and they passed only while that domain resolved. Its A record vanished
+   between runs (verified: NS and TXT answer, A returns NOERROR with zero answers) and they went red
+   with no code change. `checkDomainServing` now takes a narrow guard seam defaulted to the real
+   `assertPublicHttpUrl`; the test proving a PRIVATE address is refused deliberately does NOT use it.
+   **No test in this repo may depend on live third-party DNS.**
+
+Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
+`vitest run` — **1,366 files / 17,153 passing, 1 skipped**.

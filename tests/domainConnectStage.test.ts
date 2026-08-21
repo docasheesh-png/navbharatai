@@ -36,11 +36,25 @@ describe('connectStage — one plain sentence and the one next action', () => {
     expect(s.action).toBe('check');
   });
 
-  it('live: celebrates, drops the Check button, and names the ONE remaining user step', () => {
+  it('active: drops the Check button, and names the ONE remaining user step', () => {
+    // ⚠️ The `Live!` this used to assert was the bug (admin screenshot, 2026-08-21). DNS + certificate
+    // active is not evidence the domain SHOWS THE APP — the screen printed "Live!" directly above a
+    // browser tab showing "Site Not Found" on that same domain. With no serving verdict, "Connected"
+    // is the most that can honestly be said, and the note still names the step that fixes it.
     const s = connectStage(st({ active: true, ownershipState: 'OWNERSHIP_ACTIVE', hostState: 'HOST_ACTIVE', sslState: 'CERT_ACTIVE' }));
-    expect(s.headline).toContain('Live!');
+    expect(s.headline).toContain('Connected');
+    expect(s.headline).not.toContain('Live!');
     expect(s.action).toBe('none');
     expect(s.note).toContain('Publish');
+  });
+
+  it('…and the word "Live" IS earned once a check actually saw the app serving', () => {
+    const s = connectStage(st({
+      active: true, ownershipState: 'OWNERSHIP_ACTIVE', hostState: 'HOST_ACTIVE', sslState: 'CERT_ACTIVE',
+      serving: { state: 'serving', note: '' },
+    } as never));
+    expect(s.headline).toContain('Live!');
+    expect(s.action).toBe('none');
   });
 
   it('never claims done from the sub-states alone — only the API\'s own `active` flag does', () => {

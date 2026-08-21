@@ -25,6 +25,7 @@ import { hostingerDnsEnabled, applyHostingerRecords } from '../lib/hostingerDns'
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 import { verifyRecordsLive } from '../lib/domainDnsVerify';
 import { checkDomainServing } from '../lib/domainServingCheck';
+import { siteHasRelease } from '../lib/firebaseCustomDomain';
 
 /**
  * Firebase-NATIVE custom-domain routes (Slice 2) — connect a user's own domain directly to their
@@ -163,7 +164,24 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       // NOT whether anything was ever published to the site the domain points at. A domain connected
       // AFTER the last publish points at an empty site. The only honest way to claim a domain is live
       // is to OPEN it. Bounded, best-effort, and SSRF-guarded (the domain is user-supplied).
-      const serving = status.active ? await checkDomainServing(host).catch(() => null) : null;
+      // 🔒 THE AUTHORITATIVE ANSWER FIRST. `siteHasRelease` asks FIREBASE whether anything was ever
+      // published to this app's site — no egress to the user's domain, and a site with zero releases
+      // has unambiguously never been published to. The HTTP fetch below stays as a SECOND opinion for
+      // everything a release count cannot see (a release exists but the page errors), but it must not
+      // be the only witness: it failed to reach mitrify.com and the screen printed "Live!" over a
+      // domain the admin was watching show "Site Not Found".
+      let serving = status.active ? await checkDomainServing(host).catch(() => null) : null;
+      if (status.active) {
+        const published = await siteHasRelease(workspaceId).catch(() => null);
+        if (published === false) {
+          serving = {
+            state: 'nothing_published',
+            status: serving?.status ?? 0,
+            note: 'Your domain is connected, but this app has never been published to it — opening it '
+              + 'shows an error page. Press Publish once and your domain will start showing your app.',
+          };
+        }
+      }
       res.json({ ...status, displayRecords, dnsCheck, serving });
     } catch (err: any) {
       sendSafeError(res, 500, 'Failed to check domain status. Please try again.', err, 'nbai domain status');

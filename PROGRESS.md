@@ -38212,3 +38212,37 @@ so the trail cannot disagree with itself — a dot on the outer button leading t
 says all is well is worse than no dot at all.
 
 Gate: both tsc + `npm run build` + FULL vitest — 1,367 files / 17,175 passing, 1 skipped.
+
+## 2026-08-21 — CI red on a NEW `tar` advisory + the framework correction finally reaches the client
+
+**1. CI failure — real, and it was blocking every PR in the repo, not just mine.**
+
+`npm run audit:gate` failed with `❌ NEW high/critical: tar [high]` (GHSA-r292-9mhp-454m — uncatchable
+stack-overflow DoS via a crafted long-path tar). A newly-published advisory, unrelated to the diff.
+
+**Fixed properly, not allowlisted.** The advisory range is `<=7.5.20` and `7.5.22` is published, so a
+real patch exists — and `tar` is not dev-only here: `e2b` (the sandbox SDK, server RUNTIME) pulls it,
+alongside `@capacitor/cli` and `firebase-tools`. Added `"tar": "^7.5.22"` to `overrides`; all four
+consumers now resolve to the patched version. Gate re-run locally: ✅ no new high/critical.
+Allowlisting it would have been the wrong call twice over — a fix existed, and the package is shipped.
+
+**2. Open root cause CLOSED: the server never told the LIVE client which framework it detected.**
+
+Recorded open after the two Mitrify "preview nahi chala" autopsies. The server corrects `framework`
+in two places — a zip/URL import reads the real app's package.json (`validation.framework`), and the
+drift check reads an existing workspace (`detectFrameworkFromWorkspace`) — and BOTH corrections were
+written only to the durable conversation record and the diagnostics report.
+
+So a REOPENED session started with the right framework (the two `restored.framework` adoptions), while
+the session that DID the correcting kept `useState('vite-react')` for its whole life — the exact
+session where the correction matters most. That stale label then chose the wrong in-browser preview
+lane AND the wrong dev-server port to wait on, which is the shared root cause behind both reports.
+
+Now: a `framework` event on the build stream, emitted ONLY on a real change (tracked against what the
+CLIENT holds, not against `framework`, which each call site has already reassigned by the time it
+emits), adopted by the reducer and marked EXPLICIT in the panel so a later default cannot overwrite a
+measurement. Test-locked in `frameworkCorrection.test.ts`, including that the event touches nothing
+but the label — a correction arriving mid-build that reset files or the preview would be a worse bug
+than the one it fixes — and that ABSENCE means "nothing was corrected", never "reset to default".
+
+Gate: both tsc + build + FULL vitest — 1,368 files / 17,179 passing, 1 skipped.

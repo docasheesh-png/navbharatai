@@ -201,6 +201,12 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
         activity: pushActivity(state.activity, { id: `p-${event.ts}`, ts: event.ts, kind: 'preview', text: 'preview published', ok: true }),
       };
 
+    // The server detected a DIFFERENT framework than the client assumed — adopt it. The server read
+    // the real files (an import's package.json, or an existing workspace's config); the client only
+    // ever had a default. Between a measurement and a default, the measurement wins.
+    case 'framework':
+      return { ...state, framework: event.framework };
+
     case 'repo':
       return { ...state, repoUrl: event.url, repoFullName: event.fullName };
 

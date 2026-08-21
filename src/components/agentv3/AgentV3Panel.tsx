@@ -2647,6 +2647,27 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   /** Live state of the direct publish, so the button can report honestly instead of vanishing. */
   const [publishing, setPublishing] = useState(false);
   const [publishMsg, setPublishMsg] = useState('');
+  /**
+   * ADOPT THE FRAMEWORK THE SERVER DETECTED (2026-08-21).
+   *
+   * The server corrects the framework when it reads a real app — an import's package.json, or an
+   * existing workspace's config — and that correction was already written to the durable record, so
+   * a REOPENED session got it right (the two `restored.framework` adoptions above). The session that
+   * DID the importing never did: it kept `useState('vite-react')` for its whole life, which is the
+   * exact session where the correction matters most. That stale label chose the wrong in-browser
+   * preview lane AND the wrong dev-server port to wait on, and the preview never appeared — the
+   * shared root cause behind both Mitrify preview failures.
+   *
+   * Marked EXPLICIT for the same reason the reopen path does: this is a measurement from the real
+   * files, so a later turn must not let a default quietly overwrite it.
+   */
+  useEffect(() => {
+    const detected = state.framework;
+    if (!detected) return;
+    setFramework((prev) => (prev === detected ? prev : detected));
+    setFrameworkExplicit(true);
+  }, [state.framework]);
+
   // THE RED DOT (admin 2026-08-21: "edit karte hai, ek red dot ana chahiye — publish (*) → connect
   // your own domain (*) → publish (green)(*)"). This is the OUTERMOST step of that trail: the user is
   // not on the Publish sheet when they edit, so this is the only place the change can be noticed at

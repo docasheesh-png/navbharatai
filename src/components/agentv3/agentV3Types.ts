@@ -67,6 +67,19 @@ export type AgentV3WireEvent =
   | { type: 'tool_result'; agent: AgentRole; callId: string; ok: boolean; summary: string; ts: number }
   | { type: 'file_changed'; agent: AgentRole; change: FileChange; ts: number }
   | { type: 'files_restored'; files: FileChange[]; ts: number }
+  /**
+   * THE FRAMEWORK THE SERVER ACTUALLY DETECTED — emitted only when it DIFFERS from what the client
+   * sent (2026-08-21).
+   *
+   * ROOT CAUSE this closes (two Mitrify preview failures the admin reported): the server corrects the
+   * framework in two places — an import reads the real app's package.json, and the drift check reads
+   * an existing workspace — but the correction was only ever written to the DURABLE record. So a
+   * REOPENED session got it right while the session that did the importing kept `useState('vite-react')`
+   * for its whole life: the exact session where the correction matters most. That stale label then
+   * chose the wrong in-browser bundler AND the wrong dev-server port to wait on, and the preview never
+   * came up. The client was guessing about a fact the server already knew.
+   */
+  | { type: 'framework'; framework: string; reason: 'imported' | 'detected'; ts: number }
   | { type: 'diff'; agent: AgentRole; diff: { path: string; patch: string }; ts: number }
   | { type: 'todo_updated'; todos: TodoItem[]; ts: number }
   | { type: 'plan_updated'; plan: string; ts: number }
@@ -179,6 +192,9 @@ export interface AgentV3ClientState {
   pendingPermission?: { callId: string; action: string };
   /** The build is waiting on credentials the user must type. Names only — values go straight to the vault. */
   pendingSecrets?: { callId: string; prompt: string; secrets: Array<{ name: string; why: string }> };
+  /** The framework the SERVER detected for this workspace, once it has told us (see the event).
+   *  Absent means the server never corrected the client's choice — which is the normal case. */
+  framework?: string;
   /** The sandbox workspace id for this build (enables History → restore). */
   workspaceId?: string;
   /** P0 — the ACTIVE build's unique id + prompt hash (from `build_meta`/`result`). Echoed on the report

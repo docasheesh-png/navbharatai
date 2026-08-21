@@ -7011,6 +7011,28 @@ export function registerAgentV3Routes(app: Express): void {
     const frameworkResolved = req.body?.frameworkResolved === true;
     const fwSel = resolveFrameworkSelection({ picked: framework, explicit: frameworkExplicit, prompt, resolved: frameworkResolved });
     framework = fwSel.status === 'ok' ? fwSel.framework : fwSel.picked;
+    /**
+     * TELL THE LIVE CLIENT WHEN WE CORRECT ITS FRAMEWORK (2026-08-21).
+     *
+     * The server corrects `framework` in two places — an import reads the real app's package.json, and
+     * the drift check reads an existing workspace — and both corrections were written ONLY to the
+     * durable record and the diagnostics report. So a REOPENED session started with the right answer
+     * while the session that did the correcting kept its `vite-react` default for its whole life: the
+     * very session where it matters most. The browser then chose the wrong in-browser preview lane and
+     * waited on the wrong dev-server port, and the preview never appeared — the shared root cause
+     * behind both Mitrify "preview nahi chala" reports.
+     *
+     * Emitted ONLY on a real change (tracked against what the CLIENT actually holds, not against
+     * `framework`, which each call site has already reassigned by the time it calls this). A no-op
+     * event would be a UI update for nothing, and repeat corrections must not re-announce.
+     * Best-effort by construction: a stream failure must never affect the build.
+     */
+    let clientKnownFramework = framework;
+    const emitFrameworkCorrection = (fw: string, reason: 'imported' | 'detected'): void => {
+      if (!fw || fw === clientKnownFramework) return;
+      clientKnownFramework = fw;
+      try { events.emit({ type: 'framework', framework: fw, reason, ts: Date.now() }); } catch { /* never block a build on a label */ }
+    };
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
 
     // ── PROJECT LANDING PIPELINE — admin master plan: ONE pipeline for every import source ────
@@ -7128,6 +7150,12 @@ export function registerAgentV3Routes(app: Express): void {
       // start, before the import existed, so it kept the request default while the manifest recorded
       // the detected one — one build, two answers. The label is now pushed wherever it changes.
       try { opts.diag?.setFramework?.(framework); } catch { /* a label update never blocks an import */ }
+      // …AND TELL THE LIVE CLIENT (2026-08-21). The line above fixed the REPORT; the durable record
+      // was fixed too, so a REOPENED session got the right framework. The session doing the importing
+      // never did — it kept its `vite-react` default for its whole life, which is the exact session
+      // where the correction matters most. That stale label picked the wrong in-browser bundler and
+      // the wrong dev-server port to wait on, and the preview never appeared (both Mitrify reports).
+      emitFrameworkCorrection(framework, 'imported');
       isEditMode = true;
       isImportTurn = true; // this turn's job was to import + survey, not to build (see the flag decl)
       emit({ type: 'files_restored', files: written.map((path) => ({ path, kind: 'create' as const })), ts: Date.now() });
@@ -9049,6 +9077,10 @@ export function registerAgentV3Routes(app: Express): void {
                   // Same sibling as the import path above — the report must not keep the stale label.
                   try { buildDiagRef?.setFramework?.(detected); } catch { /* never block a build on a label */ }
                   events.emit({ type: 'narration', agent: 'architect', text: `🧭 Detected this is a ${detected} app (not the default) — switching to the ${detected} toolchain so the preview and checks match your code.`, ts: Date.now() });
+                  // The narration TELLS the user; this tells the CLIENT CODE. Without it the browser
+                  // keeps its `vite-react` default and goes on choosing the wrong preview lane and the
+                  // wrong dev-server port, while the message above says we switched.
+                  emitFrameworkCorrection(detected, 'detected');
                 }
               }
               // PROJECT-COHERENCE PRE-FLIGHT (autopsy buildId a4be5a05): a workspace whose SOURCE files are

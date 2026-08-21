@@ -37257,3 +37257,50 @@ and is the admin's step at the registrar.
 
 Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
 `vitest run` — **1,355 files / 17,014 tests, all passing** (17 new).
+
+## 2026-08-21 — Dead-button sweep, part 3: the last five, and one whole dead file
+
+Closes every remaining candidate the 2026-08-21 sweep listed as unverified. Each needed a different
+answer, so none of this was a blanket deletion.
+
+**WIRED (the capability existed, only the button was missing a handler):**
+- **`BotBuilder` — the simulator's Send button.** Pressing **Enter** sent a message; pressing **Send**
+  beside it did nothing. Root cause: the input is UNCONTROLLED and the Enter handler read the value
+  straight off `e.target`, so the button had no way to reach it — which is presumably why no handler
+  was ever written. Both now call one `sendSimMessage()` through a ref, so they cannot drift apart.
+
+**REMOVED (no honest destination exists — wiring them would mean inventing one):**
+- **`PreviewPanel` — back/forward chevrons.** Browser-style navigation that never navigated, and
+  could not be wired: the preview is a **cross-origin iframe**, and a parent page is blocked from
+  reading or stepping that frame's history (`contentWindow.history` throws). Faking it by reloading
+  `src` and keeping our own stack would move the frame somewhere the user did not ask for and call it
+  "back". Refresh beside it is real and stays.
+- **`ActivityBar` — the hamburger.** The DESKTOP rail (the mobile variant returns earlier) where the
+  icons below ARE the navigation. There is no drawer, and `ActivityBarProps` has no menu toggle.
+  Adding one would be inventing a menu to justify a button.
+- **`CostEstimator` — "Start Free".** A green CTA beside the cheapest-platform recommendation. There
+  is nowhere honest for it to go: `PlatformCost` carries no signup URL, and hardcoding third-party
+  signup links would invent a destination and rot silently the day a provider moved it. The card's
+  job is to say which option is cheapest — it does that. Deploying is the Publish sheet's job.
+
+**DELETED — `src/components/ide/StatusBar.tsx`, an entire file nothing imports.** Confirmed unmounted
+(the 27 repo hits for "StatusBar" are all `@capacitor/status-bar`, a different thing). It displayed
+invented state throughout: **"AI READY" was a hardcoded string shown even while `aiStatus === 'thinking'`**
+(only the icon changed), plus a fixed "JavaScript" regardless of the open file and a fixed "Spaces: 2"
+regardless of `ide_tabSize`. Its `isSaving` prop was accepted and never used. None of it ever reached a
+user *because* the file never rendered — which is exactly why it had to go rather than be polished:
+dead code carrying invented state is where this class returns the day somebody mounts it.
+
+**Guard extended:** `tests/deadControlSweep.test.ts` now covers all seven cleaned files (11 tests),
+pins the Enter/Send shared path, and asserts `StatusBar.tsx` stays deleted.
+
+Gate: both `tsc` clean; FULL suite **1342 files / 16809 tests green**.
+
+**The sweep is now closed.** Every handler-less `<button>` found in live UI on 2026-08-21 has been
+wired, removed, or explained. Remaining hits in the original scan are code-sample STRINGS
+(`ComponentLibrary`, `DesignSystem`, `WhitelabelBranding`, `APIMarketplace`, `SDAChat`), a props-
+forwarding `ui/Button.tsx`, test fixtures, and icon buttons whose parent handles the click.
+
+⚠️ Still open from part 2, unchanged: **`SecurityScan`'s progress bar is fake** (timer-driven
+percentage and canned phase strings over a single `fetch`). Logged as an open root cause; fixing it
+honestly needs real streamed progress or an indeterminate spinner.

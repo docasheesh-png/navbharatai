@@ -19,7 +19,7 @@
  * that genuinely bites beats a broad one that has to be exempted into uselessness.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 const root = join(__dirname, '..');
@@ -65,6 +65,10 @@ describe('dead control sweep', () => {
     'src/components/ide/AIDebugger.tsx',
     'src/components/ide/SecurityScan.tsx',
     'src/components/panels/SettingsPanel.tsx',
+    'src/components/ide/ActivityBar.tsx',
+    'src/components/ide/BotBuilder.tsx',
+    'src/components/ide/CostEstimator.tsx',
+    'src/components/ide/PreviewPanel.tsx',
   ]) {
     it(`${rel} has no button that does nothing`, () => {
       const dead = handlerless(rel);
@@ -85,5 +89,20 @@ describe('dead control sweep', () => {
     // `files` is read-only here and the pasted-error tab has no workspace or target file.
     expect(stripComments(readFileSync(join(root, 'src/components/ide/AIDebugger.tsx'), 'utf8')))
       .not.toMatch(/Apply to File/);
+  });
+
+  it('the bot simulator Send button shares one path with the Enter key', () => {
+    // Enter used to read the value off the event target, which the adjacent Send button could not
+    // reach — so Enter worked and Send did nothing. One function now serves both.
+    const src = readFileSync(join(root, 'src/components/ide/BotBuilder.tsx'), 'utf8');
+    expect(src).toMatch(/onClick=\{sendSimMessage\}/);
+    expect(src).toMatch(/onKeyDown=\{e => \{ if \(e\.key === 'Enter'\) sendSimMessage\(\); \}\}/);
+  });
+
+  it('the unmounted IDE StatusBar stays deleted', () => {
+    // It was never imported anywhere, and displayed hardcoded state a user could have believed:
+    // "AI READY" even while aiStatus was 'thinking', plus a fixed "JavaScript" and "Spaces: 2".
+    // Dead code carrying invented state is where this class comes back the day someone mounts it.
+    expect(existsSync(join(root, 'src/components/ide/StatusBar.tsx'))).toBe(false);
   });
 });

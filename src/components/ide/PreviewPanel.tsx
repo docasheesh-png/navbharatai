@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Monitor, Smartphone, RefreshCcw,
   ExternalLink, Maximize2, Shield, Globe,
-  Search, ChevronLeft, ChevronRight, Download, Package,
+  Search, Download, Package,
   Share2, Copy, Check, X, Wifi, Pen, Eye, ChevronDown, ChevronUp,
   Zap, Tag, Camera
 } from 'lucide-react';
@@ -358,8 +358,12 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
         <div className="flex items-center gap-1">
-          <button className="p-2 hover:bg-white/5 rounded-full text-[#484f58]"><ChevronLeft className="w-4 h-4" /></button>
-          <button className="p-2 hover:bg-white/5 rounded-full text-[#484f58]"><ChevronRight className="w-4 h-4" /></button>
+          {/* The back/forward chevrons were REMOVED here (admin 2026-08-21). Neither had an onClick,
+              so they were browser-style navigation that never navigated. They also could not be
+              wired: the preview runs in a CROSS-ORIGIN iframe, and the browser blocks a parent page
+              from reading or stepping that frame's history — `contentWindow.history` throws. Faking
+              it (reloading the src, keeping our own URL stack) would move the frame somewhere the
+              user did not ask for and call it "back". Refresh below is real and stays. */}
           <button onClick={onRun} className="p-2 hover:bg-indigo-600/20 rounded-full text-indigo-400"><RefreshCcw className="w-4 h-4" /></button>
         </div>
 

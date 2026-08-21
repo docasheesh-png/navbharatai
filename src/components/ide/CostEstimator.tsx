@@ -568,9 +568,14 @@ export const CostEstimator: React.FC = () => {
                   </span>
                 </span>
               </div>
-              <button className="shrink-0 px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-medium rounded-lg transition-colors">
-                Start Free
-              </button>
+              {/* "Start Free" was REMOVED here (admin 2026-08-21). It was a green CTA beside the
+                  cheapest-platform recommendation, with no onClick — a user who read "X sabse sasta
+                  rahega" and pressed it got nothing. There is also nowhere honest for it to go:
+                  `PlatformCost` carries no signup URL, so "start" on the recommended platform has no
+                  destination, and hardcoding third-party signup links here would be inventing one
+                  (and would rot silently the day a provider moves it). This card's job is to tell
+                  the user which option is cheapest, which it does. Deploying is the Publish sheet's
+                  job, and that path is real. */}
             </div>
 
             {/* Platform Cards */}

@@ -11,7 +11,8 @@ vi.mock('axios', () => {
   const post = vi.fn();
   const patch = vi.fn();
   const del = vi.fn();
-  return { default: { post, patch, delete: del }, AxiosError: class AxiosError extends Error {} };
+  const get = vi.fn();
+  return { default: { post, patch, delete: del, get }, AxiosError: class AxiosError extends Error {} };
 });
 
 import axios from 'axios';
@@ -34,7 +35,14 @@ describe('FirebaseHostingDeployer — channel-create payload is valid (no `type`
       if (url.includes('populateFiles')) {
         return { data: { uploadRequiredHashes: [], uploadUrl: undefined } };
       }
+      // A channel create returns the REAL url — hash and all. Constructing it is the 2026-08-20 bug.
+      if (url.includes('/channels?channelId=')) {
+        return { data: { url: 'https://gen-lang-client-0866594388--v3-ws-8e33e1d.web.app' } };
+      }
       return { data: {} };
+    });
+    (axios.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { url: 'https://gen-lang-client-0866594388--v3-ws-8e33e1d.web.app' },
     });
     (axios.patch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: {} });
   });
@@ -109,5 +117,58 @@ describe('FirebaseHostingDeployer - the deploy URLs are exactly what the Hosting
     await expect(
       new FirebaseHostingDeployer().deployStatic('ws-403', new Map([['index.html', Buffer.from('x')]])),
     ).rejects.toThrow(/Firebase Hosting Admin/);
+  });
+});
+
+/**
+ * REGRESSION (admin 2026-08-20, the LAST bug in the publish chain): a publish finally succeeded
+ * end-to-end and the app was still "Site Not Found". The returned URL was BUILT as
+ * `<site>--<channelId>.web.app`, but a preview channel lives at `SITE--CHANNEL-RANDOMHASH.web.app`
+ * — a hash Firebase generates. The deploy was real; the address we handed back was not.
+ */
+describe('FirebaseHostingDeployer - the published URL comes FROM Firebase, never from us', () => {
+  const REAL = 'https://gen-lang-client-0866594388--v3-ws-8e33e1d.web.app';
+
+  // Own happy-path mocks: the block above deliberately leaves failing ones in place.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (axios.post as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url.includes('/channels?channelId=')) return { data: { url: REAL } };
+      if (url.includes('populateFiles')) return { data: { uploadRequiredHashes: [], uploadUrl: undefined } };
+      if (url.includes('/versions')) return { data: { name: 'sites/s/versions/v1' } };
+      return { data: {} };
+    });
+    (axios.patch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: {} });
+    (axios.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { url: REAL } });
+  });
+
+  it('THE BUG: returns the channel url Firebase reported, hash intact', async () => {
+    const url = await new FirebaseHostingDeployer()
+      .deployStatic('ws-real', new Map([['index.html', Buffer.from('x')]]));
+    expect(url).toBe(REAL);
+    expect(url).toContain('8e33e1d'); // the hash a constructed URL could never know
+  });
+
+  it('a REDEPLOY (channel already exists, HTTP 409) looks the url up instead of guessing it', async () => {
+    (axios.post as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url.includes('/channels?channelId=')) {
+        throw Object.assign(new Error('exists'), { response: { status: 409, data: {} } });
+      }
+      if (url.includes('/versions') && !url.includes('populateFiles')) return { data: { name: 'sites/s/versions/v1' } };
+      if (url.includes('populateFiles')) return { data: { uploadRequiredHashes: [], uploadUrl: undefined } };
+      return { data: {} };
+    });
+    const url = await new FirebaseHostingDeployer()
+      .deployStatic('ws-again', new Map([['index.html', Buffer.from('x')]]));
+    expect(url).toBe(REAL);
+    expect((axios.get as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it('no url from Firebase = an honest STOP, never a second guessed address', async () => {
+    (axios.post as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => ({ data: {} }));
+    (axios.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: {} });
+    await expect(
+      new FirebaseHostingDeployer().deployStatic('ws-nourl', new Map([['index.html', Buffer.from('x')]])),
+    ).rejects.toThrow(/cannot tell you where your app is live/);
   });
 });

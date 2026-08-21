@@ -26,25 +26,41 @@ const HOSTING_API = 'https://firebasehosting.googleapis.com/v1beta1';
 /**
  * The public URL a published app is served at. Pure + exported for tests.
  *
- * DEFAULT (no branded domain): the raw Firebase channel URL `https://<site>--<channelId>.web.app`.
- * That host is already on the Public Suffix List, so it is the SAFE default — do not remove it.
+ * ⚠️ TAKES FIREBASE'S OWN CHANNEL URL, and never rebuilds one. This used to take a channelId and
+ * construct `<site>--<channelId>.web.app`, which is NOT where a preview channel lives: the real host
+ * is `SITE_ID--CHANNEL_ID-RANDOM_HASH.web.app`, with a hash Firebase generates and a channel id it
+ * TRUNCATES past the 63-char DNS limit. A publish therefore succeeded and still handed the user a
+ * "Site Not Found" (admin 2026-08-20). See `ensureChannel`, which reads the URL from the API.
  *
- * BRANDED (`PUBLISHED_APP_DOMAIN` set, e.g. `mitrify.in`): `https://<channelId>.<domain>`. This is a
- * pure STRING change — it only produces the right host. It becomes REAL only once a Cloudflare Worker
- * routes `*.<domain>` to the matching Firebase channel (deterministic: `<sub>.<domain>` →
- * `https://<site>--<sub>.web.app`, because `site` is the constant project). Until that Worker is live
- * the env MUST stay unset, or every published URL points at a host that does not resolve. See
- * `infra/cloudflare/mitrify-apps-worker.js` and its runbook.
+ * DEFAULT (no branded domain): that real Firebase URL, unchanged. Its host is already on the Public
+ * Suffix List, so it is the SAFE default — do not replace it with anything computed.
+ *
+ * BRANDED (`PUBLISHED_APP_DOMAIN` set, e.g. `mitrify.in`): the SAME host, re-labelled —
+ * `https://<sub>.<domain>` where `<sub>` is exactly what follows `<site>--` in the real host. The
+ * Cloudflare Worker reverses that mapping (`<sub>.<domain>` → `<site>--<sub>.web.app`), so the two
+ * halves stay in step by construction. Anything unparseable falls back to the Firebase URL, because a
+ * working unbranded link beats a pretty broken one. See `infra/cloudflare/mitrify-apps-worker.js`.
  *
  * ⚠️ Branded subdomains are NOT isolated from each other for COOKIES until `<domain>` is on the Public
  * Suffix List (a separate, weeks-long registration). localStorage/IndexedDB are already per-origin, so
  * apps are isolated for those from day one; PSL is what closes cookie-tossing between apps. Do not flip
  * this on for apps that set `Domain=.<domain>` cookies before PSL lands.
  */
-export function publishedAppUrl(channelId: string, site = FIREBASE_PROJECT, brandedDomain = process.env.PUBLISHED_APP_DOMAIN): string {
+export function publishedAppUrl(channelUrl: string, site = FIREBASE_PROJECT, brandedDomain = process.env.PUBLISHED_APP_DOMAIN): string {
+  const real = String(channelUrl || '').trim();
   const domain = (brandedDomain || '').trim().replace(/^\.+|\.+$/g, '');
-  if (domain) return `https://${channelId}.${domain}`;
-  return `https://${site}--${channelId}.web.app`;
+  if (!domain) return real;
+
+  // Brand it by RE-LABELLING Firebase's own host, never by rebuilding one. The Worker maps
+  // `<sub>.<domain>` → `<site>--<sub>.web.app`, so `<sub>` is exactly what follows `<site>--` in the
+  // real host — hash, truncation and all. Anything we could not parse stays on the Firebase URL,
+  // because a working unbranded link beats a pretty broken one.
+  const host = real.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const prefix = `${site}--`;
+  if (!host.endsWith('.web.app') || !host.startsWith(prefix)) return real;
+  const sub = host.slice(prefix.length, -'.web.app'.length);
+  if (!/^[a-z0-9-]+$/.test(sub)) return real; // the Worker refuses anything else — don't hand it one
+  return `https://${sub}.${domain}`;
 }
 
 /** The injected deploy function the dispatcher calls: dist files → permanent public URL. */
@@ -61,7 +77,8 @@ export class FirebaseHostingDeployer {
     const site = FIREBASE_PROJECT;
     const channelId = makeChannelId(workspaceId);
 
-    await this.ensureChannel(site, channelId, headers);
+    // The REAL channel URL, from Firebase — see ensureChannel for why it can never be constructed.
+    const channelUrl = await this.ensureChannel(site, channelId, headers);
     const versionName = await this.publishVersion(site, files, token, headers);
     await this.hostingCall('release', () =>
       axios.post(
@@ -69,7 +86,7 @@ export class FirebaseHostingDeployer {
         {},
         { headers },
       ));
-    return publishedAppUrl(channelId, site);
+    return publishedAppUrl(channelUrl, site);
   }
 
   /**
@@ -238,18 +255,35 @@ export class FirebaseHostingDeployer {
     }
   }
 
-  private async ensureChannel(site: string, channelId: string, headers: Record<string, string>): Promise<void> {
+  /**
+   * Create-or-reuse the channel and return the URL FIREBASE gave it — never one we invented.
+   *
+   * ROOT CAUSE this closes (admin 2026-08-20, the last publish bug in the chain): a publish finally
+   * succeeded end-to-end and the app was still "Site Not Found", because the returned URL was BUILT
+   * as `<site>--<channelId>.web.app`. That host does not exist. A preview channel is served at
+   *     SITE_ID--CHANNEL_ID-RANDOM_HASH.web.app
+   * (firebase.google.com/docs/hosting/test-preview-deploy) — Firebase generates the hash, and it also
+   * TRUNCATES the channel id when `SITE--CHANNEL` would pass the 63-character DNS label limit. Neither
+   * is reproducible from our side, so any constructed URL is a guess dressed as a fact: the deploy
+   * really happened, and we then pointed the user at a host that was never created.
+   *
+   * The Channel resource carries an output-only `url`. Reading it is the only way this can be right,
+   * so it is now the ONLY way the URL is obtained.
+   */
+  private async ensureChannel(site: string, channelId: string, headers: Record<string, string>): Promise<string> {
+    let url = '';
     try {
       // Channel-create payload: ONLY valid `Channel` fields. There is NO `type` field on a Channel —
       // sending `type: 'LIVE'` used to be silently ignored, but Firebase's proto3 JSON parser now
       // REJECTS unknown fields (HTTP 400 "Unknown name \"type\" at 'channel'"), which broke publishing.
       // Omitting `expireTime`/`ttl` is deliberate: per the Hosting API a channel with no expiry "will
       // not be automatically deleted", i.e. the published app URL stays permanent (the whole promise).
-      await axios.post(
+      const created = await axios.post<{ url?: string }>(
         `${HOSTING_API}/sites/${site}/channels?channelId=${channelId}`,
         { retainedReleaseCount: 3 },
         { headers },
       );
+      url = typeof created.data?.url === 'string' ? created.data.url : '';
     } catch (err) {
       const status = (err as AxiosError)?.response?.status;
       if (status !== 409) {
@@ -260,7 +294,23 @@ export class FirebaseHostingDeployer {
           'Ensure the Cloud Run service account has the "Firebase Hosting Admin" IAM role.',
         );
       }
+      // 409 = the channel already exists (every redeploy after the first). Its URL — hash and all —
+      // is only knowable by asking, which is exactly what the old constructed URL skipped.
     }
+    if (!url) {
+      const existing = await this.hostingCall('channel lookup', () =>
+        axios.get<{ url?: string }>(`${HOSTING_API}/sites/${site}/channels/${channelId}`, { headers }));
+      url = typeof existing.data?.url === 'string' ? existing.data.url : '';
+    }
+    if (!url) {
+      // Honest stop rather than a second guessed URL. The files may well be uploaded, but handing back
+      // a host we invented is the precise failure being fixed — saying so is the smaller harm.
+      throw new Error(
+        'Firebase Hosting did not return the channel URL, so NavBharatAI cannot tell you where your app '
+        + 'is live. Please publish again in a moment.',
+      );
+    }
+    return url;
   }
 
   private async createVersion(site: string, headers: Record<string, string>): Promise<string> {

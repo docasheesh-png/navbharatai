@@ -23,23 +23,36 @@ const okDeploy: DeployFn = async (ws) => `https://gen-lang-client-0866594388--v3
 const dispatcher = (act: ActuatorPort, deploy?: DeployFn) =>
   new ToolDispatcher(act, 'ws-1', undefined, undefined, undefined, undefined, undefined, undefined, undefined, deploy);
 
-describe('publishedAppUrl — branded published-app host (Step 3, env-flagged)', () => {
-  it('defaults to the SAFE raw Firebase channel host when no branded domain is set', () => {
-    expect(publishedAppUrl('v3-abc-123', 'gen-lang-client-0866594388', undefined))
-      .toBe('https://gen-lang-client-0866594388--v3-abc-123.web.app');
-    expect(publishedAppUrl('v3-abc-123', 'gen-lang-client-0866594388', ''))
-      .toBe('https://gen-lang-client-0866594388--v3-abc-123.web.app');
+describe('publishedAppUrl — brand Firebase\'s OWN host, never a rebuilt one', () => {
+  const SITE = 'gen-lang-client-0866594388';
+  // What Firebase actually serves a preview channel at: SITE--CHANNEL-RANDOMHASH.web.app
+  const REAL = `https://${SITE}--v3-abc-123-8e33e1d.web.app`;
+
+  it('defaults to the REAL Firebase channel URL, unchanged', () => {
+    expect(publishedAppUrl(REAL, SITE, undefined)).toBe(REAL);
+    expect(publishedAppUrl(REAL, SITE, '')).toBe(REAL);
   });
 
-  it('uses the branded subdomain when a domain is set — the channelId IS the subdomain', () => {
-    // The Cloudflare Worker maps <sub>.mitrify.in -> <site>--<sub>.web.app, so the channelId alone
-    // is the branded subdomain and the site prefix lives only in the Worker.
-    expect(publishedAppUrl('v3-abc-123', 'gen-lang-client-0866594388', 'mitrify.in'))
-      .toBe('https://v3-abc-123.mitrify.in');
+  it('THE BUG: the branded host keeps the RANDOM HASH — dropping it was the "Site Not Found"', () => {
+    // A publish succeeded and the app was still Site Not Found, because the URL was built as
+    // `<site>--<channelId>.web.app` — a host Firebase never created (no hash, no truncation).
+    expect(publishedAppUrl(REAL, SITE, 'mitrify.in')).toBe('https://v3-abc-123-8e33e1d.mitrify.in');
+  });
+
+  it('the branded subdomain is exactly what the Cloudflare Worker maps back to the origin', () => {
+    const branded = publishedAppUrl(REAL, SITE, 'mitrify.in');
+    const sub = branded.replace('https://', '').replace('.mitrify.in', '');
+    expect(`https://${SITE}--${sub}.web.app`).toBe(REAL); // the Worker's mapping, reversed
   });
 
   it('tolerates a domain given with stray leading/trailing dots', () => {
-    expect(publishedAppUrl('v3-x', 'site', '.mitrify.in.')).toBe('https://v3-x.mitrify.in');
+    expect(publishedAppUrl(REAL, SITE, '.mitrify.in.')).toBe('https://v3-abc-123-8e33e1d.mitrify.in');
+  });
+
+  it('anything it cannot parse stays on the WORKING Firebase URL, never a guessed brand', () => {
+    expect(publishedAppUrl('https://example.com/app', SITE, 'mitrify.in')).toBe('https://example.com/app');
+    expect(publishedAppUrl('https://other-project--v3-x.web.app', SITE, 'mitrify.in'))
+      .toBe('https://other-project--v3-x.web.app');
   });
 });
 

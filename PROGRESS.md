@@ -36646,3 +36646,27 @@ Still to verify from the original sweep (lower confidence, parent may handle the
 `StatusBar` bell.
 
 Gate: both `tsc` clean; FULL suite **1342 files / 16803 tests green**.
+---
+
+## 2026-08-21 — App Settings: the two explainer cards removed (PR #2515, merged 789087d)
+
+Admin: "yeh sab hatao delete karo. i need clear interface". Removed from the App Settings root:
+"Hosting — your app is already hosted" and "Frontend & Backend — built for you".
+
+**Why deleting was right, not a trade-off.** Both were TRUE, and both were prose on a screen whose job
+is to hold CONTROLS. A paragraph that must be read on every visit and can be acted on nowhere is weight
+the user carries for us — and these two, stacked in the right column, were the first thing the eye met.
+Crucially NOTHING WAS LOST: both facts already live in `AppKnowledgeBase`, so every AI in the app
+answers "where is my app hosted?" / "where do I configure the backend?" on demand — the surface a
+question belongs on. A new test asserts that knowledge is still there, so if it ever leaves the
+knowledge base this deletion becomes a caught regression instead of a silent loss.
+
+⚠️ **Test-intent note (not a test bent to fit code).** Two tests in `tests/websiteHub.test.ts` asserted
+the cards EXISTED — written the day before by another session, when the broken "Hosting & Deploy"
+screen was retired and its one useful sentence was preserved as an info line. They encoded the older
+product decision. Both were rewritten to the new intent: the cards are gone AND neither may return as a
+tile. The old assertions were not quietly deleted.
+
+Also: `Sparkles` became an unused import and was dropped.
+
+Gate: both tsc green, 16,785 tests / 1,339 files, CI green before merge.

@@ -154,16 +154,39 @@ class DeploymentStore {
    * updatedAt desc and filters `status` in memory so NO composite Firestore index is required.
    */
   async list(opts?: { status?: DeploymentStatus; limit?: number }): Promise<DeploymentRecord[]> {
+    return (await this.listWithCompleteness(opts)).records;
+  }
+
+  /**
+   * The same listing, plus the fact every caller that REASONS ABOUT ABSENCE needs: was this the whole
+   * registry, or only as much of it as we could get?
+   *
+   * WHY IT EXISTS (found 2026-08-21). `list()` returns `[]` both when there are genuinely no
+   * deployments and when Firestore threw, and it silently truncates at 500. The channel reconciler
+   * treated "no record for this channel" as "this channel is orphaned waste" and offered a DELETE
+   * button — so one Firestore hiccup on that screen listed every published app in the account as
+   * reclaimable, one click each from taking a real user's live site down for good.
+   *
+   * `complete: false` means: do not conclude anything from a record NOT being here.
+   */
+  async listWithCompleteness(
+    opts?: { status?: DeploymentStatus; limit?: number },
+  ): Promise<{ records: DeploymentRecord[]; complete: boolean }> {
     const db = this.getDb();
-    if (!db) return [];
+    // No database is not "no deployments" — it is no answer.
+    if (!db) return { records: [], complete: false };
     const limit = Math.max(1, Math.min(500, opts?.limit ?? 100));
     try {
       const snap = await db.collection('agentv3_deployments').orderBy('updatedAt', 'desc').limit(limit).get();
-      let recs = snap.docs.map((d) => d.data() as DeploymentRecord);
-      if (opts?.status) recs = recs.filter((r) => (r.status ?? 'active') === opts.status);
-      return recs;
+      const all = snap.docs.map((d) => d.data() as DeploymentRecord);
+      // Hitting the cap means there may be more we never saw. Filtering by status happens AFTER, so
+      // completeness is judged on the raw page — a status filter narrowing 500 rows to 3 must not be
+      // mistaken for a small, fully-read registry.
+      const complete = all.length < limit;
+      const records = opts?.status ? all.filter((r) => (r.status ?? 'active') === opts.status) : all;
+      return { records, complete };
     } catch {
-      return [];
+      return { records: [], complete: false };
     }
   }
 

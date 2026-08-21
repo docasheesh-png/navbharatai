@@ -37835,3 +37835,65 @@ under it and is why that path usually recovers. Recorded rather than silently ha
 
 Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
 `vitest run` — **1,359 files / 17,078 tests, all passing** (7 new).
+## 2026-08-21 (later) — the badge gate pointed at a withdrawn product; and a sweep found a destructive bug (PRs #2544, #2545)
+
+### Part 1 — I corrected my own change from the same afternoon (PR #2544)
+
+PR #2541 gated badge removal on the **Professional Pass** — which the admin withdrew from sale on
+2026-08-10. The gate was therefore correct and UNOPENABLE: no user could buy past it, so the Settings
+switch was dead for 100% of users. I reported it to the admin as an open question. **The answer was
+already in the codebase and I had not looked hard enough for it.**
+
+Already live: the **₹99/month Custom Domain plan** (`hostingPlan.ts`, admin-approved 2026-08-06) —
+purchasable today from Billing → Plans, paid from the ONE wallet (so no second billing model, which is
+the exact reason the Pass was removed), and **already sold on removing NavBharatAI branding**, because
+it removes the publish-time "Made with NavBharatAI" badge.
+
+That last point made it more than a swap. **There are TWO badges** — this one baked into `index.html`
+at BUILD time, and the publish-time one stamped in `DeploymentStore`. Gating them on different paywalls
+would have meant a user paying ₹99, watching one badge go, and having no way at all to reach the other:
+two prices for one promise, and the second price did not exist. One entitlement, both badges.
+
+The swap was three lines because the decision was written PURE — `probeHostingPlan` returns
+`{active, known}`, and `known:false` maps onto the `null` the decision already fails closed on.
+
+**Method note worth keeping: "is there an existing mechanism for this?" is a question to answer by
+GREPPING, not by asking the admin.** I escalated a product decision that the code had already made.
+The admin's correction was one line — *"pass nahi! apna domain connect karne ke liye ham charge kar
+rahe hai na?"* — and it was right.
+
+### Part 2 — the sweep for the artifact-vs-validity class found something destructive (PR #2545)
+
+Started auditing where "X exists" is treated as "X is valid". The deployment layer produced a real one.
+
+**THE BUG.** `deploymentStore.list()` caps at 500 records AND `catch { return [] }` — so an empty
+result means either "there are no deployments" or "Firestore did not answer", indistinguishably.
+`classifyChannels` then reads "no record for this channel" as `'unknown'` = an orphaned app nobody owns
+= **`reclaimable: true`**, and the admin reclaim endpoint DELETES that channel.
+
+**So one Firestore hiccup on the hosting-inventory screen listed EVERY published app in the account as
+reclaimable waste — one click each from taking a real user's live site down permanently.** The screen
+sorts waste FIRST, i.e. it is designed to encourage exactly that click. It needs an admin to act, so it
+was never a live outage; it was a loaded gun pointed at users' published apps.
+
+`listChannels()` had the mirror of it: a 20-page bound means it can return a PARTIAL list that looks
+identical to a whole one.
+
+**THE FIX — teach both listings to say whether they are COMPLETE, and make absence mean nothing when
+they are not.** `listWithCompleteness()` / `listChannelsWithCompleteness()`; a new `'indeterminate'`
+channel state; `registryComplete` defaults to **false** so a caller who has not thought about it gets
+no delete buttons; the reclaim endpoint refuses outright (409) on an incomplete read rather than
+guessing. An indeterminate channel still COUNTS toward the ceiling — "is this waste?" is unknowable
+there, but "does it occupy a slot?" is answered by the channel existing, and under-counting would hide
+the very ceiling the module was built for.
+
+**Note what was NOT claimed.** I suspected Firebase channel TTL as the cause of the 2026-08-19 publish
+404 and checked: `ensureChannel` deliberately omits `expireTime`/`ttl`, with a comment saying why. That
+lead is dead and is recorded as dead rather than left as a plausible-sounding theory.
+
+Gate: both tsc green, **vitest 1364 files / 17,136 passed / 1 honest skip**.
+
+**Running tally of the artifact-vs-validity class — now FIVE:** stale URL = live preview; stale `dist/`
+= current build; sandbox id = revivable; workspaceId = has an app; and now **an empty/truncated list =
+a complete list**. The first four were reported by the admin. This one was found by looking. That is
+the difference worth institutionalising.

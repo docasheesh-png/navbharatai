@@ -280,6 +280,19 @@ export class FirebaseHostingDeployer {
    * than none — it is a false all-clear on the one number this is for.
    */
   async listChannels(): Promise<Array<{ channelId: string; url: string; updateTime: string | null }>> {
+    return (await this.listChannelsWithCompleteness()).channels;
+  }
+
+  /**
+   * The same enumeration, plus whether it actually reached the END of the list.
+   *
+   * The page loop below is bounded at 20 pages so a malformed nextPageToken cannot spin forever —
+   * correct, but it means the function can return a PARTIAL list that looks exactly like a whole one.
+   * A caller reconciling "which channels exist" against our registry would then treat the channels it
+   * never saw as gone. Same class as the registry-side bug this was found with (2026-08-21): a
+   * returned list standing in for a complete list.
+   */
+  async listChannelsWithCompleteness(): Promise<{ channels: Array<{ channelId: string; url: string; updateTime: string | null }>; complete: boolean }> {
     const { headers } = await this.authHeaders();
     const site = FIREBASE_PROJECT;
     const out: Array<{ channelId: string; url: string; updateTime: string | null }> = [];
@@ -298,7 +311,8 @@ export class FirebaseHostingDeployer {
       pageToken = typeof resp.data?.nextPageToken === 'string' ? resp.data.nextPageToken : '';
       if (!pageToken) break;
     }
-    return out;
+    // A token still in hand means the loop stopped on its own bound, not on the end of the list.
+    return { channels: out, complete: !pageToken };
   }
 
   /**

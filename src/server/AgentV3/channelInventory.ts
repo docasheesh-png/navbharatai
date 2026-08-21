@@ -29,7 +29,21 @@ export type ChannelState =
   /** We have a record and it is NOT live (unpublished / taken down / held) — the channel LEAKED. */
   | 'stale'
   /** No record at all. An app orphaned by an old purge: still serving, unreachable by its owner. */
-  | 'unknown';
+  | 'unknown'
+  /**
+   * WE CANNOT TELL, because the registry we compared against was incomplete.
+   *
+   * This state exists because of a real, destructive bug (found 2026-08-21). `deploymentStore.list()`
+   * caps at 500 records AND returns `[]` on a Firestore error — so "no record found" could mean "this
+   * channel is genuinely orphaned" or it could mean "the database did not answer". Both produced
+   * `unknown`, `unknown` was `reclaimable`, and reclaim DELETES the channel. One Firestore hiccup on
+   * this screen therefore listed EVERY published app as reclaimable waste, one click each from taking
+   * a paying user's live site down permanently.
+   *
+   * A missing record is only evidence of orphanhood if the registry was actually read in full. When it
+   * was not, that is what this says — and it is never reclaimable.
+   */
+  | 'indeterminate';
 
 export interface ClassifiedChannel {
   channelId: string;
@@ -57,6 +71,12 @@ export interface ClassifiedChannel {
 export function classifyChannels(
   channels: readonly HostingChannel[] | null | undefined,
   records: ReadonlyArray<Partial<DeploymentRecord>> | null | undefined,
+  /**
+   * Was the registry read IN FULL? Defaults to false — absence of evidence is not evidence of
+   * absence, and the default has to be the safe one: a caller that has not thought about
+   * completeness must not be handed a screen full of delete buttons aimed at live apps.
+   */
+  registryComplete = false,
 ): ClassifiedChannel[] {
   const byChannel = new Map<string, Partial<DeploymentRecord>>();
   for (const r of records ?? []) {
@@ -71,20 +91,25 @@ export function classifyChannels(
     if (!channelId || seen.has(channelId)) continue;
     seen.add(channelId);
     const rec = byChannel.get(channelId);
-    const state: ChannelState = !rec ? 'unknown' : (isLiveDeployment(rec as DeploymentRecord) ? 'live' : 'stale');
+    const state: ChannelState = rec
+      ? (isLiveDeployment(rec as DeploymentRecord) ? 'live' : 'stale')
+      // No record — but that only MEANS something when the registry was genuinely read in full.
+      : (registryComplete ? 'unknown' : 'indeterminate');
     out.push({
       channelId,
       url: typeof c?.url === 'string' ? c.url : '',
       updateTime: c?.updateTime ?? null,
       state,
       workspaceId: rec?.workspaceId ?? null,
-      // A 'live' channel is somebody's working app; taking it down belongs to the owner (Unpublish) or
-      // to a deliberate admin takedown, which also updates the registry. Reclaim is for WASTE only.
-      reclaimable: state !== 'live',
+      // Reclaim is for WASTE only, and only for waste we are SURE of. A 'live' channel is somebody's
+      // working app — taking it down belongs to the owner (Unpublish) or to a deliberate admin
+      // takedown, which also updates the registry. 'indeterminate' is excluded for the stronger
+      // reason: we do not know what it is, and a delete is not reversible.
+      reclaimable: state === 'stale' || state === 'unknown',
     });
   }
   // Waste first — it is what the screen exists to act on.
-  const rank: Record<ChannelState, number> = { unknown: 0, stale: 1, live: 2 };
+  const rank: Record<ChannelState, number> = { unknown: 0, stale: 1, indeterminate: 2, live: 3 };
   return out.sort((a, b) => rank[a.state] - rank[b.state] || a.channelId.localeCompare(b.channelId));
 }
 

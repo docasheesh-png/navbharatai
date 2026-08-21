@@ -32,7 +32,7 @@ import { robustTscCommand } from './tscCommand';
 import { parseTscErrors } from './EndgameRepair';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
-import { detectTestPlan, parseTestOutcome, withSandboxBrowsers } from './testRunner';
+import { detectTestPlan, parseTestOutcome, withSandboxBrowsers, withTestFilter } from './testRunner';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
 import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision } from './SyntaxCheck';
@@ -198,6 +198,7 @@ import { generateCommentsIntegration } from '../lib/CommentsGenerator';
 import { generateMessagingIntegration } from '../lib/MessagingGenerator';
 import { generateListingsIntegration } from '../lib/ListingsGenerator';
 import { generateJobBoardIntegration } from '../lib/JobBoardGenerator';
+import { shellQuote } from '../lib/shellQuote';
 import { generateWishlistIntegration } from '../lib/WishlistGenerator';
 import { generateAddressesIntegration } from '../lib/AddressesGenerator';
 import { generateCouponsIntegration } from '../lib/CouponsGenerator';
@@ -3696,25 +3697,42 @@ export class ToolDispatcher {
           return msg;
         }
         const started = Date.now();
+        // B4 — run ONE test instead of the whole suite while iterating on a failure. The suite was
+        // re-run in full after every fix attempt, spending the user's sandbox minutes (real money)
+        // and their wall clock re-proving tests that already passed. The filter is model-written text
+        // going into a shell command, so `withTestFilter` quotes it; a runner we cannot filter safely
+        // leaves the command ALONE and says so, because a silently-dropped filter would let a green
+        // full-suite run be read as proof that one fix worked.
+        const filtered = withTestFilter(plan, typeof input?.filter === 'string' ? input.filter : undefined);
         // Make the browser the sandbox ALREADY downloaded visible to a browser suite — without it a
         // perfectly good Playwright run dies on "Executable doesn't exist at …" and we report the
         // app's tests as unverifiable for a reason that was ours, not the app's.
-        const testCommand = withSandboxBrowsers(plan.command, plan.framework);
+        const testCommand = withSandboxBrowsers(filtered.command, plan.framework);
         const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, testCommand);
         try { this.onCommand?.({ command: testCommand, exitCode, stdout, stderr, durationMs: Date.now() - started }); } catch { /* diagnostics best-effort */ }
         const outcome = parseTestOutcome(plan, exitCode, stdout, stderr);
         const mem = getWorkspaceMemory(this.workspaceId);
+        // 🔒 A FILTERED PASS IS NOT A SUITE PASS. Recorded without this, "run_tests PASS" would sit in
+        // project memory as evidence the app's tests are green when only one of them ran — and the
+        // readiness gate reads that memory. The whole-suite claim has to be earned by a whole-suite run.
+        const partial = filtered.applied ? ' (PARTIAL — only tests matching the filter ran)' : '';
         if (outcome.ok) {
-          mem.recordAudit(`run_tests PASS — ${outcome.summary} (${plan.command})`);
+          mem.recordAudit(`run_tests PASS${partial} — ${outcome.summary} (${filtered.command})`);
         } else {
           mem.recordError(
-            `run_tests FAIL — ${outcome.summary}` +
+            `run_tests FAIL${partial} — ${outcome.summary}` +
             (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 10).join(', ')}` : ''),
           );
         }
         const detail =
-          `${outcome.summary}\n` +
-          `command: ${plan.command} — ${plan.reason}\n` +
+          `${outcome.summary}${partial}\n` +
+          // The command that ACTUALLY ran, not the unfiltered plan — reporting the plan here would
+          // describe a run that did not happen.
+          `command: ${filtered.command} — ${plan.reason}\n` +
+          (filtered.note ? `${filtered.note}\n` : '') +
+          (filtered.applied
+            ? 'This was a FILTERED run. Run run_tests with no filter before calling the build done.\n'
+            : '') +
           (outcome.failingTests.length ? `failing:\n  ${outcome.failingTests.slice(0, 20).join('\n  ')}\n` : '') +
           `\n[stdout tail]\n${stdout.slice(-1500)}` +
           (stderr ? `\n[stderr tail]\n${stderr.slice(-800)}` : '');
@@ -8054,9 +8072,6 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
   return { updated, matchedOld, note: ' (matched ignoring whitespace differences)' };
 }
 
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
 
 function globToRegExp(glob: string): RegExp {
   let re = '';

@@ -7,6 +7,7 @@
 // runCommand(); nothing here executes anything itself.
 
 import { detectPackageManager, pmRun, pmExec } from '../lib/packageManager';
+import { shellQuote } from '../lib/shellQuote';
 import { inFlagRollout } from './escalationRollout';
 import { envFlag } from '../lib/envFlag';
 
@@ -61,6 +62,70 @@ export function withSandboxBrowsers(command: string, framework: TestFramework): 
   if (!needsBrowser) return command;
   if (command.includes('PLAYWRIGHT_BROWSERS_PATH')) return command;   // already carries it — never double it
   return `PLAYWRIGHT_BROWSERS_PATH=${SANDBOX_BROWSERS_PATH} ${command}`;
+}
+
+/** What `withTestFilter` did, so the caller can tell the truth about it. */
+export interface FilteredTestPlan {
+  /** The command to run. Unchanged when the filter could not be applied. */
+  command: string;
+  /** True only when the filter is genuinely in the command. */
+  applied: boolean;
+  /** Set when a filter was asked for and NOT applied — an honest reason, never silence. */
+  note: string;
+}
+
+/**
+ * Run only the tests whose name matches `filter`, instead of the whole suite.
+ *
+ * WHY IT MATTERS (ROADMAP §8B B4). A build that is fixing one failing test re-ran the ENTIRE suite
+ * after every attempt. That is the user's sandbox minutes — real money at $0.083/hour — and the wall
+ * clock they sit through, spent re-proving tests that already passed.
+ *
+ * 🔒 THE SECURITY POINT. `filter` is written by a MODEL and pasted into a shell command that runs
+ * inside the user's sandbox, so it goes through `shellQuote` — the single server-wide implementation,
+ * which makes `; rm -rf /` an ordinary argument rather than a command. Never interpolate it raw, and
+ * never "sanitise" it with a character allowlist instead: quoting is what is provably complete.
+ *
+ * 🔒 THE HONESTY POINT. A framework whose filter flag we do not know returns the command UNCHANGED
+ * with `applied: false` and a reason. The alternative — dropping the filter silently — would run the
+ * whole suite while the agent believed it had run one test, and it would read a green full-suite run
+ * as proof that its one fix worked.
+ */
+export function withTestFilter(plan: TestPlan, filter?: string | null): FilteredTestPlan {
+  const f = String(filter ?? '').trim();
+  if (!f) return { command: plan.command, applied: false, note: '' };
+  const q = shellQuote(f);
+  switch (plan.framework) {
+    // Vitest and Jest both take `-t` for "test name contains".
+    case 'vitest':
+    case 'jest':
+      return { command: `${plan.command} -t ${q}`, applied: true, note: '' };
+    // Playwright's name filter is `-g` (grep).
+    case 'playwright':
+      return { command: `${plan.command} -g ${q}`, applied: true, note: '' };
+    case 'pytest':
+      return { command: `${plan.command} -k ${q}`, applied: true, note: '' };
+    // Go's -run takes a regexp over test function names.
+    case 'go':
+      return { command: `${plan.command} -run ${q}`, applied: true, note: '' };
+    // Surefire's -Dtest= is a single argument, so the whole `-Dtest=<pattern>` is quoted as one.
+    case 'maven':
+      return { command: `${plan.command} ${shellQuote(`-Dtest=${f}`)}`, applied: true, note: '' };
+    case 'gradle':
+      return { command: `${plan.command} --tests ${q}`, applied: true, note: '' };
+    // An npm "test" script is OPAQUE — it may be vitest, jest, a shell pipeline, or a Makefile. `--`
+    // would forward to some of those and break others, and a filter that lands in the wrong runner
+    // silently runs everything. Refusing is the honest answer.
+    case 'npm-script':
+    default:
+      return {
+        command: plan.command,
+        applied: false,
+        note: `The filter was NOT applied: this project runs its tests through its own "test" script, `
+          + `which could be any runner, so there is no filter flag that is safe to add. The FULL suite ran — `
+          + `read the results as a whole-suite result, not as one test.`,
+      };
+  }
 }
 
 export interface TestOutcome {

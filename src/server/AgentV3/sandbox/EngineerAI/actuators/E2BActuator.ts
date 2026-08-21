@@ -33,6 +33,7 @@ import {
   BROWSE_PAINT_DEADLINE_MS, BROWSE_PAINT_POLL_MS, splitPaintMarker,
 } from '../../../PreviewVerify';
 import { assertWriteAllowed } from '../../../greenFreeze';
+import { shellQuote } from '../../../../lib/shellQuote';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -313,9 +314,6 @@ const {chromium}=require('playwright');
 `.trim();
 
 /** Wrap a string as a single shell argument (safe for arbitrary JSON payloads). */
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
 
 /**
  * Run a browser action, retrying exactly ONCE after relaunching the CDP daemon if the first attempt

@@ -9,6 +9,7 @@ import { ensureHostBinding } from './devServerHost';
 import { scanPackageJson, formatPackageScanReport } from '../../AgentV3/PackageSafetyScanner';
 import { toWorkspaceRelPath } from '../../lib/workspacePath';
 import { idleLimitMs } from '../../AgentV3/sandboxReaper';
+import { shellQuote } from '../../lib/shellQuote';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -156,9 +157,6 @@ const {chromium}=require('playwright');
 `.trim();
 
 /** Wrap a string as a single shell argument (safe for arbitrary JSON payloads). */
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
 
 /** Guess the dev-server port from the launch command for health-check polling. */
 function extractDevPort(command: string): number {

@@ -32,6 +32,7 @@
 
 import { ensureViteAllowedHosts, isViteConfigPath } from './ViteConfigGuard';
 import { devServerCommand, parsePackageJson } from './devScript';
+import { shellQuote } from '../lib/shellQuote';
 
 /** Where the live app lives; the worktrees hang off a sibling directory so a build never sees them. */
 export const WORKSPACE_ROOT = '/home/user/workspace';
@@ -148,9 +149,10 @@ export function writeFileCommand(path: string, base64: string): string {
 }
 
 /** Single-quote for `sh`, closing and reopening around any embedded quote. */
-export function shellQuote(s: string): string {
-  return `'${String(s).replace(/'/g, `'\\''`)}'`;
-}
+// Re-exported for compatibility — the implementation now lives in `lib/shellQuote.ts`, where it is
+// the SINGLE copy for the whole server. There were four identical ones until 2026-08-21, and a
+// security primitive with four homes is one hardening away from having a weakest one.
+export { shellQuote };
 
 /**
  * WHICH VERSIONS ARE LIVE — asked of the SANDBOX, never of this process's memory.

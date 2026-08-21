@@ -36998,3 +36998,74 @@ a false positive would send a user away over our bug, so nothing but 429 qualifi
 
 Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
 `vitest run` — **1,350 files / 16,926 tests, all passing** (21 new).
+
+---
+
+## 2026-08-21 — Re-run ONE test, one shellQuote, and two features the ROADMAP said were missing
+
+### 1. TWO FALSE-OPENS, caught by reading the code before writing any (§8A A5 and A7)
+
+I was about to build both. Neither needed building, and the reason they read as open is worth keeping.
+
+ • **A5 "Edit a past message and re-run from it" — ALREADY SHIPS.** `AgentV3Panel.handleEdit` (~923),
+   rendered through `MessageActions` `onEdit` (~3640). It takes the message back using the SAME full
+   server purge Unsend uses — transcript *and* workspace memory — drops the text into the composer,
+   refuses while a turn is in flight, and prefills ONLY on a genuine purge so a failed take-back can
+   never leave the message in both the thread and the composer.
+   ⚠️ The ROADMAP told the next session to "copy the rewind from ProfessionalChat". That would have
+   been WRONG: that surface rewinds a transcript, while v5 must also purge SERVER state, or the AI
+   still remembers the old wording while the screen says otherwise.
+ • **A7 "answer, don't build" — ALREADY DELIVERED by the ADVISE mode.** The route handles `chatRole`
+   BEFORE the build lock, with no tools at all — Advise is *structurally* incapable of building, which
+   is exactly what the row wanted. It is already in `AppKnowledgeBase.ts` too.
+
+**Why both were missed, and it is NOT the failure this file already documents.** Neither was hiding in
+a file with an unexpected NAME (the lesson from the template gallery). **They were hiding behind
+unexpected UI SHAPES**: A5 ships as a button called *Edit*, A7 as a mode called *Advise*. Grepping the
+row's noun finds neither, because the row's noun was never the product's word. The check that works
+for a UX row is to **describe the BEHAVIOUR and find what already gives it** — "can a user ask a
+question without starting a build?" finds Advise instantly. Recorded in ROADMAP §8A.
+
+### 2. ONE shellQuote for the whole server (rule 3 — hunt the siblings)
+
+There were **FOUR** independent copies of the shell-quoting function: both E2B actuators,
+`ToolDispatcher`, and `versionPreview`. All four were correct — which is luck, not design. This is a
+SECURITY primitive: every value it wraps is pasted into a shell command running in a user's sandbox,
+and some of those values are model-written. The day one copy is hardened and three are not, the
+weakest is the attack surface and nothing points at it.
+
+Now `src/server/lib/shellQuote.ts`, with the test file that has to hold: the single-quote escape, the
+breakout attempt (`'; rm -rf / #`), `$(…)`, backticks, newlines, and a non-string not turning into the
+literal text `undefined` inside a command. `versionPreview` re-exports it for compatibility.
+
+### 3. B4 — re-run only the failing test (ROADMAP §8B)
+
+A build fixing ONE failing test re-ran the ENTIRE suite after every attempt. That is the user's
+sandbox minutes — real money at the measured $0.083/hour — and the wall clock they sit through, spent
+re-proving tests that already passed.
+
+`run_tests` now takes an optional `filter`, mapped by `withTestFilter` to each runner's OWN flag:
+`-t` (vitest/jest), `-g` (playwright), `-k` (pytest), `-run` (go), `-Dtest=` (maven), `--tests`
+(gradle). Two things make it safe rather than merely convenient:
+
+ • **🔒 It is model-written text going into a sandbox shell command**, so it goes through the shared
+   `shellQuote` — `'; rm -rf /` becomes an ordinary argument. Quoting, not a character allowlist:
+   quoting is what is provably complete.
+ • **🔒 An npm `"test"` script is left ALONE, with an honest note.** That script could be vitest, jest,
+   a shell pipeline or a Makefile; a filter that lands in the wrong runner silently runs everything,
+   and the agent would then read a green FULL-suite run as proof that its one fix worked.
+
+And the honesty half (rule 5): a filtered run is labelled **PARTIAL** in the tool result AND in
+project memory, and the result reports the command that ACTUALLY ran, not the unfiltered plan. Without
+that, "run_tests PASS" would sit in the memory the readiness gate reads, claiming the app's tests are
+green when one of them ran. The tool description tells the agent to run the full suite once before
+calling a build done.
+
+### Also this session
+
+Android `.aab` **run #85 green** (`versionCode` 85) — the frontend work in #2524/#2526/#2527 is
+bundled into the app, so installed users do not get it without a fresh build. The upload to Play
+Console is the admin's step (rule 6 — no Play service account exists).
+
+Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
+`vitest run` — **1,353 files / 16,982 tests, all passing** (12 new).

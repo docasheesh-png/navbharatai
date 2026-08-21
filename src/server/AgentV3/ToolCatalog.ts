@@ -468,10 +468,24 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         "Detect and RUN the project's OWN test suite and report honest pass/fail — stronger proof the build " +
         'works than a typecheck. Auto-detects the runner from the workspace (a real npm "test" script, or ' +
         'vitest/jest/playwright config, or Python pytest, or Java/Kotlin Maven or Gradle, or Go tests) and runs it in ' +
-        'the sandbox, then returns parsed counts (passed/failed/total) and the names of failing tests. Takes ' +
-        'no arguments. If it reports failures, fix them and run it again; if it reports no suite, seed real ' +
-        'tests with generate_tests first — never claim the build is verified without running its tests.',
-      input_schema: { type: 'object', properties: {} },
+        'the sandbox, then returns parsed counts (passed/failed/total) and the names of failing tests. ' +
+        'If it reports failures, fix them and run it again; if it reports no suite, seed real ' +
+        'tests with generate_tests first — never claim the build is verified without running its tests. ' +
+        'While fixing ONE failing test, pass `filter` to re-run just that test instead of the whole suite — ' +
+        'it is far faster and cheaper. Run the FULL suite (no filter) once before you call the build done, ' +
+        'so a fix that broke something else cannot slip through.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          filter: {
+            type: 'string',
+            description:
+              'Optional. Run only tests whose NAME matches this (a substring or pattern, depending on the '
+              + 'runner) — use it to iterate on one failing test. The result always states whether the filter '
+              + 'was actually applied; some projects run tests through their own script and cannot be filtered.',
+          },
+        },
+      },
     },
     {
       name: 'find_dead_code',

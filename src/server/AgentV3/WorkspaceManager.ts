@@ -30,7 +30,15 @@ export interface PurgeDeps {
   deletePlan: (workspaceId: string) => Promise<void>;
   deleteMemory: (workspaceId: string) => Promise<void>;
   deleteDiagnostics: (workspaceId: string) => Promise<void>;
-  deleteDeployment: (workspaceId: string) => Promise<void>;
+  /**
+   * The deployment registry entry. ⚠️ Deliberately NOT a delete (2026-08-21).
+   *
+   * Purging the record used to leave the published app LIVE at its public URL while erasing the only
+   * entry admin takedown reads from — an app nobody could find, manage or remove, still holding one of
+   * the platform's scarce Firebase channels. Retaining a marked record keeps it reachable whatever we
+   * later decide about taking such apps offline.
+   */
+  releaseDeployment: (workspaceId: string) => Promise<void>;
 }
 
 /**
@@ -54,7 +62,7 @@ export async function purgeWorkspace(deps: PurgeDeps, workspaceId: string): Prom
   await run('plan', deps.deletePlan);
   await run('memory', deps.deleteMemory);
   await run('diagnostics', deps.deleteDiagnostics);
-  await run('deployment', deps.deleteDeployment);
+  await run('deployment', deps.releaseDeployment);
   return { workspaceId, stores, ok: stores.every((s) => s.ok) };
 }
 

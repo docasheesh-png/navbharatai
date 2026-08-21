@@ -2901,7 +2901,11 @@ export function registerAgentV3Routes(app: Express): void {
             deletePlan: deleteProjectPlan,
             deleteMemory: deleteWorkspaceMemory,
             deleteDiagnostics: deleteDiagnostics,
-            deleteDeployment: (id) => deploymentStore.delete(id),
+            // MARK, never delete: the app stays live at its public URL (a shared link must not die
+            // because someone tidied their chat list), and keeping the record is what lets admin
+            // takedown still reach it. Recorded as an open gap in ROADMAP §10.4: such an app cannot
+            // yet be unpublished by its owner, because there is no screen that lists it.
+            releaseDeployment: (id) => deploymentStore.markOrphaned(id),
           }, cid);
           if (!purge.ok) {
             const failed = purge.stores.filter((s) => !s.ok).map((s) => s.store).join(', ');
@@ -5252,7 +5256,76 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     const rec = await deploymentStore.get(workspaceId);
-    res.json({ url: rec?.url ?? null, fileCount: rec?.fileCount ?? 0, updatedAt: rec?.updatedAt ?? null });
+    // Only a genuinely LIVE record yields a URL. Returning one for a held / taken-down / unpublished
+    // app made the panel show a "Live site" link to a site that is not there — and, now that the
+    // Unpublish button keys off this, would have left it offering to remove something already gone.
+    const live = isLiveDeployment(rec);
+    res.json({
+      url: live ? rec!.url : null,
+      fileCount: rec?.fileCount ?? 0,
+      updatedAt: rec?.updatedAt ?? null,
+      status: rec?.status ?? null,
+    });
+  });
+
+  /**
+   * UNPUBLISH — the owner takes their OWN app off NavBharatAI hosting.
+   *
+   * WHY THIS HAD TO EXIST (2026-08-21). Only an admin could remove a published app, which made two
+   * things untrue at once: the new five-app limit told users to "remove an app you no longer need"
+   * when there was no way to, and deleting a chat left its app live FOREVER while erasing the record
+   * admin takedown reads from — an app nobody could find, manage or remove, still holding one of the
+   * platform's scarce Firebase channels.
+   *
+   * It deletes the REAL channel first and only then updates the registry: claiming an app is down
+   * while it is still serving would be the exact fake-success this codebase keeps rooting out. The
+   * status is 'unpublished', NOT 'taken_down' — the owner must be able to publish it again (see
+   * DeploymentStatus), and the deploy gate only blocks republish for a takedown.
+   */
+  app.post('/api/agentv3/unpublish', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'There is nothing published to remove.' });
+      return;
+    }
+    // STRICT, exactly like publish: taking a public site down is as consequential as putting one up.
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+
+    const rec = await deploymentStore.get(workspaceId).catch(() => null);
+    if (!isLiveDeployment(rec)) {
+      // Idempotent and honest: already gone is not an error, and there is nothing to undo.
+      res.json({ ok: true, alreadyRemoved: true, message: 'This app is not published right now.' });
+      return;
+    }
+
+    try {
+      // The REAL removal. If this throws we do NOT touch the registry — a record saying "unpublished"
+      // over a site that is still serving would be worse than the error.
+      await new FirebaseHostingDeployer().deleteChannel(workspaceId);
+    } catch (err: any) {
+      res.status(502).json({
+        error: 'Your app could NOT be removed just now, so it is still live. Please try again in a moment.',
+        detail: String(err?.message ?? err).slice(0, 300),
+      });
+      return;
+    }
+
+    const marked = await deploymentStore.setStatus(workspaceId, 'unpublished').catch(() => false);
+    try { audit('APP_UNPUBLISHED_BY_OWNER', { workspaceId, userId: userId ?? 'anon', registryUpdated: marked }); }
+    catch { /* audit never blocks */ }
+    res.json({
+      ok: true,
+      message: 'Your app has been taken off NavBharatAI hosting. You can publish it again anytime.',
+    });
   });
 
   // R5 §5.1 — list the available deploy providers and which are configured right now (no lock-in).

@@ -36821,3 +36821,44 @@ Builds: `.aab` run #84 and `.ipa` run #61 (TestFlight upload confirmed in the jo
 it to a merely-built number is precisely the trap above.
 
 Gate: tsc (frontend + server) clean · 1348 files / 16,883 tests green · build OK.
+
+---
+
+## 2026-08-21 — Unpublish: the owner can finally take their own app down
+
+Admin: "unpublish button banao — par yeh sirf tabhi dikhe, jab app kamse kam 1 bar published ho chuki ho."
+
+WHY IT HAD TO EXIST. Only an ADMIN could remove a published app, which made two things untrue at
+once. The five-app limit shipped hours earlier tells users to "remove an app you no longer need" —
+advice with no way to follow it. And purging a workspace deleted the deployment RECORD while leaving
+the app LIVE forever, erasing the only entry admin takedown reads from: an app nobody could find,
+manage or remove, still holding one of the platform's scarce Firebase channels (ROADMAP §10).
+
+WHAT SHIPPED.
+ • `POST /api/agentv3/unpublish` — STRICT verified-owner check, the same bar as publish, because
+   taking a public site down is as consequential as putting one up. It deletes the REAL Firebase
+   channel FIRST and only then touches the registry: a record saying "unpublished" over a site that is
+   still serving would be the exact fake success this codebase keeps rooting out. A failed delete
+   returns an honest 502 saying the app is STILL LIVE, and the registry is left alone.
+ • A NEW status, `'unpublished'`, deliberately separate from `'taken_down'`. A takedown is an admin
+   punishment and the deploy gate refuses to ever republish it; reusing it here would have locked
+   users out of their own app for good, over a policy violation they never committed. Both read as
+   not-live and both free the user's slot in the hosting caps.
+ • The button is gated on `liveUrl` — exactly the admin's condition. That value comes from the durable
+   record, and `GET /api/agentv3/deployment` now returns a URL ONLY for an `isLiveDeployment` record.
+   That also fixed a quieter pre-existing bug: a held or taken-down app was still showing the user a
+   "Live site" link to a site that was not there.
+ • Two-step confirm, because anyone holding the link loses it the moment it runs. The wording says
+   plainly that the code and chat are untouched and it can be published again.
+ • `purgeWorkspace`'s `deleteDeployment` is now `releaseDeployment` → `markOrphaned`. The record is
+   KEPT (marked), so an app whose chat was deleted never becomes invisible to admin takedown. The name
+   was changed too: a dep called "delete" that no longer deletes is a comment that lies in code.
+
+OPEN GAP, recorded honestly (ROADMAP §10.4): an app whose chat was deleted still cannot be unpublished
+by its OWNER, because no screen lists it. The button lives in the Publish sheet, which needs the chat.
+A "My published apps" list is what closes that, and it is not built.
+
+Gate: both tsc green; 4 new UI tests + the suite; FULL run 16,887 tests / 1,348 files green.
+(⚠️ `cssLegacy.test.ts` fails on a STALE local `dist/` — it reads the BUILT stylesheet. `npm run build`
+first; CI builds fresh so it is green there. Not a code failure, and it is not mine — it reproduces on
+clean main.)

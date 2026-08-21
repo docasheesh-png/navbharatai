@@ -66,6 +66,18 @@ export interface HostingChooserProps {
    * exactly what the billing law forbids.
    */
   customDomainPriceInr?: number | null;
+  /**
+   * The app's CURRENT live URL, or null/absent when it is not published.
+   *
+   * This is the ONLY gate on the Unpublish control (admin 2026-08-21: "yeh sirf tabhi dikhe, jab app
+   * kamse kam 1 bar published ho chuki ho"). It comes from the durable deployment record and the server
+   * now returns it only for a genuinely LIVE deployment — so the control cannot appear for an app that
+   * was never published, or one already taken down. A remove button with nothing to remove is the dead
+   * button this file exists to avoid.
+   */
+  liveUrl?: string | null;
+  /** Take the app off NavBharatAI hosting. Resolves to an honest message; the caller shows it. */
+  onUnpublish?: () => Promise<void>;
   /** Set once this workspace is storing its code in the user's OWN GitHub repo (git-native storage). */
   ownRepo?: OwnRepoInfo | null;
   /** Whether a GitHub account is already connected (token present) — governs the "I host it myself" CTA. */
@@ -101,10 +113,16 @@ const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI
 
 export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr,
+  liveUrl, onUnpublish,
   ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
   onMakeIcon,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost'>('choose');
+  // Unpublish: two-step, because taking a public site down is irreversible from the visitor's side —
+  // anyone holding the link loses it the moment this runs. `confirm` is the second step.
+  const [unpubConfirm, setUnpubConfirm] = useState(false);
+  const [unpubBusy, setUnpubBusy] = useState(false);
+  const [unpubNote, setUnpubNote] = useState('');
   // ── Nav App Store one-click publish (Kadam 1, admin: "1 click release/publish … v5 ke publish ke
   // 'Make an Android app' me kahi adjust kar dena"). The button lives HERE because this modal IS the
   // publish surface — the store is a fourth destination for the same app, beside hosting and APK.
@@ -500,6 +518,54 @@ export function HostingChooser({
                 <Link2 className="w-3.5 h-3.5" />
                 Connect your own domain{typeof customDomainPriceInr === 'number' ? ` (₹${customDomainPriceInr}/month)` : ''}
               </button>
+            )}
+
+            {/* UNPUBLISH — shown ONLY when this app is genuinely live on our hosting. `liveUrl` comes
+                from the durable deployment record, which the server now returns only for an active
+                deployment, so this cannot appear for an app that was never published or is already
+                down. Two-step on purpose: whoever holds the link loses it the moment this runs. */}
+            {liveUrl && onUnpublish && (
+              <div className="pt-1">
+                {!unpubConfirm ? (
+                  <button
+                    onClick={() => { setUnpubNote(''); setUnpubConfirm(true); }}
+                    disabled={busy || unpubBusy}
+                    className="w-full py-1.5 rounded-lg border border-zinc-700 hover:border-red-700 text-zinc-400 hover:text-red-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40"
+                  >
+                    Remove this app from NavBharatAI hosting
+                  </button>
+                ) : (
+                  <div className="rounded-lg border border-red-900/60 bg-red-950/20 p-2.5 flex flex-col gap-2">
+                    <p className="text-[11px] text-red-200 leading-relaxed">
+                      Take it offline? Anyone with the link will stop being able to open it. Your code and
+                      chat are untouched, and you can publish it again whenever you like.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setUnpubBusy(true);
+                          void onUnpublish()
+                            .catch(() => { /* the caller reports its own message */ })
+                            .finally(() => { setUnpubBusy(false); setUnpubConfirm(false); });
+                        }}
+                        disabled={unpubBusy}
+                        className="flex-1 py-1.5 rounded-lg bg-red-700 hover:bg-red-600 disabled:opacity-40 text-white text-[11px] font-bold flex items-center justify-center gap-1.5"
+                      >
+                        {unpubBusy ? <TirangaLoader className="w-3.5 h-3.5" /> : null}
+                        {unpubBusy ? 'Removing…' : 'Yes, take it offline'}
+                      </button>
+                      <button
+                        onClick={() => setUnpubConfirm(false)}
+                        disabled={unpubBusy}
+                        className="flex-1 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 text-[11px] font-semibold disabled:opacity-40"
+                      >
+                        Keep it live
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {unpubNote && <p className="mt-1.5 text-[11px] text-zinc-400">{unpubNote}</p>}
+              </div>
             )}
           </div>
 

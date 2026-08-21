@@ -38070,3 +38070,23 @@ check actually sees the app serving.
 
 Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
 `vitest run` — **1,366 files / 17,153 passing, 1 skipped**.
+
+### Same change — "Visit mitrify.com", the ending that was missing
+
+Admin: *"jab domain successfully connect ho jaye, to isi page ke niche likh kar aana chahiye — visit
+mitrify.com — aur us par click kar sake."*
+
+The obvious missing ending. Everything on that page is SETUP — records, checks, waiting — and the one
+thing a person wants once it is done is to **go and look at it**. Until now the page never offered
+that: they had to retype their own domain into the address bar.
+
+A connected domain now gets a green **"Visit <domain>"** button at the bottom of the page. Shown for
+any ACTIVE domain regardless of what it currently serves — it is their domain, and the honest state
+box directly above already says what they will find there, so this never has to pretend and never has
+to be withheld either.
+
+`cleanDomainInput` and `visitUrl` were pulled out of an inline expression, because THREE things now
+depend on it being right (the connect call, the apex record names, and this link). The rule that
+earned a test: the href is always built as `https://` + the CLEAN host, never from the raw input —
+pasting a scheme back into an href is how `https://https://…` reaches a user — and an empty input
+yields an empty string rather than a bare `https://` link.

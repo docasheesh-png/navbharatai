@@ -9,7 +9,7 @@
 // isn't. Gated by the server flag (the caller only renders this when custom domains are enabled).
 
 import { useState, useEffect } from 'react';
-import { Globe, ChevronLeft, CheckCircle2, Copy, Check, RefreshCw, Info } from 'lucide-react';
+import { Globe, ChevronLeft, CheckCircle2, Copy, Check, RefreshCw, Info, ExternalLink } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { REGISTRARS, registrarById, detectRegistrarId, registrarNameFromRdap } from '../../lib/registrarGuide';
 import { authJsonHeaders as authHeaders } from '../../lib/authHeaders';
@@ -212,7 +212,7 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
 
-  const cleanDomain = domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const cleanDomain = cleanDomainInput(domain);
   const domainValid = /^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(cleanDomain);
 
   const copy = (txt: string, key: string) => {
@@ -691,10 +691,52 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
               {checking ? 'Checking…' : 'Check now'}
             </button>
           )}
+
+          {/* VISIT YOUR DOMAIN (admin 2026-08-21: "jab domain successfully connect ho jaye, to isi
+              page ke niche 'visit mitrify.com' aana chahiye — aur us par click kar sake").
+              
+              The obvious missing ending. Everything above is setup — records, checks, waiting — and
+              once it is done the one thing a person wants is to GO AND LOOK AT IT, and until now the
+              page never offered that. They had to retype their own domain into the address bar.
+              
+              Shown for a CONNECTED domain regardless of what it currently serves: it is their domain,
+              and the honest state box directly above already says what they will find there — so this
+              never has to pretend, and never has to be withheld either. */}
+          {result.active && (
+            <a
+              href={visitUrl(cleanDomain)}
+              target="_blank"
+              rel="noreferrer"
+              className="self-start flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-500 text-white text-[13px] font-bold transition-colors"
+            >
+              <Globe className="w-4 h-4" />
+              Visit {cleanDomain}
+              <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+            </a>
+          )}
         </div>
       )}
     </div>
   );
+}
+
+/**
+ * What the user typed, reduced to a bare hostname. PURE.
+ *
+ * Extracted from an inline expression because THREE things now depend on it being right: the connect
+ * call, the record names shown for the apex, and — since 2026-08-21 — the "Visit <domain>" link. A
+ * paste of `https://mitrify.com/app` must become `mitrify.com` in all three, and the link must always
+ * be built as `https://` + this, never from the raw input: pasting a scheme back into an href is how
+ * `https://https://…` reaches a user.
+ */
+export function cleanDomainInput(raw: string): string {
+  return String(raw ?? '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+}
+
+/** The address the Visit button opens. Always https, always the bare host. PURE. */
+export function visitUrl(domain: string): string {
+  const host = cleanDomainInput(domain);
+  return host ? `https://${host}` : '';
 }
 
 /** Trim the API's verbose state enums (OWNERSHIP_ACTIVE -> active) for the status line. */

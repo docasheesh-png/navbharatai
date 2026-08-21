@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { connectStage, relativeRecordName } from './NbaiDomainConnect';
+import { connectStage, relativeRecordName, cleanDomainInput, visitUrl } from './NbaiDomainConnect';
 
 describe('connectStage — plain-language, honest connect stages', () => {
   it('active domain: done, no further action — but only CONNECTED until something SAW it serve', () => {
@@ -132,5 +132,38 @@ describe('connectStage — the word "Live" is earned by SERVING, not by DNS', ()
   it('a domain that is not active yet is unaffected by any serving result', () => {
     const s = connectStage({ active: false, ownershipState: 'PENDING', hostState: 'PENDING', sslState: 'PENDING', serving: { state: 'nothing_published', note: '' } });
     expect(s.action).toBe('check');
+  });
+});
+
+/**
+ * VISIT YOUR DOMAIN (admin 2026-08-21: "jab domain successfully connect ho jaye, to isi page ke niche
+ * 'visit mitrify.com' aana chahiye — aur us par click kar sake").
+ *
+ * The obvious missing ending: everything on that page is setup — records, checks, waiting — and once
+ * it is done the one thing a person wants is to GO AND LOOK AT IT. Until now they had to retype their
+ * own domain into the address bar.
+ */
+describe('cleanDomainInput / visitUrl', () => {
+  it('reduces whatever was pasted to a bare host', () => {
+    for (const raw of ['mitrify.com', ' MITRIFY.com ', 'https://mitrify.com', 'http://mitrify.com/app?x=1']) {
+      expect(cleanDomainInput(raw)).toBe('mitrify.com');
+    }
+  });
+
+  it('🔒 the link is built from the CLEAN host, never the raw input', () => {
+    // Pasting a scheme back into an href is how `https://https://…` reaches a user.
+    expect(visitUrl('https://mitrify.com')).toBe('https://mitrify.com');
+    expect(visitUrl('http://mitrify.com/app')).toBe('https://mitrify.com');
+    expect(visitUrl(' Mitrify.COM ')).toBe('https://mitrify.com');
+  });
+
+  it('always https — a connected domain has HTTPS by definition, so http would downgrade it', () => {
+    expect(visitUrl('mitrify.com').startsWith('https://')).toBe(true);
+  });
+
+  it('nothing in, nothing out — never a bare "https://" link', () => {
+    expect(visitUrl('')).toBe('');
+    expect(visitUrl('   ')).toBe('');
+    expect(visitUrl(undefined as never)).toBe('');
   });
 });

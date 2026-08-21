@@ -19,6 +19,9 @@ import {
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
+import { PublishCelebration } from './PublishCelebration';
+import { celebrationFor, type CelebrationKind } from '../../lib/firstPublish';
+import { getStoredMotionMode, resolveReduceMotion, systemPrefersReducedMotion } from '../../lib/a11y';
 import {  } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
 import { importProjectArchive, importProjectFolder, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
@@ -2571,6 +2574,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
   // server so it survives a reconnect/new session, not just the current build stream.
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
+  // The first-ever-publish celebration. Null until the server says this user has never published
+  // before AND we have looked at the link (see deployLive).
+  const [celebration, setCelebration] = useState<{ kind: CelebrationKind; url: string } | null>(null);
   // Hosting Phase 1 — the "Publish" chooser (host on NavBharatAI vs bring-your-own), opened from Deploy.
   const [showHostingChooser, setShowHostingChooser] = useState(false);
 
@@ -2648,6 +2654,31 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
    * model might not call the tool at all), slow, and BILLED — for something that should cost nothing.
    * It now calls the server directly; the model is not involved.
    */
+  /**
+   * Does the freshly published link actually answer?
+   *
+   * NOT a verdict on the app — a verdict on whether we may say the word "live". A brand-new host can
+   * take a few seconds to serve its first request, so a "no" here means "not yet", and the card says
+   * exactly that instead of celebrating something the user might click into an error page.
+   *
+   * `no-cors` because we cannot read a cross-origin response and do not need to: an opaque response
+   * still proves something answered. A network failure throws and gives us the honest `false`; a
+   * check that cannot run at all returns null, which is treated as live (the server already confirmed
+   * the publish — our own inability to look is not evidence against the user's app).
+   */
+  const probeLive = async (url: string): Promise<boolean | null> => {
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 2500);
+      await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: ctl.signal });
+      clearTimeout(timer);
+      return true;
+    } catch (e) {
+      // An abort is "we ran out of patience", not "the site is down" — do not accuse the app.
+      return (e as { name?: string })?.name === 'AbortError' ? null : false;
+    }
+  };
+
   const deployLive = (providerOverride?: string): string | null => {
     const prov0 = providerOverride || deployProvider;
     const blocked = deployBlockedReason({
@@ -2679,6 +2710,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           return;
         }
         if (typeof data?.url === 'string' && data.url) setLiveUrl(data.url);
+        // THE FIRST-EVER LIVE LINK (admin 2026-08-21). The server decides whether this is the user's
+        // first — see the publish route for why that answer cannot live in the browser. We only decide
+        // what the moment LOOKS like, and we refuse to celebrate a link that does not answer.
+        if (data?.firstPublish === true && typeof data?.url === 'string' && data.url) {
+          void (async () => {
+            const linkLive = await probeLive(data.url);
+            setCelebration({
+              kind: celebrationFor({
+                firstPublish: true,
+                url: data.url,
+                linkLive,
+                reducedMotion: resolveReduceMotion(getStoredMotionMode(), systemPrefersReducedMotion()),
+              }),
+              url: data.url,
+            });
+          })();
+        }
         // `warning` is the server's honest note when the publish succeeded via the preview-equivalent
         // transpile (type warnings present but not blocking) — shown, never swallowed.
         const warning = typeof data?.warning === 'string' && data.warning ? `\n\n${data.warning}` : '';
@@ -3194,6 +3242,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           onDeploy={(id) => deployLive(id)}
         />
       )}
+      {/* THE FIRST-EVER LIVE LINK. Rendered outside the publish sheet on purpose: it portals to
+          document.body and must survive the sheet being closed — the user should be able to dismiss
+          the sheet and still have their link in front of them. */}
+      {celebration && (
+        <PublishCelebration
+          kind={celebration.kind}
+          url={celebration.url}
+          onClose={() => setCelebration(null)}
+        />
+      )}
+
       {/* Header: title + New, and the workspace tab pills (open/collapse the workspace) */}
       <div className="shrink-0 border-b border-zinc-800">
         {/* In focus mode the fixed Exit-Focus button lives at the top-right corner (App.tsx). Reserve

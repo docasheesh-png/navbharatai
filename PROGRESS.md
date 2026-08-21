@@ -36601,3 +36601,48 @@ only when `//` opens the line so a `https://` in real code is never truncated in
   `BotBuilder` send, `ActivityBar` menu, `StatusBar` bell.
 
 Gate: both `tsc` clean; FULL suite **1341 files / 16798 tests green**.
+
+## 2026-08-21 — The dead-button sweep, part 2: the two outside Settings
+
+Follow-up to the settings change above, closing the siblings it recorded as open.
+
+**`AIDebugger` — "Apply to File" removed.** It sat beside the working "Copy" button and promised to
+write the AI's suggested fix straight into the user's code. It had no `onClick`, so it never did —
+and it could not have: the component receives `files` **read-only** and has no write path.
+
+It was not fixable as labelled, either. That tab analyses an error the user **pastes in**; there is
+no workspace and no identified target file, so "apply to file" has no destination and no insertion
+point. Choosing one would mean guessing which file and where — inventing the very thing the button
+claims to know, which is the bug class being closed, not a fix for it. The real auto-fix path already
+exists and is genuinely wired: the App Scan tab scans a chosen Pro workspace and hands its findings to
+v5 through `onAutoFixInV5`, which knows the workspace and can really edit code.
+
+**`SecurityScan` — "JSON" and "PDF" replaced by one download that works.** Both were handler-less, so
+a user who scanned their app and pressed either got nothing. Neither format was honest to offer, which
+is likely why neither was ever wired: the scan returns `data.reply`, a **markdown string**. There is no
+structured findings object to serialise (wrapping the same markdown in a JSON envelope names a format
+without providing one), and nothing in the app can render a PDF.
+
+So the report is now offered as what it actually is — markdown — through `deliverTextFile`, the
+existing iOS-safe helper (a bare `<a download>` silently saves nothing on iOS Safari; the admin hit
+that on iPhone in 2026-07). Filename carries the target and date. Disabled until a report exists.
+
+**The guard:** `tests/deadControlSweep.test.ts` fails CI on any handler-less `<button>` in the three
+cleaned files, and pins the two specific regressions. Verified to bite: re-adding a dead PDF button
+fails two assertions. Deliberately NOT a repo-wide scan — several components legitimately render a
+`<button>` whose click a parent handles, and a blanket rule would be loosened into uselessness. A
+narrow test that genuinely bites beats a broad one full of exemptions.
+
+**⚠️ Recorded, NOT fixed — `SecurityScan`'s progress bar is fake.** `performScan` drives the
+percentage from a `setInterval` on a 1500 ms timer and prints canned phase strings ("Phase 3: Static
+Analysis (SAST) Patterns…") that correspond to no real work — the actual scan is a single `fetch`.
+It is a status indicator that does not reflect real state, which the second absolute rule forbids.
+Fixing it honestly means either real streamed progress from `/api/security/scan` or an indeterminate
+spinner; both are a real change, not a label edit, so it is logged here as an open root cause rather
+than patched cosmetically.
+
+Still to verify from the original sweep (lower confidence, parent may handle the click):
+`CostEstimator` "Start Free", `PreviewPanel` nav arrows, `BotBuilder` send, `ActivityBar` menu,
+`StatusBar` bell.
+
+Gate: both `tsc` clean; FULL suite **1342 files / 16803 tests green**.

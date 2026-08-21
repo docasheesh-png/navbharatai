@@ -486,18 +486,21 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                       )}
                       {copiedFix ? 'Copied!' : 'Copy'}
                     </button>
-                    {files && Object.keys(files).length > 0 && (
-                      <button
-                        className="px-2 py-1 rounded text-xs"
-                        style={{
-                          background: 'rgba(34,197,94,0.15)',
-                          color: '#86efac',
-                          border: '1px solid rgba(34,197,94,0.3)',
-                        }}
-                      >
-                        Apply to File
-                      </button>
-                    )}
+                    {/* "Apply to File" was REMOVED here (admin 2026-08-21). It sat beside the working
+                        "Copy" button, promising to write the AI's suggested fix straight into the
+                        user's code — and it had NO onClick at all, so it never did. It could not have:
+                        this component receives `files` READ-ONLY (`files?: Record<string, string>`) and
+                        has no write path, which is presumably why the handler was never added.
+
+                        It was not fixable as labelled either. This tab analyses an error the user
+                        PASTES IN; there is no workspace and no identified target, so "apply to file"
+                        has no defined destination or insertion point. Picking one would mean guessing
+                        which file and where — inventing the thing the button claims to know.
+
+                        The real auto-fix path already exists and is genuinely wired: the App Scan tab
+                        scans a chosen Pro workspace and hands its findings to NavBharatAI Pro v5 via
+                        `onAutoFixInV5`, which knows the workspace and can really edit the code. "Copy"
+                        below delivers the fix text meanwhile. */}
                   </div>
                 </div>
                 <pre

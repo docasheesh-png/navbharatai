@@ -1,4 +1,11 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import {
+  appleDomainAssociation, appleDomainAssociationSource, APPLE_DOMAIN_ASSOCIATION_PATH,
+} from '../lib/appleDomainAssociation';
+import { diagnoseAppleSignIn, type AppleSelfFetch } from '../lib/appleSignInDiagnosis';
+import { APPLE_SERVICE_ID, APPLE_WEB_RETURN_URL } from '../../components/socialSignInPolicy';
 import { needsRealServer, builtAServer, tallyServerNecessity, necessityHeadline } from '../AgentV3/serverNecessity';
 import type { Express, Request, Response, NextFunction } from 'express';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
@@ -1252,6 +1259,62 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // cap, publishing stops for EVERY user at once — and nothing on our side could see it coming,
   // because our registry counts apps we know about while the cap counts channels that EXIST. This
   // reconciles the two. Read-only; it changes nothing.
+  /**
+   * WHY IS APPLE SIGN-IN FAILING? — one call, one answer (admin 2026-08-21).
+   *
+   * The server fetches its OWN public association URL, which is precisely what Apple fetches, and
+   * compares it with what it believes it is serving. That comparison is the whole point: from a
+   * browser, "file missing", "something in front of us answered instead", "stale copy" and "our side is
+   * fine, the problem is in Apple's portal" all look like the same closed sheet. See
+   * appleSignInDiagnosis.ts.
+   *
+   * Reveals no secret: the association file is a PUBLIC file by design — Apple requires the whole
+   * internet to be able to read it — and the response carries no key, no token, and no credential.
+   */
+  app.get('/api/admin/apple-signin', verifyAdminToken, async (_req: Request, res: Response) => {
+    const readRepoFile = (f: string) => fs.readFileSync(path.join(process.cwd(), f), 'utf8');
+    const served = appleDomainAssociation(process.env, readRepoFile);
+    const source = appleDomainAssociationSource(process.env, readRepoFile);
+    const url = `${(process.env.PUBLIC_BASE_URL || 'https://navbharatai.com').replace(/\/$/, '')}${APPLE_DOMAIN_ASSOCIATION_PATH}`;
+
+    // Bounded, and a failure to ASK is reported as a failure to ask — never as a bad answer.
+    let selfFetch: AppleSelfFetch | null = null;
+    if (served) {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8_000);
+        try {
+          const r = await fetch(url, { signal: ctrl.signal, redirect: 'follow' });
+          const body = await r.text();
+          selfFetch = {
+            status: r.status,
+            body: body.trim().slice(0, 4096),
+            contentType: String(r.headers.get('content-type') || '').toLowerCase(),
+          };
+        } finally { clearTimeout(timer); }
+      } catch (e: any) {
+        selfFetch = { status: null, body: '', contentType: '', error: e?.message || String(e) };
+      }
+    }
+
+    const diagnosis = diagnoseAppleSignIn({ served, source, selfFetch });
+    res.json({
+      ...diagnosis,
+      url,
+      configured: !!served,
+      source,
+      // Lengths rather than contents: enough to spot a truncated paste or stray wrapper, without
+      // printing a long file into a console nobody will read.
+      servedLength: served ? served.length : 0,
+      fetchedLength: selfFetch?.body.length ?? null,
+      fetchedStatus: selfFetch?.status ?? null,
+      fetchedContentType: selfFetch?.contentType ?? null,
+      fetchError: selfFetch?.error ?? null,
+      serviceId: APPLE_SERVICE_ID,
+      returnUrl: APPLE_WEB_RETURN_URL,
+    });
+  });
+
   app.get('/api/admin/hosting/channels', verifyAdminToken, async (_req: Request, res: Response) => {
     try {
       // BOTH sides carry completeness now, because this screen REASONS ABOUT ABSENCE — a channel with

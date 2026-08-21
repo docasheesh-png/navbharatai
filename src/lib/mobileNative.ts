@@ -39,12 +39,26 @@ export function isNativeApp(): boolean {
  * what surfaces "please update" to them.
  */
 export async function checkForAppUpdate(): Promise<boolean> {
-  if (!isNativeApp()) return false;
+  return (await playUpdateAvailability()) === 'available';
+}
+
+/**
+ * The same question, answered in THREE states instead of two.
+ *
+ * ADMIN REPORT 2026-08-21 ("update kar lene ke bad bhi update ka button aa raha hai"): the boolean
+ * above cannot tell "Play says you are current" apart from "we could not ask Play" — both are false.
+ * That distinction is the entire fix: the first is a fact strong enough to overrule the version number
+ * an admin typed into Cloud Run, and the second is no evidence at all and must change nothing.
+ *
+ * 'unknown' also covers the sideloaded app, where Play has no answer to give.
+ */
+export async function playUpdateAvailability(): Promise<'available' | 'none' | 'unknown'> {
+  if (!isNativeApp()) return 'unknown';
   try {
     const info = await AppUpdate.getAppUpdateInfo();
-    return updateIsAvailable(info.updateAvailability as unknown as number);
+    return updateIsAvailable(info.updateAvailability as unknown as number) ? 'available' : 'none';
   } catch {
-    return false;
+    return 'unknown';
   }
 }
 

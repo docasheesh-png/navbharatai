@@ -7,7 +7,7 @@ const okDeps = (): PurgeDeps => ({
   deletePlan: vi.fn(async () => {}),
   deleteMemory: vi.fn(async () => {}),
   deleteDiagnostics: vi.fn(async () => {}),
-  deleteDeployment: vi.fn(async () => {}),
+  releaseDeployment: vi.fn(async () => {}),
 });
 
 describe('purgeWorkspace — cascade cleanup (GA-1, orphan-leak fix)', () => {
@@ -30,7 +30,7 @@ describe('purgeWorkspace — cascade cleanup (GA-1, orphan-leak fix)', () => {
     const r = await purgeWorkspace(deps, 'ws-2');
     // Every OTHER store still ran despite the files failure.
     expect(deps.removeConversation).toHaveBeenCalled();
-    expect(deps.deleteDeployment).toHaveBeenCalled();
+    expect(deps.releaseDeployment).toHaveBeenCalled();
     expect(r.ok).toBe(false);
     const files = r.stores.find((s) => s.store === 'files')!;
     expect(files.ok).toBe(false);

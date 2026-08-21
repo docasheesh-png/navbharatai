@@ -202,3 +202,36 @@ describe('HostingChooser — a publish that cannot start SAYS SO (no dead button
     expect(html).toContain('you can still publish to your own'); // gives a real way forward
   });
 });
+
+/**
+ * UNPUBLISH (admin 2026-08-21). Users could not remove a published app — only an admin could — which
+ * made the new five-app limit's advice ("remove an app you no longer need") a dead end.
+ *
+ * The admin's own condition: "yeh sirf tabhi dikhe, jab app kamse kam 1 bar published ho chuki ho."
+ * `liveUrl` is that gate, and the server returns it only for a genuinely ACTIVE deployment.
+ */
+describe('HostingChooser — the Unpublish control', () => {
+  const LIVE = 'https://v3-abc-123-hash.mitrify.in';
+
+  it('THE RULE: hidden when the app has never been published', () => {
+    const html = render([P('firebase', 'NavBharatAI', true)], { onUnpublish: async () => {} });
+    expect(html).not.toContain('Remove this app from NavBharatAI hosting');
+  });
+
+  it('shown once the app is genuinely live', () => {
+    const html = render([P('firebase', 'NavBharatAI', true)], { liveUrl: LIVE, onUnpublish: async () => {} });
+    expect(html).toContain('Remove this app from NavBharatAI hosting');
+  });
+
+  it('stays hidden for a live URL when no handler is wired — never a button that cannot act', () => {
+    const html = render([P('firebase', 'NavBharatAI', true)], { liveUrl: LIVE });
+    expect(html).not.toContain('Remove this app from NavBharatAI hosting');
+  });
+
+  it('does NOT take the app offline on the first press — the confirm step is a second decision', () => {
+    // Anyone holding the link loses it the moment this runs, so the first click only asks.
+    const html = render([P('firebase', 'NavBharatAI', true)], { liveUrl: LIVE, onUnpublish: async () => {} });
+    expect(html).not.toContain('Yes, take it offline');   // the confirm appears only after the first press
+    expect(html).toContain('Remove this app from NavBharatAI hosting');
+  });
+});

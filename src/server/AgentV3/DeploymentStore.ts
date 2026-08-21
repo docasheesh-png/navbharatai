@@ -21,7 +21,19 @@ import { probeHostingPlan } from '../lib/hostingPlan';
 import { audit } from '../lib/audit';
 
 /** Lifecycle status of a published app (registry — enables takedown/report in later slices). */
-export type DeploymentStatus = 'active' | 'held' | 'taken_down';
+/**
+ * A deployment's registry state.
+ *
+ * ⚠️ 'unpublished' is SEPARATE from 'taken_down' on purpose (2026-08-21). A takedown is an admin
+ * PUNISHMENT and the deploy gate refuses to ever republish it; an unpublish is the OWNER choosing to
+ * remove their own app, and they must be able to publish it again whenever they like. Reusing
+ * 'taken_down' for both would have locked users out of their own app for good — with a message about
+ * a policy violation they never committed.
+ *
+ * Both are non-'active', so both correctly read as NOT live (isLiveDeployment) and both free the
+ * user's slot in the hosting caps (liveAppCount / liveStorageMb skip anything not active).
+ */
+export type DeploymentStatus = 'active' | 'held' | 'taken_down' | 'unpublished';
 
 export interface DeploymentRecord {
   workspaceId: string;
@@ -39,6 +51,14 @@ export interface DeploymentRecord {
   status?: DeploymentStatus;
   /** True when the content-safety scanner flagged this app in WARN mode (published, but surfaced). */
   flagged?: boolean;
+  /**
+   * The owner deleted the workspace while this app was still published (2026-08-21).
+   *
+   * The app is STILL LIVE — a link someone shared must not die because its author tidied their chat
+   * list — but nobody can reach it from the app any more. Keeping the record marked is what stops it
+   * becoming invisible to admin takedown, which is what deleting the record used to do.
+   */
+  orphaned?: boolean;
 }
 
 class DeploymentStore {
@@ -163,6 +183,21 @@ class DeploymentStore {
   }
 
   /** Set a deployment's registry status (takedown / hold / restore). Best-effort. Returns success. */
+  /**
+   * Mark a deployment as orphaned: its workspace was purged while the app was still published.
+   *
+   * Deliberately does NOT change `status` — the app really is still live, and saying otherwise would
+   * be the fake status this file's own comments warn about. Best-effort; never throws.
+   */
+  async markOrphaned(workspaceId: string): Promise<void> {
+    const db = this.getDb();
+    if (!db || !workspaceId) return;
+    try {
+      await db.collection('agentv3_deployments').doc(workspaceId)
+        .set({ orphaned: true, updatedAt: Date.now() }, { merge: true });
+    } catch { /* best-effort — a purge must never fail on this */ }
+  }
+
   async setStatus(workspaceId: string, status: DeploymentStatus): Promise<boolean> {
     const db = this.getDb();
     if (!db || !workspaceId) return false;

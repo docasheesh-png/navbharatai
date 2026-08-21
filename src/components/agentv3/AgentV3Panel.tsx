@@ -2679,6 +2679,32 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
   };
 
+  /**
+   * Take this app off NavBharatAI hosting (admin 2026-08-21).
+   *
+   * Reports the SERVER's own outcome: the route deletes the real Firebase channel before it touches
+   * the registry, so a failure here means the site is genuinely still live — and saying "removed"
+   * over a site that is still serving would be exactly the fake success this panel keeps eliminating.
+   * On success the live URL is cleared, which also hides the button that produced it.
+   */
+  const unpublishLive = async (): Promise<void> => {
+    if (!state.workspaceId) return;
+    setPublishMsg('Taking your app offline…');
+    try {
+      const res = await fetch('/api/agentv3/unpublish', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setPublishMsg(data?.error || 'Could not take your app offline. Please try again.'); return; }
+      setLiveUrl(null);
+      setPublishMsg(data?.message || 'Your app has been taken off NavBharatAI hosting.');
+    } catch {
+      setPublishMsg('Could not reach NavBharatAI. Check your connection and try again.');
+    }
+  };
+
   const deployLive = (providerOverride?: string): string | null => {
     const prov0 = providerOverride || deployProvider;
     const blocked = deployBlockedReason({
@@ -3207,6 +3233,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           busy={running || publishing}
           publishStatus={publishMsg}
           workspaceId={state.workspaceId}
+          // Gates the Unpublish control: null unless this app is genuinely live (the server returns a
+          // URL only for an ACTIVE deployment), so it never offers to remove something that is not there.
+          liveUrl={liveUrl}
+          onUnpublish={unpublishLive}
           customDomainsEnabled={customDomainsEnabled}
           customDomainPriceInr={customDomainPriceInr}
           ownRepo={state.ownRepo}

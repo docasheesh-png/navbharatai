@@ -2679,6 +2679,36 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
   };
 
+  /** Every app this USER has live — the list that reaches an app whose chat was deleted. */
+  const loadMyPublishedApps = async () => {
+    const res = await fetch('/api/agentv3/my-published-apps', { headers: await authJsonHeaders() });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    if (!data || !Array.isArray(data.apps)) return null;
+    return { apps: data.apps, used: Number(data.used ?? data.apps.length), cap: Number(data.cap ?? 0) };
+  };
+
+  /**
+   * Take ONE app offline by workspace id. Returns '' on success or the server's own reason, because
+   * the list needs to know whether to drop the row — a row removed on a failed call would be a lie.
+   */
+  const unpublishByWorkspace = async (wsId: string): Promise<string> => {
+    try {
+      const res = await fetch('/api/agentv3/unpublish', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: wsId, userId, email }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return data?.error || 'Could not take that app offline. Please try again.';
+      // If it was THIS chat's app, the panel's own live link must go too.
+      if (wsId === state.workspaceId) setLiveUrl(null);
+      return '';
+    } catch {
+      return 'Could not reach NavBharatAI. Check your connection and try again.';
+    }
+  };
+
   /**
    * Take this app off NavBharatAI hosting (admin 2026-08-21).
    *
@@ -3237,6 +3267,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           // URL only for an ACTIVE deployment), so it never offers to remove something that is not there.
           liveUrl={liveUrl}
           onUnpublish={unpublishLive}
+          onLoadMyApps={loadMyPublishedApps}
+          onUnpublishApp={unpublishByWorkspace}
           customDomainsEnabled={customDomainsEnabled}
           customDomainPriceInr={customDomainPriceInr}
           ownRepo={state.ownRepo}

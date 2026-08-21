@@ -78,6 +78,13 @@ export interface HostingChooserProps {
   liveUrl?: string | null;
   /** Take the app off NavBharatAI hosting. Resolves to an honest message; the caller shows it. */
   onUnpublish?: () => Promise<void>;
+  /**
+   * Load every app this USER has live. Keyed by user rather than workspace on purpose — an app whose
+   * chat was deleted has nothing pointing at it, and this list is the only way back to it.
+   */
+  onLoadMyApps?: () => Promise<{ apps: Array<{ workspaceId: string; url: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }>; used: number; cap: number } | null>;
+  /** Take ONE of them offline by workspace id. Resolves to '' on success, or an honest message. */
+  onUnpublishApp?: (workspaceId: string) => Promise<string>;
   /** Set once this workspace is storing its code in the user's OWN GitHub repo (git-native storage). */
   ownRepo?: OwnRepoInfo | null;
   /** Whether a GitHub account is already connected (token present) — governs the "I host it myself" CTA. */
@@ -113,11 +120,17 @@ const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI
 
 export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr,
-  liveUrl, onUnpublish,
+  liveUrl, onUnpublish, onLoadMyApps, onUnpublishApp,
   ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
   onMakeIcon,
 }: HostingChooserProps) {
-  const [view, setView] = useState<'choose' | 'domain' | 'selfhost'>('choose');
+  const [view, setView] = useState<'choose' | 'domain' | 'selfhost' | 'myapps'>('choose');
+  // MY PUBLISHED APPS (admin 2026-08-21). Loaded on demand, because most people opening Publish are
+  // here to publish, not to audit — and a list nobody asked for is a request nobody needed.
+  const [myApps, setMyApps] = useState<Array<{ workspaceId: string; url: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }> | null>(null);
+  const [myAppsMeta, setMyAppsMeta] = useState<{ used: number; cap: number } | null>(null);
+  const [myAppsErr, setMyAppsErr] = useState('');
+  const [myAppsBusy, setMyAppsBusy] = useState('');
   // Unpublish: two-step, because taking a public site down is irreversible from the visitor's side —
   // anyone holding the link loses it the moment this runs. `confirm` is the second step.
   const [unpubConfirm, setUnpubConfirm] = useState(false);
@@ -351,6 +364,70 @@ export function HostingChooser({
           <div className="p-4">
             <NbaiDomainConnect workspaceId={workspaceId} onBack={() => setView('choose')} />
           </div>
+        ) : view === 'myapps' ? (
+          /* MY PUBLISHED APPS. Lists by USER, not by workspace — which is the whole point: an app
+             whose chat was deleted has nothing pointing at it, and this is the only place it can
+             still be reached and taken down. It also makes "5 of 5 used" visible BEFORE a publish is
+             refused, instead of the limit arriving as a surprise. */
+          <div className="p-4 flex flex-col gap-3">
+            <button onClick={() => setView('choose')} className="text-[11px] text-zinc-400 hover:text-white self-start">← Back</button>
+            <div className="flex items-baseline justify-between gap-2">
+              <h4 className="text-[13px] font-bold text-white">Your published apps</h4>
+              {myAppsMeta && (
+                <span className="text-[11px] text-zinc-400">{myAppsMeta.used} of {myAppsMeta.cap} free slots used</span>
+              )}
+            </div>
+
+            {myAppsErr && <p className="text-[11.5px] text-amber-300 leading-relaxed">{myAppsErr}</p>}
+            {!myApps && !myAppsErr && <p className="text-[11.5px] text-zinc-400">Loading…</p>}
+            {myApps?.length === 0 && (
+              <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+                You have no apps published on NavBharatAI right now. Publishing one puts it at a permanent
+                link you can share.
+              </p>
+            )}
+
+            {myApps?.map((a) => (
+              <div key={a.workspaceId} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 flex flex-col gap-1.5">
+                <a
+                  href={a.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[12px] text-emerald-300 hover:text-emerald-200 font-semibold break-all"
+                >
+                  {a.url.replace(/^https?:\/\//, '')}
+                </a>
+                <p className="text-[11px] text-zinc-500">
+                  {a.sizeMb !== null ? `${a.sizeMb.toFixed(1)} MB` : 'size unknown'}
+                  {a.updatedAt ? ` · updated ${new Date(a.updatedAt).toLocaleDateString()}` : ''}
+                </p>
+                {a.orphaned && (
+                  <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                    Its chat was deleted, so it cannot be opened for editing — but it is still live, and
+                    you can take it down from here.
+                  </p>
+                )}
+                <button
+                  onClick={() => {
+                    if (!onUnpublishApp) return;
+                    setMyAppsErr('');
+                    setMyAppsBusy(a.workspaceId);
+                    void onUnpublishApp(a.workspaceId)
+                      .then((msg) => {
+                        if (msg) { setMyAppsErr(msg); return; }
+                        setMyApps((cur) => (cur ?? []).filter((x) => x.workspaceId !== a.workspaceId));
+                        setMyAppsMeta((m) => (m ? { ...m, used: Math.max(0, m.used - 1) } : m));
+                      })
+                      .finally(() => setMyAppsBusy(''));
+                  }}
+                  disabled={!onUnpublishApp || myAppsBusy === a.workspaceId}
+                  className="self-start mt-0.5 px-2.5 py-1 rounded-lg border border-zinc-700 hover:border-red-700 text-zinc-400 hover:text-red-300 text-[11px] font-semibold disabled:opacity-40"
+                >
+                  {myAppsBusy === a.workspaceId ? 'Removing…' : 'Take offline'}
+                </button>
+              </div>
+            ))}
+          </div>
         ) : view === 'selfhost' ? (
           <div className="p-4 flex flex-col gap-3">
             <button onClick={() => setView('choose')} className="text-[11px] text-zinc-400 hover:text-white self-start">← Back</button>
@@ -566,6 +643,29 @@ export function HostingChooser({
                 )}
                 {unpubNote && <p className="mt-1.5 text-[11px] text-zinc-400">{unpubNote}</p>}
               </div>
+            )}
+
+            {/* The way back to an app whose chat is gone — and the only place "how many have I
+                published?" has an answer. Shown whenever the loader is wired, even with nothing
+                published yet, because the count itself is the useful part. */}
+            {onLoadMyApps && (
+              <button
+                onClick={() => {
+                  setView('myapps');
+                  setMyApps(null); setMyAppsErr(''); setMyAppsMeta(null);
+                  void onLoadMyApps()
+                    .then((r) => {
+                      if (!r) { setMyAppsErr('Could not load your published apps. Please try again.'); return; }
+                      setMyApps(r.apps);
+                      setMyAppsMeta({ used: r.used, cap: r.cap });
+                    })
+                    .catch(() => setMyAppsErr('Could not load your published apps. Please try again.'));
+                }}
+                className="w-full py-1.5 rounded-lg border border-zinc-700 hover:border-emerald-700 text-zinc-400 hover:text-emerald-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                Your published apps
+              </button>
             )}
           </div>
 

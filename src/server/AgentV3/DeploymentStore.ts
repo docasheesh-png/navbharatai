@@ -225,6 +225,40 @@ export function isLiveDeployment(rec: Pick<DeploymentRecord, 'url' | 'status'> |
   return !!rec && typeof rec.url === 'string' && rec.url.length > 0 && (rec.status ?? 'active') === 'active';
 }
 
+/** One row of "Your published apps" — exactly what the user is shown, nothing internal. */
+export interface PublishedAppSummary {
+  workspaceId: string;
+  url: string;
+  updatedAt: number | null;
+  sizeMb: number | null;
+  /** The app's chat was deleted, so it cannot be opened for editing — but it is still live. */
+  orphaned: boolean;
+}
+
+/**
+ * The user's own live apps, from their raw deployment records.
+ *
+ * WHY IT IS A FUNCTION AND NOT A `.map()` IN THE ROUTE: two rules ride on it. Only LIVE apps may be
+ * listed — offering "take offline" on something already down would be an action that does nothing —
+ * and the count it produces must be the SAME count the five-app cap enforces (`liveAppCount`), or the
+ * screen says "3 of 5 used" while a publish is refused. Pure, so both can be pinned by a test.
+ */
+export function publishedAppList(
+  records: ReadonlyArray<Partial<DeploymentRecord>> | null | undefined,
+): PublishedAppSummary[] {
+  return (records ?? [])
+    .filter((r) => isLiveDeployment(r as DeploymentRecord) && typeof r.workspaceId === 'string' && !!r.workspaceId)
+    .map((r) => ({
+      workspaceId: r.workspaceId as string,
+      url: r.url as string,
+      updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : null,
+      // A missing size is reported as UNKNOWN rather than 0 — "0.0 MB" would be a measurement we
+      // never took, and legacy records genuinely have none.
+      sizeMb: typeof r.sizeMb === 'number' ? r.sizeMb : null,
+      orphaned: r.orphaned === true,
+    }));
+}
+
 /**
  * Wrap a DeployFn so every successful deploy is also durably recorded (R5 §5.1). The returned
  * function has the SAME signature, so it is a drop-in for the dispatcher. Recording is best-effort

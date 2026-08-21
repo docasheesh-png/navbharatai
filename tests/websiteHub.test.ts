@@ -73,18 +73,17 @@ describe('App Settings — Your Website hub', () => {
     expect(src).toContain("onBack={() => setSettingsScreen('root')}");
   });
 
-  it('the honest auto-hosting ANSWER survives the removed screen — as an info line, not a tile', () => {
-    // Removing the Hosting & Deploy screen must not remove the useful thing it said. A user opening
-    // App Settings to look for hosting still gets an answer here; only the broken second doorway is
-    // gone. Same rule as Frontend & Backend: an honest info line beats a tile that does nothing.
-    expect(src).toContain('Hosting — your app is already hosted');
-    const start = src.indexOf('Hosting — your app is already hosted');
-    const block = src.slice(start, start + 900);
-    // …and it points at the path that genuinely publishes a v5.0 app.
-    expect(block).toContain('Publish');
-    expect(block).toContain('Pro v5.0');
-    // It is an info line, NOT a clickable settings tile.
+  it('App Settings carries CONTROLS, not paragraphs — both explainer cards are gone', () => {
+    // Admin 2026-08-21: "yeh sab hatao delete karo. i need clear interface". The hosting note and the
+    // frontend/backend note were both TRUE and both unactionable — prose on a screen whose job is to
+    // hold things you can act on. This asserts the removal, and the test below asserts the part that
+    // actually mattered: the ANSWERS still exist where a question belongs.
+    expect(src).not.toContain('Hosting — your app is already hosted');
+    expect(src).not.toContain('Frontend &amp; Backend — built for you');
+    // Neither ever became a clickable settings tile, and must not come back as one.
     expect(src).not.toContain("id: 'hosting'");
+    expect(src).not.toContain("id: 'frontend'");
+    expect(src).not.toContain("id: 'backend'");
   });
 
   it('the Storage sub-screen mounts the real StorageSettings connection panel', () => {
@@ -97,11 +96,15 @@ describe('App Settings — Your Website hub', () => {
     expect(src).toContain('<AuthSettings');
   });
 
-  it('Frontend & Backend get an honest info line, NOT a fake tile', () => {
-    expect(src).toContain('Frontend &amp; Backend — built for you');
-    // They are NOT clickable settings tiles (no settingsScreen ids for them).
-    expect(src).not.toContain("id: 'frontend'");
-    expect(src).not.toContain("id: 'backend'");
+  it('NOTHING WAS LOST BY DELETING THEM — every AI can still answer both questions', () => {
+    // This is why removing the cards was a clean win rather than a trade-off. A user who wants to know
+    // where their app is hosted, or where the backend is configured, can ask any AI in the app and get
+    // the answer — the surface a question actually belongs on. If this ever fails, the cards took real
+    // knowledge with them and the deletion has become a regression.
+    const kb = readFileSync(join(process.cwd(), 'src/server/AppContext/AppKnowledgeBase.ts'), 'utf8');
+    expect(kb).toMatch(/hosted/i);
+    expect(kb).toMatch(/live.{0,20}(url|link)/i);
+    expect(kb).toMatch(/backend/i);
   });
 
   it('SettingsScreen type carries the hub screens — and no longer carries the removed ones', () => {

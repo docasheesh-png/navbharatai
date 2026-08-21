@@ -40,7 +40,21 @@ describe('the panel loader is first-load only', () => {
      */
     const fn = surface.slice(surface.indexOf('setLoading(true);'), surface.indexOf('setErr(e instanceof Error'));
     expect(fn.length).toBeGreaterThan(100);
-    expect(fn).not.toMatch(/setHtml\(\s*''\s*\)/);
+
+    /**
+     * STRENGTHENED 2026-08-21, not relaxed. There is now exactly ONE legitimate reason to clear `html`
+     * on the success path: the server answered that the workspace holds NO FILES. That is not a
+     * reload blanking a working preview — it is the app genuinely being gone, where continuing to
+     * frame the previous render would leave a deleted app looking live (the same failure the sibling
+     * test below guards on the error path). So the rule is now "cleared ONLY in the empty branch",
+     * which forbids strictly more than the old blanket ban did: a stray clear anywhere else still
+     * fails, AND the empty branch is now required to clear rather than merely permitted to.
+     */
+    const emptyBranch = fn.slice(fn.indexOf('data.empty === true'), fn.indexOf('setKnownEmpty(false)'));
+    expect(emptyBranch.length, 'the empty-workspace branch has moved or gone').toBeGreaterThan(20);
+    expect(emptyBranch, 'an empty workspace must not keep framing the previous render').toMatch(/setHtml\(\s*''\s*\)/);
+    expect(fn.replace(emptyBranch, ''), 'html was cleared somewhere other than the empty branch').not.toMatch(/setHtml\(\s*''\s*\)/);
+
     // The only assignment inside the successful path is the freshly-fetched page.
     expect(fn).toContain('setHtml(nextHtml)');
   });

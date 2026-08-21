@@ -10,6 +10,7 @@ import {
   Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail, Scale, FileText,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { authedHeaders } from '../../App';
 // META only — the ~45 KB of document bodies must never enter the main chunk (bundle budget);
 // LegalDocPage dynamic-imports the full registry into its own lazy chunk.
 import { LEGAL_META } from '../../content/legal/meta';
@@ -298,16 +299,42 @@ function FontScaleControl() {
  * "made by NavBharatAI" signature toggle (Settings → General, admin 2026-07-16). When ON (default),
  * every app the user builds carries a small "made by NavBharatAI" badge in the bottom-right corner
  * that links to navbharatai.com — the viral-growth mechanic (a friend clicks it → lands on
- * navbharatai.com → becomes a customer). Persisted to localStorage `navbharat_app_signature`
- * ('off' when disabled); the build request reads it (AgentV3Panel) and the server bakes the badge
- * into the built app's index.html. Self-contained (own state), same pattern as MotionModeControl.
+ * navbharatai.com → becomes a customer).
+ *
+ * REMOVING IT IS A PAID FEATURE (admin 2026-08-21), and this switch does NOT decide that. It records a
+ * PREFERENCE in localStorage; the server decides whether to honour it, from the verified identity, on
+ * every build (appSignatureEntitlement.ts). That split is the fix: while the decision lived here, the
+ * paid outcome was one localStorage edit away for anybody.
+ *
+ * So the card asks the server what this user is entitled to and shows the truth — including the
+ * uncomfortable part, that the entitlement is not currently on sale. A lock with a buy button that
+ * would fail at the payment gateway is worse than a lock that explains itself.
  */
 function AppSignatureToggle() {
   const KEY = 'navbharat_app_signature';
   const [enabled, setEnabled] = React.useState<boolean>(() => {
     try { return localStorage.getItem(KEY) !== 'off'; } catch { return true; }
   });
+  // null = not answered yet. Until the server answers, the switch is left alone rather than guessed at.
+  const [ent, setEnt] = React.useState<{ canRemove: boolean; priceInr: number; purchasable: boolean } | null>(null);
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/agentv3/app-signature-status', { headers: await authedHeaders() });
+        if (!res.ok) return;
+        const d = await res.json();
+        if (alive) setEnt({ canRemove: d?.canRemove === true, priceInr: Number(d?.priceInr) || 99, purchasable: d?.purchasable === true });
+      } catch { /* unreachable → the card simply shows no entitlement note, never a wrong one */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+  const locked = ent !== null && !ent.canRemove;
   const toggle = () => {
+    // Refuse locally too — not as the enforcement (that is the server's), but so the switch never
+    // animates into a position the next build will silently override. A control that moves and then
+    // does nothing is the fake-feature failure the second absolute rule forbids.
+    if (locked) return;
     setEnabled((prev) => {
       const next = !prev;
       try { localStorage.setItem(KEY, next ? 'on' : 'off'); } catch { /* ignore */ }
@@ -325,16 +352,25 @@ function AppSignatureToggle() {
           <p className="text-[10px] text-[#8b949e] mt-1 leading-relaxed max-w-xs">
             Show a small &ldquo;made by NavBharatAI&rdquo; badge in the bottom-right corner of every app you build. It links to navbharatai.com.
           </p>
+          {locked && (
+            <p className="text-[10px] text-amber-400/90 mt-1.5 leading-relaxed max-w-xs">
+              {ent?.purchasable
+                ? `Removing the badge is a paid feature (₹${ent.priceInr}/month).`
+                : 'Removing the badge is a paid feature. It is not on sale right now, so the badge stays on every app for now.'}
+            </p>
+          )}
         </div>
       </div>
       <button
         role="switch"
-        aria-checked={enabled}
+        aria-checked={locked ? true : enabled}
         aria-label="Toggle the made-by-NavBharatAI signature on built apps"
         onClick={toggle}
-        className={`w-12 h-6 rounded-full p-1 flex items-center transition-all shrink-0 ${enabled ? 'bg-indigo-600 justify-end' : 'bg-black/40 justify-start border border-white/10'}`}
+        disabled={locked}
+        title={locked ? 'Removing the badge is a paid feature.' : undefined}
+        className={`w-12 h-6 rounded-full p-1 flex items-center transition-all shrink-0 ${locked ? 'bg-indigo-600/40 justify-end cursor-not-allowed' : enabled ? 'bg-indigo-600 justify-end' : 'bg-black/40 justify-start border border-white/10'}`}
       >
-        <div className="w-4 h-4 bg-white rounded-full shadow-lg"></div>
+        <div className={`w-4 h-4 rounded-full shadow-lg ${locked ? 'bg-white/80' : 'bg-white'}`}></div>
       </button>
     </div>
   );

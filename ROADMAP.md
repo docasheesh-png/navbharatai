@@ -677,6 +677,27 @@ near 36.
    switch is reversible and no existing link breaks.
 4. Migrate existing channels lazily (on next publish), then reclaim them.
 
+### 10.4 · Two findings from wiring the 5-app free limit (2026-08-21)
+
+**(a) The per-user cap does NOT solve the platform ceiling — it only shares it out.** At 5 apps per
+user and ~50 channels total, the platform is full at **ten users**. The cap is still right (it stops
+one account taking everything, and it is what the admin asked for), but nobody should read it as the
+ceiling being handled. §10.3 is what handles the ceiling.
+
+**(b) 🔴 DELETING A CHAT ORPHANS ITS PUBLISHED APP — needs an admin decision.** Purging a workspace
+(`purgeWorkspace` → `deleteDeployment`) removes the deployment RECORD but never deletes the Firebase
+CHANNEL. So the app stays live at its public URL forever, while the registry that admin takedown reads
+from no longer lists it — an app nobody can find, manage or remove, still holding one of the ~50
+channels. That makes the ceiling arrive silently, and makes "remove an app you no longer need" only
+half-true: it frees the slot in OUR count, not in Firebase's.
+
+The fix is one line (delete the channel in the same purge), but it is DESTRUCTIVE and user-visible —
+someone who deletes a chat may still expect the link they shared to work — so it is the admin's call,
+not a silent change. Options: (i) purge unpublishes too, (ii) a real user-facing "Unpublish" button and
+purge leaves the app alone, (iii) purge keeps the record (marked orphaned) so takedown can still reach
+it. **Recommended: (ii) + (iii)** — the user gets an explicit way to take their own app down, and
+nothing goes offline by surprise.
+
 **Until it ships this is an OPEN root cause (rule 6), not a solved problem.** It is not urgent today —
 the platform is far from 50 apps — but it must land before real users arrive, because the failure mode
 is "publishing stops working for everybody" with no warning.

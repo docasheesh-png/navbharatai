@@ -66,6 +66,45 @@ export function hostingStorageCapMb(): number {
 }
 
 /**
+ * How many DISTINCT apps one user may keep published on NavBharatAI's own hosting. 0 = off.
+ *
+ * WHY A COUNT AS WELL AS A SIZE AND A TOTAL (admin 2026-08-21: "maximum 5 free publish on
+ * navbharatai — isse limit reach hone me thoda aram milega"). The three caps bound three different
+ * things and none substitutes for another: MB-per-publish bounds one bundle, total-MB bounds a user's
+ * disk, and this bounds the scarcest resource of all — Firebase Hosting CHANNELS. Every published app
+ * holds one channel on one site, and that pool is capped for the WHOLE PLATFORM (ROADMAP §10), so the
+ * count is what the ceiling is actually made of.
+ *
+ * ⚠️ IT COUNTS APPS, NOT PUBLISHES. Republishing an app reuses its channel and costs nothing new, so
+ * charging for it would punish shipping a fix — the behaviour we most want. `liveAppCount` therefore
+ * excludes the workspace being republished, exactly as the storage cap does.
+ */
+export function publishedAppCap(): number {
+  // Empty means unset, not zero — see hostingStorageCapMb for the trap this avoids.
+  const raw = String(process.env.AGENTV3_USER_PUBLISHED_APP_CAP ?? '').trim();
+  if (!raw) return 5;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 5;
+}
+
+/** Pure: how many DISTINCT live first-party apps this user holds, excluding the one being republished. */
+export function liveAppCount(
+  records: ReadonlyArray<{ workspaceId?: string; status?: string; providerId?: string; firstParty?: boolean }>,
+  excludeWorkspaceId?: string,
+): number {
+  const seen = new Set<string>();
+  for (const r of records || []) {
+    if (!r || !r.workspaceId || r.workspaceId === excludeWorkspaceId) continue;
+    if (r.status && r.status !== 'active') continue;
+    const firstParty = r.firstParty === true
+      || (r.firstParty === undefined && (r.providerId === undefined || isFirstPartyProvider(r.providerId)));
+    if (!firstParty) continue;
+    seen.add(r.workspaceId);
+  }
+  return seen.size;
+}
+
+/**
  * Pure: the MB this user already holds live, EXCLUDING the app being republished.
  *
  * That exclusion is the whole correctness of the check. Publishing an update to an existing app
@@ -163,6 +202,26 @@ export async function enforceHostingQuota(input: {
       new Promise<null>((r) => setTimeout(() => r(null), 3_000)),
     ]).catch(() => null);
     if (records) {
+      // COUNT first — it is the scarcer resource, and its message is the more actionable one.
+      const appCap = publishedAppCap();
+      if (appCap > 0) {
+        const apps = liveAppCount(records, input.workspaceId);
+        if (apps >= appCap) {
+          return {
+            allowed: false,
+            used: apps,
+            cap: appCap,
+            byteMb: Math.round(byteMb * 100) / 100,
+            message:
+              `You already have ${apps} apps published on NavBharatAI, which is the free limit of ` +
+              `${appCap}. Updating an app you have already published is always free and does not count ` +
+              `against this. To publish a NEW one, remove an app you no longer need, or publish it to ` +
+              `your own free host (Vercel / Netlify / Cloudflare Pages) — that runs on your account, ` +
+              `free from us.`,
+          };
+        }
+      }
+
       const heldMb = liveStorageMb(records, input.workspaceId);
       if (heldMb + byteMb > storageCap) {
         return {

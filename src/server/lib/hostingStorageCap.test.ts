@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { hostingStorageCapMb, liveStorageMb, deployBytesMb, isFirstPartyProvider } from './HostingQuota';
+import {
+  hostingStorageCapMb, liveStorageMb, deployBytesMb, isFirstPartyProvider,
+  publishedAppCap, liveAppCount,
+} from './HostingQuota';
 
 /**
  * THE HOLE THIS CLOSES (admin 2026-08-21: "sara 10gb ek hi user kha gaya to mera dhanda manda ho
@@ -73,5 +76,53 @@ describe('liveStorageMb — what the user actually holds', () => {
   it('a normal user is nowhere near the cap — 100 typical apps still fit', () => {
     const many = Array.from({ length: 100 }, (_, i) => rec({ workspaceId: `w${i}`, sizeMb: 0.6 }));
     expect(liveStorageMb(many)).toBeLessThan(hostingStorageCapMb());
+  });
+});
+
+/**
+ * THE FREE PUBLISH LIMIT (admin 2026-08-21: "maximum 5 free publish on navbharatai — isse limit reach
+ * hone me thoda aram milega"). It counts APPS, not publish presses: every published app holds one
+ * Firebase channel, and that pool is what the platform ceiling is made of (ROADMAP §10). Republishing
+ * reuses the same channel and costs nothing new.
+ */
+describe('publishedAppCap — five free apps, not five publishes', () => {
+  afterEach(() => { delete process.env.AGENTV3_USER_PUBLISHED_APP_CAP; });
+
+  it('defaults to 5, is env-tunable, and an explicit 0 disables it', () => {
+    expect(publishedAppCap()).toBe(5);
+    process.env.AGENTV3_USER_PUBLISHED_APP_CAP = '12';
+    expect(publishedAppCap()).toBe(12);
+    process.env.AGENTV3_USER_PUBLISHED_APP_CAP = '0';
+    expect(publishedAppCap()).toBe(0);
+  });
+
+  it('an empty or malformed value falls back to 5, never to "disabled"', () => {
+    process.env.AGENTV3_USER_PUBLISHED_APP_CAP = '';
+    expect(publishedAppCap()).toBe(5);
+    process.env.AGENTV3_USER_PUBLISHED_APP_CAP = 'five';
+    expect(publishedAppCap()).toBe(5);
+  });
+
+  it('THE RULE: REPUBLISHING an existing app never counts — shipping a fix must stay free', () => {
+    const held = [rec({ workspaceId: 'a' }), rec({ workspaceId: 'b' }), rec({ workspaceId: 'c' }),
+                  rec({ workspaceId: 'd' }), rec({ workspaceId: 'e' })];
+    expect(liveAppCount(held, 'c')).toBe(4);            // updating 'c' → under the cap of 5
+    expect(liveAppCount(held, 'c') >= publishedAppCap()).toBe(false);
+    expect(liveAppCount(held, 'new-app')).toBe(5);      // a 6th NEW app → at the cap
+    expect(liveAppCount(held, 'new-app') >= publishedAppCap()).toBe(true);
+  });
+
+  it('counts APPS, so one app published many times is still one', () => {
+    // Records are keyed by workspaceId, so a redeploy overwrites rather than adds.
+    expect(liveAppCount([rec({ workspaceId: 'a' }), rec({ workspaceId: 'a' })])).toBe(1);
+  });
+
+  it('taken-down apps and BYO deploys free the slot / never take one', () => {
+    expect(liveAppCount([rec({ workspaceId: 'a', status: 'taken_down' })])).toBe(0);
+    expect(liveAppCount([rec({ workspaceId: 'a', providerId: 'netlify', firstParty: false })])).toBe(0);
+  });
+
+  it('a record with no workspaceId cannot occupy a slot', () => {
+    expect(liveAppCount([{ sizeMb: 5, status: 'active' } as never])).toBe(0);
   });
 });

@@ -36751,3 +36751,73 @@ started, and recorded honestly — including that I could not confirm the exact 
 Google's published quota page.
 
 Gate: both tsc green; FULL suite 16,849 tests / 1,346 files green.
+
+### 2026-08-21 — The day the app had no CSS on older phones (PRs #2489, #2494, #2500, #2514, #2521, #2522)
+
+Six merges, and the last one matters more than the other five together.
+
+**THE BIG ONE — the app rendered as raw HTML on an older browser, and had done since 2026-08-12.**
+
+The admin sent a photo of a tablet: stacked logos, default fonts, a white page, and the
+"Skip to main content" link — which is supposed to be invisible — sitting at the top of the screen.
+That link IS the diagnosis. `.sr-only` is a Tailwind utility, and Tailwind v4 emits every utility
+inside `@layer utilities`.
+
+Tailwind v4 landed here on 2026-08-12 and requires a modern engine (Chrome 111+ / Safari 16.4+). The
+built stylesheet carried `@layer` (4 blocks), `oklch()` (187) and `color-mix()` (1,725). A browser
+that does not understand `@layer` does NOT skip the at-rule and continue — per spec it discards the
+whole block, so every utility class in the app disappears at once.
+
+**THE PART WORTH REMEMBERING: this was never a tablet bug, or even an app bug.** The same stylesheet
+serves navbharatai.com, so every older browser — an old phone, a school computer, a cheap tablet — had
+been getting the same raw page for nine days. Nobody noticed because every device WE test on is
+recent. A product aimed at the next hundred million users of Bharat had quietly raised its hardware
+floor, and the only reason it surfaced is that one admin happened to pick up an old tablet.
+
+Fixed as progressive enhancement in `postcss.config.js`: layers flattened, `oklch()`/`color-mix()`
+given fallbacks, and — the piece that is easy to miss — the fallbacks carried into CUSTOM PROPERTIES,
+where Tailwind v4 keeps its whole palette (a custom property accepts any tokens, so
+`--color-emerald-600: oklch(…)` "works" until it is USED, and only then does the old engine throw the
+declaration away). Verified in the OUTPUT: `@layer` 4 → 0, `--color-emerald-600` now `rgb(0, 150, 105)`
+with the oklch preserved inside `@supports`. 45KB gzipped.
+
+⚠️ `cssLegacy.test.ts` exists because deleting that config leaves `npm run build` green and the site
+pixel-identical on any machine we own. The damage is invisible from here and lands only on the users
+least able to work around it.
+
+**The update nag that could never be cleared.** "Update kar lene ke bad bhi update ka button aa raha
+hai." The banner compared against `ANDROID_LATEST_VERSION_CODE`, a number typed into Cloud Run by
+hand. If it ever names a build Play is not serving, no amount of updating can satisfy it — the user
+installs the newest build Play HAS and is told again they are out of date, forever. Play now has the
+last word: its "you are current" vetoes the env, including over a FORCED update. The answer is
+tri-state on purpose — "could not ask Play" is not evidence and changes nothing, which is exactly why
+the old boolean could not do this job.
+
+Diagnostic worth keeping: `ANDROID_VERSION_NAME` is `1.0.<run number>`, so the version in the banner
+NAMES the versionCode the env is set to. The reported banner said 1.0.78 ⇒ the env held 78 ⇒ Play was
+not serving 78.
+
+**The other four, in one line each.** #2489 three ways to a store icon (the old handler refused
+anything over 200KB, so "Paste" — whose whole purpose is an AI-generated 1024×1024 PNG — could never
+have worked) plus ✕ genuinely ending a professional chat by RULE over PROFESSIONAL_CHATS, archiving
+rather than deleting because that key is the only copy of the user's history. #2494 the registry
+cleanup can no longer delete an image a live revision still needs. #2500 the App Mart download, dead
+inside the app because a relative `/api` link points at the shell — the THIRD escape from apiBase's
+transport rewrite (fetch ✅, XHR ✅, WebSocket ✗, navigation ✗), so the fix went into `resolveApiHref`
+rather than the button. #2514 Settings/Account/Your App were a phone column on a desktop because each
+had invented its own hard-coded cap.
+
+**Two things found on the way and deliberately NOT fixed, recorded so they are not lost:**
+1. `_lz` in `ViewPanels.tsx` casts every lazily-loaded panel to `ComponentType<any>` — prop types are
+   ERASED for ~35 panels. Making a prop required caught the two directly-imported call sites and
+   stayed silent on the third. Fixing it will surface pre-existing prop errors across those panels and
+   deserves its own change.
+2. `sanitizeScreenshots` still drops an oversized screenshot silently server-side. No client path can
+   reach it (the client reports skipped images honestly and matches the cap), so it is recorded rather
+   than changed.
+
+Builds: `.aab` run #84 and `.ipa` run #61 (TestFlight upload confirmed in the job steps, not assumed).
+⚠️ `ANDROID_LATEST_VERSION_CODE` must be set to 84 ONLY after 84 is live in Play PRODUCTION — setting
+it to a merely-built number is precisely the trap above.
+
+Gate: tsc (frontend + server) clean · 1348 files / 16,883 tests green · build OK.

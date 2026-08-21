@@ -10,7 +10,7 @@ import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartph
 import { canOfferRestart, restartStatusLine } from './previewRestart';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
-import { shouldAutoRebootPreview } from './previewAutoReboot';
+import { shouldAutoRebootPreview, shouldRestorePreview } from './previewAutoReboot';
 import { shouldWatchLivePreview } from './previewKeepAlive';
 import { shouldBootImportedProject } from './importedProjectBoot';
 import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
@@ -323,15 +323,33 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // actually supports a live preview (E2B configured — otherwise there is nothing to boot), and we
   // have a workspace with no live URL, run the SAME real rehydrate-and-reboot the Diagnose button uses,
   // automatically. Gated to ONCE per workspace so it can never loop or repeatedly boot a sandbox.
+  /**
+   * The preview's REAL health, kept so the UI can SAY it (admin 2026-08-21: "live preview ek bar chal
+   * jata hai… kuch der baad wapas ao to chalta hi nahi hai").
+   *
+   * The server has always known when a preview is `sleeping` / `crashed` / `not_serving` — the probe
+   * below computes it on every check. It was then used ONLY to decide whether to auto-heal, and never
+   * shown. So a user returning after the sandbox's idle-pause met a blank frame and total silence:
+   * nothing said the preview had gone to sleep, nothing said it was being woken, nothing said to wait.
+   * From the user's side that is indistinguishable from "it just doesn't work", which is exactly how it
+   * was reported. Knowing something and not saying it is the failure this fixes.
+   */
+  const [health, setHealth] = useState<string | null>(null);
   const autoResumedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!autoResume || mode !== 'live' || !workspaceId) return;
-    if (url || foundUrl || diagnosing) return;
+    // A STALE URL IS NOT A LIVE PREVIEW (admin 2026-08-21). This used to bail whenever a url existed —
+    // but a user returning after the sandbox's idle-pause ALWAYS has the old url in hand, and the thing
+    // behind it is asleep. "We have a URL" and "the preview is alive" are different facts, and treating
+    // the first as the second meant this restore never once fired for the case it was written for. The
+    // health probe is what knows the difference, so a url only blocks the restore while health has not
+    // already reported the preview down.
+    if (!shouldRestorePreview({ hasUrl: !!(url || foundUrl), healthStatus: health, diagnosing })) return;
     if (sandbox?.livePreviewAvailable !== true) return; // no live backend here → nothing to resume
     if (autoResumedFor.current === workspaceId) return;
     autoResumedFor.current = workspaceId;
     void runDiagnose();
-  }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox, runDiagnose]);
+  }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox, health, runDiagnose]);
 
   // AN IMPORTED PROJECT INSTALLS AND RUNS ITSELF — no AI turn (admin 2026-08-10: "koi user kitni bhi
   // badi file upload kyu na kare, usko LLM/provider tak bhejne ki need hi nahi hai — IDE/VS Code jaise
@@ -419,6 +437,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         });
         const health = await res.json().catch(() => null) as { status?: unknown; serving?: unknown; servingProblems?: unknown } | null;
         if (res.ok && health && typeof health.status === 'string') status = health.status;
+        setHealth(status);
         // NOT-SERVING (admin report 2026-08-06): the port answers but the page is a 404 / "Cannot GET".
         // We used to render that page inside the iframe AS the user's app. Record it so the UI can say
         // the truth instead — see the banner in the live view below.
@@ -990,6 +1009,28 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
               a few more seconds. Meanwhile the{' '}
               <button onClick={() => setMode('inbrowser')} className="underline hover:text-amber-100">In-browser preview</button>{' '}
               renders your files right now.
+            </span>
+          </div>
+        )}
+        {/* THE PREVIEW WENT TO SLEEP — say so, instead of showing a blank frame (admin 2026-08-21).
+            A sandbox is PAUSED after it sits idle, on purpose: it is billed by running time, so keeping
+            every abandoned preview awake would burn real money for nobody's benefit. That is correct
+            behaviour and it stays. What was wrong is that the user was never told — they came back, saw
+            nothing, and reasonably concluded the preview was broken. The auto-restore below is already
+            running by the time this shows; this line exists so the wait is understood rather than
+            guessed at, and the button is here for anyone who does not want to wait for the watchdog. */}
+        {(health === 'sleeping' || health === 'crashed') && !diagnosing && (
+          <div className="flex items-start gap-2 px-3 py-2 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-sky-200">
+            <span className="flex-1">
+              <span className="font-semibold">
+                {health === 'sleeping' ? 'Your preview went to sleep.' : 'Your preview stopped.'}
+              </span>{' '}
+              {health === 'sleeping'
+                ? 'It pauses after a while of no activity so it is not billed while nobody is looking. Your app and its files are safe — it just needs a moment to start again.'
+                : 'The app stopped running. Your files are safe — starting it again usually fixes it.'}{' '}
+              <button onClick={() => void runDiagnose()} className="underline hover:text-sky-100 font-semibold">
+                Start it again
+              </button>
             </span>
           </div>
         )}

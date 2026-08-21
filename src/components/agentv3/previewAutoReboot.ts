@@ -61,3 +61,27 @@ export function shouldAutoRebootPreview(s: AutoRebootSignals): boolean {
   if (s.msSinceLastAttempt < AUTO_HEAL_COOLDOWN_MS) return false; // Infinity (never fired) always passes
   return true;
 }
+
+/**
+ * Should the ONE-SHOT restore run — i.e. is this preview genuinely down?
+ *
+ * ROOT CAUSE (admin 2026-08-21: "live preview ek bar chal jata hai… kuch der baad wapas ao to chalta
+ * hi nahi hai"). The restore used to bail whenever a preview URL existed. But a sandbox is PAUSED
+ * after it sits idle — deliberately, because it is billed by running time — and the user who comes
+ * back is holding the URL from before the pause. "We have a URL" and "the preview is alive" are
+ * different facts, and treating the first as the second meant the restore never once fired for the
+ * case it was written for: the returning user.
+ *
+ * The health probe is what knows the difference, so a URL blocks the restore only while health has NOT
+ * already reported the preview down.
+ */
+export function shouldRestorePreview(s: {
+  hasUrl: boolean;
+  /** Latest status from the health probe: 'live' | 'booting' | 'sleeping' | 'crashed' | … | null. */
+  healthStatus: string | null;
+  diagnosing: boolean;
+}): boolean {
+  if (s.diagnosing) return false;
+  if (!s.hasUrl) return true;                       // nothing to show at all → restore
+  return s.healthStatus === 'sleeping' || s.healthStatus === 'crashed';
+}

@@ -115,3 +115,21 @@ export function terminalQuotaLine(access: TerminalAccess): string {
   if (!access.allowed) return access.message;
   return access.warn ? access.message : '';
 }
+
+/**
+ * The header line: what is REALLY left today, in words a non-technical user reads at a glance.
+ *
+ * Replaces a hardcoded "Terminal — 30 free minutes a day", which was true only for someone who had
+ * not opened a terminal yet that day — and which said nothing at all once they had. `null` means the
+ * server has not reported yet, so the caller states the allowance rather than inventing a number. PURE.
+ */
+export function terminalRemainingLabel(remainingSeconds: number | null): string {
+  if (remainingSeconds === null || !Number.isFinite(remainingSeconds)) {
+    return `Terminal — ${DEFAULT_TERMINAL_DAILY_MINUTES} free minutes a day`;
+  }
+  const s = Math.max(0, Math.floor(remainingSeconds));
+  if (s <= 0) return 'Terminal — today’s free time is used up (resets tomorrow)';
+  if (s < 60) return `Terminal — under a minute left today`;
+  const mins = Math.floor(s / 60);
+  return `Terminal — ${mins} free ${mins === 1 ? 'minute' : 'minutes'} left today`;
+}

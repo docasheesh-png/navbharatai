@@ -84,6 +84,12 @@ export interface ShellTerminalProps {
   email?: string;
   /** True when this tab is the visible one — drives focus and a refit after being hidden. */
   active?: boolean;
+  /**
+   * The REAL daily allowance left, reported by the server on open and on every meter tick. Lifted to
+   * the parent because the header that states it belongs to the panel, not to one terminal — and
+   * because the allowance is per USER, shared by every terminal open (see server terminalMeter.ts).
+   */
+  onRemainingSeconds?: (seconds: number) => void;
 }
 
 type Status =
@@ -93,7 +99,7 @@ type Status =
   | { kind: 'unavailable'; message: string };
 
 export const ShellTerminal: React.FC<ShellTerminalProps> = ({
-  sessionKey, workspaceId, userId, email, active,
+  sessionKey, workspaceId, userId, email, active, onRemainingSeconds,
 }) => {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -329,6 +335,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       }
 
       shellIdRef.current = j.shellId;
+      if (typeof j.remainingSeconds === 'number') onRemainingSeconds?.(j.remainingSeconds);
       cursorRef.current = typeof j.cursor === 'number' ? j.cursor : 0;
       attachedShells.set(sessionKey, j.shellId);
       setStatus({ kind: 'live' });
@@ -505,13 +512,20 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
     }
     if (dataLines.length === 0) return;
-    let payload: { data?: string; cursor?: number; truncated?: boolean; exitCode?: number | null; message?: string };
+    let payload: { data?: string; cursor?: number; truncated?: boolean; exitCode?: number | null; message?: string; remainingSeconds?: number };
     try { payload = JSON.parse(dataLines.join('\n')); } catch { return; }
 
     // A2 — the daily free terminal allowance ran out (or is about to). WRITE IT INTO THE TERMINAL:
     // a session that just stops responding is indistinguishable from a broken one, and the user would
     // reasonably conclude the feature is broken rather than that they used it up.
+    // Live remaining time — the header states what is actually left, not a fixed "30 minutes".
+    if (event === 'quota_status') {
+      if (typeof payload.remainingSeconds === 'number') onRemainingSeconds?.(payload.remainingSeconds);
+      return;
+    }
+
     if (event === 'quota' || event === 'quota_warning') {
+      if (event === 'quota') onRemainingSeconds?.(0);
       const text = payload.message || 'Your free terminal time for today is used up.';
       term.write(`\r\n\x1b[33m${text}\x1b[0m\r\n`);
       return;

@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
+import { buildRateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
 import { honestResultEvent } from '../lib/responseEmoji';
@@ -3475,7 +3475,8 @@ export function registerAgentV3Routes(app: Express): void {
   // SEPARATE-BACKEND DEPLOY (slice 4, admin 2026-08-02): trigger a REAL deploy of the user's Node/Express
   // backend to Render via the Render API + RENDER_API_KEY. Honest — no fake success: reports not-configured
   // (no key), no-service (repo not connected yet in Render, one-time), or a real live URL on success.
-  app.post('/api/agentv3/deploy-backend', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  // deployOpsRateLimiter: a real Render deploy, same class as publish.
+  app.post('/api/agentv3/deploy-backend', deployOpsRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -4713,7 +4714,9 @@ export function registerAgentV3Routes(app: Express): void {
   // POLLING, not SSE, on purpose: the log is a FILE in the sandbox, so a stream would mean holding a
   // sandbox command open for as long as the pane is visible — billed VM time (~₹7/hr) spent to watch a
   // file that a cheap byte-offset read covers exactly. Ownership-checked and rate-limited like /exec.
-  app.get('/api/agentv3/runtime-logs', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  // workspacePollRateLimiter, NOT workspaceRateLimiter: this is a 2.5-second timer poll (1440/hr) and
+  // it used to spend the bucket 52 other workspace routes share — see WORKSPACE_POLL_RATE.
+  app.get('/api/agentv3/runtime-logs', workspacePollRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
@@ -4755,7 +4758,8 @@ export function registerAgentV3Routes(app: Express): void {
   //
   // 🔒 Every status is MEASURED in the sandbox on each request (absolute rule 2). An expected service is
   // reported as expected-and-not-listening, never as running because a config file said it would be.
-  app.get('/api/agentv3/services', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  // workspacePollRateLimiter: the other half of the App Logs pane — a 6-second poll (600/hr).
+  app.get('/api/agentv3/services', workspacePollRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
@@ -5435,7 +5439,9 @@ export function registerAgentV3Routes(app: Express): void {
    * so custom domains, the production-database migration, the liveness check and the durable deployment
    * record all still happen — none of it is reimplemented here.
    */
-  app.post('/api/agentv3/publish', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  // deployOpsRateLimiter: publishing gets a budget of its own, so a metadata call can never spend it
+  // and it can never spend theirs (admin 2026-08-21 — one publish, "max 60 requests per hour").
+  app.post('/api/agentv3/publish', deployOpsRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {

@@ -6,6 +6,7 @@ import {
   terminalQuotaLine,
   DEFAULT_TERMINAL_DAILY_MINUTES,
   MAX_ACCRUAL_SECONDS,
+  terminalRemainingLabel,
 } from './terminalQuota';
 
 describe('terminalDailyLimitSeconds', () => {
@@ -133,5 +134,31 @@ describe('terminalQuotaLine', () => {
 
   it('always shows the refusal — a blocked user must never see an empty explanation', () => {
     expect(terminalQuotaLine(decideTerminalAccess({ usedSeconds: 30 * 60, limitSeconds: 30 * 60 }))).not.toBe('');
+  });
+});
+
+/**
+ * The header used to read a hardcoded "Terminal — 30 free minutes a day": true only for someone who
+ * had not opened a terminal that day, and silent about what was actually left afterwards.
+ */
+describe('terminalRemainingLabel — state what is really left', () => {
+  it('says the ALLOWANCE only while the server has not reported yet', () => {
+    expect(terminalRemainingLabel(null)).toContain('30 free minutes a day');
+    expect(terminalRemainingLabel(Number.NaN)).toContain('30 free minutes a day');
+  });
+
+  it('states the real remaining minutes once known', () => {
+    expect(terminalRemainingLabel(22 * 60)).toBe('Terminal — 22 free minutes left today');
+    expect(terminalRemainingLabel(60)).toBe('Terminal — 1 free minute left today');
+  });
+
+  it('is honest at the edges instead of rounding to a comfortable number', () => {
+    expect(terminalRemainingLabel(0)).toContain('used up');
+    expect(terminalRemainingLabel(-5)).toContain('used up');
+    expect(terminalRemainingLabel(30)).toContain('under a minute');
+  });
+
+  it('an unlimited (admin) account never shows a scary zero', () => {
+    expect(terminalRemainingLabel(Number.POSITIVE_INFINITY)).toContain('30 free minutes a day');
   });
 });

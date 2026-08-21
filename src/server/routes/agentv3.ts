@@ -353,7 +353,8 @@ import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeSe
 import { findProjectInstructionPath, normalizeProjectInstructions, projectInstructionsBlock, projectInstructionsNotice } from '../AgentV3/projectInstructions';
 import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '../AgentV3/fileMentions';
 import { parseIgnoreFile, ignoreRulesBlock, IGNORE_FILE } from '../AgentV3/ignoreRules';
-import { terminalDailyLimitSeconds, decideTerminalAccess, accrualSeconds, type TerminalAccess } from '../AgentV3/terminalQuota';
+import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } from '../AgentV3/terminalQuota';
+import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../AgentV3/terminalMeter';
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
 import { abortBuild } from '../AgentV3/buildAbortCause';
@@ -4916,10 +4917,18 @@ export function registerAgentV3Routes(app: Express): void {
    * slightly. Under-counting costs us a little; over-counting would charge somebody for time they did
    * not spend, which the billing law forbids outright.
    */
-  async function accrueTerminalTime(uid: string | null, lastAt: number, now: number): Promise<number> {
-    const seconds = accrualSeconds(lastAt, now);
+  /**
+   * WALL-CLOCK metering, shared by every terminal a user has open (see terminalMeter.ts).
+   *
+   * Each attached stream used to run its own meter against the same daily bucket, so three terminals
+   * burned the 30-minute allowance three times as fast — for shells that are all PTYs inside ONE
+   * sandbox and cost nothing extra. The registry hands the elapsed stretch to whichever stream ticks
+   * first, so the others find nothing left to charge.
+   */
+  const terminalMeters = createMeterRegistry();
+
+  async function chargeTerminalSeconds(uid: string | null, seconds: number): Promise<void> {
     if (uid && seconds > 0) await terminalUsageStore.addSeconds(uid, seconds).catch(() => {});
-    return seconds > 0 ? now : lastAt;
   }
 
   /** Open a shell. Honest available:false (with the dormant/not_started reason) when no warm sandbox. */
@@ -4973,7 +4982,14 @@ export function registerAgentV3Routes(app: Express): void {
       rows: Number(req.body?.rows),
     });
     if (result.ok) {
-      res.json({ available: true, shellId: result.shell.shellId, cursor: result.shell.cursor });
+      // Carry the REAL remaining allowance so the header can state it instead of the hardcoded
+      // "30 free minutes a day" — which was true only for a user who had not opened a terminal today.
+      res.json({
+        available: true,
+        shellId: result.shell.shellId,
+        cursor: result.shell.cursor,
+        remainingSeconds: openQuota.access.remainingSeconds,
+      });
       return;
     }
     if (result.reason === 'too_many') {
@@ -5107,11 +5123,12 @@ export function registerAgentV3Routes(app: Express): void {
     // the stream is ended with an honest event rather than going quiet: a terminal that stops
     // responding for no stated reason is indistinguishable from a broken one.
     const quotaUid = (await verifiedIdentity(req).catch(() => null))?.uid ?? null;
-    let lastAccruedAt = Date.now();
+    // Join this user's shared stretch. A second terminal does NOT start a second bill.
+    if (quotaUid) attachStream(terminalMeters, quotaUid, shellId, Date.now());
     const meter = setInterval(() => {
       void (async () => {
         const now = Date.now();
-        lastAccruedAt = await accrueTerminalTime(quotaUid, lastAccruedAt, now);
+        if (quotaUid) await chargeTerminalSeconds(quotaUid, accrueFor(terminalMeters, quotaUid, now));
         const q = await terminalAccessFor(req).catch(() => null);
         if (q && !q.access.allowed) {
           send('quota', { message: q.access.message, code: 'TERMINAL_DAILY_LIMIT' });
@@ -5121,6 +5138,9 @@ export function registerAgentV3Routes(app: Express): void {
         } else if (q?.access.warn) {
           send('quota_warning', { message: q.access.message });
         }
+        // Keep the header honest as time is actually spent — it is already computed above, so this
+        // costs nothing beyond the frame. A stale "30 minutes" is the thing being replaced.
+        if (q?.access.allowed) send('quota_status', { remainingSeconds: q.access.remainingSeconds });
       })();
     }, 30_000);
     // Poll for exit so the UI can show "[process exited]" instead of a shell that just stops responding.
@@ -5136,8 +5156,9 @@ export function registerAgentV3Routes(app: Express): void {
       clearInterval(beat);
       clearInterval(watch);
       clearInterval(meter);
-      // Final accrual so the seconds since the last tick are not silently forgiven.
-      void accrueTerminalTime(quotaUid, lastAccruedAt, Date.now());
+      // Leave the shared stretch, charging the seconds since the last tick so closing a tab never
+      // forgives time. Terminals still open keep the same mark and carry on.
+      if (quotaUid) void chargeTerminalSeconds(quotaUid, detachStream(terminalMeters, quotaUid, shellId, Date.now()));
       unsubscribe();
     };
     req.on('close', cleanup);

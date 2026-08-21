@@ -36670,3 +36670,31 @@ tile. The old assertions were not quietly deleted.
 Also: `Sparkles` became an unused import and was dropped.
 
 Gate: both tsc green, 16,785 tests / 1,339 files, CI green before merge.
+
+---
+
+## 2026-08-21 — Terminal quota over-charged N× for a 1× cost (found while designing multi-terminal)
+
+Admin asked for a `+` button in v5's Terminal. Auditing the ground first found a real over-charge that
+had to be fixed BEFORE multi-terminal shipped, or the new feature would silently make it worse.
+
+ROOT CAUSE. Each attached terminal stream ran its OWN 30-second meter with its OWN `lastAccruedAt`,
+and every one of them added to the SAME per-user daily bucket. Three terminals open ⇒ ten real minutes
+cost thirty minutes of the 30-minute allowance. But all of a workspace's shells are PTYs inside ONE
+E2B sandbox: the second and third terminal cost NavBharatAI nothing extra. Charging 3× for a 1× cost
+is the same class as the per-call markup bug (#2175) — a number that looks measured and is not — and
+it punished exactly the workflow multi-terminal exists to enable.
+
+FIX (`terminalMeter.ts`): ONE shared mark per USER, consumed by whichever stream ticks first, so the
+others find ~0 elapsed and add nothing. Double-counting is impossible by construction rather than by
+every call site remembering. Attaching after the last terminal closed starts a FRESH mark, so the gap
+while nothing was open is never billed; detaching charges the stretch first, so closing a tab never
+forgives time; the 120s per-tick cap and the sub-second carry both survive.
+
+Also, the header now tells the truth. It read a hardcoded "Terminal — 30 free minutes a day", which
+was true only for someone who had not opened a terminal that day and said nothing at all afterwards.
+The server reports `remainingSeconds` on open and on every meter tick; `terminalRemainingLabel` turns
+it into plain words ("22 free minutes left today" / "under a minute" / "used up — resets tomorrow"),
+and falls back to stating the ALLOWANCE while the server has not reported rather than inventing a number.
+
+Gate: both tsc green; 9 new meter tests + 4 label tests; FULL suite 16,798 / 1,340 files green.

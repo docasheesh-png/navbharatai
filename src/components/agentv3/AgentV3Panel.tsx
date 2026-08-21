@@ -9,6 +9,7 @@ const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ defaul
 // A2 — the REAL shell. LAZY on purpose: it pulls xterm (~70 KB gz), which must never land on the
 // first-paint path for the many users who never open a terminal.
 const ShellTerminal = lazy(() => import('../ide/ShellTerminal').then((m) => ({ default: m.ShellTerminal })));
+import { terminalRemainingLabel } from '../../server/AgentV3/terminalQuota';
 import {
   Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye,
@@ -2637,6 +2638,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
    */
   /** Live state of the direct publish, so the button can report honestly instead of vanishing. */
   const [publishing, setPublishing] = useState(false);
+  // The REAL remaining free terminal time today, reported by the server. null until it says.
+  const [terminalRemaining, setTerminalRemaining] = useState<number | null>(null);
   const [publishMsg, setPublishMsg] = useState('');
 
   /**
@@ -4607,7 +4610,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   </div>
                   <div className="flex-1 min-h-[220px] flex flex-col">
                     <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">
-                      Terminal — 30 free minutes a day
+                      {terminalRemainingLabel(terminalRemaining)}
                     </div>
                     {state.workspaceId ? (
                       <Suspense fallback={<div className="text-xs text-zinc-500">Loading terminal…</div>}>
@@ -4617,6 +4620,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                           userId={userId ?? undefined}
                           email={email ?? undefined}
                           active={showWorkspace && tab === 'terminal'}
+                          onRemainingSeconds={setTerminalRemaining}
                         />
                       </Suspense>
                     ) : (

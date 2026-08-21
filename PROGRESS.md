@@ -36484,3 +36484,33 @@ doorway is gone; the useful thing it said stays.
 MY GATE SLIP, RECORDED: I first ran only `src/` suites, not the full `npx vitest run` the constitution
 requires — which is exactly why CI caught four failures I should have caught locally. Full suite now:
 16,773 tests / 1,338 files green, both tsc clean.
+
+---
+
+## 2026-08-21 — The publish chain's LAST bug: we invented the URL instead of reading it
+
+The admin published successfully for the first time — the sheet said *"Your app is live at
+https://v3-agentv3-giynmfcdm-8e33e1d1612a.mitrify.in"*, and the #2496 fallback line was there too
+("Published exactly what your preview runs… type warnings that do not stop it from running"). Opening
+the link: **Firebase "Site Not Found"**.
+
+ROOT CAUSE. `deployStatic` BUILT its return value as `<site>--<channelId>.web.app`. That host does
+not exist. Per firebase.google.com/docs/hosting/test-preview-deploy a preview channel is served at
+`SITE_ID--CHANNEL_ID-RANDOM_HASH.web.app` — Firebase generates the hash, and it also TRUNCATES the
+channel id when `SITE--CHANNEL` would pass the 63-character DNS label limit. Neither is reproducible
+from our side, so the constructed URL was a guess dressed as a fact: the deploy genuinely happened
+and we pointed the user at an address that was never created. The Channel resource carries an
+output-only `url`; reading it is the only way this can be right.
+
+FIX. `ensureChannel` now RETURNS Firebase's own url — from the create response, or (on the 409 every
+redeploy hits) from a `channels.get`. If Firebase returns no url at all the publish STOPS honestly
+rather than handing back a second guess. `publishedAppUrl` takes that real URL: unbranded it is
+returned untouched, and branded it is RE-LABELLED (`<sub>.<domain>` where `<sub>` is exactly what
+follows `<site>--` in the real host) so the Cloudflare Worker's reverse mapping stays in step by
+construction; anything unparseable falls back to the working Firebase URL.
+
+This also explains why `test.mitrify.in` looked right during the Worker setup — the transport was
+always fine. Only the address we generated was wrong.
+
+Gate: both tsc green; FULL suite 16,785 tests / 1,339 files green (the previous change's gate was run
+on src/ only and missed tests/websiteHub.test.ts — a real slip, corrected here by running everything).

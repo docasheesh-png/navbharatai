@@ -26,10 +26,6 @@ export interface AppModalsProps {
   setShowVishwakarmaUnlockModal: (v: boolean) => void;
   wallet: any;
   vkMode: 'basic' | 'pro' | 'vip';
-  vkPromoCode: string;
-  setVkPromoCode: (v: string) => void;
-  redeemVishwakarmaPromo: () => void;
-  isRedeemingVkPromo: boolean;
   couponError: string;
   couponSuccess: string;
   vkTokenInput: string;
@@ -78,8 +74,7 @@ export function AppModals({
   showAuth, auth, setUser, onCloseAuth,
   githubRedirectingMessage, githubDebugData, setGithubRedirectingMessage,
   showVishwakarmaUnlockModal, setShowVishwakarmaUnlockModal,
-  wallet, vkMode, vkPromoCode, setVkPromoCode, redeemVishwakarmaPromo,
-  isRedeemingVkPromo, couponError, couponSuccess, vkTokenInput, setVkTokenInput,
+  wallet, vkMode, couponError, couponSuccess, vkTokenInput, setVkTokenInput,
   isRecharging, createVishwakarmaOrder,
   showContinueModal, setShowContinueModal, setRestoreUciError, setResumeUciInputState,
   resumeUciInputState, restoreUciError, handleRestoreByUci, isRestoringUci,
@@ -266,28 +261,11 @@ export function AppModals({
                     </div>
                   </div>
 
-                  {!wallet?.hasVishwakarmaPass && (
-                    <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-xl">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="Have a promo code?"
-                          value={vkPromoCode}
-                          onChange={(e) => setVkPromoCode(e.target.value)}
-                          className="flex-1 bg-[#0d1117] border border-blue-500/30 rounded-lg p-1.5 px-2 text-xs font-mono text-white placeholder:text-[#484f58] focus:border-blue-400 outline-none transition-all"
-                        />
-                        <button
-                          onClick={redeemVishwakarmaPromo}
-                          disabled={isRedeemingVkPromo}
-                          className="text-blue-400 hover:text-blue-300 text-[10px] uppercase font-bold tracking-wider transition-colors"
-                        >
-                          {isRedeemingVkPromo ? '...' : 'Apply'}
-                        </button>
-                      </div>
-                      {couponError && <p className="text-[9px] text-red-500 mt-1">{couponError}</p>}
-                      {couponSuccess && <p className="text-[9px] text-emerald-400 mt-1">{couponSuccess}</p>}
-                    </div>
-                  )}
+                  {/* The "Have a promo code?" box that stood here was removed 2026-08-21: it posted to
+                      /api/payment/validate-mode-promo, which exists nowhere on the server, so every code
+                      came back "Validation failed" — the message blamed the user's code for a route we
+                      never built. Promo redemption that genuinely works lives in Wallet & Billing
+                      (POST /api/payment/redeem-coupon). See usePaymentEngine.ts for the full reasoning. */}
 
                   <div className="space-y-1 p-3 bg-white/5 border border-white/5 rounded-xl relative">
                     <label className="text-[11px] font-bold text-white block uppercase tracking-wide">

@@ -353,9 +353,7 @@ export default function App() {
     isRedeemingCoupon, setIsRedeemingCoupon,
     couponError, setCouponError,
     couponSuccess, setCouponSuccess,
-    vkPromoCode, setVkPromoCode,
     vkMode, setVkMode,
-    isRedeemingVkPromo, setIsRedeemingVkPromo,
     reminderLimit, setReminderLimit,
     budgetLimit, setBudgetLimit,
     tempReminderLimit, setTempReminderLimit,
@@ -367,7 +365,6 @@ export default function App() {
     buyAmountInput, setBuyAmountInput,
     referralHistory, setReferralHistory,
     fetchWallet,
-    redeemVishwakarmaPromo,
     createBillingOrder,
     createVishwakarmaOrder,
     verifyBillingPayment,
@@ -3825,10 +3822,6 @@ export default function App() {
         setShowVishwakarmaUnlockModal={setShowVishwakarmaUnlockModal}
         wallet={wallet}
         vkMode={vkMode}
-        vkPromoCode={vkPromoCode}
-        setVkPromoCode={setVkPromoCode}
-        redeemVishwakarmaPromo={redeemVishwakarmaPromo}
-        isRedeemingVkPromo={isRedeemingVkPromo}
         couponError={couponError}
         couponSuccess={couponSuccess}
         vkTokenInput={vkTokenInput}

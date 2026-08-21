@@ -81,9 +81,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   const [couponSuccess, setCouponSuccess] = useState<string | null>(null);
 
   // NEW: Vishwakarma Promo
-  const [vkPromoCode, setVkPromoCode] = useState('');
   const [vkMode, setVkMode] = useState<'basic' | 'pro' | 'vip'>('basic');
-  const [isRedeemingVkPromo, setIsRedeemingVkPromo] = useState(false);
 
   // iOS-style card balance states & limits
   const [reminderLimit, setReminderLimit] = useState<number>(() => {
@@ -160,25 +158,18 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     }
   };
 
-  const redeemVishwakarmaPromo = async () => {
-    if (!user) return;
-    setIsRedeemingVkPromo(true);
-    setCouponError(null);
-    try {
-        const res = await axios.post('/api/payment/validate-mode-promo', {
-            couponCode: vkPromoCode,
-            mode: vkMode,
-            userId: user.uid
-        });
-        if (res.data.success) {
-            setCouponSuccess(`Promo applied for ${vkMode}! Proceed to checkout to pay ₹1.`);
-        }
-    } catch (err: any) {
-        setCouponError(err.response?.data?.error || 'Validation failed');
-    } finally {
-        setIsRedeemingVkPromo(false);
-    }
-  };
+  /**
+   * REMOVED 2026-08-21 — `redeemVishwakarmaPromo` posted to `/api/payment/validate-mode-promo`, a route
+   * that exists nowhere on the server (the only occurrence of that path in the whole repo was this
+   * call). So the "Have a promo code?" box in the Professional Pass modal answered every code — valid
+   * or not — with "Validation failed", blaming the user's code for a missing endpoint. Its success
+   * message also promised a ₹1 checkout that `create-order` knows nothing about, so wiring it would
+   * have meant inventing a pricing feature rather than restoring one.
+   *
+   * The working promo redemption is `redeemPromoCoupon` below (`POST /api/payment/redeem-coupon`,
+   * surfaced in Wallet & Billing) — a user with a code still has a real place to use it. A pass-level
+   * promo can come back the day a server route genuinely honours it.
+   */
 
   const createBillingOrder = async (amount: number) => {
     if (!user) return;
@@ -407,9 +398,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     isRedeemingCoupon, setIsRedeemingCoupon,
     couponError, setCouponError,
     couponSuccess, setCouponSuccess,
-    vkPromoCode, setVkPromoCode,
     vkMode, setVkMode,
-    isRedeemingVkPromo, setIsRedeemingVkPromo,
     // limits + referral
     reminderLimit, setReminderLimit,
     budgetLimit, setBudgetLimit,
@@ -423,7 +412,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     referralHistory, setReferralHistory,
     // actions
     fetchWallet,
-    redeemVishwakarmaPromo,
     createBillingOrder,
     createVishwakarmaOrder,
     verifyBillingPayment,

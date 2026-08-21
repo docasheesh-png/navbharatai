@@ -20,6 +20,19 @@ const FIREBASE_EMPTY = `<h1>Site Not Found</h1><p>Why am I seeing this?</p>
 const fetcherReturning = (status: number, body = '') =>
   async () => ({ status, text: async () => body });
 
+/**
+ * The SSRF guard, stubbed OPEN for the cases that are about what the domain SERVES.
+ *
+ * ⚠️ These tests used the real `mitrify.com` and therefore ran a LIVE DNS lookup — they passed only
+ * while that domain happened to resolve, and went red the moment its A record changed at the
+ * registrar, for a reason that had nothing to do with the code. A test whose verdict depends on
+ * somebody else's DNS is a weather report, not a test.
+ *
+ * The guard's OWN test below deliberately does NOT use this, because that one must exercise the
+ * genuine article.
+ */
+const guardOpen = async () => ({ ok: true });
+
 describe('isEmptySitePage — recognising the hosting service\'s empty-site page', () => {
   it('matches the real page', () => {
     expect(isEmptySitePage(404, FIREBASE_EMPTY)).toBe(true);
@@ -40,32 +53,32 @@ describe('isEmptySitePage — recognising the hosting service\'s empty-site page
 
 describe('checkDomainServing', () => {
   it('THE CASE THAT STARTED THIS: connected, but nothing published to it', async () => {
-    const r = await checkDomainServing('mitrify.com', fetcherReturning(404, FIREBASE_EMPTY));
+    const r = await checkDomainServing('mitrify.com', fetcherReturning(404, FIREBASE_EMPTY), 6000, guardOpen);
     expect(r.state).toBe('nothing_published');
     expect(r.note).toContain('no app has been published');
     expect(r.note).toContain('Press Publish once');
   });
 
   it('a real page means the app is genuinely being served', async () => {
-    const r = await checkDomainServing('mitrify.com', fetcherReturning(200, '<html>app</html>'));
+    const r = await checkDomainServing('mitrify.com', fetcherReturning(200, '<html>app</html>'), 6000, guardOpen);
     expect(r.state).toBe('serving');
     expect(r.note).toBe('');   // nothing worth saying when it works
   });
 
   it("the app's OWN 404 is an error, not an empty site — they are different problems", async () => {
-    const r = await checkDomainServing('mitrify.com', fetcherReturning(404, '<h1>Page not found</h1>'));
+    const r = await checkDomainServing('mitrify.com', fetcherReturning(404, '<h1>Page not found</h1>'), 6000, guardOpen);
     expect(r.state).toBe('error');
     expect(r.note).toContain('not found');
   });
 
   it('a 5xx is reported honestly with its status', async () => {
-    const r = await checkDomainServing('mitrify.com', fetcherReturning(503));
+    const r = await checkDomainServing('mitrify.com', fetcherReturning(503), 6000, guardOpen);
     expect(r.state).toBe('error');
     expect(r.note).toContain('503');
   });
 
   it('UNREACHABLE is "unknown", never "broken" — the failure may be entirely ours', async () => {
-    const r = await checkDomainServing('mitrify.com', async () => { throw new Error('network'); });
+    const r = await checkDomainServing('mitrify.com', async () => { throw new Error('network'); }, 6000, guardOpen);
     expect(r.state).toBe('unknown');
     expect(r.note).toBe('');
   });

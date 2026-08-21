@@ -275,6 +275,37 @@ async function api<T>(path: string, init?: { method?: string; body?: unknown }):
  * Ensure a dedicated Firebase Hosting site exists for this workspace (multi-site). Idempotent: a
  * 409 (already exists) is treated as success. Returns the site id.
  */
+/**
+ * HAS ANYTHING EVER BEEN PUBLISHED TO THIS APP'S SITE? — asked of FIREBASE, not of the domain.
+ *
+ * WHY THIS EXISTS (admin, mitrify.com, 2026-08-21 — the SECOND time this exact confusion happened).
+ * A custom domain attaches to the app's own Hosting SITE, and `deployToSite` only runs during a
+ * publish. A domain connected AFTER the last publish therefore points at a site with NO RELEASE, and
+ * Firebase serves its "Site Not Found" page — while ownership, host and SSL are all genuinely active.
+ *
+ * The first attempt at telling the user this OPENED the domain over HTTP and looked for that page.
+ * That works when it works, and it did not: our server could not reach mitrify.com at the moment of
+ * the check, the result came back `unknown`, and — by my own explicit choice — `unknown` still printed
+ * **"Live!"** over a domain the admin was looking at showing an error. That choice was wrong, and this
+ * is the fix for the cause rather than the symptom.
+ *
+ * 🔒 THIS ANSWER IS AUTHORITATIVE AND NEEDS NO EGRESS TO THE USER'S DOMAIN. It uses the credentials we
+ * already hold, asks the service that would serve the page, and a site with zero releases has
+ * unambiguously never been published to. `null` means we could not ask — never "no".
+ */
+export async function siteHasRelease(workspaceId: string): Promise<boolean | null> {
+  const siteId = siteIdForWorkspace(workspaceId);
+  try {
+    const r = await api<{ releases?: unknown[] }>(`/sites/${encodeURIComponent(siteId)}/releases?pageSize=1`);
+    return Array.isArray(r?.releases) && r.releases.length > 0;
+  } catch (err) {
+    // A site that does not exist yet has certainly never been published to — that is a real answer,
+    // not a failure to get one.
+    if (err instanceof HostingApiError && (err.httpStatus === 404 || err.apiStatus === 'NOT_FOUND')) return false;
+    return null;   // anything else: we could not ask. Silence is not a verdict.
+  }
+}
+
 export async function ensureSite(workspaceId: string): Promise<string> {
   const siteId = siteIdForWorkspace(workspaceId);
   try {

@@ -37948,3 +37948,145 @@ of the commit it ran against.
 
 Gate: both tsc green, vitest 1366 files / 17,147 passed / 1 honest skip (run after rebasing onto another
 session's three merges — #2542, #2545, #2546 — per safeguard #1).
+
+---
+
+## 2026-08-21 — A verified DNS record you can never copy again, and "a different value" that was ours
+
+Admin, connecting mitrify.com a second time: *"jo jo DNS connect hai, us par bas green tick aa raha
+hai, DNS value show nahi ho rahi — mujhe wapas se copy karni padi to? kaise karu."*
+
+### 1. A verified record hid its own value
+
+Collapsing a verified record to `✓ TXT @ Verified` was right — the list stays readable and the user's
+work is visibly kept. **Dropping the VALUE was not.** There is no way to copy it again, and there are
+real reasons to need it: moving registrar, a DNS reset, an accidental delete, or simply checking that
+what is live matches what we asked for. The row now OPENS on click into the same three copyable fields
+the pending card shows — a verified record is not a different kind of record, so it must not be a
+different kind of card. The summary says "show"/"hide" rather than a bare chevron, because a clickable
+row nobody expects to be clickable is a feature that stays undiscovered.
+
+### 2. "A different value" was OUR OWN record, from their other app
+
+The same screen said *"Your TXT record for mitrify.com has a different value than the one shown
+above"* — **true, and baffling.** They had added exactly what we asked for that morning
+(`hosting-site=nbai-709e5932ecaaf74b9c63`) and it verified. Re-importing the app into a NEW chat gave
+it a NEW workspace, and every workspace gets its OWN hosting site, so the screen now wanted
+`hosting-site=nbai-dd4fe67881426b5f258a` and reported the old one as wrong.
+
+The cause is legitimate — moving a domain to a different app genuinely needs a different ownership
+record — but **"you typed it wrong" is the wrong story to tell someone who typed it right.** When the
+value we FOUND is unmistakably one of ours (`hosting-site=nbai-…`) and merely names another site, the
+message now says so and says what to do: EDIT the existing record's value, nothing else changes.
+Narrow on purpose: a genuinely unrelated TXT (an SPF record, a typo) still gets the ordinary
+"fix it" message, or a real mistake would be excused.
+
+### 3. 🔴 My own tests were a weather report — caught by the gate, before CI
+
+Four tests in `domainServingCheck.test.ts` went red on this run. **Not from any change to the code:**
+they used the real `mitrify.com`, so `assertPublicHttpUrl` ran a LIVE DNS lookup, and they had been
+passing only while that domain happened to resolve. Between the two runs its **A record disappeared**
+(verified directly: `NS` and `TXT` still answer, `A` returns NOERROR with zero answers).
+
+A test whose verdict depends on somebody else's DNS is not a test. `checkDomainServing` now takes a
+narrow guard seam, defaulted to the real `assertPublicHttpUrl` so production is unchanged — and the
+test that proves a PRIVATE address is refused deliberately does NOT use the seam, because that one
+must exercise the genuine article or it proves nothing.
+
+⚠️ **This would have gone green in CI and stayed a landmine** — it passed there yesterday for the same
+accidental reason. It is recorded because the class matters more than the instance: no test in this
+repo may depend on live third-party DNS.
+
+Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
+`vitest run` — **1,366 files / 17,151 passing, 1 skipped** (9 new).
+
+---
+
+## 2026-08-21 — "Live!" printed directly above a browser tab showing "Site Not Found"
+
+The admin's screenshot, and the clearest proof of a wrong call I have made today. Their screen read:
+
+```
+✅ Live! Your domain is connected, with HTTPS.
+   ownership: active · host: active · SSL: active
+   ✓ 4 records you added are verified — nothing more to add.
+```
+
+…and the next browser tab, on that same `mitrify.com`, showed Firebase's **"Site Not Found"**.
+
+### The call I got wrong
+
+PR #2535 added a serving check for exactly this, with three outcomes — and I wrote the third one
+wrong, on purpose, with an argument I still had in the comment:
+
+> *"`unknown` still claims Live on purpose: if we could not reach the domain from our server, the three
+> active states remain the best evidence we have, and downgrading a genuinely working domain because
+> OUR check failed trades one wrong answer for another."*
+
+That argument sounds balanced and is not. **"The best evidence we have" is not the same as "we saw it
+work", and only the second one earns the word Live.** Our check could not reach mitrify.com at that
+moment, `unknown` came back, and the platform asserted the one thing it had specifically failed to
+verify. There was a third option I did not take: **say we could not check.**
+
+`unknown` (and a server that sends no verdict at all) now reads **"Connected, with HTTPS."** with the
+note *"We could not open your domain from here to confirm it is showing your app — open it yourself to
+check. If it shows an error page, press Publish once."* It stays `tone: 'ok'` — the connection genuinely
+IS done, and nothing may be wrong; it simply stops asserting the half nobody saw.
+
+### The real fix: stop needing to reach the domain at all
+
+An HTTP fetch of the user's domain works when it works, and here it did not. But **we never needed
+it**: a custom domain attaches to the app's own Hosting SITE, and a site with **zero releases** has
+unambiguously never been published to.
+
+`siteHasRelease(workspaceId)` asks FIREBASE that question with credentials we already hold — no
+egress to the user's domain, no CDN, no cache. A 404 site is a real `false` (never published); anything
+else unreadable is `null`, because **silence is not a verdict**. The status route consults it FIRST and
+the HTTP fetch stays as a second opinion for what a release count cannot see (a release exists but the
+page errors).
+
+### Two tests reversed, and why that is allowed here
+
+`tests/domainConnectStage.test.ts` and `NbaiDomainConnect.logic.test.ts` both asserted `Live!` for a
+merely-active domain. Changing a test to match code is normally forbidden, so both sites now carry the
+reason: they encoded the bug. Each also gained the positive case — the word **is** earned the moment a
+check actually sees the app serving.
+
+### Also in this change
+
+ • A **verified DNS record now opens on click** to its three copyable fields (admin: *"green tick to
+   aa raha hai, DNS value show nahi ho rahi — wapas se copy karni padi to?"*). Compact was right;
+   losing the value was not.
+ • A mismatch whose found value is **one of ours** (`hosting-site=nbai-…` naming another site) now
+   says so — *"this domain is still pointing at a DIFFERENT app of yours, EDIT the existing record"* —
+   instead of "you typed it wrong" to someone who typed it right. Re-importing an app into a new chat
+   gives it a new workspace, hence a new site, hence a new ownership record.
+ • 🔴 **Four of my own tests were a weather report.** They used the real `mitrify.com`, so the SSRF
+   guard ran a LIVE DNS lookup and they passed only while that domain resolved. Its A record vanished
+   between runs (verified: NS and TXT answer, A returns NOERROR with zero answers) and they went red
+   with no code change. `checkDomainServing` now takes a narrow guard seam defaulted to the real
+   `assertPublicHttpUrl`; the test proving a PRIVATE address is refused deliberately does NOT use it.
+   **No test in this repo may depend on live third-party DNS.**
+
+Gate: `tsc --noEmit` green · `tsc -p tsconfig.server.json` green · `npm run build` green · FULL
+`vitest run` — **1,366 files / 17,153 passing, 1 skipped**.
+
+### Same change — "Visit mitrify.com", the ending that was missing
+
+Admin: *"jab domain successfully connect ho jaye, to isi page ke niche likh kar aana chahiye — visit
+mitrify.com — aur us par click kar sake."*
+
+The obvious missing ending. Everything on that page is SETUP — records, checks, waiting — and the one
+thing a person wants once it is done is to **go and look at it**. Until now the page never offered
+that: they had to retype their own domain into the address bar.
+
+A connected domain now gets a green **"Visit <domain>"** button at the bottom of the page. Shown for
+any ACTIVE domain regardless of what it currently serves — it is their domain, and the honest state
+box directly above already says what they will find there, so this never has to pretend and never has
+to be withheld either.
+
+`cleanDomainInput` and `visitUrl` were pulled out of an inline expression, because THREE things now
+depend on it being right (the connect call, the apex record names, and this link). The rule that
+earned a test: the href is always built as `https://` + the CLEAN host, never from the raw input —
+pasting a scheme back into an href is how `https://https://…` reaches a user — and an empty input
+yields an empty string rather than a bare `https://` link.

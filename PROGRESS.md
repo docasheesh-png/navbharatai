@@ -36546,3 +36546,58 @@ omits the field leaves the label off instead of inventing a price.
 
 Verification gate: `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · `vitest run`
 1341 files / 16,793 tests green.
+
+## 2026-08-21 — Settings day: four dead controls and six phantom screens, plus the test that ends the class
+
+**The bug class:** a control whose destination does not exist, or a screen no doorway opens. It has
+been found and hand-fixed FOUR times in `SettingsPanel.tsx` alone (`modules` 2026-08-14, `hosting`
+2026-07-29, `cloudeploy` 2026-08-20), each time with a comment asking the next person not to repeat
+it. Six more instances were sitting in the file the whole time, which is the real finding: **a
+comment cannot enforce an invariant.**
+
+**Found by sweeping every `<button>` in `src/` for a missing click handler** (79 hits; most were
+code-sample strings in ComponentLibrary/DesignSystem/Whitelabel, which are not live UI).
+
+### Fixed in the live, user-reachable UI
+1. **"Admin Login" opened an empty page.** `setSettingsScreen('admin' as any)` set a value NO branch
+   renders — the header and back arrow draw unconditionally, so the user saw a Settings page titled
+   "Admin" with nothing in it. The real admin login is a top-level VIEW. Now `setActiveView('admin')`.
+   **The `as any` cast is what hid this from `tsc`.**
+2. **"Update Preferences" did nothing, and implied preferences were unsaved.** The most prominent
+   button on the General screen, with no `onClick` at all. Not a missing save either — `useSettings`
+   persists theme/language/hinglish to localStorage the instant they are tapped. So it was worse than
+   dead: it implied a change was lost unless you pressed it. Removed (same as "Developer Mode").
+3. **The GitHub "Default Branch" selector was a fake form** — `main`/`master`/`develop`, no handlers,
+   `main` hardcoded as selected for *every* repo, under "Configure sync parameters", beside a button
+   saying "Confirm". A user on a `master` repo was shown `main`, could pick, press Confirm, and change
+   nothing. The real value was available all along (`/api/github/repos` passes GitHub's payload through,
+   `default_branch` included). Now shows the REAL branch, read-only — and says "Not reported by GitHub"
+   rather than falling back to `main`, because a plausible guess printed as fact is the bug being fixed.
+   Button renamed "Open Git Panel": it only navigates, so it says so.
+
+### Removed — three screens no route could open, all full of invented state
+`sharing`, `deploy`, `access`. Zero navigators between them. Contents: a **hardcoded** share URL
+(`navbharat.ai/s/project-592`, a literal string), dead "Copy Link" / "Publish to Community Store"
+(both real elsewhere), dead "ZIP Export" / "Android Build", and a **hardcoded collaborator**
+(`doc.asheesh@icloud.com` baked into the source, labelled "Admin / Owner" for whoever opened it).
+Also dropped `git`, `report`, `profile` — declared but neither navigable nor rendered. Donations lose
+no doorway; they have their own sidebar tile and view.
+
+### The 50/50 half — why it could arise at all
+Every prior fix removed an instance. `tests/settingsScreenReachable.test.ts` now fails CI when a
+declared `SettingsScreen` has **no doorway** or **no room**, and when a `setSettingsScreen` call
+targets a value outside the union (the `as any` hole). **Verified to bite:** re-adding `'sharing'`
+fails three assertions with actionable messages.
+
+⚠️ Its first run failed on its own documentation — the comment explaining the `admin` bug contains the
+literal `setSettingsScreen('admin')`. The scanner now strips comments before matching, line comments
+only when `//` opens the line so a `https://` in real code is never truncated into a false green.
+
+### Open, NOT fixed here (same class, different components — next change)
+- `AIDebugger.tsx` — **"Apply to File" has no handler**, sitting beside a working "Copy". It promises
+  to write the AI's fix into the user's file.
+- `SecurityScan.tsx` — **JSON and PDF export buttons are both dead**.
+- Lower confidence, still to verify: `CostEstimator` "Start Free", `PreviewPanel` nav arrows,
+  `BotBuilder` send, `ActivityBar` menu, `StatusBar` bell.
+
+Gate: both `tsc` clean; FULL suite **1341 files / 16798 tests green**.

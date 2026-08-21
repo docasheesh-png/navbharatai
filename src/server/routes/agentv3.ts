@@ -5336,6 +5336,27 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
 
+    // IS THIS THE USER'S FIRST APP EVER? (admin 2026-08-21, the first-publish celebration.)
+    //
+    // Asked HERE, before the deploy runs, because the deploy itself writes the record that would make
+    // the answer "no" a second later.
+    //
+    // 🔑 THE SERVER OWNS THIS ANSWER, NOT THE BROWSER. The obvious shortcut is a localStorage flag —
+    // and it would be wrong in both directions: the user who signs in on a new phone would be
+    // congratulated on their first app all over again, and the user who clears their browser would
+    // lose the moment entirely. A once-in-a-lifetime moment cannot live in a store that is wiped by a
+    // routine action. `listByUser` is the record every other surface already reads.
+    //
+    // Fails CLOSED: an unreadable list, or no signed-in user, means NO celebration. Skipping a
+    // celebration costs nothing; throwing confetti at someone's fifth publish makes the whole idea
+    // feel cheap, which is the one thing it must never be.
+    let firstPublish = false;
+    if (userId) {
+      try {
+        firstPublish = (await deploymentStore.listByUser(userId, 1)).length === 0;
+      } catch { /* unreadable — treat as "not first" */ }
+    }
+
     try {
       const actuator = buildActuator();
       // 0. MAKE SURE THE FILES ARE ACTUALLY THERE (admin report 2026-08-19).
@@ -5437,7 +5458,13 @@ export function registerAgentV3Routes(app: Express): void {
         const m = result.content.match(/https?:\/\/[^\s)]+/);
         url = m ? m[0] : '';
       }
-      res.json({ ok: true, url, message: result.content, ...(typecheckWarning ? { warning: typecheckWarning } : {}) });
+      // `firstPublish` travels only when it is TRUE and there is a real URL to celebrate with — a
+      // celebration flag on a publish that produced no link would be a promise with nothing behind it.
+      res.json({
+        ok: true, url, message: result.content,
+        ...(typecheckWarning ? { warning: typecheckWarning } : {}),
+        ...(firstPublish && url ? { firstPublish: true } : {}),
+      });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Could not publish your app. Please try again.' });
     }

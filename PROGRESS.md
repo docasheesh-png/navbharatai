@@ -37557,3 +37557,100 @@ admin's report (the message said 60 — the *authed* limit — so the token reso
 keyed by uid).
 
 Gate: both tsc green, 17,037 tests / 1,357 files green, CI green before merge.
+
+---
+
+## 2026-08-21 — Two admin-reported bugs, one shared root cause (PR #2541)
+
+The admin reported both in a single message. They looked unrelated — a cosmetic preview complaint and
+a billing toggle — and they were not.
+
+### Bug 1 — the preview showed "processing" for an app that did not exist
+
+**Admin, verbatim:** *"jab koi app nahi ban rahi hai, user ne aise hi free me preview khole to, waha
+processing chal rahi hoti hai, pata nahi kon se app ki 😂"*
+
+The laugh was earned: **no app's processing was running.** A user who had built nothing saw the Ashok
+Chakra spinning under "Getting your app ready… loading your files and compiling the preview" with a
+seconds counter, and then a RED panel — "Couldn't build the in-browser preview: No files to preview
+yet" — carrying a **"Fix with AI"** button offering to repair an app that was never built. Three untrue
+statements in a row, on a user's first look at the product.
+
+**Root cause — THE FOURTH INSTANCE OF THE SAME CLASS: the existence of an artifact standing in for its
+validity.** `clientWorkspaceId()` derives a workspaceId from the session the instant the panel opens,
+before a single file exists, and everything downstream read "we have a workspaceId" as "this user has an
+app". Its three siblings, all found this same week: a stale URL standing in for a live preview; a stale
+`dist/` standing in for a current build; a sandbox id standing in for revivable.
+
+Underneath it, a second and more instructive fault: **"this workspace has no files" was expressed as a
+404 with an error string.** The client had no way to tell that apart from a real failure, so it rendered
+it in the error lane — correctly, given what it was told. There was no state for "you have not built
+anything yet", so the code borrowed the two nearest ones and both were wrong. **A missing state does not
+announce itself; it gets impersonated by whichever neighbour is closest.**
+
+**Fix:** `previewWelcome.ts` names the state and ranks it. `knownEmpty` outranks BOTH loading and error.
+`everRendered` closes the last gap — until a preview has actually rendered once, an in-flight request
+cannot claim to be "getting your app ready", because nobody yet knows there is an app; it becomes an
+honest "Checking for your files…" footnote. The server now answers a file-less workspace `200
+{ empty: true }` (the question was "what should I show?", and "nothing built yet" is a correct and
+successful answer to it), keeping the old `error` string alongside so an older client cannot regress to
+a blank screen. The 3× auto-retry no longer runs on a known-empty workspace — re-asking three times
+whether an empty workspace has become non-empty IS the reported spinner, in miniature.
+
+**The picture** (admin: *"make in india wale loin wala ayega to bhi accha rahega"*): `indiaLion.ts`
+draws OUR OWN lion — a radiating saffron-to-green mane generated the same programmatic way as the Ashok
+Chakra beside it, over a still navy face that breathes. ⚠️ **Deliberately NOT the Make in India logo:
+that is a Government of India mark whose use is restricted, and reproducing it inside a product we
+charge for is a legal problem rather than a design choice.** Told to the admin plainly rather than
+quietly substituted. The mane turns over 18 seconds, slowly on purpose — a fast spin reads as "working",
+and nothing is working.
+
+### Bug 2 — removing the "made by NavBharatAI" badge was free for everyone
+
+A revenue leak, not a cosmetic issue. There was **no gate at all**: a localStorage flag in Settings →
+General became `appSignature: false` in the build request and the server did
+`req.body?.appSignature !== false` — it simply believed it. Anyone could flip the toggle, or post the
+field by hand, and take the paid outcome for nothing.
+
+**The class, fixed once rather than per feature: A PAID ENTITLEMENT ENFORCED ON THE CLIENT IS NOT
+ENFORCED.** The client can only ever express a PREFERENCE; whether it is honoured is a server decision
+made from the server-verified identity. `appSignatureEntitlement.ts` is that decision, and its FIRST
+rule is the admin's explicit requirement and the easiest to lose: **a subscriber who never touched the
+switch still gets the badge.** Paying does not remove it; asking does. The subscription buys only the
+RIGHT to ask.
+
+**It FAILS CLOSED** — an unreadable entitlement keeps the badge. That is the opposite of the wallet gate
+beside it, deliberately: failing closed there would deny a paying user their build over a Firestore
+blip, while failing open here hands the paid feature to everyone during any outage. **Same word,
+opposite correct default, because the stakes are not symmetric.** A test enumerates every combination
+and asserts removal implies (entitled AND asked), so no future edit can open a hole in a branch nobody
+thought to test.
+
+### ⚠️ OPEN ROOT CAUSE (rule 6) — the entitlement cannot currently be bought
+
+The ₹99/month Pass this gate asks about was **WITHDRAWN FROM SALE by the admin on 2026-08-10** ("pass
+system hata do"), replaced by the ONE-WALLET LAW. `/api/payment` answers `410 pass_withdrawn` for it,
+and `tests/passRemoved.test.ts` forbids any screen from even naming it — that test caught this work and
+was right. The grant + fulfilment path is intact, so the entitlement is real and enforceable, but **no
+user can buy it today.**
+
+So the enforcement half shipped (correct under any answer, and it closes a live leak) and the Settings
+card states plainly that the feature is not on sale, rather than showing an upgrade button that would
+fail at the gateway. **Which mechanism should sell it — reinstating the subscription, or charging the
+one wallet — moves real money and reverses the admin's own decision, so it was put to the admin with a
+recommendation (the wallet, since two parallel billing models is what the 2026-08-10 removal was
+avoiding) instead of being assumed.** Awaiting that decision.
+
+### Method note — four existing invariants caught this work and all four were right
+
+The Pass-naming ban, the white-alpha theme remap, the px-font compat sweep, and the preview
+single-loader guard. Three were straightforward compliance. The fourth is worth recording: the loader
+guard forbade `setHtml('')` anywhere on the success path, and the empty-workspace branch legitimately
+needs to clear it (or a deleted app stays framed as live). The temptation is to relax the assertion.
+Instead it was made **STRONGER**: html may be cleared ONLY in the empty branch, and that branch is now
+REQUIRED to clear it — which forbids strictly more than the blanket ban did. When a guard blocks a
+genuinely new case, the fix is to teach it the distinction, never to widen its hole.
+
+Gate: both tsc green, **vitest 1362 files / 17,119 passed / 1 honest skip**. New:
+`previewWelcome.test.ts` (10), `appSignatureEntitlement.test.ts` (12). AppKnowledgeBase updated for
+both, so every AI answers "preview so gaya" and "badge kaise hataye" correctly.

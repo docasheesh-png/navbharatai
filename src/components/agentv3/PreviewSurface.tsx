@@ -8,6 +8,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles } from 'lucide-react';
 import { canOfferRestart, restartStatusLine } from './previewRestart';
+import { PreviewWelcome } from './PreviewWelcome';
+import { previewEmptyKind } from './previewWelcome';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview, shouldRestorePreview } from './previewAutoReboot';
@@ -151,6 +153,16 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
    * waiting") from undefined ("nobody asked"), so this state is only ever null or a real boolean, and
    * an import can never be left waiting on an answer that is not coming.
    */
+  /**
+   * Has the server told us, explicitly, that this workspace holds NO files?
+   *
+   * A separate state from `loading` and `err` because it is a genuinely different thing, and conflating
+   * it with either is exactly the bug this fixes (see previewWelcome.ts). Cleared the moment a render
+   * succeeds, so a user who builds their first app never sees the first-time screen again.
+   */
+  const [knownEmpty, setKnownEmpty] = useState(false);
+  /** Has a preview ever actually rendered for this workspace? See previewEmptyKind's `everRendered`. */
+  const everRendered = useRef(false);
   const [browserRunnable, setBrowserRunnable] = useState<boolean | null>(null);
   const [browserBlockedReason, setBrowserBlockedReason] = useState('');
   /** Config variables the app reads that we deliberately do not hold — see the banner below. */
@@ -530,7 +542,18 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
+      // NOTHING BUILT YET is an answer, not a fault — it must never reach setErr(). Only an explicit
+      // boolean counts: an older server that does not send the field leaves this false, which is
+      // today's behaviour rather than a first-time screen guessed at from a blank render.
+      if (data.empty === true) {
+        setKnownEmpty(true);
+        setHtml('');
+        setErr('');
+        return false;
+      }
+      setKnownEmpty(false);
       const nextHtml = typeof data.html === 'string' ? data.html : '';
+      if (nextHtml.length > 0) everRendered.current = true;
       setHtml(nextHtml);
       setKind(typeof data.kind === 'string' ? data.kind : '');
       setHasBackend(data.hasBackend === true);
@@ -604,11 +627,13 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const emptyRetries = useRef(0);
   useEffect(() => {
     // An SSR/backend framework never renders in-browser — the honest panel handles it, so don't retry.
-    if (mode !== 'inbrowser' || !workspaceId || html || loading || err || !frameworkRunsInBrowser(framework)) { emptyRetries.current = 0; return; }
+    // `knownEmpty` stops the retry: re-asking three times whether an empty workspace has become
+    // non-empty is a spinner pretending to be progress, which is the reported bug in miniature.
+    if (mode !== 'inbrowser' || !workspaceId || html || loading || err || knownEmpty || !frameworkRunsInBrowser(framework)) { emptyRetries.current = 0; return; }
     if (emptyRetries.current >= 3) return;
     const t = setTimeout(() => { emptyRetries.current += 1; void loadInBrowser(); }, 1_200);
     return () => clearTimeout(t);
-  }, [mode, workspaceId, html, loading, err, loadInBrowser, framework]);
+  }, [mode, workspaceId, html, loading, err, knownEmpty, loadInBrowser, framework]);
 
   // U1 — AUTO-REFRESH the preview as the build writes files. The parent bumps `reloadSignal` on every
   // file_changed/diff event; we DEBOUNCE so a burst of writes (a 20-file batch) triggers ONE reload
@@ -1099,6 +1124,11 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
                 <p>The full-fidelity live preview runs your app on a real cloud machine, which isn't configured here. Your app still builds and runs — use the <button onClick={() => setMode('inbrowser')} className="underline hover:text-zinc-200">In-browser preview</button> to see it.</p>
                 <p className="text-zinc-500 text-xs">Admin: set <code className="text-zinc-400">E2B_API_KEY</code> in the server environment to enable the live cloud preview.</p>
               </>
+            ) : knownEmpty ? (
+              /* Nothing has been built in this workspace, so there is no dev server to diagnose and
+                 no app that is "not ready yet" — the same first-time state the in-browser preview
+                 shows, rather than a troubleshooting button aimed at an app that does not exist. */
+              <PreviewWelcome />
             ) : (
               <>
                 <p className="text-zinc-200 font-medium">No live preview yet.</p>
@@ -1316,6 +1346,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             {effectiveUrl ? '● ' : ''}Open Live server
           </button>
         </div>
+      ) : previewEmptyKind({ knownEmpty, loading, error: err, everRendered: everRendered.current }) === 'no-app-yet' && !html ? (
+        /* NOTHING BUILT YET — a beginning, not a failure and not work in progress (admin 2026-08-21).
+           This branch sits FIRST on purpose: it is the only one that can outrank a spinner claiming to
+           prepare an app that does not exist, and an error offering to fix one. `!html` keeps a user
+           whose app is already on screen from ever being dropped back to a welcome mat. */
+        <PreviewWelcome checking={loading} slow={loadSeconds >= 4} />
       ) : loading && !html ? (
         /**
          * FIRST LOAD ONLY — `&& !html` is the whole fix for the flicker (admin 2026-08-14: "2 tarah ki
@@ -1424,7 +1460,11 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         </ResponsiveFrame>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6">
-          <Empty>{workspaceId ? 'Loading your saved files into the preview…' : 'No live preview yet — it appears the moment the agent starts the app.'}</Empty>
+          {/* "Loading your saved files…" used to live here and was reached by a user with NO saved
+              files, where it was simply untrue and never resolved. The welcome branch above now owns
+              every no-html case, so this is the unreachable tail of the chain — kept as a real
+              fallback rather than a claim, so if a future edit ever routes here it says nothing false. */}
+          <Empty>Your app will appear here.</Empty>
           {workspaceId && (
             // Manual escape hatch for the invariant "files exist ⇒ the preview renders": if every
             // bounded auto-retry above somehow lost, one tap reloads from the durable files.

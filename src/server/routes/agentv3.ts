@@ -291,6 +291,9 @@ function sessionCostCapUsd(): number {
 import { deploymentStore, withDeploymentPersistence, isLiveDeployment, publishedAppList, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
 import { buildRecipe, revivalConfirmedMessage, revivalUnconfirmedMessage } from '../AgentV3/previewRevival';
+import { decideAppSignature, appSignatureNotice } from '../AgentV3/appSignatureEntitlement';
+import { professionalPassStore } from '../professionals/ProfessionalPassStore';
+import { professionalPassPriceInr } from '../professionals/professionalPaid';
 import { lastDevServerLaunch } from '../AgentV3/devServerLaunchLog';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
@@ -5708,6 +5711,41 @@ export function registerAgentV3Routes(app: Express): void {
   const INBROWSER_CACHE_TTL_MS = 5 * 60_000;
   const INBROWSER_CACHE_MAX = 30;
 
+  /**
+   * CAN THIS USER REMOVE THE "made by NavBharatAI" BADGE? (admin 2026-08-21)
+   *
+   * Exists so Settings asks the SERVER the same question the build asks, through the SAME
+   * `decideAppSignature` — rather than reimplementing the entitlement in the browser, which is the
+   * mistake being fixed here in the first place. A screen that decides for itself whether a paid
+   * feature is unlocked will always eventually disagree with the server that actually enforces it.
+   *
+   * Deliberately NOT reusing /api/professional/pass/status: that one reports `hasPass: false` whenever
+   * the Professionals paywall FLAG is off, without even reading the store — true for its own purpose,
+   * and wrong for this one, where the only question is whether this user paid.
+   */
+  app.get('/api/agentv3/app-signature-status', async (req: Request, res: Response) => {
+    const identity = process.env.VITEST ? null : await verifyFirebaseIdentity(req);
+    const uid = identity?.uid || null;
+    const email = identity?.email || (uid ? await resolveVerifiedEmail(uid) : null);
+    const freeListed = isAgentV3FreeUser(uid, email);
+    const hasActivePass = uid && !freeListed
+      ? await professionalPassStore.getStatus(uid).then((p) => p.active).catch(() => null)
+      : false;
+    // Asked with `requestedRemoval: true` on purpose: the question is "IF they asked, would it come
+    // off?" — so the screen learns the entitlement, not today's toggle position.
+    const decision = decideAppSignature({ requestedRemoval: true, signedIn: !!uid, hasActivePass, isFreeListed: freeListed });
+    res.json({
+      canRemove: decision.enabled === false,
+      reason: decision.reason,
+      priceInr: professionalPassPriceInr(),
+      // HONEST, and the reason this field exists: the Pass was WITHDRAWN from sale by the admin on
+      // 2026-08-10 (payment order creation answers 410 `pass_withdrawn`). So a user who cannot remove
+      // the badge today also has no way to buy the entitlement, and the screen must say that plainly
+      // instead of showing an upgrade button that would fail at the gateway.
+      purchasable: false,
+    });
+  });
+
   app.post('/api/agentv3/inbrowser-preview', inbrowserPreviewRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
@@ -5728,7 +5766,21 @@ export function registerAgentV3Routes(app: Express): void {
       const actuator = buildActuator();
       const { files } = await collectFilesWithSavedFallback(actuator, workspaceId, { liveTimeoutMs: 2_500 });
       if (Object.keys(files).length === 0) {
-        res.status(404).json({ error: 'No files to preview yet — build something first.' });
+        // "YOU HAVE NOT BUILT ANYTHING YET" IS NOT A FAILURE (admin 2026-08-21). This used to answer 404
+        // with an error string, and the client — which has no other way to tell the two apart — rendered
+        // it in its error lane: a red panel offering to "Fix with AI" an app that was never built, after
+        // a spinner claiming the app was being prepared. Both were false.
+        //
+        // The question this endpoint was asked is "what should I show?", and "nothing has been built
+        // here yet" is a correct and successful answer to it. So it is a 200 carrying an explicit
+        // `empty` flag, which the client turns into a real first-time state. `error` is kept alongside
+        // for any older client that only knows how to read that field — it must not regress to a blank
+        // screen, and this line is the reason it will not.
+        res.json({
+          html: '', kind: '', count: 0, empty: true,
+          error: 'No files to preview yet — build something first.',
+          hasBackend: false, backendReason: '', browserRunnable: null, browserBlockers: [], browserBlockedReason: '', envVarsUsed: [],
+        });
         return;
       }
       // HONEST FULL-STACK STATE (Task #64): the in-browser preview compiles only the FRONTEND. If the
@@ -6460,9 +6512,34 @@ export function registerAgentV3Routes(app: Express): void {
     const planFirstRequested = req.body?.planFirst !== false;
     const planFirst = planFirstRequested && decidePlanning(prompt) !== 'skip';
     const thinking = req.body?.thinking === true; // adaptive thinking, off by default
-    // "made by NavBharatAI" app-signature toggle (admin 2026-07-16). Default ON (viral-growth):
-    // absent/undefined = ON; only an explicit `false` from Settings → General turns it off.
-    const appSignatureEnabled = req.body?.appSignature !== false;
+    // "made by NavBharatAI" app signature — a PAID entitlement, decided on the SERVER (admin 2026-08-21).
+    //
+    // This used to be `req.body?.appSignature !== false`: the client's localStorage toggle WAS the
+    // decision, so removing the badge — which the admin sells as part of the ₹99/month Pass — was free
+    // to anyone who flipped a switch or posted the field by hand. A paid entitlement enforced on the
+    // client is not enforced. The body can only ever express a PREFERENCE; whether it is honoured is
+    // decided here, from the VERIFIED identity, and never from anything the browser touched.
+    //
+    // Read against the Pass store directly rather than through the Professionals paywall flag: the
+    // badge entitlement is about whether this user PAID, which is true or false regardless of whether
+    // the Professionals section's own gate happens to be switched on.
+    const signatureRequestedRemoval = req.body?.appSignature === false;
+    const signatureFreeListed = isAgentV3FreeUser(userId, email);
+    const signaturePass = signatureRequestedRemoval && !signatureFreeListed && userId
+      // `null` on failure — decideAppSignature FAILS CLOSED on it (keeps the badge), which is the
+      // opposite of the wallet gate beside it and deliberately so: see appSignatureEntitlement.ts.
+      ? await professionalPassStore.getStatus(userId).then((p) => p.active).catch(() => null)
+      : false;
+    const signatureDecision = decideAppSignature({
+      requestedRemoval: signatureRequestedRemoval,
+      signedIn: !!userId,
+      hasActivePass: signaturePass,
+      isFreeListed: signatureFreeListed,
+    });
+    const appSignatureEnabled = signatureDecision.enabled;
+    // A switch that appears to work and quietly does nothing is exactly the fake feature the second
+    // absolute rule forbids — so when the answer is no, the user is told why, and where to fix it.
+    const appSignatureNoticeText = appSignatureNotice(signatureDecision.reason, professionalPassPriceInr());
 
     // NDJSON stream (mirrors the Engineer route's streaming contract).
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -6856,6 +6933,9 @@ export function registerAgentV3Routes(app: Express): void {
 
     const events = new AgentEventStream();
     events.subscribe((e) => emit(e), false);
+    // Said once, at the start, so a user who expected the badge gone is not left to discover it on the
+    // finished app and conclude the toggle is broken.
+    if (appSignatureNoticeText) emit({ type: 'narration', agent: 'architect', text: `ℹ️ ${appSignatureNoticeText}`, ts: Date.now() });
     const state = new WorkspaceState(events);
 
     // AP-4 (flag-gated): when parallel building is ON, wrap the actuator so concurrent frontend/backend

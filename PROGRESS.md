@@ -36698,3 +36698,56 @@ it into plain words ("22 free minutes left today" / "under a minute" / "used up 
 and falls back to stating the ALLOWANCE while the server has not reported rather than inventing a number.
 
 Gate: both tsc green; 9 new meter tests + 4 label tests; FULL suite 16,798 / 1,340 files green.
+
+---
+
+## 2026-08-21 — v5 multi-terminal, a hosting cap that actually protects the allowance, and edge caching
+
+Three of the admin's five items, after the terminal-quota fix (#2519) landed first.
+
+**1. v5 Terminal is now the multi-terminal panel (admin: "Terminal ke aage + button").** It REUSES
+Code Studio's `TerminalPanel` rather than growing a second `+` in v5 — one implementation cannot drift
+from itself, which is the same discipline that collapsed four copies of `safeRelPath`. Tab 1 is a
+PINNED, read-only "NavBharatAI · build log"; `+ New` opens the user's own shells, each with a real PTY,
+each with a ✕.
+
+The pinned tab is a LOG, not a fake terminal, and that was a deliberate refusal: the builder runs its
+commands through the build actuator, not a PTY, so styling its transcript as a shell would be a prompt
+that cannot accept input. Routing the whole build loop through a PTY to make the metaphor literal
+would be the riskiest change in the engine for a cosmetic gain. The admin's mental model ("#1 AI ka,
+baaki mere") is delivered honestly instead.
+
+⚠️ MONEY RULE, now test-locked: with a pinned tab NO shell is opened on mount. Looking at the build
+log spends none of the daily allowance; a shell exists only when the user asks. The panel's decisions
+moved into pure `terminalTabs.ts` because the repo renders components to static markup in tests and
+cannot click a button — a rule that cannot be exercised is not a rule.
+
+**2. Hosting had a promise with nothing behind it.** The Publish sheet says "Fair-use limits apply",
+and there WAS a 50 MB per-publish ceiling — but nothing capped how MANY apps, so one account could
+hold the entire 10 GB free Firebase allowance (the admin's exact worry: "sara 10gb ek hi user kha gaya
+to mera dhanda manda ho jayega"). `hostingStorageCapMb` (200 MB, ON, env-tunable) + `liveStorageMb`
+close it at the SAME choke point every deploy already passes.
+Two details carry the correctness: the app being REPUBLISHED is excluded (an update replaces files
+rather than adding them — counting the old copy would charge twice and could refuse an update, the
+safest thing a user does), and BYO deploys never count because they sit on the user's own bill. A
+typical SPA is under 1 MB, so 200 MB is hundreds of apps: it bounds abuse, not use. Fail-open on any
+store error, like every gate around it.
+The empty-env trap bit again and was caught by this module's own test — `Number('')` is 0, so the
+obvious implementation would silently REMOVE the protection when a key is set with no value. Only a
+deliberate "0" disables it.
+
+**3. Cloudflare Worker now caches at the edge.** Every visit used to reach Firebase, which bills
+egress past 10 GB while Cloudflare's bandwidth is free. Fingerprinted assets are held a year (that URL
+can never mean anything else); `index.html` for 60s only, so a republish is visible within a minute
+instead of serving an old app. Non-GET and non-200 are never cached — a cached 404 would outlive the
+publish that fixes it. ⚠️ ADMIN ACTION: this file is not deployed by CI; the admin must paste it into
+the Cloudflare Worker and press Deploy.
+
+**4. ROADMAP §10 — THE PUBLISH CEILING (open root cause).** Every published app takes one Firebase
+preview channel on ONE site, and channels per site are capped at roughly 50 ACROSS ALL USERS. The
+obvious fix is wrong: Firebase documents max **36 sites per project**, a LOWER ceiling. The real answer
+is to serve published apps from Cloud Storage through the Worker that is already the front door. Not
+started, and recorded honestly — including that I could not confirm the exact channel number in
+Google's published quota page.
+
+Gate: both tsc green; FULL suite 16,849 tests / 1,346 files green.

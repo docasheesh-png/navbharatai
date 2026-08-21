@@ -20,6 +20,7 @@
  *     caller throws it as the deploy result; nothing is published, no fake success.
  */
 import { hostingUsageStore } from './HostingUsageStore';
+import { deploymentStore } from '../AgentV3/DeploymentStore';
 
 /** Providers where NavBharatAI foots the hosting bill (so the quota + size cap apply). */
 export const FIRST_PARTY_PROVIDERS = new Set<string>(['firebase', 'cloudflare']);
@@ -39,6 +40,95 @@ export function maxDeployMb(): number {
   const raw = Number(process.env.AGENTV3_DEPLOY_MAX_MB);
   if (Number.isFinite(raw) && raw >= 0) return raw; // allow explicit 0 (disable) or a custom value
   return 50;
+}
+
+/**
+ * Total live first-party hosting one user may hold, in MB. Env AGENTV3_USER_STORAGE_CAP_MB; 0 = off.
+ *
+ * WHY THIS EXISTS ON TOP OF THE PER-PUBLISH CAP (admin 2026-08-21: "sara 10gb ek hi user kha gaya to
+ * mera dhanda manda ho jayega"). The 50 MB per-publish ceiling bounds ONE app; it says nothing about
+ * how many. With unlimited apps a single account could hold the whole 10 GB free Firebase allowance —
+ * the exact hole the admin named, and one the UI already implied was closed ("Fair-use limits apply").
+ *
+ * DEFAULT 200 MB, and ON. A published SPA is typically well under 1 MB, so this is room for hundreds
+ * of apps: it cannot reach a legitimate user, which is what makes shipping it enabled safe. It bounds
+ * abuse, not use.
+ */
+export function hostingStorageCapMb(): number {
+  // ⚠️ An EMPTY value means unset, not zero. `Number('')` is 0 — finite and non-negative — so the
+  // obvious implementation turns a key set with no value in Cloud Run into a silent, total removal of
+  // the protection, with nothing in the logs to explain it. Only a deliberate "0" disables the cap.
+  // (Exactly the trap terminalQuota.ts documents; caught here by this module's own test.)
+  const raw = String(process.env.AGENTV3_USER_STORAGE_CAP_MB ?? '').trim();
+  if (!raw) return 200;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 200;
+}
+
+/**
+ * How many DISTINCT apps one user may keep published on NavBharatAI's own hosting. 0 = off.
+ *
+ * WHY A COUNT AS WELL AS A SIZE AND A TOTAL (admin 2026-08-21: "maximum 5 free publish on
+ * navbharatai — isse limit reach hone me thoda aram milega"). The three caps bound three different
+ * things and none substitutes for another: MB-per-publish bounds one bundle, total-MB bounds a user's
+ * disk, and this bounds the scarcest resource of all — Firebase Hosting CHANNELS. Every published app
+ * holds one channel on one site, and that pool is capped for the WHOLE PLATFORM (ROADMAP §10), so the
+ * count is what the ceiling is actually made of.
+ *
+ * ⚠️ IT COUNTS APPS, NOT PUBLISHES. Republishing an app reuses its channel and costs nothing new, so
+ * charging for it would punish shipping a fix — the behaviour we most want. `liveAppCount` therefore
+ * excludes the workspace being republished, exactly as the storage cap does.
+ */
+export function publishedAppCap(): number {
+  // Empty means unset, not zero — see hostingStorageCapMb for the trap this avoids.
+  const raw = String(process.env.AGENTV3_USER_PUBLISHED_APP_CAP ?? '').trim();
+  if (!raw) return 5;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 5;
+}
+
+/** Pure: how many DISTINCT live first-party apps this user holds, excluding the one being republished. */
+export function liveAppCount(
+  records: ReadonlyArray<{ workspaceId?: string; status?: string; providerId?: string; firstParty?: boolean }>,
+  excludeWorkspaceId?: string,
+): number {
+  const seen = new Set<string>();
+  for (const r of records || []) {
+    if (!r || !r.workspaceId || r.workspaceId === excludeWorkspaceId) continue;
+    if (r.status && r.status !== 'active') continue;
+    const firstParty = r.firstParty === true
+      || (r.firstParty === undefined && (r.providerId === undefined || isFirstPartyProvider(r.providerId)));
+    if (!firstParty) continue;
+    seen.add(r.workspaceId);
+  }
+  return seen.size;
+}
+
+/**
+ * Pure: the MB this user already holds live, EXCLUDING the app being republished.
+ *
+ * That exclusion is the whole correctness of the check. Publishing an update to an existing app
+ * replaces its files rather than adding to them, so counting the old copy would charge a user twice
+ * for one app and could refuse an update to something already published — punishing the safest thing
+ * a user can do. Only LIVE first-party records count: a taken-down app holds nothing, and a BYO
+ * deploy sits on the user's own bill.
+ */
+export function liveStorageMb(
+  records: ReadonlyArray<{ workspaceId?: string; sizeMb?: number; status?: string; providerId?: string; firstParty?: boolean }>,
+  excludeWorkspaceId?: string,
+): number {
+  let mb = 0;
+  for (const r of records || []) {
+    if (!r || r.workspaceId === excludeWorkspaceId) continue;
+    if (r.status && r.status !== 'active') continue;
+    // Legacy records predate both fields and were all first-party Firebase deploys — counting them
+    // is accurate, not merely cautious.
+    const firstParty = r.firstParty === true
+      || (r.firstParty === undefined && (r.providerId === undefined || isFirstPartyProvider(r.providerId)));
+    if (!firstParty) continue;
+    mb += Number.isFinite(r.sizeMb) ? Number(r.sizeMb) : 0;
+  }
+  return Math.round(mb * 100) / 100;
 }
 
 /** Pure: is `used` within `cap`? A cap of 0 (or negative) means DISABLED → always within. */
@@ -100,6 +190,53 @@ export async function enforceHostingQuota(input: {
         `Reduce the bundle (code-split, drop large images/assets into a CDN) and publish again, ` +
         `or connect your own host (GitHub Pages / Netlify / Vercel) to publish larger apps.`,
     };
+  }
+
+  // TOTAL LIVE STORAGE for this user — the cap that actually protects the 10 GB free allowance.
+  // Bounded + fail-OPEN like every other gate here: a Firestore hiccup must never refuse a real
+  // publish. The app being republished is excluded, so updating an existing app is never blocked.
+  const storageCap = hostingStorageCapMb();
+  if (storageCap > 0 && input.userId) {
+    const records = await Promise.race([
+      deploymentStore.listByUser(input.userId, 500),
+      new Promise<null>((r) => setTimeout(() => r(null), 3_000)),
+    ]).catch(() => null);
+    if (records) {
+      // COUNT first — it is the scarcer resource, and its message is the more actionable one.
+      const appCap = publishedAppCap();
+      if (appCap > 0) {
+        const apps = liveAppCount(records, input.workspaceId);
+        if (apps >= appCap) {
+          return {
+            allowed: false,
+            used: apps,
+            cap: appCap,
+            byteMb: Math.round(byteMb * 100) / 100,
+            message:
+              `You already have ${apps} apps published on NavBharatAI, which is the free limit of ` +
+              `${appCap}. Updating an app you have already published is always free and does not count ` +
+              `against this. To publish a NEW one, remove an app you no longer need, or publish it to ` +
+              `your own free host (Vercel / Netlify / Cloudflare Pages) — that runs on your account, ` +
+              `free from us.`,
+          };
+        }
+      }
+
+      const heldMb = liveStorageMb(records, input.workspaceId);
+      if (heldMb + byteMb > storageCap) {
+        return {
+          allowed: false,
+          used: heldMb,
+          cap: storageCap,
+          byteMb: Math.round(byteMb * 100) / 100,
+          message:
+            `Your published apps already use ${heldMb.toFixed(1)} MB of your ${storageCap} MB of free ` +
+            `NavBharatAI hosting, and this one needs ${byteMb.toFixed(1)} MB more. Delete an app you no ` +
+            `longer need from your published apps, or publish this one to your own free host ` +
+            `(Vercel / Netlify / Cloudflare Pages) — that runs on your account, free from us.`,
+        };
+      }
+    }
   }
 
   // Monthly free first-party deploy count — DISABLED by default (fail-open, best-effort read).

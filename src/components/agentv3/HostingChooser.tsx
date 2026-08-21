@@ -474,6 +474,7 @@ export function HostingChooser({
             <ul className="text-[11px] text-zinc-300 flex flex-col gap-1 mt-0.5">
               <li>• Instant publish — nothing to set up</li>
               <li>• Frontend now · full app (backend + DB) coming soon</li>
+              <li>• 5 apps free · updating one you published is always free</li>
               <li>• Fair-use limits apply (per-publish size + safety scan)</li>
             </ul>
             <button

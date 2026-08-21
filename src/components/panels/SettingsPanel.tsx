@@ -24,6 +24,7 @@ import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { THEME_MODES } from '../../lib/theme';
 import type { ThemeMode } from '../../lib/theme';
 import type { User as FirebaseUser } from 'firebase/auth';
+import { panelWidth, panelColumns, READING_WIDTH, type DeviceMode } from '../../lib/panelWidth';
 
 // Lazy-loaded sub-components (same pattern as App.tsx)
 const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
@@ -75,6 +76,13 @@ export interface SettingsPanelProps {
 
   // The current app's generated code — still threaded for the screens that analyse the built app.
   generatedCode?: string;
+
+  /**
+   * The device mode ALREADY RESOLVED by the app ('auto' turned into what it actually means right now).
+   * Required, not optional: a screen that forgets to ask is exactly how all three of these ended up
+   * showing a phone column on a desktop, and a compiler error is a better guard than a code review.
+   */
+  effectiveDeviceMode: DeviceMode;
 
   // settings state
   deviceMode: 'auto' | 'mobile' | 'tablet' | 'desktop';
@@ -340,6 +348,7 @@ export function SettingsPanel({
   setActiveView,
   onCloseSettings,
   generatedCode,
+  effectiveDeviceMode,
   deviceMode,
   setDeviceMode,
   preferredLanguage,
@@ -414,7 +423,15 @@ export function SettingsPanel({
           stretched-mobile column. Sub-screens (General, Connections, …) are designed for a single
           reading column, so they stay capped at max-w-xl. */}
       <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0d1117]">
-        <div className={cn("mx-auto p-4 sm:p-6 pb-20", settingsScreen === 'root' ? "max-w-xl lg:max-w-5xl xl:max-w-6xl" : "max-w-xl")}>
+        <div
+          className={cn(
+            'mx-auto p-4 sm:p-6 pb-20',
+            // The legal documents are PROSE — a full-width line of text is harder to read, not easier,
+            // so they keep a reading measure at every size. Everything else is CONTROLS, where the
+            // width is genuinely useful, and follows the one shared rule (src/lib/panelWidth.ts).
+            settingsScreen.startsWith('legal_') ? READING_WIDTH : panelWidth(effectiveDeviceMode),
+          )}
+        >
           <AnimatePresence mode="wait">
             {settingsScreen === 'root' && (
               <motion.div
@@ -678,7 +695,11 @@ export function SettingsPanel({
                      </div>
                   </div>
 
-                  <div className="space-y-6 pt-4">
+                  {/* On a desktop these setting cards flow into two columns. Widening the page alone
+                      would only stretch each row — a label at the far left and its control at the far
+                      right is a page you have to sweep your eyes across, which is worse than the
+                      narrow column, not better. Same treatment the Settings root already uses. */}
+                  <div className={cn('pt-4', effectiveDeviceMode === 'desktop' ? panelColumns(effectiveDeviceMode) : 'space-y-6')}>
                 {/* View Mode — the FIRST control in General Settings. It decides the whole layout, so a
                           user who came here to change how the app looks is looking for exactly this. */}
                      <div className="bg-[#161b22] border border-white/5 rounded-2xl p-4">

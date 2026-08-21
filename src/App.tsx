@@ -2864,6 +2864,7 @@ export default function App() {
           )}
           {activeView === 'settings' && (
             <SettingsPanel
+              effectiveDeviceMode={effectiveDeviceMode}
               themeClasses={themeClasses}
               settingsScreen={settingsScreen}
               setSettingsScreen={setSettingsScreen}
@@ -3563,6 +3564,7 @@ export default function App() {
 
           {activeView === 'my_profile' && (
             <ProfilePage
+              effectiveDeviceMode={effectiveDeviceMode}
               user={user}
               onNavigateToBilling={() => { setActiveView('billing'); }}
               onNavigateToSettings={() => { setActiveView('settings'); }}
@@ -3688,6 +3690,7 @@ export default function App() {
           )}
 
           <ViewPanels
+            effectiveDeviceMode={effectiveDeviceMode}
             v3Preview={v3Preview}
             previousFiles={previousFiles}
             onV3FixError={(errText) => setV3PendingFix({ text: `The in-browser preview failed to build with this error:\n\n${errText}\n\nPlease find the cause in the project files and fix it so the app builds and runs.`, nonce: Date.now() })}

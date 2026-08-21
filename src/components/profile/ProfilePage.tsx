@@ -16,6 +16,7 @@ import {
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { ApiKeysCard } from './ApiKeysCard';
+import { panelWidth, panelColumns, type DeviceMode } from '../../lib/panelWidth';
 
 // ── Types mirroring server responses ──────────────────────────────────────────
 
@@ -67,6 +68,9 @@ interface HistorySummary {
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface ProfilePageProps {
+  /** The app's ALREADY-RESOLVED device mode. Required so this page can never again hand a desktop
+   *  screen a phone-width column (admin report 2026-08-19). See src/lib/panelWidth.ts. */
+  effectiveDeviceMode: DeviceMode;
   user: FirebaseUser | null;
   onNavigateToBilling: () => void;
   onClose?: () => void;
@@ -116,7 +120,7 @@ function StatusBadge({ status, progress }: { status: BuildRecord['status']; prog
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ProfilePage({ user, onNavigateToBilling, onNavigateToSettings, onLogout }: ProfilePageProps) {
+export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, onNavigateToSettings, onLogout }: ProfilePageProps) {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [wallet, setWallet] = useState<WalletData | null>(null);
   const [monthlySpend, setMonthlySpend] = useState<MonthlySpend | null>(null);
@@ -268,7 +272,11 @@ export function ProfilePage({ user, onNavigateToBilling, onNavigateToSettings, o
 
   return (
     <div className="flex-1 bg-[#0d1117] overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+      {/* Width follows the app's View Mode, from the one shared rule — this page used to carry its
+          own hard-coded max-w-3xl, which is how a 1920px screen ended up showing a narrow column with
+          empty space beside it. The cards flow into two columns on a desktop so the room is actually
+          used, instead of each row being stretched across the screen. */}
+      <div className={`${panelWidth(effectiveDeviceMode)} mx-auto px-4 py-8 ${effectiveDeviceMode === 'desktop' ? panelColumns(effectiveDeviceMode) : 'space-y-6'}`}>
 
         {/* ── Profile Card ─────────────────────────────────────────────────── */}
         <div className="bg-[#161b22] border border-white/5 rounded-3xl p-6 space-y-4">

@@ -59,6 +59,11 @@ const AppHealthMonitor  = _lz(() => import('../ide/AppHealthMonitor'),   'AppHea
 const APITester         = lazy(() => import('../ide/APITester'));
 
 export interface ViewPanelsProps {
+  /** The app's resolved device mode, handed to the full-page panels so a desktop screen is not given a
+   *  phone-width column (admin report 2026-08-19; see src/lib/panelWidth.ts).
+   *  ⚠️ The lazy `_lz` loader above erases prop types (ComponentType<any>), so the compiler will NOT
+   *  tell you if this stops being passed to a panel below — hence the test that checks it. */
+  effectiveDeviceMode: 'mobile' | 'tablet' | 'desktop';
   activeView: ViewType;
   generatedCode: string;
   setGeneratedCode: (code: string) => void;
@@ -145,6 +150,7 @@ export interface ViewPanelsProps {
 }
 
 export function ViewPanels({
+  effectiveDeviceMode,
   activeView, generatedCode, setGeneratedCode, files, setFiles, onIdeFilesChange, onFlushIdeEdits, onReplaceProjectFiles, onFilesRemoved,
   hasGeneratedCode, setIsAppBuilt, setHasGeneratedCode,
   user, activeAgent, mode, setMode, isAppBuilt, theme, setTheme,
@@ -490,6 +496,7 @@ export function ViewPanels({
       {activeView === 'apk' && (
         <div className="flex-1 h-full overflow-hidden">
           <APKBuilder
+            effectiveDeviceMode={effectiveDeviceMode}
             generatedCode={generatedCode}
             appName="NavBharatAI App"
             sessionId={currentProSessionId}

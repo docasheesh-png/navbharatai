@@ -11,6 +11,7 @@ import { AppTargetPicker, useUserApps, useAppFiles } from './AppTargetPicker';
 import { StoreBuildPanel } from './StoreBuildPanel';
 import { MyBuiltApps } from './MyBuiltApps';
 import { readIconFile, readIconFromClipboard } from '../../lib/appIcon';
+import { panelWidth, type DeviceMode } from '../../lib/panelWidth';
 // The SAME pure helpers the server uses to derive and normalise the package name (rule 4 — no drift, so
 // what the user sees here is exactly what the build will use). appId.ts / mobileProjectAssembler are pure
 // (no server-only deps), and client code already imports such pure server modules elsewhere.
@@ -51,6 +52,9 @@ export interface APKBuilderProps {
   onDisconnectGitHub?: () => void;
   /** Send the user to AI Image Gen to create an icon. */
   onMakeIcon?: () => void;
+  /** The app's ALREADY-RESOLVED device mode, so this page is not a phone column on a desktop
+   *  (admin report 2026-08-19). One shared rule: src/lib/panelWidth.ts. */
+  effectiveDeviceMode: DeviceMode;
 }
 
 interface AppInfo {
@@ -91,7 +95,7 @@ function packageAdvisory(typed: string, appName: string): { effective: string; o
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, githubToken, githubUser, onConnectGitHub, onDisconnectGitHub, onMakeIcon }) => {
+export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, githubToken, githubUser, onConnectGitHub, onDisconnectGitHub, onMakeIcon, effectiveDeviceMode }) => {
   // The same auth the build panel sends: the user's Firebase identity (whose wallet and app list this
   // is) plus their GitHub token (which is what actually reads their repositories).
   const myAppsHeaders = useCallback(async (extra?: Record<string, string>) => {
@@ -211,7 +215,9 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
 
   return (
     <div className="h-full overflow-y-auto overscroll-contain p-4 sm:p-6 font-sans" style={{ background: 'var(--surface-base)', color: 'var(--text-body)', WebkitOverflowScrolling: 'touch' }}>
-      <div className="max-w-2xl mx-auto">
+      {/* Width comes from the one shared rule rather than a number invented here — this page used to
+          be pinned to max-w-2xl, so a desktop screen showed a phone column with empty space beside it. */}
+      <div className={`${panelWidth(effectiveDeviceMode)} mx-auto`}>
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center">

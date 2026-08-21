@@ -637,15 +637,25 @@ export function SettingsPanel({
                 {/* Admin + Footer */}
                 {isAdmin && (
                   <button
-                    onClick={() => setSettingsScreen('metrics' as any)}
+                    onClick={() => setSettingsScreen('metrics')}
                     className="w-full flex items-center gap-3 p-3 bg-[#161b22] border border-white/5 rounded-xl hover:border-indigo-500/20 transition-all group"
                   >
                     <BarChart2 className="w-4 h-4 text-[#484f58] group-hover:text-indigo-400 transition-colors" />
                     <span className="text-xs font-bold text-[#8b949e] group-hover:text-white transition-colors">Live Metrics</span>
                   </button>
                 )}
+                {/* ADMIN LOGIN — POINTED AT A SCREEN THAT DOES NOT EXIST (found 2026-08-21).
+                    `setSettingsScreen('admin')` set a value NO branch in this file renders, so the
+                    button opened a Settings page titled "Admin" with a completely empty body — the
+                    header and back arrow render unconditionally, so the user could escape, but the
+                    feature simply did not work. The `as any` cast is what let it through review:
+                    'admin' is not a SettingsScreen at all. The REAL admin login is a top-level VIEW
+                    (`activeView === 'admin'` -> AdminLoginPanel, App.tsx), so it is wired to that
+                    now, using the same setActiveView + reset-to-root pattern the other cross-view
+                    tiles already use. Same bug class as the removed 'modules'/'cloudeploy' screens:
+                    a doorway whose room is missing. */}
                 <button
-                  onClick={() => setSettingsScreen('admin' as any)}
+                  onClick={() => { setActiveView('admin'); setSettingsScreen('root'); }}
                   className="w-full flex items-center gap-3 p-3 bg-[#161b22] border border-white/5 rounded-xl hover:border-red-500/20 transition-all group"
                 >
                   <Lock className="w-4 h-4 text-[#484f58] group-hover:text-red-400 transition-colors" />
@@ -846,9 +856,16 @@ export function SettingsPanel({
                     Reset Editor Settings to Default
                   </button>
 
-                  <button className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[1.5rem] text-xs font-black uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/30 active:scale-[0.98] transition-all">
-                     Update Preferences
-                  </button>
+                  {/* "Update Preferences" was REMOVED here (admin 2026-08-21). It was the most
+                      prominent button on this screen - full width, indigo, shadowed - and it had NO
+                      onClick at all: pressing it did nothing, forever. It was not a missing save
+                      either. Every control above it persists the moment it is tapped (`useSettings`
+                      writes theme / language / hinglish straight to localStorage, and enabledModules
+                      through an effect), so the button was worse than dead: it implied preferences
+                      were NOT saved until you pressed it, which would make a user who closed Settings
+                      without pressing it believe their change was lost. Same removal, same reason, as
+                      "Developer Mode" above. Do not re-add a save button here unless the settings
+                      genuinely stop auto-saving. */}
                 </div>
               </motion.div>
             )}
@@ -1257,17 +1274,36 @@ export function SettingsPanel({
                         <GitBranchIcon className="w-24 h-24 text-white" />
                       </div>
                       <div className="space-y-2 relative z-10">
-                         <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">Repository Settings</h3>
-                         <p className="text-[10px] text-white/70 font-medium tracking-wide">Configure sync parameters for {selectedRepo.name}</p>
+                         <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">{selectedRepo.name}</h3>
+                         <p className="text-[10px] text-white/70 font-medium tracking-wide">Selected. Commit, push and deploy from the Git panel.</p>
                       </div>
 
                       <div className="space-y-4 relative z-10">
+                         {/* DEFAULT BRANCH — WAS A FAKE FORM (admin 2026-08-21). This used to be three
+                             buttons, "main" / "master" / "develop", with NO onClick on any of them and
+                             "main" hardcoded as the selected one for every repository — under a heading
+                             that read "Repository Settings — Configure sync parameters", beside a button
+                             labelled "Confirm". Nothing was configured and nothing was confirmed: a user
+                             on a repo whose real default is `master` was shown `main`, could "pick"
+                             their branch, press Confirm, and change nothing.
+
+                             The repo's REAL default branch was available the whole time — /api/github/repos
+                             passes GitHub's own payload straight through, `default_branch` included (the
+                             same field CICDPipeline and CodeStudio already read). So the fake control is
+                             now the true value, READ-ONLY, because reading it is all we actually do:
+                             nothing in NavBharatAI writes a per-repo default branch. If GitHub did not
+                             send one, this says so rather than falling back to "main" — a plausible guess
+                             printed as fact is the bug we just removed. The button beneath no longer says
+                             "Confirm": it only navigates, so it says so. */}
                          <div className="space-y-2">
                             <label className="text-[8px] font-black text-white uppercase tracking-widest ml-1">Default Branch</label>
-                            <div className="flex bg-black/20 rounded-2xl p-1 border border-white/10">
-                               <button className="flex-1 py-3 bg-white text-indigo-600 text-[10px] font-black uppercase tracking-widest rounded-xl shadow-xl transition-all">main</button>
-                               <button className="flex-1 py-3 text-white/50 text-[10px] font-black uppercase tracking-widest rounded-xl hover:text-white transition-all">master</button>
-                               <button className="flex-1 py-3 text-white/50 text-[10px] font-black uppercase tracking-widest rounded-xl hover:text-white transition-all">develop</button>
+                            <div className="bg-black/20 rounded-2xl px-4 py-3 border border-white/10 flex items-center gap-2">
+                               <GitBranchIcon className="w-3.5 h-3.5 text-white/60 shrink-0" />
+                               {selectedRepo.default_branch ? (
+                                 <span className="text-[11px] font-mono font-bold text-white truncate">{selectedRepo.default_branch}</span>
+                               ) : (
+                                 <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Not reported by GitHub</span>
+                               )}
                             </div>
                          </div>
                          <button
@@ -1278,7 +1314,7 @@ export function SettingsPanel({
                            className="w-full py-5 bg-white text-indigo-600 rounded-[1.5rem] font-black uppercase tracking-widest transition-all hover:scale-[1.02] shadow-2xl active:scale-[0.98] flex items-center justify-center gap-3"
                          >
                             <Zap className="w-4 h-4 fill-indigo-600" />
-                            Confirm & Go to Git
+                            Open Git Panel
                          </button>
                       </div>
                    </motion.div>
@@ -1286,137 +1322,34 @@ export function SettingsPanel({
               </motion.div>
             )}
 
-            {settingsScreen === 'sharing' && (
-              <motion.div
-                key="sharing"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="space-y-6"
-              >
-                 <div className="px-1 py-4">
-                   <h2 className="text-2xl font-black text-white tracking-tight">Share & Publish</h2>
-                   <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Collaborate with the world</p>
-                </div>
+            {/* THREE UNREACHABLE SCREENS REMOVED HERE (admin 2026-08-21): 'sharing', 'deploy'
+                and 'access'. NOTHING in the entire app ever set settingsScreen to any of them — no
+                tile, no knowledge-base nav target, no event — so none could be opened by any route.
+                This is the FOURTH time this exact bug has been found in this file ('modules'
+                2026-08-14, 'hosting' and 'cloudeploy' 2026-07-29/2026-08-20), which is why the fix
+                this time is not just another deletion: see tests/settingsScreenReachable.test.ts,
+                which now fails CI if a declared SettingsScreen has no doorway or no room.
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-8 shadow-2xl">
-                    <div className="flex items-center gap-5">
-                       <div className="w-16 h-16 bg-indigo-600/10 rounded-[2rem] flex items-center justify-center border border-indigo-600/20">
-                          <Globe className="w-8 h-8 text-indigo-400" />
-                       </div>
-                       <div>
-                          <h4 className="text-sm font-black text-white uppercase tracking-widest mb-1">Public Hub</h4>
-                          <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest leading-relaxed">Unique deployment identifier</p>
-                       </div>
-                    </div>
+                What was inside them, and why none of it is a loss — every one was a real-features
+                violation that would have shipped the moment somebody added a doorway:
+                  • 'sharing'  — a HARDCODED share URL ("navbharat.ai/s/project-592", a literal
+                                 string, not anyone's project), a "Copy Link" button with no onClick,
+                                 and a "Publish to Community Store" button with no onClick. The real
+                                 publish surfaces (the v5.0 Publish sheet and the Nav App Store) both
+                                 exist and work; this was a fake third one.
+                  • 'deploy'   — "Support Us". Its Donate button was genuinely wired, but donations
+                                 already have their own sidebar tile and view ('donation'), so no
+                                 door is lost. Beside it sat "ZIP Export" and "Android Build (BETA)",
+                                 both with no onClick — and both name capabilities that really exist
+                                 elsewhere (Git & Deployment, and the APK Builder tile above).
+                  • 'access'   — "Permissions", listing a HARDCODED collaborator: the string
+                                 "doc.asheesh@icloud.com" baked into the source and labelled
+                                 "Admin / Owner" for whoever opened it, plus a dead "+ Invite Pro".
+                                 A status indicator showing invented state is exactly what the
+                                 real-features rule forbids.
+                (The fake main/master/develop branch selector is NOT part of this removal — it lives
+                in the REACHABLE 'github_repos' screen above and was fixed in place, not deleted.) */}
 
-                    <div className="p-2 bg-[#0d1117] border border-white/10 rounded-[2rem] flex items-center h-[72px] shadow-inner">
-                       <span className="flex-1 min-w-0 text-[11px] font-mono text-indigo-400 truncate px-3 sm:px-6">navbharat.ai/s/project-592</span>
-                       <button className="h-full shrink-0 px-4 sm:px-8 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-[1.8rem] transition-all shadow-2xl active:scale-95 group overflow-hidden relative">
-                          <div className="relative z-10">Copy Link</div>
-                          <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform"></div>
-                        </button>
-                    </div>
-
-                    <button className="w-full py-5 bg-[#0d1117] border border-indigo-500/30 text-indigo-400 hover:text-white hover:bg-indigo-600 rounded-[1.5rem] text-[10px] font-black uppercase tracking-[0.3em] transition-all shadow-xl active:scale-95">
-                       Publish to Community Store
-                    </button>
-                 </div>
-              </motion.div>
-            )}
-
-            {settingsScreen === 'deploy' && (
-              <motion.div
-                key="deploy"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="space-y-6"
-              >
-                 <div className="px-1 py-4">
-                   <h2 className="text-2xl font-black text-white tracking-tight">Support Us</h2>
-                   <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Contribute to the project</p>
-                </div>
-
-                <div className="bg-[radial-gradient(circle_at_top_right,#1e1b4b,transparent)] bg-[#161b22] border border-indigo-500/20 rounded-3xl sm:rounded-[3rem] p-5 sm:p-10 space-y-6 sm:space-y-10 text-center relative overflow-hidden group shadow-3xl">
-                   <div className="w-20 h-20 bg-indigo-600/20 rounded-[2rem] flex items-center justify-center border border-indigo-500/30 shadow-2xl mx-auto group-hover:scale-110 transition-all duration-700">
-                     <Heart className="w-10 h-10 text-indigo-400 group-hover:animate-bounce-slow" />
-                   </div>
-                   <div className="space-y-3">
-                     <h3 className="text-xl font-black text-white uppercase tracking-wider">Support Our Mission</h3>
-                     <p className="text-[10px] text-[#484f58] font-black uppercase tracking-[0.15em] max-w-[260px] mx-auto leading-relaxed">Your support fuels the future of AI in Bharat</p>
-                   </div>
-                   <button
-                     onClick={() => setActiveView('donation')}
-                     className="w-full py-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[2rem] font-black uppercase tracking-[0.3em] shadow-[0_20px_50px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center gap-4 group active:scale-95"
-                   >
-                     <Heart className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                     Donate Now
-                   </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                   <button className="p-4 sm:p-6 bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] text-left group hover:border-emerald-500/30 transition-all shadow-xl active:scale-95">
-                     <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-emerald-600 transition-colors">
-                        <HardDrive className="w-6 h-6 text-emerald-400 group-hover:text-white" />
-                     </div>
-                     <h4 className="text-[10px] font-black text-white uppercase tracking-widest">ZIP Export</h4>
-                     <p className="text-[9px] text-[#484f58] mt-1 font-bold uppercase">Source Files</p>
-                   </button>
-                   <button className="p-4 sm:p-6 bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] text-left group hover:border-amber-500/30 transition-all shadow-xl active:scale-95">
-                     <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-amber-600 transition-colors">
-                        <Smartphone className="w-6 h-6 text-amber-500 group-hover:text-white" />
-                     </div>
-                     <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Android Build</h4>
-                     <p className="text-[9px] text-[#484f58] mt-1 font-bold uppercase">Native (BETA)</p>
-                   </button>
-                </div>
-              </motion.div>
-            )}
-
-            {settingsScreen === 'access' && (
-              <motion.div
-                key="access"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="space-y-6"
-              >
-                 <div className="px-1 py-4">
-                   <h2 className="text-2xl font-black text-white tracking-tight">Permissions</h2>
-                   <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Manage team access & safety</p>
-                </div>
-
-                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-8 shadow-2xl">
-                    <div className="flex items-center justify-between">
-                       <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Collaborators</h4>
-                       <button className="text-[10px] font-black text-indigo-400 hover:text-white uppercase tracking-widest transition-colors border-b border-indigo-500/20 pb-0.5">+ Invite Pro</button>
-                    </div>
-
-                    <div className="grid gap-3">
-                       <div className="p-5 bg-[#0d1117] rounded-[1.5rem] border border-white/5 flex items-center justify-between group hover:border-indigo-500/30 transition-all">
-                          <div className="flex items-center gap-4">
-                             <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center font-black text-xs text-white shadow-lg">AD</div>
-                             <div>
-                                <div className="text-xs font-bold text-white">doc.asheesh@icloud.com</div>
-                                <div className="text-[9px] text-emerald-500 uppercase font-black tracking-widest mt-0.5">Admin / Owner</div>
-                             </div>
-                          </div>
-                          <div className="w-8 h-8 flex items-center justify-center text-[#484f58]">
-                             <ShieldCheck className="w-4 h-4" />
-                          </div>
-                       </div>
-                    </div>
-
-                    <div className="bg-amber-500/5 border border-amber-500/20 p-4 sm:p-6 rounded-2xl sm:rounded-[1.5rem] flex gap-3 sm:gap-4 items-start shadow-inner">
-                       <div className="p-2 bg-amber-500/20 rounded-lg">
-                          <Zap className="w-4 h-4 text-amber-500" />
-                        </div>
-                       <p className="text-[10px] text-amber-600 font-bold uppercase leading-relaxed tracking-wider">Multi-user real-time collaboration requires specialized Navbharat Enterprise seat.</p>
-                    </div>
-                 </div>
-              </motion.div>
-            )}
 
             {/* The 'git' sub-screen was removed with its tile (admin 2026-07-20): it only relaunched
                 the sidebar's Git panel (setActiveView('git')), a redundant hop. Git lives in the

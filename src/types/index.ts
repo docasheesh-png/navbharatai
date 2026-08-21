@@ -84,9 +84,16 @@ export type ViewType =
 export type SettingsScreen =
   // 'modules' REMOVED 2026-08-14 — an unreachable screen (nothing ever set it) that hid the only
   // Git & Deployment button. Keeping a member nothing can navigate to invites the same bug back.
+  // ⚠️ That warning was right and was NOT enough on its own: on 2026-08-21 six more members were
+  // found in the same state and removed — 'sharing', 'deploy' and 'access' (rendered, but no
+  // doorway anywhere in the app, and all three full of hardcoded/dead controls), plus 'git',
+  // 'report' and 'profile' (no doorway AND no renderer — 'git' is a TAB id routed through
+  // toggleTab, and the Account tile navigates to the 'my_profile' VIEW, so neither was ever a
+  // settings screen). A comment cannot enforce an invariant, so the rule is now a test:
+  // tests/settingsScreenReachable.test.ts fails CI if any member below lacks a navigator or a
+  // renderer. Add a member only together with both.
   | 'root' | 'general' | 'secrets' | 'database' | 'connections'
-  | 'github_repos' | 'sharing' | 'deploy' | 'access'
-  | 'git' | 'logs' | 'report' | 'metrics' | 'profile'
+  | 'github_repos' | 'logs' | 'metrics'
   // "Your Website" hub (admin 2026-07-29): the real-website essentials, brought into App Settings.
   // 'hosting' was merged into 'cloudeploy' as a duplicate (2026-07-29); 'cloudeploy' itself was then
   // REMOVED 2026-08-20 — the v5.0 Publish sheet already deploys to the user's own Vercel/Netlify/

@@ -32,6 +32,8 @@ interface DomainStatus {
    *  or not (⏳ still needed). Preferred over `records` for display; `records` stays the live pending set
    *  the auto-setup appliers act on. Absent on an older server → fall back to `records`. */
   displayRecords?: DnsRecord[];
+  /** What the domain ACTUALLY serves when opened. Absent on an older server. */
+  serving?: { state: string; status: number; note: string } | null;
   /** Firebase's OWN explanation of why the domain is stuck. Absent on an older server. */
   issues?: string[];
   /** When the hosting service last looked at the user's DNS (ISO). Absent on an older server. */
@@ -60,10 +62,39 @@ export interface NbaiDomainConnectProps {
  * Pure + exported for tests.
  */
 export function connectStage(
-  s: { active: boolean; ownershipState: string; hostState: string; sslState: string },
-): { headline: string; action: 'check' | 'none'; note: string } {
+  s: { active: boolean; ownershipState: string; hostState: string; sslState: string; serving?: { state: string; note: string } | null },
+): { headline: string; action: 'check' | 'none' | 'publish'; note: string; tone?: 'ok' | 'warn' } {
   if (s.active) {
-    return { headline: 'Live! Your domain is connected, with HTTPS.', action: 'none', note: 'Publish your app once so the domain serves your latest build.' };
+    // 🔒 "LIVE!" MUST BE EARNED (admin 2026-08-21, mitrify.com). This used to claim Live the moment
+    // ownership/host/SSL went active — but those three describe DNS and a CERTIFICATE, not whether
+    // anything was ever published to the site the domain points at. A domain connected AFTER the last
+    // publish points at an EMPTY site, so the admin read "Live!", opened mitrify.com, got Firebase's
+    // "Site Not Found", and reasonably concluded the connection had failed. The old note did say
+    // "publish once" — but under a green ✅ Live headline it reads as a tip, not as "your domain shows
+    // an error page until you do this". The headline is the thing people act on, so the headline is
+    // what had to change.
+    if (s.serving?.state === 'nothing_published') {
+      return {
+        headline: 'Connected — one last step: press Publish.',
+        action: 'publish',
+        tone: 'warn',
+        note: s.serving.note
+          || 'Your domain is connected, but no app has been published to it yet, so opening it shows an '
+             + 'error page. Press Publish once and your domain will start showing your app.',
+      };
+    }
+    if (s.serving?.state === 'error') {
+      return {
+        headline: 'Connected, but your domain is answering with an error.',
+        action: 'publish',
+        tone: 'warn',
+        note: s.serving.note || 'Publishing again usually fixes this.',
+      };
+    }
+    // 'serving' or 'unknown'. `unknown` still claims Live on purpose: if we could not reach the domain
+    // from our server, the three active states remain the best evidence we have, and downgrading a
+    // genuinely working domain because OUR check failed trades one wrong answer for another.
+    return { headline: 'Live! Your domain is connected, with HTTPS.', action: 'none', tone: 'ok', note: 'Publish again any time to update what your domain shows.' };
   }
   const ownershipDone = /ACTIVE/i.test(s.ownershipState || '');
   const hostDone = /ACTIVE/i.test(s.hostState || '');
@@ -358,13 +389,16 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
               reference material. */}
           {(() => {
             const stage = connectStage(result);
+            // The COLOUR follows the stage, not `active` — a domain that is "connected" but serves an
+            // error page must not be painted green with a tick. That combination is what let the admin
+            // read ✅ Live over a domain showing "Site Not Found".
             return (
-              <div className={`flex flex-col gap-2 px-3 py-3 rounded-xl border ${result.active ? 'bg-green-500/10 border-green-500/25' : 'bg-amber-500/10 border-amber-500/25'}`}>
+              <div className={`flex flex-col gap-2 px-3 py-3 rounded-xl border ${stage.tone === 'ok' ? 'bg-green-500/10 border-green-500/25' : 'bg-amber-500/10 border-amber-500/25'}`}>
                 <div className="flex items-center gap-2 min-w-0">
-                  {result.active
+                  {stage.tone === 'ok'
                     ? <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
                     : <TirangaLoader className="w-4 h-4 shrink-0" />}
-                  <span className={`text-[12px] font-bold ${result.active ? 'text-green-200' : 'text-amber-100'}`}>{stage.headline}</span>
+                  <span className={`text-[12px] font-bold ${stage.tone === 'ok' ? 'text-green-200' : 'text-amber-100'}`}>{stage.headline}</span>
                 </div>
                 <p className="text-[11px] text-zinc-300/80 leading-relaxed">{stage.note}</p>
                 {stage.action === 'check' && (
@@ -375,6 +409,17 @@ export function NbaiDomainConnect({ workspaceId, onBack }: NbaiDomainConnectProp
                   >
                     {checking ? <TirangaLoader className="w-3.5 h-3.5" /> : <RefreshCw className="w-3.5 h-3.5" />}
                     {checking ? 'Checking…' : 'Check now'}
+                  </button>
+                )}
+                {/* A REAL way to do the one thing that is left. Telling someone to "press Publish"
+                    while they are two screens deep in the domain flow is an instruction, not a path —
+                    this takes them back to the sheet where that button actually is. */}
+                {stage.action === 'publish' && (
+                  <button
+                    onClick={onBack}
+                    className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold"
+                  >
+                    Go to Publish
                   </button>
                 )}
                 {/* WHAT WE CAN SEE OF THEIR DNS (admin 2026-08-21, mitrify.com). The status line

@@ -497,8 +497,18 @@ the code (it is actually read somewhere) on 2026-07-11.
     another. ⚠️ Note the middle one: turning this flag on is ALSO what opens `AGENTV3_VACCINE`'s repair
     budget (`vaxHealMax = featureHealEnabled(workspaceId) ? 1 : 0`), for the same 20%. That is a second
     behaviour change riding one flag, and it is intended — just not obvious from the flag's name.
-    ⚠️ An unset/malformed PCT means **100%**, not 0 — `inFlagRollout` treats a bad value as a full
-    rollout. Deleting the PCT key to "pause" the canary would ramp it to everyone instead.
+    ⚠️ **CLEARING the PCT key still means 100%, not 0** — a flag that is `on` with no percentage is a
+    full rollout, exactly like every other flag here. So **deleting the key to "pause" the canary would
+    ramp it to EVERYONE instead.** To pause it, set `AGENTV3_FEATURE_HEAL_PCT=0` (a real, supported
+    value), or unset the master flag `AGENTV3_FEATURE_HEAL`.
+    ✅ **FIXED 2026-08-21 — a MALFORMED value no longer means 100%.** It used to: `Number('20%')` is
+    NaN, so a trailing percent sign — the single most likely thing to type into a field called PCT —
+    silently rolled the feature out to every build and billed an extra model pass on each one. Now
+    `parseRolloutPercent` accepts the forms an operator actually types (`20%`, ` 20 `, `20.0`), and
+    anything still unreadable is treated as **0% with a loud server log** rather than as everyone —
+    the reasoning being that someone who wanted 100% would leave it blank, so a value that is present
+    and unreadable can never have meant 100%. Same fix covers `AGENTV3_ESCALATION_PCT` and
+    `AGENTV3_VACCINE_PCT` (one shared parser).
   - **`AGENTV3_DESIGN_GATE`** — see its own entry below. Detection was already running and free; `on`
     adds ONE bounded repair pass naming only the offending pages, and reports `DESIGN_HEALED` or,
     honestly, `DESIGN_PARTIALLY_HEALED`. It can never fail a build.

@@ -21,8 +21,25 @@ describe('escalationRolloutPercent', () => {
     expect(escalationRolloutPercent({ AGENTV3_ESCALATION: 'on', AGENTV3_ESCALATION_PCT: '12.9' } as NodeJS.ProcessEnv)).toBe(12);
   });
 
-  it('defaults to full on a malformed PCT (flag is explicitly on)', () => {
-    expect(escalationRolloutPercent({ AGENTV3_ESCALATION: 'on', AGENTV3_ESCALATION_PCT: 'abc' } as NodeJS.ProcessEnv)).toBe(100);
+  /**
+   * ⚠️ THIS TEST WAS REVERSED ON 2026-08-21, and the old assertion was the bug.
+   *
+   * It used to require 100% for an unreadable PCT, on the reasoning "never silently disable an
+   * explicitly-on flag". But there was never a prior behaviour for `PCT=twenty`, so this is not
+   * backward compatibility — it is a guess, and it guessed in the one direction that spends real
+   * money on every build. Someone who wanted 100% would leave the value BLANK, which already means
+   * 100%; a value that is present and unreadable is an intended PARTIAL rollout whose number we could
+   * not read, so 100% is the one answer it can never have been.
+   */
+  it('an UNREADABLE PCT is 0%, not 100% — the free, reversible side of a guess', () => {
+    expect(escalationRolloutPercent({ AGENTV3_ESCALATION: 'on', AGENTV3_ESCALATION_PCT: 'abc' } as NodeJS.ProcessEnv)).toBe(0);
+  });
+
+  it('THE REAL TYPO: a trailing % sign is parsed, not treated as garbage', () => {
+    // `Number('20%')` is NaN, so before this the single most likely thing to type into a field called
+    // PCT silently meant EVERYONE.
+    expect(escalationRolloutPercent({ AGENTV3_ESCALATION: 'on', AGENTV3_ESCALATION_PCT: '20%' } as NodeJS.ProcessEnv)).toBe(20);
+    expect(escalationRolloutPercent({ AGENTV3_ESCALATION: 'on', AGENTV3_ESCALATION_PCT: ' 20 ' } as NodeJS.ProcessEnv)).toBe(20);
   });
 });
 
@@ -94,8 +111,23 @@ describe('inFlagRollout — the shared feature-flag percentage canary (feature-h
     expect(inFlagRollout(true, '', key)).toBe(true);
     expect(inFlagRollout(true, '  ', key)).toBe(true);
   });
-  it('on + malformed PCT → full rollout (never silently disables an explicitly-on flag)', () => {
-    expect(inFlagRollout(true, 'abc', key)).toBe(true);
+  it('on + UNREADABLE PCT → OUT (was: full rollout — see escalationRolloutPercent above)', () => {
+    // The admin's live `AGENTV3_FEATURE_HEAL_PCT=20` runs through here, and this branch is what a typo
+    // in it lands on. Costing nothing is recoverable; billing an extra model pass on every build is not.
+    expect(inFlagRollout(true, 'abc', key)).toBe(false);
+    expect(inFlagRollout(true, 'twenty', key)).toBe(false);
+  });
+
+  it('and the readable typo forms still work', () => {
+    expect(inFlagRollout(true, '100%', key)).toBe(true);
+    expect(inFlagRollout(true, '0%', key)).toBe(false);
+  });
+
+  it('0 is how a canary is PAUSED — clearing the value would ramp it to everyone instead', () => {
+    // The intuitive way to pause is to delete the key, and that means 100%. This is the supported way,
+    // and it is why `parseRolloutPercent` distinguishes absent from present-and-zero.
+    expect(inFlagRollout(true, '0', key)).toBe(false);
+    expect(inFlagRollout(true, undefined, key)).toBe(true);
   });
   it('on + 0% → false, on + 100% → true', () => {
     expect(inFlagRollout(true, '0', key)).toBe(false);

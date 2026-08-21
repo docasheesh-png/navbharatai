@@ -2,7 +2,7 @@ import React from 'react';
 import { 
   Files, Search, GitBranch, LayoutGrid, 
   Settings, Monitor, Bug, Move,
-  ChevronRight, Menu, ShieldAlert, Keyboard
+  ShieldAlert, Keyboard
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { IDEScreen } from '../../types/ide';
@@ -62,11 +62,10 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
 
   return (
     <div className="w-12 bg-[var(--theme-card)] flex flex-col items-center py-4 gap-4 border-r border-[var(--theme-border)] shrink-0 select-none transition-colors duration-500">
-      <div className="flex border-l-2 border-transparent w-full justify-center group mb-2">
-         <button className="p-2 text-[#858585] hover:text-white transition-colors">
-            <Menu className="w-6 h-6" />
-         </button>
-      </div>
+      {/* The hamburger was REMOVED here (admin 2026-08-21): no onClick, and nothing for it to open.
+          This is the DESKTOP rail (the mobile variant returns earlier), where the icons below ARE
+          the navigation — there is no drawer, and ActivityBarProps carries no menu-toggle to wire it
+          to. Adding one would be inventing a menu to justify a button, which is backwards. */}
       
       {items.map((item) => (
         <div 

@@ -393,6 +393,22 @@ Content-Type: application/json
     if (nextId) advanceSim(nextId, newMsgs);
   }
 
+  // The simulator's free-text input. Held in a ref because the input is uncontrolled — Enter used to
+  // read the value straight off the event target, which meant the Send button BESIDE it could not
+  // reach the value at all and so had no handler: pressing Enter worked, pressing Send did nothing
+  // (found in the 2026-08-21 dead-control sweep). One shared path now serves both, so they cannot
+  // drift apart again.
+  const simInputRef = useRef<HTMLInputElement>(null);
+
+  function sendSimMessage() {
+    const input = simInputRef.current;
+    const val = input?.value.trim();
+    if (!input || !val || simCurrentId === null) return;
+    input.value = '';
+    const nexts = getNextNodes(edges, simCurrentId, nodes);
+    if (nexts.length > 0) simChoose(nexts[0].node.id, val);
+  }
+
   // Canvas dimensions
   const canvasW = Math.max(800, ...nodes.map(n => n.x + NODE_WIDTH + 80));
   const canvasH = Math.max(600, ...nodes.map(n => n.y + NODE_HEIGHT + 80));
@@ -937,21 +953,17 @@ Content-Type: application/json
               ) : (
                 <div className="flex gap-2">
                   <input
+                    ref={simInputRef}
                     className="flex-1 rounded-lg px-3 py-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
                     style={{ background: 'var(--surface-base)' }}
                     placeholder="Type a message..."
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        const val = (e.target as HTMLInputElement).value.trim();
-                        if (val) {
-                          (e.target as HTMLInputElement).value = '';
-                          const nexts = getNextNodes(edges, simCurrentId!, nodes);
-                          if (nexts.length > 0) simChoose(nexts[0].node.id, val);
-                        }
-                      }
-                    }}
+                    onKeyDown={e => { if (e.key === 'Enter') sendSimMessage(); }}
                   />
-                  <button className="px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 text-white transition-colors">
+                  <button
+                    onClick={sendSimMessage}
+                    aria-label="Send message"
+                    className="px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 text-white transition-colors"
+                  >
                     <Send size={12} />
                   </button>
                 </div>

@@ -52,6 +52,21 @@ export interface UpdateDecisionInput {
   dismissedVersionCode?: number | null;
   /** When they dismissed it (epoch ms). */
   dismissedAt?: number | null;
+  /**
+   * What the PLAY STORE ITSELF says about this device, when we were able to ask it.
+   *
+   * ADMIN REPORT 2026-08-21: "update kar lene ke bad bhi update ka button aa raha hai." The banner
+   * compared against ANDROID_LATEST_VERSION_CODE — a number a human types into Cloud Run after an
+   * upload. If that number ever names a build Play is not actually serving (set too early, promoted to
+   * a different track, a release halted), then NO amount of updating can satisfy it: the user updates,
+   * gets the newest build Play HAS, and is told again that they are out of date. Forever.
+   *
+   * A hand-maintained number cannot be the only authority on a fact the Play Store already knows.
+   * 'none' is therefore a VETO — if Play says this device is current, it is current, whatever the env
+   * says. 'unknown' (sideloaded, offline, plugin missing) falls through to the env comparison, which
+   * is exactly today's behaviour.
+   */
+  playAvailability?: 'available' | 'none' | 'unknown';
   now: number;
 }
 
@@ -110,6 +125,10 @@ export function decideUpdate(input: UpdateDecisionInput): UpdateVerdict {
   if (input.platform && String(input.platform).toLowerCase() !== 'android') {
     return { show: false, reason: 'not-android' };
   }
+
+  // PLAY HAS THE LAST WORD ON "IS THERE ANYTHING TO INSTALL". Checked before the env comparison so a
+  // wrong number in Cloud Run can annoy nobody.
+  if (input.playAvailability === 'none') return { show: false, reason: 'play-says-current' };
 
   const installed = int(input.installedVersionCode);
   const latest = int(input.store?.androidVersionCode);

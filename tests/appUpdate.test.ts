@@ -263,3 +263,42 @@ describe('it is actually wired into the app and the server', () => {
     expect(read('src/components/UpdateBanner.tsx')).toContain('minHeight: 44');
   });
 });
+
+// ADMIN REPORT 2026-08-21: "update kar lene ke bad bhi update ka button aa raha hai." The banner
+// compared only against ANDROID_LATEST_VERSION_CODE — a number a human types into Cloud Run. If that
+// number ever names a build Play is not serving (set too early, a halted release, another track), no
+// amount of updating can satisfy it: the user installs the newest build Play HAS, and is told again
+// they are out of date. Forever. Play already knows the answer, so Play gets the last word.
+describe('decideUpdate — the Play Store overrules a number typed into an env var', () => {
+  const androidBase = {
+    isNative: true,
+    platform: 'android',
+    installedVersionCode: 74,
+    store: { androidVersionCode: 78, androidVersionName: '1.0.78', storeUrl: '', minAndroidVersionCode: null },
+    now: Date.now(),
+  } as Parameters<typeof decideUpdate>[0];
+
+  it('says nothing when Play says the device is already current', () => {
+    // The env insists 78 exists; Play — which actually serves the app — says there is nothing to get.
+    const v = decideUpdate({ ...androidBase, playAvailability: 'none' });
+    expect(v.show).toBe(false);
+    expect((v as { reason: string }).reason).toBe('play-says-current');
+  });
+
+  it('still prompts when Play agrees an update exists', () => {
+    expect(decideUpdate({ ...androidBase, playAvailability: 'available' }).show).toBe(true);
+  });
+
+  it("changes nothing when Play could not be asked — 'unknown' is not evidence", () => {
+    // Sideloaded, offline, or plugin missing: fall through to exactly the old behaviour.
+    expect(decideUpdate({ ...androidBase, playAvailability: 'unknown' }).show).toBe(true);
+    expect(decideUpdate(androidBase).show).toBe(true);
+  });
+
+  it("Play's veto beats even a FORCED update — an update that cannot be installed cannot be required", () => {
+    const forced = { ...androidBase, store: { ...androidBase.store!, minAndroidVersionCode: 99 } };
+    expect(decideUpdate({ ...forced, playAvailability: 'none' }).show).toBe(false);
+    const v = decideUpdate(forced);
+    expect(v.show && v.forced).toBe(true);
+  });
+});

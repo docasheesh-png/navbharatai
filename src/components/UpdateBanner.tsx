@@ -12,7 +12,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { decideUpdate, updateMessage, parseStoreVersion, type UpdateVerdict } from '../lib/appUpdate';
-import { openAppStoreForUpdate } from '../lib/mobileNative';
+import { openAppStoreForUpdate, playUpdateAvailability } from '../lib/mobileNative';
 
 const DISMISS_KEY = 'nb_update_dismissed';
 
@@ -56,6 +56,10 @@ export function UpdateBanner({ apiBase = '' }: { apiBase?: string }) {
       const me = await installedVersionCode();
       // Skip the network call entirely on web — there is nothing to update there.
       if (!me.isNative || cancelled) return;
+      // Ask the Play Store itself first. Its "you are current" overrules the number an admin typed
+      // into Cloud Run — see playAvailability in decideUpdate for why that matters.
+      const playAvailability = await playUpdateAvailability();
+      if (cancelled) return;
       let store = null;
       try {
         const res = await fetch(`${apiBase}/api/app-version`, { headers: { accept: 'application/json' } });
@@ -72,6 +76,7 @@ export function UpdateBanner({ apiBase = '' }: { apiBase?: string }) {
         store,
         dismissedVersionCode: d?.code ?? null,
         dismissedAt: d?.at ?? null,
+        playAvailability,
         now: Date.now(),
       }));
     })();

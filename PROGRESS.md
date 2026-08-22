@@ -38497,3 +38497,42 @@ it discarded the edits to the three TRACKED files (only the new untracked module
 re-grepping before committing; all three were reapplied and the full gate re-run. Stash first.
 
 Gate: both tsc + build + FULL vitest — 1,374 files / 17,273 passing, 1 skipped.
+
+## 2026-08-22 — "Closed Port Error": the server had forgotten which sandbox the app lives in
+
+**Admin sent E2B's own page:** *"The sandbox i5ougia1mw2kcj39ualmm is running but there's no service
+running on port 3000. Connection refused on port 3000."*
+
+**This is the OTHER HALF of the wake bug.** The `.env` fix earlier today made the wake path correct
+WHEN IT RUNS. This is why it often never ran at all.
+
+**ROOT CAUSE.** `E2BActuator` tracks live sandboxes in an IN-MEMORY map. That map belongs to ONE server
+instance — empty after every deploy, every instance recycle, and on every other instance behind the
+load balancer. The workspace's real sandbox id was durable the whole time (`sandboxStore`), and exactly
+one path ever read it: the wake/diagnose route, by hand. Two failures fell out of that:
+
+1. **`getSandboxId` returned null on a cold instance.** `/api/agentv3/preview-health` GATES its port
+   probe on that id — so the probe never ran, `livePortUp` stayed unknown, the app was never classified
+   as stopped, **the auto-restore never fired and the wake card never appeared**, and the iframe simply
+   loaded the stale URL: E2B's closed-port page. Every reload repeated it identically, which is exactly
+   the "chahe kuch kar lo" the admin described two reports running.
+2. **Silently worse:** a cold instance running ANY command for an existing workspace fell through to
+   `Sandbox.create()` — a brand-new EMPTY machine. The in-memory replay cache that exists to heal that
+   is *also* empty on a fresh instance, so there was nothing to replay into it.
+
+**Fix.** `resumeSandboxChoice` (pure, test-locked) holds the precedence — explicit id → durable id →
+create — and both call sites now use it: `getSandbox` reconnects to the workspace's own sandbox instead
+of inventing one, and `getSandboxId` reports the durable id so read-only callers can tell a STOPPED app
+apart from an UNKNOWN one. Reconnecting is not an optimisation over creating; it is the only correct
+answer. Bounded (3s) and best-effort, so a slow store degrades to today's behaviour, never a hang.
+
+⚠️ **The kill switch is honoured for the durable lookup ONLY, never for an explicit id** — a "safe"
+flag that also sabotaged a caller which was handed an id would be the thing that breaks the working
+path. Test-locked, because that is exactly the shape of a safety measure causing an outage.
+
+**Honest boundary:** I could not reproduce this live (session egress is proxy-blocked), so the chain is
+derived from the code — the in-memory map, the health probe's gate on `getSandboxId`, and the durable
+store that already holds the answer. What is certain is that the OLD behaviour could not work on a cold
+instance; whether it is the whole of what the admin saw, the next attempt will show.
+
+Gate: both tsc + build + FULL vitest — 1,375 files / 17,279 passing, 1 skipped.

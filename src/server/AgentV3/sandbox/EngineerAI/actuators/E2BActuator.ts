@@ -19,6 +19,7 @@ import { isDeadSandboxSignal, isDeadSandboxError, resolveThrownCommandExit, thro
 import { postgresWatchdogCommand, mergeEnvVar } from '../../../postgresProvision';
 import { resolveTemplateId } from './fullstackRouting';
 import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
+import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
 import { idleLimitMs, reapAfterMs, sandboxesToReap, shouldTouchDurable } from '../../../sandboxReaper';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
@@ -668,12 +669,26 @@ export class E2BActuator implements IEngineerActuator {
     // never hang the build silently — on timeout we throw and the caller surfaces it.
     let sandbox: Sandbox;
     let freshCreate = false;
-    if (resumeSandboxId) {
+    // 🔒 A COLD INSTANCE MUST NOT INVENT A NEW MACHINE (admin 2026-08-22 — E2B's "no service running on
+    // port 3000"). `this.sandboxes` is THIS server instance's memory: empty after every deploy, every
+    // recycle, and on every other instance behind the load balancer. The workspace's real sandbox id was
+    // durable the whole time; only the wake route ever read it. Without this, a cold instance fell
+    // through to `Sandbox.create()` — a brand-new EMPTY machine, with an empty replay cache to match.
+    // Bounded and best-effort: a slow store just means today's behaviour (create), never a hang.
+    const durableResumeId = resumeSandboxId
+      ? undefined
+      : await withTimeout(sandboxStore.get(workspaceId), 3_000, 'sandboxStore.get').catch(() => null);
+    const resumeId = resumeSandboxChoice({
+      explicit: resumeSandboxId,
+      durable: durableResumeId,
+      resumeEnabled: sandboxResumeEnabled(),
+    });
+    if (resumeId) {
       // Reconnect to the persisted sandbox — auto-resumes it if paused, restoring
       // all files, node_modules, and any running dev server. Fall back to a fresh
       // sandbox if the resume target was killed/expired.
       try {
-        sandbox = await withTimeout(Sandbox.connect(resumeSandboxId, this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.connect');
+        sandbox = await withTimeout(Sandbox.connect(resumeId, this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.connect');
         await sandbox.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
       } catch {
         sandbox = await withTimeout(Sandbox.create(this._opts(undefined, framework)), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
@@ -1746,7 +1761,13 @@ ${paintWaitJs('p')}
 
   async getSandboxId(workspaceId: string): Promise<string | null> {
     const sandbox = this.sandboxes.get(workspaceId);
-    return sandbox ? sandbox.sandboxId : null;
+    if (sandbox) return sandbox.sandboxId;
+    // MEMORY IS NOT THE RECORD (admin 2026-08-22). Returning null here on a cold instance is what
+    // silenced the preview health probe: it gates on this id, so `livePortUp` stayed unknown, the app
+    // was never classified as stopped, and the auto-restore never fired — the user just got E2B's
+    // closed-port page and every reload repeated it. The durable store knew the answer all along.
+    if (!sandboxResumeEnabled()) return null;
+    return await withTimeout(sandboxStore.get(workspaceId), 3_000, 'sandboxStore.get').catch(() => null);
   }
 
   // ---------------------------------------------------------------------------------------------

@@ -44,7 +44,7 @@ describe('the door route', () => {
 
   it('the PROVEN port leads the sweep — the revival recipe outranks every guess', () => {
     expect(door).toContain('sandboxStore.getRecipe(');
-    expect(door).toContain('portCandidates(recipe?.port)');
+    expect(door).toContain('portCandidates(recipe?.port, hint)');
   });
 
   it('every await is time-bounded — the frame must never hang on us', () => {
@@ -65,20 +65,45 @@ describe('the door route', () => {
 
   it('has a kill switch that stops minting AND answering without a deploy', () => {
     expect(door).toContain('if (!previewDoorEnabled()) return page(404');
-    expect(route).toContain("previewDoorEnabled() ? { doorUrl: makeDoorPath(");
+    expect(route).toMatch(/previewDoorEnabled\(\)\s*\n?\s*\? \{ doorUrl: makeDoorPath\(/);
   });
 });
 
 describe('the client side of the door', () => {
   it('the live iframe prefers the door and falls back to the stored address for an older server', () => {
-    expect(surface).toContain('src={doorUrl || effectiveUrl}');
+    expect(surface).toContain('src={doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl}');
+  });
+
+  it('NATIVE SHELL: the src goes through resolveApiHref — an iframe is a navigation the fetch patch never sees', () => {
+    // The bundled Play Store app serves the UI from a local origin; a bare relative src would resolve
+    // against the shell and kill the live preview on every phone. apiBase's own header calls this
+    // "the same hole" — this is its fourth instance, caught in review before shipping.
+    expect(surface).toContain("import { resolveApiHref } from '../../lib/apiBase';");
   });
 
   it('only accepts a door url that is genuinely ours — a spoofed health payload cannot move the frame', () => {
     expect(surface).toContain("health.doorUrl.startsWith('/api/agentv3/preview-door?')");
   });
 
+  it('adopts once, keeps while fresh, DROPS when the server stops offering — via the pure rule', () => {
+    // Adopting every mint remounted the iframe each poll: the framed app reloaded every 150 seconds.
+    // Keeping a link the server stopped minting stranded the frame on a refused page after the kill
+    // switch. Both live in nextDoorUrl, tested on its own; this pins that the surface actually uses it.
+    expect(surface).toContain('setDoorUrl((prev) => nextDoorUrl(prev, offered, Date.now()));');
+  });
+
   it('the door url resets when the workspace changes — one app never frames another', () => {
     expect(surface).toMatch(/setFoundUrl\(''\); setDoorUrl\(''\);/);
+  });
+});
+
+describe('the port hint', () => {
+  it('the minter passes the DISPLAYED port and the door adds it to the sweep — an unusual port with no recipe must not mean an eternal "starting" page', () => {
+    expect(route).toMatch(/makeDoorPath\(workspaceId, Date\.now\(\), doorSecret\(\), undefined,\s*\n\s*previewUrlPort/);
+    expect(door).toContain('portCandidates(recipe?.port, hint)');
+  });
+
+  it('the hint is clamped to a real port — rubbish in the query cannot reach the sweep command', () => {
+    expect(door).toContain('Number.isInteger(hintRaw) && hintRaw > 0 && hintRaw < 65536');
   });
 });

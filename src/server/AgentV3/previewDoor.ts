@@ -24,8 +24,12 @@
 //   verified serving       → 302 to the live host — the ONLY case where the browser leaves our origin
 //
 // The consequences fall out by construction rather than by vigilance:
-//   • A vendor's error page can never render: the browser only reaches the vendor's edge after WE
-//     verified the target serves. Dead machine ⇒ the browser is still on our origin, seeing our page.
+//   • A vendor's error page cannot render ON LOAD: the browser only reaches the vendor's edge after
+//     WE verified the target serves. Dead machine ⇒ the browser is still on our origin, on our page.
+//     (HONEST LIMIT: after the 302 the frame is on the vendor's host, so a machine dying UNDER a user
+//     who is browsing inside it can still flash the vendor page until the watchdog remounts the frame
+//     — one poll cycle, not forever. Closing that too would mean proxying all app traffic, which
+//     breaks HMR and websockets; the trade is deliberate.)
 //   • A replaced sandbox needs no "adoption": the same door url simply resolves to the new machine.
 //   • The 3000-vs-5000 class dies: a port is never trusted because a url once said so — it is trusted
 //     because a probe just saw it answer.
@@ -81,11 +85,21 @@ export function verifyDoorToken(
   try { return timingSafeEqual(a, b); } catch { return false; }
 }
 
-/** The relative door url the client should put in the iframe. Stable per workspace, re-minted freely. */
-export function makeDoorPath(workspaceId: string, now: number, secret: string, ttlMs = DOOR_TOKEN_TTL_MS): string {
+/**
+ * The relative door url the client should put in the iframe. Stable per workspace, re-minted freely.
+ *
+ * `hintPort` is the port of the url the CLIENT is currently displaying, when the minter knows it —
+ * appended UNSIGNED as `p`. Unsigned is deliberate and safe: the hint only adds one candidate to a
+ * sweep that VERIFIES before redirecting, on the token-bound workspace's own machine — tampering it
+ * grants exactly nothing. What it buys is real: an app serving on a port outside the common list
+ * (with no proven recipe yet) would otherwise sit behind an eternal "starting" page even though its
+ * old direct url worked — the door must never be a downgrade from the thing it replaces.
+ */
+export function makeDoorPath(workspaceId: string, now: number, secret: string, ttlMs = DOOR_TOKEN_TTL_MS, hintPort?: number | null): string {
   const exp = now + ttlMs;
   const sig = signDoorToken(workspaceId, exp, secret);
-  return `/api/agentv3/preview-door?ws=${encodeURIComponent(workspaceId)}&exp=${exp}&sig=${sig}`;
+  const hint = Number.isInteger(hintPort) && (hintPort as number) > 0 && (hintPort as number) < 65536 ? `&p=${hintPort}` : '';
+  return `/api/agentv3/preview-door?ws=${encodeURIComponent(workspaceId)}&exp=${exp}&sig=${sig}${hint}`;
 }
 
 export type DoorPageKind =

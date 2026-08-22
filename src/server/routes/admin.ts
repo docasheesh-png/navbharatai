@@ -1271,7 +1271,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
    * Reveals no secret: the association file is a PUBLIC file by design — Apple requires the whole
    * internet to be able to read it — and the response carries no key, no token, and no credential.
    */
-  app.get('/api/admin/apple-signin', verifyAdminToken, async (_req: Request, res: Response) => {
+  app.get('/api/admin/apple-signin', verifyAdminToken, async (req: Request, res: Response) => {
     const readRepoFile = (f: string) => fs.readFileSync(path.join(process.cwd(), f), 'utf8');
     const served = appleDomainAssociation(process.env, readRepoFile);
     const source = appleDomainAssociationSource(process.env, readRepoFile);
@@ -1297,9 +1297,15 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       }
     }
 
-    const diagnosis = diagnoseAppleSignIn({ served, source, selfFetch });
+    // WHAT THE BROWSER SAW, when the admin has it (`?code=auth/invalid-credential`). Optional, and
+    // bounded — it only ever narrows the FINAL "our side is correct" answer toward the right portal,
+    // and it can never turn a real our-side fault into a clean verdict. Without it this endpoint
+    // answers exactly as it did before.
+    const observedCode = String((req.query as any)?.code || '').trim().slice(0, 64) || null;
+    const diagnosis = diagnoseAppleSignIn({ served, source, selfFetch, observedCode });
     res.json({
       ...diagnosis,
+      observedCode,
       url,
       configured: !!served,
       source,

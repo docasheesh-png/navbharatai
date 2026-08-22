@@ -2,7 +2,10 @@
 // becomes one answer instead of another evening of guessing (admin 2026-08-21).
 
 import { describe, it, expect } from 'vitest';
-import { diagnoseAppleSignIn, looksLikeHtml } from './appleSignInDiagnosis';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { diagnoseAppleSignIn, looksLikeHtml, firebaseAppleConfigNextStep } from './appleSignInDiagnosis';
+import { APPLE_SERVICE_ID } from '../../components/socialSignInPolicy';
 
 const FILE = 'abc123-apple-association-token';
 const ok = (body: string) => ({ status: 200, body, contentType: 'text/plain' });
@@ -64,6 +67,60 @@ describe('diagnoseAppleSignIn — five failures that look identical from a brows
       expect(d.message.length).toBeGreaterThan(20);
       expect(d.nextStep).toBeTruthy();
     }
+  });
+});
+
+/**
+ * THE SIBLING (2026-08-22). The client-side message for `auth/invalid-credential` used to send an admin
+ * to Apple's portal; this file's strongest verdict sent them to press Apple's **Verify** button. Both
+ * are wrong for that one code, and this one sounded MORE authoritative because it had just run a live
+ * check — so fixing only the client would have left the admin's two sources of advice disagreeing, with
+ * the wrong one winning.
+ */
+describe('the observed browser code narrows the final answer, and only that answer', () => {
+  it('a code that PROVES Apple returned sends the admin to Firebase, not back to Apple', () => {
+    const d = diagnoseAppleSignIn({
+      served: FILE, source: 'env', selfFetch: ok(FILE), observedCode: 'auth/invalid-credential',
+    });
+    expect(d.verdict).toBe('ours-is-correct');
+    // The four values that can still be wrong…
+    expect(d.nextStep).toContain('Services ID');
+    expect(d.nextStep).toContain('Team ID');
+    expect(d.nextStep).toContain('Key ID');
+    expect(d.nextStep).toContain('.p8');
+    // …and NOT the Verify button, which this code proves already worked.
+    expect(d.nextStep).not.toContain('press Verify');
+  });
+
+  it('the Services ID comes from the ONE constant the same endpoint reports', () => {
+    // A second hardcoded copy could disagree with the value printed a few lines below it in the very
+    // same JSON response, which is worse than having no advice at all.
+    expect(firebaseAppleConfigNextStep(APPLE_SERVICE_ID)).toContain(APPLE_SERVICE_ID);
+  });
+
+  it('no code, or an unrelated one, leaves the answer exactly as it was', () => {
+    const before = diagnoseAppleSignIn({ served: FILE, source: 'env', selfFetch: ok(FILE) });
+    for (const observedCode of [null, undefined, '', '   ', 'auth/popup-closed-by-user', 'auth/network-request-failed']) {
+      expect(diagnoseAppleSignIn({ served: FILE, source: 'env', selfFetch: ok(FILE), observedCode }))
+        .toEqual(before);
+    }
+  });
+
+  it('it can NEVER clean up a verdict that is genuinely our fault', () => {
+    // The narrowing sits after every our-side check on purpose. A code arriving alongside a real
+    // interception must not talk anyone out of the interception.
+    const intercepted = diagnoseAppleSignIn({
+      served: FILE, source: 'env', selfFetch: ok('<!doctype html>'), observedCode: 'auth/invalid-credential',
+    });
+    expect(intercepted.verdict).toBe('intercepted');
+    const missing = diagnoseAppleSignIn({ served: null, source: null, selfFetch: null, observedCode: 'auth/invalid-credential' });
+    expect(missing.verdict).toBe('not-configured');
+  });
+
+  it('the admin route passes the code through, bounded', () => {
+    const admin = readFileSync(join(process.cwd(), 'src/server/routes/admin.ts'), 'utf8');
+    expect(admin).toContain('diagnoseAppleSignIn({ served, source, selfFetch, observedCode })');
+    expect(admin).toContain('.slice(0, 64)');
   });
 });
 

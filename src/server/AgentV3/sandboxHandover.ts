@@ -2,10 +2,10 @@
 //
 // WHY THIS EXISTS. The plan (IN_BROWSER_PREVIEW_PLAN.md §0) opens by correcting my own framing: I was
 // about to argue that hardening the in-browser preview would remove most of the E2B bill. The
-// arithmetic already recorded in CLAUDE.md says otherwise — AGENTV3_SANDBOX_IDLE_MINUTES is already 15,
-// which caps TOTAL idle across 1,260 sandboxes at ~315 billed hours (~$26/month). The idle lever is
-// nearly spent. So the remaining ~1,760 of 2,078 billed hours must be real build activity, which no
-// browser can absorb.
+// arithmetic already recorded in CLAUDE.md says otherwise — AGENTV3_SANDBOX_IDLE_MINUTES is 5 (this
+// comment said 15 until 2026-08-22; it was written the same day the change landed), which caps TOTAL
+// idle across 1,260 sandboxes at ~105 billed hours (~$8.70/month). The idle lever is spent. So the
+// remaining ~1,970 of 2,078 billed hours must be real build activity, which no browser can absorb.
 //
 // That correction came from arithmetic on a monthly total. This module replaces the arithmetic with a
 // per-build MEASUREMENT, because the same project has now twice acted on a remembered number instead of

@@ -436,6 +436,11 @@ the code (it is actually read somewhere) on 2026-07-11.
     single biggest cost lever in this file, and why the 45 → 15 change was not a tidy-up: at 1,260
     sandboxes, 45 idle minutes each is 945 billed hours (**~$78/month**) versus 315 hours (**~$26**) at
     15. That one default is saving roughly **₹4,500/month**.
+    ⚠️ **THE CURRENT DEFAULT IS 5, NOT 15 — see the correction immediately below.** The 45/15 figures
+    here are the HISTORY of the lever, not its present setting, and this line says so because reading
+    only this paragraph is exactly how a session (mine, 2026-08-22) came away believing the file was
+    stale when the very next bullet already had it right. At 5 minutes the idle total is ~105 hours
+    (**~$8.70/month**), i.e. the lever is now spent.
   - ⚠️ **CORRECTION 2026-08-21 — THIS LEVER WAS TAKEN, AND THIS FILE DID NOT SAY SO FOR EIGHT DAYS.**
     The lines above used to read "Remaining lever, NOT taken (admin's call): 15 → 5 idle minutes would
     save a further ~$17/month (~₹1,500)". A session took it on **2026-08-13** with admin approval —

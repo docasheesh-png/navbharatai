@@ -22,11 +22,15 @@ that is idle waste the in-browser preview can absorb."
 
 It does not hold:
 
-- `AGENTV3_SANDBOX_IDLE_MINUTES` is already **15**. At 1,260 sandboxes that is **315 billed hours ≈ $26/month**
-  of idle in total. Even pausing *instantly* — a physically impossible best case — cannot save more than that.
-- `CLAUDE.md` states the remaining idle lever explicitly: 15 → 5 minutes saves **~$17/month (~₹1,500)**.
-  **The idle lever is nearly exhausted.** It was the big win once (45 → 15 saved ~₹4,500/month); it is not
-  the big win still available.
+- `AGENTV3_SANDBOX_IDLE_MINUTES` is **5** (⚠️ **corrected 2026-08-22** — this paragraph said "already 15"
+  because it was written the same day the 15 → 5 change landed, and the arithmetic below was built on the
+  stale figure). At 1,260 sandboxes, 5 idle minutes is **~105 billed hours ≈ $8.70/month** of idle in
+  total. Even pausing *instantly* — a physically impossible best case — cannot save more than that.
+- **The idle lever is now essentially exhausted.** It was the big win once (45 → 15 saved ~₹4,500/month,
+  then 15 → 5 a further ~₹1,500); what remains is under ₹800/month, and it is the LAST of it.
+  **The correction makes this section's conclusion stronger, not weaker** — which is why it is worth
+  making rather than leaving: a later reader who "fixed" the idle default back to 15 on the strength of
+  this paragraph would have put ₹1,500/month back on the bill.
 - Which means the other ~1,760 hours are **real build activity** — install, build, tests, the repair loop.
   A frontend preview in a browser cannot absorb any of that.
 

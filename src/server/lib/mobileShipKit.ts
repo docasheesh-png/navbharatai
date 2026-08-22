@@ -202,9 +202,33 @@ const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
           # fires when cap sync would have failed anyway, so a working build can never be false-failed.
           WEBDIR=$(node -e "const fs=require('fs');const f=['capacitor.config.ts','capacitor.config.js','capacitor.config.json'].find(x=>fs.existsSync(x));let d='';if(f){const t=fs.readFileSync(f,'utf8');const m=t.match(/webDir\\s*[:=]\\s*[\\x27\\x22]([^\\x27\\x22]+)/);if(m)d=m[1];}process.stdout.write(d);" 2>/dev/null || true)
           if [ -z "$WEBDIR" ]; then WEBDIR=dist; fi
+          # G17b (admin report 2026-08-22, mitrify): the app built fine and the wrapper still failed,
+          # because capacitor.config said "dist" while the app builds somewhere else. BOTH of those files
+          # are ours — NavBharatAI writes capacitor.config.ts with webDir defaulting to 'dist' "when the
+          # real build dir is not known" — so a mismatch is OUR bug being reported to the user as theirs.
+          # Look at what the build ACTUALLY produced and point the wrapper at it, instead of failing.
           if [ ! -f "$WEBDIR/index.html" ]; then
-            echo "NBAI_FAILED_STAGE=webbuild"
-            echo "::error::Your app built, but $WEBDIR/index.html was not produced — there is no page to put inside the Android app. Make sure your web build outputs to the folder named as webDir ($WEBDIR) in capacitor.config."
+            FOUND=""
+            # BUILD OUTPUT folders only. "public" is deliberately NOT here: in Create React App it is
+            # the SOURCE folder holding the un-built index.html template, so falling back to it would
+            # package a broken shell and call it a success — worse than the honest failure below.
+            for d in dist build out www dist/spa .output/public; do
+              if [ -f "$d/index.html" ]; then FOUND="$d"; break; fi
+            done
+            if [ -n "$FOUND" ]; then
+              echo "::warning::Your app builds to \"$FOUND\", not \"$WEBDIR\" — pointing the Android wrapper at the folder your build really produced."
+              # No \$ anywhere in this script: it sits inside double quotes, so a regex backreference
+              # written as a dollar-group would be eaten by the shell before node ever saw it.
+              node -e "const fs=require('fs');const d=process.argv[1];const f=['capacitor.config.ts','capacitor.config.js','capacitor.config.json'].find(x=>fs.existsSync(x));if(f){const t=fs.readFileSync(f,'utf8');const n=t.replace(/(webDir\\s*[:=]\\s*)([\\x27\\x22])[^\\x27\\x22]+\\2/,function(m,a,q){return a+q+d+q;});if(n!==t)fs.writeFileSync(f,n);}" "$FOUND" || true
+              WEBDIR="$FOUND"
+            fi
+          fi
+          if [ ! -f "$WEBDIR/index.html" ]; then
+            # The web build SUCCEEDED — this step is the one that failed, and saying "webbuild" here told
+            # the user their app did not compile while GitHub's own summary said it compiled correctly.
+            # Two of our surfaces contradicting each other, and the user reads the wrong one.
+            echo "NBAI_FAILED_STAGE=capacitor"
+            echo "::error::Your app compiled, but it produced no web page to wrap: no index.html was found in \"$WEBDIR\" or in any of the usual build folders. Check that your build script really writes the finished site to a folder."
             exit 1
           fi
           if [ ! -d android ]; then

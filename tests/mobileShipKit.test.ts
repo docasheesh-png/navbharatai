@@ -293,11 +293,32 @@ describe('generateShipKit — pre-solved future build failures, batch 2 (audit 2
       expect(wf).toMatch(/grep -qiE '[^\n]*could not resolve[^\n]*' \/tmp\/nbai-gradle\.log/);
     });
 
-    it(`${label}: G17 — fails early and honestly when the web build produced no index.html to wrap`, () => {
-      expect(wf).toContain('NBAI_FAILED_STAGE=webbuild');
+    it(`${label}: G17 — heals a webDir mismatch instead of failing, and blames the RIGHT stage`, () => {
       // it checks the ACTUAL configured webDir (so a custom output folder is never false-failed)
       expect(wf).toContain("const fs=require('fs')");
       expect(wf).toContain('if [ ! -f "$WEBDIR/index.html" ]; then');
+
+      // G17b (admin report 2026-08-22): both capacitor.config and the app are ours, so a mismatch
+      // between the configured webDir and where the build really writes is OUR bug. Find the folder
+      // the build actually produced and point the wrapper at it, rather than failing the user's build.
+      expect(wf).toContain('for d in dist build out www dist/spa .output/public; do');
+      expect(wf).toMatch(/pointing the Android wrapper at the folder your build really produced/);
+
+      // 🔒 "public" must never be a candidate ON ITS OWN: in Create React App it is the SOURCE folder
+      // holding the un-built index.html template, so accepting it would package a broken shell and
+      // call it a success — worse than the honest failure. (".output/public" IS a real build output
+      // and must stay, which is why this reads the actual list rather than searching for a substring.)
+      const forLine = wf.split('\n').find((l) => l.includes('for d in dist build out')) || '';
+      const candidates = forLine.replace(/^.*for d in /, '').replace(/;.*$/, '').trim().split(/\s+/);
+      expect(candidates).not.toContain('public');
+      expect(candidates).toContain('.output/public');
+
+      // THE STAGE MUST BE THE ONE THAT ACTUALLY FAILED. This guard lives in the capacitor step and runs
+      // only after the web build has PASSED; stamping 'webbuild' made the classifier tell the user
+      // "your app did not compile" about an app GitHub's own summary said compiled correctly.
+      const guard = wf.slice(wf.indexOf('Generate and sync the Android project'));
+      expect(guard).toContain('NBAI_FAILED_STAGE=capacitor');
+      expect(guard.slice(0, guard.indexOf('NBAI_FAILED_STAGE=capacitor'))).not.toContain('NBAI_FAILED_STAGE=webbuild');
     });
   }
 });

@@ -273,6 +273,79 @@ export class GitHubAppClient {
     return 'success';
   }
 
+  /**
+   * Every comment on a PR — inline review comments AND the general conversation — normalized to the
+   * shape the triage decides on (ROADMAP D3, final third).
+   *
+   * BOTH lists are fetched because GitHub keeps them apart and reviewers use both: `pulls/N/comments`
+   * is anchored to a diff line, `issues/N/comments` is the conversation below it. Reading only the
+   * first would silently miss "the login page is broken" posted as a plain comment — which is how
+   * most non-developers review.
+   *
+   * `position === null` is GitHub's own marker that a comment's diff hunk no longer exists, so it is
+   * carried through as `outdated` rather than re-derived: acting on a stale line number would send an
+   * edit to whatever now occupies that line.
+   *
+   * Never throws — a failed read returns []. A review round that cannot see the comments must do
+   * NOTHING, not guess.
+   */
+  async listReviewComments(repo: string, number: number): Promise<PrComment[]> {
+    try {
+      const token = await this.getInstallationToken();
+      const [inline, general] = await Promise.all([
+        this.request<CommentApi[]>('GET', `/repos/${this.cfg.org}/${repo}/pulls/${number}/comments?per_page=100`, `token ${token}`),
+        this.request<CommentApi[]>('GET', `/repos/${this.cfg.org}/${repo}/issues/${number}/comments?per_page=100`, `token ${token}`),
+      ]);
+      const rows: PrComment[] = [];
+      for (const r of Array.isArray(inline.body) ? inline.body : []) {
+        rows.push({
+          id: r.id ?? 0,
+          author: r.user?.login ?? '',
+          body: r.body ?? '',
+          path: r.path,
+          line: typeof r.line === 'number' ? r.line : null,
+          outdated: r.position === null,
+          association: r.author_association,
+        });
+      }
+      for (const r of Array.isArray(general.body) ? general.body : []) {
+        rows.push({ id: r.id ?? 0, author: r.user?.login ?? '', body: r.body ?? '', association: r.author_association });
+      }
+      return rows;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Reply to a review comment, in its own thread when possible.
+   *
+   * A reply on the THREAD is what makes the exchange legible to the reviewer — a general comment
+   * saying "done" leaves them hunting for which of their five notes it answers. When the threaded
+   * reply is refused (the comment was deleted, or it was a conversation comment with no thread), it
+   * falls back to the conversation rather than dropping the reply, because a silent non-answer reads
+   * as being ignored.
+   *
+   * Returns whether the reply landed. Never throws.
+   */
+  async replyToReviewComment(repo: string, number: number, commentId: number, body: string): Promise<boolean> {
+    try {
+      const token = await this.getInstallationToken();
+      if (commentId > 0) {
+        const threaded = await this.request<{ id?: number }>(
+          'POST', `/repos/${this.cfg.org}/${repo}/pulls/${number}/comments/${commentId}/replies`, `token ${token}`, { body },
+        );
+        if (threaded.ok) return true;
+      }
+      const fallback = await this.request<{ id?: number }>(
+        'POST', `/repos/${this.cfg.org}/${repo}/issues/${number}/comments`, `token ${token}`, { body },
+      );
+      return fallback.ok;
+    } catch {
+      return false;
+    }
+  }
+
   /** Merge a PR. Returns true when GitHub reports it merged. */
   async mergePullRequest(repo: string, number: number, method: 'merge' | 'squash' | 'rebase' = 'squash'): Promise<boolean> {
     const token = await this.getInstallationToken();
@@ -311,6 +384,32 @@ function toRepoInfo(r: RepoApi, created: boolean): RepoInfo {
 
 /** A combined CI verdict for a commit/PR head. 'none' = the repo has no checks configured. */
 export type CiVerdict = 'success' | 'pending' | 'failure' | 'none';
+
+/** One comment on a pull request, normalized across GitHub's two separate comment APIs. */
+export interface PrComment {
+  id: number;
+  author: string;
+  body: string;
+  /** File path for an inline review comment; absent for a conversation comment. */
+  path?: string;
+  line?: number | null;
+  /** GitHub reported the diff hunk this was anchored to no longer exists. */
+  outdated?: boolean;
+  /** GitHub's author_association ('OWNER' | 'COLLABORATOR' | 'NONE' | …). */
+  association?: string;
+}
+
+/** The raw comment shape from either comments endpoint (fields we read only). */
+interface CommentApi {
+  id?: number;
+  body?: string;
+  path?: string;
+  line?: number | null;
+  /** null means the comment is outdated — its diff hunk is gone. */
+  position?: number | null;
+  user?: { login?: string };
+  author_association?: string;
+}
 
 export interface PullRequestInfo {
   number: number;

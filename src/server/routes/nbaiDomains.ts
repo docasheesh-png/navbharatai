@@ -26,6 +26,7 @@ import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 import { verifyRecordsLive } from '../lib/domainDnsVerify';
 import { checkDomainServing } from '../lib/domainServingCheck';
 import { siteHasRelease } from '../lib/firebaseCustomDomain';
+import { resolvePublishState } from '../AgentV3/publishState';
 
 /**
  * Firebase-NATIVE custom-domain routes (Slice 2) — connect a user's own domain directly to their
@@ -171,9 +172,10 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       // be the only witness: it failed to reach mitrify.com and the screen printed "Live!" over a
       // domain the admin was watching show "Site Not Found".
       let serving = status.active ? await checkDomainServing(host).catch(() => null) : null;
+      let everPublished: boolean | null = null;
       if (status.active) {
-        const published = await siteHasRelease(workspaceId).catch(() => null);
-        if (published === false) {
+        everPublished = await siteHasRelease(workspaceId).catch(() => null);
+        if (everPublished === false) {
           serving = {
             state: 'nothing_published',
             status: serving?.status ?? 0,
@@ -182,7 +184,13 @@ export function registerNbaiDomainsRoutes(app: Express): void {
           };
         }
       }
-      res.json({ ...status, displayRecords, dnsCheck, serving });
+      // IS THE LIVE SITE STILL THE APP THEY HAVE? (admin 2026-08-21, the Publish-button request.) A
+      // button answers "how do I republish"; this answers the question nobody was asking them — "do I
+      // NEED to?". Two real timestamps off the SAME server clock: when the bytes went live, and when
+      // the workspace's files were last written. Both reads are metadata-only and bounded, and either
+      // one missing yields `unknown`, which the UI renders as silence rather than a guess.
+      const publish = await resolvePublishState(workspaceId, everPublished);
+      res.json({ ...status, displayRecords, dnsCheck, serving, publish });
     } catch (err: any) {
       sendSafeError(res, 500, 'Failed to check domain status. Please try again.', err, 'nbai domain status');
     }

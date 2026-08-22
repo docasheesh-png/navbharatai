@@ -25,6 +25,8 @@ import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, 
 import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
+import { usePublishState } from '../../hooks/usePublishState';
+import { needsPublishDot } from '../../lib/publishFreshness';
 
 export interface HostingProvider {
   id: string;
@@ -311,15 +313,32 @@ export function HostingChooser({
     }
   };
 
-  const publish = (providerId: string) => {
+  /**
+   * Start a publish, and RETURN the honest reason when it could not start.
+   *
+   * It still sets `blocked` for this view, but the reason is returned as well so a caller rendering
+   * its own surface — the domain screen's Publish button — can show it where the user is actually
+   * looking. `away` swaps one word of the database refusal: "choose one below" is only true on this
+   * view, and pointing at options that are not on screen is how a correct message becomes a dead end.
+   */
+  const publish = (providerId: string, opts?: { away?: boolean }): string | null => {
     setBlocked(null);
     if (needsAnswer) {
-      setBlocked('Your app saves data but has no database yet — choose one below, or publish without it.');
-      return;
+      const msg = opts?.away
+        ? 'Your app saves data but has no database yet — go back to the publish options to choose one, or publish without it.'
+        : 'Your app saves data but has no database yet — choose one below, or publish without it.';
+      setBlocked(msg);
+      return msg;
     }
     const reason = onDeploy(providerId);
-    if (typeof reason === 'string' && reason) setBlocked(reason); // stays open, explains itself
+    if (typeof reason === 'string' && reason) { setBlocked(reason); return reason; } // stays open, explains itself
+    return null;
   };
+  // THE DOT TRAIL (admin 2026-08-21). Re-read whenever a publish finishes (`busy` falling), so the
+  // dot clears itself the moment the thing it was pointing at is done — a dot the user has to dismiss
+  // by hand is a dot that eventually lies.
+  const publishState = usePublishState(workspaceId, busy);
+  const showPublishDot = needsPublishDot(publishState?.freshness);
   const hasOurHosting = providers.some((p) => p.id === NBAI_HOST_ID && p.configured);
   const byo = providers.filter((p) => p.configured && p.id !== NBAI_HOST_ID);
   // "Connect your own domain" is offered only when the server feature is on AND we have a workspace
@@ -362,7 +381,18 @@ export function HostingChooser({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {view === 'domain' && workspaceId ? (
           <div className="p-4">
-            <NbaiDomainConnect workspaceId={workspaceId} onBack={() => setView('choose')} />
+            {/* The domain screen gets the SAME publish action as the main button (admin 2026-08-21:
+                "Visit se pahle ek button banao — publish"). Passing the handler rather than letting
+                that screen build its own keeps one publish implementation; `publish` returns the
+                honest refusal reason, which the screen renders inline because `blocked` below is on
+                a view the user is not currently looking at. */}
+            <NbaiDomainConnect
+              workspaceId={workspaceId}
+              onBack={() => setView('choose')}
+              onPublish={() => publish(NBAI_HOST_ID, { away: true })}
+              publishBusy={busy}
+              publishFreshness={publishState?.freshness}
+            />
           </div>
         ) : view === 'myapps' ? (
           /* MY PUBLISHED APPS. Lists by USER, not by workspace — which is the whole point: an app
@@ -594,6 +624,10 @@ export function HostingChooser({
               >
                 <Link2 className="w-3.5 h-3.5" />
                 Connect your own domain{typeof customDomainPriceInr === 'number' ? ` (₹${customDomainPriceInr}/month)` : ''}
+                {/* THE MIDDLE STEP OF THE DOT TRAIL (admin 2026-08-21). The dot on the v5 Publish
+                    button brought the user here; this one tells them the trail continues inward
+                    rather than ending on this screen. Same source of truth as both its neighbours. */}
+                {showPublishDot && <span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-label="You have unpublished changes" />}
               </button>
             )}
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { connectStage, relativeRecordName, cleanDomainInput, visitUrl } from './NbaiDomainConnect';
+import { connectStage, relativeRecordName, cleanDomainInput, visitUrl, publishButton } from './NbaiDomainConnect';
 
 describe('connectStage — plain-language, honest connect stages', () => {
   it('active domain: done, no further action — but only CONNECTED until something SAW it serve', () => {
@@ -165,5 +165,65 @@ describe('cleanDomainInput / visitUrl', () => {
     expect(visitUrl('')).toBe('');
     expect(visitUrl('   ')).toBe('');
     expect(visitUrl(undefined as never)).toBe('');
+  });
+});
+
+/**
+ * ADMIN, 2026-08-21: "Visit se pahle ek button banao — Publish. Is publish se app edit karne ke bad
+ * wapas publish ki jayegi."
+ *
+ * The button was the request; these tests pin the half that makes it worth having. A fixed "Publish"
+ * label answers only "how", and the reason public sites go stale is that nobody answers "do I need
+ * to?". So the label states which of the three situations the user is in — and, where it cannot
+ * measure, says nothing at all rather than guessing in either direction.
+ */
+describe('publishButton — the label states the situation, or stays silent', () => {
+  const NOW = 1_000_000_000;
+
+  it('never published: this IS the missing step, so it is the loud one', () => {
+    const b = publishButton('never_published', null, NOW);
+    expect(b.label).toBe('Publish now');
+    expect(b.primary).toBe(true);
+    expect(b.note).toContain('not been published yet');
+  });
+
+  it('THE CASE THAT STARTED THIS: edited after publishing ⇒ says the domain shows the OLDER version', () => {
+    const b = publishButton('changed', NOW - 4 * 60_000, NOW);
+    expect(b.label).toBe('Publish update');
+    expect(b.primary).toBe(true);
+    expect(b.note).toContain('older version');
+    expect(b.note).toContain('4 minutes ago');   // the real publish time, not a vague "recently"
+  });
+
+  it('up to date: offered quietly, and says when it last went out', () => {
+    const b = publishButton('up_to_date', NOW - 2 * 60 * 60_000, NOW);
+    expect(b.label).toBe('Republish');
+    expect(b.primary).toBe(false);               // no urgency where there is nothing urgent
+    expect(b.note).toContain('latest build');
+    expect(b.note).toContain('2 hours ago');
+  });
+
+  it('🔒 UNKNOWN claims NOTHING — the button still works, the note is empty', () => {
+    // A wrong "you have unpublished changes" sends people to re-publish a current site forever; a
+    // wrong "up to date" leaves a stale site up while promising it is not. Silence is the honest
+    // third option, and it is the one an unmeasurable state gets.
+    const b = publishButton('unknown', null, NOW);
+    expect(b.label).toBe('Publish');
+    expect(b.note).toBe('');
+    expect(b.primary).toBe(false);
+  });
+
+  it('an OLDER server that sends no publish block at all behaves exactly like unknown', () => {
+    const b = publishButton(undefined, undefined, NOW);
+    expect(b.label).toBe('Publish');
+    expect(b.note).toBe('');
+  });
+
+  it('a missing publish TIME never fabricates one', () => {
+    // The freshness verdict can be known while the timestamp is not; the note keeps the verdict and
+    // silently drops the "Last published …" clause rather than printing a placeholder date.
+    const b = publishButton('up_to_date', null, NOW);
+    expect(b.note).toContain('latest build');
+    expect(b.note).not.toContain('Last published');
   });
 });

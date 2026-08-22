@@ -38164,3 +38164,138 @@ Gate: both tsc clean; `vitest run` 1367 files / 17,170 passed / 1 honest skip; `
 The remaining Apple cause cannot be seen from code. After this deploys, the admin opens
 `/api/admin/apple-signin`; its verdict names which of the four causes it is, and the next step follows
 from that. Recorded here as an open item (rule 6) rather than as a fix.
+## 2026-08-21 — Publish from the domain screen + the red-dot trail (admin request)
+
+**Admin:** *"v5 ka jo publish button hai usko mat chero — publish ke andar connect my domain ke andar
+ek aur publish button chahiye, jo press karne se app us domain par publish ho. Aur edit karte hai, ek
+red dot ana chahiye: publish (*) → connect your own domain (*) → publish (green)(*)."*
+
+**What shipped**
+
+1. **A Publish button on the domain screen**, directly above the Visit link — the real order of the
+   two actions (publish what you changed, then look at it). It drives the SAME pipeline as the main
+   Publish button, passed in as `onPublish`, so this is a second entry point to one implementation
+   and never a second implementation. The main v5 Publish button is untouched, as asked.
+2. **The button states the situation instead of just saying "Publish"** (`publishButton`): "Publish
+   now" when nothing was ever published, "Publish update" when the app changed after publishing,
+   a quiet "Republish" + "Last published 4 minutes ago" when the live site is current.
+3. **The red-dot trail** (`needsPublishDot`) on all three steps — the v5 Publish button, "Connect
+   your own domain", and the domain screen's Publish button — all reading ONE server answer
+   (`/api/agentv3/publish-state` → `resolvePublishState`).
+4. **The screen re-checks itself after a publish** (immediately + once at 8s, since hosting takes a
+   moment to serve a new release), so the state updates without a page reload.
+
+**Why the indicator, not just the button (the other half of the request)**
+
+A button answers *how do I republish*. What actually leaves people with a stale public site is that
+nobody tells them their live site is older than their app — they edit, they are happy, and the domain
+keeps serving last week's build. So the same measurement powers both.
+
+**The signal is measured, never inferred.** Two real timestamps off the SAME server clock:
+`DeploymentRecord.updatedAt` (when the bytes went live) and the durable workspace doc's `savedAt`
+(rewritten by every save/merge/remove — hence a true "the app changed" stamp, not a build marker).
+Either one missing ⇒ `unknown` ⇒ the UI says NOTHING about staleness. A wrong "you have unpublished
+changes" would send people to re-publish a current site forever; a wrong "up to date" would leave a
+stale site up while promising it is not. Silence is the honest third option.
+
+**Deliberate rules, test-locked** (`publishFreshness.test.ts`, `NbaiDomainConnect.logic.test.ts`):
+- The dot means published-then-changed ONLY. NOT `never_published` — an app the user has not chosen
+  to publish is not a problem to nag about, and a dot that never clears is a dot people stop seeing.
+- Equal timestamps read as up-to-date: a build saves then publishes, so a fast build landing both in
+  one millisecond must not be flagged as needing a republish it does not need.
+- Firebase's release count overrides a local record that says "live" — a deployment record outlives
+  the site it describes, and offering "Republish" for a site that never served anything is the exact
+  mitrify.com confusion, one screen over.
+
+**One answer, three surfaces.** `resolvePublishState` (server) and `usePublishState` (client) exist
+so the trail cannot disagree with itself — a dot on the outer button leading to an inner screen that
+says all is well is worse than no dot at all.
+
+Gate: both tsc + `npm run build` + FULL vitest — 1,367 files / 17,175 passing, 1 skipped.
+
+## 2026-08-21 — CI red on a NEW `tar` advisory + the framework correction finally reaches the client
+
+**1. CI failure — real, and it was blocking every PR in the repo, not just mine.**
+
+`npm run audit:gate` failed with `❌ NEW high/critical: tar [high]` (GHSA-r292-9mhp-454m — uncatchable
+stack-overflow DoS via a crafted long-path tar). A newly-published advisory, unrelated to the diff.
+
+**Fixed properly, not allowlisted.** The advisory range is `<=7.5.20` and `7.5.22` is published, so a
+real patch exists — and `tar` is not dev-only here: `e2b` (the sandbox SDK, server RUNTIME) pulls it,
+alongside `@capacitor/cli` and `firebase-tools`. Added `"tar": "^7.5.22"` to `overrides`; all four
+consumers now resolve to the patched version. Gate re-run locally: ✅ no new high/critical.
+Allowlisting it would have been the wrong call twice over — a fix existed, and the package is shipped.
+
+**2. Open root cause CLOSED: the server never told the LIVE client which framework it detected.**
+
+Recorded open after the two Mitrify "preview nahi chala" autopsies. The server corrects `framework`
+in two places — a zip/URL import reads the real app's package.json (`validation.framework`), and the
+drift check reads an existing workspace (`detectFrameworkFromWorkspace`) — and BOTH corrections were
+written only to the durable conversation record and the diagnostics report.
+
+So a REOPENED session started with the right framework (the two `restored.framework` adoptions), while
+the session that DID the correcting kept `useState('vite-react')` for its whole life — the exact
+session where the correction matters most. That stale label then chose the wrong in-browser preview
+lane AND the wrong dev-server port to wait on, which is the shared root cause behind both reports.
+
+Now: a `framework` event on the build stream, emitted ONLY on a real change (tracked against what the
+CLIENT holds, not against `framework`, which each call site has already reassigned by the time it
+emits), adopted by the reducer and marked EXPLICIT in the panel so a later default cannot overwrite a
+measurement. Test-locked in `frameworkCorrection.test.ts`, including that the event touches nothing
+but the label — a correction arriving mid-build that reset files or the preview would be a worse bug
+than the one it fixes — and that ABSENCE means "nothing was corrected", never "reset to default".
+
+Gate: both tsc + build + FULL vitest — 1,368 files / 17,179 passing, 1 skipped.
+
+**Follow-up the same session — the OTHER entry to the same screen would have shipped without it.**
+
+`ConnectMyWebsitePanel` (Sidebar → Connect my website, and Other AI → Publish & Deploy → Custom
+Domain) renders the SAME `NbaiDomainConnect`. Its own file header calls it "one real flow, not three
+different screens" — the panel exists precisely because two half-working domain screens once did. So
+adding the Publish button and its dot only in the Hosting chooser would have re-created that split:
+the same screen, reached the other way, missing the step it now tells people to take.
+
+It now passes `onPublish` (the SAME `POST /api/agentv3/publish` the build panel uses, for the app the
+user selected here), `publishBusy`, and the measured freshness. One pipeline, two callers.
+
+⚠️ **A dead-button trap avoided on the way:** the endpoint reads `userId`/`email` from the BODY for
+its availability gate (`isAgentV3Enabled`), and an allowlisted deployment returns **404** for a null
+identity — so a publish sending only `workspaceId` would have failed for exactly the accounts that
+use it. The ownership check is separate and verifies the real token, so this is not a trust boundary.
+
+## 2026-08-21 — D3 (PR → CI → review comments): two thirds already existed; the missing third built
+
+**Safeguard #6 caught this before a line was written, and the ROADMAP row did not.** D3 read "Needs
+the GitHub App token path that already exists for storage", implying none of it was built. In fact
+`GitHubPrFlow.mergeViaPullRequest` has, since the git-native storage phase, opened the PR, read the
+combined CI verdict (commit statuses AND check-runs) and merged **only on green** — minors 33 and 34.
+Only minor 35 was genuinely missing: **nothing ever read what a human reviewer wrote.**
+
+**Built + tested:**
+- `GitHubAppClient.listReviewComments` — BOTH of GitHub's separate comment APIs. Reading only the
+  inline one would silently miss "the login page is broken" posted as a plain conversation comment,
+  which is how most non-developers review. `position === null` is carried through as `outdated`.
+- `GitHubAppClient.replyToReviewComment` — threaded, falling back to the conversation, because a
+  silent non-answer reads as being ignored.
+- `prReviewFeedback.ts` (PURE) — the triage that decides what is actually a change request, plus the
+  builder prompt and the user-facing summary.
+- `GitHubPrFlow.readReviewRound` / `replyToReviewRound` — the orchestration.
+
+**The design rule, and why it is conservative:** the expensive failure is a FALSE POSITIVE — acting
+on a comment that was praise, a question, or a bot's advisory means rewriting working code nobody
+asked to change, which breaks both the first and fourth absolute rules. So our own comments, bots,
+resolved threads, OUTDATED comments (their line no longer exists, so an edit would land in the wrong
+place), non-collaborators (a stranger must not direct changes to someone else's app) and pure praise
+are all SKIPPED — and reported to the USER with the reason, because the user is who can tell us a
+skip was wrong. The reviewer's words are FENCED and attributed, never presented as a system
+directive, and the round is explicitly scoped so a review cannot become a licence to refactor.
+A failed read yields an EMPTY round: editing on the strength of comments we never saw would be worse
+than doing nothing. A failed change is reported to the reviewer as failed, never as "done".
+
+⚠️ **HONEST STATUS: D3 is NOT done, and is not marked done.** A reviewer comments hours after the
+build ends, when nothing is running — so this needs a trigger (a user action, or a webhook) that does
+not exist yet. These are tested, capable building blocks with no user-facing claim attached: no
+AppKnowledgeBase entry, because there is no surface to describe. Recorded as an open next slice
+rather than quietly ticked off, which is the exact false-open the ROADMAP header warns about.
+
+Gate: both tsc + build + FULL vitest — 1,370 files / 17,219 passing, 1 skipped.

@@ -358,6 +358,30 @@ export async function listWorkspaceFilePaths(workspaceId: string): Promise<strin
   }
 }
 
+/**
+ * When this workspace's files were last written durably (ms), or null when we cannot tell.
+ *
+ * Reads ONLY the metadata doc — the same one `countWorkspaceFiles` reads — so it is safe to call on
+ * a polled endpoint. `savedAt` is rewritten by EVERY durable write path (save / merge / remove /
+ * approved reset), which is what makes it a true "the app changed" stamp rather than a build marker.
+ *
+ * 🔒 Returns null — never 0, never Date.now() — for a workspace with no stamp or an unreadable store.
+ * The caller compares it against a publish time, and a fabricated value would produce a confident
+ * "your site is out of date" for an app that is perfectly current (see publishFreshness).
+ */
+export async function workspaceFilesSavedAt(workspaceId: string): Promise<number | null> {
+  const db = getDb();
+  if (!db) return null;
+  try {
+    const meta = await db.collection(COLLECTION).doc(workspaceId).get();
+    if (!meta.exists) return null;
+    const savedAt = meta.data()?.savedAt;
+    return typeof savedAt === 'number' && Number.isFinite(savedAt) && savedAt > 0 ? savedAt : null;
+  } catch {
+    return null;
+  }
+}
+
 /** One durably-stored Pro v5 app owned by a user (metadata only — no file content read). */
 export interface UserWorkspaceApp {
   workspaceId: string;

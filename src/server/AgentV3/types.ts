@@ -162,6 +162,19 @@ export type AgentEvent =
   // size differs per engine, so sending it would leak which engine ran (White-Label Law). Emitted only
   // when the reading meaningfully CHANGES, never once per turn.
   | { type: 'context_usage'; pct: number; level: 'ok' | 'high' | 'critical'; note: string; ts: number }
+  /**
+   * The framework the SERVER actually detected, emitted only when it DIFFERS from what the client
+   * sent (2026-08-21).
+   *
+   * ROOT CAUSE this closes (both Mitrify "preview nahi chala" reports): the server corrects the
+   * framework in two places — an import reads the real app's package.json, and the drift check reads
+   * an existing workspace — but the correction only ever reached the DURABLE record and the build
+   * report. So a REOPENED session started with the right answer while the session that DID the
+   * correcting kept its `vite-react` default for its whole life. That stale label picked the wrong
+   * in-browser preview lane and the wrong dev-server port to wait on, and the preview never came up:
+   * the client was guessing about a fact the server already knew.
+   */
+  | { type: 'framework'; framework: string; reason: 'imported' | 'detected'; ts: number }
   | { type: 'preview'; url: string; ts: number }
   | { type: 'repo'; url: string; fullName: string; ts: number }
   // Own-repo working-branch storage is active — drives the client's "Ship to main" / "Revert" controls.

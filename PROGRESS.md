@@ -39358,3 +39358,45 @@ secret — adding it later is safe by construction) and `OTP_GLOBAL_HOURLY_MAX` 
 gift, but the ₹250 unverified tier is still reachable by anyone with a genuinely new email address
 (temp-mail included). That is by design — the phone tier is what makes the remaining ₹250 cost
 something. Worth watching real numbers before deciding whether the unverified tier should shrink.
+
+## 2026-08-22 — one domain, three apps: the tokens that were never yours
+
+Closes the open root cause recorded earlier today. Admin: *"ham suru karo! bas navbharat ai na tute"* —
+so the shape of the fix was chosen for that constraint first.
+
+**The bug.** The DNS-record store is keyed by DOMAIN alone (`docId(domain)`) and merges forever, but
+the records belong to a (domain, SITE) pair — every app gets its own Firebase site, and each site
+demands its own `hosting-site=<siteId>` TXT. Connect one domain from three apps and all three tokens
+pool under one key. `mitrify.com` showed exactly that: of five records the screen told the admin to
+add, two could never do anything for the app in front of them, and both were badged **"Verified"**.
+
+**Why a read-time filter and NOT a migration.** The token is literally `hosting-site=` + the site id
+(`siteIdForWorkspace` → `nbai-<20 hex>`), so "belongs to another app" is an EXACT string comparison —
+never a guess. That means the pollution can be corrected on READ at zero risk: nothing stored is
+deleted, no document is rewritten, and a domain working today keeps working. Re-keying the store would
+mean migrating live customer records to fix a display bug — a far larger blast radius for the same
+user-visible result. Given the admin's constraint, the smaller-radius fix with identical outcome is
+the right call, and the store can be re-keyed later if a real need appears.
+
+`dropForeignSiteTokens` keeps anything it cannot positively identify: a non-token, an unparseable
+token, or an unknown site id all pass through. The failure to fear is the opposite one — hiding the
+single record the user actually must add — so every uncertain case errs toward showing it. It is
+applied to the STORED set only; the live set is what the service is asking for right now and is
+correct by construction.
+
+**The second half: "Verified" was not earned.** `done` is computed as "not in the currently-pending
+set", which describes what the service is ASKING FOR — not evidence a record exists in DNS. Another
+app's token is never asked for by this app's site, so the badge turned *irrelevant here* into
+*confirmed working*. `recordBadge` now reads our own resolver's `dnsCheck`: seen ⇒ **Verified**,
+otherwise **Added**. The green tick stays on both — either way nothing is left for the user to do,
+which is the question the row answers. Same discipline as "Live!" earlier this month.
+
+Regression tests use the admin's real token values verbatim (`nbai-3703…`, `…709e…`, `…dd4f…`).
+
+**A test-quality fix, because this class bit twice in one day.** `nbaiDomainHonesty.test.ts` sliced
+the /state handler as `start + 2200` and failed while the route stayed perfectly correct — once for
+the saved-records fallback, once for the workspace scope. `managedDns.test.ts` had the same shape at
+2600. A byte count is not the property under test; "inside this handler" is, and handlers grow. Both
+now bound by the next route registration, which cannot drift.
+
+Gate: both tsc + build + FULL vitest (17,531 passing, 1 skipped).

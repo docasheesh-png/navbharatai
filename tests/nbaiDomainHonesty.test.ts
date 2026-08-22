@@ -34,9 +34,28 @@ describe('custom-domain error honesty', () => {
  * Every fact was durable server-side the whole time; only component memory died. The state route +
  * mount hydration make a reload land exactly where the user left off.
  */
+/**
+ * The BODY of the /state handler, bounded by the next route registration.
+ *
+ * ⚠️ Both tests below used `slice(start, start + 2200)`, and that broke twice while the route stayed
+ * perfectly correct — once when the saved-records fallback was added, once when the workspace scope
+ * was threaded through. A byte count is not the property under test; "inside this handler" is, and a
+ * handler that grows is normal. Bounding by the next route registration cannot drift.
+ */
+function stateRoute(): string {
+  const start = route.indexOf("'/api/domains/nbai/state'");
+  expect(start).toBeGreaterThan(-1);
+  const after = Math.min(
+    ...[route.indexOf('app.get(', start + 10), route.indexOf('app.post(', start + 10)]
+      .filter((i) => i > -1)
+      .concat([route.length]),
+  );
+  return route.slice(start, after);
+}
+
 describe('domain state rehydration', () => {
   it('the state route is ownership-checked and assembles domain + status + zone in one answer', () => {
-    const seg = route.slice(route.indexOf("'/api/domains/nbai/state'"), route.indexOf("'/api/domains/nbai/state'") + 2200);
+    const seg = stateRoute();
     expect(seg).toContain('ownsWorkspace');
     expect(seg).toContain('firebaseDomainsForWorkspace');
     expect(seg).toContain('customDomainStatusLive');
@@ -44,7 +63,7 @@ describe('domain state rehydration', () => {
   });
 
   it('a missing zone never hides the rest of the state — best-effort by construction', () => {
-    const seg = route.slice(route.indexOf("'/api/domains/nbai/state'"), route.indexOf("'/api/domains/nbai/state'") + 2200);
+    const seg = stateRoute();
     expect(seg).toContain('.catch(() => null)');
   });
 

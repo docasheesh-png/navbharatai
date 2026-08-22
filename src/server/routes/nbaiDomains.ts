@@ -11,12 +11,13 @@ import {
   customDomainStatusLive,
   customDomainErrorMessage,
   sanitizeDomainErrorDetail,
+  siteIdForWorkspace,
 } from '../lib/firebaseCustomDomain';
 import {
   linkWorkspaceDomain, firebaseDomainsForWorkspace, firebaseDomainLinksForUser,
   rememberDomainDnsRecords, getStoredDomainDnsRecords,
 } from '../lib/firebaseDomainLink';
-import { mergeStableRecords, type StableDnsRecord } from '../lib/domainDnsRecords';
+import { mergeStableRecords, dropForeignSiteTokens, type StableDnsRecord } from '../lib/domainDnsRecords';
 import {
   managedDnsConfigured, ensureZone, zoneStatus, applyRecords, sanitizeManagedDnsError,
   listZoneRecords, missingFromZone,
@@ -57,11 +58,27 @@ const ownsWorkspace = (verifiedUid: string | null, workspaceId: unknown): worksp
  * `records` field is left untouched so the auto-DNS / Hostinger / Cloudflare appliers keep acting only
  * on what is actually pending.
  */
-async function stableRecordsFor(domain: string, liveRecords: { type: string; name: string; value: string; note?: string }[]): Promise<StableDnsRecord[]> {
+async function stableRecordsFor(
+  domain: string,
+  liveRecords: { type: string; name: string; value: string; note?: string }[],
+  workspaceId?: string,
+): Promise<StableDnsRecord[]> {
   try {
     await rememberDomainDnsRecords(domain, liveRecords);
     const stored = await getStoredDomainDnsRecords(domain);
-    return mergeStableRecords(stored, liveRecords);
+    /**
+     * 🔒 SCOPE THE STORE'S CONTENTS TO THIS APP (admin 2026-08-22). The store is keyed by domain
+     * alone, so one domain connected from several apps pools every app's `hosting-site=` ownership
+     * token under one key — and the user is then told to add records that can do nothing for the app
+     * in front of them. See `dropForeignSiteTokens` for why this is corrected on READ rather than by
+     * re-keying live customer data.
+     *
+     * Applied to the STORED set only. The live set is what the hosting service is asking for right
+     * now and is already correct by construction; filtering it could only ever remove something the
+     * user genuinely needs. Without a workspaceId nothing is dropped at all.
+     */
+    const siteId = workspaceId ? siteIdForWorkspace(workspaceId) : '';
+    return mergeStableRecords(dropForeignSiteTokens(stored, siteId), liveRecords);
   } catch {
     return liveRecords.map((r) => ({ ...r, done: false }));
   }
@@ -114,7 +131,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       // Persist the link so the deploy path publishes future builds to this workspace's dedicated site.
       await linkWorkspaceDomain({ domain: host, workspaceId, userId: verifiedUid });
       // Remember these records + return the STABLE (never-forgotten) view alongside the live set.
-      const displayRecords = await stableRecordsFor(host, status.records);
+      const displayRecords = await stableRecordsFor(host, status.records, workspaceId as string);
       // autoDns tells the client whether the zero-copy-paste path (nameserver delegation) exists on
       // this server — the UI offers it only when a tap can actually deliver it.
       res.json({ ...status, displayRecords, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() });
@@ -151,7 +168,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
         res.status(404).json({ error: 'This domain has not been connected yet.' });
         return;
       }
-      const displayRecords = await stableRecordsFor(host, status.records);
+      const displayRecords = await stableRecordsFor(host, status.records, workspaceId as string);
       // DID THE USER'S RECORDS ACTUALLY LAND? (admin 2026-08-21, mitrify.com.) The screen used to
       // show one word from Firebase — `ownership: missing` — while every required record was live and
       // byte-perfect in public DNS. That state is indistinguishable from "you typed it wrong", so a
@@ -257,7 +274,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       const fb = await customDomainStatusLive(workspaceId, host);
       if (!fb) { res.status(404).json({ error: 'Connect the domain first, then run automatic setup.' }); return; }
       const applied = await applyRecords(zone.id, fb.records);
-      const displayRecords = await stableRecordsFor(host, fb.records);
+      const displayRecords = await stableRecordsFor(host, fb.records, workspaceId as string);
       /**
        * 🔒 READ THE ZONE BACK, AND REPORT EVIDENCE INSTEAD OF A COUNT (admin 2026-08-22).
        *
@@ -332,7 +349,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
        * persisted them FOR — the moment the live source is unavailable is the moment they matter.
        */
       const displayRecords = status
-        ? await stableRecordsFor(domain, status.records)
+        ? await stableRecordsFor(domain, status.records, workspaceId as string)
         : await getStoredDomainDnsRecords(domain).catch(() => []);
       // Zone lookup is best-effort: a missing/errored zone must not hide the rest of the state.
       const zone = managedDnsConfigured() ? await zoneStatus(domain).catch(() => null) : null;

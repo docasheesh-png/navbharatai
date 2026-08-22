@@ -14,6 +14,7 @@
 
 import * as crypto from 'crypto';
 import { envFlag } from '../lib/envFlag';
+import { normalizePrComments, type RawPrComment } from './prCommentMapping';
 
 const GITHUB_API = 'https://api.github.com';
 const API_HEADERS = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'NavBharatAI-Builder' };
@@ -293,25 +294,12 @@ export class GitHubAppClient {
     try {
       const token = await this.getInstallationToken();
       const [inline, general] = await Promise.all([
-        this.request<CommentApi[]>('GET', `/repos/${this.cfg.org}/${repo}/pulls/${number}/comments?per_page=100`, `token ${token}`),
-        this.request<CommentApi[]>('GET', `/repos/${this.cfg.org}/${repo}/issues/${number}/comments?per_page=100`, `token ${token}`),
+        this.request<RawPrComment[]>('GET', `/repos/${this.cfg.org}/${repo}/pulls/${number}/comments?per_page=100`, `token ${token}`),
+        this.request<RawPrComment[]>('GET', `/repos/${this.cfg.org}/${repo}/issues/${number}/comments?per_page=100`, `token ${token}`),
       ]);
-      const rows: PrComment[] = [];
-      for (const r of Array.isArray(inline.body) ? inline.body : []) {
-        rows.push({
-          id: r.id ?? 0,
-          author: r.user?.login ?? '',
-          body: r.body ?? '',
-          path: r.path,
-          line: typeof r.line === 'number' ? r.line : null,
-          outdated: r.position === null,
-          association: r.author_association,
-        });
-      }
-      for (const r of Array.isArray(general.body) ? general.body : []) {
-        rows.push({ id: r.id ?? 0, author: r.user?.login ?? '', body: r.body ?? '', association: r.author_association });
-      }
-      return rows;
+      // ONE shared mapping (prCommentMapping.ts) — UserGitHubClient reads the same comments off the
+      // user's own repo, and two hand-copied mappings would drift the moment either is corrected.
+      return normalizePrComments(inline, general);
     } catch {
       return [];
     }
@@ -399,17 +387,8 @@ export interface PrComment {
   association?: string;
 }
 
-/** The raw comment shape from either comments endpoint (fields we read only). */
-interface CommentApi {
-  id?: number;
-  body?: string;
-  path?: string;
-  line?: number | null;
-  /** null means the comment is outdated — its diff hunk is gone. */
-  position?: number | null;
-  user?: { login?: string };
-  author_association?: string;
-}
+// The raw comment shape moved to prCommentMapping.ts as `RawPrComment`, alongside the mapping that
+// reads it — UserGitHubClient needs the same shape, and a second copy here is how the two would drift.
 
 export interface PullRequestInfo {
   number: number;

@@ -9,8 +9,9 @@
 // login as the repo owner. Implements PrCapableClient so it plugs straight into mergeViaPullRequest.
 // Everything is injectable (fetch) so it is fully unit-testable without GitHub.
 
-import type { CiVerdict, PullRequestInfo, RepoInfo } from './GitHubAppClient';
-import type { PrCapableClient } from './GitHubPrFlow';
+import type { CiVerdict, PrComment, PullRequestInfo, RepoInfo } from './GitHubAppClient';
+import type { PrCapableClient, ReviewCapableClient } from './GitHubPrFlow';
+import { normalizePrComments, type RawPrComment } from './prCommentMapping';
 
 const GITHUB_API = 'https://api.github.com';
 const API_HEADERS = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'NavBharatAI-Builder' };
@@ -20,7 +21,7 @@ interface UserClientDeps {
 }
 
 /** A GitHub client that acts AS THE USER (their OAuth token), storing projects in the user's account. */
-export class UserGitHubClient implements PrCapableClient {
+export class UserGitHubClient implements PrCapableClient, ReviewCapableClient {
   private readonly fetchImpl: typeof fetch;
   private cachedLogin: string | null = null;
 
@@ -110,6 +111,58 @@ export class UserGitHubClient implements PrCapableClient {
     const login = await this.getLogin();
     const merged = await this.request<{ merged?: boolean }>('PUT', `/repos/${login}/${repo}/pulls/${number}/merge`, { merge_method: method });
     return merged.ok && merged.body?.merged === true;
+  }
+
+  // ── ReviewCapableClient (ROADMAP D3 — read a reviewer's notes, reply on their threads) ─────────
+  //
+  // The user's OWN repo, read with the user's OWN token, so this can only ever see a PR they already
+  // have access to. Both methods mirror GitHubAppClient's semantics exactly and share its normaliser
+  // (prCommentMapping.ts) — the only differences are the owner in the path and who we authenticate as.
+
+  /**
+   * Every comment on the PR — inline review comments AND the conversation below the diff.
+   *
+   * 🔒 NEVER THROWS, AND AN UNREADABLE ROUND IS EMPTY, NOT PARTIAL. The two lists are fetched
+   * together and a failure of EITHER yields []. Returning just the half that loaded would let a
+   * review round act on an incomplete picture of what the reviewer asked for — worse than doing
+   * nothing, because it looks like it worked.
+   */
+  async listReviewComments(repo: string, number: number): Promise<PrComment[]> {
+    try {
+      if (!repo || !number) return [];
+      const login = await this.getLogin();
+      const [inline, general] = await Promise.all([
+        this.request<RawPrComment[]>('GET', `/repos/${login}/${repo}/pulls/${number}/comments?per_page=100`),
+        this.request<RawPrComment[]>('GET', `/repos/${login}/${repo}/issues/${number}/comments?per_page=100`),
+      ]);
+      return normalizePrComments(inline, general);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Reply to a review comment, in its own thread when possible.
+   *
+   * A reply ON THE THREAD is what makes the exchange legible: a general comment saying "done" leaves
+   * the reviewer hunting for which of their five notes it answers. When the threaded reply is refused
+   * (the comment was deleted, or it was a conversation comment with no thread to reply into), it falls
+   * back to the conversation rather than dropping the reply — a silent non-answer reads as being
+   * ignored. Returns whether the reply landed. Never throws.
+   */
+  async replyToReviewComment(repo: string, number: number, commentId: number, body: string): Promise<boolean> {
+    try {
+      if (!repo || !number || !body) return false;
+      const login = await this.getLogin();
+      if (commentId > 0) {
+        const threaded = await this.request<{ id?: number }>('POST', `/repos/${login}/${repo}/pulls/${number}/comments/${commentId}/replies`, { body });
+        if (threaded.ok) return true;
+      }
+      const fallback = await this.request<{ id?: number }>('POST', `/repos/${login}/${repo}/issues/${number}/comments`, { body });
+      return fallback.ok;
+    } catch {
+      return false;
+    }
   }
 
   // ── Git data API (used by "Revert last merge") ─────────────────────────────────

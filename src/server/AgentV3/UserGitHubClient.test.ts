@@ -168,3 +168,93 @@ describe('UserGitHubClient PR flow (PrCapableClient)', () => {
     expect(await client.mergePullRequest('app', 3)).toBe(true);
   });
 });
+
+/**
+ * REVIEW ROUND ON THE USER'S OWN REPO (ROADMAP D3, the half that was missing).
+ *
+ * The triage, the prompt and the reply wording all existed and were tested — against a FAKE client.
+ * Nothing could actually reach a user's pull request, because UserGitHubClient (the only client
+ * authorized against the user's own repo) did not implement the review port at all. These tests pin
+ * the real implementation, especially the two ways it is allowed to say "I don't know".
+ */
+describe('UserGitHubClient — review comments', () => {
+  const review = (extra: Record<string, { status: number; body: unknown }>) =>
+    new UserGitHubClient('t', { fetchImpl: fakeFetch({ ...userRoute, ...extra }) });
+
+  const inlinePath = 'GET /repos/alice/app/pulls/3/comments?per_page=100';
+  const generalPath = 'GET /repos/alice/app/issues/3/comments?per_page=100';
+
+  it('reads BOTH the inline comments and the conversation, under the user login', async () => {
+    const client = review({
+      [inlinePath]: { status: 200, body: [{ id: 1, body: 'rename this', path: 'src/App.tsx', line: 4, position: 2, user: { login: 'bob' } }] },
+      [generalPath]: { status: 200, body: [{ id: 2, body: 'the login page is broken', user: { login: 'bob' } }] },
+    });
+    const rows = await client.listReviewComments('app', 3);
+    expect(rows.map((r) => r.id)).toEqual([1, 2]);
+    expect(rows[0].path).toBe('src/App.tsx');
+    expect(rows[1].path).toBeUndefined(); // a conversation comment has no anchor, and none is invented
+  });
+
+  it('🔒 one failed half yields NOTHING — a half-read review must never look like a whole one', async () => {
+    const client = review({
+      [inlinePath]: { status: 200, body: [{ id: 1, body: 'please fix this' }] },
+      [generalPath]: { status: 500, body: { message: 'server error' } },
+    });
+    expect(await client.listReviewComments('app', 3)).toEqual([]);
+  });
+
+  it('never throws — a network failure is an empty round, not a crashed build', async () => {
+    const client = new UserGitHubClient('t', {
+      fetchImpl: (async () => { throw new Error('network down'); }) as unknown as typeof fetch,
+    });
+    expect(await client.listReviewComments('app', 3)).toEqual([]);
+  });
+
+  it('refuses a missing repo or PR number without calling GitHub at all', async () => {
+    const fetchImpl = vi.fn(fakeFetch(userRoute));
+    const client = new UserGitHubClient('t', { fetchImpl });
+    expect(await client.listReviewComments('', 3)).toEqual([]);
+    expect(await client.listReviewComments('app', 0)).toEqual([]);
+    expect(fetchImpl.mock.calls.length).toBe(0);
+  });
+});
+
+describe('UserGitHubClient — replying to a review comment', () => {
+  const review = (extra: Record<string, { status: number; body: unknown }>) =>
+    new UserGitHubClient('t', { fetchImpl: fakeFetch({ ...userRoute, ...extra }) });
+
+  it('replies IN THE THREAD when the comment has one', async () => {
+    const client = review({ 'POST /repos/alice/app/pulls/3/comments/11/replies': { status: 201, body: { id: 99 } } });
+    expect(await client.replyToReviewComment('app', 3, 11, 'done')).toBe(true);
+  });
+
+  it('falls back to the conversation when the thread refuses — a silent non-answer reads as ignoring them', async () => {
+    const client = review({
+      'POST /repos/alice/app/pulls/3/comments/11/replies': { status: 404, body: { message: 'Not Found' } },
+      'POST /repos/alice/app/issues/3/comments': { status: 201, body: { id: 100 } },
+    });
+    expect(await client.replyToReviewComment('app', 3, 11, 'done')).toBe(true);
+  });
+
+  it('a conversation comment (no thread id) goes straight to the conversation', async () => {
+    const client = review({ 'POST /repos/alice/app/issues/3/comments': { status: 201, body: { id: 100 } } });
+    expect(await client.replyToReviewComment('app', 3, 0, 'done')).toBe(true);
+  });
+
+  it('reports FALSE when the reply genuinely did not land', async () => {
+    const client = review({
+      'POST /repos/alice/app/pulls/3/comments/11/replies': { status: 404, body: {} },
+      'POST /repos/alice/app/issues/3/comments': { status: 403, body: {} },
+    });
+    expect(await client.replyToReviewComment('app', 3, 11, 'done')).toBe(false);
+  });
+
+  it('never posts an empty body, and never throws', async () => {
+    const fetchImpl = vi.fn(fakeFetch(userRoute));
+    const client = new UserGitHubClient('t', { fetchImpl });
+    expect(await client.replyToReviewComment('app', 3, 11, '')).toBe(false);
+    expect(fetchImpl.mock.calls.length).toBe(0);
+    const boom = new UserGitHubClient('t', { fetchImpl: (async () => { throw new Error('down'); }) as unknown as typeof fetch });
+    expect(await boom.replyToReviewComment('app', 3, 11, 'done')).toBe(false);
+  });
+});

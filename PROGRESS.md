@@ -38875,3 +38875,65 @@ exactly two controls for a connected domain. Recorded as *behaviour changed on r
 test bent to match code.
 
 Gate: both tsc + build + FULL vitest — 17,319 passing, 1 skipped. AppKnowledgeBase updated.
+
+## 2026-08-22 — D3: the review loop had every part except a way to start it
+
+`readReviewRound`, `replyToReviewRound`, the triage and the prompt builder all shipped weeks ago,
+fully unit-tested. None of it had ever run. I recorded that honestly at the time as "D3 is NOT done —
+the trigger is missing", and this closes it.
+
+**The gap was bigger than a trigger, and finding that out changed the fix.** `/api/agentv3/ship` —
+the only path that opens a PR on a user's own repo — authenticates with `UserGitHubClient`, and that
+client **did not implement the review port at all**. Only `GitHubAppClient` (the platform org) had
+`listReviewComments`/`replyToReviewComment`. So a button wired to the existing code would have had
+nothing to call for the exact repos the feature is for. Worth stating plainly: had I built the
+trigger from the task note without reading the client, it would have compiled, shipped, and failed on
+the first real pull request.
+
+**The mapping is now shared, not copied.** Both clients need the identical GitHub-JSON → `PrComment`
+mapping and differ only in who they authenticate as. Copying it into the second client is the drift
+pattern this repo has already paid for twice (four copies of `safeRelPath`, retired model ids across
+five files), so it moved to `prCommentMapping.ts` and `GitHubAppClient` was refactored onto it in the
+same change — sibling hunted, per rule 3.
+
+🔒 **One rule got *stricter* on the way through, in the shared module where both clients inherit it:
+a failed half of the fetch now collapses the whole round to empty.** The two comment lists (inline
+and conversation) are fetched together; the tempting behaviour when one fails is to return the half
+that loaded, which reads as a graceful degrade and is the most dangerous outcome available — the
+round then acts on an incomplete picture of what the reviewer asked for *while reporting success*.
+Silence is recoverable; a confident half-answer is not.
+
+**Two routes, both gated exactly like `/ship`:** `POST /api/agentv3/review` (read-only — fetch,
+triage, return) and `POST /api/agentv3/review/reply`. Both verify `canPush` on that exact repo before
+touching anything. The reply route **re-reads the round server-side** rather than trusting comment
+ids from the request body: a client-supplied id list would let a caller post NavBharatAI-branded
+replies onto arbitrary threads.
+
+**The UI trigger is the open PR itself.** A ship that does not merge leaves a real PR open — that is
+precisely where a reviewer's notes live — so the panel now remembers it and shows "Read review #N"
+beside Ship. A merged PR clears it, because a button pointing at a closed thread is the dead control
+this codebase keeps deleting. The fetched prompt lands **in the composer**, not in a build: reviewer
+text is input a human approves, never a directive that executes itself.
+
+🔒 **The honesty guard, and the bug I wrote and caught in it.** Telling a reviewer "addressed in the
+latest commit" when nothing was built since their comment is exactly the fake success rule 2 exists
+to prevent — and it is the *easy* mistake here, because after reading a review the panel looks ready
+to reply. So the reply button appears only after a build has genuinely started **and** settled since
+the review was read, carrying that build's real verdict (a failed build replies "could not be
+completed"). My first version armed the flag from any past build and then tested `reviewPending` —
+which fires the moment the review is READ, before a single line is rebuilt. It would have offered to
+claim work that never happened. Rewritten so the only path to an outcome is pending → running →
+settled, with the reason recorded at the site.
+
+Verified separately that a stale `error` cannot poison the verdict: `start()` clears it before
+setting `running`.
+
+Gate: both tsc + build + FULL vitest. New tests: `prCommentMapping.test.ts` (9),
+`UserGitHubClient.test.ts` review round (+11), `reviewRouteShape.test.ts` (6 — shape tests, chosen
+deliberately: a fake client cannot catch a *gate* being dropped from the handler around it, and both
+gates are security properties). AppKnowledgeBase entry `agentv3_read_review` added.
+
+**Still open on D3, honestly:** there is no automatic trigger — no webhook, no polling. The user
+presses a button. That is a deliberate stopping point rather than an oversight: an automatic loop
+that rebuilds on every reviewer comment spends real money per comment and needs a rate-limit and a
+cost decision the admin has not been asked for. Recorded here rather than half-built.

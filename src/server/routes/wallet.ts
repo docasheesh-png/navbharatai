@@ -7,6 +7,9 @@ import { requireUserMatch } from '../lib/authMiddleware';
 import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
 import { decideWeeklyTopUp, topUpLedgerEntry, summarizeGiftLadder } from '../lib/weeklyTopUp';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
+import { giftPlanV2Enabled, decideSignupGrant, decidePhoneClaim, claimRefusalMessage, verifiedGiftTotalTokens } from '../lib/giftPlan';
+import { normalizeEmailForGift, normalizePhoneForGift, giftMarkerCandidates, giftMarkerIdToWrite } from '../lib/giftIdentity';
+import { verifiedPhoneNumber } from '../lib/authMiddleware';
 import { readHostingPlanStatus, purchaseHostingPlan, setHostingPlanAutoRenew } from '../lib/hostingPlan';
 import { registerHostingPlanSweep, reattachSuspendedDomains } from '../lib/hostingPlanSweep';
 import { sendSafeError } from '../lib/httpError';
@@ -19,6 +22,75 @@ async function canonicalWalletId(db: any, uid: string): Promise<string> {
     const s = await getDoc(doc(db, 'user_token_wallets', u));
     return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
   }, uid);
+}
+
+/** Control-flow marker for "this wallet is on gift plan v2, so the weekly ladder does not apply".
+ *  A named class so the catch below can tell a deliberate skip from a real top-up failure. */
+class SkipLadder extends Error {}
+
+/**
+ * What the wallet screen should say about free credit on a v2 wallet.
+ *
+ * Deliberately reports `nextCreditAt: null` — nothing arrives on a schedule any more. `claimable` is
+ * the honest replacement: how much verifying a phone would still add, which is the only free credit
+ * a v2 account can still receive.
+ */
+function v2GiftSummary(data: Record<string, any>): Record<string, unknown> {
+  const givenRaw = Number(data.freeGiftedTokens);
+  const gifted = Number.isFinite(givenRaw) && givenRaw > 0 ? Math.floor(givenRaw) : 0;
+  const total = verifiedGiftTotalTokens();
+  const claimable = Math.max(0, total - gifted);
+  return {
+    plan: 'v2',
+    giftedTokens: gifted,
+    capTokens: total,
+    remainingTokens: claimable,
+    exhausted: claimable <= 0,
+    nextCreditAt: null,
+    /** Tokens a phone verification would add right now. 0 once the account is at the total. */
+    phoneBonusClaimable: claimable,
+  };
+}
+
+/**
+ * Has this identity (a normalized mailbox or phone) already consumed its welcome gift?
+ *
+ * Checks EVERY candidate id, not just the current one — `giftMarkerCandidates` returns the peppered
+ * id first and the unpeppered one after it, so introducing or rotating GIFT_ID_PEPPER can never make
+ * existing markers unfindable and re-gift the whole user base.
+ *
+ * FAILS CLOSED. A lookup that throws returns `true` (treated as "already used"), because the failure
+ * modes are not symmetric: refusing a gift is a support message to one person, while granting on a
+ * failed check is real money handed to whoever made the check fail.
+ */
+async function giftIdentityUsed(db: any, kind: 'email' | 'phone', normalized: string): Promise<boolean> {
+  if (!normalized) return false; // no identity to spend — the caller decides what that means
+  try {
+    for (const id of giftMarkerCandidates(kind, normalized)) {
+      const snap = await getDoc(doc(db, 'payment_transactions', id));
+      if (snap.exists()) return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('[WALLET] gift identity lookup failed — treating as already used:', err);
+    return true;
+  }
+}
+
+/** The durable "this identity has had its gift" record. Holds NO raw email or phone — the id is a
+ *  salted hash and the body carries only what is needed to audit a grant. */
+function giftMarkerDoc(markerId: string, kind: 'email' | 'phone', userId: string, tokens: number, nowIso: string): Record<string, unknown> {
+  return {
+    transactionId: markerId,
+    userId,
+    kind,
+    amountPaid: 0,
+    balanceAdded: tokens / TOKENS_PER_RUPEE,
+    paymentProvider: 'WELCOME_BONUS',
+    paymentStatus: 'SUCCESS',
+    paymentReference: `WELCOME_BONUS_${kind.toUpperCase()}`,
+    createdAt: nowIso,
+  };
 }
 
 /**
@@ -71,7 +143,16 @@ export function registerWalletRoutes(app: Express): void {
         // `freeGiftedTokens` is what bounds it: the TOTAL ever gifted, never the balance. A balance cap
         // would quietly become an unlimited weekly stipend the moment the user spent anything.
         // Wallets created before this field existed are seeded from the signup bonus they received.
+        // THE WEEKLY LADDER IS RETIRED FOR v2 WALLETS ONLY (admin 2026-08-21).
+        //
+        // A wallet created under the new plan carries `giftPlan: 'v2'` and never accrues weekly
+        // credit — its whole ₹500 comes from the two doors instead. Every wallet created BEFORE the
+        // switch has no such stamp and keeps its ladder exactly as it is, because those users were
+        // SHOWN a next-credit date and taking it away would be breaking a promise we made on screen.
+        // The cost of honouring it is bounded and one-way: the ladder ends by itself at ₹650.
+        const ladderRetired = data.giftPlan === 'v2';
         try {
+          if (ladderRetired) throw new SkipLadder();
           const giftedSoFar = Number.isFinite(Number(data.freeGiftedTokens))
             ? Number(data.freeGiftedTokens)
             : welcomeBonusTokens();
@@ -119,8 +200,11 @@ export function registerWalletRoutes(app: Express): void {
           }
         } catch (topUpErr) {
           // A top-up failure must never cost the user their wallet screen — log it and serve the
-          // balance we already have. The next read tries again.
-          console.error('[WALLET] Weekly top-up failed (balance served unchanged):', topUpErr);
+          // balance we already have. The next read tries again. A v2 skip is not a failure and is
+          // not logged as one.
+          if (!(topUpErr instanceof SkipLadder)) {
+            console.error('[WALLET] Weekly top-up failed (balance served unchanged):', topUpErr);
+          }
         }
         // Billing Phase 2 — the ₹↔token rate travels WITH the wallet (single source of truth:
         // payments.ts TOKENS_PER_RUPEE), so no client ever hardcodes its own conversion again.
@@ -133,12 +217,19 @@ export function registerWalletRoutes(app: Express): void {
         return res.json({
           ...data,
           tokensPerRupee: TOKENS_PER_RUPEE,
-          freeGift: summarizeGiftLadder({
-            giftedSoFar: Number.isFinite(Number(data.freeGiftedTokens)) ? Number(data.freeGiftedTokens) : welcomeBonusTokens(),
-            lastTopUpAt: data.lastWeeklyTopUpAt ?? null,
-            createdAt: data.createdAt ?? null,
-            now: Date.now(),
-          }),
+          // HONESTY: a v2 wallet has no weekly ladder, so it must NOT be handed a `nextCreditAt` —
+          // that field is what the screen renders as "next free credit on <date>", and printing a
+          // date no credit will ever arrive on is exactly the kind of confident-and-wrong status this
+          // codebase forbids. It gets its own summary instead, describing the one thing that IS true:
+          // whether a phone bonus is still available to claim.
+          freeGift: ladderRetired
+            ? v2GiftSummary(data)
+            : summarizeGiftLadder({
+                giftedSoFar: Number.isFinite(Number(data.freeGiftedTokens)) ? Number(data.freeGiftedTokens) : welcomeBonusTokens(),
+                lastTopUpAt: data.lastWeeklyTopUpAt ?? null,
+                createdAt: data.createdAt ?? null,
+                now: Date.now(),
+              }),
         });
       } else {
         // The wallet doc is missing → (re)create it. MONEY-BLEED FIX (admin 2026-07-12): grant the
@@ -150,14 +241,62 @@ export function registerWalletRoutes(app: Express): void {
         // concurrently is returned instead of overwritten.
         const welcomeMarkerRef = doc(db, 'payment_transactions', `welcome_${userId}`);
         const nowIso = new Date().toISOString();
+
+        // ── GIFT PLAN v2 (admin 2026-08-21) — the gift belongs to a PERSON, not to an account. ──
+        //
+        // Two doors to the same ₹500: sign up with a verified phone and get it at once, or sign up
+        // with email for ₹250 and top up to ₹500 by verifying a number later. What makes that safe is
+        // that both doors spend the SAME per-identity markers, so one mailbox and one number can each
+        // pay exactly once however they are combined.
+        //
+        // The phone is read from the VERIFIED ID token, never from the request — a body field would
+        // let anyone type any number and claim the verified tier.
+        //
+        // Entirely inert unless WALLET_GIFT_V2 is on; the legacy path below is untouched.
+        const v2 = giftPlanV2Enabled();
+        const normEmail = v2 ? normalizeEmailForGift(email) : '';
+        const normPhone = v2 ? normalizePhoneForGift(await verifiedPhoneNumber(req)) : '';
+        // Looked up BEFORE the transaction: Firestore transactions cannot read a document whose id
+        // depends on another read, and these markers are append-only — an id that exists now can
+        // never stop existing, so a pre-read cannot turn a refusal into a grant. The reverse race
+        // (two concurrent first reads) is closed by the wallet-doc check inside the transaction.
+        const emailUsed = v2 ? await giftIdentityUsed(db, 'email', normEmail) : false;
+        const phoneUsed = v2 ? await giftIdentityUsed(db, 'phone', normPhone) : false;
+        const v2Grant = v2
+          ? decideSignupGrant({ phoneVerified: !!normPhone, emailUsed, phoneUsed })
+          : null;
+
         const createdWallet = await runTransaction(db, async (tx) => {
           const wSnap = await tx.get(walletRef);
           if (wSnap.exists()) return wSnap.data(); // created concurrently — never overwrite, never re-grant
           const markerSnap = await tx.get(welcomeMarkerRef);
           const alreadyGranted = markerSnap.exists();
-          const welcomeTokens = welcomeGrantTokens(alreadyGranted);
+          // The per-USER marker still guards v2: it is what stops a wallet-doc recreation re-granting,
+          // and that hole is independent of the per-identity ones.
+          const welcomeTokens = v2Grant
+            ? (alreadyGranted ? 0 : v2Grant.tokens)
+            : welcomeGrantTokens(alreadyGranted);
           const initialWallet = buildInitialWallet({ userId, email, name, welcomeTokens, nowIso });
+          if (v2Grant) {
+            // Stamped so the retired weekly ladder never runs for this wallet, while wallets created
+            // BEFORE the switch keep their ladder and the schedule they were shown. Nobody's promise
+            // is withdrawn; the plan simply changes for accounts opened under it.
+            (initialWallet as Record<string, unknown>).giftPlan = 'v2';
+            (initialWallet as Record<string, unknown>).phoneVerifiedGift = v2Grant.reason === 'verified-signup';
+          }
           tx.set(walletRef, initialWallet);
+          // Spend the identities in the SAME transaction as the credit — a marker that could land
+          // without its grant (or a grant without its marker) is exactly how a double-gift happens.
+          if (v2Grant && welcomeTokens > 0) {
+            if (v2Grant.markEmail && normEmail) {
+              const id = giftMarkerIdToWrite('email', normEmail);
+              if (id) tx.set(doc(db, 'payment_transactions', id), giftMarkerDoc(id, 'email', userId, welcomeTokens, nowIso));
+            }
+            if (v2Grant.markPhone && normPhone) {
+              const id = giftMarkerIdToWrite('phone', normPhone);
+              if (id) tx.set(doc(db, 'payment_transactions', id), giftMarkerDoc(id, 'phone', userId, welcomeTokens, nowIso));
+            }
+          }
           // Only stamp the durable grant marker on a REAL grant (first time). A 0-token recreation must not
           // write it (there was nothing to grant), and if it already exists we leave it untouched.
           if (!alreadyGranted && welcomeTokens > 0) {
@@ -190,6 +329,111 @@ export function registerWalletRoutes(app: Express): void {
     } catch (err: any) {
       console.error('[API WALLET GET ERROR]:', err);
       return sendSafeError(res, 500, 'Unable to load your wallet right now. Please try again.', err, 'wallet get');
+    }
+  });
+
+  // ---------- Phone-verified welcome bonus (gift plan v2, admin 2026-08-21) ----------
+  //
+  // The user signed up with email/Google for ₹250, ran out, and is now verifying a number to be
+  // topped up to ₹500. Everything that makes this safe is on the server:
+  //
+  //  • The number comes from the VERIFIED ID token (`verifiedPhoneNumber`), never the request body,
+  //    so it exists only because a real OTP was delivered and entered.
+  //  • The amount is DERIVED (`decidePhoneClaim` tops up to the verified total) — the client cannot
+  //    ask for an amount, so there is no number for it to inflate.
+  //  • The per-number marker is written in the SAME transaction as the credit, so the classic
+  //    ₹750 route (phone sign-up → second account by email → verify with the same number) pays
+  //    nothing the second time.
+  //  • A refusal is a 200 with `granted: 0` and an honest message, not an error. Real, innocent
+  //    people land here — one handset in a family, someone locked out of an older account — and
+  //    their account must keep working exactly as before.
+  app.post('/api/wallet/:userId/claim-phone-bonus', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    try {
+      if (!giftPlanV2Enabled()) {
+        return res.json({ ok: false, granted: 0, message: claimRefusalMessage('disabled') });
+      }
+      const userId = await canonicalWalletId(db, req.params.userId);
+
+      const normPhone = normalizePhoneForGift(await verifiedPhoneNumber(req));
+      if (!normPhone) {
+        // No phone on the token: the OTP was never completed, or it was linked to a different login.
+        return res.status(400).json({
+          ok: false,
+          granted: 0,
+          message: 'Verify your phone number first, then claim the bonus.',
+        });
+      }
+
+      const phoneUsed = await giftIdentityUsed(db, 'phone', normPhone);
+      const nowIso = new Date().toISOString();
+      const walletRef = doc(db, 'user_token_wallets', userId);
+      const markerId = giftMarkerIdToWrite('phone', normPhone);
+
+      const result = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(walletRef);
+        if (!snap.exists()) return { granted: 0, reason: 'no-wallet' as const };
+        const w = snap.data() as Record<string, any>;
+
+        const givenRaw = Number(w.freeGiftedTokens);
+        const gifted = Number.isFinite(givenRaw) && givenRaw > 0 ? Math.floor(givenRaw) : 0;
+        // Re-decided INSIDE the transaction against the live figure: a build may have completed, or a
+        // concurrent claim may have landed, since the read above.
+        const claim = decidePhoneClaim({ giftedSoFar: gifted, phoneUsed });
+        if (claim.tokens <= 0) return { granted: 0, reason: claim.reason };
+
+        const creditInr = claim.tokens / TOKENS_PER_RUPEE;
+        const held = Number(w.tokenBalance) > 0 ? Number(w.tokenBalance) : 0;
+        tx.update(walletRef, {
+          tokenBalance: held + claim.tokens,
+          totalTokensPurchased: (Number(w.totalTokensPurchased) || 0) + claim.tokens,
+          // Counted against the lifetime total in the same write as the credit, so a grant can never
+          // land without being recorded — that gap is how an account gets paid twice.
+          freeGiftedTokens: gifted + claim.tokens,
+          remaining_balance: (Number(w.remaining_balance) || 0) + creditInr,
+          total_balance: (Number(w.total_balance) || 0) + creditInr,
+          phoneVerifiedGift: true,
+          // A wallet that claims its phone bonus is on the new plan from here: no weekly ladder.
+          giftPlan: 'v2',
+          walletLedger: [
+            ...(Array.isArray(w.walletLedger) ? w.walletLedger : []),
+            {
+              type: 'purchase',
+              amountCoinsOrTokens: claim.tokens,
+              moneySpent: 0,
+              timestamp: nowIso,
+              description: `Phone verified: ₹${creditInr.toLocaleString('en-IN')} bonus added`,
+            },
+          ],
+          updatedAt: nowIso,
+        });
+        // Spend the NUMBER in the same transaction as the money.
+        if (markerId) {
+          tx.set(doc(db, 'payment_transactions', markerId), giftMarkerDoc(markerId, 'phone', userId, claim.tokens, nowIso));
+        }
+        return { granted: claim.tokens, reason: claim.reason };
+      });
+
+      if (result.granted > 0) {
+        return res.json({
+          ok: true,
+          granted: result.granted,
+          grantedInr: result.granted / TOKENS_PER_RUPEE,
+          tokensPerRupee: TOKENS_PER_RUPEE,
+          message: `₹${(result.granted / TOKENS_PER_RUPEE).toLocaleString('en-IN')} added to your wallet.`,
+        });
+      }
+      return res.json({
+        ok: false,
+        granted: 0,
+        message: result.reason === 'no-wallet'
+          ? 'Open your wallet once, then claim the bonus.'
+          : claimRefusalMessage(result.reason),
+      });
+    } catch (err: any) {
+      // Nothing was credited and nothing was marked — the transaction is all-or-nothing, so a retry
+      // is safe and cannot double-pay.
+      return sendSafeError(res, 500, 'Could not add the bonus right now. Please try again.', err, 'claim phone bonus');
     }
   });
 

@@ -39164,3 +39164,88 @@ here rather than half-built.
 Gate: both tsc + build + FULL vitest (17,395 passing, 1 skipped). Three existing tests updated with
 reasoning at the site — two anchored on strings this change deliberately removed, and one used a
 fixed 2600-character window that broke when the route grew while remaining correct.
+## 2026-08-21 — Free-gift fraud: the gift now belongs to a PERSON, not to an account (slice 1/3)
+
+**The admin's report:** a user builds on free credit, saves to GitHub, opens a second account, imports
+it, keeps building on ITS free credit, then a third. NavBharatAI's free tier funds a paid-size app.
+
+**Investigated before designing anything — and the reported pipe is not the leak.** GitHub is what
+makes the abuse WORTH doing; it is not what makes it possible, and blocking import would break a real
+headline feature while the abuse continued through ZIP export or copy-paste. What actually makes it
+possible is three things the code did not do:
+
+1. **No email normalization.** `me+1@gmail.com`, `me+2@gmail.com` and `m.e@gmail.com` are ONE Gmail
+   inbox and THREE Firebase users. Cost: ₹0, ten seconds, no GitHub needed. This is the real leak —
+   far cheaper than the relay the report described.
+2. **No phone requirement** on the gift.
+3. **No email verification** gate.
+
+The per-user welcome marker (`welcome_${userId}`) is sound — it stops a wallet-doc recreation
+re-granting — but a new account is a new uid, and accounts are free.
+
+**Real numbers, from the code:** signup gift ₹250 ≈ **₹62** of real spend; the weekly ladder takes an
+account to ₹650 lifetime ≈ **₹163**. So each throwaway account costs real money, and the ladder made
+a patient fraudster 2.6× more profitable than an impatient one.
+
+**The plan the admin chose** (after three rounds — the design is theirs; mine was worse):
+
+| Door | Immediately | On verifying a phone | Total |
+|---|---|---|---|
+| Phone OTP sign-up | **₹500** | — | ₹500 |
+| Email / Google sign-up | ₹250 | +₹250 | ₹500 |
+
+…and the weekly ladder is retired. Two arguments settled the shape:
+- **₹250 stays the first rung.** `payments.ts` records ₹250 as what funds a COMPLETE first app.
+  Trimming it buys the worst outcome available — a first app that dies half-built. A fraudster costs
+  ₹62; a broken first impression costs a customer's lifetime.
+- **The ask arrives when the balance hits zero**, not at sign-up. We never choose that moment; the
+  user's own use does, and it is the moment they most want more.
+- Retiring the ladder also **stops it competing with revenue**: a user who knew ₹200 was arriving in
+  three days had a reason to WAIT rather than recharge.
+
+### Shipped in this slice (server only, flag OFF)
+
+- **`giftIdentity.ts`** — `normalizeEmailForGift` (plus-stripping everywhere; dot-stripping and the
+  googlemail fold for Gmail ONLY, because dots are significant elsewhere), `normalizePhoneForGift`
+  (Indian forms resolve to one identity; a foreign number never gets a guessed country code, which
+  would merge two real people), and salted marker ids.
+  ⚠️ `giftMarkerCandidates` returns the peppered id AND the unpeppered one, so introducing or
+  rotating `GIFT_ID_PEPPER` can never make existing markers unfindable and re-gift the user base.
+  The pepper matters: an Indian mobile is 10 digits behind known prefixes, so a plain SHA-256 of one
+  is reversible in seconds.
+- **`giftPlan.ts`** — the pure decisions. The verified tier is expressed as a **total**, not "+₹250",
+  which makes both doors land in the same place and makes every arithmetic path self-correcting.
+- **The wallet route** — v2 grant, per-identity markers written in the SAME transaction as the
+  credit, the `giftPlan: 'v2'` stamp, and the claim endpoint.
+
+### The ₹750 hole, closed by construction
+
+Phone sign-up (₹500) → second account by email (₹250) → verify it with the **same number** (+₹250).
+Both doors spend one shared per-number marker, so the third step pays zero. Test-locked as its own
+named case in `giftPlan.test.ts`.
+
+### Decisions that protect real, innocent people
+- **Nobody is clawed back.** An old ladder account at ₹650 claims ₹0 and loses nothing.
+- **The weekly ladder keeps running for every wallet created BEFORE the switch** (no `giftPlan` stamp).
+  Those users were SHOWN a next-credit date; withdrawing it would break a promise made on screen.
+- **A v2 wallet is never shown a `nextCreditAt`** — printing a date no credit will arrive on is the
+  confident-and-wrong status this codebase forbids. It gets `phoneBonusClaimable` instead.
+- **A refused claim is a 200, not an error**, and the message never accuses: one handset in a family,
+  or someone locked out of an older account, lands here. "Your account works normally."
+- **The lookup fails CLOSED** — refusing a gift is a support message to one person; granting on a
+  failed check is money handed to whoever made the check fail.
+- **The phone comes from the VERIFIED ID token, never the request body.** Test-locked, and verified to
+  bite: injecting `req.body?.phone` fails the suite.
+
+### ⚠️ OPEN — must land BEFORE the flag is flipped
+
+**`/api/auth/send-otp`'s rate limits are in-process `Map`s** (`routes/auth.ts`): 30s cooldown, 5/hour
+per phone and per IP. Cloud Run runs several instances and recycles them, so the real ceiling is far
+higher than it appears. With ₹500 payable on one verification, that gap is worth scripting against.
+`DurableRateLimit.ts` already exists and is what this should use. Slice 2.
+
+**Slice 3** is the UI: the claim moment at zero balance, the honest "₹250 abhi + ₹250 verify karke"
+framing, and the wallet showing what is still claimable.
+
+Gate: both `tsc` clean; FULL suite **1345 files / 16869 tests green**. `WALLET_GIFT_V2` unset ⇒
+behaviour byte-identical to today, with not even an extra Firestore read.

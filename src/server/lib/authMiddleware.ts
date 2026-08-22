@@ -111,6 +111,29 @@ export async function verifyFirebaseToken(req: Request): Promise<string | null> 
 }
 
 /**
+ * The phone number FIREBASE ITSELF vouches for on this request, or null.
+ *
+ * ⚠️ THE ONLY ACCEPTABLE SOURCE OF A PHONE NUMBER ON A MONEY PATH. `phone_number` is present in the
+ * decoded ID token only when a phone credential is genuinely linked to the account, i.e. only after a
+ * real OTP was delivered and entered. A number taken from the request BODY would let anyone type any
+ * number and claim the verified bonus, which is the entire scheme defeated — so the gift claim reads
+ * this and never the body. Best-effort, like the helpers around it: never throws.
+ */
+export async function verifiedPhoneNumber(req: Request): Promise<string | null> {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return null;
+  try {
+    const auth = await getAdminAuth();
+    if (!auth) return null;
+    const decoded = await auth.verifyIdToken(header.slice(7)) as { phone_number?: string | null };
+    const phone = typeof decoded.phone_number === 'string' ? decoded.phone_number.trim() : '';
+    return phone || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Like verifyFirebaseToken, but returns the VERIFIED uid AND email from the decoded token (or null
  * when no valid Bearer token). Use this where the email also drives an authorization decision (e.g.
  * an allowlist) so the check can't be spoofed by a client-supplied `email` body field.

@@ -477,6 +477,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
 
+  /**
+   * WHY IS APPLE SIGN-IN FAILING? — the answer, from inside production (admin 2026-08-22).
+   *
+   * `/api/admin/apple-signin` has existed since 2026-08-21 and had NO UI, so the only way to read it
+   * was to curl it with an admin token. For an admin who does not use a terminal that is the same as
+   * not having built it — and it is the one check that can say "stop looking at our code" with
+   * evidence instead of confidence.
+   *
+   * The optional code box is what makes the answer sharp. `auth/invalid-credential` PROVES Apple
+   * already accepted the sign-in, so the report can point at Firebase's four Apple values instead of
+   * sending the admin back to press Verify in Apple's portal — which is exactly the wrong-portal trip
+   * this pair of fixes exists to stop. Leave it empty and the report answers as it always did.
+   *
+   * Unlike the two buttons beside it this reads no build documents, so it is cheap; it is behind a
+   * button because it makes a live HTTP request to our own public URL.
+   */
+  const [appleDiag, setAppleDiag] = useState<{
+    verdict: string; message: string; nextStep: string | null;
+    url?: string; configured?: boolean; source?: string | null;
+    servedLength?: number; fetchedLength?: number | null; fetchedStatus?: number | null;
+    fetchError?: string | null; serviceId?: string; returnUrl?: string; observedCode?: string | null;
+  } | null>(null);
+  const [appleDiagLoading, setAppleDiagLoading] = useState(false);
+  const [appleObservedCode, setAppleObservedCode] = useState('');
+
+  const fetchAppleDiag = useCallback(async () => {
+    setAppleDiagLoading(true);
+    try {
+      const code = appleObservedCode.trim();
+      const q = code ? `?code=${encodeURIComponent(code)}` : '';
+      const r = await fetch(`/api/admin/apple-signin${q}`, { headers });
+      const d = await r.json();
+      // A verdict is the ONE field every answer carries. Keying off it means a changed payload shows
+      // an honest "could not check" rather than an empty card that looks like a clean result.
+      setAppleDiag(d?.verdict ? d : null);
+      if (!d?.verdict) toast(d?.error || 'Could not check Apple sign-in.');
+    } catch (e) { console.error(e); setAppleDiag(null); toast('Could not check Apple sign-in.'); }
+    finally { setAppleDiagLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, appleObservedCode]);
+
   const openBuildReport = useCallback(async (id: string) => {
     setSelectedReportLoading(true);
     setReportPart('all'); // a new report always opens on the whole thing, never the previous part index
@@ -1941,6 +1982,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   >
                     <Clock className={`w-3.5 h-3.5 ${handoverLoading ? 'animate-pulse' : ''}`} /> Sandbox handover
                   </button>
+                  {/* APPLE SIGN-IN (admin 2026-08-22) — see fetchAppleDiag. The endpoint shipped a day
+                      earlier with no UI at all, which for a non-terminal admin is the same as unbuilt.
+                      The code box is optional and only ever SHARPENS the final answer. */}
+                  <input
+                    value={appleObservedCode}
+                    onChange={(e) => setAppleObservedCode(e.target.value)}
+                    placeholder="auth/… (optional)"
+                    title="The error code shown in the sign-in message, if you have one. It makes the answer more exact; leave it empty to just check our side."
+                    className="text-[11px] font-bold px-2.5 py-2 rounded-xl bg-[#0d1117] border border-white/10 text-white placeholder:text-[#6e7681] w-[9.5rem] focus:outline-none focus:border-sky-500/50"
+                  />
+                  <button
+                    onClick={fetchAppleDiag}
+                    disabled={appleDiagLoading}
+                    title="Is anything on OUR side stopping Sign in with Apple? Fetches our own public verification file exactly as Apple does."
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-sky-500/40 text-sky-300 hover:text-white hover:bg-sky-600/20 disabled:opacity-40"
+                  >
+                    <Shield className={`w-3.5 h-3.5 ${appleDiagLoading ? 'animate-pulse' : ''}`} /> Apple sign-in
+                  </button>
                   <button
                     onClick={fetchBuildReports}
                     className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
@@ -1959,6 +2018,63 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   </button>
                 </div>
               </div>
+
+              {/* APPLE SIGN-IN RESULT (admin 2026-08-22). Colour carries the verdict, because the whole
+                  value of this check is separating "our fault" from "not our fault" at a glance — and
+                  `unverifiable` is deliberately its own colour, since being unable to ASK is not the
+                  same as a bad answer, and painting it red is how someone ends up fixing the wrong
+                  thing. The next step is the line to act on, so it is the loudest thing on the card. */}
+              {appleDiag && (() => {
+                const ok = appleDiag.verdict === 'ours-is-correct';
+                const unknown = appleDiag.verdict === 'unverifiable';
+                // FULL CLASS NAMES, never a class built by interpolating a colour name into it.
+                // Tailwind scans source text and cannot see a composed class, so it is simply never
+                // generated — the element ends up unstyled while the code looks correct.
+                const icon = ok ? 'text-emerald-400' : unknown ? 'text-amber-400' : 'text-red-400';
+                const ring = ok ? 'border-emerald-500/25' : unknown ? 'border-amber-500/25' : 'border-red-500/25';
+                const text = ok ? 'text-emerald-200/90' : unknown ? 'text-amber-200/90' : 'text-red-200/90';
+                return (
+                  <div className={`bg-[#161b22] border ${ring} rounded-[1.25rem] p-4 space-y-3`}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Shield className={`w-4 h-4 ${icon}`} />
+                      <h4 className="text-sm font-black text-white tracking-tight">Sign in with Apple — is it us?</h4>
+                      <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${ring} ${text}`}>
+                        {appleDiag.verdict.replace(/-/g, ' ')}
+                      </span>
+                      {appleDiag.observedCode && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-white/10 text-[#8b949e]">
+                          code: {appleDiag.observedCode}
+                        </span>
+                      )}
+                    </div>
+                    <p className={`text-[12px] ${text} font-bold leading-relaxed`}>{appleDiag.message}</p>
+                    {appleDiag.nextStep && (
+                      <div className="bg-[#0d1117] border border-white/10 rounded-xl p-3">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-[#8b949e] mb-1">Do this next</p>
+                        <p className="text-[12px] text-white font-bold leading-relaxed">{appleDiag.nextStep}</p>
+                      </div>
+                    )}
+                    {/* Lengths and status, never the file's contents — enough to spot a truncated paste
+                        or a stray wrapper without printing a long token nobody will read. */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {([
+                        ['File configured', appleDiag.configured ? `yes (${appleDiag.source || '—'})` : 'no'],
+                        ['Public URL status', appleDiag.fetchedStatus == null ? '—' : String(appleDiag.fetchedStatus)],
+                        ['Length here / there', `${appleDiag.servedLength ?? 0} / ${appleDiag.fetchedLength ?? '—'}`],
+                        ['Services ID', appleDiag.serviceId || '—'],
+                      ] as Array<[string, string]>).map(([label, value]) => (
+                        <div key={label} className="bg-[#0d1117] border border-white/10 rounded-xl p-2.5">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-[#6e7681]">{label}</p>
+                          <p className="text-[12px] text-white font-bold break-all">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {appleDiag.fetchError && (
+                      <p className="text-[11px] text-amber-300/80 font-bold break-all">Check failed with: {appleDiag.fetchError}</p>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* SERVER NECESSITY RESULT (admin 2026-08-12). The number that decides whether the
                   browser-native plan proceeds. Shown with its CAVEAT and a spot-check sample, never as a

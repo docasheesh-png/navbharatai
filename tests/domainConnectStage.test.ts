@@ -82,7 +82,12 @@ describe('the page shows state and action FIRST', () => {
     expect(src).not.toContain('Pending — add the records, then check.');
   });
 
-  it('both Check buttons call the SAME handler — one implementation of the action', () => {
-    expect(src.split('onClick={checkStatus}').length - 1).toBe(2);
+  it('there is exactly ONE Check button, and it calls the one handler', () => {
+    // ⚠️ Was `toBe(2)` — deliberate change, admin 2026-08-22: "check now button sahi jagah nahi hai …
+    // upar wala". The second button sat ABOVE the DNS records, i.e. before the user has anything to
+    // check: the first thing they met asked whether records they had not added yet had propagated.
+    // The surviving one sits directly under the records, which is the only moment pressing it can be
+    // true. The rule this test actually protects — ONE implementation of the action — is unchanged.
+    expect(src.split('onClick={checkStatus}').length - 1).toBe(1);
   });
 });

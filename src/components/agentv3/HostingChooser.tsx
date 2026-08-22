@@ -392,6 +392,9 @@ export function HostingChooser({
               onPublish={() => publish(NBAI_HOST_ID, { away: true })}
               publishBusy={busy}
               publishFreshness={publishState?.freshness}
+              /* The SAME takedown the "Your published apps" list uses — one implementation, so the
+                 domain screen can never drift into taking a site down differently from the list. */
+              onUnpublish={onUnpublishApp && workspaceId ? () => onUnpublishApp(workspaceId) : undefined}
             />
           </div>
         ) : view === 'myapps' ? (

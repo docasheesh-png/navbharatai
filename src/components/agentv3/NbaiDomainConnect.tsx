@@ -66,6 +66,13 @@ export interface NbaiDomainConnectProps {
   /** A build/publish is already running — the button shows it instead of pretending to be idle. */
   publishBusy?: boolean;
   /**
+   * Take this app off NavBharatAI hosting. Resolves to '' on success, or an HONEST message.
+   *
+   * Absent ⇒ the control is not rendered at all. A remove button with nothing behind it is the dead
+   * button this codebase keeps deleting.
+   */
+  onUnpublish?: () => Promise<string>;
+  /**
    * The freshness the CALLER already measured, used until this screen's own status call returns.
    *
    * It is what makes the dot trail continuous: the user follows a dot in from the Publish sheet, and
@@ -200,13 +207,18 @@ export function publishButton(
       };
     case 'changed':
       return {
-        label: 'Publish update',
+        label: 'Update',
         primary: true,
         note: `You have changed your app since it was published, so your domain is still showing the older version.${last ? ` ${last}` : ''}`,
       };
     case 'up_to_date':
+      // 🔒 NOTHING TO OFFER (admin 2026-08-22: "update — jab user app edit kare SIRF tab dikhe").
+      // An "Update" button on a site that is already current invites a build that changes nothing,
+      // and the user has no way to know it is pointless — the label promises something it cannot
+      // deliver. An EMPTY label is the caller's signal to render no button at all. The "Last
+      // published …" line stays: when the site last went out is useful and costs nothing to read.
       return {
-        label: 'Republish',
+        label: '',
         primary: false,
         note: `Your domain is showing your latest build.${last ? ` ${last}` : ''}`,
       };
@@ -214,6 +226,23 @@ export function publishButton(
       // Includes `unknown` and an older server that sends no publish block at all.
       return { label: 'Publish', primary: false, note: '' };
   }
+}
+
+/**
+ * THE WORD THAT ARMS AN IRREVERSIBLE ACTION (admin 2026-08-22: "capital me DELETE type kiya jaye,
+ * tab hi unpublish ho").
+ *
+ * 🔒 EXACT MATCH, CAPITALS INCLUDED — and that strictness is the entire point. Taking a live site
+ * down cannot be undone from any visitor's side: every link anyone has shared dies the instant it
+ * runs. A confirm dialog gets dismissed by reflex; typing a specific word in a specific case cannot
+ * be done by accident. Accepting "delete" or " Delete " would hand back exactly the carelessness the
+ * gate exists to prevent, so surrounding whitespace is trimmed (a real paste artefact) and nothing
+ * else is forgiven. PURE.
+ */
+export const UNPUBLISH_WORD = 'DELETE';
+
+export function unpublishArmed(typed: string): boolean {
+  return String(typed ?? '').trim() === UNPUBLISH_WORD;
 }
 
 /**
@@ -231,10 +260,21 @@ export function relativeRecordName(name: string, domain: string): string {
 }
 
 
-export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy, publishFreshness }: NbaiDomainConnectProps) {
+export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy, publishFreshness, onUnpublish }: NbaiDomainConnectProps) {
   const [domain, setDomain] = useState('');
   /** The honest reason the last publish attempt did not start (no dead buttons). Cleared on retry. */
   const [publishBlocked, setPublishBlocked] = useState<string | null>(null);
+  // UNPUBLISH — deliberately behind a TYPED confirmation (admin 2026-08-22: "user ko bataya jaye
+  // website delete ho jayegi, capital me DELETE type kiya jaye, tab hi unpublish ho").
+  //
+  // 🔒 WHY TYPING, NOT A SECOND TAP: taking a live site down is irreversible from every visitor's
+  // side — a shared link dies the moment this runs, and no undo exists. A confirm dialog is dismissed
+  // by reflex; typing a word cannot be. The word is checked EXACTLY, capitals and all, so a stray
+  // "delete" does not arm it.
+  const [unpubOpen, setUnpubOpen] = useState(false);
+  const [unpubTyped, setUnpubTyped] = useState('');
+  const [unpubBusy, setUnpubBusy] = useState(false);
+  const [unpubMsg, setUnpubMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -517,16 +557,12 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                   <span className={`text-[12px] font-bold ${stage.tone === 'ok' ? 'text-green-200' : 'text-amber-100'}`}>{stage.headline}</span>
                 </div>
                 <p className="text-[11px] text-zinc-300/80 leading-relaxed">{stage.note}</p>
-                {stage.action === 'check' && (
-                  <button
-                    onClick={checkStatus}
-                    disabled={checking}
-                    className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-[12px] font-bold"
-                  >
-                    {checking ? <TirangaLoader className="w-3.5 h-3.5" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                    {checking ? 'Checking…' : 'Check now'}
-                  </button>
-                )}
+                {/* THE CHECK BUTTON MOVED DOWN (admin 2026-08-22: "check now button sahi jagah nahi
+                    hai … upar wala"). It used to sit HERE — above the records, i.e. before the user
+                    has anything to check. Someone lands on this screen, is told to add DNS records,
+                    and the first button they meet asks whether the records they have not added yet
+                    have propagated. The one prominent Check now now lives AFTER the records, which is
+                    the only moment pressing it can be true. */}
                 {/* A REAL way to do the one thing that is left. Telling someone to "press Publish"
                     while they are two screens deep in the domain flow is an instruction, not a path —
                     this takes them back to the sheet where that button actually is. */}
@@ -776,15 +812,17 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
             DNS changes can take a few minutes to a few hours. Publish your app once after connecting, so the
             domain serves your latest build. HTTPS is issued automatically once the records resolve.
           </p>
-          {/* A second Check within thumb reach for the user who scrolled down to add records —
-              same handler, so there is exactly one implementation of the action. */}
+          {/* THE ONE Check now, and it is now the prominent one (admin 2026-08-22). It sits directly
+              under the records the user just added, which is the only place where pressing it means
+              anything — and it is the primary action of this whole screen while a domain is pending,
+              so it is styled like one instead of a faint outline nobody finds. */}
           {!result.active && (
             <button
               onClick={checkStatus}
               disabled={checking}
-              className="self-start flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-500/40 text-indigo-200 hover:bg-indigo-500/10 text-[11px] font-bold disabled:opacity-40"
+              className="self-start flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-500 disabled:opacity-40 text-white text-[13px] font-bold transition-colors"
             >
-              {checking ? <TirangaLoader className="w-3 h-3" /> : <RefreshCw className="w-3 h-3" />}
+              {checking ? <TirangaLoader className="w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
               {checking ? 'Checking…' : 'Check now'}
             </button>
           )}
@@ -816,6 +854,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
             const p = publishButton(freshness, result.publish?.publishedAt, Date.now());
             return (
               <div className="flex flex-col gap-1.5">
+                {p.label && (
                 <button
                   onClick={() => { setPublishBlocked(null); const r = onPublish(); if (typeof r === 'string' && r) setPublishBlocked(r); }}
                   disabled={!!publishBusy}
@@ -832,6 +871,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                     <span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-label="You have unpublished changes" />
                   )}
                 </button>
+                )}
                 {p.note && <p className="text-[11px] text-zinc-400 leading-relaxed">{p.note}</p>}
                 {publishBlocked && <p className="text-[11px] text-amber-300 leading-relaxed">{publishBlocked}</p>}
               </div>
@@ -849,6 +889,81 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               Visit {cleanDomain}
               <ExternalLink className="w-3.5 h-3.5 opacity-80" />
             </a>
+          )}
+
+          {/* UNPUBLISH (admin 2026-08-22). Offered only for an app that is genuinely LIVE — there is
+              nothing to take down otherwise, and a control with nothing behind it is the dead button
+              this file keeps deleting. Placed LAST, after Visit, because destroying something belongs
+              at the end of a screen, never beside the thing you came here to do.
+
+              🔒 The consequence is stated BEFORE the field, in plain English, and the word must be
+              typed exactly. See `unpublishArmed` for why a typed word and not a second tap. */}
+          {result.active && onUnpublish && result.publish?.live && (
+            <div className="mt-1 pt-3 border-t border-zinc-800 flex flex-col gap-2">
+              {!unpubOpen ? (
+                <button
+                  onClick={() => { setUnpubOpen(true); setUnpubMsg(''); setUnpubTyped(''); }}
+                  className="self-start text-[11px] text-zinc-500 hover:text-red-400 underline underline-offset-2 transition-colors"
+                >
+                  Take this website offline
+                </button>
+              ) : (
+                <>
+                  <p className="text-[11.5px] text-red-200 leading-relaxed">
+                    <span className="font-bold">This will delete your website.</span>{' '}
+                    {cleanDomain} will stop working, and anyone you shared the link with will no longer
+                    be able to open it. Your app and its files are safe — you can publish it again later
+                    — but this cannot be undone right now.
+                  </p>
+                  <p className="text-[11px] text-zinc-400">
+                    Type <span className="font-mono font-bold text-red-300">{UNPUBLISH_WORD}</span> to confirm:
+                  </p>
+                  <input
+                    value={unpubTyped}
+                    onChange={(e) => setUnpubTyped(e.target.value)}
+                    placeholder={UNPUBLISH_WORD}
+                    autoComplete="off"
+                    spellCheck={false}
+                    aria-label={`Type ${UNPUBLISH_WORD} to confirm taking the website offline`}
+                    className="self-start w-40 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-700 text-[12px] font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-red-500"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        if (!unpublishArmed(unpubTyped) || unpubBusy) return;
+                        setUnpubBusy(true); setUnpubMsg('');
+                        try {
+                          const msg = await onUnpublish();
+                          // '' means it really came down. Anything else is the server's own reason,
+                          // shown verbatim — a generic failure line is what makes a button feel fake.
+                          if (msg) { setUnpubMsg(msg); return; }
+                          setUnpubOpen(false);
+                          setUnpubTyped('');
+                          void checkStatus();   // the screen must stop saying the site is live
+                        } catch {
+                          setUnpubMsg('Could not reach NavBharatAI. Check your connection and try again.');
+                        } finally {
+                          setUnpubBusy(false);
+                        }
+                      }}
+                      disabled={!unpublishArmed(unpubTyped) || unpubBusy}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-[12px] font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {unpubBusy ? <TirangaLoader className="w-3.5 h-3.5" /> : null}
+                      {unpubBusy ? 'Taking it offline…' : 'Unpublish'}
+                    </button>
+                    <button
+                      onClick={() => { setUnpubOpen(false); setUnpubTyped(''); setUnpubMsg(''); }}
+                      disabled={unpubBusy}
+                      className="px-3 py-2 rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-[12px] font-bold"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {unpubMsg && <p className="text-[11px] text-amber-300 leading-relaxed">{unpubMsg}</p>}
+                </>
+              )}
+            </div>
           )}
         </div>
       )}

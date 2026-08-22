@@ -38837,3 +38837,41 @@ becomes the next largest line, and it is the one to profile when it does.
 
 **RECOMMENDED, NOT YET DONE (admin's call):** set `ignoredFiles` on the Cloud Build trigger for
 `**/*.md`. Rebuilding and redeploying the whole app because a document changed is pure cost.
+
+## 2026-08-22 — The domain screen's ending: one Check button, and the two controls that belong there
+
+Four asks from the admin's screenshot, all on the connect-your-own-domain screen.
+
+**1. The Check button was in the wrong place, and the admin was right about why.** There were TWO.
+The prominent one sat ABOVE the DNS records — so the first button a user meets asks whether records
+they have not added yet have propagated. It can only ever say no. The one that survives sits directly
+UNDER the records, which is the only moment pressing it can be true, and it is now the **bold green
+primary** it should always have been (it is the whole point of the screen while a domain is pending).
+`domainConnectStage.test.ts` pinned `toBe(2)`; updated to `toBe(1)` with the reasoning recorded — the
+rule that test actually protects, ONE implementation of the action, is unchanged.
+
+**2. "Update" now appears ONLY when the app was really edited** (admin: "jab user app edit kare SIRF
+tab dikhe"). Renamed from "Publish update", and the `up_to_date` case now returns an EMPTY label,
+which the caller reads as "render no button". A quiet "Republish" on a current site invites a build
+that changes nothing, and the user has no way to know it is pointless — the label promises what it
+cannot deliver. The "Last published 4 minutes ago" line stays: *when* it went out is genuinely useful.
+`never_published` still offers "Publish now", or the screen would be a dead end.
+
+**3. Unpublish, behind a TYPED confirmation** (admin: "user ko bataya jaye website delete ho jayegi,
+capital me DELETE type kiya jaye tab hi unpublish ho"). The consequence is stated in plain English
+BEFORE the field, and `unpublishArmed` matches the word EXACTLY — capitals included.
+
+🔒 **Why typing and not a second tap:** taking a live site down is irreversible from every visitor's
+side — every link anyone has shared dies the instant it runs. A confirm dialog is dismissed by
+reflex; a specific word in a specific case cannot be typed by accident. `delete`, `Delete`, `DELET`
+and `DELETE!` are all refused; only surrounding whitespace is forgiven, because that is a real paste
+artefact. It is offered ONLY for a genuinely live app, sits LAST (after Visit — destroying something
+belongs at the end of a screen, never beside the thing you came to do), and drives the SAME takedown
+the published-apps list uses, so the two can never drift apart.
+
+**4. Two reversals of my own earlier tests, both deliberate and documented at the site.** The
+'Publish update' and 'Republish' assertions were mine from this morning; the admin has since named
+exactly two controls for a connected domain. Recorded as *behaviour changed on request*, never as a
+test bent to match code.
+
+Gate: both tsc + build + FULL vitest — 17,319 passing, 1 skipped. AppKnowledgeBase updated.

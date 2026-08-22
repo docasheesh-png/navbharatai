@@ -1,5 +1,14 @@
 // The "your app will appear here" screen — what the preview shows before anything has been built.
 //
+// ⚠️ NAMED …Panel, NOT PreviewWelcome.tsx, and the reason is a real broken build. It used to sit
+// beside `previewWelcome.ts` — two files differing only in case. Linux keeps them apart, so CI and
+// every dev machine were happy; macOS does not, and the iOS release runner resolved
+// `./PreviewWelcome` to the LOWERCASE module, which exports no component. `npm run build` died with
+// "PreviewWelcome is not exported by previewWelcome.ts" and the .ipa could not be built at all —
+// invisible until a release, because nothing else in the pipeline runs on a case-insensitive disk.
+// tests/caseInsensitiveCollisions.test.ts now fails on Linux for any such pair, so the next one is
+// caught in CI instead of at a release.
+//
 // See previewWelcome.ts for the bug this replaced (a spinner and a red "Fix with AI" error shown to a
 // user who had built nothing). The copy and the state rule live there, unit-tested; this file is only
 // the picture.

@@ -3981,9 +3981,13 @@ export function registerAgentV3Routes(app: Express): void {
    * expiry, and reveals nothing the raw preview url would not.
    *
    * A hit on a PAUSED sandbox resumes it (processes survive a pause, so the dev server is typically
-   * still running) — the door hit IS the wake-up. A hit on an expired one recreates it hydrated; the
-   * 'starting' page then auto-refreshes while the client watchdog boots the server, and the next
-   * refresh walks straight through. Every await is time-bounded so the frame never hangs on us.
+   * still running) — the door hit IS the wake-up. A hit on an EXPIRED one recreates the machine with
+   * its files hydrated but NO processes — nothing is serving on it, so the 'starting' page shows and
+   * the machine idles until the client watchdog (or the user's Wake) actually boots the server; the
+   * page's next self-retry then walks straight through. That one recreated-idle machine is bounded:
+   * the retry cap stops the page in ~2 minutes and the idle reaper pauses the machine in 5 — and it
+   * is the same spend the authenticated health probe has always been able to trigger.
+   * Every await is time-bounded so the frame never hangs on us.
    */
   app.get('/api/agentv3/preview-door', previewPollRateLimiter(), async (req: Request, res: Response) => {
     // The 302 target changes whenever the machine does — a cached redirect would BE the stale-url bug.
@@ -4006,8 +4010,13 @@ export function registerAgentV3Routes(app: Express): void {
       // the sweep verifies whatever it claims: the door never redirects to a port it did not just see
       // answer. This is what kills the 3000-vs-5000 loop: no url is ever believed about a port again.
       const recipe = await raceTimeout(sandboxStore.getRecipe(ws), 3_000, 'doorRecipe').catch(() => null);
+      // The client's displayed port rides in unsigned as `p` (see makeDoorPath for why unsigned is
+      // safe): it slots in AFTER the proven port and BEFORE the common list, so an app on an unusual
+      // port that has never earned a recipe still resolves instead of waiting forever.
+      const hintRaw = Number(typeof req.query?.p === 'string' ? req.query.p : NaN);
+      const hint = Number.isInteger(hintRaw) && hintRaw > 0 && hintRaw < 65536 ? [hintRaw] : [];
       const sweep = await raceTimeout(
-        actuator.runCommand(ws, buildPortSweepCommand(portCandidates(recipe?.port))),
+        actuator.runCommand(ws, buildPortSweepCommand(portCandidates(recipe?.port, hint))),
         20_000, 'doorPortSweep',
       ).catch(() => null);
       const found = parsePortSweep(sweep?.stdout);
@@ -4141,7 +4150,10 @@ export function registerAgentV3Routes(app: Express): void {
         // The workspace-stable frame url. The client prefers it over any stored machine address, so a
         // machine dying stops being the client's problem at all. Absent when the kill switch is off,
         // and the client then behaves exactly as before.
-        ...(previewDoorEnabled() ? { doorUrl: makeDoorPath(workspaceId, Date.now(), doorSecret()) } : {}),
+        ...(previewDoorEnabled()
+          ? { doorUrl: makeDoorPath(workspaceId, Date.now(), doorSecret(), undefined,
+              previewUrlPort(typeof req.body?.previewUrl === 'string' ? req.body.previewUrl : null)) }
+          : {}),
         serving: describesUserView ? pageRendered : null,
         servingProblems: describesUserView ? pageProblems : [],
         // The client swaps to this instead of framing a machine that no longer exists.

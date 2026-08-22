@@ -8,6 +8,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles } from 'lucide-react';
 import { canOfferRestart, restartStatusLine } from './previewRestart';
+import { nextDoorUrl } from './previewDoorClient';
+import { resolveApiHref } from '../../lib/apiBase';
 import { PreviewWelcome } from './PreviewWelcome';
 import { previewEmptyKind } from './previewWelcome';
 import { TirangaLoader } from '../ui/TirangaLoader';
@@ -471,8 +473,14 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           currentPreviewUrl?: unknown; previewUrlStale?: unknown; previewUrlNote?: unknown;
           doorUrl?: unknown;
         } | null;
-        if (typeof health?.doorUrl === 'string' && health.doorUrl.startsWith('/api/agentv3/preview-door?')) {
-          setDoorUrl(health.doorUrl);
+        {
+          // Adopt the FIRST door link, keep it while fresh, replace it only near expiry, and DROP it
+          // when the server stops offering one — the pure rule in previewDoorClient.ts. Adopting every
+          // mint remounted the iframe each poll (the framed app reloaded every 150s); keeping a link
+          // the server stopped minting stranded the frame on a refused page after a kill switch.
+          const offered = typeof health?.doorUrl === 'string' && health.doorUrl.startsWith('/api/agentv3/preview-door?')
+            ? health.doorUrl : '';
+          setDoorUrl((prev) => nextDoorUrl(prev, offered, Date.now()));
         }
         /**
          * THE FRAME WAS POINTED AT A MACHINE THAT NO LONGER EXISTS (admin screenshot 2026-08-22).
@@ -1142,7 +1150,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
                 address, so a dead sandbox resolves to our own reconnecting page instead of a vendor
                 error, and a moved app resolves to wherever it now lives. A remount (reload button,
                 watchdog) re-resolves. effectiveUrl stays as the fallback for an older server. */}
-            <iframe key={liveReloadKey} title="Live preview" src={doorUrl || effectiveUrl} onLoad={() => setLiveLoading(false)} className="w-full h-full bg-white border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+            <iframe key={liveReloadKey} title="Live preview" src={doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl} onLoad={() => setLiveLoading(false)} className="w-full h-full bg-white border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
           </ResponsiveFrame>
         )}
       </div>

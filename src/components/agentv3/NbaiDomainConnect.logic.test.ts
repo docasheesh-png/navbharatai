@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { connectStage, relativeRecordName, cleanDomainInput, visitUrl, publishButton } from './NbaiDomainConnect';
+import { connectStage, relativeRecordName, cleanDomainInput, visitUrl, publishButton, unpublishArmed, UNPUBLISH_WORD } from './NbaiDomainConnect';
 
 describe('connectStage — plain-language, honest connect stages', () => {
   it('active domain: done, no further action — but only CONNECTED until something SAW it serve', () => {
@@ -188,17 +188,25 @@ describe('publishButton — the label states the situation, or stays silent', ()
   });
 
   it('THE CASE THAT STARTED THIS: edited after publishing ⇒ says the domain shows the OLDER version', () => {
+    // ⚠️ Label changed 'Publish update' → 'Update' (admin 2026-08-22, deliberate). This is not a test
+    // bent to match the code: the admin asked for exactly two controls on a connected domain —
+    // Unpublish, and "update — jab user app edit kare sirf tab dikhe". The shorter word is the one
+    // they named, and the note below still carries the full explanation.
     const b = publishButton('changed', NOW - 4 * 60_000, NOW);
-    expect(b.label).toBe('Publish update');
+    expect(b.label).toBe('Update');
     expect(b.primary).toBe(true);
     expect(b.note).toContain('older version');
     expect(b.note).toContain('4 minutes ago');   // the real publish time, not a vague "recently"
   });
 
-  it('up to date: offered quietly, and says when it last went out', () => {
+  it('up to date: NO button now, but it still says when the site last went out', () => {
+    // ⚠️ Was 'Republish' (admin 2026-08-22, deliberate reversal): "update — jab user app edit kare
+    // SIRF tab dikhe". A quiet Republish still invites a build that changes nothing, and the user has
+    // no way to know it is pointless. An empty label is the caller's signal to render no button; the
+    // "Last published …" line stays because when the site went out is genuinely useful.
     const b = publishButton('up_to_date', NOW - 2 * 60 * 60_000, NOW);
-    expect(b.label).toBe('Republish');
-    expect(b.primary).toBe(false);               // no urgency where there is nothing urgent
+    expect(b.label).toBe('');
+    expect(b.primary).toBe(false);
     expect(b.note).toContain('latest build');
     expect(b.note).toContain('2 hours ago');
   });
@@ -225,5 +233,62 @@ describe('publishButton — the label states the situation, or stays silent', ()
     const b = publishButton('up_to_date', null, NOW);
     expect(b.note).toContain('latest build');
     expect(b.note).not.toContain('Last published');
+  });
+});
+
+/**
+ * ADMIN, 2026-08-22: "unpublish — user ko bataya jaye website delete ho jayegi (english me), capital
+ * me DELETE type kiya jaye tab hi unpublish ho. update — jab user app edit kare SIRF tab dikhe."
+ */
+describe('unpublishArmed — the word that arms an irreversible action', () => {
+  it('the exact word, in capitals, arms it', () => {
+    expect(unpublishArmed(UNPUBLISH_WORD)).toBe(true);
+    expect(UNPUBLISH_WORD).toBe('DELETE');
+  });
+
+  it('🔒 lowercase and mixed case do NOT arm it', () => {
+    // Taking a live site down cannot be undone from any visitor's side: every shared link dies the
+    // instant it runs. Accepting "delete" would hand back exactly the carelessness this gate exists
+    // to prevent — a confirm dialog is dismissed by reflex, a specific word in a specific case is not.
+    for (const t of ['delete', 'Delete', 'DELETE!', 'DELET', 'DELETED', 'D E L E T E']) {
+      expect(unpublishArmed(t), t).toBe(false);
+    }
+  });
+
+  it('trims surrounding whitespace, because that is a real paste artefact', () => {
+    expect(unpublishArmed('  DELETE  ')).toBe(true);
+    expect(unpublishArmed('\nDELETE\n')).toBe(true);
+  });
+
+  it('empty and junk never arm it', () => {
+    expect(unpublishArmed('')).toBe(false);
+    expect(unpublishArmed('   ')).toBe(false);
+    expect(unpublishArmed(undefined as never)).toBe(false);
+    expect(unpublishArmed(null as never)).toBe(false);
+  });
+});
+
+describe('publishButton — "Update" appears ONLY when the app was actually edited', () => {
+  const NOW = 1_000_000_000;
+
+  it('edited since publishing ⇒ the button says Update', () => {
+    expect(publishButton('changed', NOW - 60_000, NOW).label).toBe('Update');
+  });
+
+  it('🔒 already up to date ⇒ NO button at all (an empty label)', () => {
+    // An "Update" button on a site that is already current invites a build that changes nothing, and
+    // the user has no way to know it is pointless — the label promises what it cannot deliver.
+    const b = publishButton('up_to_date', NOW - 60_000, NOW);
+    expect(b.label).toBe('');
+    expect(b.note).toContain('latest build');      // the "when" line still earns its place
+  });
+
+  it('never published ⇒ still offers the first publish, or the screen is a dead end', () => {
+    expect(publishButton('never_published', null, NOW).label).toBe('Publish now');
+  });
+
+  it('unmeasurable ⇒ a plain Publish that claims nothing', () => {
+    expect(publishButton('unknown', null, NOW).label).toBe('Publish');
+    expect(publishButton('unknown', null, NOW).note).toBe('');
   });
 });

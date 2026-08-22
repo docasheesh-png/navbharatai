@@ -38793,3 +38793,85 @@ debc468c, where a command-STRING change made every command look like a dev-serve
 change, its own tests.
 
 Gate: both tsc green, 17,344 tests / 1,380 files green, CI green before merge.
+## 2026-08-22 — ₹70,000/year found and killed: a VM in a project that was not ours
+
+**Admin: "yeh kharcha kaha ho raha hai? manage karo."** July's GCP bill was ₹20,549, with Compute
+Engine at ₹7,466 (36%) — the largest line, on a product the app does not use.
+
+**FIRST, WHAT THE CODE COULD PROVE.** NavBharatAI runs on Cloud Run; its sandboxes run on E2B's own
+cloud, not GCP. A grep for `compute.googleapis` / `instances.insert` / `createInstance` across the
+server found **nothing** — no code path creates a VM. The only VM this repo ever documented is
+`e2b-custom-domain-proxy`, deleted 2026-08-02 at ~₹1,350/month. So ~₹6,000/month was unexplained.
+
+**THE ONE CLICK THAT NAMED IT.** Billing → Reports, grouped by **SKU** instead of Service. The report
+names the resource:
+
+> `E2 Instance Core running in Mumbai` — ₹2,486.76 — Project **My First Project** — `asia-south1`
+
+Not our project at all. "My First Project" is the default one GCP creates. Arithmetic on the usage
+identified the machine without ever seeing it: 992.38 core-hours ÷ 504 hours (21 days) = **1.97 vCPU
+running continuously**, and 3,969.51 GiB-hours ÷ 504 = **7.88 GB RAM** — an `e2-standard-2` at 100%
+uptime, plus a 20 GB balanced PD.
+
+**It was `bharat-ai` in `asia-south1-a`. The admin deleted it; the disk and the external IP went with
+it (both verified absent afterwards).**
+
+| | |
+|---|---|
+| 21 days of August | ₹4,049 — **54% of the entire month's bill** |
+| Per month | **~₹5,978** |
+| Per year | **~₹70,381** |
+
+**THE TWO EARLIER COST FIXES ARE MEASURABLY WORKING**, visible in the same report's % change column:
+**Artifact Registry Storage ↓77%** and **Cloud Build time ↓72%**.
+
+**MY OWN CONTRIBUTION, STATED PLAINLY (rule 3).** Every merge to `main` triggers a full Docker build +
+Cloud Run deploy. Today I merged 7 PRs — 7 builds, ~₹280 in one day, at a Cloud Build line of
+₹3,556/month. That is my working style, not a platform defect. **Going forward: batch merges** rather
+than landing each small fix on its own. This entry is itself being held back for that reason — a
+docs-only deploy is exactly the waste just identified, so it rides with the next real change.
+
+**Worth watching, not yet worth acting on:** Vertex AI / Gemini 2.5 Pro is ₹1,405 across three SKUs
+and climbing fast (+268% / +150% / +362%). That is REAL usage, not waste — but at this growth rate it
+becomes the next largest line, and it is the one to profile when it does.
+
+**RECOMMENDED, NOT YET DONE (admin's call):** set `ignoredFiles` on the Cloud Build trigger for
+`**/*.md`. Rebuilding and redeploying the whole app because a document changed is pure cost.
+
+## 2026-08-22 — The domain screen's ending: one Check button, and the two controls that belong there
+
+Four asks from the admin's screenshot, all on the connect-your-own-domain screen.
+
+**1. The Check button was in the wrong place, and the admin was right about why.** There were TWO.
+The prominent one sat ABOVE the DNS records — so the first button a user meets asks whether records
+they have not added yet have propagated. It can only ever say no. The one that survives sits directly
+UNDER the records, which is the only moment pressing it can be true, and it is now the **bold green
+primary** it should always have been (it is the whole point of the screen while a domain is pending).
+`domainConnectStage.test.ts` pinned `toBe(2)`; updated to `toBe(1)` with the reasoning recorded — the
+rule that test actually protects, ONE implementation of the action, is unchanged.
+
+**2. "Update" now appears ONLY when the app was really edited** (admin: "jab user app edit kare SIRF
+tab dikhe"). Renamed from "Publish update", and the `up_to_date` case now returns an EMPTY label,
+which the caller reads as "render no button". A quiet "Republish" on a current site invites a build
+that changes nothing, and the user has no way to know it is pointless — the label promises what it
+cannot deliver. The "Last published 4 minutes ago" line stays: *when* it went out is genuinely useful.
+`never_published` still offers "Publish now", or the screen would be a dead end.
+
+**3. Unpublish, behind a TYPED confirmation** (admin: "user ko bataya jaye website delete ho jayegi,
+capital me DELETE type kiya jaye tab hi unpublish ho"). The consequence is stated in plain English
+BEFORE the field, and `unpublishArmed` matches the word EXACTLY — capitals included.
+
+🔒 **Why typing and not a second tap:** taking a live site down is irreversible from every visitor's
+side — every link anyone has shared dies the instant it runs. A confirm dialog is dismissed by
+reflex; a specific word in a specific case cannot be typed by accident. `delete`, `Delete`, `DELET`
+and `DELETE!` are all refused; only surrounding whitespace is forgiven, because that is a real paste
+artefact. It is offered ONLY for a genuinely live app, sits LAST (after Visit — destroying something
+belongs at the end of a screen, never beside the thing you came to do), and drives the SAME takedown
+the published-apps list uses, so the two can never drift apart.
+
+**4. Two reversals of my own earlier tests, both deliberate and documented at the site.** The
+'Publish update' and 'Republish' assertions were mine from this morning; the admin has since named
+exactly two controls for a connected domain. Recorded as *behaviour changed on request*, never as a
+test bent to match code.
+
+Gate: both tsc + build + FULL vitest — 17,319 passing, 1 skipped. AppKnowledgeBase updated.

@@ -397,3 +397,68 @@ describe('Android resource linking (the real @drawable/splash failure, autopsy 2
     expect(repairFiles(d, { [APK_PATH]: APK_WORKFLOW }, APK_PATH, { workflow: APK_WORKFLOW })).toBeNull();
   });
 });
+
+/**
+ * THE REAL RUN (admin report 2026-08-22, mitrify — GitHub run 32569998304).
+ *
+ * The app compiled. GitHub's own job summary said so in as many words: "Your app compiled correctly.
+ * It stopped while creating the Android project around it." NavBharatAI's screen, reading the same
+ * run, told the user "Your app itself did not compile, so it could not be packaged. NavBharatAI could
+ * not fix this one on its own."
+ *
+ * Two of our own surfaces contradicting each other, and the one the user reads was the wrong one — plus
+ * it closed the only door they had. Two causes, both ours:
+ *   1. the workflow stamped NBAI_FAILED_STAGE=webbuild from inside the CAPACITOR step, so the marker
+ *      this module treats as ground truth named a stage that had already succeeded; and
+ *   2. our own early guard prints a friendlier message than Capacitor's, which stopped Capacitor's
+ *      wording from ever appearing — making the correct, already-written WEB_DIR_MISSING rule
+ *      unreachable and dropping the log into UNKNOWN.
+ */
+describe('the mitrify run: app compiled, wrapper looked in the wrong folder', () => {
+  const REAL_LOG = [
+    'Build the web app',
+    'vite v5.4.10 building for production...',
+    '✓ built in 6.42s',
+    'Generate and sync the Android project',
+    'NBAI_FAILED_STAGE=webbuild',
+    'Error: Your app built, but dist/index.html was not produced — there is no page to put inside the '
+      + 'Android app. Make sure your web build outputs to the folder named as webDir (dist) in capacitor.config.',
+    'Error: Process completed with exit code 1.',
+  ].join('\n');
+
+  it('never again tells the user their working app did not compile', () => {
+    const r = classifyBuildFailure(REAL_LOG);
+    expect(r.summary).not.toMatch(/did not compile/i);
+    expect(r.code).not.toBe('UNKNOWN');
+  });
+
+  it('names it as what it is, and as something NavBharatAI can fix', () => {
+    const r = classifyBuildFailure(REAL_LOG);
+    expect(r.code).toBe('WEB_DIR_MISSING');
+    expect(r.autoFixable).toBe(true);
+    expect(r.needs).toContain('capacitor.config.ts');
+  });
+
+  it('survives a STALE stage marker — the wording decides, not the marker that lied', () => {
+    // Repositories already carrying the old workflow still print webbuild here. The classification
+    // must not depend on the very field that was wrong.
+    expect(classifyBuildFailure(REAL_LOG).code).toBe('WEB_DIR_MISSING');
+    expect(classifyBuildFailure(REAL_LOG.replace('=webbuild', '=capacitor')).code).toBe('WEB_DIR_MISSING');
+  });
+
+  it('matches the CURRENT workflow’s wording too, not only the old message', () => {
+    const current = 'NBAI_FAILED_STAGE=capacitor\nError: Your app compiled, but it produced no web page '
+      + 'to wrap: no index.html was found in "dist" or in any of the usual build folders.';
+    const r = classifyBuildFailure(current);
+    expect(r.code).toBe('WEB_DIR_MISSING');
+    expect(r.summary).not.toMatch(/did not compile/i);
+  });
+
+  it('a genuinely broken app is STILL reported as a broken app', () => {
+    // The fix must not turn every failure into "wrong folder" — that would be the opposite lie.
+    const broken = 'NBAI_FAILED_STAGE=webbuild\nerror during build:\nRollupError: Could not resolve "./Missing" from "src/App.tsx"';
+    const r = classifyBuildFailure(broken);
+    expect(r.code).toBe('APP_CODE_BUILD_FAILED');
+    expect(r.autoFixable).toBe(false);
+  });
+});

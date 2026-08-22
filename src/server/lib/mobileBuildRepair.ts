@@ -199,11 +199,22 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
   }
 
   // Capacitor names the directory it wanted, which is exactly what the repair needs.
+  //
+  // ⚠️ OUR OWN GUARD USED TO HIDE THIS RULE (admin report 2026-08-22, mitrify). The workflow checks for
+  // index.html BEFORE running cap sync, so that it can say something friendlier than Capacitor's path
+  // error — and in doing so it stopped Capacitor's message from ever being printed, which is the exact
+  // string this rule keys on. The correct, already-written classification became unreachable, the log
+  // fell through to UNKNOWN, and the user was told "Your app itself did not compile" about an app that
+  // GitHub's own summary said compiled correctly. So the guard's OWN wording is matched here too: one
+  // rule, one repair, whichever of the two messages the log happens to carry.
   const webDirMatch = log.match(/Could not find the web assets directory:?\s*\.?\/?([\w.\-/]+)/i);
-  if (webDirMatch || /web assets directory.*(does not exist|not found)/i.test(log)) {
+  const ourGuard = /index\.html was not produced|no web page to wrap|no index\.html was found/i.test(log);
+  if (webDirMatch || ourGuard || /web assets directory.*(does not exist|not found)/i.test(log)) {
     return {
       code: 'WEB_DIR_MISSING',
-      summary: 'The packager looked for the built app in the wrong folder.',
+      // Says what is true: the app is fine, we were looking in the wrong place. The old wording blamed
+      // the app, and a user who is told their working app does not compile has nowhere to go.
+      summary: 'Your app compiled fine — the packager was looking for the finished page in the wrong folder.',
       autoFixable: true,
       needs: ['capacitor.config.ts', 'package.json'],
       detail: webDirMatch ? { expected: webDirMatch[1].replace(/\/+$/, '') } : undefined,

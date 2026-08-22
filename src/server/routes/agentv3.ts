@@ -320,7 +320,7 @@ import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { loadUserVaultSecrets } from '../lib/secrets';
-import { secretRequestPrompt } from '../AgentV3/secretRequest';
+import { secretRequestPrompt, postBuildKeyAsks, postBuildKeyPrompt } from '../AgentV3/secretRequest';
 import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
 import { userStorageContext } from '../AgentV3/userStorageContext';
 import { userAuthContext } from '../AgentV3/userAuthContext';
@@ -14470,6 +14470,26 @@ export function registerAgentV3Routes(app: Express): void {
               phase: 'build', severity: 'info', code: 'APP_REQUIREMENTS_SURFACED', autoResolved: false,
               message: `Told the user which of their own credentials this app still needs: ${missing.map((r) => r.id).join(', ')}`.slice(0, 400),
             });
+          }
+          // …AND ASK, DON'T JUST TELL (admin 2026-08-22: "agar keys ki need hai to user se maang kyun
+          // nahi lete? Last message 'app complete' nahi — 'app ban gaya, yeh keys chahiye, yahan fill
+          // karo' hona chahiye"). The localized notice above points the user at Settings; this emits
+          // the SAME ask card the mid-build `request_secrets` tool uses, as the build's CLOSING act —
+          // fields ready, values saved straight to the encrypted vault, never up this stream.
+          // DETERMINISTIC, where the tool call depends on the model choosing to ask (and on real
+          // Mitrify builds it finished without asking — the exact reported failure).
+          //
+          // Emitted BEFORE the terminal `result`, which deliberately does NOT clear pendingSecrets
+          // (only `done`, the failure path, clears it) — so the card is the last thing standing.
+          // The `postbuild-` callId marks it non-blocking: nothing awaits it, `/respond` for a gone
+          // waiter is a harmless no-op, and a key saved now is merged into `.env` by the next boot's
+          // ensureBootEnv (the wake-path fix shipped alongside this).
+          if (userId) {
+            const savedNames = Object.keys(vaultSecrets ?? {});
+            const asks = postBuildKeyAsks(missing, savedNames);
+            if (asks.length > 0) {
+              emit({ type: 'secret_request', agent: 'architect', callId: `postbuild-${buildStartedAt}`, prompt: postBuildKeyPrompt(asks.length), secrets: asks, ts: Date.now() });
+            }
           }
         } catch {
           // A notice is never worth failing a successful build over — stay silent and ship the app.

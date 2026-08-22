@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   isUsableEnvName, isPlatformSecret, planSecretRequest, secretRequestPrompt, secretRequestResult,
+  postBuildKeyAsks, postBuildKeyPrompt, POST_BUILD_ASK_MAX,
 } from './secretRequest';
 
 /**
@@ -128,5 +129,74 @@ describe('THE VALUE NEVER PASSES THROUGH HERE', () => {
     const code = source.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, ''); // strip commentary
     expect(code).not.toMatch(/\bvalue\s*[:?]/);
     expect(code).not.toMatch(/secretValue/);
+  });
+});
+
+/**
+ * THE POST-BUILD ASK (admin 2026-08-22): "AI ka last message 'app complete' nahi hona chahiye —
+ * 'app ban gaya hai, par yeh yeh keys chahiye, yahan fill karo, nahi hai to main guide karunga'."
+ *
+ * The mid-build ask fires only when the MODEL chooses to call the tool — and on real Mitrify builds it
+ * finished without asking, which is the exact reported failure. This half is deterministic: the same
+ * requirements analysis the summary notice already uses becomes the closing ask CARD.
+ */
+describe('postBuildKeyAsks — the deterministic closing ask', () => {
+  const req = (over: Partial<{ label: string; envVars: string[]; matchedEnvVars: string[] }>) => ({
+    label: 'Payments (Razorpay)', envVars: ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET'], matchedEnvVars: [], ...over,
+  });
+
+  it('asks for the keys a detected requirement needs, with the app-is-built framing', () => {
+    const asks = postBuildKeyAsks([req({})], []);
+    expect(asks.map((a) => a.name)).toEqual(['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET']);
+    expect(asks[0].why).toContain('Payments (Razorpay)');
+    expect(asks[0].why).toContain('Your app is built');
+  });
+
+  it('🔒 the names the app\'s OWN code reads beat the catalogue list', () => {
+    // A service can be satisfied by more than one provider; asking a Mapbox user for a Google key
+    // teaches them to paste keys that do nothing.
+    const asks = postBuildKeyAsks([req({ label: 'Maps', envVars: ['GOOGLE_MAPS_API_KEY', 'MAPBOX_TOKEN'], matchedEnvVars: ['MAPBOX_TOKEN'] })], []);
+    expect(asks.map((a) => a.name)).toEqual(['MAPBOX_TOKEN']);
+  });
+
+  it('🔒 a key the user already saved is never asked for again', () => {
+    const asks = postBuildKeyAsks([req({})], ['RAZORPAY_KEY_ID']);
+    expect(asks.map((a) => a.name)).toEqual(['RAZORPAY_KEY_SECRET']);
+  });
+
+  it('🔒 inherits every mid-build guard — platform keys and junk names never reach the card', () => {
+    const asks = postBuildKeyAsks([
+      req({ label: 'AI', envVars: ['ANTHROPIC_API_KEY'], matchedEnvVars: [] }),
+      req({ label: 'Weird', envVars: ['not a name!'], matchedEnvVars: [] }),
+    ], []);
+    expect(asks).toEqual([]);
+  });
+
+  it('stays a form, not a wall — capped, with the rest reachable via the text notice', () => {
+    const many = Array.from({ length: 10 }, (_, i) => req({ label: `Svc${i}`, envVars: [`SVC${i}_KEY`], matchedEnvVars: [] }));
+    expect(postBuildKeyAsks(many, []).length).toBe(POST_BUILD_ASK_MAX);
+  });
+
+  it('nothing missing ⇒ no card at all', () => {
+    expect(postBuildKeyAsks([], [])).toEqual([]);
+    expect(postBuildKeyAsks(null, null)).toEqual([]);
+  });
+});
+
+describe('postBuildKeyPrompt — "done" and "needs keys" are said together, honestly', () => {
+  it('leads with the app being BUILT — this must not make a finished app sound unfinished', () => {
+    expect(postBuildKeyPrompt(2)).toMatch(/^Your app is built\./);
+  });
+
+  it('is honest about timing: wired at the next start, not by magic into the running process', () => {
+    expect(postBuildKeyPrompt(1)).toContain('next time your app starts');
+  });
+
+  it('offers the guide path in the same breath', () => {
+    expect(postBuildKeyPrompt(1)).toContain('Guide me');
+  });
+
+  it('zero keys ⇒ empty, never a card with nothing to fill', () => {
+    expect(postBuildKeyPrompt(0)).toBe('');
   });
 });

@@ -34,6 +34,7 @@
 // testable without a network.
 
 import { normalizePhone, maskPhone } from '../../lib/phoneNumber';
+import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 
 /** The slice of the admin Auth SDK this module uses — structural, so tests need no SDK. */
 export interface PhoneLookupAuth {
@@ -136,6 +137,39 @@ export async function hasVerifiedPhoneWith(
 /** For a log line that identifies the number without printing it. Pure. */
 export function phoneForLog(raw: string | null | undefined): string {
   return maskPhone(normalizePhone(raw) ?? raw ?? '');
+}
+
+/**
+ * SHOULD THIS IMPORT BE BLOCKED FOR A MISSING VERIFIED NUMBER? The ONE place that decides.
+ *
+ * 🔒 ROOT CAUSE (admin, 2026-08-22, locked out of their own product): the gate shipped without the
+ * free-list exemption that EVERY sibling gate in this codebase has. The hosting-plan gate reads
+ * `!isAgentV3FreeUser(uid, email)`; the billing gate does; the build gate does. This one did not, so
+ * the admin — whose account exists precisely to test the product — was refused at their own import
+ * and could not verify the day's work at all.
+ *
+ * 🔒 WHY A HELPER AND NOT `&& !isAgentV3FreeUser(...)` AT EACH CALL SITE. That is exactly how this bug
+ * happened: a rule that must be remembered at every gate is a rule that will eventually be forgotten
+ * at one. There are already two call sites (the archive upload and the build route) and the next gate
+ * will make three. Deciding it here means a new call site cannot get it wrong by omission, and the
+ * fourth absolute rule's "fix the class, not the instance" is satisfied by construction.
+ *
+ * ⚠️ THE EXEMPTION NEEDS THE **EMAIL**, NOT JUST THE UID. `AGENTV3_FREE_LIST` holds addresses, so a
+ * caller that resolves only a uid silently fails to match and the admin stays blocked — the failure is
+ * invisible, because "not on the list" and "we never checked the list properly" look identical from
+ * here. Both call sites therefore resolve the VERIFIED identity (uid + email), never a claimed one.
+ *
+ * Order matters and is deliberate: the kill switch first (cheapest, and an operator turning it off
+ * must win), the free list second (no directory call for an admin), the real lookup last.
+ */
+export async function importBlockedForPhone(
+  identity: { uid: string | null; email: string | null } | null,
+  getAuth: () => Promise<PhoneLookupAuth | null>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<boolean> {
+  if (!importPhoneGateEnabled(env)) return false;
+  if (isAgentV3FreeUser(identity?.uid ?? null, identity?.email ?? null)) return false;
+  return !(await hasVerifiedPhoneWith(identity?.uid ?? null, getAuth));
 }
 
 /**

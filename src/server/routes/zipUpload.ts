@@ -21,8 +21,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { verifyFirebaseToken, workspaceRateLimiter, zipChunkRateLimiter } from '../lib/authMiddleware';
-import { hasVerifiedPhoneWith, IMPORT_NEEDS_PHONE_MESSAGE, importPhoneGateEnabled } from '../lib/phoneGate';
+import { verifyFirebaseToken, verifyFirebaseIdentity, workspaceRateLimiter, zipChunkRateLimiter } from '../lib/authMiddleware';
+import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 // STREAMING extraction (admin 2026-08-04, "5 GB, real VS Code jaisa"): the archive is read from DISK
 // entry-by-entry — never `readFileSync` + jszip, which held the WHOLE archive in memory and made even
@@ -119,7 +119,10 @@ export function registerZipUploadRoutes(app: Express): void {
     // unverified import too, but only once the archive has already been uploaded — and an import can
     // be gigabytes. Refusing at `begin` means an unverified account cannot spend our bandwidth or disk
     // at all. Same helper, same fail-closed posture, so the two gates cannot disagree.
-    if (importPhoneGateEnabled() && !(await hasVerifiedPhoneWith(uid, getAdminAuthForPhone))) {
+    // ⚠️ The EMAIL matters here, not just the uid: the free list holds addresses, so checking a uid
+    // alone silently never matches and an exempt account stays blocked — a failure that looks
+    // identical to "not on the list". So the verified identity is resolved, never a claimed one.
+    if (await importBlockedForPhone(await verifyFirebaseIdentity(req), getAdminAuthForPhone)) {
       res.status(403).json({ error: IMPORT_NEEDS_PHONE_MESSAGE, code: 'phone-verification-required' });
       return;
     }

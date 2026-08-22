@@ -224,7 +224,7 @@ import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailP
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
-import { hasVerifiedPhoneWith, IMPORT_NEEDS_PHONE_MESSAGE, importPhoneGateEnabled } from '../lib/phoneGate';
+import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
@@ -7128,9 +7128,11 @@ export function registerAgentV3Routes(app: Express): void {
      * FAILS CLOSED (see hasVerifiedPhoneWith): a directory we cannot read means "not verified", costing
      * the user one OTP they can complete immediately — never a free import for an unverified account.
      */
-    if (hasImportIntent && importPhoneGateEnabled()) {
-      const importerUid = await verifyFirebaseToken(req);
-      if (!(await hasVerifiedPhoneWith(importerUid, getAdminAuthForPhone))) {
+    if (hasImportIntent) {
+      // The free-list exemption lives inside importBlockedForPhone, so this gate and the archive-upload
+      // gate cannot disagree, and a third one cannot be added without it. It needs the verified EMAIL,
+      // not just the uid — the free list holds addresses.
+      if (await importBlockedForPhone(await verifyFirebaseIdentity(req), getAdminAuthForPhone)) {
         send({ type: 'error', message: IMPORT_NEEDS_PHONE_MESSAGE, code: 'phone-verification-required', ts: Date.now() } as never);
         send({ type: 'result', ok: false, summary: IMPORT_NEEDS_PHONE_MESSAGE, steps: 0, billedUsd: 0, billedInr: 0 });
         res.end();

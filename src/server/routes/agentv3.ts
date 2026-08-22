@@ -66,6 +66,8 @@ import {
   githubStorageActive,
   githubPrMode,
   mergeViaPullRequest,
+  readReviewRound,
+  replyToReviewRound,
   planRevert,
   repoNameForProject,
   readableAppNameForRepo,
@@ -4280,6 +4282,112 @@ export function registerAgentV3Routes(app: Express): void {
         ci: flow.ci,
         base: access.defaultBranch,
         note: flow.note || (flow.merged ? `Merged into ${access.defaultBranch}.` : 'Nothing to merge yet — make an edit first.'),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // READ REVIEW FEEDBACK (ROADMAP D3, the trigger): a shipped PR that did NOT merge is where a human
+  // reviewer's notes live, and until now nothing in NavBharatAI could see them — the pieces existed
+  // (triage, prompt, replies) with no way to start them. This is that way in: the user presses a
+  // button on their own open PR and gets back what the reviewer actually asked for, in plain terms.
+  //
+  // 🔒 SAME AUTHORITY AS /ship, DELIBERATELY. The user's own GitHub token is the only credential, and
+  // write access to that exact repo is verified before a single comment is read — so this can never
+  // be pointed at somebody else's repository, and the check is the same one shipping already passes.
+  //
+  // 🔒 READ-ONLY. It fetches and triages; it changes no code, posts nothing, and merges nothing. The
+  // returned `prompt` is an INSTRUCTION FOR THE BUILDER that the user chooses to run — reviewer text
+  // is quoted into it, never executed as a directive (see reviewFeedbackPrompt).
+  app.post('/api/agentv3/review', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    if (!ownRepoStorageEnabled()) {
+      res.status(400).json({ error: 'Reading review feedback needs own-repo storage, which is not enabled yet.' });
+      return;
+    }
+    const repo = typeof req.body?.repo === 'string' ? req.body.repo.trim() : '';
+    const token = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
+    const prNumber = typeof req.body?.prNumber === 'number' ? req.body.prNumber : 0;
+    if (!repo || !token || !prNumber) {
+      res.status(400).json({ error: 'Sign in with GitHub and open a pull request before reading its review.' });
+      return;
+    }
+    try {
+      const client = new UserGitHubClient(token);
+      const access = await client.getRepoAccess(repo);
+      if (!access.exists || !access.canPush) {
+        res.status(403).json({ error: 'You do not have write access to that repository (or it no longer exists).' });
+        return;
+      }
+      // The token's OWN login is what marks a comment as ours. Without it, our previous replies would
+      // be triaged as fresh reviewer feedback and the loop would answer itself forever.
+      const selfLogin = await client.getLogin();
+      const round = await readReviewRound(client, repo, prNumber, selfLogin);
+      res.json({
+        prNumber,
+        summary: round.summary,
+        prompt: round.prompt,
+        actionable: round.triage.actionable.map((c) => ({ id: c.id, author: c.author, path: c.path ?? null, line: c.line ?? null, body: c.body })),
+        skipped: round.triage.skipped.map((s) => ({ id: s.id, why: s.why })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // REPLY TO A REVIEW ROUND (ROADMAP D3, closing the loop): tell the reviewer, on their own threads,
+  // what actually happened to each note we acted on.
+  //
+  // 🔒 THE ROUND IS RE-READ SERVER-SIDE, NEVER TAKEN FROM THE REQUEST. A client-supplied list of
+  // comment ids would let a caller post NavBharatAI-branded replies onto arbitrary threads; re-reading
+  // means we can only ever reply to comments the triage itself selected, on a repo the caller has
+  // already proven write access to.
+  //
+  // 🔒 HONEST BOUNDARY, STATED RATHER THAN HIDDEN: `ok` is the client's report of how the build went,
+  // and the server does not independently verify it. That is acceptable ONLY because this is the
+  // user's own repository and their own reviewer — they are the authority on their own pull request,
+  // and the failure branch is wired so a failed build genuinely says so instead of claiming success.
+  app.post('/api/agentv3/review/reply', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    if (!ownRepoStorageEnabled()) {
+      res.status(400).json({ error: 'Replying to a review needs own-repo storage, which is not enabled yet.' });
+      return;
+    }
+    const repo = typeof req.body?.repo === 'string' ? req.body.repo.trim() : '';
+    const token = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
+    const prNumber = typeof req.body?.prNumber === 'number' ? req.body.prNumber : 0;
+    if (!repo || !token || !prNumber) {
+      res.status(400).json({ error: 'Sign in with GitHub and open a pull request before replying to its review.' });
+      return;
+    }
+    const ok = req.body?.ok === true;
+    const summary = typeof req.body?.summary === 'string' ? req.body.summary.slice(0, 2000) : '';
+    try {
+      const client = new UserGitHubClient(token);
+      const access = await client.getRepoAccess(repo);
+      if (!access.exists || !access.canPush) {
+        res.status(403).json({ error: 'You do not have write access to that repository (or it no longer exists).' });
+        return;
+      }
+      const selfLogin = await client.getLogin();
+      const round = await readReviewRound(client, repo, prNumber, selfLogin);
+      const replied = await replyToReviewRound(client, repo, prNumber, round, { ok, summary });
+      res.json({
+        replied,
+        note: replied > 0
+          ? `Replied to ${replied} review ${replied === 1 ? 'comment' : 'comments'} on pull request #${prNumber}.`
+          : 'There was nothing to reply to on that pull request.',
       });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });

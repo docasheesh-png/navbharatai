@@ -11,7 +11,7 @@ const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ defaul
 const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
 import {
   Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen,
-  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye,
+  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare,
   Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
@@ -116,13 +116,28 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
   const [shipping, setShipping] = useState(false);
   const [reverting, setReverting] = useState(false);
   const [shipNote, setShipNote] = useState<string | null>(null);
+  // THE OPEN PULL REQUEST A SHIP LEFT BEHIND (ROADMAP D3). A ship that does NOT merge — red CI, or a
+  // human who wants changes — leaves a real PR open, and that is exactly where a reviewer's notes
+  // live. Remembering its number is what makes reading the review possible at all: without it there
+  // is nothing to point the request at, which is why the D3 machinery sat unreachable until now.
+  const [openPr, setOpenPr] = useState<{ number: number; url?: string } | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  // 🔒 THE GUARD THAT KEEPS THE REPLY HONEST. Telling a reviewer "addressed in the latest commit"
+  // when nothing was built since their comment is precisely the fake success this codebase exists to
+  // root out — and it is the easy mistake here, because after reading a review the panel LOOKS ready
+  // to reply. So the reply is offered only after a build has genuinely STARTED and FINISHED since the
+  // review was read, and it carries that build's real outcome rather than an optimistic assumption.
+  // `null` ⇒ no build has settled since the review ⇒ there is nothing truthful to say yet.
+  const [reviewPending, setReviewPending] = useState(false);
+  const [reviewOutcome, setReviewOutcome] = useState<{ ok: boolean } | null>(null);
+  const [replyBusy, setReplyBusy] = useState(false);
   // UNSEND (Slice 2) — true while a take-back purge is in flight (disables the button, prevents double-fire).
   const [unsending, setUnsending] = useState(false);
   // AP-3 (cross-restart resume) — a reopened build whose durable status is still 'running' with no live
@@ -190,10 +205,64 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     try {
       const r = await shipToMain({ repo: state.ownRepo.repo, userId, email, githubToken: ghToken() });
       setShipNote(r.note);
+      // A PR that MERGED is finished — there is nothing left to review, so the button must disappear
+      // rather than linger pointing at a closed thread. One that stayed open is the D3 entry point.
+      setOpenPr(r.ok && !r.merged && r.prNumber ? { number: r.prNumber, url: r.prUrl } : null);
     } finally {
       setShipping(false);
     }
   }, [state.ownRepo, shipping, shipToMain, userId, email]);
+  // READ REVIEW FEEDBACK (ROADMAP D3): pull the reviewer's notes off the open PR and put them in the
+  // composer as the next build instruction — the user reads them and presses send, so a human decides
+  // what gets built. Nothing is auto-applied: reviewer text is input, never a command.
+  const doReadReview = useCallback(async () => {
+    if (!state.ownRepo || !openPr || reviewBusy) return;
+    setReviewBusy(true);
+    setShipNote(null);
+    try {
+      const r = await readReviewFeedback({ repo: state.ownRepo.repo, prNumber: openPr.number, userId, email, githubToken: ghToken() });
+      // Honest in every branch: a failed read says so, and "nothing to act on" is a real answer that
+      // must NOT look like a failure — an empty review is the common case on a healthy PR.
+      if (!r.ok) { setShipNote(r.note); return; }
+      if (r.prompt) setPrompt(r.prompt);
+      setShipNote(r.note || (r.actionable.length === 0 ? 'No review comments ask for a change yet.' : ''));
+      // Arm the honesty guard ONLY when there is genuinely something to address. With no actionable
+      // comment there is nothing a build could be said to have fixed, so no reply is ever offered.
+      setReviewPending(r.actionable.length > 0);
+      setReviewOutcome(null);
+    } finally {
+      setReviewBusy(false);
+    }
+  }, [state.ownRepo, openPr, reviewBusy, readReviewFeedback, userId, email]);
+  // Watch for a build that STARTS and then SETTLES while a review is outstanding — that transition is
+  // the only evidence that entitles us to tell the reviewer anything, and its verdict is what we tell
+  // them. A build that errored replies "I could not complete this change", not silence and not success.
+  const buildWasRunning = useRef(false);
+  useEffect(() => {
+    // 🔒 THE FLAG IS ARMED ONLY WHILE A REVIEW IS OUTSTANDING, AND ONLY BY A RUNNING BUILD. An
+    // earlier draft armed it from any past build and then checked `reviewPending` — which fires the
+    // moment the review is READ, before a single line has been rebuilt, and would have offered to
+    // tell the reviewer "addressed" about work that never happened. Clearing first makes the only
+    // path to an outcome the real one: pending → running → settled.
+    if (!reviewPending) { buildWasRunning.current = false; return; }
+    if (running) { buildWasRunning.current = true; return; }
+    if (buildWasRunning.current) {
+      buildWasRunning.current = false;
+      setReviewOutcome({ ok: !error });
+    }
+  }, [running, error, reviewPending]);
+  const doReplyToReview = useCallback(async () => {
+    if (!state.ownRepo || !openPr || !reviewOutcome || replyBusy) return;
+    setReplyBusy(true);
+    try {
+      const r = await replyToReview({ repo: state.ownRepo.repo, prNumber: openPr.number, ok: reviewOutcome.ok, userId, email, githubToken: ghToken() });
+      setShipNote(r.note);
+      // Said once. Leaving the button armed would invite repeating the same reply on every thread.
+      if (r.ok) { setReviewPending(false); setReviewOutcome(null); }
+    } finally {
+      setReplyBusy(false);
+    }
+  }, [state.ownRepo, openPr, reviewOutcome, replyBusy, replyToReview, userId, email]);
   const doRevertLastMerge = useCallback(async () => {
     if (!state.ownRepo || reverting) return;
     if (!window.confirm(`Revert the last change on ‘${state.ownRepo.baseBranch}’? This restores it to the previous state as a new commit (undoable).`)) return;
@@ -4137,6 +4206,39 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <RotateCcw className="w-3.5 h-3.5" />
                   {reverting ? 'Reverting…' : 'Revert last'}
                 </button>
+                {/* READ REVIEW FEEDBACK (ROADMAP D3). Shown ONLY when a ship left a real pull request
+                    open — that is the single situation where a reviewer's notes can exist. Offering it
+                    on a merged (or never-opened) PR would be a button with nothing behind it, which is
+                    the dead control this codebase keeps deleting. */}
+                {openPr && (
+                  <button
+                    type="button"
+                    onClick={doReadReview}
+                    disabled={shipping || reverting || reviewBusy}
+                    title={`Read the review comments on pull request #${openPr.number} and turn them into your next instruction`}
+                    className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium border border-indigo-500/50 text-indigo-200 hover:bg-indigo-500/10 disabled:opacity-50 transition-colors"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    {reviewBusy ? 'Reading…' : `Read review #${openPr.number}`}
+                  </button>
+                )}
+                {/* TELL THE REVIEWER — offered only once a build has actually settled since the review
+                    was read (see reviewOutcome), and it reports THAT build's real verdict. The label
+                    changes with the verdict so the user is never surprised by what gets posted. */}
+                {openPr && reviewOutcome && (
+                  <button
+                    type="button"
+                    onClick={doReplyToReview}
+                    disabled={replyBusy || shipping || reverting}
+                    title={reviewOutcome.ok
+                      ? `Reply on pull request #${openPr.number}: addressed in the latest commit`
+                      : `Reply on pull request #${openPr.number}: this change could not be completed`}
+                    className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-50 transition-colors"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    {replyBusy ? 'Replying…' : reviewOutcome.ok ? 'Tell the reviewer it is done' : 'Tell the reviewer it failed'}
+                  </button>
+                )}
                 <span className="text-[10px] text-zinc-500 truncate">
                   {shipNote ?? `Edits saved on ‘${state.ownRepo.workBranch}’ in ${state.ownRepo.owner}/${state.ownRepo.repo} — your ‘${state.ownRepo.baseBranch}’ is untouched until you ship.`}
                 </span>

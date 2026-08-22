@@ -79,6 +79,10 @@ export interface UseAgentV3Build {
   /** Ship to main (own-repo storage): merge `navbharatai/work` → the repo default via a PR, server-side
    *  merging ONLY on green CI. Returns an honest result to render in-thread. */
   shipToMain: (opts: { repo: string; userId?: string; email?: string; githubToken?: string }) => Promise<ShipResult>;
+  /** Read a human reviewer's notes on the user's open PR, triaged (ROADMAP D3). Read-only. */
+  readReviewFeedback: (opts: { repo: string; prNumber: number; userId?: string; email?: string; githubToken?: string }) => Promise<ReviewResult>;
+  /** Tell the reviewer, on their own threads, what really happened to the notes we acted on. */
+  replyToReview: (opts: { repo: string; prNumber: number; ok: boolean; summary?: string; userId?: string; email?: string; githubToken?: string }) => Promise<{ ok: boolean; replied: number; note: string }>;
   /** Revert the last merge on the repo default branch (own-repo storage). Returns an honest result. */
   revertLastMerge: (opts: { repo: string; userId?: string; email?: string; githubToken?: string }) => Promise<RevertResult>;
   /** Queue executor (FIX #4.3): claim the next queued command (or null); mark the running one complete. */
@@ -158,6 +162,34 @@ export interface ShipResult {
   /** The base branch the work branch was merged into (the repo default). */
   base?: string;
   /** A short, honest, user-facing summary of what happened. */
+  note: string;
+}
+
+/** One reviewer note the triage judged worth acting on (ROADMAP D3). */
+export interface ReviewComment {
+  id: number;
+  author: string;
+  /** The file an inline comment is anchored to — null for a conversation comment, never invented. */
+  path: string | null;
+  line: number | null;
+  body: string;
+}
+
+/** Result of "Read review feedback" — what a human reviewer asked for on the user's open PR. */
+export interface ReviewResult {
+  /** The request reached GitHub. */
+  ok: boolean;
+  prNumber?: number;
+  /** Comments worth acting on. Empty is a real, common answer, not a failure. */
+  actionable: ReviewComment[];
+  /** What was deliberately NOT acted on, each with its honest reason — surfaced, never hidden. */
+  skipped: Array<{ id: number; why: string }>;
+  /**
+   * The builder instruction derived from the actionable comments — '' when there is nothing to do.
+   * Reviewer text is QUOTED into this, never executed as a directive.
+   */
+  prompt: string;
+  /** One honest line for the user, including the skipped count. */
   note: string;
 }
 
@@ -856,6 +888,51 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
+  // READ REVIEW FEEDBACK (ROADMAP D3): fetch and triage a human reviewer's notes on the user's open
+  // PR. Read-only — it changes nothing, posts nothing, and merges nothing; the returned `prompt` is
+  // something the USER chooses to run as their next build instruction.
+  const readReviewFeedback = useCallback(async (opts: { repo: string; prNumber: number; userId?: string; email?: string; githubToken?: string }): Promise<ReviewResult> => {
+    const empty = { actionable: [], skipped: [], prompt: '' };
+    try {
+      const res = await fetch('/api/agentv3/review', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ repo: opts.repo, prNumber: opts.prNumber, userId: opts.userId, email: opts.email, githubToken: opts.githubToken }),
+      });
+      const j = await res.json().catch(() => ({}));
+      // 🔒 A FAILED READ IS EMPTY, NOT PARTIAL — mirroring the server. Rendering half a review would
+      // let the user act on notes we never actually saw.
+      if (!res.ok) return { ok: false, ...empty, note: typeof j?.error === 'string' ? j.error : `Could not read the review (HTTP ${res.status}).` };
+      return {
+        ok: true,
+        prNumber: typeof j?.prNumber === 'number' ? j.prNumber : opts.prNumber,
+        actionable: Array.isArray(j?.actionable) ? j.actionable : [],
+        skipped: Array.isArray(j?.skipped) ? j.skipped : [],
+        prompt: typeof j?.prompt === 'string' ? j.prompt : '',
+        note: typeof j?.summary === 'string' ? j.summary : '',
+      };
+    } catch (err) {
+      return { ok: false, ...empty, note: err instanceof Error ? err.message : String(err) };
+    }
+  }, []);
+
+  // REPLY TO THE REVIEW ROUND (ROADMAP D3): post the build's REAL outcome on the reviewer's own
+  // threads. The server re-reads the round itself, so this cannot be aimed at arbitrary comments.
+  const replyToReview = useCallback(async (opts: { repo: string; prNumber: number; ok: boolean; summary?: string; userId?: string; email?: string; githubToken?: string }): Promise<{ ok: boolean; replied: number; note: string }> => {
+    try {
+      const res = await fetch('/api/agentv3/review/reply', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ repo: opts.repo, prNumber: opts.prNumber, ok: opts.ok, summary: opts.summary, userId: opts.userId, email: opts.email, githubToken: opts.githubToken }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, replied: 0, note: typeof j?.error === 'string' ? j.error : `Could not reply (HTTP ${res.status}).` };
+      return { ok: true, replied: typeof j?.replied === 'number' ? j.replied : 0, note: typeof j?.note === 'string' ? j.note : '' };
+    } catch (err) {
+      return { ok: false, replied: 0, note: err instanceof Error ? err.message : String(err) };
+    }
+  }, []);
+
   // REVERT LAST MERGE (own-repo storage, slice 2b): undo the most recent change to the user's default
   // branch (server snapshots it back to the previous state as a new, non-destructive commit). Returns
   // an honest result. Only single-parent (squash-ship) commits are auto-revertible server-side.
@@ -1442,5 +1519,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

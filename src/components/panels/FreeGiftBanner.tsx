@@ -1,5 +1,6 @@
 import React from 'react';
 import { Gift, Sparkles, AlertTriangle } from 'lucide-react';
+import { PhoneBonusCard } from './PhoneBonusCard';
 
 /**
  * The free gift ladder, made visible.
@@ -23,6 +24,11 @@ export interface FreeGift {
   remainingTokens: number;
   exhausted: boolean;
   nextCreditAt: string | null;
+  /** 'v2' = the weekly ladder is retired for this wallet; free credit now comes from verifying a
+   *  phone instead. Absent on every wallet created before that switch, which keeps its ladder. */
+  plan?: string;
+  /** v2 only: wallet tokens a phone verification would add right now. 0 once at the total. */
+  phoneBonusClaimable?: number;
 }
 
 export interface FreeGiftBannerProps {
@@ -30,6 +36,8 @@ export interface FreeGiftBannerProps {
   tokensPerRupee?: number;
   /** Opens the recharge flow — shown once the gift is finished. */
   onRecharge?: () => void;
+  /** Refetch the wallet after a claim lands, so the balance on screen is the real one. */
+  onClaimed?: (grantedTokens: number) => void;
 }
 
 /** "in 3 days" / "tomorrow" / "today" — a date is harder to feel than a distance. */
@@ -42,7 +50,7 @@ export function creditArrivesIn(nextCreditAt: string, now: number = Date.now()):
   return `in ${days} days`;
 }
 
-export const FreeGiftBanner: React.FC<FreeGiftBannerProps> = ({ freeGift, tokensPerRupee = 100, onRecharge }) => {
+export const FreeGiftBanner: React.FC<FreeGiftBannerProps> = ({ freeGift, tokensPerRupee = 100, onRecharge, onClaimed }) => {
   if (!freeGift || !Number.isFinite(freeGift.capTokens) || freeGift.capTokens <= 0) return null;
 
   const rupees = (t: number) => Math.round(t / tokensPerRupee);
@@ -50,6 +58,15 @@ export const FreeGiftBanner: React.FC<FreeGiftBannerProps> = ({ freeGift, tokens
   const isLast = !freeGift.exhausted && freeGift.remainingTokens > 0
     && freeGift.remainingTokens <= freeGift.capTokens - freeGift.giftedTokens
     && freeGift.capTokens - freeGift.giftedTokens <= rupeesToTokens(200, tokensPerRupee);
+
+  // A v2 wallet with credit still to claim gets the claim, not the ladder and not the recharge nag.
+  // Ordering matters: such a wallet reads as `exhausted` in ladder terms (it has had everything the
+  // ladder would give), and pushing "add credit" at someone with ₹250 sitting unclaimed would be
+  // wrong at the exact moment being wrong costs the most.
+  const claimable = freeGift.plan === 'v2' ? Number(freeGift.phoneBonusClaimable ?? 0) : 0;
+  if (claimable > 0) {
+    return <PhoneBonusCard claimableTokens={claimable} tokensPerRupee={tokensPerRupee} onClaimed={onClaimed} />;
+  }
 
   if (freeGift.exhausted) {
     return (

@@ -39249,3 +39249,49 @@ framing, and the wallet showing what is still claimable.
 
 Gate: both `tsc` clean; FULL suite **1345 files / 16869 tests green**. `WALLET_GIFT_V2` unset ⇒
 behaviour byte-identical to today, with not even an extra Firestore read.
+
+## 2026-08-21 — OTP send limits now actually hold (gift plan v2, slice 2/3)
+
+The blocker slice 1 recorded, cleared. `/api/auth/send-otp`'s limits were in-process `Map`s: 30s
+cooldown, 5/hour per phone and per IP. **Cloud Run runs several instances and recycles them**, so
+5/hour was the per-INSTANCE figure — a caller landing on a fresh instance started from zero. That was
+tolerable while an OTP only gated a login; it is not tolerable when one completed verification pays
+₹500.
+
+**Durable buckets added on top** (`consumeDurableRate`, which already existed): `otp_phone`,
+`otp_ip`, and a NEW platform-wide `otp_global`. The in-memory maps stay — the durable limiter is
+deliberately fail-open, so something must still hold when Firestore is unreachable, and a caller
+already over the fast limit never reaches Firestore at all. Consumed BEFORE success is reported,
+because success is what causes the SMS to be sent.
+
+**`otp_global` is the one that caps the actual SMS BILL.** Per-phone and per-IP limits are both
+evaded by rotating the key, and neither bounds what an attacker can make us SPEND in an hour. Default
+500/hour, `OTP_GLOBAL_HOURLY_MAX` to tune without a deploy — generous on purpose, because a ceiling
+set too low blocks real users during a growth spike. Hitting it logs as a PLATFORM event (growth, or
+an attack) and tells the user "verification is busy", never that they are blocked.
+
+**Two further defects found in the same code, both fixed:**
+1. **One handset had TWO buckets.** `cleanPhone` only stripped symbols, so `9876543210` and
+   `+919876543210` were different keys — twice the hourly allowance for one number. It now uses the
+   SAME `normalizePhoneForGift` the gift marker uses, so "the same number" means the same thing to the
+   rate limiter and to the money. (Falls back to the old strip for anything the normalizer cannot
+   resolve — an empty key would put every such caller in one shared bucket.)
+2. **The maps grew forever.** Only the timestamps INSIDE a record were pruned, never the record — so
+   every unique phone and IP ever seen stayed for the life of the instance. `pruneStale` now drops
+   records older than the window, swept only once the map is already large.
+
+**A pre-existing test caught a real behaviour change and is worth recording:**
+`routesAuthOtpValidation.test.ts` called the handler synchronously. Consulting a durable store means
+awaiting, so the handler became async and the success assertion fired before the response was sent.
+The test was RIGHT — it failed loudly instead of passing on a response that had not happened. Fixed by
+awaiting, not by weakening the assertion; the rejection cases still answer before the first await,
+which is why only the success case broke.
+
+Gate: both `tsc` clean; FULL suite **1383 files / 17398 tests green**.
+
+⚠️ Note for the next session: `npm install` was needed after rebasing — `@csstools/postcss-oklab-function`
+arrived with #2522 and slice 1's gate had run on the pre-rebase tree. Re-run the gate after a rebase
+that touches `package.json`; a green gate on an old base is not a green gate.
+
+**Slice 3 (last)** is the UI: the claim moment at zero balance, the honest "₹250 abhi + ₹250 verify
+karke" framing, and the wallet showing what is still claimable.

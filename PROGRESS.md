@@ -39540,3 +39540,55 @@ apply. The admin was told this on each of the four requests, disagreed ("not cop
 as theirs**, along with the one action that resolves it: file for permission.
 
 Gate: both tsc green, 17,554 tests / 1,391 files green, CI green before merge.
+## 2026-08-22 (night) — THE PREVIEW DOOR: the frame never holds a machine's address again (PR pending)
+
+**Admin, after the THIRD vendor-error screenshot in one day:** *"kya yeh problem kabhi fix nahi ho
+sakti? fable 5 se bhi nahi?"* — and then, giving full latitude: *"aap chaho to pura e2b delete kar ke
+wapas se banao. ya isi ko fix karo. ya jo chahe karo."*
+
+**The honest answer to the E2B question (rule 3):** replacing the vendor would have been the wrong
+move. Every sandbox vendor sells mortal machines — pausing and expiring is the COST MODEL, not a
+defect. The recurring failure was ours: **we stored a machine's address (host + port) and treated the
+stored address as the app.** Seven stale-artifact findings this week all reduce to that premise. Three
+fixes today (recipe, URL adoption, proven port) were each correct and each partial, because they kept
+the premise and patched its consequences.
+
+**So the premise is gone.** The live iframe now points at OUR OWN workspace-stable route —
+`/api/agentv3/preview-door` — and the door answers "where is this app right now?" per request:
+
+- no machine → our branded auto-retrying page (never the vendor's)
+- paused machine → the connection RESUMES it; processes survive a pause, so the dev server is
+  typically still up — **the door hit IS the wake-up**
+- machine alive → proven recipe port first, then a real port sweep; the 302 to the vendor host fires
+  ONLY after a probe just saw that port serving
+- nothing serving → branded "starting" page while the client watchdog boots it; the next self-retry
+  walks straight through
+
+**What this buys by construction, not vigilance:** a vendor error page cannot render (the browser only
+leaves our origin after verification); a replaced sandbox needs no adoption (same door URL, new
+resolution); the 3000-vs-5000 loop is dead (no URL is ever believed about a port again — the admin's
+one line, "mitrify port 3000 par hai hi nahi, 5000 par hai", exposed that the port was being read from
+the very URL under suspicion, a self-reinforcing guess).
+
+**Auth:** an iframe navigation cannot carry a header, so the authenticated health endpoint mints a
+short-lived HMAC link (workspace + expiry, `SECRET_ENCRYPTION_KEY`-keyed so any Cloud Run instance
+verifies any instance's mint). The door leaks nothing the raw preview URL would not.
+
+**💰 The bug I caught in MY OWN design before shipping it:** the waiting page self-retried every 6s,
+and a door hit resumes a paused sandbox — so an abandoned open tab would have resurrected the machine
+every few seconds FOREVER, a tug-of-war with the idle reaper billed to NavBharatAI at ~₹7/hour. The
+retry is now CAPPED (~2 min), then stops honestly ("press Wake up"), with a human-driven Try again.
+Test-locked as a money invariant, including the storage-blocked fallback degrading to the safe
+direction (retry once per load, never on its own forever).
+
+Kill switch `AGENTV3_PREVIEW_DOOR=off` stops minting AND answering; the client then falls back to the
+stored-URL behaviour byte-identically (`doorUrl || effectiveUrl`). Registered in CLAUDE.md.
+
+**Ultracode note:** an adversarial review workflow (4 lenses — security, cost/lifecycle, correctness,
+white-label — each finding then attacked by a refuter) ran over the diff before push; its confirmed
+findings and their fixes are recorded in the PR.
+
+**Honest limits:** an app can still die AFTER the 302 while the user browses inside it — full
+elimination would mean proxying all traffic, which breaks HMR/websockets; the watchdog remount closes
+that window to one poll cycle. And none of this is browser-verified from this environment — the next
+real sandbox death is the real test.

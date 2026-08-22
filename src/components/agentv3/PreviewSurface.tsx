@@ -218,6 +218,15 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // server (never a fake time-based bar) + a seconds heartbeat proving the boot is still alive.
   const [diagStage, setDiagStage] = useState<{ label: string; pct: number; seconds: number } | null>(null);
   const [foundUrl, setFoundUrl] = useState<string>('');
+  /**
+   * THE WORKSPACE-STABLE FRAME URL (admin 2026-08-22: "kya yeh problem kabhi fix nahi ho sakti?").
+   *
+   * When the server sends this, the live iframe points at OUR preview door instead of a machine's
+   * address, and "which machine, which port" is resolved on the server at request time — so a dead
+   * sandbox shows NavBharatAI's own reconnecting page and then walks itself back into the app, instead
+   * of framing the vendor's error. Empty (older server / kill switch off) ⇒ exactly today's behavior.
+   */
+  const [doorUrl, setDoorUrl] = useState<string>('');
 
   // A4: do NOT force the view to "live" just because a live URL arrived — that yanked the user off the
   // reliable in-browser render onto an ephemeral sandbox URL (the flakiness source). Live is opt-in via
@@ -229,7 +238,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // Reset the viewport to Auto on a new/changed workspace too — a leftover Mobile/Tablet device frame
   // from the previous app would otherwise misrepresent the next one.
   useEffect(() => {
-    setFoundUrl(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto');
+    setFoundUrl(''); setDoorUrl(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto');
     // The failover guards are per-project state: a new workspace gets a fresh chance to rescue itself.
     failedOverToLive.current = false; userPickedInBrowser.current = false; setFailoverNote('');
   }, [workspaceId]);
@@ -460,7 +469,11 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         const health = await res.json().catch(() => null) as {
           status?: unknown; serving?: unknown; servingProblems?: unknown;
           currentPreviewUrl?: unknown; previewUrlStale?: unknown; previewUrlNote?: unknown;
+          doorUrl?: unknown;
         } | null;
+        if (typeof health?.doorUrl === 'string' && health.doorUrl.startsWith('/api/agentv3/preview-door?')) {
+          setDoorUrl(health.doorUrl);
+        }
         /**
          * THE FRAME WAS POINTED AT A MACHINE THAT NO LONGER EXISTS (admin screenshot 2026-08-22).
          *
@@ -1125,7 +1138,11 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           </div>
         ) : (
           <ResponsiveFrame viewport={viewport}>
-            <iframe key={liveReloadKey} title="Live preview" src={effectiveUrl} onLoad={() => setLiveLoading(false)} className="w-full h-full bg-white border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+            {/* The DOOR leads when the server offers it: the frame then never holds a machine's
+                address, so a dead sandbox resolves to our own reconnecting page instead of a vendor
+                error, and a moved app resolves to wherever it now lives. A remount (reload button,
+                watchdog) re-resolves. effectiveUrl stays as the fallback for an older server. */}
+            <iframe key={liveReloadKey} title="Live preview" src={doorUrl || effectiveUrl} onLoad={() => setLiveLoading(false)} className="w-full h-full bg-white border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
           </ResponsiveFrame>
         )}
       </div>

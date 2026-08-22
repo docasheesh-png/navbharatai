@@ -229,7 +229,31 @@ describe('socialRedirectFailureMessage', () => {
   it('names the causes only an admin can fix, and where to fix them', () => {
     expect(socialRedirectFailureMessage('auth/unauthorized-domain')).toMatch(/Authorized domains/i);
     expect(socialRedirectFailureMessage('auth/operation-not-allowed')).toMatch(/Sign-in method/i);
-    expect(socialRedirectFailureMessage('auth/invalid-credential')).toMatch(/return URL|client id/i);
+    /**
+     * SHARPENED 2026-08-22 from a real DevTools capture (`signInWithIdp 400` →
+     * `auth/invalid-credential`). The old wording said "check the client id / key and the return URL",
+     * which sends an admin to APPLE's portal — and reaching this error proves Apple's side already
+     * works, so that is the wrong portal. The four values below are Firebase's own Apple config, the
+     * only thing that can still be wrong at this point.
+     */
+    const cred = socialRedirectFailureMessage('auth/invalid-credential')!;
+    expect(cred).toMatch(/Services ID/i);
+    expect(cred).toMatch(/Team ID/i);
+    expect(cred).toMatch(/Key ID/i);
+    expect(cred).toMatch(/\.p8/i);
+    expect(cred).toMatch(/Firebase Console/i);
+    // And it says what is already RIGHT, so nobody re-checks four things that are known good.
+    expect(cred).toMatch(/already correct/i);
+  });
+
+  it('does NOT tell an invalid CLIENT ID that the provider registration is already correct', () => {
+    // These two codes shared one sentence until 2026-08-22. The invalid-credential sentence asserts the
+    // provider's own registration is fine — which is precisely what invalid-oauth-client-id denies, so
+    // sharing it would have sent an admin away from the one portal that could fix it.
+    const clientId = socialRedirectFailureMessage('auth/invalid-oauth-client-id')!;
+    expect(clientId).toMatch(/client id/i);
+    expect(clientId).toMatch(/return URL/i);
+    expect(clientId).not.toMatch(/already correct/i);
   });
 
   it('tells a user with an existing account what to do instead', () => {

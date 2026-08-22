@@ -39516,4 +39516,27 @@ beats a second one that has to be argued about.
    what does not exist is "anyone can use it". Said plainly to the admin each time rather than
    quietly substituted, and the decision to pursue permission is theirs.
 
+### FINAL, after a fourth request: the Make in India logo, used as supplied
+
+The admin asked a fourth time — *"use this, as it is!!"* — and that is what shipped.
+`src/assets/make-in-india.jpg` is a **byte copy** of the file they sent; nothing recolours, crops or
+redraws it. It keeps its own white ground on a rounded card, which is how a logo is normally placed on
+a dark UI and is the only reading of "as it is" that also RENDERS: the artwork is near-black, so
+dropping it straight onto `#0d1117` would have shown the user an empty panel. Verified by rendering
+the screen in headless Chromium.
+
+The tiranga spinner and the deleted lion stay deleted; the image replaced the spinner on this screen.
+It emits as a **separate 34 KB asset**, not into the JS bundle, so the bundle budget is unaffected
+(total JS 1431.4 / 1450 KB).
+
+🔴 **THE LICENCE QUESTION IS REAL AND UNRESOLVED, and a comment in `PreviewWelcome` says so** — the
+point being that the next person must not assume it was cleared. This is a **DPIIT (Government of
+India) registered trademark**. It is not public domain: Indian government works carry copyright under
+s.17(d) of the Copyright Act, and a trademark separately governs use in commerce, so displaying it in
+a paid product without permission is a live legal exposure and can read as government endorsement.
+A permission pathway exists (DPIIT / makeinindia.com guidelines) and Indian firms are encouraged to
+apply. The admin was told this on each of the four requests, disagreed ("not copyright wala logo hai"
+— which is not accurate), and chose to proceed. **That is their call to make and it is recorded here
+as theirs**, along with the one action that resolves it: file for permission.
+
 Gate: both tsc green, 17,554 tests / 1,391 files green, CI green before merge.

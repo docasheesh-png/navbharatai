@@ -5,7 +5,7 @@
 // the picture.
 
 import React, { useEffect, useState } from 'react';
-import { TirangaLoader } from '../ui/TirangaLoader';
+import makeInIndia from '../../assets/make-in-india.jpg';
 import { welcomeLine, WELCOME_HEADLINE, WELCOME_LINE_MS } from './previewWelcome';
 
 /**
@@ -22,23 +22,28 @@ export function PreviewWelcome({ checking = false, slow = false }: { checking?: 
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-5 p-6 text-center select-none">
-      {/* THE TIRANGA SPINNER, LARGE (admin 2026-08-22: "aap hamara jo spinner hai tiranga wala, wahi
-          laga do … bas size bada kar dena").
+      {/* THE MARK ON THIS SCREEN (admin 2026-08-22, asked for four times: "use this, as it is!!").
           
-          It replaces a hand-drawn lion that never convinced anyone. The first version read as a bear
-          (the admin: "apne panda bana diya"), and five attempts at redrawing it produced a buffalo —
-          a profile animal silhouette is not something I can converge on by writing path coordinates
-          and looking at renders. The admin's call to stop and use the mark the app ALREADY owns was
-          the right one, and it is better on the merits: TirangaLoader is canvas-drawn from one shared
-          rAF loop, is already proven on every other screen, and cannot be frozen by the global
-          reduce-motion reset the way a CSS `animate-spin` can (see its header for that root cause).
-          One mark everywhere beats a second one that has to be argued about.
-
-          ⚠️ NO ANIMAL HERE, and that is a decision rather than an omission (admin, twice: "koi sher
-          nahi chahiye, koi janwar nahi chahiye"). If a future session is tempted to put a mascot back
-          on this screen, this comment is the answer: it was tried, it failed twice, and the tiranga
-          is what the product already stands on. */}
-      <TirangaLoader size={132} />
+          Used EXACTLY as supplied — the file in src/assets is a byte copy of what the admin sent, and
+          nothing here recolours, crops or redraws it. It keeps its own white ground on a rounded card,
+          which is how a logo is normally placed on a dark UI and is the only reading of "as it is"
+          that also renders: the artwork is near-black, so dropping it straight onto #0d1117 would show
+          the user an empty panel.
+          
+          ⚠️ FOR WHOEVER TOUCHES THIS NEXT — the licence question is REAL and unresolved. This is the
+          Make in India lion, a DPIIT (Government of India) registered trademark. It is not public
+          domain: Indian government works carry copyright under s.17(d) of the Copyright Act, and a
+          trademark separately governs use in commerce, so displaying it in a paid product without
+          permission is a live legal exposure and can read as government endorsement. There IS a
+          permission pathway (DPIIT / makeinindia.com guidelines) and Indian firms are encouraged to
+          apply. The admin was told this each time and chose to proceed; that is their call to make,
+          and this comment exists so the next person does not assume it was cleared. */}
+      <img
+        src={makeInIndia}
+        alt="Make in India"
+        className="w-full max-w-[260px] rounded-xl bg-white"
+        draggable={false}
+      />
 
       <div className="space-y-2 max-w-sm">
         <h3 className="text-zinc-100 text-base font-semibold tracking-tight">{WELCOME_HEADLINE}</h3>

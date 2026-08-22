@@ -39109,3 +39109,58 @@ so what it shows is always what the record says.
   exposure is bounded by requiring sign-in and by the existing per-IP/hour OTP limits.
 
 Gate: both tsc green, 17,382 tests / 1,382 files green, CI green before merge.
+
+## 2026-08-22 — the six-hour domain: the screen had the answer and would not say it
+
+Admin report: `mitrify.com` connected, spinner running six hours, "bar bar website type karni padti
+hai". Two screenshots settled it, and the spinner turned out to be the least of it.
+
+**What the screenshots proved.** Hostinger's own panel said **"DNS is managed at another provider"**
+and **"Inactive — changes saved here apply once nameservers point to Hostinger"**. The admin's
+nameservers already pointed at our Cloudflare zone, so the five DNS records they had carefully added
+by hand were being written where nothing would ever read them — while OUR screen went on instructing
+them to add records at their registrar. Nothing was wrong with the records.
+
+**The sentence that cost the afternoon.** Our own line read *"Nameservers live — 0 records applied
+automatically"*. `applyRecords` returns how many records it CHANGED, so `0` means "everything was
+already correct" exactly as often as it means "nothing was written" — the same words for opposite
+outcomes. Read as failure, it was very probably success.
+
+Fixed by reporting a STATE instead of an action count: `listZoneRecords` reads the zone back and
+`missingFromZone` says what is genuinely absent, so `autoDnsSummary` can distinguish done / missing /
+could-not-look. `missingFromZone` treats a PROXIED record as missing on purpose — an orange-cloud
+record answers with the CDN's address, so verification waits forever while the zone looks right to a
+human reading it.
+
+**The slow path was the default.** Automatic setup sat BELOW the copy-these-five-records list,
+labelled "Or:". So every user met the slow path first: type five records by hand at a registrar whose
+default TTL is 14400 (four hours), then wait that TTL on every change, forever. Automatic writes them
+itself at TTL 300 and needs one nameserver change — slow once, instant thereafter. For someone
+shipping app after app that is hours-per-app versus hours-once, and we were leading with the worse
+deal because of where a div sat. Moved above, and the manual list is now demoted and prefixed with
+the warning Hostinger buries: once our nameservers are live, anything added at the registrar is
+ignored.
+
+**The spinner (admin: "spinner hatega nahi!!! bas time kam hoga").** They were right and I was wrong
+to sell an icon change as a fix — it does not shorten a wait. It is still worth correcting, because a
+spinner PROMISES work is happening now: pointing one at a multi-hour DNS wait makes a normal wait look
+like a hang, which is why the copy beside it saying "this can take a few hours" was not believed.
+`statusIcon` now spins only while a request is genuinely in flight; waiting shows a clock, with
+`lastCheckedLabel` to prove the page is alive. The real time reduction is the reordering above.
+
+**Also fixed, found while reading:** `/state` returned `displayRecords: []` whenever the live Hosting
+lookup failed, throwing away records we had stored ourselves — so a slow Google call showed the user
+an empty form and they retyped the domain. Stored records are now read unconditionally.
+
+**Open root cause, NOT fixed here.** The record store is keyed by DOMAIN alone
+(`firebaseDomainLink.ts` `docId(domain)`) and merges forever. Connecting one domain from three
+different apps therefore pools three sites' verification tokens under one key — which is exactly what
+the screenshot shows (`hosting-site=nbai-3703…`, `…709e…`, `…dd4f…`). Worse, `mergeStableRecords`
+marks anything not currently requested as `done`, so the two foreign tokens are badged **"Verified"**
+when they were never verified at all — `done` means "not being asked for", which is not the same
+claim. Both need a workspace-scoped key plus a migration for existing domain-keyed docs; recorded
+here rather than half-built.
+
+Gate: both tsc + build + FULL vitest (17,395 passing, 1 skipped). Three existing tests updated with
+reasoning at the site — two anchored on strings this change deliberately removed, and one used a
+fixed 2600-character window that broke when the route grew while remaining correct.

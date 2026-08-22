@@ -68,9 +68,14 @@ describe('the page shows state and action FIRST', () => {
   const src = readFileSync(join(__dirname, '..', 'src/components/agentv3/NbaiDomainConnect.tsx'), 'utf8');
 
   it('the status block sits above the records list, not below the whole page', () => {
+    // ⚠️ The anchor moved (admin 2026-08-22: "auto-DNS ko upar lao"). The heading is now conditional —
+    // "For reference: the records we manage for you" once our nameservers are live, otherwise "Or: add
+    // these DNS records yourself…" — because the manual list was DEMOTED below automatic setup. The
+    // property under test is unchanged: state and action come before the records.
     const status = src.indexOf('const stage = connectStage(result)');
-    const records = src.indexOf('Add these DNS records at your registrar');
+    const records = src.indexOf('add these DNS records yourself');
     expect(status).toBeGreaterThan(-1);
+    expect(records).toBeGreaterThan(-1);
     expect(status).toBeLessThan(records);
   });
 

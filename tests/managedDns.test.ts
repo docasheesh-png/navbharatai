@@ -170,7 +170,13 @@ const client = readFileSync(join(__dirname, '..', 'src/components/agentv3/NbaiDo
 describe('auto-DNS surface honesty', () => {
   it('both routes are ownership-checked and creds-gated, with the sanitized detail on failure', () => {
     for (const ep of ['auto-dns/start', 'auto-dns/sync']) {
-      const seg = route.slice(route.indexOf(ep), route.indexOf(ep) + 2600);
+      // ⚠️ Was a fixed 2600-character window, which broke the moment the sync route grew (the zone
+      // read-back, 2026-08-22) — the catch block simply fell outside it while remaining perfectly
+      // correct. A magic byte count is not the property being tested; "within this handler" is. So
+      // the segment now runs to the NEXT route registration, which cannot drift as the body changes.
+      const start = route.indexOf(ep);
+      const next = route.indexOf('app.post(', start + ep.length);
+      const seg = route.slice(start, next === -1 ? route.length : next);
       expect(seg).toContain('ownsWorkspace');
       expect(seg).toContain('managedDnsConfigured()');
       expect(seg).toContain('sanitizeManagedDnsError(err)');
@@ -193,8 +199,20 @@ describe('auto-DNS surface honesty', () => {
     expect(route).toContain('autoDns: managedDnsConfigured()');
   });
 
-  it('zone status is told straight: waiting vs live-with-applied-count', () => {
-    expect(client).toContain('Waiting for the nameserver change');
-    expect(client).toContain('applied automatically');
+  it('zone status is told straight — as a STATE, never as a count of actions', () => {
+    // ⚠️ DELIBERATE CHANGE (admin 2026-08-22, the six-hour screenshot). This used to require the
+    // literal "applied automatically", i.e. it pinned the very sentence that caused the incident:
+    // "Nameservers live — 0 records applied automatically". `applied` counts records CHANGED, so 0
+    // means "already correct" exactly as often as it means "nothing written" — the same words for
+    // opposite outcomes. The count is now gone from the UI entirely and the line reports what is
+    // genuinely in the zone, so the assertion moves to that stronger property: one summary function,
+    // fed by the server's read-back, with no raw count formatted into the screen.
+    expect(client).toContain('autoDnsSummary(');
+    // Assert on the CODE that produced the sentence, not on the words: the phrase itself still
+    // appears twice in comments that quote the incident, and that record is worth keeping. This
+    // template expression is unambiguously the formatter, so it cannot be satisfied by prose.
+    expect(client).not.toContain('record${autoApplied');
+    // The waiting case still has to say the slow step is one-time, or the fast path reads as slow.
+    expect(client).toContain('only once');
   });
 });

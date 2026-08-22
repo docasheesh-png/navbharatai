@@ -19,6 +19,7 @@ import {
 import { mergeStableRecords, type StableDnsRecord } from '../lib/domainDnsRecords';
 import {
   managedDnsConfigured, ensureZone, zoneStatus, applyRecords, sanitizeManagedDnsError,
+  listZoneRecords, missingFromZone,
 } from '../lib/cloudflareManagedDns';
 import { checkDomainConnect, domainConnectEnabled } from '../lib/domainConnect';
 import { hostingerDnsEnabled, applyHostingerRecords } from '../lib/hostingerDns';
@@ -257,7 +258,31 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       if (!fb) { res.status(404).json({ error: 'Connect the domain first, then run automatic setup.' }); return; }
       const applied = await applyRecords(zone.id, fb.records);
       const displayRecords = await stableRecordsFor(host, fb.records);
-      res.json({ zoneStatus: zone.status, nameServers: zone.nameServers, applied, domain: { ...fb, displayRecords } });
+      /**
+       * 🔒 READ THE ZONE BACK, AND REPORT EVIDENCE INSTEAD OF A COUNT (admin 2026-08-22).
+       *
+       * `applied` is how many records CHANGED, so on its own it cannot tell the two opposite outcomes
+       * apart: "0" means either everything was already correct, or nothing was written at all. The
+       * screen printed "0 records applied automatically" for both, which reads as a failure in the
+       * success case and as success in the failure case — the worst possible pairing, and exactly
+       * what left a domain sitting for six hours with nobody able to say what was wrong.
+       *
+       * So we ask the zone what it actually holds. `missing` is then a FACT, and the message can name
+       * the real situation. Best-effort: a failed read-back must not fail a sync that already wrote
+       * the records, so it degrades to "we could not verify" rather than inventing either verdict.
+       */
+      const inZone = await listZoneRecords(zone.id).catch(() => null);
+      const missing = inZone ? missingFromZone(fb.records, inZone) : null;
+      res.json({
+        zoneStatus: zone.status,
+        nameServers: zone.nameServers,
+        applied,
+        desired: fb.records.length,
+        // null ⇒ we genuinely could not look; [] ⇒ we looked and everything is there.
+        missing: missing ? missing.map((r) => ({ type: r.type, name: r.name, value: r.value })) : null,
+        zoneRecordCount: inZone ? inZone.length : null,
+        domain: { ...fb, displayRecords },
+      });
     } catch (err) {
       console.error(`[HTTP 500] auto-dns sync: ${err instanceof Error ? err.stack || err.message : String(err)}`);
       res.status(500).json({ error: 'Could not apply the DNS records automatically.', detail: sanitizeManagedDnsError(err) });
@@ -291,12 +316,37 @@ export function registerNbaiDomainsRoutes(app: Express): void {
         return;
       }
       const status = await customDomainStatusLive(workspaceId as string, domain).catch(() => null);
-      const displayRecords = status ? await stableRecordsFor(domain, status.records) : [];
+      /**
+       * 🔒 THE RECORDS SURVIVE A FAILED LIVE LOOKUP (admin 2026-08-22: "bar bar website type karni
+       * padti hai", and "1-2 din baad wapas aaye to wahi DNS data dikhna chahiye").
+       *
+       * ROOT CAUSE this fixes: `displayRecords` used to be `status ? … : []`. The live Hosting call
+       * is a network round-trip to Google, so a slow or failed one — an outage, a quota blip, a cold
+       * instance — returned `status: null` AND an EMPTY record list. The user then opened a domain
+       * they had already set up and saw a blank form, so they typed the domain in again, and their
+       * DNS records appeared to have been forgotten. They never were: `rememberDomainDnsRecords`
+       * has been storing them all along. We were throwing away our own saved copy because a
+       * DIFFERENT call failed.
+       *
+       * So the stored records are read unconditionally now. This is exactly the kind of data we
+       * persisted them FOR — the moment the live source is unavailable is the moment they matter.
+       */
+      const displayRecords = status
+        ? await stableRecordsFor(domain, status.records)
+        : await getStoredDomainDnsRecords(domain).catch(() => []);
       // Zone lookup is best-effort: a missing/errored zone must not hide the rest of the state.
       const zone = managedDnsConfigured() ? await zoneStatus(domain).catch(() => null) : null;
       res.json({
         domain,
         status: status ? { ...status, displayRecords, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() } : null,
+        // The saved records ride OUTSIDE `status` too, so the screen can show the user what to add
+        // even in the one case where we genuinely cannot say how far along the connection is. A
+        // known set of records with an unknown status beats an empty screen with neither.
+        savedRecords: displayRecords,
+        // When the live check could not run, say so plainly instead of letting the client guess from
+        // a null status — the difference between "not connected" and "we could not look" is the
+        // difference between retyping a domain and simply waiting.
+        statusUnavailable: !status,
         zone: zone ? { nameServers: zone.nameServers, status: zone.status } : null,
       });
     } catch (err) {

@@ -192,6 +192,103 @@ export function connectStage(
  * it is not. The freshness verdict itself is the SHARED module the server computes with, so the label
  * and the measurement can never drift apart. Pure, exported for tests.
  */
+/**
+ * WHAT THE STATUS BLOCK'S ICON SHOULD BE — and the six-hour spinner it exists to kill.
+ *
+ * 🔒 ROOT CAUSE (admin 2026-08-22, verbatim: "bahut der ⏰ 6hr se spinner ghum raha hai"). The block
+ * used to pick its icon from the STAGE alone: `tone === 'ok' ? tick : <TirangaLoader/>`. A pending
+ * DNS connection is never `ok`, so the spinner ran forever — through a wait that is genuinely
+ * hours long at some registrars. Nothing was loading. Nothing was even being requested.
+ *
+ * That is not a cosmetic complaint. A spinner is a PROMISE that work is happening right now and the
+ * screen will change by itself in a moment. Pointing one at a multi-hour DNS wait makes a completely
+ * normal wait look like a hang — which is exactly how the admin read it, and why the copy beside it
+ * saying "this can take a few hours" was not believed. The picture and the sentence contradicted each
+ * other, and people believe the picture.
+ *
+ * So the icon is driven by whether a REQUEST IS ACTUALLY IN FLIGHT, not by how far along DNS is:
+ *   • 'busy'    — a real fetch is running right now. A spinner is honest here, and only here.
+ *   • 'waiting' — nothing is happening; we are waiting on the world's DNS. A CLOCK, which reads as
+ *                 "come back later" instead of "hang on a second".
+ *   • 'done'    — a tick.
+ * PURE, so the rule is pinned by tests rather than by whoever next edits the JSX.
+ */
+export type StatusIcon = 'busy' | 'waiting' | 'done';
+
+export function statusIcon(input: { tone?: 'ok' | 'warn'; checking: boolean }): StatusIcon {
+  if (input.checking) return 'busy';
+  return input.tone === 'ok' ? 'done' : 'waiting';
+}
+
+/**
+ * "Last checked 4 minutes ago" — the line that replaces a spinner's false sense of motion.
+ *
+ * A waiting screen has to prove it is alive somehow. A spinner fakes that; a real timestamp earns it,
+ * because it says something a frozen page cannot: we looked, recently, and here is when. Returns ''
+ * when we have never checked, so the UI renders nothing rather than "Last checked never".
+ */
+export function lastCheckedLabel(checkedAt: number | null | undefined, now: number): string {
+  if (typeof checkedAt !== 'number' || checkedAt <= 0) return '';
+  return `Last checked ${timeAgo(checkedAt, now)}.`;
+}
+
+/**
+ * WHAT THE AUTOMATIC-SETUP LINE SHOULD SAY — and the sentence that wasted six hours.
+ *
+ * 🔒 ROOT CAUSE (admin 2026-08-22, screenshot: "Nameservers live — 0 records applied automatically").
+ * The old line printed the number of records CHANGED, and that number cannot distinguish the two
+ * OPPOSITE outcomes it collapses:
+ *   • 0 changed because everything was already correct  → complete success
+ *   • 0 changed because nothing was ever written        → the thing that is broken
+ * Printing "0 records applied" for both reads as failure in the first case and as success in the
+ * second. The admin, correctly, read it as failure — and it was very likely success, so six hours
+ * went into a screen that had the answer and would not say it.
+ *
+ * The fix is to stop reporting an ACTION COUNT and start reporting the STATE OF THE ZONE, which the
+ * server now reads back: `missing` is the list of records the hosting service asked for that are
+ * genuinely not in the zone. `null` means we could not look, and that is said plainly rather than
+ * guessed in either direction. PURE.
+ */
+export function autoDnsSummary(input: {
+  zoneStatus: string | null;
+  applied: number | null;
+  desired?: number | null;
+  missing?: Array<{ type: string; name: string }> | null;
+  zoneRecordCount?: number | null;
+}): { text: string; tone: 'ok' | 'warn' | 'info' } {
+  if (input.zoneStatus !== 'active') {
+    return {
+      tone: 'info',
+      text: 'Waiting for your nameserver change to take effect. This is the one slow step, and it happens only once — after this, every record is written for you instantly.',
+    };
+  }
+  if (input.applied === null) return { tone: 'info', text: 'Nameservers are live. Tap “Check & apply records”.' };
+  if (input.missing === null || input.missing === undefined) {
+    // We wrote what we could but could not confirm. Say exactly that — claiming either verdict here
+    // is how a screen ends up insisting a domain is fine while it is not, or vice versa.
+    return {
+      tone: 'info',
+      text: input.applied > 0
+        ? `Nameservers live — ${input.applied} record${input.applied === 1 ? '' : 's'} written. We could not re-read your DNS to confirm; tap Check now in a minute.`
+        : 'Nameservers live. We could not re-read your DNS to confirm what is in place; tap Check now in a minute.',
+    };
+  }
+  if (input.missing.length === 0) {
+    // THE CASE THAT USED TO READ AS FAILURE. Every record is in place; the only thing left is the
+    // hosting service's own sweep, which is not ours to hurry — so say that, instead of a bare "0".
+    return {
+      tone: 'ok',
+      text: input.applied > 0
+        ? `Done — all ${input.desired ?? ''} record${input.desired === 1 ? '' : 's'} are now in place (we added ${input.applied}). Nothing left for you to do; your domain connects on its own from here.`.replace('  ', ' ')
+        : 'Done — every record is already in place. Nothing left for you to do; your domain connects on its own from here.',
+    };
+  }
+  return {
+    tone: 'warn',
+    text: `${input.missing.length} record${input.missing.length === 1 ? ' is' : 's are'} still missing from your DNS (${input.missing.map((m) => `${m.type} ${m.name}`).join(', ')}). Tap “Check & apply records” again — if it keeps saying this, tell us and we will look.`,
+  };
+}
+
 export function publishButton(
   freshness: PublishFreshness | undefined,
   publishedAt: number | null | undefined,
@@ -289,6 +386,9 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
   const [autoNs, setAutoNs] = useState<string[] | null>(null);
   const [autoZoneStatus, setAutoZoneStatus] = useState<string | null>(null);
   const [autoApplied, setAutoApplied] = useState<number | null>(null);
+  // The zone read-back (see autoDnsSummary): `null` = we could not look, `[]` = everything is there.
+  const [autoMissing, setAutoMissing] = useState<Array<{ type: string; name: string }> | null>(null);
+  const [autoDesired, setAutoDesired] = useState<number | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
   // Domain Connect one-click (registrar-approved template) + Hostinger token flow (Slice B/C).
   const [dcCheck, setDcCheck] = useState<{ supported: boolean; providerName?: string; applyUrl?: string; reason?: string } | null>(null);
@@ -429,6 +529,9 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
       setAutoZoneStatus(typeof data?.zoneStatus === 'string' ? data.zoneStatus : null);
       if (Array.isArray(data?.nameServers)) setAutoNs(data.nameServers);
       if (typeof data?.applied === 'number') setAutoApplied(data.applied);
+      // The zone read-back: what is genuinely there, so the line below states a fact instead of a count.
+      setAutoMissing(Array.isArray(data?.missing) ? data.missing : null);
+      setAutoDesired(typeof data?.desired === 'number' ? data.desired : null);
       if (data?.domain) setResult((prev) => (prev ? { ...prev, ...data.domain } : prev));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error.');
@@ -611,7 +714,104 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               </div>
             );
           })()}
-          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Add these DNS records at your registrar</span>
+          {/* ⬆️ THE FAST PATH GOES FIRST (admin 2026-08-22: "auto-DNS ko upar lao").
+
+              🔒 WHY THE ORDER IS THE FIX, not decoration. This block used to sit BELOW the
+              copy-these-five-records list and was labelled "Or:", so the first thing every user met
+              was the SLOW path: type five records by hand at a registrar whose default TTL is often
+              14400 (four hours), and then wait for that TTL on every single change, forever. The
+              automatic path writes the records itself at TTL 300 and needs a nameserver change ONCE —
+              slow that first time, then instant for every future app and every future update.
+
+              For someone shipping app after app, that difference is hours per app versus hours once.
+              We were leading with the worse deal because of where a div sat. */}
+          {result.autoDns && (
+            <div className="px-3 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex flex-col gap-2">
+              <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">Or: automatic setup (one-time nameserver change)</span>
+              {!autoNs && (
+                <>
+                  <p className="text-[11px] text-zinc-300">
+                    NavBharatAI can add these records for you. You change your domain's nameservers ONCE at
+                    your registrar (GoDaddy, Hostinger, anywhere) — after that, we manage the DNS records
+                    automatically, now and for every future update.
+                  </p>
+                  <p className="text-[10px] text-amber-200/80">
+                    ⚠️ Changing nameservers moves ALL DNS for this domain to NavBharatAI — custom email or
+                    other records set at your registrar will need re-adding here. Skip this and use the
+                    manual records above if that worries you.
+                  </p>
+                  <button onClick={autoDnsStart} disabled={autoBusy}
+                    className="self-start px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold">
+                    {autoBusy ? 'Starting…' : 'Set up automatically'}
+                  </button>
+                </>
+              )}
+              {autoNs && (
+                <>
+                  <p className="text-[11px] text-zinc-300">Set these two nameservers at your registrar (replace the existing ones):</p>
+                  {autoNs.map((ns, i) => (
+                    <Field key={ns} label={`Nameserver ${i + 1}`} value={ns} k={`ns${i}`} copied={copied} onCopy={copy} />
+                  ))}
+                  <div className="flex items-center gap-2">
+                    <button onClick={autoDnsSync} disabled={autoBusy}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold">
+                      {autoBusy ? 'Checking…' : 'Check & apply records'}
+                    </button>
+                    {/* The line that used to say "0 records applied automatically" for BOTH complete
+                        success and total failure. It now reports what is genuinely in the zone. */}
+                    {(() => {
+                      const s = autoDnsSummary({ zoneStatus: autoZoneStatus, applied: autoApplied, desired: autoDesired, missing: autoMissing });
+                      const tone = s.tone === 'ok' ? 'text-green-300' : s.tone === 'warn' ? 'text-amber-300' : 'text-zinc-400';
+                      return <span className={`text-[10px] leading-relaxed ${tone}`}>{s.text}</span>;
+                    })()}
+                  </div>
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-indigo-500/20">
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Where did you buy this domain?</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <select
+                        value={registrarId}
+                        onChange={(e) => setRegistrarId(e.target.value)}
+                        aria-label="Your domain registrar"
+                        className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-indigo-500/60"
+                      >
+                        <option value="">Select…</option>
+                        {REGISTRARS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                      {registrarById(registrarId)?.panelUrl && (
+                        <a href={registrarById(registrarId)!.panelUrl} target="_blank" rel="noreferrer"
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">
+                          Open {registrarById(registrarId)!.name} →
+                        </a>
+                      )}
+                    </div>
+                    {registrarById(registrarId) && (
+                      <p className="text-[10px] text-zinc-400">{registrarById(registrarId)!.steps}</p>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* 🔒 THE WARNING THAT COST SIX HOURS (admin 2026-08-22). Once the domain's nameservers point
+              at us, the registrar's own DNS panel STOPS BEING USED — Hostinger says so in its own words
+              ("Inactive — changes saved here apply once nameservers point to Hostinger"), but only if you
+              scroll to the right box. The admin added five records by hand into that dead panel while
+              this screen went on instructing them to do exactly that. Nothing was wrong with the records;
+              they were simply being written where nothing would ever read them.
+              So when automatic setup is live, the manual list is DEMOTED and prefixed with the truth. */}
+          {autoZoneStatus === 'active' && (
+            <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25">
+              <p className="text-[11px] text-amber-100 leading-relaxed">
+                <span className="font-bold">You do not need to add these by hand.</span> Your domain now uses
+                NavBharatAI&apos;s nameservers, so we write these records for you — and any record you add at
+                your registrar&apos;s DNS page is ignored from now on. The list below is only for reference.
+              </p>
+            </div>
+          )}
+          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+            {autoZoneStatus === 'active' ? 'For reference: the records we manage for you' : 'Or: add these DNS records yourself at your registrar'}
+          </span>
           {/* STABLE record list (admin 2026-08-19: "DNS record bhulne nahi chahiye"). Prefer the server's
               never-forgotten `displayRecords` — records you already added stay visible with a ✓ instead of
               silently vanishing when the internet accepts them, and any newly-needed record shows as ⏳. An
@@ -692,72 +892,6 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
           ))}
           </>
           ); })()}
-
-          {result.autoDns && (
-            <div className="px-3 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex flex-col gap-2">
-              <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">Or: automatic setup (one-time nameserver change)</span>
-              {!autoNs && (
-                <>
-                  <p className="text-[11px] text-zinc-300">
-                    NavBharatAI can add these records for you. You change your domain's nameservers ONCE at
-                    your registrar (GoDaddy, Hostinger, anywhere) — after that, we manage the DNS records
-                    automatically, now and for every future update.
-                  </p>
-                  <p className="text-[10px] text-amber-200/80">
-                    ⚠️ Changing nameservers moves ALL DNS for this domain to NavBharatAI — custom email or
-                    other records set at your registrar will need re-adding here. Skip this and use the
-                    manual records above if that worries you.
-                  </p>
-                  <button onClick={autoDnsStart} disabled={autoBusy}
-                    className="self-start px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold">
-                    {autoBusy ? 'Starting…' : 'Set up automatically'}
-                  </button>
-                </>
-              )}
-              {autoNs && (
-                <>
-                  <p className="text-[11px] text-zinc-300">Set these two nameservers at your registrar (replace the existing ones):</p>
-                  {autoNs.map((ns, i) => (
-                    <Field key={ns} label={`Nameserver ${i + 1}`} value={ns} k={`ns${i}`} copied={copied} onCopy={copy} />
-                  ))}
-                  <div className="flex items-center gap-2">
-                    <button onClick={autoDnsSync} disabled={autoBusy}
-                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold">
-                      {autoBusy ? 'Checking…' : 'Check & apply records'}
-                    </button>
-                    <span className="text-[10px] text-zinc-400">
-                      {autoZoneStatus === 'active'
-                        ? (autoApplied !== null ? `Nameservers live — ${autoApplied} record${autoApplied === 1 ? '' : 's'} applied automatically.` : 'Nameservers live.')
-                        : 'Waiting for the nameserver change to take effect (can take a few hours).'}
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-1.5 pt-1 border-t border-indigo-500/20">
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Where did you buy this domain?</span>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <select
-                        value={registrarId}
-                        onChange={(e) => setRegistrarId(e.target.value)}
-                        aria-label="Your domain registrar"
-                        className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-indigo-500/60"
-                      >
-                        <option value="">Select…</option>
-                        {REGISTRARS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                      </select>
-                      {registrarById(registrarId)?.panelUrl && (
-                        <a href={registrarById(registrarId)!.panelUrl} target="_blank" rel="noreferrer"
-                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">
-                          Open {registrarById(registrarId)!.name} →
-                        </a>
-                      )}
-                    </div>
-                    {registrarById(registrarId) && (
-                      <p className="text-[10px] text-zinc-400">{registrarById(registrarId)!.steps}</p>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
 
           {result.domainConnect && (
             <div className="px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20 flex flex-col gap-2">

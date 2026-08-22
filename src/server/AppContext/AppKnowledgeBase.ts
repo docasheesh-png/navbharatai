@@ -2569,6 +2569,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['ai insights', 'insights', 'nl query', 'natural language', 'ask metrics', 'ops report', 'telemetry query', 'cost question', 'admin insights', 'recommendations', 'aiops'],
   },
   {
+    id: 'admin-apple-signin-check',
+    name: 'Apple Sign-In Check (is it our side?)',
+    path: 'Admin Dashboard → Build Reports tab → "Apple sign-in" button (admin only)',
+    description: `Admin-only one-click check that answers "why is Sign in with Apple failing?" with evidence instead of guesswork. The server fetches its OWN public domain-verification file at the exact address Apple fetches, and compares it with what it believes it is serving. That single comparison separates causes a browser shows identically (a sheet that just closes): NOT CONFIGURED (we do not have the file), INTERCEPTED (something in front of us answers that path, or returns a web page instead), STALE (a different/older copy is being served), UNVERIFIABLE (we could not ask — reported as its own state, never as a failure), or OURS-IS-CORRECT (nothing on our side is blocking it). Next to the button is an OPTIONAL code box: paste the error code from the sign-in message (e.g. auth/invalid-credential) and the answer gets sharper — that particular code is only reachable AFTER Apple has already accepted the sign-in, so the report then points at Firebase Console → Authentication → Sign-in method → Apple and its four values (Services ID, Apple Team ID, Key ID, .p8 key) instead of sending you back to Apple's portal. The code can only sharpen the final "our side is correct" answer; it can never hide a real fault on our side. The card shows the verdict, the one thing to do next, and lengths/status only — never the file's contents. Backend: GET /api/admin/apple-signin (optionally ?code=).`,
+    howToUse: 'Admin login required. Open the Admin Dashboard → Build Reports tab → press "Apple sign-in" (top right, next to Server necessity and Sandbox handover). If you have the error code from the failed sign-in message, type it in the small box first — the answer becomes exact. Read the "Do this next" line.',
+    relatedFeatures: ['admin-metrics', 'admin-ai-insights'],
+    keywords: ['apple', 'apple login', 'apple sign in', 'sign in with apple', 'apple signin', 'ios login', 'apple login nahi ho raha', 'apple check', 'domain association', 'invalid-credential', 'auth/invalid-credential', 'services id', 'apple team id', 'p8', 'login fail', 'apple error'],
+  },
+  {
     id: 'admin-deploy-aiops',
     name: 'AI Deployment Ops (Deploy Risk + Incident Analysis)',
     path: 'Admin/CI only — POST /api/admin/deploy-risk and POST /api/admin/incident-analysis',

@@ -124,6 +124,45 @@ describe('the observed browser code narrows the final answer, and only that answ
   });
 });
 
+/**
+ * AND IT IS REACHABLE. The endpoint shipped on 2026-08-21 with NO user interface, so the only way to
+ * read the one check that can say "stop looking at our code" was to curl it with an admin token. For
+ * an admin who does not use a terminal that is indistinguishable from never having built it — which is
+ * the second absolute rule, not a nicety.
+ */
+describe('the check has a real way in', () => {
+  const dash = readFileSync(join(process.cwd(), 'src/components/AdminDashboard.tsx'), 'utf8');
+
+  it('a button calls the endpoint, and the optional code rides along', () => {
+    expect(dash).toContain('/api/admin/apple-signin');
+    expect(dash).toContain('Apple sign-in');
+    expect(dash).toContain('encodeURIComponent(code)');
+    // Empty box ⇒ no query string at all, so the answer is the plain one rather than `?code=`.
+    expect(dash).toContain("const q = code ? `?code=${encodeURIComponent(code)}` : '';");
+  });
+
+  it('an unexpected payload shows an honest failure, not an empty card', () => {
+    // Keying the card off `verdict` — the one field every answer carries — means a changed shape reads
+    // as "could not check" instead of rendering a blank card that looks like a clean result.
+    expect(dash).toContain('setAppleDiag(d?.verdict ? d : null)');
+  });
+
+  it('the verdict colours are full class names, never interpolated', () => {
+    // Tailwind scans source text, so `text-${tone}-400` is simply never generated and the element ends
+    // up unstyled while the code reads as correct.
+    expect(dash).not.toMatch(/text-\$\{tone\}/);
+    expect(dash).toContain("const icon = ok ? 'text-emerald-400' : unknown ? 'text-amber-400' : 'text-red-400';");
+  });
+
+  it('every AI in the app can find it, per the AppKnowledgeBase rule', () => {
+    const kb = readFileSync(join(process.cwd(), 'src/server/AppContext/AppKnowledgeBase.ts'), 'utf8');
+    expect(kb).toContain("id: 'admin-apple-signin-check'");
+    // The words the admin would actually type, in both languages they use.
+    expect(kb).toContain('apple login nahi ho raha');
+    expect(kb).toContain('auth/invalid-credential');
+  });
+});
+
 describe('looksLikeHtml — the interception tell', () => {
   it('catches the shapes a catch-all rewrite actually returns', () => {
     for (const b of ['<!DOCTYPE html>', '<html lang="en">', '  <!doctype HTML>', 'x<head><script src="/a.js">']) {

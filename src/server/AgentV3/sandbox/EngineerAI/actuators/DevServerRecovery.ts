@@ -403,6 +403,39 @@ export function unresolvedImportFromLog(log: string): { specifier: string; impor
   return { specifier, importer, inNodeModules: !!importer && /(^|\/)node_modules\//.test(importer) };
 }
 
+/**
+ * NODE'S OWN "the install is torn" ERROR — the phrasing the detector could not read.
+ *
+ * 🔒 ROOT CAUSE (admin, 2026-08-22):
+ *
+ *   Error [ERR_MODULE_NOT_FOUND]: Cannot find module
+ *     '/home/user/workspace/node_modules/vite/dist/node/chunks/dist.js'
+ *     imported from /home/user/workspace/node_modules/vite/dist/node/chunks/config.js
+ *
+ * A package's own internal file is missing — the tree is half-written. The repair for exactly this
+ * already existed (`missing_module` + `corruptPackage` → remove that package, reinstall, restart), but
+ * it could only be reached through esbuild/Vite's `Could not resolve "…"` wording. Node's ESM loader
+ * says "Cannot find module", and the generic fallback below matches "Module not found" — a different
+ * sentence. So this landed in `unknown`, earned two blind retries of a deterministic failure, and then
+ * failed identically on every later boot, because a torn tree cannot heal itself.
+ *
+ * 🔒 BOTH SIDES MUST BE INSIDE node_modules. That is what makes this a broken INSTALL rather than a
+ * code error: a user's own file importing a package that isn't there is a dependency they never added,
+ * and reinstalling for it would burn a recovery attempt on the wrong cure. PURE.
+ */
+export function nodeEsmTornInstall(log: string): { missing: string; importer: string; pkg: string | null } | null {
+  const text = stripAnsi(log || '');
+  // Node prints: Cannot find module '<abs path>' imported from <abs path>
+  const m = /Cannot find module\s+['"]([^'"\n]+)['"]\s*(?:\n\s*)?imported from\s+([^\s\n]+)/i.exec(text);
+  if (!m) return null;
+  const missing = m[1];
+  const importer = m[2];
+  const inNm = (p: string) => /(^|\/)node_modules\//.test(p);
+  if (!inNm(missing) || !inNm(importer)) return null;
+  const pkg = /node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(importer)?.[1] ?? null;
+  return { missing, importer, pkg };
+}
+
 export function classifyDevServerFailure(log: string): DevServerDiagnosis {
   // Strip ANSI FIRST (see stripAnsi): a coloured log defeats every word-boundary rule below.
   const text = stripAnsi(log || '').slice(-8000); // the tail carries the fatal line; bound the scan
@@ -430,6 +463,18 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
     return make('missing_script', `package.json has no "${missScript[1]}" script — the app must be started with its own run script (e.g. \`npm start\`), not \`npm run ${missScript[1]}\`. This is a launch-command mismatch, not an app error.`);
   }
 
+  // 2.9) A TORN INSTALL, in Node's own words — checked BEFORE the generic "Cannot find module" branch
+  //      below, which would otherwise swallow it and name the whole absolute PATH as the missing
+  //      "dependency". That branch does reinstall, but it sets no `corruptPackage`, so the targeted
+  //      remove-then-reinstall never ran — and a plain `npm install` will not repair a half-written
+  //      package it already considers installed. This is why the failure repeated on every boot.
+  // Node's ESM loader phrasing for the SAME condition the branch below repairs — see nodeEsmTornInstall.
+  // Checked first because it is the more specific signal: it names the exact file that is missing.
+  const torn = nodeEsmTornInstall(text);
+  if (torn) {
+    const d = make('missing_module', `The installed package${torn.pkg ? ` "${torn.pkg}"` : ''} is incomplete — one of its own files (${torn.missing.split('/node_modules/').pop()}) is missing, so the install is partial or was interrupted. Removing it and reinstalling dependencies, then restarting.`);
+    return torn.pkg ? { ...d, corruptPackage: torn.pkg } : d;
+  }
   // 3) Missing dependency / uninstalled tool — reinstall, then restart.
   const mod = text.match(/Cannot find module ['"]([^'"\n]+)['"]/i)
     || text.match(/Cannot find package ['"]([^'"\n]+)['"]/i)

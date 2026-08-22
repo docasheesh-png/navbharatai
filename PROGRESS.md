@@ -38497,3 +38497,83 @@ it discarded the edits to the three TRACKED files (only the new untracked module
 re-grepping before committing; all three were reapplied and the full gate re-run. Stash first.
 
 Gate: both tsc + build + FULL vitest — 1,374 files / 17,273 passing, 1 skipped.
+
+## 2026-08-22 — "Closed Port Error": the server had forgotten which sandbox the app lives in
+
+**Admin sent E2B's own page:** *"The sandbox i5ougia1mw2kcj39ualmm is running but there's no service
+running on port 3000. Connection refused on port 3000."*
+
+**This is the OTHER HALF of the wake bug.** The `.env` fix earlier today made the wake path correct
+WHEN IT RUNS. This is why it often never ran at all.
+
+**ROOT CAUSE.** `E2BActuator` tracks live sandboxes in an IN-MEMORY map. That map belongs to ONE server
+instance — empty after every deploy, every instance recycle, and on every other instance behind the
+load balancer. The workspace's real sandbox id was durable the whole time (`sandboxStore`), and exactly
+one path ever read it: the wake/diagnose route, by hand. Two failures fell out of that:
+
+1. **`getSandboxId` returned null on a cold instance.** `/api/agentv3/preview-health` GATES its port
+   probe on that id — so the probe never ran, `livePortUp` stayed unknown, the app was never classified
+   as stopped, **the auto-restore never fired and the wake card never appeared**, and the iframe simply
+   loaded the stale URL: E2B's closed-port page. Every reload repeated it identically, which is exactly
+   the "chahe kuch kar lo" the admin described two reports running.
+2. **Silently worse:** a cold instance running ANY command for an existing workspace fell through to
+   `Sandbox.create()` — a brand-new EMPTY machine. The in-memory replay cache that exists to heal that
+   is *also* empty on a fresh instance, so there was nothing to replay into it.
+
+**Fix.** `resumeSandboxChoice` (pure, test-locked) holds the precedence — explicit id → durable id →
+create — and both call sites now use it: `getSandbox` reconnects to the workspace's own sandbox instead
+of inventing one, and `getSandboxId` reports the durable id so read-only callers can tell a STOPPED app
+apart from an UNKNOWN one. Reconnecting is not an optimisation over creating; it is the only correct
+answer. Bounded (3s) and best-effort, so a slow store degrades to today's behaviour, never a hang.
+
+⚠️ **The kill switch is honoured for the durable lookup ONLY, never for an explicit id** — a "safe"
+flag that also sabotaged a caller which was handed an id would be the thing that breaks the working
+path. Test-locked, because that is exactly the shape of a safety measure causing an outage.
+
+**Honest boundary:** I could not reproduce this live (session egress is proxy-blocked), so the chain is
+derived from the code — the in-memory map, the health probe's gate on `getSandboxId`, and the durable
+store that already holds the answer. What is certain is that the OLD behaviour could not work on a cold
+instance; whether it is the whole of what the admin saw, the next attempt will show.
+
+Gate: both tsc + build + FULL vitest — 1,375 files / 17,279 passing, 1 skipped.
+
+## 2026-08-22 — The torn `node_modules`: how it got broken, and why it could never heal
+
+**Admin, verbatim:** `Error [ERR_MODULE_NOT_FOUND]: Cannot find module
+'/home/user/workspace/node_modules/vite/dist/node/chunks/dist.js' imported from
+…/node_modules/vite/dist/node/chunks/config.js`
+
+This closes the THIRD and last piece of today's preview story. All three are one chain.
+
+**HOW IT BROKE (the cause).** The idle reaper pauses a sandbox after ~5 minutes with no sandbox
+OPERATION, and it is build-aware: it skips a workspace whose build called `setBuildActive`. But that
+flag was only ever set from a BUILD (`ToolDispatcher.markBuildActive`) — a `grep` for callers outside
+the actuator returns exactly one. The wake/diagnose route does precisely the work that must not be
+interrupted (resume → re-hydrate → install → boot) and **never set it**. A cold revive needing a full
+`npm install` can pass five minutes inside ONE command, which to the sweep is indistinguishable from an
+abandoned session. Pausing there snapshots a half-written `node_modules`. Now marked for the whole
+route, released in `finally` (and the flag expires on its own besides, so a crash cannot leave a
+sandbox billing).
+
+**WHY IT NEVER HEALED (the honesty half).** The repair for exactly this already existed —
+`missing_module` + `corruptPackage` removes the package and reinstalls — but it could only be reached
+through esbuild's `Could not resolve "…"` wording. Node's ESM loader says **"Cannot find module"**, and
+the generic fallback matches **"Module not found"** — a different sentence.
+
+⚠️ **Worse than a miss: a near-miss.** An EARLIER branch did match `Cannot find module` and named the
+whole absolute PATH as the missing "dependency". So a reinstall ran, set no `corruptPackage`, and a
+plain `npm install` will not repair a half-written package npm already considers installed. The build
+looked like it was trying, and failed identically on every boot. `nodeEsmTornInstall` now runs BEFORE
+that branch, names the real package (`vite`) and routes to the targeted remove-then-reinstall.
+
+🔒 **BOTH sides of the import must be inside `node_modules`** — that is what makes it a broken INSTALL
+rather than a code error. A user's own file importing a missing package is a dependency they never
+added, and reinstalling for it would burn a recovery attempt on the wrong cure. Test-locked.
+
+**THE FULL CHAIN, for the record.** (1) A cold server instance could not find the workspace's sandbox,
+so the health probe never ran and the auto-restore never fired → E2B's closed-port page. (2) When the
+wake path did run, it wrote no `.env`, so the app booted without its own session key. (3) And the wake
+path could be paused mid-install, tearing `node_modules` into a state nothing recognised. Each one
+alone produces "preview nahi chalta, chahe kuch kar lo".
+
+Gate: both tsc + build + FULL vitest — 1,376 files / 17,287 passing, 1 skipped.

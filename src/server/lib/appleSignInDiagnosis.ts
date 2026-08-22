@@ -22,6 +22,11 @@
 // PURE — the caller performs the fetch and passes the result in. No network here, so every verdict is
 // unit-testable, including the ones that only happen in production.
 
+// ONE source of truth for the Services ID. `routes/admin.ts` already imports it from here and reports
+// it in this endpoint's own response, so a second copy in this file would be a value that can disagree
+// with the one the same JSON prints — the exact drift this codebase centralises away.
+import { APPLE_SERVICE_ID as APPLE_SERVICE_ID_FOR_ADVICE } from '../../components/socialSignInPolicy';
+
 export type AppleSignInVerdict =
   /** Nothing is configured — the file cannot be served because we do not have it. */
   | 'not-configured'
@@ -52,6 +57,41 @@ export interface AppleDiagnosisInput {
   source: 'env' | 'dist-file' | 'source-file' | null;
   /** The result of fetching our own public URL, or null when the check was not run. */
   selfFetch: AppleSelfFetch | null;
+  /**
+   * The Firebase error code the BROWSER actually reported, when the admin has one to hand (from the
+   * toast, or `[auth] social redirect failed:` in the console). Optional — omitted, everything below
+   * behaves exactly as it did before.
+   *
+   * WHY THIS BELONGS IN A SERVER-SIDE FILE CHECK (2026-08-22). This module's strongest verdict,
+   * `ours-is-correct`, used to end by sending the admin to press **Verify** in Apple's portal. For one
+   * code that advice is now provably wrong: `auth/invalid-credential` comes out of
+   * `accounts:signInWithIdp`, which the browser only reaches AFTER Apple has accepted the sign-in and
+   * returned. Apple's Verify, the Return URL and this very association file are therefore all already
+   * working — so re-checking them finds nothing, and an evening goes into the wrong portal.
+   *
+   * This is the same defect the client-side message had, in its sibling. Fixing one and leaving the
+   * other would mean the admin's two sources of advice disagree, and the wrong one sounds more
+   * authoritative because it ran a live check.
+   */
+  observedCode?: string | null;
+}
+
+/**
+ * Codes that PROVE Apple's side already worked, because the browser cannot produce them until Apple
+ * has accepted the sign-in and handed a credential back.
+ *
+ * Deliberately a SHORT list. A code that merely *often* means this does not belong here — the value of
+ * saying "stop looking there" comes entirely from it being true every time.
+ */
+const CODES_PROVING_APPLE_RETURNED = new Set(['auth/invalid-credential']);
+
+/** The one thing left to check once Apple has provably returned. Shared so the wording cannot drift. */
+export function firebaseAppleConfigNextStep(serviceId: string): string {
+  return 'Apple accepted the sign-in and handed the credential back — so Apple’s Verify, the Return URL '
+    + 'and this file are all already working, and re-checking them will find nothing. What failed is the '
+    + 'step after: exchanging Apple’s code. In Firebase Console → Authentication → Sign-in method → Apple, '
+    + `check ALL FOUR values: Services ID (exactly ${serviceId}), Apple Team ID, Key ID, and the .p8 private key. `
+    + 'Any one of them being wrong produces exactly this failure.';
 }
 
 export interface AppleDiagnosis {
@@ -116,6 +156,17 @@ export function diagnoseAppleSignIn(input: AppleDiagnosisInput): AppleDiagnosis 
       verdict: 'stale',
       message: 'The public address returns a DIFFERENT file from the one this server holds — usually an older deployment or a cached copy.',
       nextStep: 'Redeploy, then check the address again. If it still differs, clear the CDN cache for that path.',
+    };
+  }
+
+  // NARROWED BY WHAT THE BROWSER ACTUALLY REPORTED, when we have it. Only reached once our own side is
+  // provably correct, so this is a choice between two Apple-side answers — and the code, where one
+  // exists, is stronger evidence than the general advice below it.
+  if (CODES_PROVING_APPLE_RETURNED.has(String(input.observedCode || '').trim())) {
+    return {
+      verdict: 'ours-is-correct',
+      message: 'NavBharatAI is serving exactly the file Apple asks for, and the browser’s own error proves Apple then accepted the sign-in. Nothing on this side is blocking it.',
+      nextStep: firebaseAppleConfigNextStep(APPLE_SERVICE_ID_FOR_ADVICE),
     };
   }
 

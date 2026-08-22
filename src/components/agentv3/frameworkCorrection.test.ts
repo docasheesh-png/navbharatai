@@ -46,3 +46,29 @@ describe('framework correction reaches the LIVE client', () => {
     expect(blank().framework).toBeUndefined();
   });
 });
+
+/**
+ * THE CLOSING ASK SURVIVES THE BUILD ENDING (admin 2026-08-22: "AI ka last message 'app complete'
+ * nahi — 'yeh keys chahiye, yahan fill karo'").
+ *
+ * The deterministic post-build `secret_request` is emitted immediately BEFORE the terminal event. A
+ * successful build terminates with `result` — which must keep `pendingSecrets`, or the card would
+ * flash and vanish and the admin's exact complaint would return. `done` (the failure path) clears it,
+ * correctly: a failed build has no "one last step".
+ */
+describe('the post-build key ask survives the terminal event', () => {
+  const ask = { type: 'secret_request' as const, agent: 'architect' as const, callId: 'postbuild-1', prompt: 'Your app is built. One last step…', secrets: [{ name: 'RAZORPAY_KEY_ID', why: 'Payments' }], ts: 1 };
+
+  it('result (the SUCCESS terminal) keeps the card standing', () => {
+    let s = agentV3Reducer(blank(), ask);
+    s = agentV3Reducer(s, { type: 'result', ok: true, summary: 'Built.', steps: 1, billedUsd: 0, billedInr: 0, ts: 2 } as never);
+    expect(s.pendingSecrets?.callId).toBe('postbuild-1');
+    expect(s.done).toBe(true);
+  });
+
+  it('done (the FAILURE terminal) clears it — a failed build has no "one last step"', () => {
+    let s = agentV3Reducer(blank(), ask);
+    s = agentV3Reducer(s, { type: 'done', ok: false, summary: 'failed', ts: 2 });
+    expect(s.pendingSecrets).toBeUndefined();
+  });
+});

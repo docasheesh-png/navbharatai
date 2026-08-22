@@ -3886,6 +3886,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               <SecretRequestCard
                 prompt={state.pendingSecrets.prompt}
                 secrets={state.pendingSecrets.secrets}
+                /* THE CLOSING ASK (admin 2026-08-22). A `postbuild-` callId is the deterministic
+                   end-of-build ask: the app is done and these keys are the one remaining step, so the
+                   card turns vivid and its buttons stop implying a waiting build. `respond` for a gone
+                   waiter is a harmless no-op on the server, so one code path serves both. */
+                finale={state.pendingSecrets.callId.startsWith('postbuild-')}
+                onGuide={(name) => {
+                  // "Nahi hai to batao, main guide karunga" — PREPARE the question, never auto-send.
+                  // The AI answers like any chat turn, in the user's own language, step by step.
+                  setPrompt(`I don't have ${name} yet. Where do I get it? Guide me step by step — I'll tell you what I see on the screen.`);
+                  composerRef.current?.focus();
+                }}
                 onSave={async (vals) => {
                   // Straight to the encrypted vault over the authenticated API — the value never goes
                   // back up the build stream, which is stored in the transcript and the admin report.

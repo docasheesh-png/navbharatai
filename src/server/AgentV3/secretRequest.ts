@@ -123,6 +123,67 @@ export function secretRequestPrompt(plan: SecretRequestPlan): string {
     + 'NavBharatAI never shows them to the AI or puts them in your code.';
 }
 
+// ── The POST-BUILD ask (admin 2026-08-22) ─────────────────────────────────────────────────────────
+//
+// "Agar keys/secrets ki need hai, to user se maang kyun nahi lete? AI ka last message 'app complete'
+// nahi hona chahiye — 'app ban gaya hai, par yeh yeh keys chahiye, yahan fill karo, nahi hai to main
+// guide karunga' hona chahiye."
+//
+// The mid-build ask above fires only when the MODEL decides to call `request_secrets` — and on real
+// builds it often finishes without asking, which is exactly the failure the admin reported. This half
+// is DETERMINISTIC: after a successful build the route already computes which of the user's own
+// credentials the app still needs (`unconfiguredRequirements` — pure static analysis, zero LLM cost)
+// and appends a localized text notice. These helpers turn that same computation into a fill-in ASK
+// CARD as the build's closing act, so the last thing the user sees is the form, not a sentence
+// pointing at Settings.
+
+/** A minimal slice of AppRequirement — kept structural so this module stays dependency-free. */
+export interface RequirementLike {
+  label: string;
+  /** Env names that satisfy the requirement (any one). */
+  envVars: readonly string[];
+  /** The names the app's OWN code actually reads — preferred, so a Mapbox user is never asked for a Google key. */
+  matchedEnvVars: readonly string[];
+}
+
+/** The card stays a form, not a wall — beyond this many keys, the rest go to Settings via the text notice. */
+export const POST_BUILD_ASK_MAX = 6;
+
+/**
+ * Turn the post-build "unconfigured requirements" into the ask-card's key list. PURE.
+ *
+ * Per requirement, the names the app's own code READS win over the catalogue's full list (a service
+ * can be satisfied by more than one provider, and asking for the one the code does not read teaches
+ * the user to paste keys that do nothing). The same guards as the mid-build ask apply: usable env
+ * names only, never a platform credential, no duplicates, and already-saved keys are dropped.
+ */
+export function postBuildKeyAsks(
+  missing: readonly RequirementLike[] | null | undefined,
+  alreadySaved: readonly string[] | null | undefined,
+): SecretAsk[] {
+  const raw: Array<Partial<SecretAsk>> = [];
+  for (const req of missing || []) {
+    const names = (req.matchedEnvVars?.length ? req.matchedEnvVars : req.envVars) || [];
+    for (const name of names) {
+      raw.push({ name, why: `Needed for ${req.label}. Your app is built — this key is what makes that feature actually work.` });
+    }
+  }
+  return planSecretRequest(raw, alreadySaved).ask.slice(0, POST_BUILD_ASK_MAX);
+}
+
+/**
+ * The closing card's headline. Distinct from the mid-build prompt on purpose: mid-build the message
+ * is "the build stopped to ask"; here the message is "the app is DONE and this is the last step" —
+ * conflating the two makes a finished app sound unfinished. Honest about timing: a key saved now is
+ * wired in when the app next starts, not by magic into the already-running process. PURE.
+ */
+export function postBuildKeyPrompt(count: number): string {
+  if (count <= 0) return '';
+  return `Your app is built. One last step: ${count === 1 ? 'it needs this key' : `it needs these ${count} keys`} from your own account${count === 1 ? '' : 's'} to fully work. `
+    + 'Paste what you have — each is saved to your encrypted vault and wired in the next time your app starts. '
+    + 'Don’t have one? Tap "Guide me" and I’ll walk you to it step by step.';
+}
+
 export type SecretRequestOutcome = 'saved' | 'skipped' | 'nothing-to-ask';
 
 /**

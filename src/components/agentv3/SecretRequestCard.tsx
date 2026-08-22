@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Key, Eye, EyeOff, ChevronDown, Loader2, AlertCircle } from 'lucide-react';
+import { Key, Eye, EyeOff, ChevronDown, Loader2, AlertCircle, Sparkles, HelpCircle } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { findRecipeSource } from '../../lib/credentialRecipes';
 
@@ -24,9 +24,24 @@ export interface SecretRequestCardProps {
   onSave: (values: Record<string, string>) => Promise<boolean>;
   /** Answer the build: true = saved and wired, false = the user skipped. */
   onDone: (saved: boolean) => void;
+  /**
+   * THE BUILD'S CLOSING ACT (admin 2026-08-22: "last message 'app complete' nahi — 'app ban gaya,
+   * yeh keys chahiye, yahan fill karo' hona chahiye, kisi alag vibrant colour me").
+   *
+   * True for the deterministic POST-build ask. Visually louder on purpose — the mid-build card sits
+   * inside a stream the user is already watching; this one has to survive being the LAST thing on a
+   * screen someone glances at and closes.
+   */
+  finale?: boolean;
+  /**
+   * "Nahi hai to batao, main guide karunga." Drops a ready question into the chat composer so the AI
+   * walks the user to the key step by step — in the user's own language, like any chat turn. The
+   * question is only PREPARED, never auto-sent: what goes to the AI stays the user's decision.
+   */
+  onGuide?: (name: string) => void;
 }
 
-export function SecretRequestCard({ prompt, secrets, onSave, onDone }: SecretRequestCardProps) {
+export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onGuide }: SecretRequestCardProps) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const [minimised, setMinimised] = useState(false);
@@ -77,10 +92,22 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone }: SecretReq
   }
 
   return (
-    <div className="px-3 py-2.5 bg-amber-950/50 border border-amber-900 rounded space-y-2.5">
+    <div className={cn(
+      'px-3 py-2.5 rounded space-y-2.5',
+      finale
+        // The finale card must not look like one more log line. Vivid, but still the product's dark
+        // palette — a gradient ring and glow, not a neon block that fights the whole screen.
+        ? 'bg-gradient-to-br from-violet-950/80 via-fuchsia-950/60 to-amber-950/60 border-2 border-fuchsia-500/70 shadow-lg shadow-fuchsia-900/40 rounded-xl'
+        : 'bg-amber-950/50 border border-amber-900',
+    )}>
+      {finale && (
+        <div className="flex items-center gap-1.5 text-[13px] font-bold text-fuchsia-200">
+          <Sparkles className="w-4 h-4 text-fuchsia-300" /> Your app is ready — one last step
+        </div>
+      )}
       <div className="flex items-start gap-2">
         <Key className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
-        <p className="text-xs text-amber-100 leading-relaxed flex-1">{prompt}</p>
+        <p className={cn('text-xs leading-relaxed flex-1', finale ? 'text-fuchsia-100' : 'text-amber-100')}>{prompt}</p>
         <button
           onClick={() => setMinimised(true)}
           title="Minimise — your typing is kept"
@@ -146,6 +173,15 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone }: SecretReq
             >
               {shown[s.name] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
             </button>
+            {onGuide && (
+              <button
+                onClick={() => onGuide(s.name)}
+                title={`Ask NavBharatAI to walk you to ${s.name}, step by step`}
+                className="flex items-center gap-1 px-2 rounded bg-indigo-900/60 hover:bg-indigo-800 text-indigo-200 text-[10px] font-semibold whitespace-nowrap cursor-pointer"
+              >
+                <HelpCircle className="w-3.5 h-3.5" /> Guide me
+              </button>
+            )}
           </div>
         </div>
         );
@@ -166,14 +202,14 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone }: SecretReq
             saving ? 'bg-emerald-900/40 text-emerald-500/60 cursor-not-allowed' : 'bg-emerald-700 hover:bg-emerald-600 text-white',
           )}
         >
-          {saving ? (<span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Saving…</span>) : 'Save & continue'}
+          {saving ? (<span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Saving…</span>) : (finale ? 'Save keys' : 'Save & continue')}
         </button>
         <button
           onClick={() => onDone(false)}
           disabled={saving}
           className="px-3 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-100 cursor-pointer"
         >
-          Skip for now
+          {finale ? 'I\u2019ll do this later' : 'Skip for now'}
         </button>
       </div>
       <p className="text-[10px] text-zinc-500 leading-snug">

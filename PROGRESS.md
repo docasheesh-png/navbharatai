@@ -38394,3 +38394,45 @@ it — scale-to-zero, the way Cloud Run works — which removes the wake button 
 preview URL stable across sandbox death. Not built: it is new infra and the admin's call.
 
 Gate: both tsc + build + FULL vitest — 1,372 files / 17,242 passing, 1 skipped.
+
+## 2026-08-22 — The build's last word is the ASK, not "app complete" (admin request)
+
+**Admin:** *"Agar keys/secrets ki need hai, to user se maang kyun nahi lete? AI ka last message 'app
+complete' nahi hona chahiye — 'app ban gaya hai, par yeh yeh keys chahiye, yahan fill karo, nahi hai
+to batao main guide karunga' hona chahiye. Alag vibrant colour me, user ki language me. Non-technical
+suggestion hai — blindly follow mat karna, professionally banao."*
+
+**What already existed (redundant-work check first, per safeguard #6):**
+- The mid-build `request_secrets` tool + `SecretRequestCard` popup (2026-08-08) — values straight to
+  the encrypted vault, never up the build stream.
+- The post-build localized TEXT notice (`appRequirementsNotice`, 2026-08-03) — in the user's language.
+- Curated `credentialRecipes` (2026-08-17) — the exact console page, clicks, cost per known key.
+
+**The real gap** (exactly what the admin hit): the mid-build ask fires only when the MODEL chooses to
+call the tool — and on real builds it finished without asking. The text notice tells; nothing ASKS.
+
+**Shipped, professionally adapted:**
+1. **Deterministic closing ask.** On a successful build, the same pure requirements analysis that
+   feeds the notice now ALSO emits the existing `secret_request` card (callId `postbuild-…`) as the
+   build's final act — fields ready, capped at 6 keys (a form, not a wall), app-code-matched names
+   preferred (a Mapbox user is never asked for a Google key), platform keys and already-saved keys
+   filtered by the same guards as the mid-build ask. Zero LLM cost.
+2. **It survives the end of the build by construction:** emitted before the terminal `result`, which
+   keeps `pendingSecrets` (only `done`, the failure path, clears it) — reducer-test-locked.
+3. **Non-blocking by design:** nothing awaits the postbuild callId; `/respond` on a gone waiter is a
+   no-op; a key saved now is merged into `.env` by `ensureBootEnv` at the next boot (the wake-path fix
+   shipped an hour earlier) — the card says so honestly ("wired the next time your app starts").
+4. **Vibrant finale variant** of the card: gradient ring, "Your app is ready — one last step", and
+   buttons reworded ("Save keys" / "I'll do this later" — "Save & continue" implies a waiting build).
+5. **"Guide me" per key:** drops a ready question into the composer (never auto-sends — what goes to
+   the AI stays the user's decision); the AI then guides step by step in the user's own language.
+
+**Where I adapted rather than obeyed (rule 3, honest):**
+- The card's own labels stay ENGLISH — CLAUDE.md's language standard: platform UI is English; the
+  AI's summary (already localized via `appRequirementsNotice` + LANGUAGE_RULE) and the Guide-me chat
+  are what speak the user's language. 22 hand-translations of product chrome is the path this repo
+  already rejected once (see narrationCatalogue's warning).
+- "Vibrant" ≠ neon: a gradient ring within the product's dark palette, loud enough to survive being
+  the last thing on a glanced-at screen.
+
+Gate: both tsc + build + FULL vitest — 1,372 files / 17,254 passing, 1 skipped.

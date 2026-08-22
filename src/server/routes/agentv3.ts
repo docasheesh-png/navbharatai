@@ -221,6 +221,7 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
+import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
@@ -11551,6 +11552,34 @@ export function registerAgentV3Routes(app: Express): void {
               writtenFiles.set(inj.entry, newEntry);
               try { await actuator.writeFile(workspaceId, inj.entry, newEntry); } catch { /* sandbox write best-effort — the store copy is fixed */ }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" was imported by NOTHING (app would render unstyled) — injected its import into ${inj.entry}.`, autoResolved: true });
+            }
+          }
+        }
+        // ENV NEVER LOADED — the app that cannot serve one request (admin report 2026-08-22).
+        //
+        // That build's preview answered EVERY request with {"message":"secret option required for
+        // sessions"}: `.env` held SESSION_SECRET, the code read process.env.SESSION_SECRET, and nothing
+        // loaded the file. The engine healed it — read four files, edited the entry, restarted,
+        // re-probed — which under the 50/50 law is the red flag, not the win. This is the prevention
+        // half, and it belongs HERE rather than in a better heal because the runtime workaround we
+        // already had (E2BActuator sourcing .env onto the dev-server launch, added after the same class
+        // hit DATABASE_URL on 2026-08-02) fixes the app only INSIDE our sandbox — `npm start` on the
+        // user's laptop, a Render deploy or a Docker image would still be broken. Fixing the source
+        // makes the app correct everywhere, which is the only version of correct worth shipping.
+        //
+        // Deterministic, free, and conservative by construction: it does nothing unless the project is
+        // a plain Node app whose OWN .env defines a key the code reads, that nothing loads, with an
+        // entry the project itself names. `dotenv` needs no declaring — it is on DependencyAutoFix's
+        // well-known allowlist, so the import we add is what installs it. Kill: AGENTV3_DOTENV_GUARD=off.
+        if (process.env.AGENTV3_DOTENV_GUARD !== 'off' && !isImportTurn) {
+          const env = injectDotenvLoad(integrityFiles);
+          if (env.wired) {
+            const patched = env.files[env.wired.entry];
+            if (typeof patched === 'string') {
+              integrityFiles[env.wired.entry] = patched;
+              writtenFiles.set(env.wired.entry, patched);
+              try { await actuator.writeFile(workspaceId, env.wired.entry, patched); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'ENV_LOADING_WIRED', message: dotenvWiringMessage(env.wired), autoResolved: true });
             }
           }
         }

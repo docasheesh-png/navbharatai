@@ -1,12 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Menu, X, RotateCcw, LogOut, Maximize2, User, Settings, ChevronDown, Shield } from 'lucide-react';
+import { Menu, X, RotateCcw, LogOut, Maximize2, User, Settings, ChevronDown, Shield, UserPlus } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { ViewType } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from '../../lib/signOutFlow';
 import { signOutEverywhere } from '../../lib/firebase';
+import {
+  readRoster, forgetAccount, switchTargets, addAccountLabel, canAddAccount,
+  accountLabel, accountInitial, writeRoster, type RosterAccount,
+} from '../../lib/accountRoster';
 import { NotificationBell } from '../NotificationBell';
 
 interface MenuItem {
@@ -56,6 +60,36 @@ export function TopNav({
 }: TopNavProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  // PROFILE SWITCHING (admin 2026-08-22: "apne photo par click kar ke switch profile kare, ek saath
+  // 5 id"). The roster is metadata only — see accountRoster.ts for why no token is ever stored, and
+  // for the honest boundary: the SDK holds one live session, so switching re-authenticates rather
+  // than keeping five sessions in parallel. Read when the menu opens, so it is never stale.
+  const [roster, setRoster] = useState<RosterAccount[]>([]);
+  useEffect(() => {
+    if (dropdownOpen) setRoster(readRoster(typeof localStorage !== 'undefined' ? localStorage : null));
+  }, [dropdownOpen]);
+
+  const store = () => (typeof localStorage !== 'undefined' ? localStorage : null);
+
+  /** Sign out of THIS account and land on the sign-in screen, with the roster intact for one tap back. */
+  const switchTo = async (target: RosterAccount) => {
+    setDropdownOpen(false);
+    await performSignOut({
+      signOut: () => signOutEverywhere(),
+      clearStorage: defaultClearAuthStorage,
+      deleteAuthDb: () => deleteFirebaseAuthDb(),
+      // The roster survives the sign-out (it is not auth storage), so the next screen already knows
+      // who this device remembers. `switchTo` is queued so the sign-in screen can offer it first.
+      reload: () => { try { store()?.setItem('nbai:switch-to', target.email || target.uid); } catch { /* optional hint */ } window.location.reload(); },
+    });
+  };
+
+  /** Remove one account from THIS DEVICE. Never claims to sign it out anywhere else. */
+  const removeAccount = (uid: string) => {
+    const next = forgetAccount(roster, uid);
+    setRoster(next);
+    writeRoster(store(), next);
+  };
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -244,8 +278,54 @@ export function TopNav({
                     </p>
                     <p className="text-[10px] text-[#484f58] truncate">{user.email}</p>
                   </div>
+                  {/* SWITCH PROFILE (admin 2026-08-22). Other remembered accounts, one tap each.
+                      Honest wording throughout: "Remove from this device" never says "sign out",
+                      because this list cannot sign anyone out anywhere else — and someone would use
+                      it believing they had secured a shared computer. */}
+                  {switchTargets(roster, user.uid).length > 0 && (
+                    <div className="py-1 border-b border-white/5">
+                      <p className="px-4 pt-1 pb-1.5 text-[9px] font-black text-[#484f58] uppercase tracking-widest">Switch account</p>
+                      {switchTargets(roster, user.uid).map((a) => (
+                        <div key={a.uid} className="group flex items-center gap-2 px-2 hover:bg-white/5 transition-colors">
+                          <button
+                            onClick={() => void switchTo(a)}
+                            className="flex-1 flex items-center gap-3 px-2 py-2 text-left min-w-0"
+                          >
+                            {a.photo ? (
+                              <img src={a.photo} alt="" className="w-6 h-6 rounded-lg object-cover shrink-0" referrerPolicy="no-referrer" />
+                            ) : (
+                              <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center shrink-0">
+                                <span className="text-[10px] font-black text-[#8b949e]">{accountInitial(a)}</span>
+                              </div>
+                            )}
+                            <span className="min-w-0">
+                              <span className="block text-[11px] font-bold text-white truncate">{accountLabel(a)}</span>
+                              {a.email && a.name && <span className="block text-[9px] text-[#484f58] truncate">{a.email}</span>}
+                            </span>
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); removeAccount(a.uid); }}
+                            title="Remove from this device"
+                            aria-label={`Remove ${accountLabel(a)} from this device`}
+                            className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 text-[#484f58] hover:text-red-400 transition-all"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {/* Menu items */}
                   <div className="py-1">
+                    <button
+                      onClick={() => { if (!canAddAccount(roster)) return; setDropdownOpen(false); void switchTo({ uid: '', email: '', name: '', photo: '', provider: '', lastUsed: 0 }); }}
+                      disabled={!canAddAccount(roster)}
+                      title={addAccountLabel(roster)}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <UserPlus className="w-4 h-4 text-emerald-400" />
+                      <span className="text-sm font-bold text-white truncate">{addAccountLabel(roster)}</span>
+                    </button>
                     <button
                       onClick={() => { setDropdownOpen(false); onOpenProfile?.(); }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"

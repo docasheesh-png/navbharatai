@@ -3897,6 +3897,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   setPrompt(`I don't have ${name} yet. Where do I get it? Guide me step by step — I'll tell you what I see on the screen.`);
                   composerRef.current?.focus();
                 }}
+                onSwitchProvider={() => {
+                  // "Razorpay ki jagah koi aur?" — the keys on the card come from the app's OWN code,
+                  // but the user may not want that provider at all. The AI lists the alternatives
+                  // (including keyless ones like UPI) and rewires the app as a normal edit turn.
+                  const names = state.pendingSecrets!.secrets.map((s) => s.name).join(', ');
+                  setPrompt(`My app currently needs ${names}, but I'd rather use a different provider for this. What are my options (including any that need no key at all)? Switch the app to the one I choose.`);
+                  composerRef.current?.focus();
+                }}
                 onSave={async (vals) => {
                   // Straight to the encrypted vault over the authenticated API — the value never goes
                   // back up the build stream, which is stored in the transcript and the admin report.

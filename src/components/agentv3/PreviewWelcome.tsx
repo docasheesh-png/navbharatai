@@ -5,7 +5,7 @@
 // the picture.
 
 import React, { useEffect, useState } from 'react';
-import { indiaLionManeSvg, indiaLionFaceSvg } from '../../lib/indiaLion';
+import makeInIndia from '../../assets/make-in-india.jpg';
 import { welcomeLine, WELCOME_HEADLINE, WELCOME_LINE_MS } from './previewWelcome';
 
 /**
@@ -22,20 +22,28 @@ export function PreviewWelcome({ checking = false, slow = false }: { checking?: 
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-5 p-6 text-center select-none">
-      <div className="relative w-24 h-24">
-        {/* The mane turns slowly — slowly on purpose. A fast spin reads as "working", and nothing is
-            working; this is a resting mark, not a progress indicator. */}
-        <div
-          className="absolute inset-0 animate-spin motion-reduce:animate-none"
-          style={{ animationDuration: '18s' }}
-          dangerouslySetInnerHTML={{ __html: indiaLionManeSvg(96) }}
-        />
-        {/* The face is still, and breathes. */}
-        <div
-          className="absolute inset-0 nbai-lion-breathe motion-reduce:animate-none"
-          dangerouslySetInnerHTML={{ __html: indiaLionFaceSvg(96) }}
-        />
-      </div>
+      {/* THE MARK ON THIS SCREEN (admin 2026-08-22, asked for four times: "use this, as it is!!").
+          
+          Used EXACTLY as supplied — the file in src/assets is a byte copy of what the admin sent, and
+          nothing here recolours, crops or redraws it. It keeps its own white ground on a rounded card,
+          which is how a logo is normally placed on a dark UI and is the only reading of "as it is"
+          that also renders: the artwork is near-black, so dropping it straight onto #0d1117 would show
+          the user an empty panel.
+          
+          ⚠️ FOR WHOEVER TOUCHES THIS NEXT — the licence question is REAL and unresolved. This is the
+          Make in India lion, a DPIIT (Government of India) registered trademark. It is not public
+          domain: Indian government works carry copyright under s.17(d) of the Copyright Act, and a
+          trademark separately governs use in commerce, so displaying it in a paid product without
+          permission is a live legal exposure and can read as government endorsement. There IS a
+          permission pathway (DPIIT / makeinindia.com guidelines) and Indian firms are encouraged to
+          apply. The admin was told this each time and chose to proceed; that is their call to make,
+          and this comment exists so the next person does not assume it was cleared. */}
+      <img
+        src={makeInIndia}
+        alt="Make in India"
+        className="w-full max-w-[260px] rounded-xl bg-white"
+        draggable={false}
+      />
 
       <div className="space-y-2 max-w-sm">
         <h3 className="text-zinc-100 text-base font-semibold tracking-tight">{WELCOME_HEADLINE}</h3>
@@ -53,12 +61,10 @@ export function PreviewWelcome({ checking = false, slow = false }: { checking?: 
       )}
 
       <style>{`
-        @keyframes nbaiLionBreathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.045); } }
-        .nbai-lion-breathe { animation: nbaiLionBreathe 3.4s ease-in-out infinite; transform-origin: 50% 50%; }
         @keyframes nbaiFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
         .nbai-fade-in { animation: nbaiFadeIn .5s ease-out both; }
         @media (prefers-reduced-motion: reduce) {
-          .nbai-lion-breathe, .nbai-fade-in { animation: none !important; }
+          .nbai-fade-in { animation: none !important; }
         }
       `}</style>
     </div>

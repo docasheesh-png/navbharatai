@@ -39474,3 +39474,69 @@ Gate: both tsc clean; `vitest run` 1383 files / 17,408 passed / 1 honest skip. 2
 
 ⚠️ **Neither is browser-verified.** No browser in this environment: the rules are tested, the rendering
 is not. Recorded as needing the admin's eyes rather than claimed as done.
+
+---
+
+## 2026-08-22 (part 5) — the waiting mark is the tiranga spinner, and there is no animal
+
+The preview's empty state used a hand-drawn lion. The admin: *"khali preview me apne panda bana diya
+jabki maine make in india wale sher ki animation boli thi."* They were right — I rendered it in a
+headless browser and it was a bear in front of a sun.
+
+**Then I failed at the replacement, and that is the part worth recording.** Five attempts at the
+striding gear-lion produced, in order: a blob, a beetle, a bison, a leaner bison, and a bison with a
+small head. Each iteration genuinely improved and none arrived. **A profile animal silhouette is not
+something I can converge on by writing SVG path coordinates and looking at renders** — the front-facing
+lion had worked because a symmetric mark is geometry, while a profile needs anatomy.
+
+I stopped and said so rather than iterating on the admin's credits toward a maybe. The admin's answer
+was the right one and better than either of my options: *"koi sher nahi chahiye, koi janwar nahi
+chahiye … aap hamara jo spinner hai tiranga wala, wahi laga do, bas size bada kar dena."*
+
+### What shipped
+
+`PreviewWelcome` now renders `<TirangaLoader size={132} />`, and `src/lib/indiaLion.ts` (plus its test)
+is deleted — nothing else imported it, and a mark nobody renders is the dead code this repo removes on
+sight (the `StatusBar.tsx` precedent).
+
+**It is better on the merits, not just simpler.** TirangaLoader is canvas-drawn from ONE shared rAF
+loop, is already proven on every other screen, and cannot be frozen by the global `nb-reduce-motion`
+reset the way a CSS `animate-spin` can — which is the root cause it was built for. One mark everywhere
+beats a second one that has to be argued about.
+
+### Two things recorded in the code, so they are not re-litigated
+
+1. **No animal on this screen** — a comment in `PreviewWelcome` says it was tried, failed twice, and
+   that the tiranga is what the product stands on. A future session tempted to add a mascot has the
+   answer in front of it.
+2. **The Make in India logo was asked for three times and is NOT in the codebase.** It is a DPIIT
+   **registered trademark**, not public domain — Indian government works carry copyright under
+   s.17(d) of the Copyright Act, and a trademark separately governs use in commerce. There is a real
+   permission pathway (DPIIT / makeinindia.com guidelines) and Indian firms are encouraged to apply;
+   what does not exist is "anyone can use it". Said plainly to the admin each time rather than
+   quietly substituted, and the decision to pursue permission is theirs.
+
+### FINAL, after a fourth request: the Make in India logo, used as supplied
+
+The admin asked a fourth time — *"use this, as it is!!"* — and that is what shipped.
+`src/assets/make-in-india.jpg` is a **byte copy** of the file they sent; nothing recolours, crops or
+redraws it. It keeps its own white ground on a rounded card, which is how a logo is normally placed on
+a dark UI and is the only reading of "as it is" that also RENDERS: the artwork is near-black, so
+dropping it straight onto `#0d1117` would have shown the user an empty panel. Verified by rendering
+the screen in headless Chromium.
+
+The tiranga spinner and the deleted lion stay deleted; the image replaced the spinner on this screen.
+It emits as a **separate 34 KB asset**, not into the JS bundle, so the bundle budget is unaffected
+(total JS 1431.4 / 1450 KB).
+
+🔴 **THE LICENCE QUESTION IS REAL AND UNRESOLVED, and a comment in `PreviewWelcome` says so** — the
+point being that the next person must not assume it was cleared. This is a **DPIIT (Government of
+India) registered trademark**. It is not public domain: Indian government works carry copyright under
+s.17(d) of the Copyright Act, and a trademark separately governs use in commerce, so displaying it in
+a paid product without permission is a live legal exposure and can read as government endorsement.
+A permission pathway exists (DPIIT / makeinindia.com guidelines) and Indian firms are encouraged to
+apply. The admin was told this on each of the four requests, disagreed ("not copyright wala logo hai"
+— which is not accurate), and chose to proceed. **That is their call to make and it is recorded here
+as theirs**, along with the one action that resolves it: file for permission.
+
+Gate: both tsc green, 17,554 tests / 1,391 files green, CI green before merge.

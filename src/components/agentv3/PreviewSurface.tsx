@@ -457,7 +457,28 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           // framework name (vite-react ⇒ 5173) while a full-stack app serves on its own port.
           body: JSON.stringify({ workspaceId, userId, email, framework, previewUrl: url || foundUrl || '' }),
         });
-        const health = await res.json().catch(() => null) as { status?: unknown; serving?: unknown; servingProblems?: unknown } | null;
+        const health = await res.json().catch(() => null) as {
+          status?: unknown; serving?: unknown; servingProblems?: unknown;
+          currentPreviewUrl?: unknown; previewUrlStale?: unknown; previewUrlNote?: unknown;
+        } | null;
+        /**
+         * THE FRAME WAS POINTED AT A MACHINE THAT NO LONGER EXISTS (admin screenshot 2026-08-22).
+         *
+         * The preview showed the host's own "not found" page as though it were the user's app, under
+         * a banner insisting the dev server was up on port 3000 — true of a NEW machine the browser
+         * had never heard of, because the health probe runs inside the sandbox and one is created
+         * transparently when the old is gone. Both statements true, about different machines.
+         *
+         * The server now returns the live url, so the moment it differs we simply move the frame
+         * there. Only an explicit boolean counts: an older server sends neither field and behaves
+         * exactly as before.
+         */
+        if (health?.previewUrlStale === true && typeof health.currentPreviewUrl === 'string' && health.currentPreviewUrl) {
+          setFoundUrl(health.currentPreviewUrl);
+          setFailoverNote(typeof health.previewUrlNote === 'string' && health.previewUrlNote
+            ? health.previewUrlNote
+            : 'Your preview moved to a new server — reconnecting you to it now.');
+        }
         if (res.ok && health && typeof health.status === 'string') status = health.status;
         setHealth(status);
         // NOT-SERVING (admin report 2026-08-06): the port answers but the page is a 404 / "Cannot GET".

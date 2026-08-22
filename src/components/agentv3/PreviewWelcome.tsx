@@ -5,7 +5,7 @@
 // the picture.
 
 import React, { useEffect, useState } from 'react';
-import { indiaLionManeSvg, indiaLionFaceSvg } from '../../lib/indiaLion';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { welcomeLine, WELCOME_HEADLINE, WELCOME_LINE_MS } from './previewWelcome';
 
 /**
@@ -22,20 +22,23 @@ export function PreviewWelcome({ checking = false, slow = false }: { checking?: 
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-5 p-6 text-center select-none">
-      <div className="relative w-24 h-24">
-        {/* The mane turns slowly — slowly on purpose. A fast spin reads as "working", and nothing is
-            working; this is a resting mark, not a progress indicator. */}
-        <div
-          className="absolute inset-0 animate-spin motion-reduce:animate-none"
-          style={{ animationDuration: '18s' }}
-          dangerouslySetInnerHTML={{ __html: indiaLionManeSvg(96) }}
-        />
-        {/* The face is still, and breathes. */}
-        <div
-          className="absolute inset-0 nbai-lion-breathe motion-reduce:animate-none"
-          dangerouslySetInnerHTML={{ __html: indiaLionFaceSvg(96) }}
-        />
-      </div>
+      {/* THE TIRANGA SPINNER, LARGE (admin 2026-08-22: "aap hamara jo spinner hai tiranga wala, wahi
+          laga do … bas size bada kar dena").
+          
+          It replaces a hand-drawn lion that never convinced anyone. The first version read as a bear
+          (the admin: "apne panda bana diya"), and five attempts at redrawing it produced a buffalo —
+          a profile animal silhouette is not something I can converge on by writing path coordinates
+          and looking at renders. The admin's call to stop and use the mark the app ALREADY owns was
+          the right one, and it is better on the merits: TirangaLoader is canvas-drawn from one shared
+          rAF loop, is already proven on every other screen, and cannot be frozen by the global
+          reduce-motion reset the way a CSS `animate-spin` can (see its header for that root cause).
+          One mark everywhere beats a second one that has to be argued about.
+
+          ⚠️ NO ANIMAL HERE, and that is a decision rather than an omission (admin, twice: "koi sher
+          nahi chahiye, koi janwar nahi chahiye"). If a future session is tempted to put a mascot back
+          on this screen, this comment is the answer: it was tried, it failed twice, and the tiranga
+          is what the product already stands on. */}
+      <TirangaLoader size={132} />
 
       <div className="space-y-2 max-w-sm">
         <h3 className="text-zinc-100 text-base font-semibold tracking-tight">{WELCOME_HEADLINE}</h3>
@@ -53,12 +56,10 @@ export function PreviewWelcome({ checking = false, slow = false }: { checking?: 
       )}
 
       <style>{`
-        @keyframes nbaiLionBreathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.045); } }
-        .nbai-lion-breathe { animation: nbaiLionBreathe 3.4s ease-in-out infinite; transform-origin: 50% 50%; }
         @keyframes nbaiFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
         .nbai-fade-in { animation: nbaiFadeIn .5s ease-out both; }
         @media (prefers-reduced-motion: reduce) {
-          .nbai-lion-breathe, .nbai-fade-in { animation: none !important; }
+          .nbai-fade-in { animation: none !important; }
         }
       `}</style>
     </div>

@@ -50,7 +50,7 @@ jobs:
   build-aab:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Fail EARLY and honestly if the signing secrets are not set — a Play Store .aab MUST be signed,
       # so we never hand back an unsigned bundle that would be rejected on upload.
@@ -87,7 +87,7 @@ jobs:
           echo "Play service-account secret present — will upload to the internal track after the build."
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: 'npm'
@@ -131,7 +131,7 @@ jobs:
         run: rm -f "$RUNNER_TEMP/upload-keystore.jks"
 
       - name: Upload the .aab artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: navbharatai-release-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
@@ -141,7 +141,7 @@ jobs:
       # stable URL (GitHub release asset / Firebase Hosting / any CDN), and set VITE_APK_DOWNLOAD_URL to
       # that URL so the button downloads it directly. (Until set, the button falls back to the Play listing.)
       - name: Upload the .apk artifact (direct-download / sideload)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: navbharatai-release-apk
           path: android/app/build/outputs/apk/release/app-release.apk

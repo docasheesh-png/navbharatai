@@ -9,6 +9,7 @@
 // isn't. Gated by the server flag (the caller only renders this when custom domains are enabled).
 
 import { useState, useEffect, useRef } from 'react';
+import { readDomainDraft, writeDomainDraft, clearDomainDraft, draftNotice } from './domainDraftCache';
 import { Globe, ChevronLeft, CheckCircle2, Copy, Check, RefreshCw, Info, ExternalLink, Rocket } from 'lucide-react';
 import { timeAgo, needsPublishDot, type PublishFreshness } from '../../lib/publishFreshness';
 import { TirangaLoader } from '../ui/TirangaLoader';
@@ -358,7 +359,18 @@ export function relativeRecordName(name: string, domain: string): string {
 
 
 export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy, publishFreshness, onUnpublish }: NbaiDomainConnectProps) {
-  const [domain, setDomain] = useState('');
+  /**
+   * OPENS WITH WHAT YOU ALREADY TYPED (admin 2026-08-22: "abhi lagta hai sab gayab ho gaya").
+   *
+   * Read SYNCHRONOUSLY in the initialiser, not in an effect — an effect runs after the first paint,
+   * which is the blank frame the admin is describing. The server state below still loads and still
+   * wins; this only removes the empty screen in front of it. See domainDraftCache.ts for why the
+   * records come back instantly and the verification states deliberately do not.
+   */
+  const draft = useRef(readDomainDraft(typeof localStorage !== 'undefined' ? localStorage : null, workspaceId || '', Date.now())).current;
+  const [domain, setDomain] = useState(draft?.domain || '');
+  /** True once the SERVER has answered. Until then, anything restored is last-known, not confirmed. */
+  const [confirmed, setConfirmed] = useState(false);
   /** The honest reason the last publish attempt did not start (no dead buttons). Cleared on retry. */
   const [publishBlocked, setPublishBlocked] = useState<string | null>(null);
   // UNPUBLISH — deliberately behind a TYPED confirmation (admin 2026-08-22: "user ko bataya jaye
@@ -383,7 +395,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
   const [copied, setCopied] = useState<string | null>(null);
   // Auto-DNS (nameserver delegation): the zero-copy-paste path. Offered only when the server says a
   // tap can actually deliver it (result.autoDns), and honest about the ONE registrar step it needs.
-  const [autoNs, setAutoNs] = useState<string[] | null>(null);
+  const [autoNs, setAutoNs] = useState<string[] | null>(draft?.nameServers?.length ? draft.nameServers : null);
   const [autoZoneStatus, setAutoZoneStatus] = useState<string | null>(null);
   const [autoApplied, setAutoApplied] = useState<number | null>(null);
   // The zone read-back (see autoDnsSummary): `null` = we could not look, `[]` = everything is there.
@@ -415,18 +427,58 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
         const res = await fetch(`/api/domains/nbai/state?${params.toString()}`, { headers: await authHeaders() });
         if (!res.ok) return;                              // no saved state / not enabled — a fresh form is correct
         const data = await res.json().catch(() => null);
-        if (cancelled || !data?.domain) return;
+        if (cancelled) return;
+        // The server has spoken, so nothing on screen is a remembered guess any more — even when it
+        // had nothing to say, which honestly means "no domain connected" rather than "not loaded".
+        setConfirmed(true);
+        if (!data?.domain) {
+          // THE SERVER SAYS NOTHING IS CONNECTED, and the device remembers a domain. That is a real
+          // divergence — the connection was removed elsewhere, or from another device — and keeping
+          // the remembered copy on screen would be the stale-artifact trap this module exists to
+          // avoid. The server is the authority on what is connected; forget ours.
+          clearDomainDraft(typeof localStorage !== 'undefined' ? localStorage : null, workspaceId || '');
+          return;
+        }
         setDomain((prev) => prev || data.domain);
         if (data.status) setResult((prev) => prev ?? data.status);
         if (data.zone?.nameServers?.length) {
           setAutoNs((prev) => prev ?? data.zone.nameServers);
           setAutoZoneStatus((prev) => prev ?? data.zone.status);
         }
-      } catch { /* offline — the manual flow still works from scratch */ }
+        // Keep the device copy current, so the NEXT visit is instant too. Only ever "what to type" —
+        // writeDomainDraft has no field for a verification state, by construction.
+        writeDomainDraft(
+          typeof localStorage !== 'undefined' ? localStorage : null,
+          workspaceId || '',
+          {
+            domain: data.domain,
+            records: data.status?.displayRecords || data.status?.records || [],
+            nameServers: data.zone?.nameServers,
+          },
+          Date.now(),
+        );
+      } catch { /* offline — the manual flow still works from scratch, now with the saved copy shown */ }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
+
+  /**
+   * Remember what to type, after any answer that produced records.
+   *
+   * One function so connect, re-check and first load cannot drift on WHAT is remembered — and so the
+   * "never remember a verification" rule lives in exactly one place (domainDraftCache.ts refuses to
+   * store one at all, which is the stronger form of the same guarantee).
+   */
+  const rememberDraft = (status: DomainStatus | null | undefined, nameServers?: string[] | null) => {
+    if (!status?.domain) return;
+    writeDomainDraft(
+      typeof localStorage !== 'undefined' ? localStorage : null,
+      workspaceId || '',
+      { domain: status.domain, records: status.displayRecords || status.records || [], nameServers: nameServers || undefined },
+      Date.now(),
+    );
+  };
 
   const cleanDomain = cleanDomainInput(domain);
   const domainValid = /^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(cleanDomain);
@@ -455,6 +507,8 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
       }
       setNeedsPlan(false);
       setResult(data);
+      setConfirmed(true);
+      rememberDraft(data, autoNs);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error.');
     } finally {
@@ -471,6 +525,8 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(data?.error || 'Could not check status.'); return; }
       setResult(data);
+      setConfirmed(true);
+      rememberDraft(data, autoNs);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error.');
     } finally {
@@ -595,6 +651,17 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
           <p className="text-[11px] text-zinc-400">Point your domain at this app on NavBharatAI — free HTTPS included.</p>
         </div>
       </div>
+
+      {/* WHERE THIS CAME FROM, while the live check runs (admin 2026-08-22). The page is already
+          populated from the device by now, so the reassurance the admin asked for — "your work is
+          still here" — is carried by the screen itself; this line only says the status is not
+          confirmed YET. It deliberately never says connected or verified: see domainDraftCache.ts. */}
+      {draftNotice(!!draft?.domain, confirmed) && (
+        <p className="text-[11px] text-zinc-500 flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse shrink-0" />
+          {draftNotice(!!draft?.domain, confirmed)}
+        </p>
+      )}
 
       {/* Step 1 — domain */}
       <div className="flex gap-2">

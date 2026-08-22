@@ -25,11 +25,62 @@ describe('gift plan v2 — off by default, and genuinely inert while off', () =>
   });
 
   it('does not even LOOK anything up when the flag is off', () => {
-    // The marker reads are two extra Firestore round-trips on the wallet path; a disabled feature
-    // must not pay for them, and must not be able to fail for a user it does not apply to.
-    expect(SRC).toMatch(/const emailUsed = v2 \? await giftIdentityUsed\(db, 'email', normEmail\) : false;/);
-    expect(SRC).toMatch(/const phoneUsed = v2 \? await giftIdentityUsed\(db, 'phone', normPhone\) : false;/);
+    // The marker reads are extra Firestore round-trips on the wallet path; a disabled feature must
+    // not pay for them, and must not be able to fail for a user it does not apply to.
+    //
+    // Renamed to *Pre when the binding in-transaction read was added (pre-merge review): these two
+    // are now the FAST pre-check, and the guard that actually holds is giftIdentityUsedInTx below.
+    // The assertion is unchanged in spirit — both must still be behind `v2`.
+    expect(SRC).toMatch(/const emailUsedPre = v2 \? await giftIdentityUsed\(db, 'email', normEmail\) : false;/);
+    expect(SRC).toMatch(/const phoneUsedPre = v2 \? await giftIdentityUsed\(db, 'phone', normPhone\) : false;/);
     expect(SRC).toMatch(/const normPhone = v2 \? normalizePhoneForGift\(await verifiedPhoneNumber\(req\)\) : '';/);
+  });
+
+  it('the IN-TRANSACTION reads are gated by the flag too — a disabled feature adds no reads anywhere', () => {
+    // The binding check runs inside the signup transaction, so it is the easiest place to
+    // accidentally spend two round-trips on every wallet creation forever. The `v2 ? … : null`
+    // short-circuit is what keeps it free while the flag is off.
+    expect(SRC).toMatch(/const v2Grant = v2\s*\n?\s*\? decideSignupGrant\(\{/);
+    expect(SRC).toMatch(/emailUsed: emailUsedPre \|\| await giftIdentityUsedInTx\(tx, db, 'email', normEmail\)/);
+    expect(SRC).toMatch(/phoneUsed: phoneUsedPre \|\| await giftIdentityUsedInTx\(tx, db, 'phone', normPhone\)/);
+  });
+
+  /**
+   * THE RACE THIS CLOSES (found reviewing this PR before merge).
+   *
+   * Firestore's optimistic concurrency guards the documents a transaction READ. A marker that is
+   * only written is not a precondition, so two transactions could blind-set the same marker and both
+   * commit. Across two accounts sharing a normalized mailbox — `me+1@` and `me+2@` signing up in the
+   * same instant — there is no shared read at all: different uids mean different wallet docs, so the
+   * wallet-doc check that closes the same-account race does not reach across them. Both would be paid.
+   */
+  it('the identity marker is READ inside the transaction, not only written', () => {
+    // A pre-transaction read cannot make two concurrent transactions contend; only a read INSIDE can.
+    expect(SRC).toContain('async function giftIdentityUsedInTx(');
+    expect(SRC).toMatch(/giftIdentityUsedInTx[\s\S]{0,900}await tx\.get\(doc\(db, 'payment_transactions', id\)\)/);
+  });
+
+  it('the fail-closed pre-check can never be UNDONE by the in-transaction read', () => {
+    // OR-ed, never replaced: if the store was unreachable the pre-check returns true (already used),
+    // and a successful read inside the transaction must not turn that refusal back into a grant.
+    expect(SRC).toMatch(/emailUsedPre \|\| await giftIdentityUsedInTx/);
+    expect(SRC).toMatch(/phoneUsedPre \|\| await giftIdentityUsedInTx/);
+    expect(SRC).toMatch(/phoneUsed = phoneUsedPre \|\| await giftIdentityUsedInTx/);
+  });
+
+  it('every transaction read still precedes every write (Firestore requires it)', () => {
+    // The binding read was added inside transactions that already write; putting it after a write
+    // would throw at runtime and only on the paths that actually grant money.
+    for (const [open, close] of [['const createdWallet = await runTransaction', '...createdWallet,'],
+      ['const result = await runTransaction', 'if (result.granted > 0)']] as const) {
+      const body = SRC.slice(SRC.indexOf(open), SRC.indexOf(close));
+      expect(body.length, open).toBeGreaterThan(100);
+      const lastRead = Math.max(body.lastIndexOf('await tx.get('), body.lastIndexOf('giftIdentityUsedInTx('));
+      const firstWrite = Math.min(
+        ...[body.indexOf('tx.set('), body.indexOf('tx.update(')].filter((i) => i >= 0),
+      );
+      expect(lastRead, open).toBeLessThan(firstWrite);
+    }
   });
 
   it('falls back to the exact legacy grant when v2 is off', () => {

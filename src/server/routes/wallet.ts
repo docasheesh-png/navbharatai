@@ -77,6 +77,36 @@ async function giftIdentityUsed(db: any, kind: 'email' | 'phone', normalized: st
   }
 }
 
+/**
+ * The same question, asked INSIDE a transaction — which is what actually makes it binding.
+ *
+ * WHY THIS EXISTS (review of PR #2562, before merge). The pre-transaction read below is a fine fast
+ * path, but Firestore's optimistic concurrency only guards documents a transaction READ. A marker
+ * that is merely written is not a precondition, so two transactions could both blind-set the same
+ * marker and both commit. For two accounts that share a normalized mailbox — `me+1@` and `me+2@`
+ * signing up in the same instant — there is no shared read between them at all: different uids mean
+ * different wallet docs, so the wallet-doc check that closes the same-account race does not reach
+ * across them. Both would see "unused" and both would be paid. That is precisely the attack the
+ * per-identity marker exists to stop, and it is two scripted requests.
+ *
+ * Reading the candidates here puts them in the transaction's precondition set, so the second attempt
+ * retries, sees the marker the first one wrote, and grants nothing.
+ *
+ * The ids do NOT depend on another read — they come from the normalized identity, known before the
+ * transaction opens — so there is no ordering problem in reading them here.
+ *
+ * ⚠️ Reads only. Firestore requires every read in a transaction to precede every write, so this must
+ * be called before the first `tx.set`/`tx.update`.
+ */
+async function giftIdentityUsedInTx(tx: any, db: any, kind: 'email' | 'phone', normalized: string): Promise<boolean> {
+  if (!normalized) return false;
+  for (const id of giftMarkerCandidates(kind, normalized)) {
+    const snap = await tx.get(doc(db, 'payment_transactions', id));
+    if (snap.exists()) return true;
+  }
+  return false;
+}
+
 /** The durable "this identity has had its gift" record. Holds NO raw email or phone — the id is a
  *  salted hash and the body carries only what is needed to audit a grant. */
 function giftMarkerDoc(markerId: string, kind: 'email' | 'phone', userId: string, tokens: number, nowIso: string): Record<string, unknown> {
@@ -256,21 +286,30 @@ export function registerWalletRoutes(app: Express): void {
         const v2 = giftPlanV2Enabled();
         const normEmail = v2 ? normalizeEmailForGift(email) : '';
         const normPhone = v2 ? normalizePhoneForGift(await verifiedPhoneNumber(req)) : '';
-        // Looked up BEFORE the transaction: Firestore transactions cannot read a document whose id
-        // depends on another read, and these markers are append-only — an id that exists now can
-        // never stop existing, so a pre-read cannot turn a refusal into a grant. The reverse race
-        // (two concurrent first reads) is closed by the wallet-doc check inside the transaction.
-        const emailUsed = v2 ? await giftIdentityUsed(db, 'email', normEmail) : false;
-        const phoneUsed = v2 ? await giftIdentityUsed(db, 'phone', normPhone) : false;
-        const v2Grant = v2
-          ? decideSignupGrant({ phoneVerified: !!normPhone, emailUsed, phoneUsed })
-          : null;
+        // A fast pre-check OUTSIDE the transaction. These markers are append-only, so an id that
+        // exists now can never stop existing and this can only ever refuse early — never grant. It
+        // also keeps the FAIL-CLOSED behaviour of giftIdentityUsed for a store that is unreachable.
+        // It is NOT the guard: the binding read happens inside the transaction below, because a
+        // pre-read cannot make two concurrent transactions contend. See giftIdentityUsedInTx.
+        const emailUsedPre = v2 ? await giftIdentityUsed(db, 'email', normEmail) : false;
+        const phoneUsedPre = v2 ? await giftIdentityUsed(db, 'phone', normPhone) : false;
 
         const createdWallet = await runTransaction(db, async (tx) => {
           const wSnap = await tx.get(walletRef);
           if (wSnap.exists()) return wSnap.data(); // created concurrently — never overwrite, never re-grant
           const markerSnap = await tx.get(welcomeMarkerRef);
           const alreadyGranted = markerSnap.exists();
+          // THE BINDING CHECK. Re-read inside the transaction so the markers become preconditions —
+          // a concurrent signup sharing this mailbox now loses the race instead of being paid too.
+          // The pre-check still counts: it is OR-ed in so a fail-closed refusal cannot be undone by
+          // a successful read here.
+          const v2Grant = v2
+            ? decideSignupGrant({
+                phoneVerified: !!normPhone,
+                emailUsed: emailUsedPre || await giftIdentityUsedInTx(tx, db, 'email', normEmail),
+                phoneUsed: phoneUsedPre || await giftIdentityUsedInTx(tx, db, 'phone', normPhone),
+              })
+            : null;
           // The per-USER marker still guards v2: it is what stops a wallet-doc recreation re-granting,
           // and that hole is independent of the per-identity ones.
           const welcomeTokens = v2Grant
@@ -365,7 +404,9 @@ export function registerWalletRoutes(app: Express): void {
         });
       }
 
-      const phoneUsed = await giftIdentityUsed(db, 'phone', normPhone);
+      // Fast pre-check only — and the one that preserves fail-closed when the store is unreachable.
+      // The binding read is inside the transaction, for the same reason as the signup path.
+      const phoneUsedPre = await giftIdentityUsed(db, 'phone', normPhone);
       const nowIso = new Date().toISOString();
       const walletRef = doc(db, 'user_token_wallets', userId);
       const markerId = giftMarkerIdToWrite('phone', normPhone);
@@ -379,6 +420,11 @@ export function registerWalletRoutes(app: Express): void {
         const gifted = Number.isFinite(givenRaw) && givenRaw > 0 ? Math.floor(givenRaw) : 0;
         // Re-decided INSIDE the transaction against the live figure: a build may have completed, or a
         // concurrent claim may have landed, since the read above.
+        // Binding: the marker joins the transaction's precondition set, so two claims that somehow
+        // reach the same number concurrently cannot both be paid. Belt-and-braces here — the top-up
+        // arithmetic below already reads freeGiftedTokens in-transaction — but the two guards protect
+        // different things: that one bounds ONE wallet, this one bounds ONE NUMBER across wallets.
+        const phoneUsed = phoneUsedPre || await giftIdentityUsedInTx(tx, db, 'phone', normPhone);
         const claim = decidePhoneClaim({ giftedSoFar: gifted, phoneUsed });
         if (claim.tokens <= 0) return { granted: 0, reason: claim.reason };
 

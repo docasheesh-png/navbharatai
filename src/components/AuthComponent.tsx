@@ -29,7 +29,7 @@ import { firebaseConfig } from '../config/firebase';
 import { signOutEverywhere } from '../lib/firebase';
 import { markRedirectStarted } from '../lib/redirectSignInMarker';
 import { explainAuthReason, shouldDeepDiagnose } from '../lib/authDiagnostics';
-import { popupFailureAction, waitForSignedInUser, settleNativeSignIn, appleSignInFailureMessage, webSignInStrategy } from './socialSignInPolicy';
+import { popupFailureAction, waitForSignedInUser, settleNativeSignIn, appleSignInFailureMessage, webSignInStrategy, authErrorDetail } from './socialSignInPolicy';
 
 /**
  * Force-logout the old session BEFORE a new login — WEB ONLY, and never let it block the sign-in.
@@ -598,7 +598,15 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         let result: UserCredential | null = null;
         const exchange = signInWithCredential(auth, credential).then(
           (r) => { result = r; },
-          (e) => { mark(`exchange error: ${String(e?.code || e?.message || e).slice(0, 60)}`); throw e; }, // surface the REAL reason (was swallowed)
+          // SURFACE THE REAL REASON (was swallowed) — and since 2026-08-22 the reason the SERVER gave,
+          // not only our code for it. `e?.code || e?.message` looks like a fallback and is not one: the
+          // code is always truthy, so the detail Google puts in `.message` after ` : ` never printed.
+          // This is the same native exchange Apple sign-in on iOS ends in, so it is the same blind spot.
+          (e) => {
+            const d = authErrorDetail(e);
+            mark(`exchange error: ${String(e?.code || e?.message || e).slice(0, 60)}${d ? ` — ${d.slice(0, 80)}` : ''}`);
+            throw e;
+          },
         );
         const outcome = await settleNativeSignIn(exchange, auth, 15000, 3000);
         if (outcome === 'failed') {

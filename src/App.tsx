@@ -76,7 +76,7 @@ import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, getRedirectResult, GithubAuthProvider, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
 // One shared, tested describer for social sign-in outcomes (see socialSignInPolicy).
-import { socialRedirectFailureMessage } from './components/socialSignInPolicy';
+import { socialRedirectFailureMessage, authErrorDetail } from './components/socialSignInPolicy';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { firebaseConfig } from './config/firebase';
@@ -1183,13 +1183,21 @@ export default function App() {
         })
         .catch((e) => {
           const code = e?.code || '';
-          console.error('[auth] social redirect failed:', code || e?.message || e);
+          // BOTH, NEVER `code || message` (2026-08-22). The old line was `code || e?.message || e`, and
+          // the code is always truthy — so Google's own explanation of the failure, which the SDK puts
+          // in `.message` whenever the server sent one after ` : `, was never printed. That is why the
+          // admin's screenshot of a real, reproducible Apple failure showed a bare
+          // `auth/invalid-credential` and not one word about WHY. See authErrorDetail.
+          const detail = authErrorDetail(e);
+          console.error('[auth] social redirect failed:', code || e?.message || e, detail ? `— ${detail}` : '');
           // SAY WHY (admin 2026-08-21). This used to show "Sign-in failed. Please try again." for every
           // cause — true of all of them, useful for none, and on a phone there is no console to read the
           // real code from. socialRedirectFailureMessage names the causes we can act on and carries the
           // raw code for the rest; it returns null only for auth/no-auth-event, which is what a normal
           // page load reports when no redirect was pending.
-          const message = socialRedirectFailureMessage(code);
+          // …and the detail travels to the TOAST too, because on a phone there is no console at all —
+          // which is the entire reason this function exists.
+          const message = socialRedirectFailureMessage(code, detail);
           if (message) addToast(message, 'error');
         });
     }

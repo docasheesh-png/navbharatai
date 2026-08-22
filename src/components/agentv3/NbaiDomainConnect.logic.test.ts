@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { connectStage, relativeRecordName, cleanDomainInput, visitUrl, publishButton, unpublishArmed, UNPUBLISH_WORD } from './NbaiDomainConnect';
+import { connectStage, relativeRecordName, cleanDomainInput, visitUrl, publishButton, unpublishArmed, UNPUBLISH_WORD, statusIcon, lastCheckedLabel } from './NbaiDomainConnect';
 
 describe('connectStage — plain-language, honest connect stages', () => {
   it('active domain: done, no further action — but only CONNECTED until something SAW it serve', () => {
@@ -290,5 +290,47 @@ describe('publishButton — "Update" appears ONLY when the app was actually edit
   it('unmeasurable ⇒ a plain Publish that claims nothing', () => {
     expect(publishButton('unknown', null, NOW).label).toBe('Publish');
     expect(publishButton('unknown', null, NOW).note).toBe('');
+  });
+});
+
+/**
+ * THE SIX-HOUR SPINNER (admin 2026-08-22: "bahut der ⏰ 6hr se spinner ghum raha hai").
+ *
+ * The status block used to choose its icon from the STAGE — `tone === 'ok' ? tick : spinner` — so a
+ * pending DNS connection span a loader forever, through a wait that is genuinely hours long. Nothing
+ * was loading; nothing was even being requested. These tests pin the rule that replaced it: a spinner
+ * means a REQUEST IS IN FLIGHT, and nothing else.
+ */
+describe('statusIcon — a spinner only when something is actually happening', () => {
+  it('a real in-flight check spins', () => {
+    expect(statusIcon({ tone: 'warn', checking: true })).toBe('busy');
+    expect(statusIcon({ tone: 'ok', checking: true })).toBe('busy');
+  });
+
+  it('🔒 waiting on DNS shows a CLOCK, never a spinner', () => {
+    // This is the whole fix. A spinner promises the screen will change by itself in a moment; DNS
+    // propagation takes hours. The picture and the "this can take a few hours" copy contradicted each
+    // other, and people believe the picture.
+    expect(statusIcon({ tone: 'warn', checking: false })).toBe('waiting');
+    expect(statusIcon({ checking: false })).toBe('waiting');
+  });
+
+  it('done is done', () => {
+    expect(statusIcon({ tone: 'ok', checking: false })).toBe('done');
+  });
+});
+
+describe('lastCheckedLabel — the honest replacement for a spinner\'s fake motion', () => {
+  const now = Date.UTC(2026, 7, 22, 12, 0, 0);
+
+  it('says when we really looked', () => {
+    expect(lastCheckedLabel(now - 4 * 60_000, now)).toContain('Last checked');
+    expect(lastCheckedLabel(now - 4 * 60_000, now)).toContain('4 minutes ago');
+  });
+
+  it('says NOTHING when we have never checked — never "Last checked never"', () => {
+    expect(lastCheckedLabel(null, now)).toBe('');
+    expect(lastCheckedLabel(undefined, now)).toBe('');
+    expect(lastCheckedLabel(0, now)).toBe('');
   });
 });

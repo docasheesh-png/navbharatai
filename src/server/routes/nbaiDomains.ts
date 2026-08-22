@@ -291,12 +291,37 @@ export function registerNbaiDomainsRoutes(app: Express): void {
         return;
       }
       const status = await customDomainStatusLive(workspaceId as string, domain).catch(() => null);
-      const displayRecords = status ? await stableRecordsFor(domain, status.records) : [];
+      /**
+       * 🔒 THE RECORDS SURVIVE A FAILED LIVE LOOKUP (admin 2026-08-22: "bar bar website type karni
+       * padti hai", and "1-2 din baad wapas aaye to wahi DNS data dikhna chahiye").
+       *
+       * ROOT CAUSE this fixes: `displayRecords` used to be `status ? … : []`. The live Hosting call
+       * is a network round-trip to Google, so a slow or failed one — an outage, a quota blip, a cold
+       * instance — returned `status: null` AND an EMPTY record list. The user then opened a domain
+       * they had already set up and saw a blank form, so they typed the domain in again, and their
+       * DNS records appeared to have been forgotten. They never were: `rememberDomainDnsRecords`
+       * has been storing them all along. We were throwing away our own saved copy because a
+       * DIFFERENT call failed.
+       *
+       * So the stored records are read unconditionally now. This is exactly the kind of data we
+       * persisted them FOR — the moment the live source is unavailable is the moment they matter.
+       */
+      const displayRecords = status
+        ? await stableRecordsFor(domain, status.records)
+        : await getStoredDomainDnsRecords(domain).catch(() => []);
       // Zone lookup is best-effort: a missing/errored zone must not hide the rest of the state.
       const zone = managedDnsConfigured() ? await zoneStatus(domain).catch(() => null) : null;
       res.json({
         domain,
         status: status ? { ...status, displayRecords, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() } : null,
+        // The saved records ride OUTSIDE `status` too, so the screen can show the user what to add
+        // even in the one case where we genuinely cannot say how far along the connection is. A
+        // known set of records with an unknown status beats an empty screen with neither.
+        savedRecords: displayRecords,
+        // When the live check could not run, say so plainly instead of letting the client guess from
+        // a null status — the difference between "not connected" and "we could not look" is the
+        // difference between retyping a domain and simply waiting.
+        statusUnavailable: !status,
         zone: zone ? { nameServers: zone.nameServers, status: zone.status } : null,
       });
     } catch (err) {

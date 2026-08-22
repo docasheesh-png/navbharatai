@@ -192,6 +192,46 @@ export function connectStage(
  * it is not. The freshness verdict itself is the SHARED module the server computes with, so the label
  * and the measurement can never drift apart. Pure, exported for tests.
  */
+/**
+ * WHAT THE STATUS BLOCK'S ICON SHOULD BE — and the six-hour spinner it exists to kill.
+ *
+ * 🔒 ROOT CAUSE (admin 2026-08-22, verbatim: "bahut der ⏰ 6hr se spinner ghum raha hai"). The block
+ * used to pick its icon from the STAGE alone: `tone === 'ok' ? tick : <TirangaLoader/>`. A pending
+ * DNS connection is never `ok`, so the spinner ran forever — through a wait that is genuinely
+ * hours long at some registrars. Nothing was loading. Nothing was even being requested.
+ *
+ * That is not a cosmetic complaint. A spinner is a PROMISE that work is happening right now and the
+ * screen will change by itself in a moment. Pointing one at a multi-hour DNS wait makes a completely
+ * normal wait look like a hang — which is exactly how the admin read it, and why the copy beside it
+ * saying "this can take a few hours" was not believed. The picture and the sentence contradicted each
+ * other, and people believe the picture.
+ *
+ * So the icon is driven by whether a REQUEST IS ACTUALLY IN FLIGHT, not by how far along DNS is:
+ *   • 'busy'    — a real fetch is running right now. A spinner is honest here, and only here.
+ *   • 'waiting' — nothing is happening; we are waiting on the world's DNS. A CLOCK, which reads as
+ *                 "come back later" instead of "hang on a second".
+ *   • 'done'    — a tick.
+ * PURE, so the rule is pinned by tests rather than by whoever next edits the JSX.
+ */
+export type StatusIcon = 'busy' | 'waiting' | 'done';
+
+export function statusIcon(input: { tone?: 'ok' | 'warn'; checking: boolean }): StatusIcon {
+  if (input.checking) return 'busy';
+  return input.tone === 'ok' ? 'done' : 'waiting';
+}
+
+/**
+ * "Last checked 4 minutes ago" — the line that replaces a spinner's false sense of motion.
+ *
+ * A waiting screen has to prove it is alive somehow. A spinner fakes that; a real timestamp earns it,
+ * because it says something a frozen page cannot: we looked, recently, and here is when. Returns ''
+ * when we have never checked, so the UI renders nothing rather than "Last checked never".
+ */
+export function lastCheckedLabel(checkedAt: number | null | undefined, now: number): string {
+  if (typeof checkedAt !== 'number' || checkedAt <= 0) return '';
+  return `Last checked ${timeAgo(checkedAt, now)}.`;
+}
+
 export function publishButton(
   freshness: PublishFreshness | undefined,
   publishedAt: number | null | undefined,

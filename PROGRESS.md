@@ -38436,3 +38436,10 @@ call the tool — and on real builds it finished without asking. The text notice
   the last thing on a glanced-at screen.
 
 Gate: both tsc + build + FULL vitest — 1,372 files / 17,254 passing, 1 skipped.
+
+**Follow-up the same hour (admin: "RAZORPAY_KEY_ID ki jagah koi aur gateway use karna chahe to?").**
+The card's keys come from the app's OWN code, so it never asks for the wrong provider's key — but a
+user who does not WANT that provider had no affordance except knowing to type the request. The finale
+card now carries a "switch to a different provider" link that prepares the question in the composer
+(never auto-sends); the AI lists real alternatives — including keyless UPI — and rewires the app as a
+normal edit turn. Gate re-run in full: 1,372 files / 17,254 passing.

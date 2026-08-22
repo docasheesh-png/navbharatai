@@ -39,9 +39,17 @@ export interface SecretRequestCardProps {
    * question is only PREPARED, never auto-sent: what goes to the AI stays the user's decision.
    */
   onGuide?: (name: string) => void;
+  /**
+   * "RAZORPAY_KEY_ID ki jagah koi aur gateway use karna chahe to?" (admin 2026-08-22). The keys on
+   * this card come from the app's OWN code — but the user may not WANT that provider at all, and
+   * without this button the only escape is knowing to type the request themselves. Prepares a
+   * switch-provider question in the composer; the AI lists the options (including keyless ones like
+   * UPI) and rewires the app as a normal edit turn. Prepared, never auto-sent.
+   */
+  onSwitchProvider?: () => void;
 }
 
-export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onGuide }: SecretRequestCardProps) {
+export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onGuide, onSwitchProvider }: SecretRequestCardProps) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const [minimised, setMinimised] = useState(false);
@@ -216,6 +224,14 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onG
         Saved to your own encrypted keys (Settings → Secrets &amp; API Keys). Never shown to the AI, never
         written into your code, never committed to git.
       </p>
+      {finale && onSwitchProvider && (
+        <button
+          onClick={onSwitchProvider}
+          className="text-[11px] text-indigo-300 hover:text-indigo-200 underline underline-offset-2 cursor-pointer text-left"
+        >
+          Don’t want to use these services? Ask me to switch your app to a different provider.
+        </button>
+      )}
     </div>
   );
 }

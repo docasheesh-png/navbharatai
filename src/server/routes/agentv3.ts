@@ -290,6 +290,7 @@ function sessionCostCapUsd(): number {
 }
 import { deploymentStore, withDeploymentPersistence, isLiveDeployment, publishedAppList, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 import { resolvePublishState } from '../AgentV3/publishState';
+import { ensureBootEnv, bootEnvNote, type BootEnvIo } from '../AgentV3/devSecretsBoot';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
 import { buildRecipe, revivalConfirmedMessage, revivalUnconfirmedMessage } from '../AgentV3/previewRevival';
@@ -3753,6 +3754,25 @@ export function registerAgentV3Routes(app: Express): void {
       // Named rather than inlined: this exact string is what gets stored as the revival recipe below,
       // so the command that revives the preview is BY CONSTRUCTION the command that just started it.
       const devRunCommand = proven?.devCommand || resolveDevRunCommand(diagPkgRaw);
+      // 🔒 THE APP'S KEYS, BEFORE IT STARTS (admin 2026-08-22: "preview ek baar chal jata hai, phir
+      // wapas chalao to nahi chalta, chahe kuch kar lo").
+      //
+      // THIS is why. A live `.env` is never imported and never persisted durably — the user's secrets
+      // stay theirs — so it exists only inside the sandbox that wrote it. The BUILD path wrote one.
+      // This path, which is what the "Wake up" button and the auto-restore both call, wrote NO `.env`
+      // at all: not the user's saved keys, not the ones the app mints for itself. So a resumed or
+      // recycled sandbox ran `npm run dev` into an app with no SESSION_SECRET, express-session threw,
+      // and every request 500'd — and pressing Wake again repeated it exactly, forever.
+      //
+      // Deterministic, one grep, no model call, and it can only ever ADD a key: an existing value —
+      // the user's real one above all — always wins, and a third-party credential is never invented.
+      try {
+        const bootVault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => ({})) : {};
+        const { [DB_PROVIDER_MARKER]: _dbMarker, ...bootEnv } = bootVault as Record<string, string>;
+        const envResult = await ensureBootEnv(actuator as unknown as BootEnvIo, workspaceId, bootEnv);
+        const note = bootEnvNote(envResult);
+        if (note) sendStage(note, 70);
+      } catch { /* the app boots as it would have — this can only add keys, never remove them */ }
       const result = await withTimeout(actuator.runCommand(workspaceId, devRunCommand), 90_000, 'preview-diagnose');
       if (heartbeat) clearInterval(heartbeat);
       sendStage('Running the health check', 85);

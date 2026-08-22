@@ -38347,3 +38347,50 @@ correct and was wrong on cost and on blast radius.
 ~₹1,500/month) and the panel offers Wake up. Working as designed, and honestly worded.
 
 Gate: both tsc + build + FULL vitest — 1,371 files / 17,231 passing, 1 skipped.
+
+## 2026-08-22 — "preview ek baar chalta hai, phir kabhi nahi": the WAKE path never wrote the .env
+
+**Admin:** *"live (e2b) preview ek bar chal jata hai, fir browser band kar wapas chalao, to preview
+nahi chalta chahe kuch kar lo. Kya iska sach me koi solution nahi hai?"*
+
+**There is, and this was the specific bug.** An hour earlier I fixed the BUILD path to conjure the
+app's self-issued secrets at boot. That fix did not reach the path the user actually presses.
+
+`/api/agentv3/preview-diagnose` — what BOTH the "Wake up" button and the automatic restore call —
+wrote **no `.env` at all**: not the user's vault keys, not the self-issued ones. Verified by reading
+the route: zero occurrences of `ensureUserSecretsEnvFile`, `userSecretsEnv` or `conjur*` in it.
+
+The chain, end to end:
+1. A live `.env` is deliberately never imported and never persisted durably — the user's secrets stay
+   theirs. **Correct**, and it means the `.env` exists only inside the sandbox that wrote it.
+2. The build path writes one, so the FIRST preview works. That is the "ek baar chal jata hai".
+3. The sandbox is paused after 5 idle minutes, and eventually recycled.
+4. Wake resumes it and re-hydrates the durable files — which by design do **not** include `.env`.
+5. `npm run dev` starts an app with no `SESSION_SECRET`. express-session throws on boot, or every
+   request returns 500.
+6. Pressing Wake again repeats step 4–5 **identically**. That is the "chahe kuch kar lo".
+
+**Fixed by centralizing, not by adding a third copy.** `devSecretsBoot.ts` now owns "make sure the app
+has the keys it needs to boot", and BOTH the dispatcher and the wake route call it. Two copies of that
+logic is precisely what caused this: the build path learned to conjure secrets in July and the wake
+path never did. Order is the safety story — existing `.env` kept, then the user's vault keys merged
+(a real key always beats a generated one), then self-issued names still missing or empty are
+generated. A third-party credential is NEVER invented.
+
+Test-locked in `devSecretsBoot.test.ts`, including: the user's key always wins; Stripe is never
+invented even though the app reads it; **nothing to add ⇒ no write at all** (rewriting for no reason
+risks clobbering formatting in a real `.env`); a failed scan leaves the boot exactly as it was; and
+the note names the generated key rather than hiding that a development secret was minted.
+
+⚠️ **STILL OPEN — the bigger answer, which is architectural.** Even with this fixed, a wake needs a
+resume + a dev-server boot, and a sandbox that has expired entirely needs a fresh VM + `npm install`
+(minutes, and the route's own budget is 90s). The industry does not solve this by making wake faster:
+Bolt runs the dev server IN THE BROWSER (WebContainers), v0 and Lovable make the preview a real
+DEPLOYMENT that is always up, and only Replit keeps VMs — and sells "Always On" to paper over exactly
+this. NavBharatAI already has both of the good answers built (the in-browser lane, and Firebase
+publish); what it does not have is the piece that makes them automatic. Proposed to the admin: put a
+Cloudflare Worker in front of the preview URL so a request to a sleeping app BOOTS it and then serves
+it — scale-to-zero, the way Cloud Run works — which removes the wake button entirely and makes the
+preview URL stable across sandbox death. Not built: it is new infra and the admin's call.
+
+Gate: both tsc + build + FULL vitest — 1,372 files / 17,242 passing, 1 skipped.

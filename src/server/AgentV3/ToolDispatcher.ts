@@ -56,7 +56,7 @@ import { securitySummary } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
 import { injectAppSignature, hasAppSignature } from './appSignature';
 import { mergeDotEnv, gitignoreWithEnv, dotEnvValue } from '../secrets/appSecretsEnv';
-import { envNamesFromGrep, conjureMissingLocalSecrets } from './ImportPreview';
+import { ensureBootEnv } from './devSecretsBoot';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
@@ -659,37 +659,20 @@ export class ToolDispatcher {
   private async ensureSelfIssuedDevSecrets(): Promise<void> {
     if (this.selfSecretsChecked) return;
     this.selfSecretsChecked = true;
+    // ONE implementation, shared with the wake/diagnose route — see devSecretsBoot.ts. Two copies of
+    // "write the dev .env" is exactly the drift that caused the original bug: this path learned to
+    // conjure secrets in July and the wake path never did. The vault half is already on disk by now
+    // (ensureUserSecretsEnvFile ran immediately before), so nothing is passed here.
     try {
-      // What the app's own code actually reads. Bounded, and it sees the tree as it is on disk right
-      // now — including files this turn just wrote.
-      const scan = await withTimeout(
-        this.actuator.runCommand(
-          this.workspaceId,
-          `grep -rhoE "(process|import\\.meta)\\.env\\.[A-Za-z_][A-Za-z0-9_]*" . --include=*.js --include=*.ts --include=*.jsx --include=*.tsx --include=*.mjs --include=*.cjs --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build 2>/dev/null | sort -u | head -200`,
-        ),
-        8_000,
-        'env-name-scan',
-      ).catch(() => null);
-      const names = envNamesFromGrep(scan?.stdout ?? '');
-      if (names.length === 0) return;
-
-      let existing = '';
-      try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
-      const { content, added } = conjureMissingLocalSecrets(existing, names);
-      if (added.length === 0) return;
-
-      await this.actuator.writeFile(this.workspaceId, '.env', content);
-      try { this.onFileWrite?.('.env', content); } catch { /* durable record is best-effort */ }
-      // Keep it out of git for the same reason the vault path does — this file now holds real values.
-      try {
-        let gi = '';
-        try { gi = await withTimeout(this.actuator.readFile(this.workspaceId, '.gitignore'), 5_000, 'gi-read'); } catch { gi = ''; }
-        const nextGi = gitignoreWithEnv(gi);
-        if (nextGi !== gi) {
-          await this.actuator.writeFile(this.workspaceId, '.gitignore', nextGi);
-          try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ }
-        }
-      } catch { /* gitignore hardening is best-effort */ }
+      const io = {
+        readFile: (w: string, p: string) => withTimeout(this.actuator.readFile(w, p), 5_000, 'boot-env-read'),
+        writeFile: async (w: string, p: string, c: string) => {
+          await this.actuator.writeFile(w, p, c);
+          try { this.onFileWrite?.(p, c); } catch { /* durable record is best-effort */ }
+        },
+        runCommand: (w: string, c: string) => withTimeout(this.actuator.runCommand(w, c), 8_000, 'boot-env-scan'),
+      };
+      await ensureBootEnv(io, this.workspaceId);
     } catch { /* the app boots as it would have — this can only ever help */ }
   }
 

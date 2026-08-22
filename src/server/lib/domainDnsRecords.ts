@@ -79,6 +79,49 @@ export function dedupeRecords(records: readonly RecordLike[]): { type: string; n
  *
  * Pure — the route does the persistence and passes both lists in.
  */
+/**
+ * ANOTHER APP'S OWNERSHIP TOKEN — the record that must never appear on this app's screen.
+ *
+ * 🔒 ROOT CAUSE (admin screenshot 2026-08-22). The record store is keyed by DOMAIN alone and merges
+ * forever, but the records themselves belong to a (domain, SITE) pair: every app gets its own
+ * Firebase site, and each site demands its own `hosting-site=<siteId>` TXT. Connect one domain from
+ * three apps and all three tokens pool under one key — which is exactly what `mitrify.com` showed:
+ *
+ *     hosting-site=nbai-37038f98f790b362308d   ← this app's, correctly listed as still needed
+ *     hosting-site=nbai-709e5932ecaaf74b9c63   ← another app's, shown and badged "Verified"
+ *     hosting-site=nbai-dd4fe67881426b5f258a   ← another app's, shown and badged "Verified"
+ *
+ * The admin dutifully added all of them at their registrar. Two of the five records they were told to
+ * add could never do anything for the app they were looking at.
+ *
+ * 🔒 WHY THIS IS A FILTER AND NOT A MIGRATION. The token is literally `hosting-site=` + the site id
+ * (`siteIdForWorkspace`), so "belongs to another app" is an EXACT string comparison, never a guess.
+ * That means the pollution can be corrected on READ, at zero risk: nothing stored is deleted, no
+ * document is rewritten, and a domain that is working today keeps working. Re-keying the store would
+ * mean migrating live customer records to fix a display bug — a much larger blast radius for the same
+ * user-visible result. The store stays as it is; what we SHOW is now scoped correctly.
+ *
+ * A record that is not a site token, or a token we cannot parse, is always KEPT — this only ever
+ * removes something it can positively identify as another app's. PURE.
+ */
+export const SITE_TOKEN_PREFIX = 'hosting-site=';
+
+export function isForeignSiteToken(value: unknown, currentSiteId: string): boolean {
+  const v = String(value ?? '').trim().replace(/^"|"$/g, '');
+  if (!v.toLowerCase().startsWith(SITE_TOKEN_PREFIX)) return false;   // not a site token — keep
+  const site = v.slice(SITE_TOKEN_PREFIX.length).trim();
+  if (!site) return false;                                            // unparseable — keep
+  // No current site id ⇒ we cannot tell whose it is, so we keep everything. Guessing here would hide
+  // the ONE record the user actually needs.
+  if (!currentSiteId) return false;
+  return site.toLowerCase() !== currentSiteId.trim().toLowerCase();
+}
+
+/** Drop only the ownership tokens that provably belong to a DIFFERENT app. PURE. */
+export function dropForeignSiteTokens<T extends RecordLike>(records: readonly T[], currentSiteId: string): T[] {
+  return records.filter((r) => !isForeignSiteToken(r?.value, currentSiteId));
+}
+
 export function mergeStableRecords(
   stored: readonly RecordLike[],
   pending: readonly RecordLike[],

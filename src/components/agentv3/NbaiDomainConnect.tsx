@@ -290,6 +290,35 @@ export function autoDnsSummary(input: {
   };
 }
 
+/**
+ * WHAT A FINISHED RECORD'S BADGE MAY CLAIM — "Verified" has to be earned, like "Live!" before it.
+ *
+ * 🔒 ROOT CAUSE (admin screenshot 2026-08-22): three records were badged **Verified** and two of them
+ * had never been verified by anything. `done` is computed as "not in the currently-pending set", which
+ * is a statement about what the hosting service is ASKING FOR — not evidence that a record exists in
+ * DNS. Those two were another app's ownership tokens, so of course this app's site never asked for
+ * them; the badge turned "irrelevant here" into "confirmed working".
+ *
+ * The pollution itself is fixed upstream (`dropForeignSiteTokens`). This closes the second half: the
+ * word only appears when something actually LOOKED. We have a real observer — `dnsCheck`, our own
+ * resolver reading the user's live DNS — so:
+ *   • seen by our resolver        → "Verified", genuinely earned
+ *   • no longer requested, unseen → "Added", which is all we can honestly say
+ * The green tick stays on both: either way there is nothing left for the user to do, and that is the
+ * question the row is answering. PURE.
+ */
+export function recordBadge(
+  rec: { type: string; name: string; value: string },
+  dnsCheck: { checks?: Array<{ type: string; name: string; expected: string; seen: boolean }> } | null | undefined,
+): 'Verified' | 'Added' {
+  const norm = (s: string) => String(s ?? '').trim().replace(/\.$/, '').toLowerCase();
+  const val = (s: string) => String(s ?? '').trim().replace(/^"|"$/g, '');
+  const hit = (dnsCheck?.checks ?? []).find(
+    (c) => norm(c.type) === norm(rec.type) && norm(c.name) === norm(rec.name) && val(c.expected) === val(rec.value),
+  );
+  return hit?.seen === true ? 'Verified' : 'Added';
+}
+
 export function publishButton(
   freshness: PublishFreshness | undefined,
   publishedAt: number | null | undefined,
@@ -915,7 +944,8 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 <Check className="w-3.5 h-3.5 text-green-400 shrink-0" />
                 <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-green-500/15 text-green-300">{rec.type}</span>
                 <span className="text-[11px] text-zinc-400 font-mono truncate">{relativeRecordName(rec.name, cleanDomain)}</span>
-                <span className="ml-auto text-[10px] text-green-300 shrink-0">Verified</span>
+                {/* "Verified" only when our resolver actually saw it — see recordBadge. */}
+                <span className="ml-auto text-[10px] text-green-300 shrink-0">{recordBadge(rec, result.dnsCheck)}</span>
                 {/* Says what the click DOES. A bare chevron on a row nobody expects to be clickable is
                     how a feature stays undiscovered. */}
                 <span className="text-[10px] text-zinc-500 shrink-0 group-open/rec:hidden">show</span>

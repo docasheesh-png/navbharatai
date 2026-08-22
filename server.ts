@@ -159,6 +159,7 @@ import path from 'path';
 import https from 'https';
 import fs from 'fs';
 import { appleDomainAssociation, APPLE_DOMAIN_ASSOCIATION_PATH } from './src/server/lib/appleDomainAssociation';
+import { rewriteProxyHeaders } from './src/server/lib/authProxyCookies';
 import { auditEnv } from './src/server/audit_env';
 
 auditEnv();
@@ -403,7 +404,14 @@ setInterval(() => {
         timeout: AUTH_PROXY_TIMEOUT_MS,
       },
       (pres) => {
-        res.writeHead(pres.statusCode || 502, pres.headers);
+        // 🔒 COOKIES MUST BIND TO *OUR* HOST (admin 2026-08-22 — the Apple redirect login loop).
+        // The upstream sets its cookies for `*.firebaseapp.com`; arriving from navbharatai.com the
+        // browser MUST reject those, so the handler believed it stored its state, the browser dropped
+        // it, the return leg found nothing, and the app loaded logged out — with no error anywhere,
+        // because nothing actually failed. Google was unaffected: the popup flow hands its result back
+        // by postMessage and never needs a cookie to survive a cross-site return. See authProxyCookies.
+        const host = String(req.headers?.host || '').split(':')[0];
+        res.writeHead(pres.statusCode || 502, rewriteProxyHeaders(pres.headers as Record<string, unknown>, host));
         pres.pipe(res, { end: true });
       },
     );

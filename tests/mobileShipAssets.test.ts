@@ -130,3 +130,54 @@ describe('🔒 the note the user reads', () => {
     expect(p.notes.join(' ')).not.toContain('not pushed');
   });
 });
+
+/**
+ * WHOSE FAULT IS A MISSING PICTURE? (admin report 2026-08-22, mitrify.)
+ *
+ * The ship note read: "2 image/font file(s) your code imports are not in the app and were not pushed
+ * … add these to your app and ship again." That sentence is correct only if we actually LOOKED.
+ * `loadWorkspaceAssets` returned an empty map both when a workspace holds no images AND when Firestore
+ * did not answer — so on a failed read we shipped an app with no pictures and told the user to add
+ * files they had already added. We lost them, and then billed the mistake to them.
+ *
+ * Same class as the rest of this week's findings: an empty result standing in for a complete one.
+ */
+describe('a missing asset is only the user’s problem if we actually looked', () => {
+  const APP = {
+    'package.json': JSON.stringify({ name: 'x', scripts: { build: 'vite build' }, dependencies: { react: '^18' } }),
+    'index.html': '<div id="root"></div>',
+    'src/App.tsx': "import logo from '@assets/IMG_8630.jpeg';\nexport default () => <img src={logo} />;",
+  };
+  const noteAbout = (notes: string[]) => notes.find((n) => /image\/font file/i.test(n)) || '';
+
+  it('THE BUG: a FAILED asset read never tells the user to add files they already added', () => {
+    const r = assembleMobileProject(APP, {}, { appName: 'X', appId: 'com.x.y', appAssets: {}, appAssetsComplete: false });
+    const note = noteAbout(r.notes);
+    expect(note).toBeTruthy();
+    expect(note).not.toMatch(/add these to your app/i);
+    expect(note).toMatch(/could not be fetched/i);
+    expect(note, 'the note must own the failure rather than blame the app').toMatch(/NavBharatAI/);
+  });
+
+  it('a COMPLETE read that genuinely found nothing still says so plainly', () => {
+    const r = assembleMobileProject(APP, {}, { appName: 'X', appId: 'com.x.y', appAssets: {}, appAssetsComplete: true });
+    const note = noteAbout(r.notes);
+    expect(note).toMatch(/not in the app and were not pushed/i);
+    expect(note).toMatch(/add these to your app/i);
+  });
+
+  it('the default is unchanged — an omitted flag behaves exactly as before', () => {
+    expect(noteAbout(assembleMobileProject(APP, {}, { appName: 'X', appId: 'com.x.y', appAssets: {} }).notes))
+      .toMatch(/not in the app and were not pushed/i);
+  });
+
+  it('an asset that IS present produces no complaint either way', () => {
+    for (const complete of [true, false]) {
+      const r = assembleMobileProject(APP, {}, {
+        appName: 'X', appId: 'com.x.y', appAssetsComplete: complete,
+        appAssets: { 'src/assets/IMG_8630.jpeg': 'data:image/jpeg;base64,AAAA' },
+      });
+      expect(noteAbout(r.notes), `complete=${complete}`).toBe('');
+    }
+  });
+});

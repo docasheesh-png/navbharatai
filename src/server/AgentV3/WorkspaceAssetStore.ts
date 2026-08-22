@@ -90,14 +90,34 @@ export async function saveWorkspaceAssets(workspaceId: string, assets: Record<st
  * in the authoritative metadata list are returned. Never throws.
  */
 export async function loadWorkspaceAssets(workspaceId: string): Promise<Record<string, string>> {
+  return (await loadWorkspaceAssetsWithCompleteness(workspaceId)).assets;
+}
+
+/**
+ * The same load, plus the fact every caller that BLAMES SOMEONE for a missing asset needs: was the
+ * store actually read?
+ *
+ * WHY IT EXISTS (admin report 2026-08-22, mitrify). `loadWorkspaceAssets` returns `{}` both when the
+ * workspace genuinely holds no images and when Firestore did not answer. The mobile assembler cannot
+ * tell those apart, so on a failed read it pushed the app with NO pictures and told the user
+ * "2 image/font file(s) your code imports are not in the app and were not pushed — add these to your
+ * app and ship again." They had added them. We lost them, and then billed the mistake to them.
+ *
+ * `complete: false` means: say nothing about what is missing, because you did not look.
+ */
+export async function loadWorkspaceAssetsWithCompleteness(
+  workspaceId: string,
+): Promise<{ assets: Record<string, string>; complete: boolean }> {
   const db = getDb();
-  if (!db) return {};
+  // No database is not "no assets" — it is no answer.
+  if (!db) return { assets: {}, complete: false };
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);
     const meta = await root.get();
-    if (!meta.exists) return {};
+    // A workspace with no asset record genuinely has no assets — that IS a complete answer.
+    if (!meta.exists) return { assets: {}, complete: true };
     const paths: string[] = Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
-    if (paths.length === 0) return {};
+    if (paths.length === 0) return { assets: {}, complete: true };
     const allowed = new Set(paths);
     const docs = await root.collection('assets').get();
     const out: Record<string, string> = {};
@@ -107,9 +127,9 @@ export async function loadWorkspaceAssets(workspaceId: string): Promise<Record<s
         out[data.path] = data.dataUri;
       }
     }
-    return out;
+    return { assets: out, complete: true };
   } catch {
-    return {};
+    return { assets: {}, complete: false };
   }
 }
 

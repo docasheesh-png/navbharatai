@@ -72,6 +72,13 @@ export interface AssembleOptions {
    * Optional: omitted or empty behaves exactly as before.
    */
   appAssets?: Record<string, string>;
+  /**
+   * Was the asset store actually READ? Defaults to true so existing callers are unchanged.
+   *
+   * When false, nothing below may claim an asset is missing from the user's app: an empty asset map
+   * then means "we could not look", not "there is nothing there". See the note this guards.
+   */
+  appAssetsComplete?: boolean;
 }
 
 export interface AssembledProject {
@@ -436,12 +443,20 @@ export function assembleMobileProject(
   // rather than a guess — see unshippableAssetImports. A note, never a refusal.
   const unshippable = unshippableAssetImports(files, binaryFiles);
   if (unshippable.length > 0) {
+    // 🔒 WHOSE FAULT IT IS DEPENDS ON WHETHER WE LOOKED (admin report 2026-08-22, mitrify). The asset
+    // store used to answer an empty map for BOTH "this app has no images" and "Firestore did not
+    // answer" — so a failed read pushed the app with no pictures and told the user to "add these to
+    // your app and ship again". They had added them; we lost them, and then billed the mistake to
+    // them. When the read did not complete, the honest sentence is that WE could not fetch them.
+    const couldNotLook = opts.appAssetsComplete === false;
+    const list = `${unshippable.slice(0, 3).join(', ')}${unshippable.length > 3 ? `, and ${unshippable.length - 3} more` : ''}`;
     notes.push(
-      `${unshippable.length} image/font file(s) your code imports are not in the app and were not pushed: ` +
-      `${unshippable.slice(0, 3).join(', ')}${unshippable.length > 3 ? `, and ${unshippable.length - 3} more` : ''}. ` +
-      (kind === 'built'
-        ? 'A build that imports a file it cannot find will fail, so add these to your app and ship again.'
-        : 'Those images will be blank in the app.'),
+      couldNotLook
+        ? `${unshippable.length} image/font file(s) your app uses could not be fetched from your workspace just now, so they were not pushed: ${list}. This is on NavBharatAI's side, not your app — try shipping again in a moment.`
+        : `${unshippable.length} image/font file(s) your code imports are not in the app and were not pushed: ${list}. `
+          + (kind === 'built'
+            ? 'A build that imports a file it cannot find will fail, so add these to your app and ship again.'
+            : 'Those images will be blank in the app.'),
     );
   }
 

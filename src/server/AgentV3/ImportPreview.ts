@@ -288,6 +288,74 @@ export function conjurableSecrets(
   return out;
 }
 
+/**
+ * Env var names out of a `grep -rhoE "process.env.NAME"` sweep of the sandbox. PURE.
+ *
+ * WHY A GREP AND NOT THE FILE MAP (2026-08-21): this runs on the hot path right before a dev server
+ * starts, where reading every file out of the durable store to scan it would cost more than the boot
+ * it is protecting. One deterministic sandbox command, no model call, and it sees the app as it
+ * ACTUALLY is on disk — including files written this turn that the durable store has not caught up
+ * with yet.
+ */
+export function envNamesFromGrep(stdout: string): string[] {
+  const names: string[] = [];
+  const re = /(?:process|import\s*\.\s*meta)\s*\.\s*env\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(String(stdout ?? ''))) !== null) {
+    if (!names.includes(m[1])) names.push(m[1]);
+  }
+  return names;
+}
+
+/** Which env keys an existing `.env` already gives a NON-EMPTY value. PURE. */
+export function envKeysWithValues(envContent: string): Set<string> {
+  const out = new Set<string>();
+  for (const line of String(envContent ?? '').split('\n')) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!m) continue;
+    if (m[2].trim().replace(/^['"]|['"]$/g, '') !== '') out.add(m[1]);
+  }
+  return out;
+}
+
+/**
+ * Fill in the app's OWN self-issued secrets so it can boot — and nothing else. PURE given `rand`.
+ *
+ * 🔒 ROOT CAUSE THIS CLOSES (admin, 2026-08-21, "preview mar gaya" — Mitrify, the SECOND time).
+ * `conjurableSecrets` existed and worked, but ran ONLY on the import turn. Every later turn went
+ * through `ToolDispatcher.ensureUserSecretsEnvFile`, which opens with `if (names.length === 0)
+ * return` — so a user with NO saved vault secrets got **no `.env` written at all**. Since a live
+ * `.env` is deliberately never imported and never persisted durably (the user's secrets stay
+ * theirs), any sandbox that was recycled or rebuilt came back without one, express-session threw
+ * "secret option required", and EVERY page request returned 500. The app was fine; it simply had no
+ * key to sign a cookie with.
+ *
+ * A session secret is not a credential anyone issued the user — it is a random string the app mints
+ * for itself, and one generated per sandbox is completely valid for a dev preview. So this is
+ * prevention, not a workaround: the class of failure stops being possible instead of being detected.
+ *
+ * 🔒 NEVER OVERWRITES. A value already present — the user's real key from the vault, or one their
+ * own `.env` carries — always wins. We only ever fill a hole.
+ */
+export function conjureMissingLocalSecrets(
+  existingEnv: string,
+  varNames: string[],
+  rand: () => string = () => randomBytes(24).toString('hex'),
+): { content: string; added: string[] } {
+  const have = envKeysWithValues(existingEnv);
+  const missing: Record<string, string> = {};
+  for (const n of varNames ?? []) {
+    if (!LOCAL_SECRET_VAR.test(n) || have.has(n)) continue;
+    if (missing[n] === undefined) missing[n] = rand();
+  }
+  const added = Object.keys(missing);
+  if (added.length === 0) return { content: existingEnv, added: [] };
+  const base = String(existingEnv ?? '');
+  const sep = base === '' || base.endsWith('\n') ? '' : '\n';
+  const block = added.map((n) => `${n}=${missing[n]}`).join('\n');
+  return { content: `${base}${sep}${block}\n`, added };
+}
+
 /** The dev infra we auto-provide for a preview boot — everything else the app documents is
  *  something the USER must supply for full functionality. */
 const AUTO_PROVIDED_ENV = /^(DATABASE_URL|NODE_ENV|PORT)$/i;

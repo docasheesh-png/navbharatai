@@ -56,6 +56,7 @@ import { securitySummary } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
 import { injectAppSignature, hasAppSignature } from './appSignature';
 import { mergeDotEnv, gitignoreWithEnv, dotEnvValue } from '../secrets/appSecretsEnv';
+import { ensureBootEnv } from './devSecretsBoot';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
@@ -558,6 +559,8 @@ export class ToolDispatcher {
    */
   private userSecretsEnv: Record<string, string> = {};
   private secretsEnvWritten = false;
+  /** The self-issued dev-secret check runs at most once per build (see ensureSelfIssuedDevSecrets). */
+  private selfSecretsChecked = false;
   /** Set once a local Postgres has been provisioned for this build's `provider="postgresql"` schema. */
   private postgresProvisioned = false;
   /** When the provision (or last successful revival) completed — gates the preflight probe so a freshly
@@ -627,6 +630,52 @@ export class ToolDispatcher {
    * vault OVERRIDES any generated placeholder (mergeDotEnv), and existing .env lines are preserved.
    * Never throws — a failure just means the app runs without the injected keys (honest degradation).
    */
+  /**
+   * Give the app the secrets it mints for ITSELF, so it can boot at all.
+   *
+   * 🔒 ROOT CAUSE (admin 2026-08-21, "preview mar gaya" — Mitrify, the SECOND time). `ensureUserSecretsEnvFile`
+   * below opens with `if (names.length === 0) return`, so a user with NO saved vault secrets got **no
+   * `.env` written at all**. A live `.env` is deliberately never imported and never persisted durably
+   * (the user's secrets stay theirs), so any sandbox that was recycled or rebuilt came back without
+   * one — express-session threw "secret option required" and EVERY page request returned 500. The
+   * app was fine; it had no key to sign a cookie with. The import turn conjured these correctly; no
+   * later turn ever did.
+   *
+   * This is PREVENTION, not a heal: the failure class stops being possible instead of being detected
+   * afterwards by the log classifier. A session secret is not a credential anyone issued the user —
+   * it is a random string the app mints for itself, and one per sandbox is entirely valid for a dev
+   * preview. Only self-issued names are filled; a third-party API key is NEVER invented (a fake one
+   * makes the app fire real requests with garbage credentials and fail in confusing ways).
+   *
+   * Deterministic and cheap: ONE grep in the sandbox, no model call. Never overwrites a value that
+   * already exists, and never throws — a failure here just leaves the app as it was.
+   *
+   * ⚠️ CALLED FROM `update_preview` ONLY, deliberately. My first version also hung it off the generic
+   * bash path beside `ensureUserSecretsEnvFile` — which put a grep in front of EVERY command the
+   * model runs, for a value that only matters when a server boots. The dispatcher's own tests caught
+   * it (they assert the exact command sequence), and they were right to: `update_preview` is the
+   * managed dev-server start, which is precisely the choke point this needs to guard.
+   */
+  private async ensureSelfIssuedDevSecrets(): Promise<void> {
+    if (this.selfSecretsChecked) return;
+    this.selfSecretsChecked = true;
+    // ONE implementation, shared with the wake/diagnose route — see devSecretsBoot.ts. Two copies of
+    // "write the dev .env" is exactly the drift that caused the original bug: this path learned to
+    // conjure secrets in July and the wake path never did. The vault half is already on disk by now
+    // (ensureUserSecretsEnvFile ran immediately before), so nothing is passed here.
+    try {
+      const io = {
+        readFile: (w: string, p: string) => withTimeout(this.actuator.readFile(w, p), 5_000, 'boot-env-read'),
+        writeFile: async (w: string, p: string, c: string) => {
+          await this.actuator.writeFile(w, p, c);
+          try { this.onFileWrite?.(p, c); } catch { /* durable record is best-effort */ }
+        },
+        runCommand: (w: string, c: string) => withTimeout(this.actuator.runCommand(w, c), 8_000, 'boot-env-scan'),
+      };
+      await ensureBootEnv(io, this.workspaceId);
+    } catch { /* the app boots as it would have — this can only ever help */ }
+  }
+
   async ensureUserSecretsEnvFile(command: string): Promise<void> {
     if (this.secretsEnvWritten) return;
     const names = Object.keys(this.userSecretsEnv);
@@ -7422,6 +7471,9 @@ export class ToolDispatcher {
         // actuator without any run_command having gone through the lazy gate, which is how an imported app
         // booted with none of the keys its owner had saved in Settings (mitrify autopsy 2026-08-04).
         await this.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+        // …and the secrets the app mints for ITSELF. The call above returns early when the user has
+        // no saved secrets, which is exactly when an app with a session middleware cannot boot.
+        await this.ensureSelfIssuedDevSecrets();
         // LOOP-BREAKER (build-diagnostics root cause): once preview has DEFINITIVELY failed —
         // including a managed dev-server start — stop the retry loop cold. Without this the model
         // re-ran update_preview / npm run dev until the step cap (~10 min burned, build reported

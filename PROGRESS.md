@@ -38299,3 +38299,98 @@ AppKnowledgeBase entry, because there is no surface to describe. Recorded as an 
 rather than quietly ticked off, which is the exact false-open the ROADMAP header warns about.
 
 Gate: both tsc + build + FULL vitest — 1,370 files / 17,219 passing, 1 skipped.
+
+## 2026-08-22 — "preview mar gaya": the app had no key to sign a cookie with (ROOT CAUSE CLOSED)
+
+**Admin sent a screenshot of a finished Mitrify build (Express.js, 1m12s, ₹12.91) whose preview showed
+a broken frame.** The screen was already telling the truth, twice: *"Your app started, but its login
+sessions have no secret key, so every page request fails"*, and separately *"Preview is in sleep
+mode"*. Two unrelated things, and only the first is a defect.
+
+**ROOT CAUSE — and it is the SECOND time this exact app hit it.** `conjurableSecrets` (built
+2026-07-05 for precisely this) generates real random values for the secrets an app mints for ITSELF —
+`SESSION_SECRET`, `JWT_SECRET`, cookie/CSRF secrets. It ran on the **import turn only**. Every later
+turn goes through `ToolDispatcher.ensureUserSecretsEnvFile`, whose second line is:
+
+```ts
+const names = Object.keys(this.userSecretsEnv);
+if (names.length === 0) return;      // ← no vault secrets ⇒ NO .env written at all
+```
+
+A live `.env` is deliberately never imported and never persisted durably — the user's secrets stay
+theirs — so the conjured file exists **only inside that sandbox**. Any sandbox that was recycled or
+rebuilt came back without one, `express-session` threw `secret option required for sessions`, and
+EVERY page request returned 500. The app was fine. It had no key to sign a cookie with.
+
+**THE FIX IS PREVENTION, NOT A HEAL (the 50/50 law).** `DevServerRecovery.sessionSecretMissing` already
+DETECTED this from the log and asked the model to patch the source — a model pass to solve a problem
+that should never have existed. Now `ensureSelfIssuedDevSecrets` runs at the managed dev-server start:
+ONE grep for what the app's code actually reads, fill only the self-issued names that are missing or
+empty, write `.env`, harden `.gitignore`. No model call, no cost on an app that already has its keys.
+
+**The rules, test-locked** (`selfIssuedSecrets.test.ts`):
+- **Never overwrites.** A value already present — their real key from the vault, or their own `.env` —
+  always wins. We only ever fill a hole. An EMPTY value is a hole (it is the exact boot-killer).
+- **Never invents a third-party credential.** A fake Stripe/OpenAI key makes the app fire real
+  requests with garbage and fail confusingly; absent keeps that feature cleanly inactive.
+- **A different value per sandbox**, never a shared constant, and ≥32 chars of real entropy.
+- Nothing missing ⇒ the file is returned byte-for-byte untouched.
+
+⚠️ **A MISTAKE I MADE AND THE REPO'S OWN TESTS CAUGHT.** My first version also hung this off the
+generic bash path, putting a grep in front of EVERY command the model runs for a value that only
+matters when a server boots. Three `ToolDispatcher` prisma tests failed because they assert the exact
+command sequence — they were right, and the call now lives only at `update_preview`, the managed
+dev-server start. Recorded because the instinct ("attach it next to the other env writer") looked
+correct and was wrong on cost and on blast radius.
+
+**Not a defect: sleep mode.** The sandbox pauses after 5 idle minutes (`AGENTV3_SANDBOX_IDLE_MINUTES`,
+~₹1,500/month) and the panel offers Wake up. Working as designed, and honestly worded.
+
+Gate: both tsc + build + FULL vitest — 1,371 files / 17,231 passing, 1 skipped.
+
+## 2026-08-22 — "preview ek baar chalta hai, phir kabhi nahi": the WAKE path never wrote the .env
+
+**Admin:** *"live (e2b) preview ek bar chal jata hai, fir browser band kar wapas chalao, to preview
+nahi chalta chahe kuch kar lo. Kya iska sach me koi solution nahi hai?"*
+
+**There is, and this was the specific bug.** An hour earlier I fixed the BUILD path to conjure the
+app's self-issued secrets at boot. That fix did not reach the path the user actually presses.
+
+`/api/agentv3/preview-diagnose` — what BOTH the "Wake up" button and the automatic restore call —
+wrote **no `.env` at all**: not the user's vault keys, not the self-issued ones. Verified by reading
+the route: zero occurrences of `ensureUserSecretsEnvFile`, `userSecretsEnv` or `conjur*` in it.
+
+The chain, end to end:
+1. A live `.env` is deliberately never imported and never persisted durably — the user's secrets stay
+   theirs. **Correct**, and it means the `.env` exists only inside the sandbox that wrote it.
+2. The build path writes one, so the FIRST preview works. That is the "ek baar chal jata hai".
+3. The sandbox is paused after 5 idle minutes, and eventually recycled.
+4. Wake resumes it and re-hydrates the durable files — which by design do **not** include `.env`.
+5. `npm run dev` starts an app with no `SESSION_SECRET`. express-session throws on boot, or every
+   request returns 500.
+6. Pressing Wake again repeats step 4–5 **identically**. That is the "chahe kuch kar lo".
+
+**Fixed by centralizing, not by adding a third copy.** `devSecretsBoot.ts` now owns "make sure the app
+has the keys it needs to boot", and BOTH the dispatcher and the wake route call it. Two copies of that
+logic is precisely what caused this: the build path learned to conjure secrets in July and the wake
+path never did. Order is the safety story — existing `.env` kept, then the user's vault keys merged
+(a real key always beats a generated one), then self-issued names still missing or empty are
+generated. A third-party credential is NEVER invented.
+
+Test-locked in `devSecretsBoot.test.ts`, including: the user's key always wins; Stripe is never
+invented even though the app reads it; **nothing to add ⇒ no write at all** (rewriting for no reason
+risks clobbering formatting in a real `.env`); a failed scan leaves the boot exactly as it was; and
+the note names the generated key rather than hiding that a development secret was minted.
+
+⚠️ **STILL OPEN — the bigger answer, which is architectural.** Even with this fixed, a wake needs a
+resume + a dev-server boot, and a sandbox that has expired entirely needs a fresh VM + `npm install`
+(minutes, and the route's own budget is 90s). The industry does not solve this by making wake faster:
+Bolt runs the dev server IN THE BROWSER (WebContainers), v0 and Lovable make the preview a real
+DEPLOYMENT that is always up, and only Replit keeps VMs — and sells "Always On" to paper over exactly
+this. NavBharatAI already has both of the good answers built (the in-browser lane, and Firebase
+publish); what it does not have is the piece that makes them automatic. Proposed to the admin: put a
+Cloudflare Worker in front of the preview URL so a request to a sleeping app BOOTS it and then serves
+it — scale-to-zero, the way Cloud Run works — which removes the wake button entirely and makes the
+preview URL stable across sandbox death. Not built: it is new infra and the admin's call.
+
+Gate: both tsc + build + FULL vitest — 1,372 files / 17,242 passing, 1 skipped.

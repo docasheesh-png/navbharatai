@@ -300,6 +300,8 @@ import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
 import { buildRecipe, revivalConfirmedMessage, revivalUnconfirmedMessage } from '../AgentV3/previewRevival';
 import { comparePreviewUrl, measurementDescribesUserView, stalePreviewMessage } from '../AgentV3/previewUrlFreshness';
+import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage } from '../AgentV3/previewDoor';
+import { buildPortSweepCommand, portCandidates, parsePortSweep } from '../AgentV3/sandbox/EngineerAI/actuators/portSweep';
 import { decideAppSignature, appSignatureNotice } from '../AgentV3/appSignatureEntitlement';
 import { probeHostingPlan } from '../lib/hostingPlan';
 import { lastDevServerLaunch } from '../AgentV3/devServerLaunchLog';
@@ -3967,6 +3969,58 @@ export function registerAgentV3Routes(app: Express): void {
   // crashed / inbrowser_only / empty. Deliberately does NOT create a sandbox just to check (that would
   // be wasteful and slow) — a cold workspace reports `sleeping` (rebootable from saved files), which is
   // exactly the "reopen an old chat years later" case: files are safe, the live preview boots on demand.
+  /**
+   * THE PREVIEW DOOR (admin 2026-08-22: "kya yeh problem kabhi fix nahi ho sakti?"). The iframe now
+   * points HERE — a workspace-stable url on our own origin — and this route answers "where is the app
+   * right now?" at request time. The browser only ever leaves our origin through the 302 at the end,
+   * which fires ONLY after a probe just saw the target port serving. A dead machine therefore renders
+   * OUR page, never the vendor's — the class of screenshot this ends. See previewDoor.ts.
+   *
+   * No auth middleware ON PURPOSE: an iframe navigation is a plain GET and cannot carry a header. The
+   * HMAC token minted by the authenticated health endpoint is the credential; it binds workspace and
+   * expiry, and reveals nothing the raw preview url would not.
+   *
+   * A hit on a PAUSED sandbox resumes it (processes survive a pause, so the dev server is typically
+   * still running) — the door hit IS the wake-up. A hit on an expired one recreates it hydrated; the
+   * 'starting' page then auto-refreshes while the client watchdog boots the server, and the next
+   * refresh walks straight through. Every await is time-bounded so the frame never hangs on us.
+   */
+  app.get('/api/agentv3/preview-door', previewPollRateLimiter(), async (req: Request, res: Response) => {
+    // The 302 target changes whenever the machine does — a cached redirect would BE the stale-url bug.
+    res.setHeader('Cache-Control', 'no-store');
+    const page = (status: number, kind: 'asleep' | 'starting' | 'refused') =>
+      res.status(status).type('html').send(doorPage(kind));
+    try {
+      if (!previewDoorEnabled()) return page(404, 'refused');
+      const ws = typeof req.query?.ws === 'string' ? req.query.ws : '';
+      if (!verifyDoorToken(ws, typeof req.query?.exp === 'string' ? req.query.exp : null,
+        typeof req.query?.sig === 'string' ? req.query.sig : null, doorSecret(), Date.now())) {
+        return page(403, 'refused');
+      }
+      const actuator = buildActuator();
+      const sandboxId = actuator.getSandboxId
+        ? await raceTimeout(actuator.getSandboxId(ws), 4_000, 'doorSandboxId').catch(() => null)
+        : null;
+      if (!sandboxId) return page(200, 'asleep');
+      // The PROVEN port leads the sweep — recorded the moment this app last genuinely rendered — and
+      // the sweep verifies whatever it claims: the door never redirects to a port it did not just see
+      // answer. This is what kills the 3000-vs-5000 loop: no url is ever believed about a port again.
+      const recipe = await raceTimeout(sandboxStore.getRecipe(ws), 3_000, 'doorRecipe').catch(() => null);
+      const sweep = await raceTimeout(
+        actuator.runCommand(ws, buildPortSweepCommand(portCandidates(recipe?.port))),
+        20_000, 'doorPortSweep',
+      ).catch(() => null);
+      const found = parsePortSweep(sweep?.stdout);
+      if (found === null) return page(200, 'starting');
+      const live = await raceTimeout(actuator.getPortUrl(ws, found), 5_000, 'doorPortUrl').catch(() => '');
+      if (!live) return page(200, 'starting');
+      return res.redirect(302, applyPreviewDomain(String(live)));
+    } catch {
+      // Whatever went wrong, the answer is still OUR page — the vendor's edge is never the fallback.
+      return page(200, 'starting');
+    }
+  });
+
   app.post('/api/agentv3/preview-health', previewPollRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
@@ -4084,6 +4138,10 @@ export function registerAgentV3Routes(app: Express): void {
       res.json({
         ...health,
         fileCount,
+        // The workspace-stable frame url. The client prefers it over any stored machine address, so a
+        // machine dying stops being the client's problem at all. Absent when the kill switch is off,
+        // and the client then behaves exactly as before.
+        ...(previewDoorEnabled() ? { doorUrl: makeDoorPath(workspaceId, Date.now(), doorSecret()) } : {}),
         serving: describesUserView ? pageRendered : null,
         servingProblems: describesUserView ? pageProblems : [],
         // The client swaps to this instead of framing a machine that no longer exists.

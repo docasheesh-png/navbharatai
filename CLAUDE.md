@@ -818,6 +818,15 @@ the flag entries above promise.
   the changed files against the rules derived from the project as it was BEFORE the build. Costs no file
   reads (it uses the already-warm graph) and no model call. Purely advisory — it can never fail a build.
   Report codes: `ARCHITECTURE_INVARIANTS_HELD` (clean) / `ARCHITECTURE_INVARIANT_VIOLATED`.
+- **`AGENTV3_PREVIEW_DOOR`** (default ON, set `off` to disable — added 2026-08-22) — the live-preview
+  iframe points at OUR OWN workspace-stable route (`/api/agentv3/preview-door`, HMAC-tokened) instead of
+  a stored sandbox URL; the route resolves "which machine, which port" at REQUEST time (proven recipe
+  port first, then a verified port sweep) and 302s ONLY to a port it just saw serving. A dead machine
+  shows a NavBharatAI-branded auto-retrying page, never the vendor's error — this ended the day of
+  "Sandbox Not Found"/"Closed Port Error" screenshots. ⚠️ TWO THINGS NOT TO BREAK: (1) the waiting
+  page's self-retry is CAPPED (~2 min) because a door hit RESUMES a paused sandbox — uncapped, an
+  abandoned open tab would fight the idle reaper forever at real E2B cost; (2) `off` stops both minting
+  and answering, and the client falls back to the old stored-URL behaviour byte-identically.
 - **`AGENTV3_JOURNEY_CHECK`** (default ON, set `off` to disable) — after a successful build with a live
   preview, derives a real user journey from the app's OWN markup and runs it in the sandbox's pre-baked
   browser: fill the form, submit, **reload, and check the item is still there**. That last step is the

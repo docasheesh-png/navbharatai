@@ -86,6 +86,7 @@ import { firebaseConfig } from './config/firebase';
 // depending, put the WRONG cross-origin authDomain on the default app — silently breaking the first
 // Google sign-in). Re-exported here so every existing `import { auth, db } from './App'` still works.
 import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib/firebase';
+import { readRedirectMarker, clearRedirectMarker, redirectReturnVerdict, redirectLostMessage } from './lib/redirectSignInMarker';
 export { auth, db };
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from './lib/signOutFlow';
 import { authGateDecision, isAuthGatedView } from './lib/authGate';
@@ -1155,6 +1156,28 @@ export default function App() {
             setUser(result.user);
             setLoadingUser(false);
             setShowAuth(false);
+          }
+          // JUDGE THE RETURN (admin 2026-08-22 — the Apple login loop). A null result here is
+          // ambiguous: it is what an ordinary page load reports AND what "came back from Apple with
+          // nothing" reports. The marker written before we handed over the page is the only thing that
+          // separates them, so this is the one place the reported failure can be seen at all.
+          const store = typeof sessionStorage !== 'undefined' ? sessionStorage : null;
+          const marker = readRedirectMarker(store, Date.now());
+          const verdict = redirectReturnVerdict({
+            marker,
+            resultUser: result?.user ?? null,
+            currentUser: auth.currentUser,
+          });
+          if (verdict !== 'none') clearRedirectMarker(store);   // judged once, never twice
+          if (verdict === 'recovered') {
+            // The session landed even though getRedirectResult gave nothing — a real SDK race this
+            // codebase has hit twice on the popup path. Telling a signed-in user it failed would be
+            // the worst possible answer, so adopt the session instead.
+            setUser(auth.currentUser);
+            setLoadingUser(false);
+            setShowAuth(false);
+          } else if (verdict === 'lost') {
+            addToast(redirectLostMessage(marker?.provider), 'error');
           }
         })
         .catch((e) => {

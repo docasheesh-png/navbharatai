@@ -38443,3 +38443,57 @@ user who does not WANT that provider had no affordance except knowing to type th
 card now carries a "switch to a different provider" link that prepares the question in the composer
 (never auto-sends); the AI lists real alternatives — including keyless UPI — and rewires the app as a
 normal edit turn. Gate re-run in full: 1,372 files / 17,254 passing.
+
+## 2026-08-22 — Apple sign-in loop: the cookie the browser was throwing away, and the silence around it
+
+**Admin:** *"signin with apple → apple login page → logins successfully → return to navbharatai (still
+logged out)"* — repeating identically, forever.
+
+**What the report already ruled out.** Apple ACCEPTS the login now, so the Service ID, the Return URL
+and the domain-association work (the 2026-08-16/21 rounds fixed those). The failure moved to the
+RETURN leg. Audited and found structurally correct: one Firebase init with the right authDomain, the
+redirect strategy for Apple, `getRedirectResult` at the app root, CSP (`unsafe-inline` present, Apple
+in `form-action`), `express.json` (does not consume urlencoded, so Apple's `form_post` body survives),
+the malicious-path blocker and `adaptiveGuard` (scoped to `/api/`, never sees `/__/auth`).
+
+**ROOT CAUSE FOUND — the auth reverse-proxy passed the upstream's cookies through unchanged.**
+`authDomain` is our own origin and `server.ts` proxies `/__/auth/*` to the real `*.firebaseapp.com`
+host, streaming the response back untouched — `Set-Cookie` included. A cookie carrying
+`Domain=gen-lang-client-…firebaseapp.com` is one the browser **must reject** when it arrives from
+navbharatai.com: a site may only set cookies for its own domain. The handler believed it stored its
+state, the browser silently dropped it, the return found nothing, and the app loaded logged out —
+**with no error anywhere, because nothing actually failed.**
+
+⚠️ **This is exactly why Google was fine and only Apple broke.** Google takes the POPUP path, which
+hands its result back by `postMessage` and never needs a cookie to survive a cross-site return. Apple
+is the only provider on the redirect path (`webSignInStrategy`), so it was the only one exposed.
+
+Fixed in `authProxyCookies.ts` (pure, test-locked): a foreign `Domain=` is stripped so the cookie
+binds to the host that served it — which IS navbharatai.com from the browser's view, and is strictly
+NARROWER than any Domain form, so it cannot widen a cookie's reach. A Domain the browser would already
+honour is left alone; Path/Secure/HttpOnly/SameSite are the upstream's decisions and are untouched.
+
+**AND THE SILENCE, WHICH IS WHY THIS COST SO MANY ROUNDS.** On return, `getRedirectResult` resolves
+null and reports `auth/no-auth-event` — which is ALSO precisely what an ordinary page load reports, on
+every visit. The app could not tell "just came back from Apple with nothing" apart from "opened the
+homepage", so it correctly said nothing about both. `redirectSignInMarker.ts` writes a short-lived
+marker before handing over the page, so the return can finally be judged:
+- `signed-in` — normal.
+- **`recovered`** — a REAL rescue: the session landed while `getRedirectResult` gave null (the SDK race
+  this codebase has already hit twice on the popup path). Adopt it; telling a signed-in user it failed
+  would be the worst possible answer.
+- **`lost`** — the reported bug, now an honest message that agrees with what the user watched happen
+  ("Apple accepted your sign-in, but this browser did not keep it").
+- `none` — no marker ⇒ silence, so a visitor whose browser blocks session storage never meets a banner.
+
+⚠️ **HONEST BOUNDARY (rule 6):** egress from this session is proxy-blocked, so I could NOT fetch
+`https://navbharatai.com/__/auth/handler` to observe the real `Set-Cookie` headers. The cookie fix is
+derived from the code path and from the Google/Apple asymmetry, not from a captured response. If the
+loop survives this deploy, the new `lost` message is the instrument that will name the next cause —
+which is the half of this change that cannot be wrong.
+
+**A process note worth keeping:** mid-task I ran `git reset --hard origin/main` to refresh the base and
+it discarded the edits to the three TRACKED files (only the new untracked modules survived). Caught by
+re-grepping before committing; all three were reapplied and the full gate re-run. Stash first.
+
+Gate: both tsc + build + FULL vitest — 1,374 files / 17,273 passing, 1 skipped.

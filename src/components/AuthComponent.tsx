@@ -25,6 +25,7 @@ import { TirangaLoader } from './ui/TirangaLoader';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
 import { signOutEverywhere } from '../lib/firebase';
+import { markRedirectStarted } from '../lib/redirectSignInMarker';
 import { explainAuthReason, shouldDeepDiagnose } from '../lib/authDiagnostics';
 import { popupFailureAction, waitForSignedInUser, settleNativeSignIn, appleSignInFailureMessage, webSignInStrategy } from './socialSignInPolicy';
 
@@ -629,6 +630,11 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     // completed the sign-in and the app never heard about it. The redirect has no relay to break, and
     // getRedirectResult at the app root already finalizes it.
     if (webSignInStrategy(providerId) === 'redirect') {
+      // WRITE IT DOWN BEFORE WE HAND OVER THE PAGE (admin 2026-08-22 — the Apple login loop).
+      // On return, `getRedirectResult` reports `auth/no-auth-event` for BOTH "came back with nothing"
+      // and "ordinary page load", so the app could not tell them apart and stayed silent about both.
+      // This marker is the only thing that can: we know we sent them, because we recorded it.
+      markRedirectStarted(typeof sessionStorage !== 'undefined' ? sessionStorage : null, providerId, Date.now());
       await signInWithRedirect(auth, provider);
       return 'redirecting';   // the page navigates away; nothing after this runs
     }

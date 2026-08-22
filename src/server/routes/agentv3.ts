@@ -154,7 +154,7 @@ import { importFailureNarration, importFailureModelReason } from '../AgentV3/imp
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
-import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
+import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { decideGreenGuard, restorePlan, greenGuardMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
@@ -3808,7 +3808,7 @@ export function registerAgentV3Routes(app: Express): void {
           // No URL ⇒ keep the pre-flip semantics (port up, page unverifiable, benefit of the doubt).
           if (!url) return { served: { rendered: true, problems: [] } };
           try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(url)), 30_000, 'preview-diagnose-verify')).html) }; }
-          catch { return { url, served: { rendered: false, problems: ['the preview could not be reached to verify it'] } }; }
+          catch { return { url, served: { rendered: false, problems: [PREVIEW_UNVERIFIED_PROBLEM] } }; }
         };
         let winner = await visit(boundPort);
         let winnerPort = boundPort;
@@ -3848,15 +3848,22 @@ export function registerAgentV3Routes(app: Express): void {
           portListening: true,
           port: winnerPort,
           previewUrl,
-          reason: !previewUrl
-            ? `Dev server is up on port ${winnerPort}, but the public URL could not be resolved yet. Try again in a few seconds.`
-            : served.rendered
-              ? `Dev server is up on port ${winnerPort} — preview restored.`
-              // Task 2 (2026-08-05): the boot log is right here in `combined` — when it NAMES the
-              // cause (half-boot on an unreachable database, a missing key), say THAT instead of
-              // pointing the user into the log to find something we already computed.
-              : halfBootCause(combined)
-                ?? `Dev server is up on port ${winnerPort}, but it isn't serving the app's pages yet: ${served.problems[0] || 'no page rendered'}. This is common for a full-stack app whose client routes aren't served (only its API) — the boot log below shows the cause.`,
+          // Task 2 (2026-08-05): the boot log is right here in `combined` — when it NAMES the cause
+          // (half-boot on an unreachable database, a missing key), say THAT instead of pointing the
+          // user into the log to find something we already computed.
+          //
+          // 2026-08-22: and when the check itself could not run, say ONLY that. This line used to end
+          // "…it isn't serving the app's pages yet: the preview could not be reached to verify it.
+          // This is common for a full-stack app whose client routes aren't served (only its API) —
+          // the boot log below shows the cause." — a confident diagnosis built on a measurement that
+          // never happened. See previewDiagnoseReason for the full case.
+          reason: previewDiagnoseReason({
+            port: winnerPort,
+            hasUrl: !!previewUrl,
+            rendered: served.rendered,
+            problems: served.problems,
+            bootCause: halfBootCause(combined),
+          }),
           detail: combined.slice(-4000),
         });
         return;
@@ -7566,7 +7573,7 @@ export function registerAgentV3Routes(app: Express): void {
                 catch { /* URL resolution is best-effort — the boot itself already succeeded */ }
                 if (!url) return { url: '', served: { rendered: true, problems: [] as string[] } };
                 try { return { url, served: analyzePreviewHtml((await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(url)), 30_000, 'import-preview-verify')).html) }; }
-                catch { return { url, served: { rendered: false, problems: ['the preview could not be reached to verify it'] } }; }
+                catch { return { url, served: { rendered: false, problems: [PREVIEW_UNVERIFIED_PROBLEM] } }; }
               };
               let winner = await visit(bootPort);
               // FLIP SYSTEM, now on the IMPORT path too (admin 2026-08-09 — "report me port 3000, lekin

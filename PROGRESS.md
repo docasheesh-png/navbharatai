@@ -38632,3 +38632,94 @@ practice the provider session is still valid, so it is one tap with nothing to r
 fast switch, not five simultaneous logins, and nothing claims otherwise.
 
 Gate: both tsc + build + FULL vitest — 17,311 passing, 1 skipped.
+
+---
+
+## 2026-08-22 — autopsy: "secret option required for sessions", and a banner that diagnosed an app it never opened
+
+**Admin screenshot**, a live Express build in v5.0. The preview pane showed
+`{"message":"secret option required for sessions"}` and, above it, a blue banner:
+
+> *"Dev server is up on port 3000, but it isn't serving the app's pages yet: the preview could not be
+> reached to verify it. This is common for a full-stack app whose client routes aren't served (only
+> its API) — the boot log below shows the cause."*
+
+### The five-bucket ledger
+
+- ✅ **Self-healed (1).** The engine detected the failure correctly on the BUILD path — its own words,
+  visible in the transcript: *"I opened the preview and it didn't render correctly (the server
+  returned an error instead of the app: secret option required for sessions)"* — then diagnosed the
+  cause (`.env` holds `SESSION_SECRET`, the code reads `process.env.SESSION_SECRET`, nothing loads
+  dotenv) and edited `index.ts` (+12 −9). `analyzePreviewHtml`'s `jsonErrorBody` rule, added after the
+  2026-08-09 Mitrify report, is what caught it. **Per the 50/50 law this is a red flag, not a win**:
+  the builder GENERATED an app that could not serve a single request.
+- ❌ **Still wrong (1).** The Diagnose banner, above.
+- 🥵 **Struggle (1).** The whole detour — read `.env`, reason about dotenv, edit the entry file,
+  restart, re-probe — is minutes of a paid build spent on a defect the platform created.
+
+### Root cause of the ❌ — the verdict looked where the evidence wasn't
+
+`routes/agentv3.ts` built that string as `halfBootCause(combined) ?? <generic guess>`.
+
+1. `halfBootCause` reads **only the boot log**. `express-session` throws when a REQUEST arrives, not at
+   boot, so the boot log is silent **by construction** — `halfBootCause` returned null and the guess ran.
+2. The guess is three claims, and the last two were untrue. We had verified nothing (the in-sandbox
+   capture had thrown, which is why `problems[0]` was literally *"the preview could not be reached to
+   verify it"*), so *"isn't serving the app's pages"* was not something we knew; the full-stack
+   API-only line explains a real 404, not a capture timeout; and the boot log did **not** show the cause.
+3. Bitterest detail: `classifyDevServerFailure` has known `missing_session_secret` since 2026-08-13,
+   with a good honest message written for exactly this failure. **The right answer existed and was
+   never reachable**, because the only input it is ever given is the one place this cause cannot appear.
+
+So the user had two surfaces on one screen disagreeing about one app — and the one carrying a
+confident explanation was the wrong one.
+
+### Fix
+
+`previewWasVerified()` + `previewDiagnoseReason()` (pure, in `ImportPreview.ts`), with one rule:
+**never name a cause we did not measure.** Order of authority — rendered → success; a NAMED boot cause
+→ say that; the check itself failed → say only that and point at the Preview tab, where the answer
+actually is; we saw the page and it failed → the observed problem, with the full-stack hint attached
+**only** when the problem is genuinely a 404 / "Cannot GET", the one failure that hint explains.
+`PREVIEW_UNVERIFIED_PROBLEM` is exported so both `catch` sites and both verdict builders share one
+string and the distinction cannot drift into a typo. `previewServeNarration` (the build path) follows
+the same rule — it used to attach the API-only sentence on `needsDb` alone.
+
+12 tests in `tests/previewVerdictHonesty.test.ts` encode the screenshot verbatim. One existing test
+asserted the old phrasing; its assertion now holds the PROPERTY (no fake success, no unearned verdict)
+instead of one sentence, with the reason written next to it.
+
+### 🔴 OPEN ROOT CAUSE — the upstream half is NOT done (rule 6, stated plainly)
+
+The app should never have needed healing. Two findings, both certain and code-anchored:
+
+1. **`.env` is auto-loaded on exactly ONE path.** `E2BActuator.ts` prefixes `set -a; . ./.env; set +a`
+   onto the **dev-server launch** only — a mitigation added after the 2026-08-02 Mitrify autopsy of the
+   *same class* (`DATABASE_URL` read with no dotenv). Every other way a process starts in the sandbox —
+   the agent's own `runCommand`, a plain `node index.js`, `DevServerRecovery` — gets nothing. That
+   2026-08-02 fix was a 🔀 **workaround recorded as a win**, and the class has now returned with a
+   different variable, which is exactly what the 50/50 law predicts.
+2. **Nothing prevents the generation.** There is no analyzer for "reads `process.env.X`, ships a `.env`,
+   never loads dotenv" — `DependencyAutoFix` will add the dotenv *package* if it is imported, but
+   nothing adds the import.
+
+**The real fix is upstream** (a deterministic analyzer + auto-fix that wires `import 'dotenv/config'`
+into the entry file, and a scaffold that ships it) **plus** widening the runtime load. Not shipped
+here, deliberately: prefixing every sandbox command is not safe to do blind — this repo has already
+had one autopsy (debc468c) where a command-STRING change made every command look like a dev-server
+launch. The safer shape is passing the parsed `.env` as `envs` on the sandbox command rather than
+mangling the string, and that deserves its own change with its own tests.
+
+### Not fixed by me after all: the DNS-dependent unit test
+
+`domainServingCheck.test.ts` (from #2535) failed 4/14 here, and I wrote the fix — an injectable SSRF
+guard — before the rebase showed that **another session had already landed the identical fix on
+`main` a day earlier**, with the same design and better notes (theirs records that the
+private-address test deliberately does NOT pass the seam, because that one must exercise the real
+guard or it proves nothing). Mine was dropped in favour of theirs; nothing of it survives here.
+
+Recorded because it is safeguard #6 doing its job late rather than early: I diagnosed a red test in
+my working tree without first checking whether current `main` already answered it. The cheap check —
+`git log -- <the failing file>` before writing a line — would have saved the whole detour.
+
+Gate: both tsc green, 17,146 tests / 1,366 files green, CI green before merge.

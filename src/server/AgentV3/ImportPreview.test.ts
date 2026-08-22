@@ -201,10 +201,16 @@ describe('previewServeNarration — "✅ up" is EARNED by the home route renderi
     expect(v.text.toLowerCase()).toContain('build-error overlay');
   });
 
-  it('handles an unreachable preview without a fake success', () => {
+  it('handles an unreachable preview without a fake success — and without a fake diagnosis', () => {
     const v = previewServeNarration({ rendered: false, problems: ['the preview could not be reached to verify it'], port: 8080, needsDb: false });
     expect(v.ok).toBe(false);
-    expect(v.text).toMatch(/could not be reached/i);
+    // The wording tightened on 2026-08-22 (admin screenshot): saying only "could not be reached" left
+    // room for the sentence that followed it to diagnose an app we had never opened. The assertion
+    // now holds the PROPERTY that matters — no fake success, and no verdict we did not earn — rather
+    // than one phrase. See tests/previewVerdictHonesty.test.ts for the full case.
+    expect(v.text).toContain('could not open the preview');
+    expect(v.text).toContain('not a verdict about your app');
+    expect(v.text).not.toMatch(/isn't serving the app's pages|only its API/);
   });
 });
 

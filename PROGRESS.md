@@ -38577,3 +38577,58 @@ path could be paused mid-install, tearing `node_modules` into a state nothing re
 alone produces "preview nahi chalta, chahe kuch kar lo".
 
 Gate: both tsc + build + FULL vitest — 1,376 files / 17,287 passing, 1 skipped.
+
+## 2026-08-22 — "Apple, Google aur GitHub sab band" — it was the `www.` host all along
+
+**The admin's browser console settled in one line what two rounds of reasoning could not:**
+
+```
+POST https://www.navbharatai.com/api/agentv3/chat   401 (Unauthorized)
+```
+
+**`www.`** The site answers on BOTH `navbharatai.com` and `www.navbharatai.com`, and auth works on
+only one of them. `authDomain` is a SINGLE value (`navbharatai.com`), adopted precisely so the auth
+handler is SAME-ORIGIN with the app — that is the property the entire redirect flow rests on. On the
+`www.` host it is gone: the handler is cross-origin, the session is partitioned away from the page,
+and every request leaves without a token. 401, on an account that has just signed in successfully.
+
+That is why it looked like every provider broke at once, with no error anywhere — **from the
+browser's point of view nothing failed.** Apple loops forever (its redirect returns to a host that
+cannot hold the session); Google/GitHub simply stop working the moment the user is on `www.`.
+
+**MY OWN CHANGE WAS INNOCENT, AND I PROVED IT BEFORE BLAMING ANYTHING ELSE.** The obvious suspect was
+#2556 (the auth-proxy cookie rewrite — the only thing that touched the shared auth path). I built a
+real proxy harness against a mock Firebase upstream and ran BOTH versions: old → `200`, cookie with
+`Domain=…firebaseapp.com`; new → `200`, same body, cookie with the foreign Domain stripped. Behaviour
+identical, minus the bug. The client half is inert for popup providers (verdict `none`). The
+rate-limit change (#2540) RAISED limits. Evidence first; the instinct to revert my own work would have
+removed a correct fix and left the outage exactly where it was.
+
+**FIX — one canonical host.** `canonicalHost.ts` (pure, test-locked) + a middleware mounted FIRST, so
+nothing can answer on the wrong host. Narrow by construction:
+- Only the `www.` twin of the configured host is moved. Cloud Run's internal hostname, the health
+  checker, preview revisions, localhost and every other domain are served exactly as before — a rule
+  that rewrote every unrecognised host would turn a login bug into an outage.
+- **308, not 301:** a permanent redirect that PRESERVES method and body. A 301 turns a POST into a
+  GET and silently drops the payload — a worse bug than the one being fixed.
+- **OFF unless `CANONICAL_HOST` is set**, so no other environment (or local dev) starts redirecting.
+
+⚠️ **ADMIN ACTION REQUIRED — this ships INERT until the env is set:** add `CANONICAL_HOST=navbharatai.com`
+in Cloud Run. Until then the code is a no-op and the `www.` split remains. Immediate workaround for
+users: open **navbharatai.com without `www.`**.
+
+**Also shipped: profile switching (admin: "photo par click kar ke switch profile, ek saath 5 id").**
+`accountRoster.ts` (pure, 17 tests) + the avatar dropdown. 🔒 METADATA ONLY — uid, email, name, photo,
+provider, last-used. **No token is ever stored**: a refresh token in localStorage is a permanent
+account takeover for anyone who reaches that storage, and saving one tap is nowhere near worth it.
+Recorded at the single place every successful sign-in passes through, so every provider and path
+populates it with no per-flow wiring. LRU eviction at 5 never drops the account being added; "remove
+from this device" is worded exactly that way because this list cannot sign anyone out anywhere else,
+and someone would use it believing they had secured a shared computer.
+
+⚠️ **HONEST BOUNDARY, stated in the code and the UI:** the SDK holds ONE live session per app
+instance, so switching RE-AUTHENTICATES rather than keeping five sessions live in parallel. In
+practice the provider session is still valid, so it is one tap with nothing to retype — but it is a
+fast switch, not five simultaneous logins, and nothing claims otherwise.
+
+Gate: both tsc + build + FULL vitest — 17,311 passing, 1 skipped.

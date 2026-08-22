@@ -160,6 +160,7 @@ import https from 'https';
 import fs from 'fs';
 import { appleDomainAssociation, APPLE_DOMAIN_ASSOCIATION_PATH } from './src/server/lib/appleDomainAssociation';
 import { rewriteProxyHeaders } from './src/server/lib/authProxyCookies';
+import { canonicalHostRedirect, canonicalHostFromEnv } from './src/server/lib/canonicalHost';
 import { auditEnv } from './src/server/audit_env';
 
 auditEnv();
@@ -326,6 +327,23 @@ setInterval(() => {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many admin requests.' },
+  });
+
+  // ── ONE CANONICAL HOST (admin's console, 2026-08-22: `POST https://www.navbharatai.com/... 401`) ──
+  //
+  // The site answered on BOTH `navbharatai.com` and `www.navbharatai.com`, and auth works on only one:
+  // `authDomain` is a SINGLE value, chosen so the auth handler is SAME-ORIGIN with the app. On `www.`
+  // that property is gone — the session is partitioned away from the page and every request goes out
+  // without a token, so a user who has just signed in successfully is 401 everywhere. It looked like
+  // every provider broke at once, with no error, because from the browser's side nothing failed.
+  //
+  // Mounted FIRST so nothing else can answer on the wrong host, and narrow by construction: it moves
+  // only the `www.` twin of the configured host and is OFF entirely unless CANONICAL_HOST is set.
+  const CANONICAL_HOST = canonicalHostFromEnv();
+  app.use((req: any, res: any, next: any) => {
+    const d = canonicalHostRedirect({ host: req.headers?.host, originalUrl: req.originalUrl || req.url || '/', canonical: CANONICAL_HOST });
+    if (!d.redirectTo) { next(); return; }
+    res.redirect(d.status, d.redirectTo);
   });
 
   // ── Structured Audit Logger (4.7) ────────────────────────────────────────

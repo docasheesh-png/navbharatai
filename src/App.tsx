@@ -87,6 +87,7 @@ import { firebaseConfig } from './config/firebase';
 // Google sign-in). Re-exported here so every existing `import { auth, db } from './App'` still works.
 import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib/firebase';
 import { readRedirectMarker, clearRedirectMarker, redirectReturnVerdict, redirectLostMessage } from './lib/redirectSignInMarker';
+import { readRoster, writeRoster, rememberAccount } from './lib/accountRoster';
 export { auth, db };
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from './lib/signOutFlow';
 import { authGateDecision, isAuthGatedView } from './lib/authGate';
@@ -1205,6 +1206,23 @@ export default function App() {
         // in-memory, which is what made every app relaunch come back logged out). Fire-and-forget: it is
         // best-effort, never throws, and must never delay the UI reacting to a successful sign-in.
         void ensureNativeSessionPersisted();
+        // REMEMBER THIS ACCOUNT ON THIS DEVICE (admin 2026-08-22 — profile switching). Recorded HERE,
+        // at the one place every successful sign-in passes through, so every provider and every path
+        // (popup, redirect, native, email) populates the switcher without its own wiring.
+        //
+        // 🔒 METADATA ONLY — no token ever reaches this list; see accountRoster.ts for why. Wrapped
+        // because a device with storage disabled must still sign in normally, just without a roster.
+        try {
+          const rStore = typeof localStorage !== 'undefined' ? localStorage : null;
+          writeRoster(rStore, rememberAccount(readRoster(rStore), {
+            uid: currentUser.uid,
+            email: currentUser.email || '',
+            name: currentUser.displayName || '',
+            photo: currentUser.photoURL || '',
+            provider: currentUser.providerData?.[0]?.providerId || '',
+            lastUsed: Date.now(),
+          }));
+        } catch { /* the roster is a convenience — it must never affect signing in */ }
         // GITHUB CONNECTION IS PER-USER: pick up this user's OWN GitHub token, but NEVER inherit a
         // token authorized by a different NavBharatAI user on this browser (the "every user sees my
         // account" bug). resolveGithubConnectionForUser decides keep / claim / clear.

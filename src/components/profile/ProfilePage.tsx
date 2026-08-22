@@ -11,12 +11,15 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight,
-  Edit3, Save, X, RefreshCw, CalendarDays, Zap, Activity, LogOut, AlertTriangle,
+  Edit3, Save, X, RefreshCw, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone,
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { ApiKeysCard } from './ApiKeysCard';
 import { panelWidth, panelColumns, type DeviceMode } from '../../lib/panelWidth';
+import { maskPhone } from '../../lib/phoneNumber';
+import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
+import { auth as firebaseAuth } from '../../lib/firebase';
 
 // ── Types mirroring server responses ──────────────────────────────────────────
 
@@ -136,6 +139,9 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
 
   // Edit state
   const [editing, setEditing] = useState(false);
+  // Verify-number sheet, opened from the mobile row above. Reloads on success so the row re-reads the
+  // auth record rather than showing a state this component invented.
+  const [verifyOpen, setVerifyOpen] = useState(false);
   const [editName, setEditName] = useState('');
   const [editBio, setEditBio] = useState('');
   const [editPhone, setEditPhone] = useState('');
@@ -272,6 +278,17 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
 
   return (
     <div className="flex-1 bg-[#0d1117] overflow-y-auto">
+      {/* It portals to document.body, so where it sits in this tree does not matter — what matters is
+          that it is OUTSIDE the conditional early-returns above, or a signed-out render would unmount
+          a sheet mid-verification. */}
+      <VerifyPhoneSheet
+        auth={firebaseAuth}
+        open={verifyOpen}
+        onClose={() => setVerifyOpen(false)}
+        reason="A verified number keeps your account yours, and it is what lets you import a project from GitHub or a .zip."
+        onVerified={() => window.location.reload()}
+        onSignInInstead={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { signIn: 'phone' } }))}
+      />
       {/* Width follows the app's View Mode, from the one shared rule — this page used to carry its
           own hard-coded max-w-3xl, which is how a 1920px screen ended up showing a narrow column with
           empty space beside it. The cards flow into two columns on a desktop so the room is actually
@@ -296,6 +313,27 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
             <div className="flex-1 min-w-0">
               <h1 className="text-xl font-black text-white truncate">{displayName}</h1>
               <p className="text-xs text-[#8b949e] mt-0.5">{user.email}</p>
+              {/* MOBILE VERIFICATION (admin 2026-08-22). Shown here because otherwise the ONLY way to
+                  verify would be to attempt an import and be refused — a feature you can only reach by
+                  first failing at something else is not finished. `phoneNumber` is on the auth record
+                  only once a phone credential is really linked, so its presence IS the verification;
+                  nothing here asks the server or can disagree with it. */}
+              <p className="text-[11px] mt-1 flex items-center gap-1.5">
+                <Smartphone className="w-3 h-3 text-[#484f58]" />
+                {user.phoneNumber ? (
+                  <span className="text-emerald-400 font-mono">{maskPhone(user.phoneNumber)} · verified</span>
+                ) : (
+                  <>
+                    <span className="text-[#8b949e]">Mobile not verified</span>
+                    <button
+                      onClick={() => setVerifyOpen(true)}
+                      className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 hover:text-indigo-300"
+                    >
+                      Verify
+                    </button>
+                  </>
+                )}
+              </p>
               <p className="text-[10px] text-[#484f58] mt-1 font-mono">Member since {memberSince}</p>
               {saveSuccess && (
                 <span className="text-[10px] text-emerald-400 font-bold mt-1 block">✓ Profile saved</span>

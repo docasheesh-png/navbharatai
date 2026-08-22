@@ -244,7 +244,7 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'error':
       // A crashed build now carries its diagnostics report (server attaches it) — keep it so the
       // failure card / "Build report" renders and the user can see WHAT went wrong, not a bare error.
-      return { ...state, done: true, ok: false, error: event.message, pendingPermission: undefined, ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}) };
+      return { ...state, done: true, ok: false, error: event.message, errorCode: event.code, pendingPermission: undefined, ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}) };
 
     default:
       return state;

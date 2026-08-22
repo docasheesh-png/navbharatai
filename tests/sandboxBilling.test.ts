@@ -125,7 +125,10 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
 
   it('both billing paths pass it, so the settle and the watchdog can never disagree', () => {
     // Fix 67 established that these two must agree; a cost on one and not the other would revive that.
-    const hits = route.match(/billableSandboxUsd\(actuator, workspaceId, /g) || [];
+    // The helper was renamed on 2026-08-22 (`…Usd` → `…Detail`) when it began returning the SECONDS as
+    // well, so the user-facing "Live preview: 4 min — ₹8" line and the bill come from one measurement.
+    // The invariant is unchanged: both paths, same helper, same build start.
+    const hits = route.match(/billableSandboxDetail\(actuator, workspaceId, /g) || [];
     expect(hits.length).toBe(2);
   });
 
@@ -139,15 +142,22 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
      * onto the SECOND build. A third build would be charged for all of it again: the same seconds, sold
      * twice. Capping at the build's own duration fixes both at once.
      */
-    expect(route).toContain('billableSandboxUsd(actuator, workspaceId, billingCtx.buildStartedAt)');
-    expect(route).toContain('billableSandboxUsd(actuator, workspaceId, buildStartedAt)');
-    expect(route).toContain('sandboxBillableUsd(sandboxCost(Math.min(seconds, buildSeconds)))');
+    expect(route).toContain('billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt)');
+    expect(route).toContain('billableSandboxDetail(actuator, workspaceId, buildStartedAt)');
+    // The cap itself, now named before it is priced so the seconds can be reported alongside the ₹.
+    expect(route).toContain('const billable = Math.min(seconds, buildSeconds);');
+    expect(route).toContain('sandboxBillableUsd(sandboxCost(billable))');
+    // And the number the USER is shown is that same one — not a second measurement taken later.
+    expect(route).toContain('usdInrRate(), livePreviewCharge)');
+    expect(route).toContain('usdInrRate(), watchdogLivePreview)');
   });
 
   it('an UNKNOWN build start bills nothing rather than guessing', () => {
-    const at = route.indexOf('function billableSandboxUsd');
+    const at = route.indexOf('function billableSandboxDetail');
     const fn = route.slice(at, at + 2200);
-    expect(fn).toContain('if (!Number.isFinite(started) || started <= 0) return 0;');
+    // `none` replaced a bare `0` when the helper began returning seconds too (2026-08-22). The
+    // property is asserted, not the word: the next test pins that `none` really is zero on both.
+    expect(fn).toContain('if (!Number.isFinite(started) || started <= 0) return none;');
   });
 
   it('it reads the SAME measurement the report uses', () => {
@@ -158,10 +168,16 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
   });
 
   it('any doubt bills ZERO — a money path must fail toward charging less', () => {
-    const at = route.indexOf('function billableSandboxUsd');
+    const at = route.indexOf('function billableSandboxDetail');
     const fn = route.slice(at, at + 2200);
-    expect(fn).toContain("if (typeof fn !== 'function' || !workspaceId) return 0;");
-    expect(fn).toContain('catch {\n    return 0;');
+    expect(fn).toContain("if (typeof fn !== 'function' || !workspaceId) return none;");
+    expect(fn).toContain('catch {\n    return none;');
+    // …and `none` is genuinely nothing — otherwise every guard above would be pointing at a value
+    // that could quietly become non-zero.
+    expect(fn).toContain('const none = { seconds: 0, usd: 0 };');
+    // Seconds are reported only when they were CHARGED, so the user can never see a duration next to
+    // a ₹0 they cannot reconcile.
+    expect(fn).toContain('return usd > 0 ? { seconds: billable, usd } : none;');
   });
 
   it('the report says whether it reached the bill', () => {

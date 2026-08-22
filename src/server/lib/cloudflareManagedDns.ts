@@ -185,6 +185,52 @@ export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Pr
   return changed;
 }
 
+/**
+ * WHAT IS ACTUALLY IN THE ZONE RIGHT NOW — the reading nothing in this product could take.
+ *
+ * 🔒 WHY THIS EXISTS (admin 2026-08-22, six hours of a domain not connecting). The screen could show
+ * two things: what the hosting service is ASKING for, and what we REMEMBER showing. Neither is the
+ * question people actually have, which is "are my records there or not?" — and with the domain's
+ * nameservers delegated to us, the registrar's own DNS panel is inert, so the user cannot check
+ * either. Their records sat in Hostinger's panel, which announced in its own words that it was
+ * "Inactive", while everyone stared at a spinner.
+ *
+ * Worse, the one number we did print could not tell the two opposite cases apart: `applyRecords`
+ * returns how many records it CHANGED, so "0 applied" means either "everything was already correct"
+ * (success) or "there was nothing to write" (a real problem). Reading the zone back distinguishes
+ * them with evidence instead of inference.
+ *
+ * Values come back unquoted so a TXT compares equal to what the user was told to add.
+ */
+export async function listZoneRecords(zoneId: string): Promise<Array<{ type: string; name: string; value: string; ttl: number; proxied: boolean }>> {
+  const rows = (await cf<Array<CfDnsRecord & { ttl?: number }>>(`/zones/${zoneId}/dns_records?per_page=200`)) ?? [];
+  return rows.map((r) => ({
+    type: String(r.type ?? '').toUpperCase(),
+    name: String(r.name ?? ''),
+    value: stripQuotes(String(r.content ?? '')),
+    ttl: typeof r.ttl === 'number' ? r.ttl : 0,
+    proxied: r.proxied === true,
+  }));
+}
+
+/**
+ * Is every record the hosting service asked for genuinely present in the zone? PURE.
+ *
+ * 🔒 The comparison is on TYPE + NAME + VALUE, and a record that is present but PROXIED counts as
+ * MISSING — an orange-cloud record answers with the CDN's own address, so the hosting service's
+ * verification sweep sees the wrong value and waits forever while the zone looks correct to a human
+ * reading it. That failure is invisible without saying so explicitly, which is why it is named here
+ * rather than left to a reviewer's eye.
+ */
+export function missingFromZone(
+  desired: readonly DesiredRecord[],
+  inZone: ReadonlyArray<{ type: string; name: string; value: string; proxied?: boolean }>,
+): DesiredRecord[] {
+  const key = (t: string, n: string, v: string) => `${t.toUpperCase()}|${n.replace(/\.$/, '').toLowerCase()}|${stripQuotes(v)}`;
+  const have = new Set(inZone.filter((r) => r.proxied !== true).map((r) => key(r.type, r.name, r.value)));
+  return desired.filter((d) => d.type && d.name && d.value && !have.has(key(d.type, d.name, d.value)));
+}
+
 /** A managed-DNS failure for the OWNER's screen — bounded, vendor branding neutralized. */
 export function sanitizeManagedDnsError(e: unknown): string {
   const msg = e instanceof Error && e.message ? e.message : String(e ?? 'unknown error');

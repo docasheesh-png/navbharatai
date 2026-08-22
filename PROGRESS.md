@@ -38536,3 +38536,44 @@ store that already holds the answer. What is certain is that the OLD behaviour c
 instance; whether it is the whole of what the admin saw, the next attempt will show.
 
 Gate: both tsc + build + FULL vitest — 1,375 files / 17,279 passing, 1 skipped.
+
+## 2026-08-22 — The torn `node_modules`: how it got broken, and why it could never heal
+
+**Admin, verbatim:** `Error [ERR_MODULE_NOT_FOUND]: Cannot find module
+'/home/user/workspace/node_modules/vite/dist/node/chunks/dist.js' imported from
+…/node_modules/vite/dist/node/chunks/config.js`
+
+This closes the THIRD and last piece of today's preview story. All three are one chain.
+
+**HOW IT BROKE (the cause).** The idle reaper pauses a sandbox after ~5 minutes with no sandbox
+OPERATION, and it is build-aware: it skips a workspace whose build called `setBuildActive`. But that
+flag was only ever set from a BUILD (`ToolDispatcher.markBuildActive`) — a `grep` for callers outside
+the actuator returns exactly one. The wake/diagnose route does precisely the work that must not be
+interrupted (resume → re-hydrate → install → boot) and **never set it**. A cold revive needing a full
+`npm install` can pass five minutes inside ONE command, which to the sweep is indistinguishable from an
+abandoned session. Pausing there snapshots a half-written `node_modules`. Now marked for the whole
+route, released in `finally` (and the flag expires on its own besides, so a crash cannot leave a
+sandbox billing).
+
+**WHY IT NEVER HEALED (the honesty half).** The repair for exactly this already existed —
+`missing_module` + `corruptPackage` removes the package and reinstalls — but it could only be reached
+through esbuild's `Could not resolve "…"` wording. Node's ESM loader says **"Cannot find module"**, and
+the generic fallback matches **"Module not found"** — a different sentence.
+
+⚠️ **Worse than a miss: a near-miss.** An EARLIER branch did match `Cannot find module` and named the
+whole absolute PATH as the missing "dependency". So a reinstall ran, set no `corruptPackage`, and a
+plain `npm install` will not repair a half-written package npm already considers installed. The build
+looked like it was trying, and failed identically on every boot. `nodeEsmTornInstall` now runs BEFORE
+that branch, names the real package (`vite`) and routes to the targeted remove-then-reinstall.
+
+🔒 **BOTH sides of the import must be inside `node_modules`** — that is what makes it a broken INSTALL
+rather than a code error. A user's own file importing a missing package is a dependency they never
+added, and reinstalling for it would burn a recovery attempt on the wrong cure. Test-locked.
+
+**THE FULL CHAIN, for the record.** (1) A cold server instance could not find the workspace's sandbox,
+so the health probe never ran and the auto-restore never fired → E2B's closed-port page. (2) When the
+wake path did run, it wrote no `.env`, so the app booted without its own session key. (3) And the wake
+path could be paused mid-install, tearing `node_modules` into a state nothing recognised. Each one
+alone produces "preview nahi chalta, chahe kuch kar lo".
+
+Gate: both tsc + build + FULL vitest — 1,376 files / 17,287 passing, 1 skipped.

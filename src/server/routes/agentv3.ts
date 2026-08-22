@@ -3652,8 +3652,24 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     let heartbeat: ReturnType<typeof setInterval> | undefined;
+    // 🔒 HOLD THE SANDBOX WHILE WE REVIVE IT (admin 2026-08-22 — the torn `node_modules`).
+    //
+    // The idle reaper pauses a sandbox after ~5 minutes with no sandbox OPERATION, and it is
+    // build-aware: it skips a workspace whose build set `setBuildActive`. This route does exactly the
+    // work that must not be interrupted — resume, re-hydrate, install, boot — and it NEVER set that
+    // flag, because the flag was only ever set from a BUILD (ToolDispatcher.markBuildActive).
+    //
+    // A cold revive that needs a full `npm install` can easily pass five minutes inside ONE command,
+    // which to the sweep looks exactly like an abandoned session. Pausing there snapshots a half-written
+    // `node_modules`, and Vite then dies importing its own missing chunk — on this boot and on every
+    // boot after it, because a torn tree cannot heal itself. That is the error the admin reported.
+    //
+    // Released in `finally` however this ends, and the flag expires on its own besides, so a crash here
+    // can never leave a sandbox billing for ever.
+    let heldSandbox: { actuator: ReturnType<typeof buildActuator>; workspaceId: string } | null = null;
     try {
       const actuator = buildActuator();
+      try { actuator.setBuildActive?.(workspaceId, true); heldSandbox = { actuator, workspaceId }; } catch { /* the revive proceeds; it is just interruptible, exactly as before */ }
       const expectedPort = oneShotDevPort(framework);
       // COLD-SANDBOX HYDRATION (fixes the bogus "No package.json found" on a perfectly-saved project):
       // the Diagnose button is used precisely when the Live-server preview is empty — i.e. when the
@@ -3861,6 +3877,10 @@ export function registerAgentV3Routes(app: Express): void {
     } catch (err) {
       if (heartbeat) clearInterval(heartbeat);
       finish({ ok: false, portListening: false, reason: err instanceof Error ? err.message : 'Could not reach the sandbox to diagnose the preview.', detail: '' }, 500);
+    } finally {
+      // Release the hold however this ended — a revive that threw must not keep a sandbox billing.
+      // The flag expires on its own as well, so this is belt-and-braces rather than the only guard.
+      try { heldSandbox?.actuator.setBuildActive?.(heldSandbox.workspaceId, false); } catch { /* the flag expires by itself */ }
     }
   });
 

@@ -39694,3 +39694,63 @@ dozen causes.
 
 Gate for all four: both tsc green; `npx vitest run` 17,604 passing / 1,394 files; build + bundle
 budget within limits (total JS 1433.9 / 1450 KB).
+
+---
+
+## 2026-08-22 (night, correction + continuation) — the door shipped in three pieces, and two of them were my mistakes (PRs #2576, #2582, #2584)
+
+The entry above was written before its PR merged and still says "(PR pending)" in its heading. Correcting
+by ADDING, per the append-only rule. It shipped as **#2576** — and then twice more, because I broke it.
+
+### The door merged WITHOUT its fixes, and that was my process failure
+
+I pushed the door, ran an adversarial review over it, hand-triaged four real defects out of the review,
+pushed those as a second commit, and armed a CI watcher. **The watcher was not pinned to a commit.** It
+fired on a green reading for the PREVIOUS head, reported the PR ready, and #2576 merged at `30ffe1c2`
+— one commit short. The four fixes sat on the branch, unshipped, while the door went live with its
+known defects, including one that broke live preview on every phone.
+
+**"Some green exists" is not "MY commit is green".** That is the same artifact-vs-validity conflation
+this week's entire body of work exists to kill, reproduced in my own tooling on the same day. It then
+recurred twice more within the hour — a build-status monitor that reported ten historical successes as
+if they were the run I had just triggered, and a first notification that fired on a stale API read.
+Every watcher is now pinned to an exact sha, and I verify from two sources before merging.
+
+The four defects (shipped in **#2582**): the framed app reloaded every 150 s because every health poll
+minted a new link and the client adopted each one; the kill switch stranded open tabs on a refused page
+while a working fallback sat unused; **the bundled Play Store app lost live preview entirely** because
+an iframe src is a NAVIGATION and the fetch-layer rewrite never sees it (apiBase's own header calls
+navigations "the same hole, a third time" — this was the fourth); and an app on an unusual port with no
+revival recipe sat behind an eternal "starting" page even though its direct url worked, because the
+door must never be a downgrade from the thing it replaces.
+
+### The .ipa could not be built at all, and that was my bug too
+
+**Android #87 succeeded. iOS #62 failed** — `npm run build` died before Xcode was reached:
+
+    "PreviewWelcome" is not exported by "src/components/agentv3/previewWelcome.ts"
+
+I had created a React component `PreviewWelcome.tsx` beside its pure module `previewWelcome.ts` — two
+paths differing only in capitalisation. Each name follows this repo's convention (PascalCase components,
+camelCase modules); **together they are a landmine.** Linux keeps them apart, so every dev machine,
+every test and ALL OF CI were happy for a day. macOS is case-INSENSITIVE, and on the iOS runner
+`./PreviewWelcome` resolved to the lowercase module, which exports no component.
+
+**The asymmetry is what made it invisible**: nothing in the pipeline runs on a case-insensitive disk
+except the occasional iOS release — the worst possible place to discover anything.
+
+Fixed in **#2584** by renaming the component AND by `tests/caseInsensitiveCollisions.test.ts`, which
+fails **on Linux, in CI**, for any pair of tracked paths that collide when lowercased. The rename fixes
+one pair; the guard fixes the class, and the class will recur because a PascalCase component beside its
+camelCase module is the natural shape of this codebase. **The guard was watched failing** on a
+deliberately created collision before being trusted — a guard nobody has seen fail is just a comment.
+
+### What this day actually demonstrated
+
+Three of today's incidents were the SAME error at three different altitudes: stale preview URL (code),
+merge at the wrong commit (process), build status read from the wrong run (tooling). The lesson is not
+"be careful with previews" — it is that **an identifier is not the thing it identifies**, and every
+layer of this system had somewhere it was quietly assuming otherwise.
+
+Gate at each merge: both tsc clean, `npm run build` clean (the command that had failed), vitest 1397
+files / 17,626 passing / 1 honest skip.

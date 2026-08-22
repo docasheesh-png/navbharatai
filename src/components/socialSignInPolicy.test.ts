@@ -10,6 +10,7 @@ import {
   APPLE_SERVICE_ID,
   webSignInStrategy,
   socialRedirectFailureMessage,
+  authErrorDetail,
   type MinimalAuthLike,
 } from './socialSignInPolicy';
 
@@ -244,6 +245,61 @@ describe('socialRedirectFailureMessage', () => {
     expect(cred).toMatch(/Firebase Console/i);
     // And it says what is already RIGHT, so nobody re-checks four things that are known good.
     expect(cred).toMatch(/already correct/i);
+  });
+
+  /**
+   * THE REASON WAS ALWAYS THERE AND WE DELETED IT (2026-08-22).
+   *
+   * `@firebase/auth` splits the identity-toolkit error on `' : '` and, when the server sent a detail,
+   * throws it as the error's own `.message`. Every caller then wrote `err.code || err.message` — and the
+   * code is ALWAYS truthy, so the detail half never ran. A real, reproducible Apple failure therefore
+   * logged `auth/invalid-credential` and not one word about why.
+   *
+   * These tests exist so that can never be re-introduced by someone "simplifying" the log line back.
+   */
+  it('unwraps the SDK packaging and returns only the server’s own sentence', () => {
+    // Exactly the shape _errorWithCustomMessage produces.
+    expect(authErrorDetail({ message: 'Firebase: Invalid Idp Response: invalid_client (auth/invalid-credential).' }))
+      .toBe('Invalid Idp Response: invalid_client');
+    expect(authErrorDetail({ message: 'Firebase: Unable to parse id_token (auth/invalid-credential).' }))
+      .toBe('Unable to parse id_token');
+  });
+
+  it('returns null when there is no real detail, so a caller can never append noise', () => {
+    // The prod error map's own generic sentences arrive in the SAME shape. Repeating them at the user
+    // would say the code twice and look like new information.
+    expect(authErrorDetail({ message: 'Firebase: An internal AuthError has occurred. (auth/internal-error).' })).toBeNull();
+    expect(authErrorDetail({ message: 'some other library’s error' })).toBeNull();
+    expect(authErrorDetail({})).toBeNull();
+    expect(authErrorDetail(null)).toBeNull();
+    expect(authErrorDetail(undefined)).toBeNull();
+    expect(authErrorDetail({ message: 42 })).toBeNull();
+  });
+
+  it('carries the server’s reason into the message, because a phone has no console', () => {
+    const m = socialRedirectFailureMessage('auth/invalid-credential', 'Invalid Idp Response: invalid_client')!;
+    // Our sentence says what to DO; the detail says what the server actually complained about. The
+    // detail is the half that survives a cause nobody has met before, so it is APPENDED, not swapped in.
+    expect(m).toMatch(/Services ID/i);
+    expect(m).toContain('invalid_client');
+  });
+
+  it('is unchanged when no detail is available — every existing caller keeps working', () => {
+    expect(socialRedirectFailureMessage('auth/invalid-credential'))
+      .toBe(socialRedirectFailureMessage('auth/invalid-credential', null));
+    expect(socialRedirectFailureMessage('auth/invalid-credential', '   '))
+      .toBe(socialRedirectFailureMessage('auth/invalid-credential'));
+    expect(socialRedirectFailureMessage('auth/no-auth-event', 'anything')).toBeNull();
+  });
+
+  it('the two places a human reads the failure both take the detail', () => {
+    const app = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8');
+    const auth = readFileSync(join(process.cwd(), 'src/components/AuthComponent.tsx'), 'utf8');
+    // The redirect path: logged AND shown.
+    expect(app).toContain('const detail = authErrorDetail(e);');
+    expect(app).toContain('socialRedirectFailureMessage(code, detail)');
+    // The native exchange path — the one iOS Apple sign-in ends in, and the same blind spot.
+    expect(auth).toContain('const d = authErrorDetail(e);');
   });
 
   it('does NOT tell an invalid CLIENT ID that the provider registration is already correct', () => {

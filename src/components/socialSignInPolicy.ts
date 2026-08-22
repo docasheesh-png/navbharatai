@@ -66,10 +66,62 @@ export function webSignInStrategy(providerId: string | null | undefined): WebSig
  * Returns null ONLY for `auth/no-auth-event`, which is not a failure at all — it is what a normal page
  * load reports when no redirect was pending, and it fires on nearly every visit.
  */
-export function socialRedirectFailureMessage(code: string | null | undefined): string | null {
+/**
+ * THE REASON WAS ALWAYS IN OUR HANDS, AND WE WERE DELETING IT (found 2026-08-22, reading the SDK).
+ *
+ * `@firebase/auth`'s `_performApiRequest` splits the identity-toolkit error on `' : '`:
+ *
+ *     const [serverErrorCode, serverErrorMessage] = errorMessage.split(' : ');
+ *     if (serverErrorMessage) throw _errorWithCustomMessage(auth, authError, serverErrorMessage);
+ *
+ * So when Google returns `INVALID_IDP_RESPONSE : <why>`, the `<why>` — Google's OWN sentence naming
+ * what went wrong in the Apple exchange — becomes the thrown error's `.message`, as
+ * `Firebase: <why> (auth/invalid-credential).`
+ *
+ * Every caller in this app then wrote `err.code || err.message`. The code is always truthy, so the
+ * `.message` half NEVER ran, and the one string that explains the failure was discarded at the exact
+ * moment it arrived. That is the failure class the block above says must never happen again, happening
+ * one function below its own comment — which is why the admin's DevTools screenshot showed a bare
+ * `auth/invalid-credential` and nothing else after a real, reproducible failure.
+ *
+ * This unwraps the SDK's packaging and returns only Google's sentence. Returns null when the message is
+ * just the generic mapped text (no ` : ` detail was sent), so a caller can never append noise.
+ */
+export function authErrorDetail(err: unknown): string | null {
+  const raw = (err as { message?: unknown } | null | undefined)?.message;
+  if (typeof raw !== 'string') return null;
+  // `Firebase: <detail> (auth/<code>).` — strip the SDK's own wrapper, keep the middle.
+  const m = /^Firebase:\s*(.+?)\s*\(auth\/[^)]+\)\.?$/s.exec(raw.trim());
+  const detail = (m?.[1] ?? '').trim();
+  if (!detail) return null;
+  // The prod error map's own sentences come through this same shape. They tell us nothing the code did
+  // not already say, so treat them as "no detail" rather than repeating ourselves at the user.
+  if (/^An internal (AuthError|error) has occurred/i.test(detail)) return null;
+  return detail;
+}
+
+export function socialRedirectFailureMessage(
+  code: string | null | undefined,
+  /**
+   * Google's own reason, from `authErrorDetail`. Optional so every existing caller and test keeps
+   * working unchanged; when present it is APPENDED, never substituted — our sentence says what to DO,
+   * and the detail says what the server actually complained about. Both matter, and the detail is the
+   * half that survives a cause we have not met before.
+   */
+  detail?: string | null,
+): string | null {
   const c = String(code || '').trim();
   // Not a failure: no redirect was in flight. Silent, exactly as before.
   if (!c || c === 'auth/no-auth-event') return null;
+  const base = socialRedirectBaseMessage(c);
+  const d = String(detail || '').trim();
+  // Not for the default branch: it already prints the code, and the detail there is usually the same
+  // words again. Everywhere else the detail is strictly new information.
+  if (!d || c === 'auth/network-request-failed') return base;
+  return `${base} (Reported reason: ${d})`;
+}
+
+function socialRedirectBaseMessage(c: string): string {
   switch (c) {
     case 'auth/missing-initial-state':
       // The classic proxied/partitioned-storage failure: the browser dropped the state this app saved

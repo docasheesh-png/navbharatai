@@ -8,8 +8,9 @@ import { signOut } from 'firebase/auth';
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from '../../lib/signOutFlow';
 import { signOutEverywhere } from '../../lib/firebase';
 import {
-  readRoster, forgetAccount, switchTargets, addAccountLabel, canAddAccount,
+  readRoster, forgetAccount, addAccountLabel, canAddAccount,
   accountLabel, accountInitial, writeRoster, type RosterAccount,
+  SIGN_IN_HINT_KEY, SWITCH_ACCOUNT_LABEL, accountRows,
 } from '../../lib/accountRoster';
 import { NotificationBell } from '../NotificationBell';
 
@@ -71,17 +72,34 @@ export function TopNav({
 
   const store = () => (typeof localStorage !== 'undefined' ? localStorage : null);
 
-  /** Sign out of THIS account and land on the sign-in screen, with the roster intact for one tap back. */
-  const switchTo = async (target: RosterAccount) => {
+  /**
+   * Sign in as another account — WITHOUT signing out of this one first.
+   *
+   * 🔒 THE BUG THIS REPLACES (admin 2026-08-22: "add account click kare aur koi bhi other account
+   * login nahi kare to logout ho ja raha hai"). This used to call performSignOut() and reload onto
+   * the sign-in screen, so pressing "Add account" logged you out immediately — and changing your mind
+   * cost you your session for pressing a button that promised to ADD one. A cancelled action must
+   * cost nothing.
+   *
+   * Firebase can sign a new user in while one is active: on success it becomes the current user, on
+   * cancel nothing changes. So the existing sign-in modal is opened over the app and no sign-out
+   * happens at all. See switchRequiresSignOutFirst() for why this is not merely deferred.
+   *
+   * It also removes a hint that never worked: the old code wrote `nbai:switch-to` for "the sign-in
+   * screen to offer first", and NOTHING has ever read that key — so a switch dropped the user on a
+   * generic sign-in screen with no help, having already logged them out.
+   *
+   * `target` is kept for the email hint the sign-in screen can prefill; passing none means "add a new
+   * one".
+   */
+  const switchTo = async (target?: RosterAccount) => {
     setDropdownOpen(false);
-    await performSignOut({
-      signOut: () => signOutEverywhere(),
-      clearStorage: defaultClearAuthStorage,
-      deleteAuthDb: () => deleteFirebaseAuthDb(),
-      // The roster survives the sign-out (it is not auth storage), so the next screen already knows
-      // who this device remembers. `switchTo` is queued so the sign-in screen can offer it first.
-      reload: () => { try { store()?.setItem('nbai:switch-to', target.email || target.uid); } catch { /* optional hint */ } window.location.reload(); },
-    });
+    try {
+      const hint = target?.email?.trim();
+      if (hint) store()?.setItem(SIGN_IN_HINT_KEY, hint);
+      else store()?.removeItem(SIGN_IN_HINT_KEY);
+    } catch { /* the hint is a convenience; never block the sign-in on it */ }
+    setShowAuth(true);
   };
 
   /** Remove one account from THIS DEVICE. Never claims to sign it out anywhere else. */
@@ -282,14 +300,19 @@ export function TopNav({
                       Honest wording throughout: "Remove from this device" never says "sign out",
                       because this list cannot sign anyone out anywhere else — and someone would use
                       it believing they had secured a shared computer. */}
-                  {switchTargets(roster, user.uid).length > 0 && (
-                    <div className="py-1 border-b border-white/5">
-                      <p className="px-4 pt-1 pb-1.5 text-[9px] font-black text-[#484f58] uppercase tracking-widest">Switch account</p>
-                      {switchTargets(roster, user.uid).map((a) => (
-                        <div key={a.uid} className="group flex items-center gap-2 px-2 hover:bg-white/5 transition-colors">
+                  {/* The list now ALWAYS shows, with the current account first and ticked. It used to
+                      render only the OTHERS and hide itself when there were none — so a user with one
+                      account saw no list at all and just an "Add another account" button, which is
+                      exactly why this menu read as an add-only control (admin 2026-08-22). */}
+                  <div className="py-1 border-b border-white/5">
+                    <p className="px-4 pt-1 pb-1.5 text-[9px] font-black text-[#484f58] uppercase tracking-widest">{SWITCH_ACCOUNT_LABEL}</p>
+                    {accountRows(roster, user.uid, user).map((a) => (
+                        <div key={a.uid} className={cn('group flex items-center gap-2 px-2 transition-colors', a.isCurrent ? 'bg-white/[0.03]' : 'hover:bg-white/5')}>
                           <button
-                            onClick={() => void switchTo(a)}
-                            className="flex-1 flex items-center gap-3 px-2 py-2 text-left min-w-0"
+                            onClick={() => { if (!a.isCurrent) void switchTo(a); }}
+                            disabled={a.isCurrent}
+                            title={a.isCurrent ? 'You are signed in as this account' : `Switch to ${accountLabel(a)}`}
+                            className="flex-1 flex items-center gap-3 px-2 py-2 text-left min-w-0 disabled:cursor-default"
                           >
                             {a.photo ? (
                               <img src={a.photo} alt="" className="w-6 h-6 rounded-lg object-cover shrink-0" referrerPolicy="no-referrer" />
@@ -303,29 +326,35 @@ export function TopNav({
                               {a.email && a.name && <span className="block text-[9px] text-[#484f58] truncate">{a.email}</span>}
                             </span>
                           </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); removeAccount(a.uid); }}
-                            title="Remove from this device"
-                            aria-label={`Remove ${accountLabel(a)} from this device`}
-                            className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 text-[#484f58] hover:text-red-400 transition-all"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
+                          {a.isCurrent ? (
+                            <span className="shrink-0 px-1 text-[9px] font-black uppercase tracking-widest text-emerald-400">Current</span>
+                          ) : (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); removeAccount(a.uid); }}
+                              title="Remove from this device"
+                              aria-label={`Remove ${accountLabel(a)} from this device`}
+                              className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 text-[#484f58] hover:text-red-400 transition-all"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       ))}
+                      {/* Sits at the BOTTOM of the account list, where the admin asked for it — the
+                          accounts you have are the point of this menu, and adding one is the last
+                          option under them rather than the name of the whole control. */}
+                      <button
+                        onClick={() => { if (!canAddAccount(roster)) return; void switchTo(); }}
+                        disabled={!canAddAccount(roster)}
+                        title={addAccountLabel(roster)}
+                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <UserPlus className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span className="text-[11px] font-bold text-white truncate">{addAccountLabel(roster)}</span>
+                      </button>
                     </div>
-                  )}
                   {/* Menu items */}
                   <div className="py-1">
-                    <button
-                      onClick={() => { if (!canAddAccount(roster)) return; setDropdownOpen(false); void switchTo({ uid: '', email: '', name: '', photo: '', provider: '', lastUsed: 0 }); }}
-                      disabled={!canAddAccount(roster)}
-                      title={addAccountLabel(roster)}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <UserPlus className="w-4 h-4 text-emerald-400" />
-                      <span className="text-sm font-bold text-white truncate">{addAccountLabel(roster)}</span>
-                    </button>
                     <button
                       onClick={() => { setDropdownOpen(false); onOpenProfile?.(); }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"

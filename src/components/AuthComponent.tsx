@@ -17,6 +17,7 @@ import {
   AuthProvider,
   UserCredential,
 } from 'firebase/auth';
+import { SIGN_IN_HINT_KEY } from '../lib/accountRoster';
 import { Capacitor } from '@capacitor/core';
 import { raceNativeAuth, settleWithinOrProceed, preLoginWebSignOutAllowed } from '../lib/nativeAuthGuard';
 import { normalizePhone } from '../lib/phoneNumber';
@@ -674,7 +675,26 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     setError('');
     setLoading(true);
     const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
+    // THE ACCOUNT THE USER WAS REACHING FOR (admin 2026-08-22). When this screen was opened by tapping
+    // a specific account in the switch menu, Google is told which one, so the chooser lands on it
+    // instead of making the user pick again from a list they just picked from.
+    //
+    // `prompt: 'select_account'` stays either way — a login_hint alone can silently sign them straight
+    // back into the wrong account when only one session is live with Google, which is the failure this
+    // whole menu exists to avoid. The hint is consumed once and cleared, so it cannot steer a LATER,
+    // unrelated sign-in.
+    //
+    // 🔒 And it is genuinely READ here. The previous attempt wrote `nbai:switch-to` for "the sign-in
+    // screen to offer first" and nothing ever consumed it — a stored hint standing in for a working
+    // handoff. Writing a key nobody reads is not a feature.
+    let signInHint = '';
+    try {
+      signInHint = (localStorage.getItem(SIGN_IN_HINT_KEY) || '').trim();
+      if (signInHint) localStorage.removeItem(SIGN_IN_HINT_KEY);
+    } catch { /* private mode / blocked storage — the chooser simply shows every account */ }
+    provider.setCustomParameters(signInHint
+      ? { prompt: 'select_account', login_hint: signInHint }
+      : { prompt: 'select_account' });
     try {
       const outcome = await socialSignIn(provider);
       // The user's own cancel: just re-enable the buttons — no error banner, no navigation.

@@ -118,11 +118,85 @@ export function canAddAccount(roster: readonly RosterAccount[]): boolean {
  *
  * At the cap it explains the limit and the way out instead of showing a disabled button with no
  * reason — a dead control that says nothing is the thing this codebase keeps removing.
+ *
+ * Shortened to "Add account" (admin 2026-08-22): it now sits at the BOTTOM of a list of accounts
+ * under a "Switch account" heading, where "another" is already implied by everything above it.
  */
 export function addAccountLabel(roster: readonly RosterAccount[]): string {
   return canAddAccount(roster)
-    ? 'Add another account'
+    ? 'Add account'
     : `You can keep ${MAX_ACCOUNTS} accounts on this device — remove one to add another`;
+}
+
+/**
+ * Does signing in as this target require leaving the current account first? PURE.
+ *
+ * ⚠️ THE ANSWER IS ALWAYS NO, and that is the whole point (admin 2026-08-22: "add account click kare
+ * aur koi bhi other account login nahi kare to logout ho ja raha hai").
+ *
+ * Both controls used to sign the user OUT and reload onto the sign-in screen. So the moment you
+ * pressed "Add account" you were already logged out — and if you then changed your mind, you had lost
+ * your session for pressing a button that promised to ADD one. A cancelled action must cost nothing.
+ *
+ * Firebase can sign a new user in while one is active: on success it becomes the current user, and on
+ * cancel nothing changes at all. So the sign-in modal is simply opened over the app, and the sign-out
+ * is not merely deferred — it is not needed.
+ *
+ * This exists as a named function rather than as a deleted line because the old flow READ correctly
+ * ("switch means leave, then arrive") and someone will reach for it again.
+ */
+export function switchRequiresSignOutFirst(): boolean {
+  return false;
+}
+
+/**
+ * The heading for the account section, and what the avatar menu's control is called. PURE.
+ *
+ * "Switch account" rather than "Add another account" (admin 2026-08-22): switching is what people
+ * come to this menu to do, and adding is one option inside it — not the name of the whole thing.
+ */
+export const SWITCH_ACCOUNT_LABEL = 'Switch account';
+
+/**
+ * Where the sign-in screen looks for "the account the user was trying to reach".
+ *
+ * Named here, beside the roster, so the writer and any future reader share one constant. The previous
+ * attempt wrote `nbai:switch-to` and nothing ever read it — a stored hint standing in for a working
+ * handoff, which is the same shape of bug as a stale URL standing in for a live preview.
+ */
+export const SIGN_IN_HINT_KEY = 'nbai:sign-in-hint';
+
+/**
+ * Every row the account list should show, current account FIRST and marked.
+ *
+ * The old list showed only the OTHERS, and hid itself entirely when there were none — so a user with
+ * one account saw no list at all and only an "Add another account" button, which is exactly why the
+ * menu read as an add-only control. Showing the current account (disabled, ticked) makes the list a
+ * list of accounts rather than a list of alternatives.
+ */
+export function accountRows(
+  roster: readonly RosterAccount[],
+  currentUid: string | null | undefined,
+  current?: { uid: string; email?: string | null; displayName?: string | null; photoURL?: string | null } | null,
+): Array<RosterAccount & { isCurrent: boolean }> {
+  const cur = String(currentUid ?? '').trim();
+  const others = roster.filter((a) => a.uid !== cur).map((a) => ({ ...a, isCurrent: false }));
+  const mine = roster.find((a) => a.uid === cur);
+  if (mine) return [{ ...mine, isCurrent: true }, ...others];
+  // Signed in as somebody the roster has not recorded yet (first load, or a cleared roster): build the
+  // row from the live user rather than omitting them, so the list is never missing the person using it.
+  if (cur && current) {
+    return [{
+      uid: cur,
+      email: String(current.email ?? ''),
+      name: String(current.displayName ?? ''),
+      photo: String(current.photoURL ?? ''),
+      provider: '',
+      lastUsed: 0,
+      isCurrent: true,
+    }, ...others];
+  }
+  return others;
 }
 
 /** A short label for a roster row: the name when there is one, otherwise the email. PURE. */

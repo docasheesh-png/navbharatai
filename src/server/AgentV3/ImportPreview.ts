@@ -493,6 +493,81 @@ export function schemaMissingFromLog(log: string | null | undefined): string | n
 }
 
 /**
+ * THE ONE PROBLEM STRING THAT IS NOT A STATEMENT ABOUT THE APP.
+ *
+ * Every other entry in `problems` comes from `analyzePreviewHtml` reading a page we actually
+ * fetched — real evidence about the user's app. This one is produced by the `catch` around the fetch
+ * itself: the capture timed out or errored, so we hold NOTHING. Exported so both verdict builders and
+ * both `catch` sites use the identical string and the distinction cannot drift into a typo.
+ */
+export const PREVIEW_UNVERIFIED_PROBLEM = 'the preview could not be reached to verify it';
+
+/**
+ * Did we actually SEE the app? False when the only thing we know is that the check itself failed.
+ *
+ * ROOT CAUSE THIS EXISTS FOR (admin screenshot 2026-08-22, an Express build). The diagnose banner read:
+ *
+ *   "Dev server is up on port 3000, but it isn't serving the app's pages yet: the preview could not be
+ *    reached to verify it. This is common for a full-stack app whose client routes aren't served (only
+ *    its API) — the boot log below shows the cause."
+ *
+ * Three sentences, and the last two were untrue. We had verified nothing, so "isn't serving the app's
+ * pages" was not something we knew; the full-stack API-only line is a real cause of a REAL 404, not of
+ * a capture timeout; and the boot log did NOT show the cause, because the app's failure
+ * (`express-session` throwing "secret option required for sessions") happens per REQUEST, so the boot
+ * log is silent by construction. Worse, the true cause was already on the same screen, three messages
+ * up, where the build path had correctly reported "the server returned an error instead of the app:
+ * secret option required for sessions". Two surfaces disagreeing, and the confident one was wrong.
+ *
+ * A failed measurement must never be dressed up as a finding. PURE.
+ */
+export function previewWasVerified(problems: ReadonlyArray<string>): boolean {
+  const list = (problems || []).filter((p) => typeof p === 'string' && p.trim());
+  if (list.length === 0) return true; // nothing to explain — the caller decides on `rendered`
+  return !list.every((p) => p.trim() === PREVIEW_UNVERIFIED_PROBLEM);
+}
+
+/**
+ * The Diagnose panel's headline, with one rule: NEVER name a cause we did not measure.
+ *
+ * Order of authority — evidence first, guess last, and no guess at all when there is no evidence:
+ *  1. the page rendered                → success.
+ *  2. the boot log NAMED a cause       → say that (it is proof).
+ *  3. the check itself failed          → say only that, and point at the one place the answer really
+ *                                        is (the preview tab the user is already looking at).
+ *  4. we saw the page and it failed    → the problem we actually observed, plus the full-stack hint
+ *                                        ONLY when the problem is genuinely a 404 / "Cannot GET",
+ *                                        which is the single failure that hint explains.
+ * PURE.
+ */
+export function previewDiagnoseReason(opts: {
+  port: number;
+  hasUrl: boolean;
+  rendered: boolean;
+  problems: ReadonlyArray<string>;
+  bootCause?: string | null;
+}): string {
+  if (!opts.hasUrl) {
+    return `Dev server is up on port ${opts.port}, but the public URL could not be resolved yet. Try again in a few seconds.`;
+  }
+  if (opts.rendered) return `Dev server is up on port ${opts.port} — preview restored.`;
+  if (opts.bootCause) return opts.bootCause;
+
+  if (!previewWasVerified(opts.problems)) {
+    // No verdict about the app — because we do not have one.
+    return `Dev server is up on port ${opts.port}, but NavBharatAI could not open the preview to check it, so this is not a verdict about your app. `
+      + 'Open the Preview tab and reload (↻): whatever that page shows — your app, or an error from it — is the real answer.';
+  }
+
+  const why = opts.problems.find((p) => typeof p === 'string' && p.trim()) || 'no page rendered';
+  const routing = /cannot get|\b404\b|not serving/i.test(why);
+  const hint = routing
+    ? ' This is common for a full-stack app whose client routes aren\'t served (only its API) — the boot log below shows the cause.'
+    : ' The boot log below has the full output.';
+  return `Dev server is up on port ${opts.port}, but it isn't serving the app's pages yet: ${why}.${hint}`;
+}
+
+/**
  * EARN the "live preview is up" verdict (admin 2026-08-03, "Cannot GET /customer/home"): a port being
  * up is NOT the app serving. The boot must actually VISIT the home route and read the rendered HTML;
  * this turns that (already-classified) result into the honest user-facing narration.
@@ -514,6 +589,15 @@ export function previewServeNarration(opts: { rendered: boolean; problems: strin
   }
   if (opts.bootCause) {
     return { ok: false, text: `⚠️ ${opts.bootCause}. Tap reload (↻) once the cause is fixed, or press Diagnose for the full boot log.${opts.fixOffer ? ` ${opts.fixOffer}` : ''}` };
+  }
+  // The same rule the Diagnose panel now follows (2026-08-22): a capture that never happened is not
+  // a finding about the app, so it gets no cause and no diagnosis — only what we actually know.
+  if (!previewWasVerified(opts.problems)) {
+    return {
+      ok: false,
+      text: `⚠️ The app is running on port ${opts.port}, but NavBharatAI could not open the preview to check it — so this is not a verdict about your app. `
+        + 'Open the Preview tab and reload (↻): whatever that page shows is the real answer.',
+    };
   }
   const why = opts.problems[0] || 'the server started but is not serving its pages yet';
   // A full-stack app that serves its API but 404s its client routes is the classic Express-serves-SPA

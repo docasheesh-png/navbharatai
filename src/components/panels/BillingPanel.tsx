@@ -235,6 +235,10 @@ export function BillingPanel(props: BillingPanelProps) {
             freeGift={wallet?.freeGift}
             tokensPerRupee={wallet?.tokensPerRupee}
             onRecharge={() => onSetActiveBillingDetailTab('purchase')}
+            /* A claim moves real money, so the balance beside it must be re-read from the server
+               rather than adjusted locally — a number this screen computed itself could disagree
+               with the wallet, and on a billing screen that is the one thing it must never do. */
+            onClaimed={onFetchWallet}
           />
 
           {/* iOS / iPhone App Icons Styled Clickable Cards Panel */}

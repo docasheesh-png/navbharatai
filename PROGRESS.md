@@ -39295,3 +39295,66 @@ that touches `package.json`; a green gate on an old base is not a green gate.
 
 **Slice 3 (last)** is the UI: the claim moment at zero balance, the honest "₹250 abhi + ₹250 verify
 karke" framing, and the wallet showing what is still claimable.
+
+## 2026-08-21 — The claim screen (gift plan v2, slice 3/3 — complete)
+
+The user side of the plan. Sign up with email/Google for ₹250, run out, and the wallet offers the
+other ₹250 for verifying a number.
+
+**⚠️ THE TRAP THIS SLICE EXISTED TO AVOID, recorded because it is invisible and severe.** The phone
+flow already in `AuthComponent` is a **LOGIN**: it calls `forceLogoutBeforeLogin()` and then
+`signInWithPhoneNumber` / `signInWithCredential`. Reusing it for a bonus claim would sign the user OUT
+of the Google account they are standing in and INTO a phone-only account — abandoning their apps,
+their wallet and their history in exchange for ₹250. `PhoneBonusCard` therefore uses
+`linkWithPhoneNumber` / `linkWithCredential` on `auth.currentUser`. Test-locked and **verified to
+bite**: swapping one call back to `signInWithCredential` fails the suite.
+
+**The one permitted `signIn*` call is the native plugin's SMS dispatch**, and that was verified rather
+than assumed: `capacitor.config.ts` sets `skipNativeAuth: true`, so the plugin returns a
+verificationId and creates no session — the JS SDK stays the single session source and the credential
+is LINKED. The test asserts both the single call and the config that makes it safe.
+
+**Other things the code gets right on purpose:**
+- **The ID token is refreshed before claiming.** `phone_number` only appears in the token AFTER the
+  link; without the refresh the server would honestly answer "verify your phone first" on a
+  verification that had just succeeded.
+- **The server's anti-spam gateway is asked BEFORE Firebase**, so a refusal costs no SMS.
+- **The screen never names an amount.** It asks the server to settle; `decidePhoneClaim` decides, from
+  a number read off the verified token.
+- **The wallet is re-read from the server after a claim** (`onClaimed={onFetchWallet}`) — a balance
+  this screen computed itself could disagree with the wallet, which on a billing screen is the one
+  thing it must never do.
+- **`granted: 0` renders as information, not an error.** "This number is already linked to another
+  NavBharatAI account. Use a different number, or sign in to that account instead." — the innocent
+  cases (an older account they cannot reach, a shared family handset) are the common ones, and no
+  message accuses anyone or leaks a raw `auth/…` code.
+- **Ordering in `FreeGiftBanner` is load-bearing.** A v2 wallet with credit still claimable reads as
+  `exhausted` in ladder terms, so the claim is checked FIRST — pushing "add credit" at someone with
+  ₹250 sitting unclaimed would be wrong at the moment being wrong costs the most.
+- The card says what the money **buys** ("enough for another full app"), and gives the user a reason
+  of their own to hand over a number (account recovery) rather than it being a tax we collect.
+
+**A near-miss worth recording:** the test was first written as `phoneBonusClaim.test.tsx`, and
+`vitest.config` collects only `tests/**/*.test.ts` — it silently collected NOTHING and exited 0. Caught
+by reading the runner output instead of the exit code. A test that never runs is worse than no test,
+because it reads as coverage. Renamed to `.test.ts`.
+
+Gate: both `tsc` clean; FULL suite **1384 files / 17411 tests green**.
+
+### The plan is now complete end to end (flag still OFF)
+
+| | |
+|---|---|
+| Phone OTP sign-up | ₹500 at once |
+| Email / Google sign-up | ₹250, +₹250 on verifying a number |
+| One number, one gift | shared marker across BOTH doors — the ₹750 route pays nothing |
+| Weekly ladder | retired for v2 wallets; every older wallet keeps the schedule it was shown |
+| OTP limits | durable + cross-instance, with a platform ceiling that caps the SMS bill |
+
+**To go live:** set `WALLET_GIFT_V2=on` in Cloud Run. Optionally set `GIFT_ID_PEPPER` (any stable
+secret — adding it later is safe by construction) and `OTP_GLOBAL_HOURLY_MAX` (default 500).
+
+⚠️ **Still open, and NOT closed by this work:** email normalization now exists and is used for the
+gift, but the ₹250 unverified tier is still reachable by anyone with a genuinely new email address
+(temp-mail included). That is by design — the phone tier is what makes the remaining ₹250 cost
+something. Worth watching real numbers before deciding whether the unverified tier should shrink.

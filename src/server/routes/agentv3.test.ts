@@ -2298,7 +2298,18 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      (false on every import/survey turn) AND `result.ok` AND the AGENTV3_DESIGN_GATE flag, so it
     //      cannot write on a read-only turn — and it only ever restores content the SAME pass had just
     //      overwritten, never anything the user owns. Considered ✓.
-    expect(count).toBe(17);
+    //   1× the ENV-LOADING guard (admin report 2026-08-22 — "secret option required for sessions") —
+    //      gated on `!isImportTurn` in the same integrity block as the css/vite-types passes, so it
+    //      never writes on a read-only turn. It deliberately does NOT require result.ok: an app whose
+    //      .env is never loaded is a cause of a FAILED build, so repairing only on success would skip
+    //      the builds that need it (same discipline as the vite.config ensure). It edits exactly ONE
+    //      file — the entry the PROJECT itself names — adding one line, and refuses outright unless
+    //      the project is a plain Node app whose own .env defines a key the code reads that nothing
+    //      loads; a self-loading framework (Vite/Next/Nuxt/…) is never touched, because there adding
+    //      dotenv could change which value wins. An IMPORT turn is excluded for the ordinary reason
+    //      (the user asked us not to change their files); their apps keep the sandbox-level .env
+    //      sourcing that already exists. Considered ✓.
+    expect(count).toBe(18);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

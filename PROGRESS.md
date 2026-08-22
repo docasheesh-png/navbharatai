@@ -38723,3 +38723,73 @@ my working tree without first checking whether current `main` already answered i
 `git log -- <the failing file>` before writing a line — would have saved the whole detour.
 
 Gate: both tsc green, 17,146 tests / 1,366 files green, CI green before merge.
+
+---
+
+## 2026-08-22 (part 2) — the upstream half: an app can no longer ship with a `.env` nobody loads
+
+The autopsy above closed the ❌ (a banner diagnosing an app it never opened) and left the ✅ self-heal
+as an **open root cause**, because under the 50/50 law a heal that fires is a bug that was generated.
+This is that half, and it is the one that actually reaches THE AIM: the build no longer needs healing.
+
+### What was already there, and why it was not enough
+
+`E2BActuator` prefixes `set -a; . ./.env; set +a` onto the **dev-server launch** — added 2026-08-02
+after the Mitrify autopsy of this exact class (`DATABASE_URL` read with no dotenv). Three holes:
+
+1. **One start path.** A server the agent starts itself, a plain `node index.js`, the recovery path —
+   none of them get it. The 2026-08-22 report is what that hole looks like from the user's side.
+2. **It does not travel.** `npm start` on the user's laptop, a Render deploy, a Docker image: the app
+   is still broken everywhere except inside our sandbox. **We would be shipping an app that only works
+   here** — the worst kind of green, and a direct violation of rule 2.
+3. **The generator stayed free to keep producing the bug**, which is why the same class came back three
+   weeks later wearing a different variable name.
+
+So the answer was never a better heal. It was to make the app *correct in its own source*.
+
+### `envLoading.ts` — deterministic, free, and silent unless certain
+
+`findMissingDotenvWiring(files)` fires only when ALL hold: a readable `package.json`; a real `.env`
+(never `.env.example`) defining key K; some source file reading `process.env.K`; K is not a key the
+runtime already supplies (`PORT`, `NODE_ENV`, …); **nothing** loads env in any form (`import
+'dotenv/config'`, `require('dotenv')`, `dotenv.config()`, `node -r dotenv/config`, Node 20's
+`--env-file`); the project is not a **self-loading framework** (Vite/Next/Nuxt/Astro/SvelteKit/CRA/
+Expo/Angular/Gatsby/@nestjs/config — there adding dotenv could change *which value wins*, so being
+wrong is the risk, not being redundant); and an entry file the **project itself names** exists
+(start/dev script → `main` → convention). Any doubt returns null and nothing happens.
+
+`injectDotenvLoad` puts the load **FIRST** in that entry — first, not merely present, because a module
+that reads `process.env` while being imported runs before any statement below its import, so a dotenv
+call placed after the other imports is a fix that silently does not work. ESM gets
+`import 'dotenv/config';`, CommonJS gets `require('dotenv').config();`, a shebang keeps line 1, and a
+second run is a no-op. `dotenv` needs no declaring — it is already on `DependencyAutoFix`'s well-known
+allowlist, so the import we add is what installs it.
+
+Wired beside the CSS-import and Vite-types guards (`AGENTV3_DOTENV_GUARD=off` to kill), writing to both
+the durable store and the sandbox. It does NOT require `result.ok`: an unloaded `.env` is a cause of a
+FAILED build, so repairing only on success would skip the builds that need it. Report code
+`ENV_LOADING_WIRED`, with a message in the user's terms that names their keys and never says "dotenv".
+
+**IMPORT turns are excluded**, deliberately and for the ordinary reason — the user asked us not to
+change their files — so an imported app keeps the sandbox-level `.env` sourcing that already exists.
+That is a narrower promise than a generated app gets, and it is stated here rather than implied.
+
+21 tests, and the ones that matter most are the ten "does nothing" cases: injecting an import into
+somebody's working app is the only way this module can do harm.
+
+### The census guard did its job
+
+`agentv3.test.ts` counts `writtenFiles.set` call sites and failed at 18-vs-17 — a guard built precisely
+so a new writer cannot slip in without being audited against the read-only import/survey turn. The
+census entry records the audit rather than just the number.
+
+### Still open, honestly
+
+The runtime half is unchanged: `.env` is still auto-loaded on exactly one path. It matters much less
+now (a generated app carries its own load, and this fix travels with the app), but an IMPORTED app
+started off the dev-server path still gets nothing. The safe shape is passing the parsed `.env` as
+`envs` on the sandbox command rather than mangling the command string — this repo already has autopsy
+debc468c, where a command-STRING change made every command look like a dev-server launch. Its own
+change, its own tests.
+
+Gate: both tsc green, 17,344 tests / 1,380 files green, CI green before merge.

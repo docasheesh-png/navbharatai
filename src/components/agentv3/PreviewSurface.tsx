@@ -10,7 +10,7 @@ import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartph
 import { canOfferRestart, restartStatusLine } from './previewRestart';
 import { nextDoorUrl } from './previewDoorClient';
 import { resolveApiHref } from '../../lib/apiBase';
-import { PreviewWelcome } from './PreviewWelcome';
+import { PreviewWelcome } from './PreviewWelcomePanel';
 import { previewEmptyKind } from './previewWelcome';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';

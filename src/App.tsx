@@ -1364,7 +1364,12 @@ export default function App() {
   // `navbharat:navigate` with { detail: { view } } instead of threading a prop through every layer.
   useEffect(() => {
     const onNavigate = (e: Event) => {
-      const detail = (e as CustomEvent<{ view?: ViewType; settingsScreen?: string; fixPrompt?: string; autoSend?: boolean }>).detail;
+      const detail = (e as CustomEvent<{ view?: ViewType; settingsScreen?: string; fixPrompt?: string; autoSend?: boolean; signIn?: 'phone' }>).detail;
+      // OPEN THE SIGN-IN SCREEN (admin 2026-08-22). The verify sheet refuses a number that belongs to
+      // another account and offers the one thing that helps — signing in with it, which opens that
+      // account. It rides this existing event rather than a new prop chain: the sheet lives four
+      // components deep and App is the only place that owns `showAuth`.
+      if (detail?.signIn === 'phone') { setShowAuth(true); return; }
       if (detail?.view) toggleTab(detail.view);
       // A surface that hit a wall can hand v5 the whole problem (the APK build's "Fix" button). The
       // nonce lets the SAME text re-trigger, so pressing Fix twice is not silently ignored.

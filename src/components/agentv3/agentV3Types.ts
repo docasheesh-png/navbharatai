@@ -19,6 +19,14 @@ export interface CostBreakdown {
   usdInrRate: number;
   tier: string;
   engine: string;
+  /**
+   * Live-preview time charged on this build, and its ₹ (admin 2026-08-22). Both 0 when nothing was
+   * charged — the honest answer when the build never held a live server. OPTIONAL because an older
+   * server (or a replayed older event) does not send them, and a breakdown that renders `undefined`
+   * would be a worse bug than a missing line.
+   */
+  livePreviewSeconds?: number;
+  livePreviewInr?: number;
 }
 
 // Mirrors the server roster (src/server/AgentV3/types.ts). The six-layer AI team.
@@ -105,7 +113,12 @@ export type AgentV3WireEvent =
   // dismissible card the user MAY answer via a follow-up; the build never waits for it.
   | { type: 'clarify'; domain: string; questions: string[]; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
-  | { type: 'error'; message: string; ts: number; diagnostics?: unknown }
+  /**
+   * `code` is set when the server refused for a reason the UI can ACT on rather than merely print.
+   * Today that is `phone-verification-required` (an import from an account with no verified number),
+   * which opens the verify sheet instead of leaving the user reading a sentence with nowhere to go.
+   */
+  | { type: 'error'; message: string; ts: number; code?: string; diagnostics?: unknown }
   | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; budgetReached?: boolean; tokens?: number; planRemaining?: number; filesWritten?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
@@ -238,6 +251,8 @@ export interface AgentV3ClientState {
   /** Billing Phase 1 — the wallet's token balance right after the deduction (live at build end). */
   walletTokenBalance?: number;
   error?: string;
+  /** Set when the failure has an action attached — see the `error` wire event's `code`. */
+  errorCode?: string;
 }
 
 /** R2 §4.6 — readiness verdict shown as a build-health card after a build. */

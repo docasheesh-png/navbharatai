@@ -19,6 +19,7 @@ import {
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
 import { raceNativeAuth, settleWithinOrProceed, preLoginWebSignOutAllowed } from '../lib/nativeAuthGuard';
+import { normalizePhone } from '../lib/phoneNumber';
 import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2, Github } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
@@ -263,13 +264,14 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   };
 
   const handleSendOtp = async () => {
-    let phone = mobile;
-    if (!phone.startsWith('+')) {
-        if (phone.length === 10) phone = '+91' + phone;
-        else {
-            setError('Enter mobile with country code (e.g. +91...)');
-            return;
-        }
+    // ONE normaliser, shared with the server (src/lib/phoneNumber.ts). This used to be four lines of
+    // the same rule written here, and the server was about to need it too — two copies of "10 digits
+    // means +91" drift silently, and when they do the client sends one number while the server looks
+    // up another, which is exactly how a duplicate slips past the one-number-one-account check.
+    const phone = normalizePhone(mobile);
+    if (!phone) {
+        setError('Enter mobile with country code (e.g. +91...)');
+        return;
     }
     
     if (otpCooldown > 0 || otpSending) {

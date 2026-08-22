@@ -40,8 +40,13 @@ describe('userCostBreakdown — provider-anonymous by construction', () => {
 
   it('the shape exposes NO provider-detail / margin fields (only anonymized keys)', () => {
     const bd = userCostBreakdown({ inputTokens: 1, outputTokens: 1 }, 1, 'off', 87);
+    // An ALLOWLIST, so a new user-facing field is a decision rather than an accident. The two added on
+    // 2026-08-22 are `livePreviewSeconds` / `livePreviewInr`: a NavBharatAI CATEGORY ("live preview" —
+    // the words the Preview tab already shows), not vendor detail. §1 of the White-Label Law allows an
+    // itemised breakdown in our own terms and forbids one by vendor/model, and a separate test asserts
+    // no vendor name can appear in this object.
     expect(Object.keys(bd).sort()).toEqual(
-      ['billedInr', 'billedUsd', 'engine', 'inputTokens', 'outputTokens', 'tier', 'usdInrRate'].sort(),
+      ['billedInr', 'billedUsd', 'engine', 'inputTokens', 'livePreviewInr', 'livePreviewSeconds', 'outputTokens', 'tier', 'usdInrRate'].sort(),
     );
     expect(bd).not.toHaveProperty('perProvider');
     expect(bd).not.toHaveProperty('baseModel');

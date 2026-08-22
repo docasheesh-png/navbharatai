@@ -164,6 +164,15 @@ export async function resolveVerifiedEmail(uid: string): Promise<string | null> 
   return resolveVerifiedEmailWith(uid, getAdminAuth as unknown as () => Promise<UserLookupAuth | null>);
 }
 
+/**
+ * The admin Auth handle, exported for the phone gate (`phoneGate.ts`).
+ *
+ * Exported rather than re-created there so there is exactly ONE place that initialises firebase-admin
+ * — a second initialiser is how two slightly different app configs end up in one process, and this
+ * file's own history (the `FIREBASE_PROJECT_ID` mix-up recorded in CLAUDE.md) is what that costs.
+ */
+export const getAdminAuthForPhone = getAdminAuth as unknown as () => Promise<import('./phoneGate').PhoneLookupAuth | null>;
+
 /** Testable CORE: resolve the account DISPLAY NAME for an already-verified uid. Best-effort — null on a
  *  missing provider, a lookup throw, or an empty/absent name. Mirrors resolveVerifiedEmailWith so the
  *  admin build-report inbox can show WHO sent a report, not just their email. */

@@ -39001,3 +39001,99 @@ obvious — nothing crashes, nothing is deleted, a real person is just told they
 A lint rule cannot see it, but a reviewer's checklist can: *if this returns empty, who gets blamed?*
 
 Gate: both tsc clean; vitest 1380 files / 17,361 passed / 1 honest skip.
+---
+
+## 2026-08-22 (part 3) — the live-preview charge is named, and an import now needs a verified number
+
+Two admin asks, built together.
+
+### 1. "Live preview ka charge user se lena compulsory ho … build successful wale last message me"
+
+**The charge was already real.** `AGENTV3_BILL_SANDBOX=on` + a measured `E2B_USD_PER_HOUR` have billed
+sandbox seconds into every build since 2026-08-13, and `billableSandboxDetail` already caps them at the
+build's own duration so idle minutes between builds are never sold twice. What did not exist was the
+user being TOLD: it was folded into one total, which is how a correct charge still reads as a deduction.
+
+Now the success message carries `Live preview: 4 min — ₹7.83 (the in-browser preview is free)`, and the
+"Why this cost?" panel shows the same row. Three deliberate properties:
+
+- **One measurement, two uses.** `billableSandboxDetail` returns `{ seconds, usd }`; the SAME pair feeds
+  the bill and the sentence. Two measurements taken moments apart would eventually disagree, and only
+  the user would notice. Both the settle path and the watchdog finalizer do it identically (Fix 67's
+  lesson, re-applied rather than re-learned).
+- **No charge ⇒ no line.** Seconds travel only when they were CHARGED — a "0 min — ₹0.00" row on every
+  build is noise that teaches the user to stop reading the panel, and a duration next to ₹0 is something
+  they cannot reconcile. A failed build is never charged, so it never shows one.
+- **It names the FREE alternative.** Telling a user how to spend less is what a builder they trust does;
+  hiding it is how a total becomes something they audit instead of read.
+
+⚠️ **WHITE-LABEL LAW.** §1 allows an itemised breakdown in NavBharatAI's own categories and forbids one
+by VENDOR. "Live preview" is our category — the words the Preview tab already shows — so this is
+allowed and the vendor's name appears nowhere. `sandboxCost.ts`'s header said "the user never sees a
+line item for our VMs"; that sentence is now false and was corrected rather than left to mislead.
+`tests/userCostBreakdown.test.ts` is a key ALLOWLIST, so the two new fields had to be added
+deliberately — it failed first, which is exactly what it is for.
+
+### 2. "OTP verified nahi to — GitHub/ZIP app import nahi", and "number already linked ⇒ OTP bhejo hi mat"
+
+The second rule replaced an earlier plan to MERGE two accounts sharing a number. **Refusing is the far
+better design**, and the reason belongs in the record: in India a disconnected number is reallocated
+after ~90 days, so "this number already has an account" often means *the previous owner of that SIM*.
+An automatic merge would have handed a stranger somebody else's apps, published sites and wallet, with
+no undo. Refusing makes that impossible rather than unlikely. The admin's own third rule — phone-OTP
+login opens the old account — was already true (Firebase resolves a number to its user), so nothing was
+built for it; it became the ESCAPE HATCH instead.
+
+**⚠️ The subtle half, and the reason `phoneGate.ts` exists: LOGIN and VERIFY are opposite cases on one
+endpoint.** Signing in with a number that already has an account is the entire point of signing in;
+refusing there would lock every returning phone user out of the product. Attaching that number to a
+SECOND account must be refused before an SMS is sent. So the purpose travels with the request, and it
+**defaults to `login`** — today's behaviour — so an older client, including the installed Android/iOS
+build (bundled mode: it ships its own frontend until a new store release), is unaffected.
+
+- **`/api/auth/send-otp`** checks ownership only for `purpose:'verify'`, BEFORE the rate-limit
+  bookkeeping, so a refusal costs nothing from the user's hourly OTP budget. Refuses with **409**, not
+  429: nothing is rate-limited and retrying later cannot help.
+- **FAILS OPEN.** An unreadable directory SENDS the OTP. The real enforcement is the provider's own
+  one-number-one-account rule at link time; this check exists to save an SMS and give a better message.
+  Failing closed would mean one provider hiccup locks every user out of verification.
+- **`hasVerifiedPhoneWith` fails CLOSED**, and the asymmetry is deliberate: a wrong "yes" gives an
+  unverified account a free import; a wrong "no" costs one OTP the user completes immediately.
+- **ONE gate covers BOTH import kinds**, at the line that already recognises them
+  (`hasImportIntent`) — a gate per route would be two gates that drift, and a third import kind added
+  later inherits this one for free. `/api/zip-upload/begin` is gated too, so an unverified account
+  cannot spend our bandwidth or disk before the refusal.
+- **The refusal carries the door.** `VerifyPhoneSheet` LINKS the number to the current account
+  (`linkWithPhoneNumber`), never signs in with it — signing in would open whichever account owns the
+  number, which the user would experience as their account silently changing. When the number turns out
+  to be taken, the sheet offers "Sign in with this number instead", riding the existing
+  `navbharat:navigate` event. A refused import shows "Verify my number" instead of "Fix with AI", which
+  could not have helped and would have spent a build finding that out.
+- **One normaliser, shared.** `src/lib/phoneNumber.ts` now serves the sign-in screen AND the server. The
+  client had its own "10 digits ⇒ +91" rule and the server was about to need it; two copies drift, and
+  when they do the client sends one number while the server looks up another — precisely how a
+  duplicate slips past this check. It refuses to GUESS a country for an 11/12-digit string, because a
+  wrong guess looks up somebody else's number.
+- Kill switch `AGENTV3_IMPORT_REQUIRES_PHONE=off` governs only whether an unverified account may
+  import; it cannot re-open the duplicate-number hole.
+
+### Three existing guards caught this work, which is the system behaving correctly
+
+`tests/authHeaders.test.ts` (a local ID-token helper in the new sheet → use the shared one),
+`tests/sandboxBilling.test.ts` (the renamed helper — and it revealed `billableSandboxUsd` had become a
+wrapper nothing called, now deleted), and `tests/userCostBreakdown.test.ts` (the anonymity allowlist).
+Each assertion was updated to hold the PROPERTY rather than the old string.
+
+### 🔴 Honest limits
+
+- **Neither auth path could be exercised live from this session** — no credentials, no device. The
+  logic is unit-tested and the wiring is asserted, but the OTP round trip (web reCAPTCHA and the native
+  Play-Integrity/SMS-Retriever path) needs a real test by the admin before it can be called verified.
+- **The app store build will not have this** until a fresh `.aab`/`.ipa` — bundled mode.
+- **Every existing user meets the wall once.** At 12 users that is trivial; at 10,000 it would be a
+  migration. Doing it now is the cheap moment.
+- **Enumeration tradeoff, stated rather than hidden:** telling a signed-in user that a number already
+  has an account does leak that fact. The alternative (silently failing) is worse for the user; the
+  exposure is bounded by requiring sign-in and by the existing per-IP/hour OTP limits.
+
+Gate: both tsc green, 17,382 tests / 1,382 files green, CI green before merge.

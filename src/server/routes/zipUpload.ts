@@ -22,6 +22,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { verifyFirebaseToken, workspaceRateLimiter, zipChunkRateLimiter } from '../lib/authMiddleware';
+import { hasVerifiedPhoneWith, IMPORT_NEEDS_PHONE_MESSAGE, importPhoneGateEnabled } from '../lib/phoneGate';
+import { getAdminAuthForPhone } from '../lib/authMiddleware';
 // STREAMING extraction (admin 2026-08-04, "5 GB, real VS Code jaisa"): the archive is read from DISK
 // entry-by-entry — never `readFileSync` + jszip, which held the WHOLE archive in memory and made even
 // the old 1 GB cap partly fiction (a 1 GB commit needed ~2-3 GB of RAM). Peak memory is now bounded by
@@ -113,6 +115,14 @@ export function registerZipUploadRoutes(app: Express): void {
   app.post('/api/zip-upload/begin', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const uid = await verifyFirebaseToken(req);
     if (!uid) { res.status(401).json({ error: 'Please sign in to import a project.' }); return; }
+    // A VERIFIED NUMBER BEFORE THE BYTES MOVE (admin 2026-08-22). The build route refuses an
+    // unverified import too, but only once the archive has already been uploaded — and an import can
+    // be gigabytes. Refusing at `begin` means an unverified account cannot spend our bandwidth or disk
+    // at all. Same helper, same fail-closed posture, so the two gates cannot disagree.
+    if (importPhoneGateEnabled() && !(await hasVerifiedPhoneWith(uid, getAdminAuthForPhone))) {
+      res.status(403).json({ error: IMPORT_NEEDS_PHONE_MESSAGE, code: 'phone-verification-required' });
+      return;
+    }
     sweepExpired(Date.now());
     const rawName = typeof req.body?.fileName === 'string' ? req.body.fileName : 'project.zip';
     const fileName = rawName.replace(/[^\w.\- ]/g, '').slice(0, 120) || 'project.zip';

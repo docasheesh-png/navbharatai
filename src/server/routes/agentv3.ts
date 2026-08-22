@@ -224,6 +224,8 @@ import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailP
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
+import { hasVerifiedPhoneWith, IMPORT_NEEDS_PHONE_MESSAGE, importPhoneGateEnabled } from '../lib/phoneGate';
+import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
@@ -1171,6 +1173,23 @@ export interface UserCostBreakdown {
   tier: string;
   /** Always the NavBharatAI engine — the only "who did the work" the user ever sees. */
   engine: string;
+  /**
+   * LIVE PREVIEW — the seconds of live-server time this build was charged for, and what they cost in ₹
+   * (admin 2026-08-22: "live preview ka charge user se lena compulsory ho … build successful wale last
+   * message me live preview charge likh kar aye").
+   *
+   * Both are 0 when nothing was charged, which is the honest answer in three real cases: the feature is
+   * off, no rate is configured, or the build never held a live server at all. `livePreviewInr` is
+   * DERIVED from the same seconds and rate the bill used, so the line can never disagree with the total
+   * it is part of.
+   *
+   * ⚠️ WHITE-LABEL LAW: this is a NavBharatAI CATEGORY, not a vendor line. §1 of the law explicitly
+   * allows an itemised breakdown in our own user-facing terms; what it forbids is itemising by
+   * vendor/model. So "Live preview — 4 min" is allowed and "E2B sandbox" never is. The word for this on
+   * every user-facing surface is "live preview", the same words the Preview tab already uses.
+   */
+  livePreviewSeconds: number;
+  livePreviewInr: number;
 }
 
 const POWER_TIER_DISPLAY: Record<string, string> = {
@@ -1183,8 +1202,16 @@ export function userCostBreakdown(
   billedUsd: number,
   powerLevel: BillingPowerLevel | boolean,
   rate: number,
+  /**
+   * What this build's LIVE PREVIEW cost, as `{ seconds, usd }` — the exact pair that went into
+   * `billedUsd`, never a second calculation. Omitted or zero ⇒ no live-preview line is shown, which is
+   * the truthful outcome when the charge is off, unrated, or the build never held a live server.
+   */
+  livePreview?: { seconds: number; usd: number } | null,
 ): UserCostBreakdown {
   const key = powerLevel === true ? 'medium' : powerLevel === false ? 'off' : String(powerLevel);
+  const lpSeconds = Math.max(0, Math.round(Number(livePreview?.seconds) || 0));
+  const lpUsd = Math.max(0, Number(livePreview?.usd) || 0);
   return {
     inputTokens: Math.max(0, sinkTotal.inputTokens || 0),
     outputTokens: Math.max(0, sinkTotal.outputTokens || 0),
@@ -1193,7 +1220,28 @@ export function userCostBreakdown(
     usdInrRate: Math.max(0, rate),
     tier: POWER_TIER_DISPLAY[key] ?? 'NavBharatAI',
     engine: 'NavBharatAI Pro v5.0',
+    // Seconds without a charge are not shown: a "0 min — ₹0.00" line on every build is noise that
+    // teaches the user to stop reading the breakdown, and the whole point of it is to be read.
+    livePreviewSeconds: lpUsd > 0 ? lpSeconds : 0,
+    livePreviewInr: lpUsd > 0 ? Math.round(lpUsd * Math.max(0, rate) * 100) / 100 : 0,
   };
+}
+
+/**
+ * The live-preview line for the build's closing message, or '' when there is nothing to charge for.
+ *
+ * WHY A LINE IN THE MESSAGE AND NOT ONLY IN THE PANEL (admin 2026-08-22): a charge the user discovers
+ * afterwards, folded into one total, reads as a surprise no matter how correct it is. Naming it in the
+ * same message that says the app is ready is what makes it a price rather than a deduction.
+ *
+ * It also names the FREE alternative, on purpose. Teaching a user how to spend less is what a builder
+ * they trust does; hiding it is how a total becomes something they audit instead of read. PURE.
+ */
+export function livePreviewChargeLine(b: Pick<UserCostBreakdown, 'livePreviewSeconds' | 'livePreviewInr'>): string {
+  if (!(b.livePreviewInr > 0) || !(b.livePreviewSeconds > 0)) return '';
+  const mins = b.livePreviewSeconds / 60;
+  const shown = mins >= 1 ? `${Math.round(mins)} min` : `${b.livePreviewSeconds} sec`;
+  return `Live preview: ${shown} — ₹${b.livePreviewInr.toFixed(2)} (the in-browser preview is free).`;
 }
 
 /** Minimal shape of the per-provider ledger the billing decision needs (structural — no import cycle). */
@@ -1222,10 +1270,24 @@ export interface BillingLedgerView {
  * Returns 0 on ANY doubt: no actuator, no measurement, the feature off, or no real rate configured.
  * A money path must fail toward charging LESS, never toward charging for something we cannot measure.
  */
-function billableSandboxUsd(actuator: unknown, workspaceId: string | null | undefined, buildStartedAtMs?: number): number {
+/**
+ * Returns the SECONDS as well as the dollars — one function rather than two on purpose: the number the
+ * user is shown ("Live preview: 4 min — ₹8", admin 2026-08-22) and the number that reached their bill
+ * have to come from the same measurement, or one day they will disagree and only the user will notice.
+ *
+ * It replaced a `billableSandboxUsd` that returned only the dollars; that wrapper was kept for a few
+ * minutes during the change and then deleted, because both of its call sites had moved and a helper
+ * nothing calls is the start of a second implementation.
+ */
+function billableSandboxDetail(
+  actuator: unknown,
+  workspaceId: string | null | undefined,
+  buildStartedAtMs?: number,
+): { seconds: number; usd: number } {
+  const none = { seconds: 0, usd: 0 };
   try {
     const fn = (actuator as any)?.sandboxHeldSeconds;
-    if (typeof fn !== 'function' || !workspaceId) return 0;
+    if (typeof fn !== 'function' || !workspaceId) return none;
     const held = fn.call(actuator, workspaceId);
     /**
      * BILL ONLY THE TIME WE WERE ACTUALLY USING THE VM (admin question 2026-08-12: "AGENTV3_BILL_SANDBOX
@@ -1242,13 +1304,17 @@ function billableSandboxUsd(actuator: unknown, workspaceId: string | null | unde
      * errs downward by construction — an unknown build start bills nothing rather than guessing.
      */
     const seconds = Number(held);
-    if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+    if (!Number.isFinite(seconds) || seconds <= 0) return none;
     const started = Number(buildStartedAtMs);
-    if (!Number.isFinite(started) || started <= 0) return 0;
+    if (!Number.isFinite(started) || started <= 0) return none;
     const buildSeconds = Math.max(0, (Date.now() - started) / 1000);
-    return sandboxBillableUsd(sandboxCost(Math.min(seconds, buildSeconds)));
+    const billable = Math.min(seconds, buildSeconds);
+    const usd = sandboxBillableUsd(sandboxCost(billable));
+    // Seconds travel only when they were CHARGED. Reporting time we did not bill for would put a
+    // number next to a ₹0 the user cannot reconcile.
+    return usd > 0 ? { seconds: billable, usd } : none;
   } catch {
-    return 0;
+    return none;
   }
 }
 
@@ -6927,6 +6993,30 @@ export function registerAgentV3Routes(app: Express): void {
     // below. Without this, "is app ko analyze karo" + an import could classify as small-talk and
     // exit before anything was imported.
     const hasImportIntent = zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '');
+    /**
+     * IMPORTING SOMEBODY'S PROJECT NEEDS A VERIFIED NUMBER (admin 2026-08-22: "otp verified nahi to —
+     * github/zip app import nahi!").
+     *
+     * Gated HERE because this one line is where BOTH import kinds are already recognised — a GitHub URL
+     * and a zip attachment. A gate per route would have been two gates that drift; this is one, and a
+     * third import kind added later inherits it for free by construction.
+     *
+     * It refuses BEFORE any sandbox is touched, which is the point: an import is the most expensive
+     * thing an unverified account can start, and the cost lands on us. The reply carries a code the
+     * client turns into the OTP sheet rather than a dead-end error.
+     *
+     * FAILS CLOSED (see hasVerifiedPhoneWith): a directory we cannot read means "not verified", costing
+     * the user one OTP they can complete immediately — never a free import for an unverified account.
+     */
+    if (hasImportIntent && importPhoneGateEnabled()) {
+      const importerUid = await verifyFirebaseToken(req);
+      if (!(await hasVerifiedPhoneWith(importerUid, getAdminAuthForPhone))) {
+        send({ type: 'error', message: IMPORT_NEEDS_PHONE_MESSAGE, code: 'phone-verification-required', ts: Date.now() } as never);
+        send({ type: 'result', ok: false, summary: IMPORT_NEEDS_PHONE_MESSAGE, steps: 0, billedUsd: 0, billedInr: 0 });
+        res.end();
+        return;
+      }
+    }
     const isPlainChatTurn = intent === 'chat' && !hasImportIntent;
     // Surgical edit mode: the user is modifying an existing app (fix/change/update/
     // refactor/…), not building from scratch. When true, the build loop reads the
@@ -8036,9 +8126,13 @@ export function registerAgentV3Routes(app: Express): void {
       // showed the wrong legacy ₹ (e.g. ₹250 instead of the real-cost ₹157) and its report was
       // billing-null. Only a SUCCESSFUL app is billed; an overran-but-failed build stays free.
       let watchdogBilledUsd = 0;
+      // Measured OUTSIDE the try, because the user-facing breakdown below needs the same pair the bill
+      // used — a second measurement taken later would count different seconds.
+      let watchdogLivePreview = { seconds: 0, usd: 0 };
       if (ok && billingCtx.providerLedger) {
         try {
-          const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, billableSandboxUsd(actuator, workspaceId, billingCtx.buildStartedAt));
+          watchdogLivePreview = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt);
+          const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, watchdogLivePreview.usd);
           watchdogBilledUsd = decided.effectiveBilledUsd;
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
           buildDiagRef?.setCacheReadInputTokens(billingCtx.cacheReadInputTokens ?? 0);
@@ -8100,9 +8194,11 @@ export function registerAgentV3Routes(app: Express): void {
         }
         const billedInr = Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100;
         const watchdogCostBreakdown = watchdogBilledUsd > 0
-          ? userCostBreakdown(buildUsage.total(), watchdogBilledUsd, powerLevelReqEffective, usdInrRate())
+          ? userCostBreakdown(buildUsage.total(), watchdogBilledUsd, powerLevelReqEffective, usdInrRate(), watchdogLivePreview)
           : null;
-        emit({ type: 'result', ok: true, summary: buildResultRef.summary || 'Built your app — your files are saved.', steps: buildResultRef.steps ?? 0, billedUsd: watchdogBilledUsd, billedInr, ...(watchdogWalletDebit && watchdogWalletDebit.tokensDebited > 0 ? { walletTokensDebited: watchdogWalletDebit.tokensDebited, walletTokenBalance: watchdogWalletDebit.tokenBalance } : {}), ...(watchdogCostBreakdown ? { costBreakdown: watchdogCostBreakdown } : {}), ...(dl ? { diagnostics: dl } : {}) });
+        const watchdogLine = watchdogCostBreakdown ? livePreviewChargeLine(watchdogCostBreakdown) : '';
+        const watchdogSummary = [buildResultRef.summary || 'Built your app — your files are saved.', watchdogLine].filter(Boolean).join('\n\n');
+        emit({ type: 'result', ok: true, summary: watchdogSummary, steps: buildResultRef.steps ?? 0, billedUsd: watchdogBilledUsd, billedInr, ...(watchdogWalletDebit && watchdogWalletDebit.tokensDebited > 0 ? { walletTokensDebited: watchdogWalletDebit.tokensDebited, walletTokenBalance: watchdogWalletDebit.tokenBalance } : {}), ...(watchdogCostBreakdown ? { costBreakdown: watchdogCostBreakdown } : {}), ...(dl ? { diagnostics: dl } : {}) });
         void notifyBuildComplete(userId, true);
       } else {
         // SEAMLESS WINDOW TRANSITION (admin "sabkuch automatically hona chahiye, user ko pata bhi na
@@ -14144,8 +14240,12 @@ export function registerAgentV3Routes(app: Express): void {
       // every non-Opus tier (Weak/Normal/Strong) bills tieredMarkup(REAL provider cost). Computed by the
       // shared decideBuildBilledUsd so this settle path and the watchdog finalization (Fix 67) never
       // drift. The realcost path is default-ON (kill-switch `AGENTV3_REALCOST_BILLING`).
+      // LIVE PREVIEW — measured ONCE and used twice: it goes into the bill, and the SAME pair is what
+      // the user is shown ("Live preview: 4 min — ₹8"). Two measurements would eventually disagree, and
+      // only the user would notice.
+      const livePreviewCharge = billableSandboxDetail(actuator, workspaceId, buildStartedAt);
       const { effectiveBilledUsd: decidedBilledUsd, reconciledProviderUsage } =
-        decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, billableSandboxUsd(actuator, workspaceId, buildStartedAt));
+        decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd);
       let effectiveBilledUsd: number = decidedBilledUsd;
       // WHY a build ended up free — recorded into the build report's billing section (admin
       // 2026-07-11) so a ₹0 build always explains itself.
@@ -14601,7 +14701,16 @@ export function registerAgentV3Routes(app: Express): void {
       // consistent shape for every tier, so the client render can never crash on a per-tier mismatch.
       const costBreakdown = effectiveBilledUsd <= 0
         ? null
-        : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate());
+        : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate(), livePreviewCharge);
+      // THE CHARGE, IN THE MESSAGE THAT SAYS THE APP IS READY (admin 2026-08-22). It rides on the
+      // summary rather than only the breakdown panel because a charge the user finds afterwards, folded
+      // into one total, reads as a deduction no matter how correct it is. Only on a SUCCESSFUL build —
+      // a failed one is never charged, and `costBreakdown` is already null there, so this is the second
+      // of two independent guards rather than the only one.
+      const livePreviewLine = costBreakdown && result.ok ? livePreviewChargeLine(costBreakdown) : '';
+      if (livePreviewLine && typeof result.summary === 'string') {
+        result = { ...result, summary: `${result.summary}\n\n${livePreviewLine}` };
+      }
       // WEAK-TIER FAILURE GUIDANCE (admin spec 2026-08-02): when a real build attempt FAILS on the weak
       // tier (the free engine, or a paid user who picked Weak), tell the user — in their OWN language —
       // the honest, actionable reason: a complex app needs a stronger tier, switchable via the ⚙️ options

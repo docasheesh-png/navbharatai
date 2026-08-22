@@ -20,6 +20,8 @@ import {
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
 import { PublishCelebration } from './PublishCelebration';
+import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
+import { auth as firebaseAuth } from '../../lib/firebase';
 import { celebrationFor, type CelebrationKind } from '../../lib/firstPublish';
 import { usePublishState } from '../../hooks/usePublishState';
 import { needsPublishDot } from '../../lib/publishFreshness';
@@ -2650,6 +2652,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [celebration, setCelebration] = useState<{ kind: CelebrationKind; url: string } | null>(null);
   // Hosting Phase 1 — the "Publish" chooser (host on NavBharatAI vs bring-your-own), opened from Deploy.
   const [showHostingChooser, setShowHostingChooser] = useState(false);
+  // The verify-number sheet, opened by an import the server refused for a missing verified number.
+  const [verifyPhoneOpen, setVerifyPhoneOpen] = useState(false);
 
 
   // Fetch the persisted live URL whenever the workspace changes or a build/deploy finishes.
@@ -3405,6 +3409,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           onDeploy={(id) => deployLive(id)}
         />
       )}
+      {/* VERIFY-NUMBER sheet — portals to document.body, so it is rendered at the panel's top level
+          rather than inside any conditional branch. */}
+      <VerifyPhoneSheet
+        auth={firebaseAuth}
+        open={verifyPhoneOpen}
+        onClose={() => setVerifyPhoneOpen(false)}
+        reason="Importing a project needs a verified mobile number. One OTP, once — after that every import just works."
+        onVerified={() => setPublishMsg('Number verified — send your import again.')}
+        onSignInInstead={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { signIn: 'phone' } }))}
+      />
       {/* THE FIRST-EVER LIVE LINK. Rendered outside the publish sheet on purpose: it portals to
           document.body and must survive the sheet being closed — the user should be able to dismiss
           the sheet and still have their link in front of them. */}
@@ -3886,7 +3900,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{error || state.error}</span>
                 </div>
-                {!running && (
+                {/* AN IMPORT REFUSED FOR A MISSING VERIFIED NUMBER IS NOT A CODE ERROR (admin 2026-08-22).
+                    "Fix with AI" cannot help and would burn a build; the one useful action is the OTP,
+                    so it is the one offered. The refusal opens a door instead of ending the road. */}
+                {!running && state.errorCode === 'phone-verification-required' ? (
+                  <div className="mt-2">
+                    <button
+                      onClick={() => setVerifyPhoneOpen(true)}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-white bg-emerald-600 hover:bg-emerald-500 rounded px-2.5 py-1"
+                    >
+                      <Rocket className="w-3.5 h-3.5" /> Verify my number
+                    </button>
+                  </div>
+                ) : !running && (
                   isBuildBusyError(error || state.error) ? (
                     // "A build is already running" is a LOCK, not a code error — "Fix with AI" would just
                     // re-send and re-hit the lock (the 100-retries loop). The real actions are STOP (free
@@ -4041,6 +4067,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <div className="mt-1 ml-1 flex flex-col gap-0.5 border-l border-zinc-700 pl-2">
                   <span>Input: {state.costBreakdown.inputTokens.toLocaleString()} tokens · Output: {state.costBreakdown.outputTokens.toLocaleString()} tokens</span>
                   <span>Engine: {state.costBreakdown.engine} · {state.costBreakdown.tier} tier</span>
+                  {/* LIVE PREVIEW (admin 2026-08-22) — shown only when it was actually charged, and named
+                      in NavBharatAI's own words. The free alternative is named beside it on purpose:
+                      telling the user how to spend less is what makes the total worth reading. */}
+                  {typeof state.costBreakdown.livePreviewInr === 'number' && state.costBreakdown.livePreviewInr > 0 && (
+                    <span>
+                      Live preview: {(state.costBreakdown.livePreviewSeconds ?? 0) >= 60
+                        ? `${Math.round((state.costBreakdown.livePreviewSeconds ?? 0) / 60)} min`
+                        : `${state.costBreakdown.livePreviewSeconds ?? 0} sec`} · ₹{state.costBreakdown.livePreviewInr.toFixed(2)}
+                      <span className="text-zinc-600"> · in-browser preview is free</span>
+                    </span>
+                  )}
                   <span>Total: ₹{state.costBreakdown.billedInr.toFixed(2)}</span>
                 </div>
               </details>

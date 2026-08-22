@@ -39625,3 +39625,72 @@ intent ("both gates … to the same helper") is now true by construction rather 
 happening to match, and a new test asserts neither route re-implements `hasVerifiedPhoneWith` by hand.
 
 Gate: both tsc + build + FULL vitest (17,574 passing, 1 skipped).
+
+---
+
+## 2026-08-22 — Apple login: the reason was in our hands and we were deleting it (#2577, #2579, #2580, #2581)
+
+**The admin's evidence, which ended a week of guessing.** A DevTools capture:
+`POST identitytoolkit…/accounts/signInWithIdp 400` → `[auth] social redirect failed:
+auth/invalid-credential`.
+
+**Reaching `signInWithIdp` at all PROVES the earlier legs work.** Apple accepted the login, the return
+landed on our handler, and a credential was read from it. Every cause this project had been chasing —
+the Service ID, the Return URL, the domain-association file, the proxied cookie — is behind us,
+because none of them can be wrong and still get that far. What fails is the ONE step after: Firebase
+exchanging Apple's authorization code, which needs four values in its own Apple provider config.
+
+### The root cause of "we cannot diagnose this" (#2579)
+
+Reading `@firebase/auth` to write the better message turned up something bigger than the Apple config.
+`_performApiRequest` does:
+
+```js
+const [serverErrorCode, serverErrorMessage] = errorMessage.split(' : ');
+if (serverErrorMessage) throw _errorWithCustomMessage(auth, authError, serverErrorMessage);
+```
+
+So when identity-toolkit returns `INVALID_IDP_RESPONSE : <why>`, **Google's own sentence naming what
+went wrong lands in the thrown error's `.message`**. Every caller in this app then wrote
+`err.code || err.message` — which LOOKS like a fallback and is not one: the code is always truthy, so
+the `.message` half never ran and the explanation was discarded at the moment it arrived.
+
+That is why a real, reproducible failure produced a screenshot with a bare code and not one word about
+the cause. It is also precisely the failure class `socialSignInPolicy`'s own header comment says must
+never happen again, happening one function below that comment.
+
+`authErrorDetail(err)` now unwraps it, and both places a human reads the failure carry it: the
+app-root redirect catch (logged AND shown in the toast — on a phone there is no console, which is the
+entire reason that message function exists) and the native `signInWithCredential` exchange trace,
+where iOS Apple sign-in ends up and which had a comment claiming it already surfaced the real reason.
+
+### The sibling, hunted rather than waited for (#2580)
+
+`diagnoseAppleSignIn`'s strongest verdict ended by sending the admin to press **Verify** in Apple's
+portal. For `auth/invalid-credential` that is provably wrong for the reason above. Fixing only the
+browser message would have been **worse than fixing neither**: the admin's two sources of advice would
+disagree, and the wrong one sounds more authoritative because it had just run a live check against
+production. An optional `observedCode` now narrows the final answer — and it sits AFTER every our-side
+check, so it can never talk anyone out of a real interception, a stale copy or a missing file.
+
+### The feature that was not reachable (#2581)
+
+`/api/admin/apple-signin` shipped 2026-08-21 with **no UI at all** — curl with an admin token was the
+only way in. For a non-terminal admin that is indistinguishable from unbuilt (second absolute rule),
+and it is the one check that can say "stop looking at our code" with evidence. It now has a button in
+Admin Dashboard → Build Reports, with the optional code box, plus its AppKnowledgeBase entry.
+
+Three tests pin ways this could have looked right and been wrong; one of them caught a real bug I
+wrote: a Tailwind class built by interpolating a colour name is never generated, so the icon would
+have rendered unstyled while the code read as correct.
+
+### 🔴 OPEN ROOT CAUSE — infra-blocked (rule 6)
+
+**None of this FIXES Apple login.** The four values live in Firebase Console → Authentication →
+Sign-in method → Apple (Services ID `com.navbharatai.web`, Apple Team ID, Key ID, .p8 private key),
+which no Claude session can read. That check is the admin's. What changed is that the next attempt
+reports WHY — in the toast, in the console, and in the admin report — instead of a code that fits a
+dozen causes.
+
+Gate for all four: both tsc green; `npx vitest run` 17,604 passing / 1,394 files; build + bundle
+budget within limits (total JS 1433.9 / 1450 KB).

@@ -299,6 +299,7 @@ import { ensureBootEnv, bootEnvNote, type BootEnvIo } from '../AgentV3/devSecret
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
 import { buildRecipe, revivalConfirmedMessage, revivalUnconfirmedMessage } from '../AgentV3/previewRevival';
+import { comparePreviewUrl, measurementDescribesUserView, stalePreviewMessage } from '../AgentV3/previewUrlFreshness';
 import { decideAppSignature, appSignatureNotice } from '../AgentV3/appSignatureEntitlement';
 import { probeHostingPlan } from '../lib/hostingPlan';
 import { lastDevServerLaunch } from '../AgentV3/devServerLaunchLog';
@@ -3992,7 +3993,24 @@ export function registerAgentV3Routes(app: Express): void {
             // 5000) — so the guess probed a port nothing was on, and a perfectly healthy app read as
             // "sleeping". The client sends the live URL it is actually displaying; its port is the
             // ground truth, and the guess stays only as the fallback.
-            const port = previewUrlPort(typeof req.body?.previewUrl === 'string' ? req.body.previewUrl : null)
+            /**
+             * THE PROVEN PORT OUTRANKS THE URL'S (admin 2026-08-22: "mitrify app port 3000 par hai hi
+             * nahi, yeh port 5000 par hai").
+             *
+             * The port used to be read out of the very url we are checking, falling back to a guess
+             * from the framework name. Both are guesses, and the first one is self-reinforcing: once a
+             * wrong port lands in the url, every later check probes that wrong port, finds nothing,
+             * and leaves the wrong url in place. That is how a preview stays broken through any number
+             * of retries.
+             *
+             * The revival recipe holds the port that ACTUALLY rendered this app, recorded at the
+             * moment it was proven (previewRevival.ts). A remembered fact beats a re-derived guess, so
+             * it leads; the url and the framework default remain behind it for an app that has never
+             * successfully rendered and therefore has no recipe.
+             */
+            const provenPort = (await raceTimeout(sandboxStore.getRecipe(workspaceId), 3_000, 'previewHealthRecipe').catch(() => null))?.port;
+            const port = provenPort
+              ?? previewUrlPort(typeof req.body?.previewUrl === 'string' ? req.body.previewUrl : null)
               ?? oneShotDevPort(framework);
             // -L FOLLOWS REDIRECTS and we keep the BODY. Root cause (admin report 2026-08-06): the old
             // probe threw the body away (`-o /dev/null`) and accepted 301/302 as healthy. The app's `/`
@@ -4017,18 +4035,62 @@ export function registerAgentV3Routes(app: Express): void {
           }
         } catch { /* probe is best-effort — a failure just means "not currently up" (null/false) */ }
       }
+      /**
+       * WHICH MACHINE DID WE JUST MEASURE? (admin screenshot 2026-08-22.)
+       *
+       * The probe above runs INSIDE the sandbox, and `getSandbox()` transparently creates a new one
+       * when the old is gone — so it can succeed brilliantly on a machine the user's browser has
+       * never heard of. That is exactly what happened: the frame showed the provider's own
+       * "not found" page while this endpoint reported the dev server up on port 3000. Both true,
+       * about different machines, and together a lie.
+       *
+       * So the current url is resolved and returned, and a reading from a DIFFERENT host is not
+       * allowed to describe what the user can see. Best-effort: if the url cannot be resolved we say
+       * 'unknown' and behave exactly as before rather than inventing a verdict.
+       */
+      let currentPreviewUrl = '';
+      try {
+        const urlActuator = buildActuator();
+        if (urlActuator.getPortUrl) {
+          // The SAME port the probe used, for the same reason — a url built on the wrong port would
+          // simply move the problem rather than fix it.
+          const proven = (await raceTimeout(sandboxStore.getRecipe(workspaceId), 3_000, 'previewUrlRecipe').catch(() => null))?.port;
+          const probedPort = proven
+            ?? previewUrlPort(typeof req.body?.previewUrl === 'string' ? req.body.previewUrl : null)
+            ?? oneShotDevPort(framework);
+          const live = await raceTimeout(urlActuator.getPortUrl(workspaceId, probedPort), 6_000, 'previewCurrentUrl').catch(() => '');
+          currentPreviewUrl = applyPreviewDomain(String(live || ''));
+        }
+      } catch { /* best-effort — a missing url simply yields the 'unknown' verdict below */ }
+      const urlVerdict = comparePreviewUrl(
+        typeof req.body?.previewUrl === 'string' ? req.body.previewUrl : null,
+        currentPreviewUrl,
+      );
+      const describesUserView = measurementDescribesUserView(urlVerdict);
+
       const health = classifyPreviewHealth({
         hasFiles: fileCount > 0,
         liveBackend: diag.livePreviewAvailable,
-        livePortUp,
-        pageRendered,
-        pageProblems,
+        // A port that is up on ANOTHER machine is not up for this user. Reporting it is how the
+        // banner came to insist the dev server was fine over a dead frame.
+        livePortUp: describesUserView ? livePortUp : null,
+        pageRendered: describesUserView ? pageRendered : null,
+        pageProblems: describesUserView ? pageProblems : [],
         everPublished: fileCount > 0, // files exist ⇒ a build ran ⇒ a preview was attempted
         lastError: null,             // a specific crash error only comes from a live boot (Diagnose)
         booting: false,
       });
       // `serving` is what the CLIENT needs to stop presenting a 404 page as the user's app.
-      res.json({ ...health, fileCount, serving: pageRendered, servingProblems: pageProblems });
+      res.json({
+        ...health,
+        fileCount,
+        serving: describesUserView ? pageRendered : null,
+        servingProblems: describesUserView ? pageProblems : [],
+        // The client swaps to this instead of framing a machine that no longer exists.
+        currentPreviewUrl: currentPreviewUrl || null,
+        previewUrlStale: urlVerdict === 'stale',
+        ...(urlVerdict === 'stale' ? { previewUrlNote: stalePreviewMessage() } : {}),
+      });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }

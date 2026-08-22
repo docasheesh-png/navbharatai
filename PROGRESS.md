@@ -38793,3 +38793,47 @@ debc468c, where a command-STRING change made every command look like a dev-serve
 change, its own tests.
 
 Gate: both tsc green, 17,344 tests / 1,380 files green, CI green before merge.
+## 2026-08-22 — ₹70,000/year found and killed: a VM in a project that was not ours
+
+**Admin: "yeh kharcha kaha ho raha hai? manage karo."** July's GCP bill was ₹20,549, with Compute
+Engine at ₹7,466 (36%) — the largest line, on a product the app does not use.
+
+**FIRST, WHAT THE CODE COULD PROVE.** NavBharatAI runs on Cloud Run; its sandboxes run on E2B's own
+cloud, not GCP. A grep for `compute.googleapis` / `instances.insert` / `createInstance` across the
+server found **nothing** — no code path creates a VM. The only VM this repo ever documented is
+`e2b-custom-domain-proxy`, deleted 2026-08-02 at ~₹1,350/month. So ~₹6,000/month was unexplained.
+
+**THE ONE CLICK THAT NAMED IT.** Billing → Reports, grouped by **SKU** instead of Service. The report
+names the resource:
+
+> `E2 Instance Core running in Mumbai` — ₹2,486.76 — Project **My First Project** — `asia-south1`
+
+Not our project at all. "My First Project" is the default one GCP creates. Arithmetic on the usage
+identified the machine without ever seeing it: 992.38 core-hours ÷ 504 hours (21 days) = **1.97 vCPU
+running continuously**, and 3,969.51 GiB-hours ÷ 504 = **7.88 GB RAM** — an `e2-standard-2` at 100%
+uptime, plus a 20 GB balanced PD.
+
+**It was `bharat-ai` in `asia-south1-a`. The admin deleted it; the disk and the external IP went with
+it (both verified absent afterwards).**
+
+| | |
+|---|---|
+| 21 days of August | ₹4,049 — **54% of the entire month's bill** |
+| Per month | **~₹5,978** |
+| Per year | **~₹70,381** |
+
+**THE TWO EARLIER COST FIXES ARE MEASURABLY WORKING**, visible in the same report's % change column:
+**Artifact Registry Storage ↓77%** and **Cloud Build time ↓72%**.
+
+**MY OWN CONTRIBUTION, STATED PLAINLY (rule 3).** Every merge to `main` triggers a full Docker build +
+Cloud Run deploy. Today I merged 7 PRs — 7 builds, ~₹280 in one day, at a Cloud Build line of
+₹3,556/month. That is my working style, not a platform defect. **Going forward: batch merges** rather
+than landing each small fix on its own. This entry is itself being held back for that reason — a
+docs-only deploy is exactly the waste just identified, so it rides with the next real change.
+
+**Worth watching, not yet worth acting on:** Vertex AI / Gemini 2.5 Pro is ₹1,405 across three SKUs
+and climbing fast (+268% / +150% / +362%). That is REAL usage, not waste — but at this growth rate it
+becomes the next largest line, and it is the one to profile when it does.
+
+**RECOMMENDED, NOT YET DONE (admin's call):** set `ignoredFiles` on the Cloud Build trigger for
+`**/*.md`. Rebuilding and redeploying the whole app because a document changed is pure cost.

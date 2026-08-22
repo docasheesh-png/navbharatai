@@ -39400,3 +39400,77 @@ the saved-records fallback, once for the workspace scope. `managedDns.test.ts` h
 now bound by the next route registration, which cannot drift.
 
 Gate: both tsc + build + FULL vitest (17,531 passing, 1 skipped).
+---
+
+## 2026-08-22 — Two screens that made the user think they had lost something (PRs #2569, #2570)
+
+Both admin-reported, both the same underlying mistake in different clothes, and neither was a
+data-loss bug: **nothing was ever lost. The screen said so anyway, and the user believed it.**
+
+### #2569 — "Add account" logged you out for changing your mind
+
+**Admin:** *"add account click kare aur koi bhi other account login nahi kare to logout ho ja raha hai."*
+
+Both the switch and the add control called `performSignOut()` and reloaded onto the sign-in screen. So
+the sign-out was **step one**, not the consequence of anything: the moment you pressed "Add account"
+you were already logged out, and closing the screen cost you your session for pressing a button that
+promised to ADD one. **A cancelled action must cost nothing; this one cost what the user already had.**
+
+The fix is not to defer the sign-out — it is that there was never a reason for one. Firebase signs a
+new user in while one is active: success replaces the current user, cancel changes nothing. So the
+existing sign-in modal (`setShowAuth`, already passed to TopNav) opens over the app.
+`switchRequiresSignOutFirst()` exists as a named function returning `false` because the old flow READ
+correctly — "switch means leave, then arrive" — and someone will reach for it again.
+
+**A hint that was never read.** The old switch wrote `nbai:switch-to`, commented as "queued so the
+sign-in screen can offer it first". **Nothing in the codebase has ever read that key.** So a switch
+logged you out and dropped you on a generic sign-in screen with no help at all — a stored value
+standing in for a working handoff. Replaced with `SIGN_IN_HINT_KEY`, defined once and genuinely
+consumed as Google's `login_hint`. `prompt: 'select_account'` is kept beside it deliberately: a hint
+alone can silently sign someone back into the wrong account when only one session is live, which is
+the exact failure the menu exists to prevent.
+
+**Why it read as an add-only control:** the list rendered only the OTHER accounts and hid itself when
+there were none, so a one-account user saw nothing but "Add another account". Its "Switch account"
+heading had been there all along, invisible to exactly the people who needed it. The list now always
+renders, current account first and marked, with "Add account" at the bottom.
+
+### #2570 — the domain page looked like "sab gayab ho gaya"
+
+**Admin:** save the connect-domain page on the device so it opens fast — *"abhi lagta hai sab gayab ho
+gaya."*
+
+It DID restore itself, from the server, one round trip after mount **inside a useEffect** — and an
+effect runs after the first paint. So every reopen painted an empty form and filled it a moment later.
+On a cold start the moment is long. Fixed by reading the saved copy synchronously in the state
+initialiser: there is no blank frame to see.
+
+**But the caching is not the interesting part.** This page holds two kinds of thing, and treating them
+alike is how a cache starts lying:
+- **What to TYPE** — the domain and the records to copy. These do not change on their own; restoring
+  them instantly is simply correct, and it is the whole of what was asked for.
+- **Whether it WORKED** — verified / active / serving. A remembered "connected" badge would be REAL and
+  would be from yesterday, and someone would read it off the screen while their site was down.
+
+So `writeDomainDraft` has **no field for a verification state at all** — refused by construction rather
+than by discipline — and a test asserts the persisted shape contains none of them. And the divergence
+the cache itself creates is closed in the same change: when the server confirms NO domain while the
+device remembers one, the device copy is cleared. The server is the authority on what is connected.
+
+### The pattern, now stated as a rule rather than a tally
+
+Every instance this week has been one sentence: **a screen rendering "we do not know yet" identically
+to "there is nothing here".** Preview, published apps, APK, assets, account menu, domain page. It is
+never a data bug and never fails a test, which is why it keeps shipping — and it is the single loudest
+thing a user experiences, because *"my work is gone"* is the fear the product must never trigger by
+accident.
+
+The check that catches it costs nothing at review time: **for every empty state on screen, ask which of
+the three it means — nothing exists, we have not looked, or we looked and failed — and whether the
+screen can tell them apart.**
+
+Gate: both tsc clean; `vitest run` 1383 files / 17,408 passed / 1 honest skip. 27 new tests across
+`accountRoster.test.ts` and `domainDraftCache.test.ts`.
+
+⚠️ **Neither is browser-verified.** No browser in this environment: the rules are tested, the rendering
+is not. Recorded as needing the admin's eyes rather than claimed as done.

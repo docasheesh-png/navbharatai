@@ -400,6 +400,8 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
   const [domain, setDomain] = useState(draft?.domain || '');
   /** True once the SERVER has answered. Until then, anything restored is last-known, not confirmed. */
   const [confirmed, setConfirmed] = useState(false);
+  /** The server answered, but could NOT reach the live source. Not the same as "not connected". */
+  const [statusUnavailable, setStatusUnavailable] = useState(false);
   /** The honest reason the last publish attempt did not start (no dead buttons). Cleared on retry. */
   const [publishBlocked, setPublishBlocked] = useState<string | null>(null);
   // UNPUBLISH — deliberately behind a TYPED confirmation (admin 2026-08-22: "user ko bataya jaye
@@ -469,7 +471,34 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
           return;
         }
         setDomain((prev) => prev || data.domain);
-        if (data.status) setResult((prev) => prev ?? data.status);
+        /**
+         * 🔒 USE THE COPY THE SERVER KEPT (admin 2026-08-22: "server par bhi doge? mujhe dono jagah
+         * chahiye"). It always kept both — the domain and the records live in Firestore — and it now
+         * returns `savedRecords` OUTSIDE `status` precisely so a failed live lookup cannot take the
+         * records down with it. This client was reading only `data.status`, which is null in exactly
+         * that case, so it threw the saved copy away and the user saw a page with no records: the
+         * server half of that fix had landed and the client half had not.
+         *
+         * `statusUnavailable` is the honest distinction it carries — "we could not look" is not
+         * "not connected", and telling them apart is the difference between waiting and retyping a
+         * domain that was never lost.
+         */
+        const saved: DnsRecord[] = Array.isArray(data.savedRecords) ? data.savedRecords : [];
+        if (data.status) {
+          setResult((prev) => prev ?? data.status);
+        } else if (saved.length > 0) {
+          // Known records, unknown status — stated as exactly that, never as a connection verdict.
+          setResult((prev) => prev ?? {
+            domain: data.domain,
+            active: false,
+            ownershipState: 'unknown',
+            hostState: 'unknown',
+            sslState: 'unknown',
+            records: saved,
+            displayRecords: saved,
+          });
+          setStatusUnavailable(true);
+        }
         if (data.zone?.nameServers?.length) {
           setAutoNs((prev) => prev ?? data.zone.nameServers);
           setAutoZoneStatus((prev) => prev ?? data.zone.status);
@@ -481,7 +510,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
           workspaceId || '',
           {
             domain: data.domain,
-            records: data.status?.displayRecords || data.status?.records || [],
+            records: data.status?.displayRecords || data.status?.records || saved,
             nameServers: data.zone?.nameServers,
           },
           Date.now(),
@@ -537,6 +566,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
       setNeedsPlan(false);
       setResult(data);
       setConfirmed(true);
+      setStatusUnavailable(false);
       rememberDraft(data, autoNs);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error.');
@@ -555,6 +585,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
       if (!res.ok) { setError(data?.error || 'Could not check status.'); return; }
       setResult(data);
       setConfirmed(true);
+      setStatusUnavailable(false);
       rememberDraft(data, autoNs);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Network error.');
@@ -689,6 +720,17 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
         <p className="text-[11px] text-zinc-500 flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse shrink-0" />
           {draftNotice(!!draft?.domain, confirmed)}
+        </p>
+      )}
+
+      {/* "We could not look" is NOT "not connected", and the difference is the difference between
+          waiting a minute and retyping a domain that was never lost. Your records are below either
+          way — the server keeps them, which is exactly what they were saved for. */}
+      {statusUnavailable && (
+        <p className="text-[11px] text-amber-400/90 flex items-start gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 mt-1" />
+          Your domain and its DNS records are saved — NavBharatAI just could not check the live status
+          this moment. Nothing is lost; press Check status again in a minute.
         </p>
       )}
 

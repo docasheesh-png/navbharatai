@@ -82,9 +82,33 @@ export function socialRedirectFailureMessage(code: string | null | undefined): s
       return "This site's domain is not authorised for sign-in yet. Admin: add it in Firebase Console → Authentication → Settings → Authorized domains.";
     case 'auth/operation-not-allowed':
       return 'This sign-in method is not enabled for the app yet. Admin: enable it in Firebase Console → Authentication → Sign-in method.';
-    case 'auth/invalid-credential':
     case 'auth/invalid-oauth-client-id':
-      return 'The sign-in provider rejected the request as invalid. Admin: check the provider’s client id / key and the return URL registered with it.';
+      // SPLIT OUT from invalid-credential (2026-08-22). These two used to share one sentence, and the
+      // new sentence below is only TRUE for invalid-credential — it asserts that the provider's own
+      // registration is already correct, which is exactly what THIS code says is not.
+      return 'The sign-in provider rejected the request as invalid. '
+        + 'Admin: check the provider’s client id / key and the return URL registered with it.';
+    case 'auth/invalid-credential':
+      /**
+       * ⚠️ THIS CODE IS GOOD NEWS, AND THE MESSAGE HAS TO SAY SO (admin DevTools capture 2026-08-22:
+       * `POST identitytoolkit…/accounts/signInWithIdp 400` → `[auth] social redirect failed:
+       * auth/invalid-credential`).
+       *
+       * Reaching `signInWithIdp` at all PROVES the earlier legs now work: Apple accepted the login,
+       * the return landed on our handler, and a credential was read from it. Every cause this project
+       * has already chased — the Service ID, the Return URL, the domain-association file, the proxied
+       * cookie — is behind us, because none of them can be passed and still get here.
+       *
+       * What is left is the ONE step that happens after: Firebase exchanging Apple's authorization
+       * code, which needs FOUR values in its own Apple provider config. Any single one wrong produces
+       * exactly this error at exactly this point, so the message names all four rather than saying
+       * "check the client id / key", which is where the previous wording sent people looking in the
+       * wrong portal.
+       */
+      return 'Apple accepted your sign-in, but NavBharatAI\'s sign-in service could not complete it. '
+        + 'This is the last step — exchanging Apple\'s code — and it needs four values to match. '
+        + `Admin: Firebase Console → Authentication → Sign-in method → Apple, and check ALL of: Services ID (must be exactly ${APPLE_SERVICE_ID}), Apple Team ID, Key ID, and the .p8 private key. `
+        + 'Everything before this step is already correct.';
     case 'auth/network-request-failed':
       return 'Could not reach the sign-in provider. Check your connection and try again.';
     case 'auth/user-disabled':

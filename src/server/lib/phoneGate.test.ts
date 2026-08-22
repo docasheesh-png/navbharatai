@@ -157,13 +157,26 @@ describe('both gates are really connected, and to the same helper', () => {
   it('ONE gate covers BOTH import kinds, at the line that already recognises them', () => {
     // A gate per route would be two gates that drift; a third import kind added later inherits this
     // one for free.
-    expect(chat).toContain('if (hasImportIntent && importPhoneGateEnabled()) {');
-    expect(chat).toContain('hasVerifiedPhoneWith(importerUid, getAdminAuthForPhone)');
+    //
+    // ⚠️ UPDATED 2026-08-22, and the update is the point this test was reaching for. It used to pin
+    // the hand-rolled call site verbatim — and BOTH hand-rolled sites were missing the free-list
+    // exemption that every sibling gate has, which locked the admin out of their own product. The
+    // decision now lives in `importBlockedForPhone`, so "the same helper" is true by construction
+    // rather than by two call sites happening to match.
+    expect(chat).toContain('if (hasImportIntent) {');
+    expect(chat).toContain('importBlockedForPhone(await verifyFirebaseIdentity(req), getAdminAuthForPhone)');
   });
 
   it('the zip upload is refused BEFORE any bytes move', () => {
-    expect(zip).toContain('importPhoneGateEnabled() && !(await hasVerifiedPhoneWith(uid, getAdminAuthForPhone))');
+    expect(zip).toContain('importBlockedForPhone(await verifyFirebaseIdentity(req), getAdminAuthForPhone)');
     expect(zip).toContain("code: 'phone-verification-required'");
+  });
+
+  it('🔒 neither gate re-implements the check by hand', () => {
+    // The original bug in one line: two hand-rolled gates, both forgetting the exemption. Inlining
+    // `hasVerifiedPhoneWith` at a route again would re-create exactly that hole.
+    expect(chat).not.toContain('hasVerifiedPhoneWith(');
+    expect(zip).not.toContain('hasVerifiedPhoneWith(');
   });
 
   it('the user is told WHY, not just refused', () => {

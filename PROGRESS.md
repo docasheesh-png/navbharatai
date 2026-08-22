@@ -39592,3 +39592,36 @@ findings and their fixes are recorded in the PR.
 elimination would mean proxying all traffic, which breaks HMR/websockets; the watchdog remount closes
 that window to one poll cycle. And none of this is browser-verified from this environment — the next
 real sandbox death is the real test.
+## 2026-08-22 — the import gate locked the admin out of their own product
+
+Admin, with a screenshot of their own account refused at import: *"yeh to aapne admin ke liye bhi block
+kar diya. ab test kaise hoga."* Correct, and it was blocking all testing of the day's work.
+
+**Root cause: the gate shipped without the free-list exemption that EVERY sibling gate has.** The
+hosting-plan gate reads `!isAgentV3FreeUser(uid, email)`; the billing gate does; the build gate does.
+The import gate (#2566) did not — so the one account that exists to test the product could not import
+at all.
+
+**Fixed as a class, not an instance.** The decision moved into `importBlockedForPhone` in
+`phoneGate.ts`, and both call sites (archive upload, build route) now go through it. Adding the
+exemption at each call site instead would have reproduced exactly the condition that caused the bug: a
+rule that must be remembered at every gate is a rule that will eventually be forgotten at one. There
+were two gates and both forgot it; the next one would have made three.
+
+⚠️ **The subtle half — the exemption needs the EMAIL, not the uid.** `AGENTV3_FREE_LIST` holds
+addresses, so a call site resolving only a uid silently never matches and the exempt account stays
+blocked. That failure is invisible from the gate: "not on the list" and "we never checked the list
+properly" look identical. Both call sites now resolve the VERIFIED identity (`verifyFirebaseIdentity`
+→ uid + email), never a claimed one. Test-locked.
+
+Order inside the helper is deliberate: kill switch first (an operator turning it off must win), free
+list second (no directory call for an admin, so an outage cannot lock them out), the real lookup last.
+The fail-CLOSED posture for ordinary accounts is unchanged and separately tested — a directory failure
+still refuses a non-exempt import.
+
+**Two of the other session's tests updated, with reasoning at the site.** They pinned the hand-rolled
+call sites verbatim — i.e. they pinned the exact lines that were missing the exemption. Their stated
+intent ("both gates … to the same helper") is now true by construction rather than by two call sites
+happening to match, and a new test asserts neither route re-implements `hasVerifiedPhoneWith` by hand.
+
+Gate: both tsc + build + FULL vitest (17,574 passing, 1 skipped).

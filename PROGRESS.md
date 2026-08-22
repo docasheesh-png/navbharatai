@@ -39084,6 +39084,18 @@ build (bundled mode: it ships its own frontend until a new store release), is un
 wrapper nothing called, now deleted), and `tests/userCostBreakdown.test.ts` (the anonymity allowlist).
 Each assertion was updated to hold the PROPERTY rather than the old string.
 
+### Completing it: you can verify BEFORE hitting the wall
+
+Shipped in the same change, because without it the ONLY route to verification was to attempt an import
+and be refused — a feature you can reach only by first failing at something else is not finished.
+
+**Settings → My Profile** now shows the mobile row under the email: `••••3210 · verified`, or
+"Mobile not verified" with a **Verify** button that opens the same sheet. The number is read from the
+auth record (`user.phoneNumber` is present only once a phone credential is genuinely linked), so this
+row cannot disagree with the gate — it is the same fact, not a copy of it. It is MASKED: a profile page
+is a screenshot away from a group chat. On success the page reloads rather than setting a local flag,
+so what it shows is always what the record says.
+
 ### 🔴 Honest limits
 
 - **Neither auth path could be exercised live from this session** — no credentials, no device. The

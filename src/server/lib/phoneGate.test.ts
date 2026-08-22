@@ -214,3 +214,26 @@ describe('the client side is wired, and does not accidentally SIGN IN', () => {
     expect(sheet).toContain("from '../lib/phoneNumber'");
   });
 });
+
+describe('a user can verify BEFORE hitting the wall', () => {
+  const profile = readFileSync(join(process.cwd(), 'src/components/profile/ProfilePage.tsx'), 'utf8');
+
+  it('Profile shows the verified number, or offers to verify', () => {
+    // Without this the ONLY route to verification is to attempt an import and be refused. A feature you
+    // can reach only by first failing at something else is not finished.
+    expect(profile).toContain('user.phoneNumber ?');
+    expect(profile).toContain('maskPhone(user.phoneNumber)');
+    expect(profile).toContain('Mobile not verified');
+    expect(profile).toContain('setVerifyOpen(true)');
+  });
+
+  it('it shows the MASKED number, never the whole one', () => {
+    expect(profile).not.toMatch(/>\{user\.phoneNumber\}</);
+  });
+
+  it('the sheet sits outside the early returns, so a re-render cannot unmount it mid-verification', () => {
+    const sheetAt = profile.indexOf('<VerifyPhoneSheet');
+    const signedOutAt = profile.indexOf('Sign in to view your profile.');
+    expect(sheetAt).toBeGreaterThan(signedOutAt);
+  });
+});

@@ -38937,3 +38937,67 @@ gates are security properties). AppKnowledgeBase entry `agentv3_read_review` add
 presses a button. That is a deliberate stopping point rather than an oversight: an automatic loop
 that rebuilds on every reviewer comment spends real money per comment and needs a rate-limit and a
 cost decision the admin has not been asked for. Recorded here rather than half-built.
+---
+
+## 2026-08-22 — APK autopsy (mitrify): the app compiled, and we told the user it did not (PRs #2564, #2565)
+
+**Admin report** with three screenshots. NavBharatAI's screen and GitHub's job summary described the
+SAME run in opposite terms:
+
+| Surface | Verdict on run 32569998304 |
+|---|---|
+| NavBharatAI | "Your app itself **did not compile**… NavBharatAI could not fix this one on its own." |
+| GitHub | "Your app **compiled correctly**. It stopped while creating the Android project around it." |
+
+The user reads ours. Ours was wrong, and it closed their only door.
+
+### Ledger (rule 5, five buckets)
+
+- ❌ **Still broken / shipped imperfect — 3.** (1) The stage marker lied. (2) Our own guard hid the
+  correct classification. (3) The real cause — a webDir mismatch we ourselves create — was a dead end
+  instead of a self-heal.
+- ⏭️ **Skipped — 1.** The "2 image/font file(s) … were not pushed" note was already being emitted and
+  nothing acted on it; mined below.
+- 🔀 **Workaround — 0.** 🥵 **Struggle — 0.** ✅ **Self-heal — 0.** The build failed in 35s; there was
+  nothing to loop on.
+
+### The three defects, all ours
+
+1. **The stage marker lied.** The `index.html` guard lives in the *capacitor* step and runs only after
+   the web build PASSED, yet stamped `NBAI_FAILED_STAGE=webbuild`. `mobileBuildRepair` calls that marker
+   *"GROUND TRUTH, not a pattern match"* — and the ground truth named a stage that had already
+   succeeded. Now stamps `capacitor`.
+2. **Our own guard made a correct rule unreachable.** `WEB_DIR_MISSING` already existed and was already
+   right, keyed on Capacitor's own wording. Our guard fails BEFORE `cap sync` so it can print something
+   friendlier — and thereby stopped Capacitor's wording from ever appearing. The log fell to `UNKNOWN`,
+   and `UNKNOWN` + `stage=webbuild` produces "your app did not compile". **A friendlier message
+   silently disabled the classifier that depended on the unfriendly one.** The rule now matches both
+   wordings; its summary no longer blames the app.
+3. **The real cause is ours and is fixable.** We generate `capacitor.config.ts` with `webDir` defaulting
+   to `'dist'` *"when the real build dir is not known"*, and we generate the app. The workflow now finds
+   the folder the build ACTUALLY produced and points the wrapper at it. `public` is deliberately NOT a
+   candidate — in CRA it is the SOURCE folder holding the un-built template, so accepting it would
+   package a broken shell as a success, which is worse than the honest failure.
+
+### Mining the skipped item found the class again — SEVENTH instance
+
+`loadWorkspaceAssets` returned `{}` both when a workspace holds no images and when Firestore did not
+answer. So a FAILED read shipped the app with no pictures and told the user *"add these to your app and
+ship again"* — **they had added them; we lost them, and then billed the mistake to them.** Now the load
+reports completeness and the note owns the failure when we could not look.
+
+Running tally of *an artifact standing in for its validity*: stale URL = live preview · stale `dist/` =
+current build · sandbox id = revivable · workspaceId = has an app · empty list = complete list · file in
+repo = file readable in production · **empty asset map = no assets**.
+
+### Proactive layer (rule 5 step 6) — what would stop this class at the source
+
+Six of these seven are the same two lines of code: `catch { return [] }` and `catch { return {} }`. The
+pattern is not wrong everywhere — 14 of them in `src/server` are advisory analysers where "could not
+parse ⇒ no findings" is correct and nothing is destroyed. **The dangerous subset is narrow and
+mechanically identifiable: a store read whose emptiness later drives a DESTRUCTIVE action, a MONEY
+action, or a SENTENCE THAT BLAMES THE USER.** That third one is new from this report and is the least
+obvious — nothing crashes, nothing is deleted, a real person is just told they made a mistake we made.
+A lint rule cannot see it, but a reviewer's checklist can: *if this returns empty, who gets blamed?*
+
+Gate: both tsc clean; vitest 1380 files / 17,361 passed / 1 honest skip.

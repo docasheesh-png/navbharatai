@@ -140,7 +140,19 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 // blank white screen (the #1 "built but the preview is blank" class), and the readiness gate's
 // "no error boundary" warning never fires. A real class boundary (getDerivedStateFromError +
 // componentDidCatch) — the exact signals ErrorBoundaryAnalysis looks for.
-export const errorBoundaryTsx = `import React from 'react';
+export const errorBoundaryTsx = `// PROVIDED AND CORRECT — do not rewrite this file.
+//
+// It already extends React.Component with its Props/State generics, which is the ONLY thing that
+// gives \`this.state\`, \`this.setState\` and \`this.props\` their types. A rewrite that drops the
+// \`extends\` clause compiles to nothing but errors:
+//
+//     Property 'setState' does not exist on type 'ErrorBoundary'.
+//     Property 'props' does not exist on type 'ErrorBoundary'.
+//
+// That happened to a real user (2026-08-23): the file was replaced, then rewritten three more times,
+// each attempt still missing the clause, on an app whose preview was already rendering. If you need
+// different fallback UI, edit the markup inside render() — leave the class declaration alone.
+import React from 'react';
 
 interface Props { children: React.ReactNode; }
 interface State { error: Error | null; }

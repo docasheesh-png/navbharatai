@@ -39959,3 +39959,35 @@ one-time Render Blueprint connect, which Render requires in its own UI and no AP
 stated honestly at the point of use rather than papered over.
 
 Gate: both tsc + build + FULL vitest (17,681 passing, 1 skipped).
+
+## 2026-08-23 — "Closed Port Error on 3000" for an app that was running fine on 5000
+
+Admin screenshot: the sandbox is up, the app is up, and the preview says *"no service running on port
+3000"*. The app was never broken — **we were watching the wrong door.**
+
+**Root cause.** A server's start script is usually just `node server.js`, with the port living in the
+CODE (`app.listen(process.env.PORT || 5000)`). The preview asked only `devScriptPort`, which reads
+`--port N` FLAGS out of the script. No flag ⇒ null ⇒ fall back to the framework guess of 3000 ⇒ wait
+on 3000 forever, while Express served 5000.
+
+**And the reader already existed.** `serverListenPort` — which parses exactly `process.env.PORT || N`,
+`const PORT = N` and `.listen(N)` — was sitting PRIVATE inside `fullstackBootHint.ts`, used there and
+nowhere else. This is the same class as the 2026-07-04 `--port 5173` incident, in the one place that
+fix never reached: a capability that exists, and one call site that does not use it.
+
+Exported it, added `serverPortFromFiles` to find whichever entry actually declares a port, and wired
+the preview to it. One implementation, both call sites.
+
+🔒 **ORDER, so the old fix is not regressed.** `scriptPort ?? codePort ?? expectedPort`. A `--port`
+flag is a deliberate override of whatever the code defaults to, so the CODE is consulted only where
+the script is silent, and the framework guess only where BOTH are. This can add knowledge; it can
+never overrule a better source. Test-locked, including the ordering itself.
+
+🔒 **`server.*` is preferred over `index.*`, and that order is the point.** A project containing both
+almost always means `server.js` is the API and `index.js` the frontend entry — reading the frontend's
+port and waiting on it would be this very failure in a new costume.
+
+Reading the files is best-effort and only happens when the script named no port, so a failure leaves
+today's behaviour untouched.
+
+Gate: both tsc + build + FULL vitest (17,693 passing, 1 skipped).

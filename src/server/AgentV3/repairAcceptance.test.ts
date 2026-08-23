@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { judgeRepair } from './repairAcceptance';
+import { judgeRepair, judgeRuntimeRepair } from './repairAcceptance';
 import { countTscErrors, hasTscErrors } from './TscGate';
 
 const err = (n: number, code = 2339) =>
@@ -104,5 +104,69 @@ describe('judgeRepair — the half-applied state is refused, not risked', () => 
   it('ignores empty and non-string entries in createdPaths', () => {
     const j = judgeRepair({ beforeErrors: err(4), afterErrors: err(41), afterOk: false, createdPaths: ['', undefined as never] });
     expect(j.action).toBe('revert');
+  });
+});
+
+describe('judgeRuntimeRepair — rendering is not working', () => {
+  /**
+   * The runtime auto-fix loop already had a net: verifyAfterFix snapshots the green app, applies the
+   * repair, re-renders and rolls back if it broke. But "still renders" is a weaker test than "actually
+   * better" — a repair that fixed one error while introducing two more passed it, and with the default
+   * of a single attempt it then shipped.
+   */
+  it('REVERTS a repair that renders but left MORE runtime errors than it found', () => {
+    const j = judgeRuntimeRepair({ stillRenders: true, beforeCount: 1, afterCount: 3 });
+    expect(j.action).toBe('revert');
+    expect(j.reason).toContain('1 → 3');
+  });
+
+  it('keeps a repair that reduced them', () => {
+    const j = judgeRuntimeRepair({ stillRenders: true, beforeCount: 4, afterCount: 1 });
+    expect(j.action).toBe('keep');
+    expect(j.reason).toContain('4 to 1');
+  });
+
+  it('keeps an equal count — different errors can still be progress', () => {
+    // Same judgement the compile-side gate makes, deliberately: trading two errors for two others may
+    // mean one fixed and one revealed.
+    expect(judgeRuntimeRepair({ stillRenders: true, beforeCount: 2, afterCount: 2 }).action).toBe('keep');
+  });
+
+  it('keeps a clean result', () => {
+    expect(judgeRuntimeRepair({ stillRenders: true, beforeCount: 3, afterCount: 0 }).action).toBe('keep');
+  });
+
+  it('reverts when the app stopped rendering — the guarantee that already existed', () => {
+    const j = judgeRuntimeRepair({ stillRenders: false, beforeCount: 1, afterCount: 0 });
+    expect(j.action).toBe('revert');
+    expect(j.reason).toContain('no longer rendered');
+  });
+
+  it('an unreadable console is UNPROVEN, never proof against the repair', () => {
+    // Reverting on no evidence throws away a fix that may well have been correct — the same mistake in
+    // the opposite direction, and the reason the existing net keeps an inconclusive render too.
+    const j = judgeRuntimeRepair({ stillRenders: true, beforeCount: 5, afterCount: null });
+    expect(j.action).toBe('keep');
+    expect(j.reason).toContain('could not be read');
+  });
+
+  it('agrees with the compile-side gate on what "worse" means', () => {
+    // ONE definition, two units. If these ever diverge, a repair judged good by one path is judged bad
+    // by the other on identical evidence.
+    for (const [before, after] of [[1, 3], [4, 1], [2, 2], [0, 0]] as const) {
+      const runtime = judgeRuntimeRepair({ stillRenders: true, beforeCount: before, afterCount: after });
+      const compile = judgeRepair({
+        beforeErrors: Array.from({ length: before }, (_, i) => `a.ts(${i + 1},1): error TS1000: x`).join('\n'),
+        afterErrors: Array.from({ length: after }, (_, i) => `a.ts(${i + 1},1): error TS1000: x`).join('\n'),
+        afterOk: after === 0,
+      });
+      const compileWorse = compile.action === 'revert' || compile.action === 'keep-and-stop';
+      expect(runtime.action === 'revert', `${before}→${after}`).toBe(compileWorse);
+    }
+  });
+
+  it('names no vendor', () => {
+    const j = judgeRuntimeRepair({ stillRenders: true, beforeCount: 1, afterCount: 9 });
+    expect(j.reason).not.toMatch(/e2b|glm|kimi|claude|sonnet|opus|gemini|grok|anthropic|moonshot/i);
   });
 });

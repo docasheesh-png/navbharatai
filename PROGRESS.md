@@ -40394,3 +40394,71 @@ that is worth more than the one assertion it broke.
 
 `greenFreeze`'s anchor pinned the clear by the comment that followed it; re-anchored on the derivation,
 which states the guarantee directly instead of depending on neighbouring text.
+
+---
+
+## 2026-08-23 (later) — Monitoring that tells you, and the sibling the first pass missed
+
+Follow-up to PR #2598, from a code review of the work I had just shipped.
+
+### 1. A SIBLING I MISSED — the daily history was still blind
+
+PR #2598 fixed the live metrics registry so AgentV3 feeds it. But `metricsStore.save()` — which
+writes the DAILY `metrics_snapshots` document behind `/api/admin/metrics/history` — was still called
+from `routes/build.ts` only, the same legacy builder. So with no legacy build running, the daily doc
+was never written at all, and the in-memory totals died with each Cloud Run instance.
+
+That is the same root cause, one file further along, and rule 4 step 3 (hunt the siblings) says it
+should have been found in the same change. Recording it plainly rather than quietly folding it in:
+the first pass was incomplete. The save now happens in the shared metrics sink, so EVERY builder
+persists the daily snapshot through one place.
+
+### 2. ALERTS WERE COMPUTED AND THROWN AWAY
+
+`metricsAlerts.ts` has evaluated real alert conditions since Phase 4.3, and its header says delivery
+"needs external infra (out of scope, infra-gated)". **That comment was stale.** `saveNotification`,
+the in-app NotificationBell and the shared `ScheduledJobs` scheduler all exist now. So the alerts
+only ever reached the admin if they happened to open the panel at the right moment — which is not
+monitoring, it is luck.
+
+`monitorAlerts.ts` closes it. Every 15 minutes the server judges the last hour and sends an in-app
+notification when build failure rate, preview rate or build time leaves its normal range — plus an
+all-clear when it recovers.
+
+Four properties, each a way alerting normally fails:
+- **It judges a rolling window, not since-boot.** The live registry resets on every deploy and is
+  per-instance, so an alert built on it fires on whatever that container happened to see. Alerts read
+  the shared timeline, so every instance reaches the same verdict about the same hour.
+- **It does not repeat itself.** A condition announces once, then stays quiet for a 6-hour cooldown
+  while it keeps firing. An alert that repeats every sweep trains its reader to ignore it — and an
+  ignored alert is worse than none, because it is still trusted to be there.
+- **It says when things recover.** Without an all-clear, "fixed" and "still broken, and I stopped
+  being told" look identical.
+- **It never alerts on absence.** Too few builds to judge, or an unreadable timeline ⇒ the sweep does
+  NOTHING. "We cannot see" is not "everything is on fire", and inventing an alert out of missing data
+  is the same dishonesty as drawing a zero line over a dead feed.
+
+Cross-instance safety: the notified-state doc is written in a TRANSACTION, so several Cloud Run
+instances sweeping at once produce ONE notification between them, not one each.
+
+Tunables (code defaults, nothing to set): `MONITOR_ALERT_COOLDOWN_MINUTES` (360),
+`MONITOR_ALERT_WINDOW_HOURS` (1), kill switch `MONITOR_ALERTS=off`.
+
+### 3. The admin allowlist was inside a 15,000-line route
+
+`isReportAdmin` owned the admin email list inside `routes/agentv3.ts`, so anything else needing it
+would have had to import that whole route or copy the list — and a copied allowlist drifts silently
+until one surface trusts somebody the other does not. Moved to `lib/adminEmails.ts`; `isReportAdmin`
+now delegates, so both surfaces resolve the same admins by construction.
+
+### Honest scope note
+
+Delivery is the IN-APP notification bell. There is no email or SMS path for the admin in this
+codebase, and I did not invent one — an alert that claims to have emailed you and did not is worse
+than no alert. Adding email would need a mail provider credential the project does not have; recorded
+as an open item rather than half-built.
+
+### Verification
+
+`npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json --noEmit` clean · `npx vitest run` —
+**1418 files, 17,937 passed, 4 skipped, 0 failed**.

@@ -29,6 +29,7 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
 import { setMetricsSink } from './metrics';
+import { metricsStore } from './metricsStore';
 
 export const TIMELINE_COLLECTION = 'metrics_timeline';
 
@@ -396,7 +397,15 @@ export const metricsTimeline = new MetricsTimeline();
  */
 export function attachMetricsTimeline(): void {
   setMetricsSink({
-    onBuild: (o) => metricsTimeline.recordBuild({ ok: o.ok, previewAllowed: o.previewAllowed, ms: o.ms }),
+    onBuild: (o) => {
+      metricsTimeline.recordBuild({ ok: o.ok, previewAllowed: o.previewAllowed, ms: o.ms });
+      // ALSO persist the DAILY snapshot here. It used to be saved only from routes/build.ts — the
+      // legacy Engineer-AI builder — which is the same blindness the timeline work fixed for the live
+      // registry, one file further along and missed on the first pass: with no legacy build running,
+      // `metrics_snapshots` was never written at all, so /api/admin/metrics/history had nothing in it
+      // and the in-memory totals died with each Cloud Run instance. Best-effort and never awaited.
+      void metricsStore.save().catch(() => {});
+    },
     onModelCall: (provider, inputTokens, outputTokens, costUsd) =>
       metricsTimeline.recordModelCall(provider, inputTokens, outputTokens, costUsd),
   });

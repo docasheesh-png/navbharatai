@@ -16,10 +16,34 @@ const report = (problems: BuildIssue[]): BuildDiagnosticsReport => ({
   problems,
 } as BuildDiagnosticsReport);
 
+/** The one record that means "we opened the app in a real browser and it rendered". */
+const PROVEN = issue({ code: 'OUTCOME_BUILD_SUCCESS', severity: 'info', message: 'Build outcome: BUILD_SUCCESS', autoResolved: true });
+
 describe('buildHealthFromDiagnostics', () => {
-  it('a clean ok build is ready with score 100 and no blockers/warnings', () => {
+  /**
+   * 🔒 A PERFECT SCORE IS EARNED, NOT DEFAULTED (admin screenshot 2026-08-22).
+   *
+   * These four assertions used to expect 100/100 for a clean build with NO proof it ran, and that
+   * expectation was the bug: the score starts at 100 and subtracts problems, so "nothing was found"
+   * and "nothing was ever looked at" produce the same number. The card printed "READY · 100/100"
+   * directly above the build's own text saying the app could not compile, over a preview that never
+   * came up.
+   */
+  it('a clean build that was never SEEN RUNNING is capped below perfect, and says why', () => {
     const h = buildHealthFromDiagnostics(report([]), true);
-    expect(h).toEqual({ score: 100, ready: true, blockers: [], warnings: [] });
+    expect(h.score).toBe(85);
+    expect(h.provenRunning).toBe(false);
+    expect(h.warnings.join(' ')).toMatch(/not seen running/i);
+    // Deliberately still READY: we did not see it work, and we did not see it fail either. Claiming
+    // breakage would be the opposite lie.
+    expect(h.ready).toBe(true);
+  });
+
+  it('a clean build PROVEN running earns the full 100, with no caveat line', () => {
+    const h = buildHealthFromDiagnostics(report([PROVEN]), true);
+    expect(h.score).toBe(100);
+    expect(h.provenRunning).toBe(true);
+    expect(h.warnings).toEqual([]);
   });
 
   it('an unresolved error is a blocker → not ready, score drops', () => {
@@ -52,6 +76,7 @@ describe('buildHealthFromDiagnostics', () => {
 
   it('unresolved warnings lower the score but do not block readiness', () => {
     const h = buildHealthFromDiagnostics(report([
+      PROVEN,
       issue({ severity: 'warning', message: 'no error boundary' }),
       issue({ severity: 'warning', message: 'missing alt text' }),
     ]), true);
@@ -61,7 +86,7 @@ describe('buildHealthFromDiagnostics', () => {
   });
 
   it('a resolved (autoResolved) error is NOT counted as a current blocker', () => {
-    const h = buildHealthFromDiagnostics(report([issue({ autoResolved: true, message: 'fixed itself' })]), true);
+    const h = buildHealthFromDiagnostics(report([PROVEN, issue({ autoResolved: true, message: 'fixed itself' })]), true);
     expect(h.ready).toBe(true);
     expect(h.blockers).toEqual([]);
     expect(h.score).toBe(100);
@@ -75,13 +100,25 @@ describe('buildHealthFromDiagnostics', () => {
 
   it('dedupes repeated messages and caps the list', () => {
     const many = Array.from({ length: 10 }, (_, i) => issue({ severity: 'warning', message: `w${i % 3}` }));
-    const h = buildHealthFromDiagnostics(report(many), true);
+    const h = buildHealthFromDiagnostics(report([PROVEN, ...many]), true);
     expect(h.warnings).toEqual(['w0', 'w1', 'w2']); // deduped
   });
 
-  it('tolerates a missing diagnostics report', () => {
+  it('the unproven caveat never crowds out real warnings past the cap', () => {
+    // It is prepended, so a build with a full list of real findings still shows them; the list is
+    // capped afterwards. A caveat that hid actual problems would be a worse lie than the one it fixes.
+    const many = Array.from({ length: 10 }, (_, i) => issue({ severity: 'warning', message: `w${i}` }));
+    const h = buildHealthFromDiagnostics(report(many), true);
+    expect(h.warnings[0]).toMatch(/not seen running/i);
+    expect(h.warnings.length).toBeLessThanOrEqual(6);
+    expect(h.warnings).toContain('w0');
+  });
+
+  it('a build with no report at all is UNPROVEN — the emptiest possible evidence is not perfection', () => {
     const h = buildHealthFromDiagnostics(undefined, true);
-    expect(h).toEqual({ score: 100, ready: true, blockers: [], warnings: [] });
+    expect(h.score).toBe(85);
+    expect(h.provenRunning).toBe(false);
+    expect(h.ready).toBe(true);
     const bad = buildHealthFromDiagnostics(undefined, false);
     expect(bad.ready).toBe(false);
   });

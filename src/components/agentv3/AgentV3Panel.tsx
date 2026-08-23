@@ -5709,7 +5709,13 @@ function BuildHealthCard({ health }: { health: BuildHealth }) {
         {ready
           ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
           : <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
-        <span className={ready ? 'text-emerald-300' : 'text-amber-300'}>Build health: {ready ? 'READY' : 'NOT READY'}</span>
+        {/* "READY" alone overstated an app nobody had seen run (admin screenshot 2026-08-22: the card
+            said READY · 100/100 directly above the build's own "critical build-breaking issues"). The
+            server now reports whether the app was actually seen running; when it was not, the label
+            says so rather than implying proof. `undefined` (older payload) keeps today's wording. */}
+        <span className={ready ? 'text-emerald-300' : 'text-amber-300'}>
+          Build health: {ready ? (health.provenRunning === false ? 'READY (not verified)' : 'READY') : 'NOT READY'}
+        </span>
         <span className="text-zinc-500">· {health.score}/100</span>
       </div>
       {blockers.lines.length > 0 && (

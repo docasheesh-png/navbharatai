@@ -16,6 +16,22 @@ export function hasTscErrors(output: string | null | undefined): boolean {
 }
 
 /**
+ * How many real TypeScript diagnostics the output contains.
+ *
+ * Lives beside `hasTscErrors` on purpose — same single-parser discipline. A repair is only worth
+ * keeping if it made the compiler quieter, and answering "quieter?" needs a COUNT, not a boolean.
+ * `hasTscErrors` cannot tell 4 errors from 41, which is exactly how a repair that quadrupled the
+ * error count was accepted and written over a working file (real build report 2026-08-23).
+ *
+ * Counts `error TS####` occurrences. tsc's own trailer ("Found 41 errors in 7 files.") carries no
+ * `error TS`, so it cannot inflate the count. Pure.
+ */
+export function countTscErrors(output: string | null | undefined): number {
+  if (!output) return 0;
+  return (output.match(/error TS\d+/g) ?? []).length;
+}
+
+/**
  * True when `tsc --noEmit` output is the CLI HELP/version page rather than a real compile result —
  * what `tsc` prints when there is no tsconfig.json AND no input files, exiting 0. Treating that as a
  * clean pass is a FALSE pass: the type-check never actually ran (a real report hit exactly this — a

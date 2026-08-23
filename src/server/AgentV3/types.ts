@@ -144,6 +144,16 @@ export type AgentEvent =
   | { type: 'tool_call'; agent: AgentRole; tool: ToolName; input: unknown; callId: string; ts: number }
   | { type: 'tool_result'; agent: AgentRole; callId: string; ok: boolean; summary: string; ts: number }
   | { type: 'file_changed'; agent: AgentRole; change: FileChange; ts: number }
+  /**
+   * What the engine is doing to this workspace right now, so the preview can stop hard-remounting a
+   * running app under the person using it.
+   *
+   * 'settling' is the load-bearing value: the app exists and RUNS, and everything happening to it now
+   * is verification and repair — mid-surgery states the user must not be shown. See
+   * components/agentv3/previewReloadPolicy.ts for why the phase, and not "is the user interacting",
+   * had to be the discriminator (a cross-origin iframe hides every click from us).
+   */
+  | { type: 'build_phase'; phase: 'generating' | 'settling' | 'idle'; ts: number }
   | { type: 'diff'; agent: AgentRole; diff: FileDiff; ts: number }
   | { type: 'todo_updated'; todos: TodoItem[]; ts: number }
   | { type: 'plan_updated'; plan: string; ts: number }

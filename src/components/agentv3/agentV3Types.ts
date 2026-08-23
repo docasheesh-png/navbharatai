@@ -5,6 +5,8 @@
 // the final {type:'result'} line streamed by /api/agentv3/chat. Client and server
 // communicate only via this JSON contract — normal client/server decoupling.
 
+import type { BuildPhase } from './previewReloadPolicy';
+
 /**
  * User-facing cost breakdown — mirrors the server's UserCostBreakdown (routes/agentv3.ts).
  * ANONYMIZED by design (admin rule 2026-07-15): tokens + the real bill + the user's tier, branded
@@ -75,6 +77,12 @@ export type AgentV3WireEvent =
   | { type: 'tool_result'; agent: AgentRole; callId: string; ok: boolean; summary: string; ts: number }
   | { type: 'file_changed'; agent: AgentRole; change: FileChange; ts: number }
   | { type: 'files_restored'; files: FileChange[]; ts: number }
+  /**
+   * What the engine is doing to this workspace right now. 'settling' means the app EXISTS and runs and
+   * is only being verified/repaired — the window in which reloading the preview shows somebody their
+   * working app breaking. See previewReloadPolicy.ts.
+   */
+  | { type: 'build_phase'; phase: BuildPhase; ts: number }
   /**
    * THE FRAMEWORK THE SERVER ACTUALLY DETECTED — emitted only when it DIFFERS from what the client
    * sent (2026-08-21).
@@ -187,6 +195,11 @@ export interface AgentV3ClientState {
   contextUsage: { pct: number; level: 'ok' | 'high' | 'critical'; note: string } | null;
   /** Plan-mode text. */
   plan: string;
+  /**
+   * What the engine is doing right now. Drives whether the live preview may be reloaded — a rendered
+   * app must not be hard-remounted under the person using it while the engine is only settling it.
+   */
+  buildPhase: BuildPhase;
   /** Live preview URL (the running app in the sandbox), once published. */
   previewUrl?: string;
   /** The project's GitHub repo (the user's own, or platform-org), once git-native storage runs. */
@@ -283,6 +296,7 @@ export function initialAgentV3State(): AgentV3ClientState {
     checkpoints: [],
     contextUsage: null,
     plan: '',
+    buildPhase: 'idle',
     agents: {},
     pendingBash: {},
     done: false,

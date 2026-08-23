@@ -12,6 +12,7 @@ import { nextDoorUrl } from './previewDoorClient';
 import { resolveApiHref } from '../../lib/apiBase';
 import { PreviewWelcome } from './PreviewWelcomePanel';
 import { previewEmptyKind } from './previewWelcome';
+import { decidePreviewReload, shouldFlushOnBuildEnd, deferredReloadNote, type BuildPhase } from './previewReloadPolicy';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview, shouldRestorePreview } from './previewAutoReboot';
@@ -123,7 +124,7 @@ export function veRgbToHex(color: string): string {
   return `#${h(+m[1])}${h(+m[2])}${h(+m[3])}`;
 }
 
-export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, bootSignal, onFixError, onFileEdited, onAskAiAboutElement }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean;
+export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, buildPhase, bootSignal, onFixError, onFileEdited, onAskAiAboutElement }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean;
   /**
    * Is this pane the surface actually on screen INSIDE the app?
    *
@@ -133,7 +134,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
    * silently reintroduce the sandbox-cost leak this prop was added to close — see
    * `shouldWatchLivePreview` in previewKeepAlive.ts for the full history.
    */
-  paneVisible: boolean; reloadSignal?: number; bootSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void }) {
+  paneVisible: boolean; reloadSignal?: number; buildPhase?: BuildPhase; bootSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void }) {
   // A4 (unified preview): in-browser is the DETERMINISTIC DEFAULT — it always renders the current
   // files instantly with no server, so the preview is never a dead "No live preview yet" empty state
   // that depends on an ephemeral E2B sandbox being up. "Live server" (full-fidelity, real runtime) is
@@ -711,17 +712,47 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // value (the mount load already covers it) and any unchanged re-render.
   const reloadTracker = useRef(newReloadTracker());
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Live-mode reloads HELD BACK because the engine is settling a running app.
+   *
+   * In live mode the reload is `setLiveReloadKey(k => k + 1)` — a change of the iframe's React key,
+   * which DESTROYS AND RE-CREATES it. Not a hot reload: a hard remount, taking with it whatever the
+   * person had typed, opened or scrolled to. That is fine while the app is being written and there is
+   * nothing to lose; it is the reported bug once the app runs and every write is a mid-repair state
+   * (admin 2026-08-23: "chalti huyi app tut jati hai"). See previewReloadPolicy.ts.
+   */
+  const [heldReloads, setHeldReloads] = useState(0);
+  /** Has the live preview genuinely rendered once? Before that there is no user state to protect. */
+  const everRenderedRef = useRef(false);
+  const applyReload = useCallback(() => {
+    if (mode === 'inbrowser') { void loadInBrowser(); }
+    else if (mode === 'live' && effectiveUrl) { setLiveReloadKey((k) => k + 1); }
+    setHeldReloads(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, effectiveUrl, loadInBrowser]);
   useEffect(() => {
     if (!shouldReloadOnSignal(reloadTracker.current, reloadSignal)) return;
     if (!workspaceId) return;
+    const decision = decidePreviewReload({ mode, phase: buildPhase ?? 'idle', everRendered: everRenderedRef.current });
+    if (decision.defer) { setHeldReloads((n) => n + 1); return; }
     if (reloadTimer.current) clearTimeout(reloadTimer.current);
-    reloadTimer.current = setTimeout(() => {
-      if (mode === 'inbrowser') { void loadInBrowser(); }
-      else if (mode === 'live' && effectiveUrl) { setLiveReloadKey((k) => k + 1); }
-    }, 900);
+    reloadTimer.current = setTimeout(applyReload, 900);
     return () => { if (reloadTimer.current) clearTimeout(reloadTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadSignal]);
+
+  /**
+   * The build ended — land whatever was held.
+   *
+   * A deferral that never lands is its own version of showing the user the wrong thing, so this runs
+   * on EVERY ending (success, failure, watchdog, Stop), matching the server emitting `idle` from its
+   * finally rather than only on the happy path.
+   */
+  useEffect(() => {
+    if (!shouldFlushOnBuildEnd({ phase: buildPhase ?? 'idle', pendingChanges: heldReloads })) return;
+    applyReload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildPhase, heldReloads]);
 
   // CONSOLE DRAWER (world-best-preview, 2026-08-06): the preview's mirrored console — every log/warn/
   // error the running app prints, streamed up from the iframe (see ReactPreview's console mirror).
@@ -1147,6 +1178,25 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             </button>
           </div>
         )}
+        {/* HELD UPDATES (admin 2026-08-23: "chalti huyi app tut jati hai"). While the engine is
+            SETTLING an app that already runs, a reload would hard-remount the iframe and take with it
+            whatever the person is doing inside their app. So the updates wait here — visibly and
+            countably — and land when the user asks or when the build ends.
+            Deliberately in the NORMAL FLOW above the frame, never inside ResponsiveFrame: that
+            component holds a constant-tree-depth invariant precisely so the iframe is never
+            reparented, and reparenting an iframe IS a reload — the exact thing this bar exists to
+            prevent. */}
+        {heldReloads > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-700 bg-zinc-900/80 text-[11px] text-zinc-300">
+            <span className="flex-1 truncate">{deferredReloadNote(heldReloads)}</span>
+            <button
+              onClick={applyReload}
+              className="shrink-0 rounded-md bg-zinc-700 px-2.5 py-1 font-semibold text-zinc-100 hover:bg-zinc-600"
+            >
+              Refresh now
+            </button>
+          </div>
+        )}
         {liveLoading && (
           <div className="h-0.5 bg-zinc-800 overflow-hidden">
             <div className="h-full w-1/3 bg-indigo-500 animate-pulse" />
@@ -1187,7 +1237,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
                 address, so a dead sandbox resolves to our own reconnecting page instead of a vendor
                 error, and a moved app resolves to wherever it now lives. A remount (reload button,
                 watchdog) re-resolves. effectiveUrl stays as the fallback for an older server. */}
-            <iframe key={liveReloadKey} title="Live preview" src={doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl} onLoad={() => setLiveLoading(false)} className="w-full h-full bg-white border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+            <iframe key={liveReloadKey} title="Live preview" src={doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; }} className="w-full h-full bg-white border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
           </ResponsiveFrame>
         )}
       </div>

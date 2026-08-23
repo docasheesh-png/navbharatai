@@ -174,6 +174,11 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       };
     }
 
+    // The engine says what it is doing. 'settling' is what stops the live preview hard-remounting a
+    // running app under the person using it (previewReloadPolicy.ts).
+    case 'build_phase':
+      return { ...state, buildPhase: event.phase };
+
     case 'files_restored':
       // "Restore all files" replaced the whole file list with what's genuinely in the workspace now.
       return { ...state, files: event.files };

@@ -30,12 +30,25 @@ import * as admin from 'firebase-admin';
 export const APP_PREFIX = 'published-apps';
 
 /**
- * Which bucket. Falls back to the buckets the platform already has, so this needs no new
- * infrastructure to start working — and returns '' when there is none, which every caller treats as
- * "not configured" rather than as an error.
+ * Which bucket. `PUBLISHED_APPS_BUCKET` ONLY — deliberately no fallback.
+ *
+ * ⚠️ THIS FUNCTION USED TO FALL BACK TO `NAV_STORE_BUCKET`, AND THAT WAS A REAL HAZARD (caught
+ * 2026-08-23 while walking the admin through the console setup, before anything was configured).
+ *
+ * Objects here must be PUBLICLY READABLE — the Cloudflare Worker fetches them anonymously, and a
+ * published app is public by definition. `NAV_STORE_BUCKET` holds the Nav App Store's APK bytes,
+ * which are deliberately PRIVATE: every upload lands as `pending`, and downloads are served through
+ * our own route precisely so a rejected or removed app genuinely stops being downloadable.
+ *
+ * A convenience fallback would therefore have pointed "the bucket you must make public" at "the
+ * bucket that must never be public" — and the person following the setup would have granted
+ * `allUsers` read on every unreviewed APK we hold. The two stores have opposite access models, so
+ * they must never resolve to the same name by default.
+ *
+ * Returns '' when unset, which every caller treats as "not configured" rather than as an error.
  */
 export function publishedAppsBucket(env: NodeJS.ProcessEnv = process.env): string {
-  return (env.PUBLISHED_APPS_BUCKET || env.NAV_STORE_BUCKET || env.FIREBASE_STORAGE_BUCKET || '').trim();
+  return String(env.PUBLISHED_APPS_BUCKET || '').trim();
 }
 
 /** Is mirroring switched on? Default ON — it cannot affect a publish, and OFF would mean it never

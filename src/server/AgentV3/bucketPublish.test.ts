@@ -69,16 +69,24 @@ describe('objectPathFor', () => {
 });
 
 describe('configuration — off is a real state, not a failure', () => {
-  it('reads the bucket from the platform buckets it already has', () => {
+  it('reads ONLY its own env var', () => {
     expect(publishedAppsBucket({ PUBLISHED_APPS_BUCKET: 'mine' } as any)).toBe('mine');
-    expect(publishedAppsBucket({ NAV_STORE_BUCKET: 'store' } as any)).toBe('store');
     expect(publishedAppsBucket({} as any)).toBe('');
+  });
+
+  it('NEVER falls back to the App Store bucket — the two have OPPOSITE access models', () => {
+    // Published apps must be publicly readable; the App Store's APKs must not be, because every
+    // upload lands as `pending` and a rejected app has to genuinely stop being downloadable. A
+    // convenience fallback would have pointed "make this bucket public" at the bucket that must
+    // never be public.
+    expect(publishedAppsBucket({ NAV_STORE_BUCKET: 'navbharatai-appstore-1' } as any)).toBe('');
+    expect(publishedAppsBucket({ FIREBASE_STORAGE_BUCKET: 'anything' } as any)).toBe('');
   });
 
   it('is off with no bucket, on by default with one, and off on the kill switch', () => {
     expect(bucketMirrorEnabled({} as any)).toBe(false);
-    expect(bucketMirrorEnabled({ NAV_STORE_BUCKET: 'b' } as any)).toBe(true);
-    expect(bucketMirrorEnabled({ NAV_STORE_BUCKET: 'b', PUBLISHED_APPS_MIRROR: 'off' } as any)).toBe(false);
+    expect(bucketMirrorEnabled({ PUBLISHED_APPS_BUCKET: 'b' } as any)).toBe(true);
+    expect(bucketMirrorEnabled({ PUBLISHED_APPS_BUCKET: 'b', PUBLISHED_APPS_MIRROR: 'off' } as any)).toBe(false);
   });
 });
 
@@ -93,21 +101,21 @@ describe('mirrorPublishToBucket — can never break a publish', () => {
   });
 
   it('does nothing for an empty file set or a missing channel', async () => {
-    expect((await mirrorPublishToBucket('v3-abc', new Map(), { NAV_STORE_BUCKET: 'b' } as any)).attempted).toBe(false);
-    expect((await mirrorPublishToBucket('', files, { NAV_STORE_BUCKET: 'b' } as any)).attempted).toBe(false);
+    expect((await mirrorPublishToBucket('v3-abc', new Map(), { PUBLISHED_APPS_BUCKET: 'b' } as any)).attempted).toBe(false);
+    expect((await mirrorPublishToBucket('', files, { PUBLISHED_APPS_BUCKET: 'b' } as any)).attempted).toBe(false);
   });
 
   it('reports failure instead of throwing when the bucket is unreachable', async () => {
     // Under vitest there is no initialised Firebase app, so this exercises the real failure path:
     // the publish that already succeeded must not be undone by it.
-    const r = await mirrorPublishToBucket('v3-abc', files, { NAV_STORE_BUCKET: 'nope' } as any);
+    const r = await mirrorPublishToBucket('v3-abc', files, { PUBLISHED_APPS_BUCKET: 'nope' } as any);
     expect(r.attempted).toBe(true);
     expect(r.uploaded).toBe(0);
     expect(r.error).toBeTruthy();
   });
 
   it('removal never throws either', async () => {
-    await expect(removePublishFromBucket('v3-abc', { NAV_STORE_BUCKET: 'nope' } as any)).resolves.toBeTruthy();
+    await expect(removePublishFromBucket('v3-abc', { PUBLISHED_APPS_BUCKET: 'nope' } as any)).resolves.toBeTruthy();
     expect((await removePublishFromBucket('v3-abc', {} as any)).attempted).toBe(false);
   });
 });

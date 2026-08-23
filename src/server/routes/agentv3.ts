@@ -8569,6 +8569,19 @@ export function registerAgentV3Routes(app: Express): void {
     let etaFirstFileAt = 0;
     /** Stamp the first file's arrival — the start of the only interval we can honestly measure. */
     const noteEtaFileWritten = (): void => { if (etaFirstFileAt === 0) etaFirstFileAt = Date.now(); };
+    /**
+     * Tell the surfaces the app now EXISTS and is only being settled.
+     *
+     * Idempotent on purpose: both build lanes announce it, and a resumed or retried build can reach
+     * the same point twice. Emitting it twice is harmless, but announcing it once keeps the client's
+     * reasoning about "when did settling start" simple.
+     */
+    let settlingAnnounced = false;
+    const emitSettlingPhase = (): void => {
+      if (settlingAnnounced) return;
+      settlingAnnounced = true;
+      try { events.emit({ type: 'build_phase', phase: 'settling', ts: Date.now() }); } catch { /* a preview hint never affects a build */ }
+    };
     /** Record the plan's real size. Only ever grows: a later, larger plan supersedes an earlier guess. */
     const noteEtaPlannedFiles = (n: number): void => {
       if (Number.isFinite(n) && n > etaPlannedFiles) etaPlannedFiles = Math.floor(n);
@@ -9088,6 +9101,11 @@ export function registerAgentV3Routes(app: Express): void {
       // of an open-ended spinner. Derived from the prompt's complexity (no blueprint yet). Best-effort
       // and additive — a failure just skips the ETA; chat turns already returned above.
       if (intent === 'new_build' || intent === 'edit_existing') {
+        // The preview needs to know we are WRITING the app, not settling one that already runs — it is
+        // the only signal that lets it stop hard-remounting a live app under the person using it. See
+        // components/agentv3/previewReloadPolicy.ts. Best-effort; a missed event just means today's
+        // behaviour (reload on every batch).
+        try { events.emit({ type: 'build_phase', phase: 'generating', ts: Date.now() }); } catch { /* a preview hint never affects a build */ }
         try {
           // ETA NOW LEARNS FROM REAL BUILDS (admin 2026-08-11). This call used to pass NO history, so
           // every user saw the cold heuristic at confidence 0.4 on every build, forever — which is the
@@ -11356,7 +11374,7 @@ export function registerAgentV3Routes(app: Express): void {
           merge: mergeWorkspaceFiles,
           emit: (e) => events.emit(e),
         });
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // OBSERVABILITY (deep-test App #2, 2026-07-13): when the fast lane falls back after a verify
         // failure, record the ACTUAL compiler error text so the report can be mined for the true cause
@@ -11688,6 +11706,9 @@ export function registerAgentV3Routes(app: Express): void {
             return { ok: true, verified: false, errors: '' };
           }
         };
+        // The agentic lane's own "the app exists, now I am fixing it" moment — same meaning as the fast
+        // lane's, so the preview behaves identically whichever lane a build took.
+        emitSettlingPhase();
         let check = await runTsc();
         // DETERMINISTIC FIRST — restore the boilerplate WE ship before asking a weak model to fix it
         // (confirmed across three real builds, 2026-08-12). The scaffold's class-component
@@ -15284,6 +15305,11 @@ export function registerAgentV3Routes(app: Express): void {
       // can't fire after a clean finish (no double terminal event), and stop the heartbeat timer.
       if (deadlineTimer) clearTimeout(deadlineTimer);
       clearInterval(diagHeartbeatTimer);
+      // The build is over however it ended — success, failure, watchdog or Stop. The preview has been
+      // holding updates back while the app was being settled; this is what lets them land. Emitted in
+      // the FINALLY on purpose: a deferral that only ends on the happy path would leave a user staring
+      // at a stale app after any failure, which is the failure mode the deferral exists to prevent.
+      try { events.emit({ type: 'build_phase', phase: 'idle', ts: Date.now() }); } catch { /* best-effort */ }
       activeBuilds.delete(buildKey);
       // Only clear the registry slot if it is STILL this build — a Stop may have already
       // replaced it with a newer run. End every attached stream.

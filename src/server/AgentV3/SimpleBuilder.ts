@@ -585,6 +585,12 @@ export interface SimpleBuildDeps {
    * Fired BEFORE the `minFiles` bail, so a plan too small for this lane still reports its size.
    */
   onPlanned?: (plannedFiles: number) => void;
+  /**
+   * Called when the lane stops WRITING the app and starts VERIFYING and REPAIRING one that already
+   * runs. The preview uses it to stop hard-remounting under a user mid-repair — see
+   * components/agentv3/previewReloadPolicy.ts.
+   */
+  onSettling?: () => void;
 }
 
 export interface SimpleBuildResult {
@@ -967,6 +973,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // (its own repair loop + readiness gate finish it) — never worse than today, never a fake success.
   let typecheckRan: boolean | undefined;
   if (deps.verify) {
+    // From here on the app EXISTS and runs; everything below rewrites files in a working app. That is
+    // the exact window in which reloading the preview shows somebody their app breaking.
+    try { deps.onSettling?.(); } catch { /* a preview hint must never affect a build */ }
     const maxRepairs = deps.maxRepairs ?? 2;
     const byPath = new Map(files.map((f) => [f.path, f] as const));
     // A verify THROW = the check never executed (sandbox infra failure) — record that honestly

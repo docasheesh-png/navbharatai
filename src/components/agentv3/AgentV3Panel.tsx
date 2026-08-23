@@ -4810,6 +4810,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 paneVisible={previewVisible(showWorkspace, tab)}
                 // U1 — auto-refresh the preview as files are written during the build (debounced inside).
                 reloadSignal={filesVersion}
+                buildPhase={state.buildPhase}
                 // C1 — when the panel is idle (no build running), let the preview auto-boot a dead
                 // sandbox ONCE on reopen so a returning user's live preview restores itself instead of
                 // requiring a manual "Diagnose" click. Suppressed during an active build (the live URL

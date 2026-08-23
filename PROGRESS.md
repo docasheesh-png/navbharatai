@@ -40666,3 +40666,63 @@ just the door, and that the snapshot is decided before any port is probed.
   • Two decisions still with the admin: whether `ok:true` should survive a build whose reviewer reports
     build-breaking issues (a billing question), and the 20-second resume-cutover policy, offered but not
     built.
+
+---
+
+## 2026-08-23 (late) — #2616: ignorance is not a licence to edit
+
+The admin asked whether to switch the reviewer off entirely: *"reviewer ko band kar den? yeh 99% time to
+app ko todta hai."*
+
+**Answered from the code, not from memory**, which is the only reason the answer was useful. What they
+remember was real and was fixed on 2026-08-12: Green Stop already means a VERIFIED-GREEN app is never
+silently rewritten by the reviewer — its findings become an offer. Both documented incidents (the
+44-minute report where the reviewer's fix erased a user's real .env secrets, and BENCHMARK 0's
+6.6-minute app inside a 14.3-minute build) predate it. The "99%" figure could not be verified and was
+said to be unverifiable rather than agreed with.
+
+**But one hole survived, and it is almost certainly the one being felt.** The rule was
+`!previewGreen ⇒ write`, and `previewGreen: false` has always meant two different things at once: "we
+looked and it was broken" and "we never managed to look" (no sandbox, a snapshot taken before the app
+painted, a dev server that had stopped). Only the first is evidence. In the second the app in front of
+the user is very likely fine and the reviewer rewrites it anyway — the exact re-break class Green Stop
+exists to end, surviving in the one state nobody had separated out.
+
+The rule now needs the evidence it always implied: green ⇒ suggest; the BUILD reported failure ⇒ write
+(no working app to protect); PROVEN broken ⇒ write; anything else ⇒ suggest. `previewProvenBroken` is
+set only from a conclusive verdict (`!rendered && !inconclusive && !serverDown`), and both exclusions
+are this codebase's own reasoning already written in PreviewVerify.ts — an unpainted snapshot is
+ignorance, and a dead dev server is a process problem no code edit can fix. An ABSENT signal falls on
+the safe side, so a call site that forgets to pass it suggests rather than edits.
+
+**Two existing assertions broke and both WERE the old rule** — `reviewerShouldWrite({ previewGreen:
+false }) === true` is literally `!green ⇒ write`. Restated as the new rule, keeping the intent it
+protected (a genuinely broken build is still repaired) and now requiring the evidence. The wiring test
+was repointed from the call's SHAPE to the EVIDENCE reaching the rule, because a call site that dropped
+`previewProvenBroken` would compile, pass a shape check, and silently restore the old behaviour.
+
+Nothing is lost when the reviewer stays its hand: the findings become the same offer a green app's
+findings become, and are still recorded in full in the build report.
+
+### Why "turn it off" was argued against, for the record
+
+Four things would have gone with it, and the fourth is the one that matters most: the reviewer's
+findings are the evidence every autopsy runs on; the user's "want me to fix these?" offer; critical
+fixes on builds that never went green; and the FALSE-SUCCESS GUARD — a non-green build with unresolved
+criticals is currently NOT reported ok, so switching the reviewer off would make those builds report
+success, which is both an honesty and a BILLING consequence.
+
+Also recorded: post-build work is already capped by `ADVISORY_CAP_MS = 120_000`, so disabling the
+reviewer buys at most two minutes — the same "a correctness gate is not a time saving" reasoning
+CLAUDE.md already carries for `AGENTV3_REVIEW_AUTOFIX_WARNINGS`.
+
+And #2600 (shipped the same day) means this no longer has to be argued from opinion: a build the user's
+behaviour contradicts now sends its own report, so if the reviewer is genuinely breaking apps it will
+show up by name within days.
+
+### Mobile builds for the day's milestone
+
+Android `.aab` run **#88** and iOS `.ipa` run **#64** both green; the iOS workflow waits for Apple's
+processing, so green means it genuinely reached TestFlight. #2616 landed after both, and is
+SERVER-ONLY — server changes reach installed app users immediately, so the #88 bundle is still current
+for the frontend and no rebuild is needed.

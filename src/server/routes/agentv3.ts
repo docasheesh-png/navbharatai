@@ -200,6 +200,7 @@ import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxChec
 import { designHealDecision, designHealGuardNote } from '../AgentV3/designHealGuard';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
+import { planDeployment, staticHostingRefusal } from '../AgentV3/deployPlan';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
@@ -5890,6 +5891,37 @@ export function registerAgentV3Routes(app: Express): void {
         res.status(422).json({ error: prep.reason });
         return;
       }
+      /**
+       * 0. IS THIS EVEN A WEBSITE? (admin 2026-08-23, mitrify.com.)
+       *
+       * 🔒 THE BUG THIS CLOSES: publish assumed every app is a folder of static files. An Express app
+       * was therefore uploaded to a static CDN and reported as PUBLISHED, and the user's domain served
+       * Firebase's own "Page Not Found — there was no index.html". Nothing errored. They just got a
+       * broken site and no reason, which is exactly the "looked done, was not" failure rule 2 forbids.
+       *
+       * Checked BEFORE the build on purpose: an app we cannot host is refused in a second, instead of
+       * after a full npm install and bundle that were never going to help.
+       *
+       * 🔒 REFUSES ONLY ON POSITIVE EVIDENCE of a server we cannot run — `planDeployment` returns
+       * static-sufficient for anything it does not recognise, so an unclassifiable-but-working static
+       * site publishes exactly as before. A classifier that guessed would turn this diagnostic into an
+       * outage for real users.
+       */
+      try {
+        const planFiles: Record<string, string> = {};
+        for (const p of ['package.json', 'requirements.txt', 'pyproject.toml', 'Pipfile']) {
+          try { planFiles[p] = await actuator.readFile(workspaceId, p); } catch { /* absent is normal */ }
+        }
+        const plan = planDeployment(planFiles);
+        if (!plan.staticHostingSufficient) {
+          res.status(422).json({
+            error: staticHostingRefusal(plan),
+            code: 'needs-server-hosting',
+            shape: plan.shape,
+          });
+          return;
+        }
+      } catch { /* the planner must never be what stops a publish — fall through and behave as before */ }
       // 1. BUILD. Deterministic, and its real output is returned on failure — the user gets the
       //    compiler's own reason instead of "publish failed".
       let build = await actuator.runCommand(workspaceId, 'npm run build');

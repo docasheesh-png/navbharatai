@@ -39792,3 +39792,47 @@ was wrong. Their nameservers already pointed at our managed zone, so Hostinger's
 The records live in the managed zone, which is why the fix had to be in `applyRecords`.
 
 Gate: both tsc + build + FULL vitest (17,635 passing, 1 skipped). New: `tests/ownershipConflict.test.ts`.
+
+## 2026-08-23 — "sabhi apps ko welcome karo, kisi bhi format me" (slice 1: know the shape)
+
+Admin, after the Express app published to static hosting and served "Page Not Found": *"mai dono chahta
+hu. user koi bhi app le kar aye, hamara platform sabhi apps ko welcome kare, kisi bhi format me."*
+
+**The bug this closes.** Publish assumed every app is a folder of static files. So an Express server
+was uploaded to a static CDN and reported as PUBLISHED, and the user's domain served Firebase's own
+"Page Not Found — there was no index.html". Nothing errored. They got a broken site and no reason —
+the "looked done, was not" failure rule 2 exists to prevent.
+
+**Why a PLAN and not another boolean.** `detectBackendPresence` already answers "can the in-browser
+preview run this?" — a yes/no aimed at the preview. Publishing needs a richer question, and answering
+it with one more flag is how a codebase ends up with five overlapping flags that disagree. An app is
+not backend-or-not; it is a SHAPE, and each shape has its own requirements: `static` / `spa` /
+`node-server` / `python-server` / `fullstack`.
+
+**Fullstack is the one worth getting right, and it is where competitors stop.** A React app served by
+an Express API is not "a backend app" — it is a frontend that belongs on a CDN (edge-cached, ~free)
+and an API that belongs on a Node host. Shipping the whole thing to either alone is broken or
+needlessly slow. `planDeployment` returns BOTH parts with their build command and output dir, which is
+what makes splitting them possible in the next slice.
+
+🔒 **The direction it errs in is the whole safety argument.** Anything unrecognised returns
+`staticHostingSufficient: true` — i.e. today's exact behaviour. A classifier that guessed "probably a
+backend" would start REFUSING working static sites, turning a diagnostic improvement into an outage.
+We refuse ONLY on positive evidence of a server we cannot run. Test-locked, including a null input.
+
+The check runs BEFORE the build, so an app we cannot host is refused in a second instead of after a
+full install and bundle that were never going to help; and the whole thing is wrapped so the planner
+can never itself be what stops a publish.
+
+**Still to build (this is slice 1 of 3):** actually routing a backend to a real runtime
+(`renderDeploy.ts` exists and `RENDER_API_KEY` is set), then the fullstack split — frontend to the
+CDN, API to the Node host, with the frontend's API base wired to the backend's URL. Recorded here so
+the remaining work is visible rather than implied by a "welcome any app" claim we have not finished.
+
+**Third fixed-byte-window test fixed today.** `publishSeedWiring.test.ts` held FOUR windows into the
+publish route (6000, 6000, 9000, 9000) and all four broke when the handler grew, while the code they
+assert about stayed correct — after `managedDns` (2600) and `nbaiDomainHonesty` (2200) earlier. Three
+in one day is a pattern, not an accident: a byte count is not the property under test, "inside this
+handler" is, and handlers grow.
+
+Gate: both tsc + build + FULL vitest (17,647 passing, 1 skipped).

@@ -4154,6 +4154,10 @@ export function registerAgentV3Routes(app: Express): void {
           ? { doorUrl: makeDoorPath(workspaceId, Date.now(), doorSecret(), undefined,
               previewUrlPort(typeof req.body?.previewUrl === 'string' ? req.body.previewUrl : null)) }
           : {}),
+        // The client refuses to FRAME a host whose port is down — whatever the browser gets back from
+        // it is the provider's own error page, never the user's app. Explicit and separate from
+        // `status`, so an older client that ignores it behaves exactly as before.
+        livePortUp: describesUserView ? livePortUp : null,
         serving: describesUserView ? pageRendered : null,
         servingProblems: describesUserView ? pageProblems : [],
         // The client swaps to this instead of framing a machine that no longer exists.

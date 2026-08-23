@@ -20,6 +20,7 @@ import { getProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { metricsTimeline } from '../lib/metricsTimeline';
+import { resolveEmailConfig } from '../lib/alertEmail';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
@@ -499,6 +500,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       snapshot,
       instanceUptimeSeconds: Math.round(process.uptime()),
       liveSandboxes,
+      // Whether alerts can reach the admin OUTSIDE the app, and plainly why not when they cannot.
+      // Never a secret: only the configured flag and the reason travel, never the key or the sender.
+      emailAlerts: (() => {
+        const cfg = resolveEmailConfig();
+        return { configured: cfg.configured, reason: cfg.reason, recipients: cfg.configured ? cfg.to.length : 0 };
+      })(),
       alerts: guard(() => evaluateAlerts(snapshot)).value ?? [],
       health: health.value,
       healthError: health.error,

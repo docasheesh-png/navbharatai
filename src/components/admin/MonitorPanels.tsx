@@ -20,7 +20,7 @@
  * surface (White-Label Law §3). None of it may ever be rendered on a user-facing screen.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, RefreshCw, Cpu, IndianRupee, CheckCircle2, Clock, Server, Eye } from 'lucide-react';
+import { Activity, AlertTriangle, RefreshCw, Cpu, IndianRupee, CheckCircle2, Clock, Server, Eye, Bell } from 'lucide-react';
 import { stackedBarLayout, linePoints, donutSegments, axisTickIndices } from '../ui/charts/chartGeometry';
 import {
   RANGE_OPTIONS, timeLabel, humanDuration, percent, compactNumber, microUsdToInr, formatInr,
@@ -36,6 +36,8 @@ interface MonitorResponse {
   instanceUptimeSeconds: number;
   /** Sandboxes running right now (durable, cross-instance). null = the store could not be read. */
   liveSandboxes: number | null;
+  /** Can alerts reach the admin outside the app? Carries the reason, never the key. */
+  emailAlerts?: { configured: boolean; reason: string; recipients: number };
   alerts: any[];
   health: { score: any; inputs: any } | null;
   healthError: string | null;
@@ -328,6 +330,28 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
           Icon={Cpu}
         />
       </div>
+
+      {/* ── HOW ALERTS REACH YOU. Shown whether or not anything is firing, because the moment that
+          matters is BEFORE an incident: an admin who believes they will be emailed, and will not,
+          finds out at the worst possible time. */}
+      {data?.emailAlerts && (
+        <div className={`rounded-[1.25rem] border px-4 py-3 flex items-start gap-3 ${
+          data.emailAlerts.configured
+            ? 'bg-emerald-500/5 border-emerald-500/25'
+            : 'bg-[#161b22] border-white/10'}`}>
+          <Bell className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${data.emailAlerts.configured ? 'text-emerald-400' : 'text-[#484f58]'}`} />
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-widest text-white">
+              Alerts {data.emailAlerts.configured ? 'reach you by app and email' : 'reach you in the app only'}
+            </p>
+            <p className="text-[10px] text-[#8b949e] mt-0.5 leading-relaxed">
+              {data.emailAlerts.configured
+                ? `The notification bell, plus email to ${data.emailAlerts.recipients} address${data.emailAlerts.recipients === 1 ? '' : 'es'}.`
+                : `${data.emailAlerts.reason} Until then a problem overnight is seen when you next open the app.`}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── Alerts, when the platform's own thresholds fire ── */}
       {alerts.length > 0 && (

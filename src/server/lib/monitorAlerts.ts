@@ -34,6 +34,7 @@ import type { MetricsSnapshot } from './metrics';
 import { metricsTimeline, summarize, type TimelineSummary } from './metricsTimeline';
 import { saveNotification } from './AdminNotificationStore';
 import { adminEmailList } from './adminEmails';
+import { resolveEmailConfig, sendAlertEmail } from './alertEmail';
 
 export const ALERT_STATE_COLLECTION = 'monitor_alert_state';
 export const ALERT_STATE_DOC = 'current';
@@ -310,9 +311,20 @@ export async function runMonitorAlertSweep(): Promise<AlertSweepResult> {
       }
     },
     notify: async (message) => {
-      // One in-app notification per admin — the same inbox the NotificationBell already reads.
+      // THE BELL FIRST, ALWAYS. It is the delivery path that is guaranteed to exist, so it must not
+      // depend on an optional one: an email provider being down, slow or misconfigured can never cost
+      // the admin the in-app notification.
       for (const email of adminEmailList()) {
         await saveNotification({ message, target: { type: 'user', email }, createdBy: 'monitor' }).catch(() => {});
+      }
+      // …then email, IF it is configured. An unconfigured provider is a no-op here and an honest
+      // "not configured" line on the Monitor — never a silent failure and never a false "sent".
+      const cfg = resolveEmailConfig();
+      if (!cfg.configured) return;
+      const result = await sendAlertEmail(cfg, message).catch((err) => ({ sent: false, error: String(err) }));
+      if (!result.sent) {
+        // Logged, not swallowed: an alerting channel that fails quietly is how alerting rots.
+        console.warn('[MONITOR-ALERT] email delivery failed:', result.error);
       }
     },
   });

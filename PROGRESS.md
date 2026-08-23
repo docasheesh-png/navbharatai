@@ -40530,3 +40530,51 @@ Alerts reach the in-app notification bell only. There is **no email-sending code
 all** — no mail dependency in `package.json`, no provider key. So an overnight failure is seen the next
 morning. Building it needs a provider account and an API key, which is the admin's decision and the
 admin's money; the honest state is to say so rather than half-build it.
+
+---
+
+## 2026-08-23 (Phase 3) — Alerts can now leave the app
+
+Alerts reached the in-app notification bell only, which is seen when someone opens the app. A failure
+at 2am was a morning discovery. This adds email delivery — and, just as importantly, makes the
+UNCONFIGURED state visible instead of silent.
+
+### The design decisions worth keeping
+
+**No new dependency.** The send is a POST to the provider's HTTP API using the runtime's own `fetch`,
+not a mail SDK. A monitoring path should not be able to break a build by adding a package, and the
+request is four lines of JSON.
+
+**"Not configured" is a real, visible state.** With no key or no verified sender, the Monitor shows a
+line saying alerts reach the app only, and exactly which setting is missing. It never silently no-ops.
+An admin who BELIEVES they will be emailed, and will not, finds out at the worst possible moment — so
+the banner is shown whether or not anything is currently firing.
+
+**Every missing piece names itself.** No key, no sender, and no recipient each produce their own
+message. "Email is not set up" would leave the admin guessing which of three things to fix, and
+guessing at a config screen is how a feature stays off for months.
+
+**The key-without-sender case is treated as NOT configured.** A provider rejects a send from an
+unverified address, so without that check the key would look configured while every send failed — the
+worst of both states.
+
+**The bell is delivered FIRST and never depends on email.** It is the channel guaranteed to exist, so
+an email provider that is down, slow or misconfigured can never cost the admin the in-app
+notification. A failed send is logged with the provider's real status (401 means the key, 403 usually
+means an unverified sender) and never reported as sent.
+
+### What the admin has to do to turn it on
+
+Create a provider account (Resend's free tier is far larger than this needs), verify a sender, then
+set in Cloud Run: `ALERT_EMAIL_API_KEY`, `ALERT_EMAIL_FROM`, and optionally `ALERT_EMAIL_TO`
+(defaults to the admin list). Nothing else changes — the same alerts that already reach the bell start
+reaching the inbox. `ALERT_EMAIL_ENDPOINT` can point at another provider with a compatible shape.
+
+This closes the open item recorded earlier the same day. It was left open rather than half-built
+because it needs an account and a credential that are the admin's decision and the admin's money; the
+code is now complete and inert until those exist.
+
+### Verification
+
+`npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json --noEmit` clean · `npx vitest run` —
+**1419 files, 17,976 passed, 4 skipped, 0 failed**.

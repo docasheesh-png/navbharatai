@@ -69,13 +69,21 @@ export type DeployFn = (workspaceId: string, files: Map<string, Buffer>) => Prom
 export class FirebaseHostingDeployer {
   private readonly auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/firebase'] });
 
-  async deployStatic(workspaceId: string, files: Map<string, Buffer>): Promise<string> {
+  /**
+   * @param channelId Which Hosting channel to release onto. Defaults to the workspace's PUBLISH
+   *   channel — the one the user's own Publish button uses.
+   *
+   *   The preview snapshot passes its own instead (previewSnapshot.ts), and that separation is
+   *   load-bearing: writing a snapshot to the publish channel would mean an edit that broke the app
+   *   silently REPLACED the working version somebody had deliberately shipped. A parameter rather
+   *   than a second copy of this method, so the two paths can never drift in how they publish.
+   */
+  async deployStatic(workspaceId: string, files: Map<string, Buffer>, channelId = makeChannelId(workspaceId)): Promise<string> {
     if (files.size === 0) {
       throw new Error('No files to deploy. Ensure "npm run build" produced a dist/ directory.');
     }
     const { token, headers } = await this.authHeaders();
     const site = FIREBASE_PROJECT;
-    const channelId = makeChannelId(workspaceId);
 
     // The REAL channel URL, from Firebase — see ensureChannel for why it can never be constructed.
     const channelUrl = await this.ensureChannel(site, channelId, headers);

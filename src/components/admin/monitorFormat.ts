@@ -19,6 +19,7 @@ export interface MonitorPoint {
   inputTokens: number;
   outputTokens: number;
   costMicroUsd: number;
+  sandboxSeconds: number;
 }
 
 export const RANGE_OPTIONS = [
@@ -108,6 +109,8 @@ export function extractSeries(points: MonitorPoint[], key: SeriesKey): number[] 
 }
 
 export interface MonitorTotals {
+  /** Real E2B VM seconds the window's builds held — our infrastructure cost, not a user charge. */
+  sandboxSeconds: number;
   builds: number;
   buildsOk: number;
   buildsFailed: number;
@@ -125,8 +128,10 @@ export interface MonitorTotals {
 export function totalsFor(points: MonitorPoint[]): MonitorTotals {
   const pts = points || [];
   let builds = 0, buildsOk = 0, buildsFailed = 0, previewOk = 0, buildMs = 0, tokens = 0, costMicroUsd = 0;
+  let sandboxSeconds = 0;
   let observed = false;
   for (const p of pts) {
+    sandboxSeconds += p.sandboxSeconds || 0;
     builds += p.builds || 0;
     buildsOk += p.buildsOk || 0;
     buildsFailed += p.buildsFailed || 0;
@@ -137,6 +142,7 @@ export function totalsFor(points: MonitorPoint[]): MonitorTotals {
     if (p.observed) observed = true;
   }
   return {
+    sandboxSeconds,
     builds,
     buildsOk,
     buildsFailed,

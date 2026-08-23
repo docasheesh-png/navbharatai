@@ -40536,3 +40536,264 @@ height.
 ### Verification
 
 `npx tsc --noEmit` clean · `npx vitest run` — see the run recorded with the merge commit.
+## 2026-08-23 (Phase 1+2) — The E2B bill gets a live surface and an alarm
+
+The admin's largest single infrastructure line — measured at ~$172/month (~₹15,000) across 1,260
+sandboxes — had **no live surface at all**. Its cost appeared inside one build's report and was never
+aggregated, so it could double overnight and nothing in the product would have said a word. Token
+spend at least had FinOps findings; the VM bill had nothing.
+
+### What shipped
+
+**Real VM seconds now flow into the Monitor timeline.** `billableSandboxDetail` gained a third return
+value, `measuredSeconds`, and the reason it lives in THAT function rather than being measured again
+elsewhere is the capping rule: bill only the seconds inside this build's own window, never idle time
+between builds. That rule is subtle and hard-won, and a second copy of it would drift until the cost
+graph and the bill described different builds. **One measurement, three views of it.**
+
+The distinction that matters: `seconds`/`usd` are what the USER was charged, and are deliberately zero
+whenever sandbox billing is off or no rate is configured — a money path must never charge for
+something we cannot price. But NavBharatAI **paid for that VM time either way**, and that is the
+figure the admin needs.
+
+**Four new tiles**: Live sandboxes · VM time · VM cost · Total spend (AI + VM).
+
+`Live sandboxes` reads the DURABLE sandbox records, not the in-process active-build map — that map
+lives in one Cloud Run instance's memory, so a tile built on it would show a different number
+depending on which instance answered. That is worse than no tile, because it looks authoritative.
+Unreadable store ⇒ `—`, never a confident zero.
+
+**Money is shown only when `E2B_USD_PER_HOUR` is really set.** `sandboxUsdPerHour` falls back to a
+round $0.10 that its own docs admit is a placeholder; a guess displayed beside measured token spend
+reads as equally real, and this is the number the admin would act on to cut a bill. Seconds are always
+shown; rupees are `null` with the tile saying why. The SERVER prices it (it holds the rate) and the
+client just reads it — a client-side copy of the same sum was written and then deleted, because two
+copies are how two surfaces start disagreeing.
+
+**A spike alert.** VM spend in the recent window against the same-length window before it — a baseline
+the data itself supplies, with no stored "normal day" to maintain. Both halves come from ONE query,
+split in memory, because two reads could straddle a bucket flush and disagree. Two guards stop it
+crying wolf: a minimum absolute spend (₹2 → ₹6 is a 3× rise and completely uninteresting), and a zero
+baseline is "nothing to compare", not an infinite spike. It rides the SAME cooldown/all-clear
+machinery as the other alerts — a second notifier would mean a second set of dedupe bugs.
+
+**A cost spike is NOT gated on the build window being judgeable.** An idle VM burning money with nobody
+building is exactly the case worth hearing about.
+
+Tunables: `MONITOR_SANDBOX_SPIKE_MULTIPLE` (3), `MONITOR_SANDBOX_SPIKE_MIN_USD` (1).
+
+### A test that failed for the right reason
+
+`tests/sandboxBilling.test.ts` pinned the old return shape and went red. Its INTENT — a money path
+must fail toward charging less — is untouched, so it was updated to the new shape and **strengthened**:
+there is now an explicit test that the admin's `measuredSeconds` can never reach the billing decision.
+Without it, unbilled VM time could one day land on a user's invoice, which is the exact thing the
+sandbox-billing flags exist to prevent.
+
+### Verification
+
+`npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json --noEmit` clean · `npx vitest run` —
+**1418 files, 17,961 passed, 4 skipped, 0 failed**.
+
+### Still open (rule 6): email alerts
+
+Alerts reach the in-app notification bell only. There is **no email-sending code in this repository at
+all** — no mail dependency in `package.json`, no provider key. So an overnight failure is seen the next
+morning. Building it needs a provider account and an API key, which is the admin's decision and the
+admin's money; the honest state is to say so rather than half-build it.
+
+---
+
+## 2026-08-23 (Phase 3) — Alerts can now leave the app
+
+Alerts reached the in-app notification bell only, which is seen when someone opens the app. A failure
+at 2am was a morning discovery. This adds email delivery — and, just as importantly, makes the
+UNCONFIGURED state visible instead of silent.
+
+### The design decisions worth keeping
+
+**No new dependency.** The send is a POST to the provider's HTTP API using the runtime's own `fetch`,
+not a mail SDK. A monitoring path should not be able to break a build by adding a package, and the
+request is four lines of JSON.
+
+**"Not configured" is a real, visible state.** With no key or no verified sender, the Monitor shows a
+line saying alerts reach the app only, and exactly which setting is missing. It never silently no-ops.
+An admin who BELIEVES they will be emailed, and will not, finds out at the worst possible moment — so
+the banner is shown whether or not anything is currently firing.
+
+**Every missing piece names itself.** No key, no sender, and no recipient each produce their own
+message. "Email is not set up" would leave the admin guessing which of three things to fix, and
+guessing at a config screen is how a feature stays off for months.
+
+**The key-without-sender case is treated as NOT configured.** A provider rejects a send from an
+unverified address, so without that check the key would look configured while every send failed — the
+worst of both states.
+
+**The bell is delivered FIRST and never depends on email.** It is the channel guaranteed to exist, so
+an email provider that is down, slow or misconfigured can never cost the admin the in-app
+notification. A failed send is logged with the provider's real status (401 means the key, 403 usually
+means an unverified sender) and never reported as sent.
+
+### What the admin has to do to turn it on
+
+Create a provider account (Resend's free tier is far larger than this needs), verify a sender, then
+set in Cloud Run: `ALERT_EMAIL_API_KEY`, `ALERT_EMAIL_FROM`, and optionally `ALERT_EMAIL_TO`
+(defaults to the admin list). Nothing else changes — the same alerts that already reach the bell start
+reaching the inbox. `ALERT_EMAIL_ENDPOINT` can point at another provider with a compatible shape.
+
+This closes the open item recorded earlier the same day. It was left open rather than half-built
+because it needs an account and a credential that are the admin's decision and the admin's money; the
+code is now complete and inert until those exist.
+
+### Verification
+
+`npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json --noEmit` clean · `npx vitest run` —
+**1419 files, 17,976 passed, 4 skipped, 0 failed**.
+## 2026-08-23 (evening) — the four that finish "app tute na", and the blind spot behind all of them
+
+The admin's standing instruction for this batch: *"ab jo bacha hai, woh aise kar ke build karo, jisse v5 jo
+app banaye to tute na… jitna ho sake perfect no error app bane."*
+
+### #2602 — a runtime repair must leave the app BETTER, not merely still painting
+
+**This corrects an entry written earlier the same day.** That one recorded the runtime auto-fix loop as
+"the same unguarded shape #2594 fixed". It is not: `verifyAfterFix` already snapshots the green app,
+applies the repair, re-renders it in a real browser and rolls back if it broke. Reading the code rather
+than trusting my own note is what found the real gap.
+
+That net asks exactly one question — did the app still RENDER — and rendering is a weaker test than
+working. A repair that fixes one runtime error while introducing two more still paints, so it is kept,
+and with `AGENTV3_AUTOFIX_ATTEMPTS` defaulting to 1 that is the version that ships: one error before we
+touched the app, three after, every gate saying yes.
+
+`judgeRuntimeRepair` now sits beside `judgeRepair` in ONE module, with the same three answers and the
+same reasoning, differing only in the unit counted. A test asserts the two agree on identical evidence,
+so a future edit cannot let a repair be judged good by one path and bad by the other. Order is
+deliberate: the render check short-circuits first (a broken app is never console-counted), the count is
+read after the verify browse has reloaded the page, and an unreadable console is UNPROVEN — it keeps the
+repair, exactly as the existing net keeps an inconclusive render.
+
+### #2604 — the one command no gate ever ran
+
+`BuildOutcome.ts` has always declared `prodBuildOk?: boolean | null` with the comment "tsc clean but
+`npm run build` broke", and **nothing in the codebase ever set it.** `tsc --noEmit` type-checks, the
+preview proves the DEV server renders, the vaccine runs the app's tests — nobody ran the command Publish,
+the APK workflow and every deploy provider depend on.
+
+That blind spot is why the scaffold could ship a build script pointing at a tsconfig it never wrote,
+failing on EVERY app that provider made, invisibly, until a user hit it mid-build (#2592). The dev server
+never runs the build script, so no preview could ever have shown it.
+
+Deliberately a DETECTOR, not a gate: it runs after the app is delivered and green, can never block or
+fail a build, and does NOT feed `classifyBuildOutcome` — a green, rendering app whose production build is
+broken is a working app with a shipping problem, and calling it BUILD_FAILED would both lie to the user
+and change what they are charged. Three outcomes, not two: "could not run" is UNVERIFIED and is not told
+to the user at all, because it is our infrastructure and not their app. A placeholder build script
+(`echo`, `true`, `exit 0`, bare `:`) is skipped rather than passed.
+
+### #2613 — a finished app outlives its machine
+
+By the time a build is green we already HAVE the built output — #2604 just produced `dist/` to prove the
+app packages. Those bytes ARE the app: no VM, no port, no dev server, no wake-up. They are kept on the
+same permanent host Publish uses, and the door hands the user THAT when the machine is finally gone.
+
+**Its own channel, and that is the load-bearing decision.** `deployStatic` publishes to
+`makeChannelId(workspaceId)` — the channel the user's own Publish button uses. A snapshot written there
+would mean an edit that broke the app silently REPLACED the version somebody deliberately shipped. The
+channel is now a defaulted parameter, so the two paths cannot drift in how they publish while remaining
+unable to collide.
+
+Only when the machine is genuinely gone: `asleep` gets the snapshot, `starting` does not — a booting
+machine is seconds away, and replacing a live app that is still starting with a stale copy of itself
+would lose the very edits the user is waiting to see. A full-stack app is SKIPPED rather than
+half-served: its server runs inside the sandbox, so a static copy would render the shell and fail every
+request behind it — an app that looks alive and does nothing is worse than an honest expiry. Judged from
+the app's own package.json, because the framework label the client sends is a request and the scripts are
+a fact. And the user is told which version they are looking at, in our own chrome, not styled as an error.
+
+### The method note this batch earned twice
+
+Four existing tests broke across these changes, and every one broke for the same reason:
+
+**A test that locates code by POSITION, or by a FIXED CHARACTER WINDOW, silently stops covering what it
+names the moment anything is inserted.**
+
+  • `previewDoorRoute` found the port redirect as "the first res.redirect in the slice"; the snapshot
+    fallback added an earlier one, to a permanent host with no port to verify.
+  • `previewDoorRoute` (again, earlier in the day) sliced to the NEXT route, and a newly added route
+    landed between them, so "every await is bounded" began measuring a different route entirely.
+  • `prodBuildGateWiring` read a fixed 2600-character window that the snapshot block pushed its catch past.
+  • `greenFreeze` pinned a line by the comment that happened to follow it.
+
+All four were REPOINTED, never weakened, and each repoint states the guarantee more directly than the
+locator it replaced. Two gained new assertions the original never had — that the door slice really is
+just the door, and that the snapshot is decided before any port is probed.
+
+### Open, honestly
+
+  • A deep agentic build with `AGENTV3_BLUEPRINT` off never learns a plan size, so the measured ETA does
+    not engage and behaviour is byte-identical to before.
+  • Full-stack apps get no snapshot, by design — the honest "preview expired" page stands for them.
+  • Two decisions still with the admin: whether `ok:true` should survive a build whose reviewer reports
+    build-breaking issues (a billing question), and the 20-second resume-cutover policy, offered but not
+    built.
+
+---
+
+## 2026-08-23 (late) — #2616: ignorance is not a licence to edit
+
+The admin asked whether to switch the reviewer off entirely: *"reviewer ko band kar den? yeh 99% time to
+app ko todta hai."*
+
+**Answered from the code, not from memory**, which is the only reason the answer was useful. What they
+remember was real and was fixed on 2026-08-12: Green Stop already means a VERIFIED-GREEN app is never
+silently rewritten by the reviewer — its findings become an offer. Both documented incidents (the
+44-minute report where the reviewer's fix erased a user's real .env secrets, and BENCHMARK 0's
+6.6-minute app inside a 14.3-minute build) predate it. The "99%" figure could not be verified and was
+said to be unverifiable rather than agreed with.
+
+**But one hole survived, and it is almost certainly the one being felt.** The rule was
+`!previewGreen ⇒ write`, and `previewGreen: false` has always meant two different things at once: "we
+looked and it was broken" and "we never managed to look" (no sandbox, a snapshot taken before the app
+painted, a dev server that had stopped). Only the first is evidence. In the second the app in front of
+the user is very likely fine and the reviewer rewrites it anyway — the exact re-break class Green Stop
+exists to end, surviving in the one state nobody had separated out.
+
+The rule now needs the evidence it always implied: green ⇒ suggest; the BUILD reported failure ⇒ write
+(no working app to protect); PROVEN broken ⇒ write; anything else ⇒ suggest. `previewProvenBroken` is
+set only from a conclusive verdict (`!rendered && !inconclusive && !serverDown`), and both exclusions
+are this codebase's own reasoning already written in PreviewVerify.ts — an unpainted snapshot is
+ignorance, and a dead dev server is a process problem no code edit can fix. An ABSENT signal falls on
+the safe side, so a call site that forgets to pass it suggests rather than edits.
+
+**Two existing assertions broke and both WERE the old rule** — `reviewerShouldWrite({ previewGreen:
+false }) === true` is literally `!green ⇒ write`. Restated as the new rule, keeping the intent it
+protected (a genuinely broken build is still repaired) and now requiring the evidence. The wiring test
+was repointed from the call's SHAPE to the EVIDENCE reaching the rule, because a call site that dropped
+`previewProvenBroken` would compile, pass a shape check, and silently restore the old behaviour.
+
+Nothing is lost when the reviewer stays its hand: the findings become the same offer a green app's
+findings become, and are still recorded in full in the build report.
+
+### Why "turn it off" was argued against, for the record
+
+Four things would have gone with it, and the fourth is the one that matters most: the reviewer's
+findings are the evidence every autopsy runs on; the user's "want me to fix these?" offer; critical
+fixes on builds that never went green; and the FALSE-SUCCESS GUARD — a non-green build with unresolved
+criticals is currently NOT reported ok, so switching the reviewer off would make those builds report
+success, which is both an honesty and a BILLING consequence.
+
+Also recorded: post-build work is already capped by `ADVISORY_CAP_MS = 120_000`, so disabling the
+reviewer buys at most two minutes — the same "a correctness gate is not a time saving" reasoning
+CLAUDE.md already carries for `AGENTV3_REVIEW_AUTOFIX_WARNINGS`.
+
+And #2600 (shipped the same day) means this no longer has to be argued from opinion: a build the user's
+behaviour contradicts now sends its own report, so if the reviewer is genuinely breaking apps it will
+show up by name within days.
+
+### Mobile builds for the day's milestone
+
+Android `.aab` run **#88** and iOS `.ipa` run **#64** both green; the iOS workflow waits for Apple's
+processing, so green means it genuinely reached TestFlight. #2616 landed after both, and is
+SERVER-ONLY — server changes reach installed app users immediately, so the #88 bundle is still current
+for the frontend and no rebuild is needed.

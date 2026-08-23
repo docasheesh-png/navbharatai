@@ -65,7 +65,7 @@ export interface MetricsSnapshot {
  */
 export interface MetricsSink {
   onModelCall?(provider: string, inputTokens: number, outputTokens: number, costUsd: number): void;
-  onBuild?(o: { ok: boolean; previewAllowed: boolean; isEdit?: boolean; ms: number; repairAttempts?: number }): void;
+  onBuild?(o: { ok: boolean; previewAllowed: boolean; isEdit?: boolean; ms: number; repairAttempts?: number; sandboxSeconds?: number }): void;
 }
 
 let _sink: MetricsSink | null = null;
@@ -105,7 +105,7 @@ export class MetricsRegistry {
   }
 
   /** Record the outcome of one build/edit run. */
-  recordBuild(o: { ok: boolean; previewAllowed: boolean; isEdit?: boolean; ms: number; repairAttempts?: number }): void {
+  recordBuild(o: { ok: boolean; previewAllowed: boolean; isEdit?: boolean; ms: number; repairAttempts?: number; /** Real E2B VM seconds this build held — passed to the sink for the admin cost view, deliberately NOT added to MetricsSnapshot (which feeds insights/FinOps/health, none of which judge infra time). */ sandboxSeconds?: number }): void {
     this.builds.total += 1;
     if (o.ok) this.builds.succeeded += 1; else this.builds.failed += 1;
     if (o.previewAllowed) this.builds.previewAllowed += 1;

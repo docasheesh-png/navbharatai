@@ -309,6 +309,7 @@ import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage
 import { previewKeepAliveEnabled, isTopLevelNavigation, shouldServeKeepAliveShell, keepAliveShellPage } from '../AgentV3/previewKeepAlive';
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
+import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE } from '../AgentV3/previewSnapshot';
 import { scoreBuildOutcome, shouldAutoReport, autoReportReason, complaintInText } from '../AgentV3/buildOutcomeSignals';
 import { buildOutcomeStore, buildOutcomeTrackingEnabled, watchedMsFrom, type BuildOutcomeRecord } from '../AgentV3/BuildOutcomeStore';
 import { buildPortSweepCommand, portCandidates, parsePortSweep } from '../AgentV3/sandbox/EngineerAI/actuators/portSweep';
@@ -1292,12 +1293,25 @@ export interface BillingLedgerView {
  * minutes during the change and then deleted, because both of its call sites had moved and a helper
  * nothing calls is the start of a second implementation.
  */
+/**
+ * `measuredSeconds` is a THIRD number, and it answers a different question from the other two.
+ *
+ * `seconds`/`usd` are what the USER was charged, and they are deliberately zero whenever sandbox
+ * billing is off or no real rate is configured — a money path must never charge for something we
+ * cannot price. But NavBharatAI still PAID for that VM time either way, and the admin's Monitor needs
+ * that figure to answer "why is the E2B bill this size?".
+ *
+ * It is returned from THIS function rather than measured again elsewhere: the capping rule above (bill
+ * only the seconds inside this build's own window, never idle time between builds) is subtle and
+ * hard-won, and a second copy of it would drift until the cost graph and the bill described different
+ * builds. One measurement, three views of it.
+ */
 function billableSandboxDetail(
   actuator: unknown,
   workspaceId: string | null | undefined,
   buildStartedAtMs?: number,
-): { seconds: number; usd: number } {
-  const none = { seconds: 0, usd: 0 };
+): { seconds: number; usd: number; measuredSeconds: number } {
+  const none = { seconds: 0, usd: 0, measuredSeconds: 0 };
   try {
     const fn = (actuator as any)?.sandboxHeldSeconds;
     if (typeof fn !== 'function' || !workspaceId) return none;
@@ -1324,8 +1338,11 @@ function billableSandboxDetail(
     const billable = Math.min(seconds, buildSeconds);
     const usd = sandboxBillableUsd(sandboxCost(billable));
     // Seconds travel only when they were CHARGED. Reporting time we did not bill for would put a
-    // number next to a ₹0 the user cannot reconcile.
-    return usd > 0 ? { seconds: billable, usd } : none;
+    // number next to a ₹0 the user cannot reconcile. `measuredSeconds` carries the real VM time
+    // regardless, for the admin-only cost view — see the note on the return type.
+    return usd > 0
+      ? { seconds: billable, usd, measuredSeconds: billable }
+      : { ...none, measuredSeconds: billable };
   } catch {
     return none;
   }
@@ -4125,7 +4142,18 @@ async function noteBuildOutcome(
       const sandboxId = actuator.getSandboxId
         ? await raceTimeout(actuator.getSandboxId(ws), 4_000, 'doorSandboxId').catch(() => null)
         : null;
-      if (!sandboxId) return page(200, 'asleep');
+      if (!sandboxId) {
+        // THE MACHINE IS GONE, NOT ASLEEP. Retrying against it will never succeed, so if a VM-free
+        // copy of this app exists, hand the user their app rather than a spinner. Only in this state:
+        // a sandbox that exists but has not opened its port yet is usually seconds away, and replacing
+        // a live app that is still starting with a STALE copy of itself would lose the very edits the
+        // user is waiting to see.
+        const rec = await raceTimeout(sandboxStore.getRecord(ws), 3_000, 'doorSnapshot').catch(() => null);
+        if (shouldServeSnapshot({ enabled: previewSnapshotEnabled(), doorState: 'asleep', snapshotUrl: rec?.snapshotUrl })) {
+          return res.redirect(302, String(rec!.snapshotUrl));
+        }
+        return page(200, 'asleep');
+      }
       // The PROVEN port leads the sweep — recorded the moment this app last genuinely rendered — and
       // the sweep verifies whatever it claims: the door never redirects to a port it did not just see
       // answer. This is what kills the 3000-vs-5000 loop: no url is ever believed about a port again.
@@ -4313,6 +4341,25 @@ async function noteBuildOutcome(
       );
       const describesUserView = measurementDescribesUserView(urlVerdict);
 
+      // Is the user currently being shown the VM-free copy? True only when the machine is genuinely
+      // gone AND a snapshot exists — the same condition the door itself applies, read from the same
+      // record, so the two can never tell the user different stories.
+      let snapshotServing = false;
+      let snapshotTakenAt: number | null = null;
+      try {
+        if (previewSnapshotEnabled() && livePortUp !== true) {
+          const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'healthSnapshot').catch(() => null);
+          const sandboxGone = !(await raceTimeout(
+            buildActuator().getSandboxId ? buildActuator().getSandboxId!(workspaceId) : Promise.resolve(null),
+            3_000, 'healthSandboxId',
+          ).catch(() => null));
+          if (sandboxGone && shouldServeSnapshot({ enabled: true, doorState: 'asleep', snapshotUrl: rec?.snapshotUrl })) {
+            snapshotServing = true;
+            snapshotTakenAt = typeof rec?.snapshotAt === 'number' ? rec.snapshotAt : null;
+          }
+        }
+      } catch { /* the note is a nicety; the door already does the real work */ }
+
       const health = classifyPreviewHealth({
         hasFiles: fileCount > 0,
         liveBackend: diag.livePreviewAvailable,
@@ -4346,6 +4393,11 @@ async function noteBuildOutcome(
         currentPreviewUrl: currentPreviewUrl || null,
         previewUrlStale: urlVerdict === 'stale',
         ...(urlVerdict === 'stale' ? { previewUrlNote: stalePreviewMessage() } : {}),
+        // A VM-FREE COPY EXISTS AND THE MACHINE DOES NOT. The door is already handing the user their
+        // app rather than a spinner (previewSnapshot.ts); this is what lets the surface SAY so. It
+        // matters: they are looking at the last built version, and without being told they would
+        // report a bug about an edit that is simply not in this copy.
+        ...(snapshotServing ? { snapshotServing: true, snapshotNote: SNAPSHOT_NOTE, snapshotAt: snapshotTakenAt } : {}),
       });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
@@ -8555,7 +8607,7 @@ async function noteBuildOutcome(
       let watchdogBilledUsd = 0;
       // Measured OUTSIDE the try, because the user-facing breakdown below needs the same pair the bill
       // used — a second measurement taken later would count different seconds.
-      let watchdogLivePreview = { seconds: 0, usd: 0 };
+      let watchdogLivePreview = { seconds: 0, usd: 0, measuredSeconds: 0 };
       if (ok && billingCtx.providerLedger) {
         try {
           watchdogLivePreview = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt);
@@ -8567,6 +8619,7 @@ async function noteBuildOutcome(
             isEdit: isEditMode,
             ms: Date.now() - (billingCtx.buildStartedAt ?? Date.now()),
             providerUsage: decided.reconciledProviderUsage,
+            sandboxSeconds: watchdogLivePreview.measuredSeconds,
           });
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
           buildDiagRef?.setCacheReadInputTokens(billingCtx.cacheReadInputTokens ?? 0);
@@ -12993,6 +13046,16 @@ async function noteBuildOutcome(
       // may — a build that merely "finished" is not proof the app works, and protecting a state we
       // never verified would be the same lie in a new place.
       let previewGreen = false;
+      /**
+       * Did we OPEN the app and SEE it broken — as opposed to never managing to look?
+       *
+       * `previewGreen === false` has always meant two different things at once: "we looked and it was
+       * broken" and "we could not look". Only the first is evidence, and only the first is a reason to
+       * let the reviewer rewrite a build that otherwise reports success. Set exclusively where a
+       * conclusive verdict says the app did not render — never on an inconclusive snapshot (ignorance)
+       * and never on a dead dev server (a process problem no code edit can fix). See greenReviewPolicy.
+       */
+      let previewProvenBroken = false;
       // THE WAKE-UP GUARANTEE, as a fact rather than a hope. `true` = the revival recipe is stored AND
       // was read back, so this preview can be brought up again without guessing. `false` = the preview
       // works but the recipe could not be stored, which the user is told plainly at the only moment it
@@ -13015,6 +13078,9 @@ async function noteBuildOutcome(
           // admin actually saw, yet the rescue upgraded to success). The full-workspace readiness result
           // that found it is already on the diagnostics timeline — no re-analysis.
           const runtimeCrashBlocker = buildDiag.hasRuntimeCrashBlocker();
+          // We looked, the answer was conclusive, and the app did not render. That — and only that — is
+          // evidence a repair has something real to aim at.
+          if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
           if (renderRescueConfirmsSuccess({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length, runtimeCrashBlocker })) {
             result = { ...result, ok: true, summary: result.summary || 'The app builds and the live preview renders correctly.' };
             renderRescued = true;
@@ -13070,6 +13136,7 @@ async function noteBuildOutcome(
           try {
             if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
           } catch { /* console capture is best-effort */ }
+          if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
           if (verdict.rendered && consoleErrs.length === 0) {
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Preview verified — I opened the running app in a browser and it renders correctly.', ts: Date.now() });
             // Honesty upgrade (autopsy 2026-07-11): the real-browser check just CONFIRMED the app renders,
@@ -13633,6 +13700,37 @@ async function noteBuildOutcome(
             });
             const note = prodBuildUserNote(verdict);
             if (note) events.emit({ type: 'narration', agent: 'architect', text: note, ts: Date.now() });
+            // A FINISHED APP SHOULD NOT NEED A RENTED COMPUTER TO STAY ALIVE (previewSnapshot.ts).
+            //
+            // The build we just ran to prove this app packages ALSO produced its `dist/` — and those
+            // bytes are the app. They need no VM, no port and no wake-up. Keeping them on the same
+            // permanent host Publish uses means that when the sandbox is finally gone (it pauses in
+            // five idle minutes and expires soon after), the user sees their app instead of a page
+            // retrying against a machine that is never coming back.
+            //
+            // ITS OWN CHANNEL, never the publish one: a snapshot must never be able to replace the
+            // version somebody deliberately shipped. Skipped entirely for a full-stack app, whose
+            // server lives inside the sandbox — a static copy of that would render the shell and fail
+            // every request behind it, which is worse than an honest expiry.
+            if (verdict.ok && previewSnapshotEnabled() && snapshotSuitable(pkgRaw) && actuator.downloadDistFiles) {
+              try {
+                const dist = await withTimeout(actuator.downloadDistFiles(workspaceId), 60_000, 'snapshot-dist');
+                if (dist && dist.size > 0) {
+                  const url = await withTimeout(
+                    new FirebaseHostingDeployer().deployStatic(workspaceId, dist, snapshotChannelId(workspaceId)),
+                    90_000, 'snapshot-deploy',
+                  );
+                  if (url) {
+                    await sandboxStore.saveSnapshot(workspaceId, url, Date.now()).catch(() => {});
+                    buildDiag.record({
+                      phase: 'readiness', severity: 'info', code: 'PREVIEW_SNAPSHOT_SAVED',
+                      message: 'Kept a permanent copy of this build, so the preview still works after its live server expires.',
+                      autoResolved: true,
+                    });
+                  }
+                }
+              } catch { /* a fallback copy must never be able to affect the build it is copying */ }
+            }
           }
         } catch { /* the detector must never affect a build it is only observing */ }
       }
@@ -14312,7 +14410,7 @@ async function noteBuildOutcome(
           // and the working app ships untouched. The user's actual requests (a missing requested feature,
           // a real runtime error) are handled by their own passes and keep fixing automatically — this
           // governs only the reviewer's opinions. Kill switch: AGENTV3_GREEN_STOP=off. See greenReviewPolicy.
-          const greenStopReview = !reviewerShouldWrite({ previewGreen }) && autoFixItems.length > 0 && !isImportTurn;
+          const greenStopReview = !reviewerShouldWrite({ previewGreen, previewProvenBroken, buildOk: result.ok }) && autoFixItems.length > 0 && !isImportTurn;
           // FALSE-SUCCESS GUARD: a real build turn (never an import/survey turn, where findings stay
           // advisory by design) whose reviewer found [CRITICAL]s is NOT-ok until they are verifiably
           // fixed. Set the holder NOW (before the bounded fix pass) so the verdict is honest even if
@@ -14842,6 +14940,8 @@ async function noteBuildOutcome(
         isEdit: isEditMode,
         ms: Date.now() - buildStartedAt,
         providerUsage: reconciledProviderUsage,
+        // OUR VM cost, measured whether or not the user was charged for it.
+        sandboxSeconds: livePreviewCharge.measuredSeconds,
       });
       let effectiveBilledUsd: number = decidedBilledUsd;
       // WHY a build ended up free — recorded into the build report's billing section (admin

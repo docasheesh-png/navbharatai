@@ -7,7 +7,7 @@ import {
 
 const pt = (over: Partial<MonitorPoint>): MonitorPoint => ({
   t: 0, observed: true, builds: 0, buildsOk: 0, buildsFailed: 0, buildMs: 0,
-  previewOk: 0, aiRequests: 0, inputTokens: 0, outputTokens: 0, costMicroUsd: 0, ...over,
+  previewOk: 0, aiRequests: 0, inputTokens: 0, outputTokens: 0, costMicroUsd: 0, sandboxSeconds: 0, ...over,
 });
 
 describe('monitorFormat — unknown is never rendered as zero', () => {
@@ -165,5 +165,13 @@ describe('monitorFormat — rateTone', () => {
     expect(rateTone(0.8)).toBe('warn');
     expect(rateTone(0.4)).toBe('bad');
     expect(rateTone(null)).toBe('unknown');
+  });
+});
+
+
+describe('totalsFor — VM seconds', () => {
+  it('totals the real VM time across the window', () => {
+    const t = totalsFor([pt({ sandboxSeconds: 120 }), pt({ sandboxSeconds: 300 })]);
+    expect(t.sandboxSeconds).toBe(420);
   });
 });

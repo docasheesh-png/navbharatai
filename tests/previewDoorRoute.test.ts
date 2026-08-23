@@ -10,9 +10,13 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+// Ends at the route registered immediately AFTER the door. It used to end at `preview-health`, which
+// silently began including the keep-alive route added between them (2026-08-23) — so the "every await
+// is bounded" assertion started measuring a different route's awaits. A slice that quietly grows is a
+// test that quietly stops testing what it names.
 const door = route.slice(
   route.indexOf("app.get('/api/agentv3/preview-door'"),
-  route.indexOf("app.post('/api/agentv3/preview-health'"),
+  route.indexOf("app.post('/api/agentv3/preview-keepalive'"),
 );
 const surface = readFileSync(join(process.cwd(), 'src/components/agentv3/PreviewSurface.tsx'), 'utf8');
 
@@ -45,6 +49,12 @@ describe('the door route', () => {
   it('the PROVEN port leads the sweep — the revival recipe outranks every guess', () => {
     expect(door).toContain('sandboxStore.getRecipe(');
     expect(door).toContain('portCandidates(recipe?.port, hint)');
+  });
+
+  it('the slice really is just the door — a widened window would silently stop testing it', () => {
+    expect(door).toContain("app.get('/api/agentv3/preview-door'");
+    expect(door).not.toContain("app.post('/api/agentv3/preview-keepalive'");
+    expect(door).not.toContain("app.post('/api/agentv3/preview-health'");
   });
 
   it('every await is time-bounded — the frame must never hang on us', () => {

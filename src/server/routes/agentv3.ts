@@ -201,6 +201,7 @@ import { designHealDecision, designHealGuardNote } from '../AgentV3/designHealGu
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
+import { analyzeApiWiring } from '../AgentV3/apiWiring';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
@@ -5926,9 +5927,21 @@ export function registerAgentV3Routes(app: Express): void {
            */
           const vault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
           const key = resolveRenderKey(vault);
+          /**
+           * SHOULD this app be split at all? Only its own source can say, so the verdict is formed
+           * here from the real files and handed to the (pure) decision. `analyzeApiWiring` defaults
+           * to "ship whole", which is the answer that WORKS when we cannot tell — see apiWiring.ts.
+           */
+          let wiring: ReturnType<typeof analyzeApiWiring> | null = null;
+          if (plan.shape === 'fullstack') {
+            const src = await loadWorkspaceFiles(workspaceId).catch(() => null);
+            if (src) wiring = analyzeApiWiring(src);
+          }
           const decision = deployDecision(plan, {
             canDeploy: key !== null,
             requirement: renderRequirement(process.env, vault),
+            splitAdvised: wiring ? wiring.strategy === 'split' : undefined,
+            wholeAppNote: wiring?.summary ?? '',
           });
           res.status(422).json({ error: decision.message, code: decision.code, shape: plan.shape });
           return;

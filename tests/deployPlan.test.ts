@@ -159,3 +159,34 @@ describe('deployDecision — a refusal becomes an offer when we can really help'
     }
   });
 });
+
+describe('deployDecision — splitting is an optimisation, not a requirement', () => {
+  const fullstack = planDeployment({
+    'package.json': JSON.stringify({ dependencies: { express: '^4' }, devDependencies: { vite: '^5' } }),
+  });
+  const cap = { canDeploy: true, requirement: 'Deploying to YOUR own Render account.' };
+
+  it('🔒 an app with relative /api calls is told to ship WHOLE, not split', () => {
+    // Splitting this app gives a site whose every button fails silently — worse than not splitting,
+    // and far harder to diagnose than a page that plainly does not load.
+    const d = deployDecision(fullstack, { ...cap, splitAdvised: false, wholeAppNote: 'They belong together.' });
+    expect(d.message).toContain('whole app');
+    expect(d.message).toContain('together, exactly as it works now');
+    expect(d.message).not.toContain('server first');
+  });
+
+  it('an app built to be split still gets the split instructions', () => {
+    const d = deployDecision(fullstack, { ...cap, splitAdvised: true });
+    expect(d.message).toContain('server first');
+  });
+
+  it('no verdict formed ⇒ the previous wording stands, unchanged', () => {
+    expect(deployDecision(fullstack, cap).message).toContain('server first');
+  });
+
+  it('🔒 whichever advice is given, a static publish still never proceeds', () => {
+    for (const s of [true, false, undefined]) {
+      expect(deployDecision(fullstack, { ...cap, splitAdvised: s }).proceed).toBe(false);
+    }
+  });
+});

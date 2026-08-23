@@ -39875,3 +39875,46 @@ command and output dir, which is what makes it possible; nothing about it is cla
 has zero.
 
 Gate: both tsc + build + FULL vitest (17,653 passing, 1 skipped).
+
+### slice 3 — and the conclusion that reversed the plan
+
+The plan was: split every fullstack app — frontend to the CDN, API to a Node host. Building it made
+clear that **the textbook answer is wrong for most fullstack apps**, and that is the finding worth
+recording, not the code.
+
+**Why.** Splitting assumes the frontend can be TOLD where its API went. Most fullstack apps are not
+written that way: they call `fetch('/api/orders')` — a RELATIVE path that works precisely because one
+server serves both halves. Put that frontend on a CDN and every call goes to
+`https://theirsite.com/api/orders`, which the CDN has never heard of. The app builds, deploys, looks
+fine, and **every button silently fails** — worse than not splitting, and far harder to diagnose than
+a page that plainly does not load. Firebase Hosting cannot rescue it either: its rewrites target Cloud
+Functions, Cloud Run or a local path, never an arbitrary external URL, so there is no proxy to hide
+the seam behind.
+
+So the question is not "how do we split this?" but "SHOULD we?", and the answer is already in the code
+the user wrote (`analyzeApiWiring`):
+- reads an API base from an env var ⇒ it was BUILT to be split; inject the backend URL at build time.
+- relative `/api` paths ⇒ **do NOT split**; ship it WHOLE to the Node host, which already serves both
+  halves. Not a lesser fallback — for this app it is the correct deployment, and what the author
+  implicitly designed for.
+- hardcoded localhost ⇒ cannot work anywhere yet; name the FILE so the fix is a minute, not a hunt.
+
+🔒 **The default is "whole", never "split".** A wrong guess toward split gives a site whose every
+button fails silently; a wrong guess toward whole costs some CDN speed the user never knew they could
+have. Only one of those is a bug. Test-locked, including a null input and a README that merely
+contains a fetch call.
+
+🔒 **An env base WINS over a stray localhost or relative call.** An app that reads one was written to
+be split, and condemning it over a dev-only fallback (`import.meta.env.VITE_API_URL || 'http://localhost:3000'`
+— extremely common) would be wrong. Order is the design.
+
+🔒 **`buildEnvForSplit` never invents a variable the code does not read.** A setting nothing consumes
+is indistinguishable from a working one, and would turn a broken split into a mysterious one.
+
+**Honest state of "welcome any app".** What is now TRUE: every shape is recognised, no app can be
+published into a broken site, and each is told the correct strategy for its own code — including the
+non-obvious "do not split this". What is still NOT built: executing the split (running the frontend
+build with the injected env and deploying the two halves in order). The decision layer is complete;
+the execution of the split is not, and is not claimed to be.
+
+Gate: both tsc + build + FULL vitest (17,675 passing, 1 skipped).

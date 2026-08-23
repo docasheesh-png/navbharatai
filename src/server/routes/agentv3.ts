@@ -9,7 +9,7 @@ import { memoryLinkedSuggestions, mergeSuggestions } from '../AgentV3/memoryLink
 import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
 import { analyzeAppScope } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
-import { fullstackBootHint } from '../lib/fullstackBootHint';
+import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { requestedFeatureLabels, renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
@@ -3805,7 +3805,26 @@ export function registerAgentV3Routes(app: Express): void {
       // declared `--port 5173 --strictPort` while the framework guess waited on 3000, so a
       // healthy boot could never be seen as up (admin evidence, 2026-07-04).
       const scriptPort = devScriptPort(pkgRaw);
-      const effectivePort = scriptPort ?? expectedPort;
+      /**
+       * …AND THE APP'S OWN CODE BEATS THE FRAMEWORK GUESS (admin 2026-08-23, an Express app).
+       *
+       * 🔒 THE BUG: a server's start script is usually just `node server.js`, with the port living in
+       * the CODE as `app.listen(process.env.PORT || 5000)`. `devScriptPort` reads flags from the
+       * script, so it returned null, we fell back to the framework guess of 3000, waited on 3000 — and
+       * told the user "no service running on port 3000" about an app that was running perfectly on
+       * 5000. Exactly the 2026-07-04 `--port 5173` failure, in the one place that fix never reached.
+       *
+       * 🔒 ORDER: the script's explicit flag still wins, because a flag is a deliberate override of
+       * whatever the code defaults to. The code is consulted only where the script is silent, and the
+       * framework guess only where BOTH are — so this can add knowledge but never overrule a better
+       * source. Reading the files is best-effort; a failure leaves today's behaviour untouched.
+       */
+      let codePort: number | null = null;
+      if (scriptPort === null) {
+        const src = await loadWorkspaceFiles(workspaceId).catch(() => null);
+        if (src) codePort = serverPortFromFiles(src);
+      }
+      const effectivePort = scriptPort ?? codePort ?? expectedPort;
       if (!structure.ok) {
         let reason = structure.issues.join(' ');
         // HONESTY (build-report autopsy 2026-07-06): a MISSING package.json in the (cold/recycled)

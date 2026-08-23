@@ -54,7 +54,18 @@ export interface FullstackBootFinding {
 }
 
 /** Read a server's listen port from its source — the shapes people actually write. Null if none found. */
-function serverListenPort(src: string): number | null {
+/**
+ * The port a server's own CODE binds — the truth when the start script does not name one.
+ *
+ * 🔒 EXPORTED 2026-08-23 because it was private here while the PREVIEW path needed it and had no
+ * equivalent. That path asked only `devScriptPort` (which reads `--port N` from the start script) and
+ * fell back to a framework guess of 3000. An Express app's script is just `node server.js` — its port
+ * lives in the code, as `app.listen(process.env.PORT || 5000)` — so the guess said 3000, the app bound
+ * 5000, and the user got "Closed Port Error: no service running on port 3000" for an app that was
+ * running perfectly. Same class as the 2026-07-04 `--port 5173` incident, in the one place that fix
+ * did not reach. One implementation, both call sites.
+ */
+export function serverListenPort(src: string): number | null {
   for (const re of [
     /process\.env\.PORT\s*\)?\s*\|\|\s*(\d{2,5})/, // process.env.PORT || 5000  /  Number(process.env.PORT) || 5000
     /\bPORT\s*[:=]\s*(\d{2,5})/,                    // const PORT = 5000  /  PORT: 5000
@@ -65,6 +76,37 @@ function serverListenPort(src: string): number | null {
       const n = Number(m[1]);
       if (Number.isInteger(n) && n > 0 && n < 65_536) return n;
     }
+  }
+  return null;
+}
+
+/**
+ * Where a Node server's entry file usually lives, most specific first.
+ *
+ * 🔒 ORDER IS DELIBERATE. `server.*` is checked before `index.*` because a project containing both
+ * almost always means `server.js` is the API and `index.js` is the frontend entry — reading the
+ * frontend's port and waiting on it is the exact failure this is fixing, in a new costume.
+ */
+const SERVER_ENTRY_CANDIDATES = [
+  'server.js', 'server.ts', 'server.mjs',
+  'src/server.js', 'src/server.ts',
+  'app.js', 'app.ts', 'src/app.js', 'src/app.ts',
+  'index.js', 'index.ts', 'src/index.js', 'src/index.ts',
+];
+
+/**
+ * The port this project's server binds, read from whichever entry file actually declares one.
+ *
+ * Returns null when no candidate declares a port — the caller then keeps its own fallback, so this can
+ * only ever ADD knowledge, never replace a better answer with a worse one.
+ */
+export function serverPortFromFiles(files: Record<string, string>): number | null {
+  if (!files || typeof files !== 'object') return null;
+  for (const path of SERVER_ENTRY_CANDIDATES) {
+    const src = files[path];
+    if (typeof src !== 'string' || !src) continue;
+    const port = serverListenPort(src);
+    if (port !== null) return port;
   }
   return null;
 }

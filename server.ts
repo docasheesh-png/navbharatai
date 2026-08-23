@@ -89,6 +89,7 @@ import { handleSonicUpgrade } from './src/server/sonic/sonicWs';
 import { registerSonicRoutes } from './src/server/sonic/sonicRoute';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
+import { attachMetricsTimeline } from './src/server/lib/metricsTimeline';
 import { registerSyncRoutes } from './src/server/routes/sync';
 import { registerProfileRoutes } from './src/server/routes/profile';
 import { registerExportRoutes } from './src/server/routes/export';
@@ -624,6 +625,10 @@ setInterval(() => {
   registerSyncRoutes(app);
   registerPaymentRoutes(app, paymentLimiter);
   registerAdminRoutes(app, adminLimiter);
+  // MONITOR — point the shared metrics registry at the time-series store, ONCE. Every existing
+  // getMetrics().recordBuild/recordModelCall call site then feeds the admin Monitor's charts with no
+  // change at those call sites (see metricsTimeline.ts for why it is a sink and not a direct import).
+  attachMetricsTimeline();
   // P2.1 — observability: recent distributed traces + live metrics (admin-gated).
   registerObservabilityRoutes(app);
   // P-PME.2 — release-notes generator (stateless blueprint-diff → structured notes).

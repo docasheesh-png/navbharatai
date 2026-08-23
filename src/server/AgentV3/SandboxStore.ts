@@ -83,6 +83,27 @@ class SandboxStore {
   }
 
   /**
+   * The whole record for a workspace, or null.
+   *
+   * Exists for the CROSS-INSTANCE keep-alive. Cloud Run runs several instances; a keep-alive ping from
+   * a user's popped-out preview tab can land on any of them, while the idle sweep that would pause
+   * that sandbox runs on whichever instance happens to hold it. An in-memory stamp on the wrong
+   * instance protects nothing, so the ping writes the DURABLE record and the sweep reads it here
+   * before pausing anything. Best-effort — a read failure yields null and today's behaviour.
+   */
+  async getRecord(workspaceId: string): Promise<SandboxRecord | null> {
+    const db = this.getDb();
+    if (!db || !workspaceId) return null;
+    try {
+      const snap = await db.collection('agentv3_sandboxes').doc(workspaceId).get();
+      if (!snap.exists) return null;
+      return (snap.data() as SandboxRecord) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Store the revival recipe proven by a successful boot, and CONFIRM it by reading it back.
    *
    * The read-back is the whole point. "We wrote it" and "it is there" are different facts, and a

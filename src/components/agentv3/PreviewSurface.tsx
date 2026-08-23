@@ -326,6 +326,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // render is exactly the contradiction the Mitrify report ended in.
   const refusal = inBrowserRefusal({ framework, browserRunnable, browserBlockedReason, hasBackend, backendReason });
   const effectiveUrl = foundUrl || url;
+  /**
+   * Where "open in new tab" points. The door when the server has offered one, the raw url otherwise —
+   * the same precedence the iframe already uses, so the two can never disagree about which host the
+   * user is looking at.
+   */
+  const popoutHref = doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl;
   const lastUrlProp = useRef(url);
   useEffect(() => {
     if (url !== lastUrlProp.current) {
@@ -1053,7 +1059,19 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
               {diagnosing ? <TirangaLoader className="w-3.5 h-3.5" /> : <Stethoscope className="w-3.5 h-3.5" />}
             </button>
           )}
-          <a href={effectiveUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
+          {/*
+            THE POPOUT GOES THROUGH THE DOOR, exactly like the iframe beside it.
+            Root cause (admin report 2026-08-23, a finished app breaking under its user after ~5 min):
+            this link handed out the RAW sandbox url, so a popped-out tab bypassed both of the door's
+            guarantees. It got the vendor's "Sandbox not found" instead of our branded retry page when
+            the machine was asleep — the screenshot this codebase has been chasing all week — and it
+            carried none of our JavaScript, so while the user sat there using their app, every one of
+            the six conditions gating the keep-alive watchdog was false and the idle sweep paused the
+            machine underneath them. Through the door, a top-level navigation is served the keep-alive
+            shell (see server/AgentV3/previewKeepAlive.ts) and the sandbox stays up while it is watched.
+            `effectiveUrl` remains the fallback for the case the door is off or has not been offered.
+          */}
+          <a href={popoutHref} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
         </div>
         {paidNote}
         {/* A restart is a 30–90s sandbox reboot. A spinner alone for that long is indistinguishable

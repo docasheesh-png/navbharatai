@@ -21,6 +21,7 @@ import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { metricsTimeline } from '../lib/metricsTimeline';
 import { resolveEmailConfig } from '../lib/alertEmail';
+import { serverLoad } from '../lib/serverLoad';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
@@ -500,6 +501,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       snapshot,
       instanceUptimeSeconds: Math.round(process.uptime()),
       liveSandboxes,
+      // How hard THIS instance is working right now. One instance of several — the client says so.
+      serverLoad: serverLoad.snapshot(),
       // Whether alerts can reach the admin OUTSIDE the app, and plainly why not when they cannot.
       // Never a secret: only the configured flag and the reason travel, never the key or the sender.
       emailAlerts: (() => {

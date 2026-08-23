@@ -222,3 +222,29 @@ export function rateTone(rate: number | null | undefined): 'good' | 'warn' | 'ba
   if (rate >= 0.7) return 'warn';
   return 'bad';
 }
+
+/** Bytes as a human size. Unknown stays "—" rather than becoming 0 B. */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return '—';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = bytes / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v >= 10 ? Math.round(v) : Math.round(v * 10) / 10} ${units[i]}`;
+}
+
+/**
+ * The one-line verdict on server load, in words the admin can act on.
+ *
+ * Deliberately says what it MEANS rather than repeating the number: "the server is keeping up" is
+ * actionable, "p99 event loop delay 32ms" is not — and the numbers are right there beside it anyway.
+ */
+export function serverLoadHeadline(level: 'ok' | 'warn' | 'critical' | undefined, reason: string | undefined): string {
+  if (!level) return 'Server load could not be read on this request.';
+  if (level === 'ok') return 'This server is keeping up comfortably.';
+  const because = reason ? ` — ${reason}` : '';
+  return level === 'critical'
+    ? `This server is struggling${because}.`
+    : `This server is under pressure${because}.`;
+}

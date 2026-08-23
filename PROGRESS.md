@@ -39754,3 +39754,41 @@ layer of this system had somewhere it was quietly assuming otherwise.
 
 Gate at each merge: both tsc clean, `npm run build` clean (the command that had failed), vitest 1397
 files / 17,626 passing / 1 honest skip.
+
+## 2026-08-23 — three days of waiting for something that could never happen
+
+Admin: *"3 din ho gaye? kitna time lagega?"* The honest answer was **never**, and the screen had been
+saying the opposite the whole time.
+
+The hosting service was explicit, and its message was on screen: *"Custom Domain has multiple,
+conflicting ownership claims. There must be at most one TXT record with the `hosting-site=` prefix on
+the domain."* — with `ownership: conflict · host: active · SSL: active`. Host and certificate were
+both fine. Ownership was permanently REFUSED, not slow.
+
+**Two independent failures produced those three days.**
+
+**1. Our own code created the conflict.** `applyRecords`' TXT branch only ever ADDED. Each time the
+domain was connected from a different app, that app's site minted a new `hosting-site=` token and the
+loop appended it; nothing ever removed the previous one. Three connects, three claims, permanent
+refusal. The A-record branch converges properly — TXT never did.
+
+The TXT branch stays ADD-ONLY for everything else, deliberately: a zone's TXT records also carry SPF,
+DKIM and other services' verifications, and converging them would silently break the user's EMAIL. So
+the new sweep is scoped to the one prefix that is unambiguously ours and that the service itself
+requires to be unique (`isSiteToken`). ⚠️ And it only runs when the desired set CONTAINS a site token:
+an empty wanted-set means the service has already accepted ownership and stopped asking, so the token
+in the zone is the one holding the domain up — deleting it then would tear down a working domain.
+
+**2. The screen called a refusal a wait.** `connectStage` had no branch for a conflict, so it fell
+through to *"Waiting for your DNS records to spread across the internet… this can take a few hours"*.
+The admin read that and did the reasonable thing. Telling someone to wait for something that will
+never happen is the most expensive dishonest message this product can produce — it is not a wrong
+label, it is wasted days. There is now a conflict branch that says waiting will not help and names the
+one action that clears it, which genuinely does now.
+
+**A correction I owe:** I earlier told the admin to delete the stale TXT records at Hostinger. That
+was wrong. Their nameservers already pointed at our managed zone, so Hostinger's DNS page was inert
+("DNS is managed at another provider", in its own words) and deleting there would have done nothing.
+The records live in the managed zone, which is why the fix had to be in `applyRecords`.
+
+Gate: both tsc + build + FULL vitest (17,635 passing, 1 skipped). New: `tests/ownershipConflict.test.ts`.

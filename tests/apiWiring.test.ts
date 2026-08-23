@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeApiWiring, buildEnvForSplit } from '../src/server/AgentV3/apiWiring';
+import { analyzeApiWiring, buildEnvForSplit, mergeEnvFile } from '../src/server/AgentV3/apiWiring';
 
 /**
  * SHOULD WE SPLIT THIS APP AT ALL? (slice 3 of "welcome any app, in any format", admin 2026-08-23.)
@@ -89,5 +89,48 @@ describe('buildEnvForSplit — never invent a setting the code does not read', (
     expect(buildEnvForSplit(whole, 'https://my-api.onrender.com')).toEqual({});
     expect(buildEnvForSplit(split, '')).toEqual({});
     expect(buildEnvForSplit(split, '   ')).toEqual({});
+  });
+});
+
+describe('mergeEnvFile — merge, never overwrite', () => {
+  it('🔒 keeps every other setting in the file', () => {
+    // Not politeness — the difference between a working app and a broken one. A fullstack project's
+    // .env.production routinely holds the analytics key, the Stripe publishable key, a Sentry DSN.
+    // Writing our one line over that publishes a build silently missing all of them.
+    const before = 'VITE_STRIPE_KEY=pk_live_123\nVITE_SENTRY_DSN=https://sentry.io/1\n';
+    const after = mergeEnvFile(before, { VITE_API_URL: 'https://api.example.com' });
+    expect(after).toContain('VITE_STRIPE_KEY=pk_live_123');
+    expect(after).toContain('VITE_SENTRY_DSN=https://sentry.io/1');
+    expect(after).toContain('VITE_API_URL=https://api.example.com');
+  });
+
+  it('replaces our own key in place when it is already there — theirs is stale by definition', () => {
+    const after = mergeEnvFile('VITE_API_URL=http://localhost:3000\nVITE_X=1\n', { VITE_API_URL: 'https://api.example.com' });
+    expect(after).toContain('VITE_API_URL=https://api.example.com');
+    expect(after).not.toContain('localhost:3000');
+    expect(after).toContain('VITE_X=1');
+  });
+
+  it('preserves comments and blank lines verbatim', () => {
+    const before = '# analytics\nVITE_GA=G-1\n\n# other\nVITE_Y=2\n';
+    const after = mergeEnvFile(before, { VITE_API_URL: 'https://a.com' });
+    expect(after).toContain('# analytics');
+    expect(after).toContain('# other');
+    expect(after.split('\n').filter((l) => l === '').length).toBeGreaterThan(0);
+  });
+
+  it('an absent or empty file just gets our line', () => {
+    expect(mergeEnvFile('', { VITE_API_URL: 'https://a.com' })).toBe('VITE_API_URL=https://a.com\n');
+  });
+
+  it('nothing to set leaves the file byte-identical', () => {
+    const before = 'VITE_X=1\n';
+    expect(mergeEnvFile(before, {})).toBe(before);
+  });
+
+  it('a key that merely CONTAINS our name is not mistaken for it', () => {
+    const after = mergeEnvFile('VITE_API_URL_OLD=keep-me\n', { VITE_API_URL: 'https://a.com' });
+    expect(after).toContain('VITE_API_URL_OLD=keep-me');
+    expect(after).toContain('VITE_API_URL=https://a.com');
   });
 });

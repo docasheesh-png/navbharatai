@@ -128,3 +128,37 @@ export function buildEnvForSplit(report: ApiWiringReport, backendUrl: string): R
   if (report.strategy !== 'split' || !report.envVar || !backendUrl.trim()) return {};
   return { [report.envVar]: backendUrl.trim().replace(/\/+$/, '') };
 }
+
+/**
+ * Merge our build-time settings into an existing `.env.production`, keeping everything else. PURE.
+ *
+ * 🔒 MERGE, NEVER OVERWRITE — and this is not politeness, it is the difference between a working app
+ * and a broken one. A fullstack project's `.env.production` routinely holds the analytics key, the
+ * Stripe publishable key, a feature flag, a Sentry DSN. Writing our one line over that file would
+ * publish a build silently missing all of them: everything compiles, the site loads, and unrelated
+ * things quietly stop working — the same silent-failure class this whole feature exists to prevent.
+ *
+ * Writing `.env.production` (rather than passing an env var to the build command) is deliberate too:
+ * it is the mechanism Vite, CRA and Next all document for build-time values, so it works across the
+ * three without a per-tool special case, and the user can SEE what we set.
+ *
+ * A key we set replaces an existing line with the same name — ours is the live backend URL and theirs
+ * is by definition stale — while comments, blank lines and every other key are preserved verbatim.
+ */
+export function mergeEnvFile(existing: string, vars: Record<string, string>): string {
+  const names = Object.keys(vars);
+  if (names.length === 0) return existing;
+  const lines = String(existing ?? '').split('\n');
+  const done = new Set<string>();
+  const out = lines.map((line) => {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    if (!m || !(m[1] in vars)) return line;
+    done.add(m[1]);
+    return `${m[1]}=${vars[m[1]]}`;
+  });
+  // Anything not already present is appended, so an empty or absent file works the same way.
+  const added = names.filter((n) => !done.has(n)).map((n) => `${n}=${vars[n]}`);
+  if (added.length === 0) return out.join('\n');
+  const body = out.join('\n').replace(/\s*$/, '');
+  return `${body ? `${body}\n` : ''}${added.join('\n')}\n`;
+}

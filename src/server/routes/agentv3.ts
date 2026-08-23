@@ -193,7 +193,7 @@ import {
   MAX_SHELLS_PER_WORKSPACE,
 } from '../AgentV3/ShellSessions';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
-import { deployBackendToRender, resolveRenderKey, renderRequirement } from '../AgentV3/renderDeploy';
+import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
@@ -201,7 +201,7 @@ import { designHealDecision, designHealGuardNote } from '../AgentV3/designHealGu
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
-import { analyzeApiWiring } from '../AgentV3/apiWiring';
+import { analyzeApiWiring, buildEnvForSplit, mergeEnvFile } from '../AgentV3/apiWiring';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
@@ -5937,6 +5937,31 @@ export function registerAgentV3Routes(app: Express): void {
             const src = await loadWorkspaceFiles(workspaceId).catch(() => null);
             if (src) wiring = analyzeApiWiring(src);
           }
+          /**
+           * THE JOIN — the half nobody automates (slice 4).
+           *
+           * A SPLIT app's frontend is only useful if it knows where its backend went, so before
+           * publishing one we look the address up and bake it into the build via `.env.production`
+           * (merged, never overwritten — see mergeEnvFile). With the address in hand, this publish
+           * becomes an ordinary static publish and simply proceeds.
+           *
+           * 🔒 NO ADDRESS ⇒ WE DO NOT PUBLISH. A split frontend built without its backend URL is
+           * exactly the silent-failure site this feature exists to prevent: it loads, it looks
+           * right, and every request goes nowhere. Falling through to the offer below is the correct
+           * outcome — the user deploys the backend first, then publishes.
+           */
+          let wiredToBackend = false;
+          if (wiring?.strategy === 'split' && key) {
+            const backendUrl = await findBackendUrl({ apiKey: key.key, appName: workspaceId }).catch(() => '');
+            const envVars = buildEnvForSplit(wiring, backendUrl);
+            if (Object.keys(envVars).length > 0) {
+              const existing = await actuator.readFile(workspaceId, '.env.production').catch(() => '');
+              await actuator.writeFile(workspaceId, '.env.production', mergeEnvFile(existing, envVars));
+              wiredToBackend = true;
+            }
+          }
+          // Wired: the frontend half is now an ordinary static publish, so fall through and run it.
+          if (!wiredToBackend) {
           const decision = deployDecision(plan, {
             canDeploy: key !== null,
             requirement: renderRequirement(process.env, vault),
@@ -5945,6 +5970,7 @@ export function registerAgentV3Routes(app: Express): void {
           });
           res.status(422).json({ error: decision.message, code: decision.code, shape: plan.shape });
           return;
+          }
         }
       } catch { /* the planner must never be what stops a publish — fall through and behave as before */ }
       // 1. BUILD. Deterministic, and its real output is returned on failure — the user gets the

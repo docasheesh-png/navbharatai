@@ -41661,3 +41661,88 @@ The first five came from reading real build reports, one report-cycle each. The 
 searching for the SHAPE on purpose — minutes. The eighth came from distrusting the day's own new code.
 **That progression is the finding**, more than any individual fix: the method got cheaper each time the
 question got more general.
+## 2026-08-23 (later) — Server load on the Monitor, the scale plan, and the publish ceiling's first half
+
+Three things the admin asked for in one message: start removing the publish ceiling, show server load
+on the admin home, and write the millions-of-users plan into `CLAUDE.md` as explicitly deferred.
+
+### 1 · Server load — "will the server hang when millions arrive?"
+
+Every number the platform had was about BUILDS. None answered whether the server itself is close to
+falling over, and by the time builds start failing the answer is already yes.
+
+**WAITING TIME (event-loop lag) leads**, and it is the signal most dashboards miss: Node runs one
+thread, so when something blocks it every request waits while CPU still looks calm. A green CPU beside
+a blocked thread is exactly how a slow site gets called healthy. The histogram is RESET on each read,
+or one stall hours ago would show as a permanent problem and the panel would stop being believed.
+
+**Memory is measured against the container's REAL limit**, read from its own cgroup. `os.totalmem()`
+on Cloud Run reports the HOST — large enough to show 4% while the instance is about to be killed for
+exceeding memory. Both "no limit" sentinels (cgroup v2's literal `max`, v1's near-2^63 number) read as
+UNKNOWN rather than as a limit.
+
+`os.loadavg()` is excluded on purpose: in a container it reports the host's load, mixing in every other
+tenant's work — authoritative-looking and meaningless about us.
+
+**In-flight requests release on `close` as well as `finish`**, or a user navigating away mid-request
+would leak the counter upward forever and the panel would slowly lie.
+
+⚠️ Stated on the panel: this is ONE instance of several.
+
+### 2 · The scale plan — written down, and marked DO-NOT-BUILD-NOW
+
+`CLAUDE.md` gains a scale section with a TRIGGER on every item, because the admin asked for the plan to
+be deferred until there is revenue for it. The honest correction it opens with: **Cloud Run already
+scales, so "the server hangs" is not what breaks first.**
+
+It names our own worst offender rather than waiting for it to be discovered: `metricsTimeline` writes
+every instance's counters into ONE Firestore document per 5-minute bucket, and Firestore allows about
+one sustained write per second per document. Today's per-minute batching keeps it far under; at ~60
+concurrent instances it becomes contention, **and the failure would be silent** — the flush swallows
+its error and retries, so the Monitor would quietly under-count. Sharded counters fix it with no new
+infrastructure and no monthly cost, which is why that is the one early item.
+
+The "unified memory" question is answered without reopening a settled decision: `ROADMAP.md` §5 records
+Redis as explicitly declined; the plan records what would change if revisited and the cost that is easy
+to miss — a standing monthly bill regardless of traffic, and a single point of failure where today
+there is none.
+
+### 3 · The publish ceiling — the server half of ROADMAP §10.3
+
+**A MIRROR, NOT A REPLACEMENT — that is the load-bearing decision.** Firebase stays the source of truth
+and keeps returning the URL; the same files are also written to a bucket. So a bucket that is missing,
+misconfigured or failing cannot break a publish that already worked; the Worker can prefer the bucket
+and fall back to Firebase, so no existing link breaks; and apps published before this migrate on their
+next publish with nothing to run. A cutover that deleted the Firebase path in the same change would
+have had no way back.
+
+**The two things Firebase Hosting did for free**, now done explicitly: CONTENT TYPES (miss them and the
+browser treats the stylesheet as text and renders an unstyled page) and CACHE HEADERS per object. An
+unknown extension falls back to `octet-stream` — a download is a visible, diagnosable failure, where
+guessing `text/html` would render something wrong.
+
+**The third — SPA FALLBACK — is the Worker's, and it is the one that would have broken every published
+app.** A user refreshes on `/dashboard`; there is no object called `dashboard`, only `index.html`.
+Firebase rewrote automatically; an object store 404s. Ten lines in `serveFromBucket` handle it — and
+deliberately do NOT apply to a path with a file extension, because serving HTML with a 200 where a
+script was expected produces a confusing parse error instead of an honest 404.
+
+**Takedown removes the bucket copy too**, or "remove my app" would be true in one place and false in
+the other the moment the Worker prefers the bucket.
+
+**The Worker ships with `APPS_BUCKET = ''`** — behaviour is byte-identical to today until the admin
+sets it. That empty string is the revert.
+
+### Still needed from the admin (cannot be done from a session)
+
+1. Create a bucket (or reuse `navbharatai-appstore-1`) and grant `allUsers` the **Storage Object
+   Viewer** role on it — the Worker fetches anonymously, and these are published apps, public by
+   definition.
+2. Set `PUBLISHED_APPS_BUCKET` in Cloud Run (optional — it already falls back to `NAV_STORE_BUCKET`).
+3. Only AFTER a publish has been confirmed to land in the bucket: set `APPS_BUCKET` in the Worker and
+   redeploy it. Verify a deep link (`/something`) still loads before relying on it.
+
+### Verification
+
+`npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json --noEmit` clean · `npx vitest run` —
+**1425 files, 18,080 passed, 4 skipped, 0 failed**.

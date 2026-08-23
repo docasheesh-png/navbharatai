@@ -214,6 +214,8 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // once rather than nagging on every switch; the "Paid" tag on the toggle keeps the fact visible after.
   const [paidNoteDismissed, setPaidNoteDismissed] = useState<boolean>(() => isLiveServerNoticeDismissed());
   const [liveReloadKey, setLiveReloadKey] = useState(0);
+  /** Set when the server is serving the VM-free copy of this app because its machine has expired. */
+  const [snapshotNote, setSnapshotNote] = useState('');
   // "Diagnose" — reuses the build loop's real dev-server boot sequence (install/pre-kill/start/
   // port-wait/one retry) instead of guessing, so the empty state can show the REAL internal
   // reason the live preview isn't up (and self-heal + restore the URL when it actually comes up).
@@ -489,7 +491,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         const health = await res.json().catch(() => null) as {
           status?: unknown; serving?: unknown; servingProblems?: unknown;
           currentPreviewUrl?: unknown; previewUrlStale?: unknown; previewUrlNote?: unknown;
-          doorUrl?: unknown; livePortUp?: unknown;
+          doorUrl?: unknown; livePortUp?: unknown; snapshotServing?: unknown; snapshotNote?: unknown;
         } | null;
         {
           // Adopt the FIRST door link, keep it while fresh, replace it only near expiry, and DROP it
@@ -532,6 +534,11 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
          * older server (no field) behaves exactly as before.
          */
         setPortDown(res.ok && health?.livePortUp === false);
+        // THE USER IS LOOKING AT THEIR APP, NOT AT A SPINNER — but it is the last BUILT version, not
+        // the live one. Saying so is the whole difference between a graceful fallback and a confusing
+        // one: without this line they would report a bug about an edit that is simply not in this copy.
+        setSnapshotNote(res.ok && health?.snapshotServing === true && typeof health.snapshotNote === 'string'
+          ? health.snapshotNote : '');
         setHealth(status);
         // NOT-SERVING (admin report 2026-08-06): the port answers but the page is a 404 / "Cannot GET".
         // We used to render that page inside the iframe AS the user's app. Record it so the UI can say
@@ -1185,6 +1192,15 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             >
               Wake up
             </button>
+          </div>
+        )}
+        {/* THE LAST BUILT VERSION. The door is already showing the user their app rather than a page
+            retrying against a machine that is never coming back (previewSnapshot.ts) — this says which
+            version they are looking at. Deliberately NOT an error style: nothing is wrong with their
+            app, it is simply the copy from its last build. */}
+        {snapshotNote && (
+          <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/30 text-[11px] text-amber-200">
+            <span className="flex-1">{snapshotNote}</span>
           </div>
         )}
         {/* HELD UPDATES (admin 2026-08-23: "chalti huyi app tut jati hai"). While the engine is

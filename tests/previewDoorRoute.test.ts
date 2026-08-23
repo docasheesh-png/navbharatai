@@ -40,7 +40,10 @@ describe('the door route', () => {
   it('only redirects to a port a probe just saw serving — no url is ever believed about a port', () => {
     // The 302 must be reachable only AFTER parsePortSweep produced a hit.
     const sweepAt = door.indexOf('parsePortSweep(');
-    const redirectAt = door.indexOf('res.redirect(302');
+    // Anchored on the PORT redirect specifically. The door also has an earlier redirect — the VM-free
+    // snapshot, served when there is no sandbox at all — and that one has no port to verify, so
+    // "the first redirect in the file" stopped being a way to find this one.
+    const redirectAt = door.indexOf('res.redirect(302, target)');
     expect(sweepAt).toBeGreaterThan(-1);
     expect(redirectAt).toBeGreaterThan(sweepAt);
     expect(door).toContain("if (found === null) return page(200, 'starting')");
@@ -62,6 +65,17 @@ describe('the door route', () => {
     const bounded = (door.match(/raceTimeout\(/g) || []).length;
     expect(awaits).toBeGreaterThan(0);
     expect(bounded).toBe(awaits);
+  });
+
+  it('the snapshot fallback fires only when there is NO sandbox, and never to a probed port', () => {
+    // It is reached inside `if (!sandboxId)`, i.e. the machine is gone rather than starting — and it
+    // redirects to a stored permanent url, not to anything the port sweep produced.
+    const gone = door.indexOf('if (!sandboxId) {');
+    const snap = door.indexOf('shouldServeSnapshot({');
+    const sweep = door.indexOf('buildPortSweepCommand(');
+    expect(gone).toBeGreaterThan(-1);
+    expect(snap).toBeGreaterThan(gone);
+    expect(snap).toBeLessThan(sweep); // decided before a port is ever probed
   });
 
   it('the branded redirect target goes through applyPreviewDomain like every other preview url', () => {

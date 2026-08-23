@@ -40,7 +40,7 @@ describe('it observes — it never changes the verdict', () => {
     // problem, not a failed build. Calling it BUILD_FAILED would lie to the user AND change what they
     // are charged, since a failed build is never billed.
     const i = route.indexOf('prodBuildGateEnabled() && expectsArtifacts');
-    const block = route.slice(i, i + 2600);
+    const block = route.slice(i, route.indexOf('APP HEALTH CULTURE — VACCINE', i));
     expect(block).not.toContain('classifyBuildOutcome');
     expect(block).not.toContain('result.ok = false');
   });
@@ -50,8 +50,14 @@ describe('it observes — it never changes the verdict', () => {
   });
 
   it('every failure path inside it is swallowed', () => {
+    // Bounded by the block's real END (the vaccine gate that follows it) rather than by a guessed
+    // character count — a fixed window silently stops covering the block the moment anything is added
+    // inside it, which is exactly what happened when the snapshot fallback landed here.
     const i = route.indexOf('prodBuildGateEnabled() && expectsArtifacts');
-    expect(route.slice(i, i + 2600)).toContain('the detector must never affect a build it is only observing');
+    const end = route.indexOf('APP HEALTH CULTURE — VACCINE', i);
+    expect(i).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(i);
+    expect(route.slice(i, end)).toContain('the detector must never affect a build it is only observing');
   });
 });
 

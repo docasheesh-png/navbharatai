@@ -38,6 +38,17 @@ export interface SandboxRecord {
    * rather than derived at revival.
    */
   recipe?: PreviewRecipe;
+  /**
+   * A permanent, VM-free copy of the app as of its last green build — served when the sandbox is
+   * genuinely gone (previewSnapshot.ts).
+   *
+   * It lives on THIS record for the same reason the recipe does: it shares the workspace's lifetime
+   * exactly, it is read at precisely the moment a preview is being resolved, and one record cannot
+   * drift out of step with itself.
+   */
+  snapshotUrl?: string;
+  /** When that snapshot was taken — so the surface can say how old the copy is, rather than guess. */
+  snapshotAt?: number;
 }
 
 class SandboxStore {
@@ -80,6 +91,23 @@ class SandboxStore {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Remember where this workspace's last VM-free snapshot lives.
+   *
+   * Merged, never overwritten: a snapshot must survive every later build that does not produce a new
+   * one — the whole point is that it is there on the day the machine is not.
+   */
+  async saveSnapshot(workspaceId: string, url: string, at: number): Promise<void> {
+    const db = this.getDb();
+    if (!db || !workspaceId || !url) return;
+    try {
+      await db.collection('agentv3_sandboxes').doc(workspaceId).set(
+        { workspaceId, snapshotUrl: url, snapshotAt: at, updatedAt: Date.now() },
+        { merge: true },
+      );
+    } catch { /* best-effort — a fallback copy must never be able to fail a build */ }
   }
 
   /**

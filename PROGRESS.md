@@ -39836,3 +39836,42 @@ in one day is a pattern, not an accident: a byte count is not the property under
 handler" is, and handlers grow.
 
 Gate: both tsc + build + FULL vitest (17,647 passing, 1 skipped).
+
+### slice 2 — the refusal becomes a real offer (same PR, one CI)
+
+Admin: *"dusra hissa suru karo, aur ek me hi CI bana dena"* — so this rides the SAME branch and PR as
+slice 1: one CI run, one merge, one paid Cloud Build deploy instead of two.
+
+**Reading `renderDeploy.ts` changed the plan, and found an inaccuracy of my own.** Slice 1's refusal
+told the user *"backend hosting is coming to NavBharatAI"*. That was true of the PUBLISH path and
+FALSE of the product: `renderDeploy.ts` is a real, wired backend deploy with its own route, and has
+been for weeks. So I had just written a message that teaches users something they already have does
+not exist — the same class of dishonesty as claiming something works when it does not, erring in the
+other direction. Both waste the user's time on a false picture.
+
+`deployDecision(plan, capability)` fixes it: when a backend deploy can genuinely run, the refusal
+becomes an OFFER naming the next step; when it cannot, the honest refusal stands unchanged.
+
+🔒 **Capability is PASSED IN, never detected in the module.** `deployPlan.ts` stays pure and knows
+nothing about Render, keys or env — the route resolves what is really available (the user's own key
+first, the server's only as fallback, exactly as the deploy-backend route does) and hands it over.
+That keeps every rule testable and means a second backend host later changes the CALLER, not the
+decision.
+
+🔒 **The whose-account line is reproduced VERBATIM, not reworded.** `renderRequirement` is the string
+that says whose Render account the deploy lands in — i.e. whose card is charged. Paraphrasing it is
+not a style choice; test-locked.
+
+The invariant that matters is also pinned directly: for every combination of shape and capability, a
+static publish NEVER proceeds when a server is required. No input can reproduce the "Page Not Found"
+site again.
+
+**Still open — slice 3:** the fullstack split (frontend to the CDN, API to the Node host, with the
+frontend's API base wired to the backend's URL). The plan already returns both halves with their build
+command and output dir, which is what makes it possible; nothing about it is claimed as done.
+
+**Fifth fixed-byte-window in publishSeedWiring** — my earlier sweep matched only the windows where
+`const at` and `const seg` were adjacent, and missed one with an assertion between them. That file now
+has zero.
+
+Gate: both tsc + build + FULL vitest (17,653 passing, 1 skipped).

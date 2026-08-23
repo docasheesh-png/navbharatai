@@ -200,7 +200,7 @@ import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxChec
 import { designHealDecision, designHealGuardNote } from '../AgentV3/designHealGuard';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
-import { planDeployment, staticHostingRefusal } from '../AgentV3/deployPlan';
+import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
@@ -5914,11 +5914,19 @@ export function registerAgentV3Routes(app: Express): void {
         }
         const plan = planDeployment(planFiles);
         if (!plan.staticHostingSufficient) {
-          res.status(422).json({
-            error: staticHostingRefusal(plan),
-            code: 'needs-server-hosting',
-            shape: plan.shape,
+          /**
+           * Resolve what we can ACTUALLY do about the backend — the user's own Render key first, the
+           * server's only as a fallback, exactly as the deploy-backend route does. Resolved here and
+           * passed in, so `deployDecision` stays pure and a second backend host later changes only
+           * this line.
+           */
+          const vault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
+          const key = resolveRenderKey(vault);
+          const decision = deployDecision(plan, {
+            canDeploy: key !== null,
+            requirement: renderRequirement(process.env, vault),
           });
+          res.status(422).json({ error: decision.message, code: decision.code, shape: plan.shape });
           return;
         }
       } catch { /* the planner must never be what stops a publish — fall through and behave as before */ }

@@ -230,3 +230,59 @@ export function staticHostingRefusal(plan: DeployPlan): string {
   return `${plan.summary} Backend hosting is coming to NavBharatAI — until then you can deploy it to your own `
     + 'provider. Nothing has been published, so nothing is broken.';
 }
+
+/** What the server can actually do about a backend right now — supplied by the caller, never assumed. */
+export interface BackendCapability {
+  /** A real deploy can run this instant (a Render key resolved, the user's or the server's). */
+  canDeploy: boolean;
+  /** The honest one-liner about WHOSE account it lands in — comes from `renderRequirement`. */
+  requirement: string;
+}
+
+export interface DeployDecision {
+  /** May the static publish proceed? */
+  proceed: boolean;
+  /** What the user is told. '' when publish simply proceeds. */
+  message: string;
+  /** A machine code the client can branch on to show the right button. */
+  code: '' | 'needs-server-hosting' | 'backend-deploy-available';
+}
+
+/**
+ * THE ONE PLACE THAT TURNS "WE CANNOT HOST THIS" INTO "HERE IS HOW WE WILL".
+ *
+ * 🔒 WHY THIS EXISTS, AND AN INACCURACY OF MINE IT CORRECTS. `staticHostingRefusal` above tells the
+ * user "backend hosting is coming to NavBharatAI". When it was written that was true of the publish
+ * path — but it is NOT true of the product: `renderDeploy.ts` is a real, wired backend deploy, and it
+ * has been for weeks. So the refusal was about to teach users that something they already have does
+ * not exist, which is the same class of dishonesty as claiming something works when it does not — it
+ * simply errs in the other direction. Both waste the user's time on a false picture.
+ *
+ * 🔒 CAPABILITY IS PASSED IN, NOT DETECTED HERE. This module stays pure and knows nothing about
+ * Render, keys or env; the caller resolves what is genuinely available and hands it over. That keeps
+ * every rule below testable, and means adding a second backend host later changes the CALLER, not this
+ * decision.
+ *
+ * The `requirement` string is reproduced verbatim rather than reworded, because it is the line that
+ * names WHOSE ACCOUNT GETS THE BILL — the one fact a user must not have paraphrased at them.
+ */
+export function deployDecision(plan: DeployPlan, backend: BackendCapability): DeployDecision {
+  if (plan.staticHostingSufficient) return { proceed: true, message: '', code: '' };
+  if (!backend.canDeploy) {
+    return { proceed: false, message: staticHostingRefusal(plan), code: 'needs-server-hosting' };
+  }
+  const what = plan.backend?.framework ?? 'server';
+  if (plan.shape === 'fullstack') {
+    return {
+      proceed: false,
+      code: 'backend-deploy-available',
+      message: `${plan.summary} Deploy the ${what} server first, then publish the website half here so it can `
+        + `reach it. ${backend.requirement}`,
+    };
+  }
+  return {
+    proceed: false,
+    code: 'backend-deploy-available',
+    message: `${plan.summary} Use “Deploy backend” to put it somewhere it can run. ${backend.requirement}`,
+  };
+}

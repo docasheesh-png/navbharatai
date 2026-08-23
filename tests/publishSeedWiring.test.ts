@@ -34,7 +34,7 @@ describe('Publish seeds the sandbox before it builds', () => {
   it('the seed runs BEFORE npm run build, not after', () => {
     const at = route.indexOf("'/api/agentv3/publish'");
     expect(at).toBeGreaterThan(-1);
-    const seg = route.slice(at, at + 6000);
+    const seg = publishRoute();
     const seed = seg.indexOf('prepareSandboxForBuild');
     const build = seg.indexOf("runCommand(workspaceId, 'npm run build')");
     expect(seed).toBeGreaterThan(-1);

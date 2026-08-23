@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planDeployment, staticHostingRefusal } from '../src/server/AgentV3/deployPlan';
+import { planDeployment, staticHostingRefusal, deployDecision } from '../src/server/AgentV3/deployPlan';
 
 /**
  * "SABHI APPS KO WELCOME KARE, KISI BHI FORMAT ME" (admin 2026-08-23).
@@ -102,5 +102,60 @@ describe('staticHostingRefusal — a refusal must carry a next step', () => {
       'package.json': pkg({ dependencies: { express: '^4' }, devDependencies: { vite: '^5' } }),
     }));
     expect(msg).toContain('cannot reach its');
+  });
+});
+
+describe('deployDecision — a refusal becomes an offer when we can really help', () => {
+  const express = planDeployment({ 'package.json': JSON.stringify({ dependencies: { express: '^4' } }) });
+  const fullstack = planDeployment({
+    'package.json': JSON.stringify({ dependencies: { express: '^4' }, devDependencies: { vite: '^5' } }),
+  });
+  const site = planDeployment({ 'index.html': '<p>' });
+  const USER_KEY = 'Deploying to YOUR own Render account, using the key you saved in Settings → Secrets & API Keys.';
+
+  it('a website just publishes — no message, no interruption', () => {
+    const d = deployDecision(site, { canDeploy: false, requirement: 'irrelevant' });
+    expect(d).toEqual({ proceed: true, message: '', code: '' });
+  });
+
+  it('🔒 with a real backend path available, it OFFERS instead of refusing', () => {
+    // The inaccuracy this corrects: staticHostingRefusal says "backend hosting is coming to
+    // NavBharatAI", which was true of the publish path and NOT of the product — renderDeploy has been
+    // a real, wired deploy for weeks. Teaching users that something they already have does not exist
+    // is the same class of dishonesty as claiming something works when it does not.
+    const d = deployDecision(express, { canDeploy: true, requirement: USER_KEY });
+    expect(d.code).toBe('backend-deploy-available');
+    expect(d.message).toContain('Deploy backend');
+    expect(d.message).not.toContain('coming to NavBharatAI');
+  });
+
+  it('🔒 reproduces the whose-account line VERBATIM — it names who gets the bill', () => {
+    // Paraphrasing this is not a style choice: it is the one fact a user must not have reworded at
+    // them, because it decides whose card is charged.
+    const d = deployDecision(express, { canDeploy: true, requirement: USER_KEY });
+    expect(d.message).toContain(USER_KEY);
+  });
+
+  it('with NO backend path available, it still refuses honestly and publishes nothing', () => {
+    const d = deployDecision(express, { canDeploy: false, requirement: 'Save your own RENDER_API_KEY…' });
+    expect(d.proceed).toBe(false);
+    expect(d.code).toBe('needs-server-hosting');
+    expect(d.message).toContain('Nothing has been published');
+  });
+
+  it('fullstack is told the ORDER: server first, then the website that talks to it', () => {
+    const d = deployDecision(fullstack, { canDeploy: true, requirement: USER_KEY });
+    expect(d.message).toContain('server first');
+    expect(d.message).toContain('reach it');
+    expect(d.proceed).toBe(false);
+  });
+
+  it('🔒 never proceeds with a static publish when a server is required', () => {
+    // The whole point: no combination of inputs may produce a "Page Not Found" site again.
+    for (const cap of [true, false]) {
+      for (const plan of [express, fullstack]) {
+        expect(deployDecision(plan, { canDeploy: cap, requirement: 'x' }).proceed).toBe(false);
+      }
+    }
   });
 });

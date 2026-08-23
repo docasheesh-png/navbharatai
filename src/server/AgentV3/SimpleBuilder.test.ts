@@ -901,3 +901,119 @@ describe('runSimpleBuild — orphan-stylesheet guard (app must actually be style
     expect(main?.content).toContain(`import './index.css';`); // wired before the files ever ship
   });
 });
+
+describe('the repair loop refuses a repair that makes the app worse', () => {
+  /**
+   * ROOT CAUSE (real build report 2026-08-23): the loop wrote whatever the repair model returned and
+   * only stopped on byte-IDENTICAL errors. A batch repair took the app from 4 compile errors to 41 —
+   * not identical, so it was kept, the damaged files were committed to the sandbox and to the loop's
+   * own map, and the next ladder rung started from the damaged state.
+   *
+   * These drive the REAL loop, not the pure judge (which has its own file) — the guarantee only exists
+   * if the revert actually reaches both the sandbox and the map.
+   */
+  const errs = (n: number) =>
+    Array.from({ length: n }, (_, i) => `src/F${i}.tsx(1,1): error TS2339: Property 'x' does not exist.`).join('\n');
+
+  const planningDeps = (over: Record<string, unknown> = {}) => ({
+    prompt: 'build a todo app', framework: 'vite-react', scaffoldPaths: ['index.html', 'src/App.tsx'],
+    generate: async (_system: string, user: string) => {
+      if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/List.tsx :: list\nsrc/index.css :: styles';
+      const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+      return `<<<FILE ${path}>>>\n// GOOD ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
+    },
+    writeFiles: async (_f: OneShotFile[]) => {},
+    ...over,
+  });
+
+  it('puts the previous version back — in the sandbox AND in the map the next attempt reads', async () => {
+    const written: OneShotFile[][] = [];
+    const logs: string[] = [];
+    let verifyCall = 0;
+    const r = await runSimpleBuild(planningDeps({
+      writeFiles: async (f: OneShotFile[]) => { written.push(f.map((x) => ({ ...x }))); },
+      log: (m: string) => logs.push(m),
+      maxRepairs: 1,
+      verify: async () => {
+        verifyCall++;
+        return verifyCall === 1
+          ? { ok: false, errors: errs(4), ran: true }   // the state that prompts a repair
+          : { ok: false, errors: errs(41), ran: true }; // the repair made it four times worse
+      },
+      repair: async () => [{ path: 'src/App.tsx', content: '// WORSE — the regression' }],
+    }) as never);
+
+    expect(r.ok).toBe(false); // still handed to the full builder, exactly as before
+    expect(logs.join('\n')).toContain('errors went from 4 to 41');
+
+    // The LAST write must be the restore, carrying the pre-repair content — proof the sandbox was
+    // actually put back, not merely that an in-memory map was corrected.
+    const last = written[written.length - 1];
+    expect(last).toHaveLength(1);
+    expect(last[0].path).toBe('src/App.tsx');
+    expect(last[0].content).toContain('GOOD src/App.tsx');
+    expect(last[0].content).not.toContain('WORSE');
+  });
+
+  it('the next ladder rung starts from the GOOD file, not the damaged one', async () => {
+    const seenByRepair: string[] = [];
+    let verifyCall = 0;
+    await runSimpleBuild(planningDeps({
+      maxRepairs: 2,
+      verify: async () => {
+        verifyCall++;
+        return verifyCall === 1 ? { ok: false, errors: errs(4), ran: true }
+          : verifyCall === 2 ? { ok: false, errors: errs(41), ran: true } // attempt 1 regressed → revert
+            : { ok: false, errors: errs(4), ran: true };
+      },
+      repair: async (_errors: string, files: OneShotFile[]) => {
+        seenByRepair.push(files.find((f) => f.path === 'src/App.tsx')?.content ?? '');
+        return [{ path: 'src/App.tsx', content: '// WORSE — the regression' }];
+      },
+    }) as never);
+
+    // THE POINT OF THE REVERT. Before the fix the second attempt was handed the damaged file and every
+    // further attempt compounded the last.
+    expect(seenByRepair).toHaveLength(2);
+    expect(seenByRepair[1]).toContain('GOOD src/App.tsx');
+    expect(seenByRepair[1]).not.toContain('WORSE');
+  });
+
+  it('a WORSE repair that also created a file is kept, and the loop stops rather than compounding it', async () => {
+    const logs: string[] = [];
+    let repairCalls = 0;
+    let verifyCall = 0;
+    await runSimpleBuild(planningDeps({
+      log: (m: string) => logs.push(m),
+      maxRepairs: 3,
+      verify: async () => {
+        verifyCall++;
+        return verifyCall === 1 ? { ok: false, errors: errs(4), ran: true } : { ok: false, errors: errs(41), ran: true };
+      },
+      repair: async () => {
+        repairCalls++;
+        return [{ path: 'src/App.tsx', content: '// WORSE' }, { path: 'src/Brand.tsx', content: '// NEW FILE' }];
+      },
+    }) as never);
+
+    expect(repairCalls).toBe(1); // stopped after the first, instead of spending two more on a bad base
+    expect(logs.join('\n')).toContain('added 1 new file');
+  });
+
+  it('a repair that genuinely improves things is untouched', async () => {
+    const logs: string[] = [];
+    let verifyCall = 0;
+    const r = await runSimpleBuild(planningDeps({
+      log: (m: string) => logs.push(m),
+      maxRepairs: 2,
+      verify: async () => {
+        verifyCall++;
+        return verifyCall === 1 ? { ok: false, errors: errs(4), ran: true } : { ok: true, errors: '', ran: true };
+      },
+      repair: async () => [{ path: 'src/App.tsx', content: '// FIXED' }],
+    }) as never);
+
+    expect(r.ok).toBe(true);
+    expect(logs.join('\n')).not.toContain('made the app worse');
+  });
+});

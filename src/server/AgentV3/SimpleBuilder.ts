@@ -14,6 +14,7 @@
 // fully unit-testable without a sandbox.
 
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
+import { judgeRepair } from './repairAcceptance';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
@@ -980,9 +981,44 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract, strategy); } catch { fixed = []; }
       fixed = fixed.filter((f) => f && f.path && f.content);
       if (!fixed.length) break;
+      // ACCEPTANCE TEST (real build report 2026-08-23: a repair took the app from 4 errors to 41 and was
+      // kept, because the only brake here was byte-IDENTICAL errors and 41 is not identical to 4). A
+      // repair is a HYPOTHESIS; snapshot what it is about to overwrite so a regression can be undone.
+      // See repairAcceptance.ts for why "worse" is a strict error COUNT and nothing more.
+      const priorVerdict = verdict;
+      const priorContents: OneShotFile[] = [];
+      const createdPaths: string[] = [];
+      for (const f of fixed) {
+        const prior = byPath.get(f.path);
+        if (prior) priorContents.push({ path: prior.path, content: prior.content });
+        else createdPaths.push(f.path);
+      }
       for (const f of fixed) byPath.set(f.path, f);
       try { await deps.writeFiles(fixed); } catch { break; }
       verdict = await deps.verify().catch(() => ({ ok: true, errors: '', ran: false }));
+      const judgement = judgeRepair({
+        beforeErrors: priorVerdict.errors, afterErrors: verdict.errors,
+        afterOk: verdict.ok, afterRan: verdict.ran, createdPaths,
+      });
+      if (judgement.action !== 'keep') {
+        deps.log?.(judgement.reason);
+        if (judgement.action === 'revert') {
+          // Put the better version back in BOTH places — the in-memory map the next attempt reads from
+          // and the sandbox the next verify runs against. A revert in one and not the other is how the
+          // loop would go on reasoning about files that are no longer there.
+          // Sandbox FIRST, then the map. If the write fails we bail with both still describing the
+          // post-repair state — consistent with each other and with reality, rather than a map that
+          // claims files the sandbox does not have.
+          try { await deps.writeFiles(priorContents); } catch { break; }
+          for (const f of priorContents) byPath.set(f.path, f);
+          // Restore the verdict too. Without this the loop's own condition, and the next attempt's
+          // prompt, would both still be reasoning from the worse compiler output we just discarded.
+          verdict = priorVerdict;
+          promptingErrors = priorVerdict.errors;
+          continue; // the NEXT ladder rung gets a fresh try from the better state, not the damaged one
+        }
+        break; // 'keep-and-stop' — coherent but worse; never compound it with another attempt
+      }
       // Circuit-breaker: the repair produced the identical compiler errors → zero progress, it's stuck.
       if (!verdict.ok && verdict.errors === promptingErrors) {
         deps.log?.('The same build errors remain after a repair attempt — handing to the full builder to finish it.');

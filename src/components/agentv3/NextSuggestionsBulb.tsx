@@ -151,7 +151,7 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick }: Props) {
       </button>
 
       {open && (
-        <div className="absolute bottom-full right-0 mb-2 w-72 max-h-[62vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl z-50">
+        <div className="absolute bottom-full right-0 mb-2 w-72 max-h-[62vh] supports-[height:100dvh]:max-h-[62dvh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl z-50">
           {/* ── ROADMAP (guided step-by-step big-app journey) ── */}
           {hasRoadmap && (
             <div className="border-b border-zinc-800">

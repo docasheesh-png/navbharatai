@@ -773,7 +773,7 @@ Content-Type: application/json
 
       {/* ——— Mobile properties sheet (opens only via the toolbar's Edit / a double-tap) ——— */}
       {editorOpen && selectedNode && (
-        <div className="md:hidden flex-shrink-0 border-t border-white/10 max-h-[42vh] overflow-y-auto" style={{ background: 'var(--surface-card)' }}>
+        <div className="md:hidden flex-shrink-0 border-t border-white/10 max-h-[42vh] supports-[height:100dvh]:max-h-[42dvh] overflow-y-auto" style={{ background: 'var(--surface-card)' }}>
           <div className="flex items-center justify-between px-4 pt-3">
             <span className="text-xs text-gray-500 uppercase tracking-wider">Edit node</span>
             <button onClick={() => setEditorOpen(false)} className="text-gray-500 hover:text-white" aria-label="Close editor"><X size={16} /></button>
@@ -805,8 +805,8 @@ Content-Type: application/json
 
       {/* ——— GO LIVE — real Telegram / WhatsApp connect ——— */}
       {showConnect && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="rounded-xl border border-white/10 p-6 w-full max-w-[480px] max-h-[85vh] overflow-y-auto flex flex-col gap-4" style={{ background: 'var(--surface-card)' }}>
+        <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="nb-sheet rounded-xl border border-white/10 p-6 w-full max-w-[480px] overflow-y-auto flex flex-col gap-4" style={{ background: 'var(--surface-card)' }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Rocket size={16} className="text-emerald-400" />
@@ -892,8 +892,8 @@ Content-Type: application/json
 
       {/* ——— Simulator Modal ——— */}
       {showSimulator && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="rounded-xl border border-white/10 flex flex-col w-full max-w-[380px] max-h-[80vh]" style={{ background: 'var(--surface-card)' }}>
+        <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="nb-sheet rounded-xl border border-white/10 flex flex-col w-full max-w-[380px]" style={{ background: 'var(--surface-card)' }}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />

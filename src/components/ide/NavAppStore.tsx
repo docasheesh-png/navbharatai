@@ -741,8 +741,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
 
       {/* ── App detail ── */}
       {detailApp && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDetailApp(null)}>
-          <div className="w-full sm:max-w-lg bg-[#0d1117] border border-white/10 rounded-t-2xl sm:rounded-2xl p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDetailApp(null)}>
+          <div className="nb-sheet w-full sm:max-w-lg bg-[#0d1117] border border-white/10 rounded-t-2xl sm:rounded-2xl p-5 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-3 mb-3">
               <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
                 {detailApp.iconDataUrl ? <img src={detailApp.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={20} className="text-white/30" />}
@@ -779,9 +779,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
       )}
 
       {openApp && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setOpenApp(null)}>
+        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setOpenApp(null)}>
           <div
-            className="w-full sm:max-w-lg max-h-[88vh] overflow-y-auto bg-[#161b22] border border-white/10 rounded-t-2xl sm:rounded-2xl p-4 sm:p-5"
+            className="nb-sheet w-full sm:max-w-lg overflow-y-auto bg-[#161b22] border border-white/10 rounded-t-2xl sm:rounded-2xl p-4 sm:p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex gap-3 mb-3">

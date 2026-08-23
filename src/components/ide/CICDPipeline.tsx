@@ -261,7 +261,7 @@ export function CICDPipeline({ githubToken, onConnectGitHub }: CICDPipelineProps
 
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
         {/* Pipeline Steps */}
-        <div className="w-full md:w-72 flex-shrink-0 max-h-[40vh] md:max-h-none flex flex-col border-b md:border-b-0 md:border-r border-white/5 overflow-hidden">
+        <div className="w-full md:w-72 flex-shrink-0 max-h-[40vh] supports-[height:100dvh]:max-h-[40dvh] md:max-h-none flex flex-col border-b md:border-b-0 md:border-r border-white/5 overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
             <span className="text-[11px] text-white/30 uppercase tracking-wider">Steps ({steps.filter(s => s.enabled).length} active)</span>
             <button onClick={() => setShowAddStep(!showAddStep)} className="text-[11px] text-violet-400 hover:text-violet-300 flex items-center gap-1 py-1">

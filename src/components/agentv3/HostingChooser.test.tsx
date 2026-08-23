@@ -157,7 +157,17 @@ describe('HostingChooser — the sheet must scroll on a phone (clipped-content f
     const html = render([P('firebase', 'Firebase Hosting', true)]);
     // Without a height cap the card grew past the screen and `overflow-hidden` CLIPPED everything
     // below the fold (the "Set up" button, the full-stack note) with no way to reach it.
-    expect(html).toContain('max-h-[85vh]');
+    //
+    // ⚠️ THIS ASSERTION USED TO BE `max-h-[85vh]`, AND THAT CAP WAS ITSELF THE NEXT BUG (admin
+    // 2026-08-23). On a mobile browser `vh` is the LARGE viewport, so 85vh is measured against a box
+    // ~100-150px taller than the visible one: the card's bottom sat under the browser toolbar and,
+    // because the body's scroll height was computed from that same too-tall box, content that only
+    // just overflowed produced NO scrollbar at all. `nb-sheet` (index.css) caps against the visible
+    // viewport via `dvh`, with `vh` as the fallback. The cap is still asserted — only its unit moved.
+    expect(html).toContain('nb-sheet');
+    expect(html).not.toContain('max-h-[85vh]');
+    // The backdrop is the height authority, so the card's `max-height: 100%` means something real.
+    expect(html).toContain('nb-sheet-overlay');
     // The body is the one scroll container…
     expect(html).toContain('overflow-y-auto');
     // …and the swipe stays inside the sheet instead of scrolling the page behind it.

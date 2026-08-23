@@ -3458,7 +3458,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     to the root) Safari only synthesizes click on "clickable" elements, so a bare div
                     never closed the menu on tap-outside on iPhone. */}
                 <div className="fixed inset-0 z-40 cursor-pointer touch-manipulation" onClick={() => setHistoryOpen(false)} aria-hidden="true" />
-                <div className="absolute left-0 top-9 z-50 w-80 max-h-[70vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
+                <div className="absolute left-0 top-9 z-50 w-80 max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
                   <div className="px-3 pb-1.5 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Session history</div>
                   {historyListBody}
                 </div>
@@ -4969,7 +4969,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     </div>
                   )}
                   {runtimeLogs.text
-                    ? <pre ref={logPaneRef} className="whitespace-pre-wrap text-zinc-300 max-h-[60vh] overflow-y-auto">{runtimeLogs.text}</pre>
+                    ? <pre ref={logPaneRef} className="whitespace-pre-wrap text-zinc-300 max-h-[60vh] supports-[height:100dvh]:max-h-[60dvh] overflow-y-auto">{runtimeLogs.text}</pre>
                     : <Empty>{runtimeLogEmptyMessage(runtimeLogs.status, runtimeLogs.hasLog)}</Empty>}
                 </div>
               )}
@@ -5088,7 +5088,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         <>
           <div className="fixed inset-0 z-[140] bg-black/50 cursor-pointer touch-manipulation lg:hidden" onClick={() => setMobileSheet(null)} aria-hidden="true" />
           <div
-            className="fixed inset-x-0 z-[145] lg:hidden max-h-[70vh] overflow-y-auto rounded-t-2xl border-t border-zinc-700 bg-zinc-900 shadow-2xl pb-2"
+            /* 70vh is 70% of the mobile LARGE viewport, i.e. taller than what is on screen while the
+               browser toolbar is showing — the sheet's own bottom then sat under it. `dvh` is the unit
+               that tracks the visible height; the `vh` value stays as the fallback for engines without
+               it, exactly as App.tsx does for the shell. */
+            className="fixed inset-x-0 z-[145] lg:hidden max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-t-2xl border-t border-zinc-700 bg-zinc-900 shadow-2xl pb-2"
             style={{ bottom: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))' }}
           >
             <div className="sticky top-0 z-10 bg-zinc-900 flex items-center justify-between px-4 pt-3 pb-2 border-b border-zinc-800">
@@ -5242,11 +5246,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
       {/* Framework Picker Modal */}
       {showFrameworkPicker && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowFrameworkPicker(false)} />
           {/* Capped + scrollable — an uncapped modal grows past a phone screen and everything below the
               fold becomes unreachable (see the Import/Push modal below for the reported instance). */}
-          <div className="relative z-10 w-full max-w-sm max-h-[85vh] overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+          <div className="nb-sheet relative z-10 w-full max-w-sm overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-white uppercase tracking-widest">Choose Framework</h3>
@@ -5269,7 +5273,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
       {/* Import Repo Modal */}
       {showImportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowImportModal(false)} />
           {/* ROOT CAUSE of "PUSH button kaam ka nahi hai" (admin 2026-08-03): this card had NO height cap
               and NO scroll, so on a phone it grew past the screen. In PUSH mode the commit-message field
@@ -5277,7 +5281,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               no way to reach them. The push itself ran fine (real blobs → tree → commit → ref); its only
               feedback was simply off-screen, so the button felt dead. Same class as the Publish sheet
               (#2037) — this was its surviving sibling. Cap at the viewport and scroll. */}
-          <div className="relative z-10 w-full max-w-sm max-h-[85vh] overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+          <div className="nb-sheet relative z-10 w-full max-w-sm overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-white uppercase tracking-widest">{modalMode === 'push' ? 'Push to GitHub' : 'Import Project'}</h3>

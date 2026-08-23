@@ -83,7 +83,7 @@ export function NotificationBell({ user }: { user: FirebaseUser | null }) {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute right-0 top-11 z-50 w-80 max-w-[92vw] max-h-[70vh] overflow-y-auto rounded-2xl border border-white/10 bg-[#161b22] shadow-2xl">
+          <div className="absolute right-0 top-11 z-50 w-80 max-w-[92vw] max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-2xl border border-white/10 bg-[#161b22] shadow-2xl">
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 sticky top-0 bg-[#161b22]">
               <span className="text-sm font-black text-white">Notifications</span>
               <button onClick={() => setOpen(false)} className="p-1 text-[#8b949e] hover:text-white rounded-lg hover:bg-white/5"><X className="w-4 h-4" /></button>

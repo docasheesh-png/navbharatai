@@ -1985,7 +1985,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               </div>
 
               {/* List grid */}
-              <div className="max-h-[50vh] overflow-y-auto no-scrollbar space-y-1.5 pr-0.5">
+              <div className="max-h-[50vh] supports-[height:100dvh]:max-h-[50dvh] overflow-y-auto no-scrollbar space-y-1.5 pr-0.5">
                 {fetchedProjects
                   .filter((p) => p.displayName?.toLowerCase().includes(syncQuery.toLowerCase()) || p.name?.toLowerCase().includes(syncQuery.toLowerCase()))
                   .map((project) => (

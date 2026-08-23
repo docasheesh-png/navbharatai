@@ -595,7 +595,7 @@ ${generatedCode}
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
         {/* Section 2: Design Tree */}
         {fileInfo && (
-          <div className="w-full md:w-[280px] flex-shrink-0 max-h-[38vh] md:max-h-none border-b md:border-b-0 md:border-r border-white/10 flex flex-col overflow-hidden bg-[#0d1117]">
+          <div className="w-full md:w-[280px] flex-shrink-0 max-h-[38vh] supports-[height:100dvh]:max-h-[38dvh] md:max-h-none border-b md:border-b-0 md:border-r border-white/10 flex flex-col overflow-hidden bg-[#0d1117]">
             {/* File info card */}
             <div className="p-3 border-b border-white/10 flex-shrink-0">
               <div className="bg-[#161b22] border border-white/10 rounded-lg p-3">

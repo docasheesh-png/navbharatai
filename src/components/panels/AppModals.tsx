@@ -181,12 +181,12 @@ export function AppModals({
       {/* Agent Vishwakarma Premium Access Modal */}
       <AnimatePresence>
         {showVishwakarmaUnlockModal && (
-          <div className="fixed inset-0 bg-[#0d1117]/95 backdrop-blur-md flex items-start md:items-center justify-center p-3 pt-24 md:pt-4 z-[9999] overflow-y-auto modal-scroll-lock">
+          <div className="nb-sheet-overlay fixed inset-0 bg-[#0d1117]/95 backdrop-blur-md flex items-start md:items-center justify-center p-3 pt-24 md:pt-4 z-[9999] overflow-y-auto modal-scroll-lock">
             <motion.div
               initial={{ scale: 0.96, y: 15, opacity: 0 }}
               animate={{ scale: 1, y: 0, opacity: 1 }}
               exit={{ scale: 0.96, y: 15, opacity: 0 }}
-              className="w-full max-w-md md:max-w-[400px] bg-[#161b22] border border-amber-500/35 rounded-2xl p-4 sm:p-5 space-y-4 shadow-2xl relative max-h-[85vh] sm:max-h-[90vh] flex flex-col overflow-hidden"
+              className="nb-sheet w-full max-w-md md:max-w-[400px] bg-[#161b22] border border-amber-500/35 rounded-2xl p-4 sm:p-5 space-y-4 shadow-2xl relative flex flex-col overflow-hidden"
             >
               <div className="flex justify-between items-center shrink-0 border-b border-white/5 pb-2.5">
                 <div className="flex items-center gap-1.5 text-amber-500 font-bold uppercase tracking-wider text-[9px] sm:text-[10px] font-mono">

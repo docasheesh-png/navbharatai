@@ -2345,11 +2345,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'generate_metrics',
       description:
-        'Add real Prometheus metrics (prom-client): a registry with default process metrics + an HTTP request ' +
-        'counter and duration histogram + a middleware that records count/latency per request, and a GET ' +
-        '/metrics scrape endpoint (Prometheus text format). Complements generate_observability (structured ' +
-        'logging). Point Prometheus/Grafana at /metrics. Adds the prom-client dependency.',
-      input_schema: { type: 'object', properties: {} },
+        'Add real Prometheus metrics (prom-client) AND a runnable Grafana dashboard: a registry with default ' +
+        'process metrics + an HTTP request counter and duration histogram + a middleware that records ' +
+        'count/latency per request, a GET /metrics scrape endpoint, and a monitoring/ folder (docker-compose ' +
+        'with Prometheus + Grafana, auto-provisioned datasource, and a pre-built dashboard showing request ' +
+        'rate, 5xx error rate, latency p50/p95/p99, busiest routes, memory and event-loop lag). One command ' +
+        'starts it; no dashboard-building homework. Complements generate_observability (structured logging). ' +
+        'Adds the prom-client dependency.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          port: { type: 'number', description: "The port the app listens on, so Prometheus scrapes the right target (default 3000)." },
+          app_name: { type: 'string', description: 'App name, used as the dashboard title and Prometheus job name.' },
+          grafana: { type: 'boolean', description: 'Set false to emit only the /metrics endpoint without the monitoring/ stack (default true).' },
+        },
+      },
     },
     {
       name: 'generate_tracing',

@@ -7,14 +7,27 @@
 //   • server/routes/metrics.routes.ts — GET /metrics in the Prometheus text format for a scraper.
 // PURE builder → the caller writes the files. Real, complete code — no stubs (the real-features rule).
 
+import { generateGrafanaStack, type GrafanaStackOptions } from './GrafanaStackGenerator';
+
+export interface MetricsOptions extends GrafanaStackOptions {
+  /**
+   * Also emit the runnable monitoring/ stack (Prometheus + a provisioned Grafana dashboard).
+   *
+   * Default TRUE, because "here is a /metrics endpoint, now go build a dashboard" is homework most
+   * people never do — the endpoint then sits there unread and the feature is real in name only.
+   */
+  includeGrafanaStack?: boolean;
+}
+
 export interface MetricsResult {
   files: Record<string, string>;
   dependencies: Array<{ name: string; version: string }>;
   instructions: string;
 }
 
-/** Generate a Prometheus metrics integration (registry + request middleware + /metrics route). Pure. */
-export function generateMetrics(): MetricsResult {
+/** Generate a Prometheus metrics integration (registry + request middleware + /metrics route) and,
+ *  by default, the runnable Grafana stack that turns it into an actual dashboard. Pure. */
+export function generateMetrics(opts: MetricsOptions = {}): MetricsResult {
   const libFile = `import client from 'prom-client';
 import type { Request, Response, NextFunction } from 'express';
 
@@ -67,18 +80,22 @@ router.get('/', async (_req, res) => {
 export default router;
 `;
 
+  const wantsStack = opts.includeGrafanaStack !== false;
+  const stack = wantsStack ? generateGrafanaStack(opts) : null;
+
   return {
     files: {
       'server/lib/metrics.ts': libFile,
       'server/routes/metrics.routes.ts': routeFile,
+      ...(stack ? stack.files : {}),
     },
     dependencies: [{ name: 'prom-client', version: '^15' }],
     instructions:
       'Wired Prometheus metrics (prom-client). Mount the middleware early and expose the endpoint:\n' +
       "  app.use(metricsMiddleware); // from server/lib/metrics.ts\n" +
       "  app.use('/metrics', metricsRouter); // from server/routes/metrics.routes.ts\n" +
-      'Point your Prometheus/Grafana (or any scraper) at /metrics. It reports default process metrics plus ' +
-      'http_requests_total and http_request_duration_seconds (labelled by method/route/status). Restrict ' +
-      '/metrics to your monitoring network in production.',
+      'It reports default process metrics plus http_requests_total and http_request_duration_seconds ' +
+      '(labelled by method/route/status). Restrict /metrics to your monitoring network in production.' +
+      (stack ? `\n\n${stack.instructions}` : ''),
   };
 }

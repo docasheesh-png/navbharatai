@@ -5759,8 +5759,13 @@ export class ToolDispatcher {
       }
 
       case 'generate_metrics': {
-        // T2.8 recipe — Prometheus metrics (registry + request middleware + /metrics route). Pure generator.
-        const met = generateMetrics();
+        // T2.8 recipe — Prometheus metrics (registry + request middleware + /metrics route) plus the
+        // runnable Grafana stack under monitoring/. Pure generator.
+        const met = generateMetrics({
+          appPort: typeof input?.port === 'number' ? input.port : undefined,
+          appName: typeof input?.app_name === 'string' ? input.app_name : undefined,
+          includeGrafanaStack: input?.grafana !== false,
+        });
         const metWritten: string[] = [];
         for (const [path, content] of Object.entries(met.files)) {
           let kind: 'create' | 'modify' = 'create';
@@ -5772,7 +5777,7 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('metrics');
         const metDeps = met.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
-        return `Wired Prometheus metrics:\n${metWritten.join('\n')}\nAdd the dependencies: ${metDeps}\n\n${met.instructions}`;
+        return `Wired Prometheus metrics + Grafana dashboard:\n${metWritten.join('\n')}\nAdd the dependencies: ${metDeps}\n\n${met.instructions}`;
       }
 
       case 'generate_tracing': {

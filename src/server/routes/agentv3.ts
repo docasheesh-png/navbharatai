@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
+import { recordPlatformBuild } from '../lib/platformBuildMetrics';
 import { honestResultEvent } from '../lib/responseEmoji';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
@@ -8347,6 +8348,22 @@ export function registerAgentV3Routes(app: Express): void {
     // debit with the SAME idempotent buildRef the normal settle uses. Empty until the build starts → the
     // finalizer safely skips billing if the cap somehow fires before then.
     const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number } = {};
+    // PLATFORM TELEMETRY (2026-08-23) — what the admin Monitor needs from a build, readable by BOTH
+    // exits. It lives here, above the deadline finalizer, on purpose: `previewVerifiedRendered` is a
+    // `let` declared much further down, so a finalizer that fires before that line runs would hit its
+    // temporal dead zone. A crash inside the watchdog would lose the whole finalization, so the
+    // finalizer reads this ref instead and never the later binding.
+    const buildObs: { previewRendered: boolean; telemetryRecorded: boolean } = { previewRendered: false, telemetryRecorded: false };
+    // ONE build must count ONCE. `finalizeOnDeadline` is guarded by `rb.ended`, but the advisory cap
+    // fires 120s after a SUCCESSFUL result, so a long post-build tail can race the normal settle and
+    // both exits can reach a recorder. Billing survives that on its idempotent buildRef; a counter has
+    // no such protection and would quietly inflate the admin's build totals — a wrong number is worse
+    // than a missing one, because nothing about it looks wrong.
+    const recordBuildTelemetryOnce = (rec: Parameters<typeof recordPlatformBuild>[0]) => {
+      if (buildObs.telemetryRecorded) return;
+      buildObs.telemetryRecorded = true;
+      recordPlatformBuild(rec);
+    };
     // Force-finalize a build that overran its wall-clock cap — or, once the build has already SUCCEEDED,
     // its much shorter ADVISORY cap (see armAdvisoryCap). Extracted so the initial arm and the re-arm
     // share one implementation. Guarded by rb.ended so it can never double-emit after a clean finish.
@@ -8422,6 +8439,13 @@ export function registerAgentV3Routes(app: Express): void {
           watchdogLivePreview = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt);
           const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, watchdogLivePreview.usd);
           watchdogBilledUsd = decided.effectiveBilledUsd;
+          recordBuildTelemetryOnce({
+            ok,
+            previewAllowed: buildObs.previewRendered,
+            isEdit: isEditMode,
+            ms: Date.now() - (billingCtx.buildStartedAt ?? Date.now()),
+            providerUsage: decided.reconciledProviderUsage,
+          });
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
           buildDiagRef?.setCacheReadInputTokens(billingCtx.cacheReadInputTokens ?? 0);
           buildDiagRef?.setBilling({
@@ -13060,6 +13084,7 @@ export function registerAgentV3Routes(app: Express): void {
               }
             } catch { /* feature-presence is best-effort — never blocks a verified build */ }
             previewVerifiedRendered = true; // the eyes SAW it render — the runtime verdict must not deny it
+            buildObs.previewRendered = true; // same observation, readable by the deadline finalizer
             break;
           }
           // THE DEV SERVER IS DEAD — RESTART A PROCESS, DO NOT REWRITE AN APP (admin build transcript
@@ -14608,6 +14633,16 @@ export function registerAgentV3Routes(app: Express): void {
       const livePreviewCharge = billableSandboxDetail(actuator, workspaceId, buildStartedAt);
       const { effectiveBilledUsd: decidedBilledUsd, reconciledProviderUsage } =
         decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd);
+      // PLATFORM TELEMETRY — feed the admin Monitor / Health Score / FinOps the REAL engine's numbers.
+      // Until this line, those panels saw only the legacy Engineer-AI builder and were blind to every
+      // Pro build. Uses the reconciled per-provider tokens, so the cost graph and the bill agree.
+      recordBuildTelemetryOnce({
+        ok: result.ok === true,
+        previewAllowed: buildObs.previewRendered,
+        isEdit: isEditMode,
+        ms: Date.now() - buildStartedAt,
+        providerUsage: reconciledProviderUsage,
+      });
       let effectiveBilledUsd: number = decidedBilledUsd;
       // WHY a build ended up free — recorded into the build report's billing section (admin
       // 2026-07-11) so a ₹0 build always explains itself.

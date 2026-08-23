@@ -54,6 +54,27 @@ export interface MetricsSnapshot {
   since: string;
 }
 
+/**
+ * A side-channel that mirrors every recorded number somewhere else (today: the Monitor timeline).
+ *
+ * WHY A HOOK AND NOT A DIRECT IMPORT. This module is deliberately pure and dependency-free so it can
+ * be unit-tested without Firestore or a server. The timeline needs Firestore. Injecting the sink
+ * keeps the ONE recording funnel here — every existing and future caller of recordBuild /
+ * recordModelCall feeds the timeline automatically — without dragging storage into a pure module.
+ * Adding a second, parallel recording call at each call site is exactly the drift this avoids.
+ */
+export interface MetricsSink {
+  onModelCall?(provider: string, inputTokens: number, outputTokens: number, costUsd: number): void;
+  onBuild?(o: { ok: boolean; previewAllowed: boolean; isEdit?: boolean; ms: number; repairAttempts?: number }): void;
+}
+
+let _sink: MetricsSink | null = null;
+
+/** Register (or clear, with null) the metrics sink. Called once at server boot. */
+export function setMetricsSink(sink: MetricsSink | null): void {
+  _sink = sink;
+}
+
 export class MetricsRegistry {
   private tokens: Record<string, ProviderUsage> = {};
   private builds: BuildStats = {
@@ -62,13 +83,25 @@ export class MetricsRegistry {
   };
   private readonly since = new Date().toISOString();
 
-  /** Record one model call's (estimated) token use + cost under a provider. */
-  recordModelCall(provider: string, inputTokens: number, outputTokens: number): void {
+  /**
+   * Record one model call's token use + cost under a provider.
+   *
+   * `knownCostUsd` is the REAL cost when the caller has it (AgentV3 prices every call against the
+   * live rate card in providerRates.ts). Without it we fall back to the approximate table at the top
+   * of this file — which is fine for a usage trend, but is why any surface built on it must say
+   * "estimated" rather than presenting it as measured money.
+   */
+  recordModelCall(provider: string, inputTokens: number, outputTokens: number, knownCostUsd?: number): void {
     const u = this.tokens[provider] || (this.tokens[provider] = { requests: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 });
     u.requests += 1;
     u.inputTokens += Math.max(0, inputTokens);
     u.outputTokens += Math.max(0, outputTokens);
-    u.costUsd += costUsd(provider, Math.max(0, inputTokens), Math.max(0, outputTokens));
+    const cost = typeof knownCostUsd === 'number' && Number.isFinite(knownCostUsd) && knownCostUsd >= 0
+      ? knownCostUsd
+      : costUsd(provider, Math.max(0, inputTokens), Math.max(0, outputTokens));
+    u.costUsd += cost;
+    // Never let a sink failure lose the metric that was just recorded here.
+    try { _sink?.onModelCall?.(provider, Math.max(0, inputTokens), Math.max(0, outputTokens), cost); } catch { /* telemetry never throws */ }
   }
 
   /** Record the outcome of one build/edit run. */
@@ -79,6 +112,7 @@ export class MetricsRegistry {
     if (o.isEdit) this.builds.edits += 1; else this.builds.freshBuilds += 1;
     this.builds.totalMs += Math.max(0, o.ms);
     this.builds.totalRepairAttempts += Math.max(0, o.repairAttempts ?? 0);
+    try { _sink?.onBuild?.(o); } catch { /* telemetry never throws */ }
   }
 
   snapshot(): MetricsSnapshot {

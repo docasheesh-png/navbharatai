@@ -19,6 +19,8 @@ import { serverStats } from '../lib/serverStats';
 import { getProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
+import { metricsTimeline } from '../lib/metricsTimeline';
+import { usdInrRate } from '../lib/UsdInrRate';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
@@ -423,6 +425,80 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const ok = await releaseGateStore.set(config);
     if (!ok) return res.status(503).json({ error: 'Could not persist the release gate (storage unavailable).' });
     res.json({ ok: true, config });
+  });
+
+  // ── MONITOR (2026-08-23) — the admin home page's single data call. ────────────────────────────
+  //
+  // WHY ONE ENDPOINT. The Monitor is the first screen the admin sees, and it needs the live snapshot,
+  // the alerts, the health score, the FinOps waste findings, the provider circuit state AND the
+  // time-series all at once. Ten separate round trips on page load is a slow home page; one call is
+  // a fast one.
+  //
+  // WHY IT DUPLICATES NOTHING. Every field below is produced by the SAME shared function the
+  // dedicated endpoint uses (getMetrics / evaluateAlerts / computeHealthScore / analyzeFinOps /
+  // getProviderStats). This route composes, it does not re-implement — so the Monitor and the
+  // detailed tabs can never tell the admin two different stories about one number.
+  //
+  // HONESTY. `timeline.available:false` means the time-series store could not be read; the client
+  // MUST show that as unknown rather than drawing a flat zero line. A section that throws is
+  // returned as null with its reason, so one broken panel never blanks the whole page.
+  app.get('/api/admin/monitor', verifyAdminToken, async (req: Request, res: Response) => {
+    const hours = Math.min(Math.max(parseInt(String(req.query.hours ?? '6'), 10) || 6, 1), 168);
+    const snapshot = getMetrics().snapshot();
+
+    // Each section is independently guarded: a failure in one must not blank the whole home page.
+    const guard = <T>(fn: () => T): { value: T | null; error: string | null } => {
+      try { return { value: fn(), error: null }; } catch (err: any) {
+        return { value: null, error: err?.message || 'unavailable' };
+      }
+    };
+
+    const timeline = await metricsTimeline.series(hours).catch(() => null);
+    const providerStats = guard(() => getProviderStats());
+
+    // The same composite health inputs the dedicated /health-score endpoint reports, from the same
+    // real signals. Kept identical on purpose — two health numbers would be worse than none.
+    const health = guard(() => {
+      const provider = providerStats.value ?? {};
+      let totalReq = 0;
+      let totalErr = 0;
+      let latencyWeighted = 0;
+      for (const st of Object.values(provider) as any[]) {
+        totalReq += st.requestCount || 0;
+        totalErr += st.errorCount || 0;
+        latencyWeighted += (st.avgLatencyMs || 0) * (st.requestCount || 0);
+      }
+      const inputs = {
+        successRatePct: snapshot.builds.total > 0 ? snapshot.builds.successRate * 100 : null,
+        errorRatePct: totalReq > 0 ? (totalErr / totalReq) * 100 : null,
+        avgLatencyMs: totalReq > 0 ? latencyWeighted / totalReq : null,
+        uptimeSeconds: process.uptime(),
+      };
+      return { score: computeHealthScore(inputs), inputs };
+    });
+
+    res.json({
+      generatedAt: Date.now(),
+      windowHours: hours,
+      // The live conversion rate, so the client shows ₹ from one shared source instead of hardcoding
+      // a rate that would silently drift away from what the user is actually billed.
+      usdInr: usdInrRate(),
+      // Cumulative since THIS instance booted — labelled as such by the client, because a Cloud Run
+      // deploy resets it and a number that silently restarts at zero reads as an outage.
+      snapshot,
+      instanceUptimeSeconds: Math.round(process.uptime()),
+      alerts: guard(() => evaluateAlerts(snapshot)).value ?? [],
+      health: health.value,
+      healthError: health.error,
+      finops: guard(() => analyzeFinOps(snapshot)).value,
+      insights: guard(() => generateInsights(snapshot)).value ?? [],
+      providers: providerStats.value ?? {},
+      providersError: providerStats.error,
+      timeline: timeline ?? {
+        available: false, hasData: false, bucketMs: 0, from: 0, to: 0,
+        points: [], summary: null, providers: {},
+      },
+    });
   });
 
   // G2 — daily metrics history (last N days of persisted MetricsSnapshots).

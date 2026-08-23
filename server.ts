@@ -752,6 +752,19 @@ setInterval(() => {
             scheduler.register({ id: 'retention-purge', schedule: { kind: 'dailyAtUtc', hour: 3, minute: 0 }, handler: runPurge });
             runPurge(); // once at boot
           }
+          // MONITOR ALERTS — the admin is TOLD when build success, preview rate or build time leaves
+          // its normal range, instead of finding out by happening to open the panel. Every 15 minutes;
+          // the sweep itself decides what is worth saying (new / still-firing-after-a-cooldown /
+          // recovered) and says NOTHING when the window cannot be judged. Kill switch: MONITOR_ALERTS=off.
+          scheduler.register({
+            id: 'monitor-alerts',
+            schedule: { kind: 'everyMs', ms: 15 * 60_000 },
+            handler: async () => {
+              await import('./src/server/lib/monitorAlerts')
+                .then(({ runMonitorAlertSweep }) => runMonitorAlertSweep())
+                .catch(() => { /* monitoring must never affect the server */ });
+            },
+          });
           scheduler.start();
         })
         .catch(() => { /* best-effort — the scheduler must never affect boot */ });

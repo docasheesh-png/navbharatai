@@ -3,6 +3,7 @@ import { buildRateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deplo
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
 import { recordPlatformBuild } from '../lib/platformBuildMetrics';
+import { isAdminEmail } from '../lib/adminEmails';
 import { honestResultEvent } from '../lib/responseEmoji';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
@@ -2556,12 +2557,9 @@ export { redactProviderError };
  * admins. Fails CLOSED — an unknown/empty email is NOT admin, so a lookup failure yields the anonymized view.
  */
 export function isReportAdmin(email: string | null | undefined): boolean {
-  const e = String(email ?? '').trim().toLowerCase();
-  if (!e) return false;
-  const raw = process.env.AGENTV3_REPORT_ADMINS;
-  const list = (raw && raw.trim() ? raw : 'aashishcpmt09@gmail.com,doc.asheesh@icloud.com')
-    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  return list.includes(e);
+  // Delegates to the shared list in lib/adminEmails so surfaces outside this route (the Monitor's
+  // alert notifier) resolve the SAME admins by construction, never a copied allowlist that drifts.
+  return isAdminEmail(email);
 }
 
 /** The user-facing note when the build sandbox can't be set up (any cause). Deliberately carries NO

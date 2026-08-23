@@ -480,7 +480,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'audit log', 'audit trail', 'activity log', 'tamper evident', 'tamper proof', 'who did what', 'change history', 'admin actions log', 'immutable log', 'hash chain', 'compliance log', 'action history',
       'image', 'resize', 'thumbnail', 'sharp', 'optimize image', 'compress image', 'avatar', 'image upload',
       'logging', 'logs', 'logger', 'structured logging', 'pino', 'log level', 'request log', 'console log', 'observability', 'json logs',
-      'grafana', 'prometheus', 'metrics', 'dashboard', 'monitoring', 'monitor', 'graphs', 'charts', 'uptime', 'latency', 'p95', 'error rate', 'request rate', 'grafana dashboard', 'app monitoring', 'server monitoring', 'nigrani', 'monitoring kaise kare',
+      'grafana', 'prometheus', 'metrics', 'dashboard', 'monitoring', 'monitor', 'graphs', 'charts', 'uptime', 'latency', 'p95', 'error rate', 'request rate', 'grafana dashboard', 'app monitoring', 'server monitoring', 'nigrani', 'monitoring kaise kare', 'alert', 'alerts', 'notification', 'warning', 'khabar', 'batao jab', 'downtime alert',
       'file upload', 'upload validation', 'validate upload', 'magic bytes', 'file type', 'mime check', 'allowed file types', 'max file size', 'malicious upload', 'image upload', 'avatar upload', 'document upload',
       'graceful shutdown', 'sigterm', 'zero downtime', 'drain connections', 'shutdown', 'restart', 'deploy downtime', 'dropped requests',
       'security headers', 'helmet', 'clickjacking', 'x-frame-options', 'hsts', 'csp', 'content security policy', 'harden', 'nosniff', 'referrer policy',
@@ -2578,6 +2578,7 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
 • PLATFORM HEALTH — the composite health / reliability / risk score, from the same real signals as /api/admin/health-score
 • ALERTS, WASTE FINDINGS AND INSIGHTS — what is worth acting on, derived from live metrics, never predicted
 • SERVER LOGS — the newest entries, so "something is wrong" becomes a line you can read
+• ALERTS THAT REACH YOU — every 15 minutes the server checks the last hour on its own and sends an in-app notification (the bell) when build failure rate, preview rate or build time leaves its normal range, and an all-clear when it recovers. It announces a condition ONCE and then stays quiet for 6 hours while it keeps firing, so alerts stay worth reading; and it says NOTHING when the window has too few builds to judge or the telemetry cannot be read, because "we cannot see" is not "everything is on fire". Tunable: MONITOR_ALERT_COOLDOWN_MINUTES, MONITOR_ALERT_WINDOW_HOURS; kill switch MONITOR_ALERTS=off
 • BUSINESS — everything the old Overview tab held (revenue, registered users, website hits, active users, tokens, margin, publish capacity, provider ranking and token burn, recent purchases) is on this same page, below the live charts
 HONESTY: when the telemetry store cannot be read, the charts are SUPPRESSED and the page says it cannot see — it never draws a reassuring flat zero line, because a broken feed and a quiet night must not look identical. A rate nobody has measured shows as "—", never as 0%.
 Backend: GET /api/admin/monitor (one composed call) over the 5-minute time-series in Firestore (metrics_timeline).`,

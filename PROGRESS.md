@@ -40302,3 +40302,95 @@ is deliberately not invented. Token and cost totals are exact. The Monitor there
 tokens and cost rather than a request count; real per-call counts remain in `/api/admin/llm-latency`,
 which reads the trace spans. Closing this properly means carrying a call counter through the billing
 ledger, which is a separate change to the ledger's shape.
+
+---
+
+## 2026-08-23 (later) — the app-breaks-under-its-user trio, and the quality signal that replaces a rating popup
+
+Four merges, in the order the admin asked for them ("1-2-3 sab ek ek kar ke, bana kar rock solid karo").
+
+### #2597 — a sandbox was paused under a user who was actively using their app
+
+**This corrects the diagnosis recorded earlier the same day.** That entry said no keep-alive existed.
+One does: the Live tab's watchdog probes every 150s against the 300s idle sweep, and its own comment
+says that is what holds the VM open. The real defect is narrower and worse.
+
+That watchdog runs only while SIX client-side conditions hold — `autoResume`, `mode === 'live'`, a
+workspace, a url, the sandbox flag, and (added 2026-08-17, to stop a left-behind preview burning
+~₹7/hour) the preview pane being the visible surface INSIDE our app.
+
+**And "Open in new tab" pointed at the RAW sandbox URL.** So the moment a user popped their app out to
+look at it properly, the tab they were using had none of our JavaScript, our own tab was backgrounded,
+every one of those six conditions stopped holding, and the sweep paused the machine out from under an
+app somebody was actively using. Bypassing the door also meant they got the vendor's "Sandbox not
+found" rather than our branded retry page — the screenshot class #2576/#2582/#2587 were built to end,
+surviving on the one path none of them covered.
+
+The class, one level up: **"our pane is in the foreground" was standing in for "someone is using this
+app"** — two facts that come apart precisely when the user is most engaged. So the fix does not add a
+seventh condition to that chain; it takes the signal from where the app is actually being watched.
+
+The popout now goes through the door; a TOP-LEVEL navigation (`Sec-Fetch-Dest`, with a missing header
+treated as an iframe so an old browser can only get the path that already works) is served a keep-alive
+shell — our origin, one full-bleed iframe, and a heartbeat. The in-app iframe keeps today's 302
+byte-for-byte. A new cheap endpoint stamps the clocks and runs NO sandbox command. The idle sweep reads
+the DURABLE record before pausing, because a ping can land on any Cloud Run instance while the sweep
+runs on whichever holds the sandbox.
+
+Money invariant, same as the door's retry cap: the heartbeat pauses when the tab is hidden and gives up
+after an hour of continuous viewing. Kill switch `AGENTV3_PREVIEW_KEEPALIVE=off`.
+
+### #2599 — the running app was hard-remounted while the engine was still settling it
+
+Streaming first paint publishes files as they are written, so the user sees their app 30–155s sooner.
+Each batch bumps `reloadSignal`, and in LIVE mode that does `setLiveReloadKey(k => k + 1)` — a change of
+the iframe's React key, which DESTROYS AND RE-CREATES it. Not a hot reload: a hard remount, taking
+whatever the person had typed, opened or scrolled to.
+
+While the builder is writing NEW files that is a good trade. It stops being one once the app runs and
+every write is mid-surgery — a half-applied fix, a file rewritten for the fourth time, a repair that
+took errors 4 → 41 before being reverted. In the reported build that window was seven minutes.
+
+**The discriminator had to be the build's PHASE.** "Stop reloading once the user interacts" cannot be
+implemented: the app is in a cross-origin iframe and we cannot see a single click inside it. The phase
+is a fact we own. New `build_phase` event; both lanes announce settling; `idle` is emitted from the
+FINALLY so a deferral is never left hanging after a failure; the first render is never held.
+In-browser mode deliberately unchanged.
+
+The held-updates bar sits ABOVE `ResponsiveFrame`, never inside it — that component keeps a constant
+tree depth precisely so the iframe is never reparented, and reparenting an iframe IS a reload, so
+putting the bar inside would have made the fix cause the bug. Test-pinned.
+
+### #2600 — Option A: notice a bad build from what the user does
+
+The admin proposed a 1-5 star popup after each build, and asked for an honest opinion before it was
+built. Rejected, with reasons worth keeping: a star carries no diagnostic content (the build REPORT is
+what strengthens the engine; a rating would only ever be its trigger); rating fatigue means the 1-2
+star tail dries up within weeks, leaving silence that reads exactly like success; and it interrupts the
+user at their most engaged moment. The admin chose Option A.
+
+It asks nothing. Signals: the user's next message says the app does not work; they pressed Diagnose or
+Restart; they published/packaged/connected a domain; how long they actually watched it (the #2597
+keep-alive). **The one case it exists for is the SILENT failure — a green verdict the user contradicts.**
+A build that failed openly is already in diagnostics; pushing those at the admin would bury the cases
+they cannot see.
+
+The rule that shapes it: **absence of evidence is 'unclear', never 'bad'.** A short look is not evidence
+of a bad app. False positives are the expensive failure, so `complaintInText` is deliberately narrow
+("add a dark mode" is not a complaint), only a PERSON pressing Diagnose counts (the watchdog calls the
+same function), and investment outranks every negative.
+
+Sent at most once per build, claimed in a Firestore transaction that re-checks the buildId. Identity
+from the verified token. Every recording is fire-and-forget and after the response. Kill switch
+`AGENTV3_OUTCOME_TRACKING=off`.
+
+### Method note — three existing tests broke and were REPOINTED, not weakened
+
+The most instructive: `previewDoorRoute`'s slice ran from the door route to `preview-health`, and the
+new keep-alive route landed between them — so "every await is time-bounded" silently began measuring a
+different route's awaits and failed. Narrowed back, **plus a new assertion that the slice really is just
+the door**. A test window that quietly grows is a test that quietly stops testing what it names, and
+that is worth more than the one assertion it broke.
+
+`greenFreeze`'s anchor pinned the clear by the comment that followed it; re-anchored on the derivation,
+which states the guarantee directly instead of depending on neighbouring text.

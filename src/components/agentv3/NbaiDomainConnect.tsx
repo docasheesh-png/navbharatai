@@ -149,6 +149,30 @@ export function connectStage(
   }
   const ownershipDone = /ACTIVE/i.test(s.ownershipState || '');
   const hostDone = /ACTIVE/i.test(s.hostState || '');
+  /**
+   * 🔒 A CONFLICT IS NOT A WAIT — and calling it one cost the admin three days.
+   *
+   * The hosting service reported `ownership: conflict` with host and certificate BOTH active, and its
+   * own message said exactly why: more than one `hosting-site=` TXT on the domain, where it permits at
+   * most one. That is a permanent REFUSAL, not a slow state. But this screen had no branch for it, so
+   * it fell through to "Waiting for your DNS records to spread across the internet" — and the admin,
+   * reasonably, waited. Three days, for something that could never resolve on its own.
+   *
+   * Telling someone to wait for a thing that will never happen is the most expensive kind of dishonest
+   * message this codebase can produce: it is not a wrong label, it is wasted days. So the conflict says
+   * plainly that waiting will not help, and names the one action that fixes it — which now genuinely
+   * does, because "Check & apply records" removes the stale tokens (see applyRecords' TXT sweep).
+   */
+  if (/CONFLICT/i.test(s.ownershipState || '')) {
+    return {
+      headline: 'Your domain has more than one ownership record — waiting will not clear it.',
+      action: 'check',
+      tone: 'warn',
+      note: 'This happens when the same domain was connected from more than one app: each one left its '
+        + 'own ownership record, and only one is allowed. It will not fix itself, however long you wait. '
+        + 'Tap “Check & apply records” above — we will remove the extra ones and keep the right one.',
+    };
+  }
   if (!ownershipDone) {
     return {
       headline: 'Waiting for your DNS records to spread across the internet.',

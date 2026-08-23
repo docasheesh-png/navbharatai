@@ -118,6 +118,17 @@ interface CfDnsRecord { id: string; type: string; name: string; content: string;
 const stripQuotes = (s: string) => s.replace(/^"|"$/g, '');
 
 /**
+ * Is this TXT value one of OUR site-ownership tokens? PURE.
+ *
+ * The prefix is what makes the stale-token sweep above safe to scope: it is issued by us, the hosting
+ * service requires at most one of them per domain, and nothing else in a user's zone looks like it.
+ * Everything else — SPF, DKIM, another service's verification — is invisible to that sweep.
+ */
+export function isSiteToken(txtValue: string): boolean {
+  return stripQuotes(String(txtValue ?? '')).trim().toLowerCase().startsWith('hosting-site=');
+}
+
+/**
  * Write the desired records into the zone by CONVERGING each type+name set we manage.
  *
  * ROOT CAUSE HARDENING (mitrify.in live walk, 2026-08-06): when a zone activates, Cloudflare
@@ -156,6 +167,45 @@ export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Pr
         if (present) continue;
         await cf(`/zones/${zoneId}/dns_records`, { method: 'POST', body: want });
         changed++;
+      }
+      /**
+       * 🔒 REMOVE THE OWNERSHIP TOKENS THAT ARE NO LONGER OURS — the fix for a domain that could
+       * never connect, no matter how long anyone waited.
+       *
+       * ROOT CAUSE (admin, three days on `mitrify.com`, and the hosting API said it outright):
+       *
+       *     "Custom Domain has multiple, conflicting ownership claims. There must be at most one TXT
+       *      record with the `hosting-site=` prefix on the domain."
+       *      ownership: conflict · host: active · SSL: active
+       *
+       * Host and certificate were both fine. Only ownership was stuck, and it was stuck FOREVER —
+       * this is not a slow state that eventually resolves, it is a permanent refusal. Every time the
+       * domain was connected from a different app, that app's site minted a new `hosting-site=` token
+       * and the loop above ADDED it. Nothing ever took the old one away, so three connects left three
+       * claims and the hosting service refused all of them. Waiting could never have fixed it.
+       *
+       * 🔒 WHY THIS IS SAFE, AND WHY THE WHOLE TXT BRANCH IS STILL ADD-ONLY. Converging TXT the way
+       * the A-record branch below converges would be a data-loss bug: a domain's TXT records also
+       * carry SPF, DKIM and other services' verifications, and deleting those would silently break
+       * the user's EMAIL. So the sweep is scoped to the one prefix that is unambiguously ours and
+       * that the hosting service itself requires to be unique. A record we did not issue is never
+       * touched, and the token we still want is never removed.
+       */
+      const wantedTokens = new Set(group.map((w) => stripQuotes(w.content)).filter(isSiteToken));
+      /**
+       * ⚠️ SWEEP ONLY WHEN WE KNOW WHICH TOKEN IS THE LIVE ONE. An empty `wantedTokens` does NOT mean
+       * "no token is wanted" — it usually means the hosting service has already ACCEPTED ownership and
+       * stopped asking, so the token sitting in the zone is the one holding the domain up. Deleting it
+       * then would tear down a working domain to fix a problem it does not have. So a group that
+       * carries no site token sweeps nothing at all.
+       */
+      if (wantedTokens.size > 0) {
+        for (const r of existing) {
+          const content = stripQuotes(r.content);
+          if (!isSiteToken(content) || wantedTokens.has(content)) continue;
+          await cf(`/zones/${zoneId}/dns_records/${r.id}`, { method: 'DELETE' });
+          changed++;
+        }
       }
       continue;
     }

@@ -155,6 +155,42 @@ export type RenderDeployResult =
  *
  * `fetchImpl` is injected so the orchestration is testable without network; defaults to global fetch.
  */
+/**
+ * The backend's LIVE URL, without deploying anything. Returns '' when it cannot be established.
+ *
+ * 🔒 WHY A LOOKUP SEPARATE FROM THE DEPLOY. Publishing a SPLIT frontend needs one thing from the
+ * backend — the address to bake into the bundle — and needs it BEFORE the frontend build runs.
+ * Triggering a deploy to obtain it would be a side effect nobody asked for on every publish, and
+ * would still race: a deploy that has just started is not yet serving. Reading the service's existing
+ * URL is both cheaper and more honest.
+ *
+ * 🔒 AND '' IS A REFUSAL, NOT A DEFAULT. The caller must NOT publish a split frontend without this —
+ * a bundle built with no backend address is the silent-failure site this whole feature exists to
+ * prevent: it loads, it looks right, and every request goes nowhere.
+ */
+export async function findBackendUrl(
+  opts: { repoUrl?: string; appName?: string; apiKey?: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const apiKey = (opts.apiKey ?? process.env.RENDER_API_KEY ?? '').trim();
+  if (!apiKey) return '';
+  try {
+    const req = buildListServicesRequest(apiKey);
+    const res = await fetchImpl(req.url, { method: req.method, headers: req.headers });
+    if (!res.ok) return '';
+    const json = await res.json().catch(() => null);
+    const services = (Array.isArray(json) ? json : [])
+      .map(parseRenderService)
+      .filter((s): s is RenderService => s !== null);
+    const match = matchRenderService(services, opts);
+    // Only a real SERVICE url is an API address. The dashboard link is a web page for a human, and
+    // baking it into a frontend would point every request at Render's own UI.
+    return match?.serviceUrl?.trim() ? match.serviceUrl.trim().replace(/\/+$/, '') : '';
+  } catch {
+    return '';
+  }
+}
+
 export async function deployBackendToRender(
   opts: { repoUrl?: string; appName?: string; apiKey?: string },
   fetchImpl: typeof fetch = fetch,

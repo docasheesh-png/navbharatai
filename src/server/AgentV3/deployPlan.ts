@@ -237,6 +237,15 @@ export interface BackendCapability {
   canDeploy: boolean;
   /** The honest one-liner about WHOSE account it lands in — comes from `renderRequirement`. */
   requirement: string;
+  /**
+   * Is splitting this app the right move? Supplied by the caller from `analyzeApiWiring`, because
+   * only the app's own code can answer it — see the note in the fullstack branch for why `false`
+   * (ship whole) is both the safe default and, for a relative-path app, the correct answer.
+   * Undefined ⇒ no verdict was formed, and the split wording stands as before.
+   */
+  splitAdvised?: boolean;
+  /** The wiring analysis's own plain sentence, used when we recommend shipping whole. */
+  wholeAppNote?: string;
 }
 
 export interface DeployDecision {
@@ -273,6 +282,21 @@ export function deployDecision(plan: DeployPlan, backend: BackendCapability): De
   }
   const what = plan.backend?.framework ?? 'server';
   if (plan.shape === 'fullstack') {
+    /**
+     * 🔒 SPLITTING IS AN OPTIMISATION, NOT A REQUIREMENT — and for most fullstack apps it is the
+     * WRONG one. See apiWiring.ts: an app whose frontend calls `/api/…` works only because one
+     * server serves both halves, so splitting it produces a site whose every button fails silently.
+     * The caller supplies that verdict (this module stays pure), and `'whole'` — the safe default —
+     * means we say so plainly instead of recommending a split that would break the app.
+     */
+    if (backend.splitAdvised === false) {
+      return {
+        proceed: false,
+        code: 'backend-deploy-available',
+        message: `${backend.wholeAppNote || plan.summary} Use “Deploy backend” to put the whole app somewhere it `
+          + `can run — website and ${what} server together, exactly as it works now. ${backend.requirement}`,
+      };
+    }
     return {
       proceed: false,
       code: 'backend-deploy-available',

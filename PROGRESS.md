@@ -39875,3 +39875,87 @@ command and output dir, which is what makes it possible; nothing about it is cla
 has zero.
 
 Gate: both tsc + build + FULL vitest (17,653 passing, 1 skipped).
+
+### slice 3 — and the conclusion that reversed the plan
+
+The plan was: split every fullstack app — frontend to the CDN, API to a Node host. Building it made
+clear that **the textbook answer is wrong for most fullstack apps**, and that is the finding worth
+recording, not the code.
+
+**Why.** Splitting assumes the frontend can be TOLD where its API went. Most fullstack apps are not
+written that way: they call `fetch('/api/orders')` — a RELATIVE path that works precisely because one
+server serves both halves. Put that frontend on a CDN and every call goes to
+`https://theirsite.com/api/orders`, which the CDN has never heard of. The app builds, deploys, looks
+fine, and **every button silently fails** — worse than not splitting, and far harder to diagnose than
+a page that plainly does not load. Firebase Hosting cannot rescue it either: its rewrites target Cloud
+Functions, Cloud Run or a local path, never an arbitrary external URL, so there is no proxy to hide
+the seam behind.
+
+So the question is not "how do we split this?" but "SHOULD we?", and the answer is already in the code
+the user wrote (`analyzeApiWiring`):
+- reads an API base from an env var ⇒ it was BUILT to be split; inject the backend URL at build time.
+- relative `/api` paths ⇒ **do NOT split**; ship it WHOLE to the Node host, which already serves both
+  halves. Not a lesser fallback — for this app it is the correct deployment, and what the author
+  implicitly designed for.
+- hardcoded localhost ⇒ cannot work anywhere yet; name the FILE so the fix is a minute, not a hunt.
+
+🔒 **The default is "whole", never "split".** A wrong guess toward split gives a site whose every
+button fails silently; a wrong guess toward whole costs some CDN speed the user never knew they could
+have. Only one of those is a bug. Test-locked, including a null input and a README that merely
+contains a fetch call.
+
+🔒 **An env base WINS over a stray localhost or relative call.** An app that reads one was written to
+be split, and condemning it over a dev-only fallback (`import.meta.env.VITE_API_URL || 'http://localhost:3000'`
+— extremely common) would be wrong. Order is the design.
+
+🔒 **`buildEnvForSplit` never invents a variable the code does not read.** A setting nothing consumes
+is indistinguishable from a working one, and would turn a broken split into a mysterious one.
+
+**Honest state of "welcome any app".** What is now TRUE: every shape is recognised, no app can be
+published into a broken site, and each is told the correct strategy for its own code — including the
+non-obvious "do not split this". What is still NOT built: executing the split (running the frontend
+build with the injected env and deploying the two halves in order). The decision layer is complete;
+the execution of the split is not, and is not claimed to be.
+
+Gate: both tsc + build + FULL vitest (17,675 passing, 1 skipped).
+
+### slice 4 — the join actually runs
+
+Admin: *"jo nahi hai sab banao, professional kaam karo."* This is the execution the decision layer was
+built for, and it completes the split path.
+
+**The join.** A split frontend is only useful if it knows where its backend went. Publish now looks the
+address up (`findBackendUrl` — a LOOKUP, deliberately separate from the deploy: triggering one to learn
+a URL is a side effect nobody asked for on every publish, and would still race, because a deploy that
+has just started is not yet serving). With the address in hand it writes `.env.production` and the
+publish continues as an ordinary static publish.
+
+🔒 **NO ADDRESS ⇒ NO PUBLISH.** A split frontend built without its backend URL is exactly the
+silent-failure site this whole feature exists to prevent — it loads, it looks right, every request goes
+nowhere. So the absence of a URL falls through to the honest offer: deploy the backend first, then
+publish. Only a *real* service URL counts; Render's dashboard link is a web page for a human, and
+baking it in would point every request at Render's own UI.
+
+🔒 **`mergeEnvFile` merges, never overwrites — and that is a correctness requirement, not politeness.**
+A fullstack project's `.env.production` routinely holds the analytics key, the Stripe publishable key,
+a Sentry DSN. Writing our one line over it would publish a build silently missing all of them:
+everything compiles, the site loads, unrelated things quietly stop working. Comments, blank lines and
+every other key survive verbatim; only our own key is replaced (theirs is stale by definition), and a
+key that merely CONTAINS our name (`VITE_API_URL_OLD`) is not mistaken for it.
+
+Writing `.env.production` rather than passing an env var to the build command is also deliberate: it is
+the mechanism Vite, CRA and Next all document for build-time values, so one implementation covers all
+three — and the user can SEE what we set.
+
+**A control-flow correction of my own, made before it shipped.** The first version signalled "wired,
+proceed" by throwing a sentinel that the surrounding try/catch swallowed. It happened to work, and it
+was bad code: control flow through a swallowed exception is invisible to the next reader and breaks the
+moment someone narrows that catch. Replaced with an explicit flag.
+
+**"Welcome any app" — what is now genuinely true.** Every shape is recognised; no app can be published
+into a broken site; each is told the correct strategy for its own code, including the non-obvious "do
+not split this"; and a split app's two halves are joined automatically. What still needs the user: the
+one-time Render Blueprint connect, which Render requires in its own UI and no API can do for them —
+stated honestly at the point of use rather than papered over.
+
+Gate: both tsc + build + FULL vitest (17,681 passing, 1 skipped).

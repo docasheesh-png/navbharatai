@@ -45,6 +45,15 @@ export interface SessionManagerDeps {
   toggleTab: (view: any, pushToHistory?: boolean) => void;
   addToast: (message: string, type?: any) => void;
   addLog: (message: string, level?: any) => void;
+  /**
+   * The opening messages for a brand-new free chat — supplied by App, which owns the language choice.
+   *
+   * 🔒 PASSED IN RATHER THAN REBUILT HERE. `startNewChat` used to hardcode its OWN copy of the welcome
+   * line, so it (a) would drift from App's the moment either changed, and (b) skipped the language
+   * PICKER that a user who has not chosen a language yet must see — pressing New chat silently put
+   * them back into English. One source, both paths.
+   */
+  initialFreeChatMessages: () => Message[];
 }
 
 export function useSessionManager(deps: SessionManagerDeps) {
@@ -54,7 +63,7 @@ export function useSessionManager(deps: SessionManagerDeps) {
     setV3Resume, setCurrentSessionId, setFiles, setSessions, setSdaResetKey, setCurrentProSessionId,
     setProMessages, setMessages, setGeneratedCode, setHasGeneratedCode, setActiveAgent, setErrorContext,
     setIsAppBuilt, setRestoreUciError, setIsRestoringUci, setResumeUciInputState, setShowContinueModal,
-    toggleTab, addToast, addLog,
+    toggleTab, addToast, addLog, initialFreeChatMessages,
   } = deps;
 
   const handleRestoreUci = async (uciToFind: string): Promise<boolean> => {
@@ -279,17 +288,14 @@ export function useSessionManager(deps: SessionManagerDeps) {
     const newUci = user ? generateUCI() : '';
     
     setCurrentSessionId(newId);
-    setMessages([]);
-    
-    
-    const isVishwakarma = false;
-    const welcomeText = isVishwakarma
-       ? 'Hello! I\'m Vishwakarma. How can I help you today?'
-       : 'Hello! I\'m navBharatAI. You can chat with me in any language!';
-
-    setMessages([
-      { id: 'welcome', text: welcomeText, sender: 'ai', timestamp: new Date(), modelUsed: 'General Assistant' }
-    ]);
+    // The SAME opening App uses for a fresh chat — so a user who has not picked a language still gets
+    // the picker, and the welcome text cannot drift from the one App shows on first load.
+    //
+    // ⚠️ Computed ONCE and used for both the on-screen transcript and the saved session below. This
+    // function previously carried THREE hardcoded copies of that welcome line (two here, one in the
+    // saved record), which is how the saved session could describe a conversation that never happened.
+    const opening = initialFreeChatMessages();
+    setMessages(opening);
 
     setErrorContext(null);
     setHasGeneratedCode(false);
@@ -304,9 +310,7 @@ export function useSessionManager(deps: SessionManagerDeps) {
     const initSession: ChatSession = {
       id: newId,
       title: 'New Conversation',
-      messages: isVishwakarma 
-        ? [{ id: 'asc-welcome', text: 'Hello! I\'m Vishwakarma. How can I help you today?', sender: 'ai', timestamp: new Date(), modelUsed: 'Vishwakarma' }]
-        : [{ id: 'nbi-welcome', text: 'Hello! I\'m navBharatAI. You can chat with me in any language!', sender: 'ai', timestamp: new Date(), modelUsed: 'navBharatAI Cognitive Layer' }],
+      messages: opening,
       files: {
         'index.html': `<!DOCTYPE html><html><body><h1>New Sandbox</h1></body></html>`,
         'script.js': 'console.log("Ready");',

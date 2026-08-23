@@ -1694,8 +1694,9 @@ Tap a tab to open that surface (it takes over the screen on mobile); tap it agai
 • GENERATES images for FREE — just ask in plain text ("generate an image of a mountain sunrise", "ek logo banao", "draw a red car") and the image appears right in the chat. No separate tool needed.
 • Remembers conversation context within a session.
 • Responds in the SAME language and tone the user writes in — Hindi reply for Hindi input, English for English, etc.
+• START A NEW CHAT any time with the "+ New" button at the top-right of the chat, next to the Teach toggle. It clears the screen for a fresh conversation; the one you were having is already saved and stays in History, so nothing is lost and you can reopen it whenever you like.
 NOTE: Does NOT build apps (use NavBharatAI Pro v5.0 for that).`,
-    howToUse: 'Open "NavBharatAI FREE" from the sidebar menu (or tap "Start Free Chat" on Home) and type your question in any language. To get a picture, just ask for one in plain text (e.g. "generate an image of…", "ek image banao…") — it is generated free and shown inline.',
+    howToUse: 'Open "NavBharatAI FREE" from the sidebar menu (or tap "Start Free Chat" on Home) and type your question in any language. To get a picture, just ask for one in plain text (e.g. "generate an image of…", "ek image banao…") — it is generated free and shown inline. To begin a fresh conversation, tap "+ New" at the top-right of the chat — your previous chat stays saved in History.',
     relatedFeatures: ['pro_chat', 'history', 'free_chat_file_analysis', 'ai_image_gen'],
     aiSurface: 'nbi_chat',
     keywords: [
@@ -1703,6 +1704,8 @@ NOTE: Does NOT build apps (use NavBharatAI Pro v5.0 for that).`,
       'question answer', 'help', 'explain', 'kya hai', 'bataiye', 'samjhao',
       'hindi chat', 'language', 'translate', 'muft chat', 'free ai',
       'generate image in chat', 'image banao', 'photo banao', 'make an image', 'draw', 'picture in chat', 'free image',
+      'new chat', 'start new chat', 'naya chat', 'nayi chat', 'new conversation', 'clear chat', 'chat clear karo',
+      'fresh chat', 'purani chat hatao', 'reset chat', 'start over', 'naya shuru karo',
     ],
   },
   {

@@ -2350,13 +2350,13 @@ export default function App() {
   // P3.1 — session restore/management (UCI restore, delete, new chat) extracted into useSessionManager
   // (behavior-preserving). All deps are defined above; the panels/modal consumers below resolve the
   // returned handlers unchanged. v3ResumeInFlightRef stays App-owned (shared with the toggleTab bump).
-  const { handleRestoreUci, handleRestoreByUci, deleteSession } = useSessionManager({
+  const { handleRestoreUci, handleRestoreByUci, deleteSession, startNewChat } = useSessionManager({
     sessions, user, currentSessionId, resumeUciInputState, mode,
     v3ResumeInFlightRef,
     setV3Resume, setCurrentSessionId, setFiles, setSessions, setSdaResetKey, setCurrentProSessionId,
     setProMessages, setMessages, setGeneratedCode, setHasGeneratedCode, setActiveAgent, setErrorContext,
     setIsAppBuilt, setRestoreUciError, setIsRestoringUci, setResumeUciInputState, setShowContinueModal,
-    toggleTab, addToast, addLog,
+    toggleTab, addToast, addLog, initialFreeChatMessages: initialNbiMessages,
   });
 
 
@@ -3011,6 +3011,7 @@ export default function App() {
               wallet={wallet}
               setPreferredLanguage={setPreferredLanguage}
               setMessages={setMessages}
+              onNewChat={startNewChat}
             />
           )}
 

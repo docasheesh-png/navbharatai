@@ -44,6 +44,11 @@ export interface NBIChatPanelProps {
   wallet: any;
   setPreferredLanguage: (lang: any) => void;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  /**
+   * Start a fresh conversation. Absent ⇒ the control is not rendered at all — a New chat button with
+   * nothing behind it is the dead button this codebase keeps deleting.
+   */
+  onNewChat?: () => void;
 }
 
 export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
@@ -76,6 +81,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
   wallet,
   setPreferredLanguage,
   setMessages,
+  onNewChat,
 }) => {
   const currentSession = sessions.find(s => s.id === currentSessionId);
 
@@ -92,6 +98,27 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
             <span>NAVBHARATAI</span>
           </div>
           <div className="flex items-center gap-2">
+            {/* START A NEW CHAT (admin 2026-08-23: "free me new chat kaise start hogi? koi option
+                banaya hai? nahi banaya hai").
+
+                🔒 SAFE BY CONSTRUCTION, and worth saying why. `startNewChat` mints a NEW session id
+                before it clears anything. That ordering is the whole thing: the transcript is
+                auto-saved to History keyed by the CURRENT id, so clearing the messages WITHOUT a new
+                id would make the user's next message overwrite the conversation they just left. With
+                the new id, the old chat stays in History, intact and reopenable — which is also why
+                this needs no "are you sure": nothing is lost to confirm about.
+
+                Shown only when the caller supplies the handler, so it can never be a dead button. */}
+            {onNewChat && (
+              <button
+                onClick={onNewChat}
+                title="Start a new chat — this conversation stays saved in History"
+                className="flex items-center gap-1 px-2 py-0.5 rounded border bg-white/5 border-white/10 text-[8px] font-black uppercase tracking-widest text-[#484f58] hover:text-white hover:border-white/30 transition-all"
+              >
+                <span>＋</span>
+                <span className="hidden sm:inline">New</span>
+              </button>
+            )}
             <button
               onClick={() => setTeachMode(p => !p)}
               title={teachMode ? 'Teaching Mode ON — click to turn off' : 'Teaching Mode OFF — click to enable beginner explanations'}

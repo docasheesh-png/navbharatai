@@ -215,8 +215,17 @@ describe('AgentV3 telemetry wiring (locked)', () => {
   const route = readFileSync(resolve(__dirname, '../routes/agentv3.ts'), 'utf8');
 
   it('records platform telemetry from BOTH the normal settle and the watchdog finalizer', () => {
-    const occurrences = route.split('recordPlatformBuild(').length - 1;
+    const occurrences = route.split('recordBuildTelemetryOnce(').length - 1;
     expect(occurrences).toBeGreaterThanOrEqual(2);
+  });
+
+  it('counts one build ONCE, even when both exits reach a recorder', () => {
+    // The advisory cap fires 120s after a successful result, so a long post-build tail can race the
+    // normal settle. Billing survives that on its idempotent buildRef; a counter has no such
+    // protection, and an inflated build total is worse than a missing one because nothing about it
+    // looks wrong.
+    expect(route).toContain('telemetryRecorded');
+    expect(route).toContain('if (buildObs.telemetryRecorded) return;');
   });
 
   it('imports the shared recorder rather than re-implementing it at a call site', () => {

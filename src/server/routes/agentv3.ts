@@ -308,6 +308,7 @@ import { comparePreviewUrl, measurementDescribesUserView, stalePreviewMessage } 
 import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage } from '../AgentV3/previewDoor';
 import { previewKeepAliveEnabled, isTopLevelNavigation, shouldServeKeepAliveShell, keepAliveShellPage } from '../AgentV3/previewKeepAlive';
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
+import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
 import { scoreBuildOutcome, shouldAutoReport, autoReportReason, complaintInText } from '../AgentV3/buildOutcomeSignals';
 import { buildOutcomeStore, buildOutcomeTrackingEnabled, watchedMsFrom, type BuildOutcomeRecord } from '../AgentV3/BuildOutcomeStore';
 import { buildPortSweepCommand, portCandidates, parsePortSweep } from '../AgentV3/sandbox/EngineerAI/actuators/portSweep';
@@ -13588,6 +13589,52 @@ async function noteBuildOutcome(
             });
           }
         } catch { /* the net is additive — a failure here never touches the build result */ }
+      }
+
+      // DOES THIS APP ACTUALLY BUILD? The one command Publish, the APK workflow and every deploy
+      // provider depend on — and the only one no gate has ever run. `tsc --noEmit` type-checks, the
+      // preview proves the DEV server renders, the vaccine runs the app's tests; none of them executes
+      // `npm run build`. That blind spot is how the scaffold shipped a build script pointing at a
+      // tsconfig it never wrote, failing on EVERY app that provider made, invisibly, until a user hit
+      // it mid-build (#2592). See prodBuildGate.ts.
+      //
+      // A DETECTOR, DELIBERATELY NOT A GATE: it runs after the app is delivered and green, it can never
+      // block or fail a build, and it does NOT feed classifyBuildOutcome — a green, rendering app whose
+      // production build is broken is a working app with a shipping problem, not a failed build, and
+      // calling it BUILD_FAILED would both lie to the user and change what they are charged.
+      if (
+        prodBuildGateEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+      ) {
+        try {
+          let pkgRaw: string | undefined;
+          try { pkgRaw = await actuator.readFile(workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+          // No real build script — nothing to prove, and running a placeholder would "pass" without
+          // building anything, which is the fake success this whole check exists to prevent.
+          if (buildScriptFrom(pkgRaw)) {
+            let ran = false;
+            let exitCode: number | null = null;
+            let output = '';
+            try {
+              const r = await withTimeout(actuator.runCommand(workspaceId, prodBuildCommand()), PROD_BUILD_TIMEOUT_MS, 'prod-build-gate');
+              ran = true;
+              exitCode = typeof r.exitCode === 'number' ? r.exitCode : null;
+              output = `${r.stdout || ''}\n${r.stderr || ''}`;
+            } catch { ran = false; /* no sandbox, or it outran the bound — UNVERIFIED, never "failed" */ }
+            const verdict = judgeProdBuild({ ran, exitCode, output });
+            buildDiag.record({
+              phase: 'readiness',
+              severity: verdict.code === 'PROD_BUILD_FAILED' ? 'warning' : 'info',
+              code: verdict.code,
+              message: verdict.message,
+              // A failing production build is a real, unresolved problem with the app the user now has —
+              // marking it auto-resolved would file it away as handled when nothing has handled it.
+              autoResolved: verdict.code !== 'PROD_BUILD_FAILED',
+            });
+            const note = prodBuildUserNote(verdict);
+            if (note) events.emit({ type: 'narration', agent: 'architect', text: note, ts: Date.now() });
+          }
+        } catch { /* the detector must never affect a build it is only observing */ }
       }
 
       // APP HEALTH CULTURE — VACCINE (Immune System Phase 2, opt-in AGENTV3_VACCINE=on): run_tests is a

@@ -102,3 +102,37 @@ export function scaffoldRestores(
   }
   return out;
 }
+
+/**
+ * Strip a repair pass's power to break the boilerplate at all.
+ *
+ * ROOT CAUSE (real build report 2026-08-23): a build whose preview was ALREADY RENDERING spent seven
+ * minutes and four `tsc` runs on `src/ErrorBoundary.tsx`. The scaffold ships that file correct; the
+ * model overwrote it without the `extends React.Component<Props, State>` clause, produced
+ * "Property 'setState' does not exist on type 'ErrorBoundary'", and then rewrote it three more times —
+ * each attempt still missing the clause, because a React error boundary MUST be a class and the model
+ * does not know that.
+ *
+ * A comment in the file asking it not to (added the same day) is prevention by persuasion. This is
+ * prevention by construction: a REPAIR is fixing compile errors, never implementing a user request, so
+ * a repair aimed at a file we own and that has one correct form is simply replaced with that form. The
+ * model can propose it; it cannot land it.
+ *
+ * Deliberately scoped to REPAIR output only. The BUILDER may legitimately write these paths — a user
+ * can ask for different fallback wording — and that path is untouched.
+ *
+ * Returns the files to write, with any boilerplate path's content swapped for canonical, plus the paths
+ * that were overridden so the caller can say so honestly. Pure.
+ */
+export function protectBoilerplateInRepair<T extends { path: string; content: string }>(
+  files: readonly T[],
+): { files: Array<T | { path: string; content: string }>; overridden: string[] } {
+  const overridden: string[] = [];
+  const out = (files ?? []).map((f) => {
+    const canonical = canonicalScaffold(f?.path);
+    if (canonical == null || f.content === canonical) return f;
+    overridden.push(f.path);
+    return { path: f.path, content: canonical };
+  });
+  return { files: out, overridden };
+}

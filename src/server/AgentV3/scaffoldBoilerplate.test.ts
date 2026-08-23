@@ -3,8 +3,9 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   SCAFFOLD_BOILERPLATE, isScaffoldBoilerplate, canonicalScaffold,
-  scaffoldFilesInTscErrors, tscFailureIsOnlyScaffold, scaffoldRestores,
+  scaffoldFilesInTscErrors, tscFailureIsOnlyScaffold, scaffoldRestores, protectBoilerplateInRepair,
 } from './scaffoldBoilerplate';
+import { manifestSystemPrompt } from './SimpleBuilder';
 
 /**
  * THE RECURRING ERROR, from three real reports (2026-08-12):
@@ -117,5 +118,85 @@ describe('it is wired into the tsc gate — deterministic restore BEFORE the mod
 
   it('has a kill switch', () => {
     expect(routes).toContain("process.env.AGENTV3_SCAFFOLD_RESTORE !== 'off'");
+  });
+});
+
+describe('protectBoilerplateInRepair — the model may propose it, it cannot land it', () => {
+  const broken = 'export class ErrorBoundary { render(){ return this.props.children } }';
+
+  it('replaces a repair aimed at boilerplate with the canonical version', () => {
+    const r = protectBoilerplateInRepair([{ path: 'src/ErrorBoundary.tsx', content: broken }]);
+    expect(r.overridden).toEqual(['src/ErrorBoundary.tsx']);
+    expect(r.files[0].content).toBe(canonicalScaffold('src/ErrorBoundary.tsx'));
+    // The clause whose absence produced "Property 'setState' does not exist on type 'ErrorBoundary'"
+    // for seven minutes across four tsc runs on a real build.
+    expect(r.files[0].content).toContain('extends React.Component<Props, State>');
+  });
+
+  it('leaves the user’s own files completely alone', () => {
+    const files = [{ path: 'src/App.tsx', content: 'export default function App(){return null}' }];
+    const r = protectBoilerplateInRepair(files);
+    expect(r.overridden).toEqual([]);
+    expect(r.files[0]).toBe(files[0]); // same object — untouched, not re-created
+  });
+
+  it('reports nothing when the repair already matches canonical', () => {
+    const r = protectBoilerplateInRepair([{ path: 'src/ErrorBoundary.tsx', content: canonicalScaffold('src/ErrorBoundary.tsx')! }]);
+    expect(r.overridden).toEqual([]);
+  });
+
+  it('handles an empty or absent list without throwing', () => {
+    expect(protectBoilerplateInRepair([]).files).toEqual([]);
+    expect(protectBoilerplateInRepair(undefined as never).files).toEqual([]);
+  });
+
+  it('preserves the other files in a mixed repair', () => {
+    const r = protectBoilerplateInRepair([
+      { path: 'src/App.tsx', content: 'A' },
+      { path: 'src/ErrorBoundary.tsx', content: broken },
+      { path: 'src/List.tsx', content: 'B' },
+    ]);
+    expect(r.files.map((f) => f.path)).toEqual(['src/App.tsx', 'src/ErrorBoundary.tsx', 'src/List.tsx']);
+    expect(r.files[0].content).toBe('A');
+    expect(r.files[2].content).toBe('B');
+    expect(r.overridden).toEqual(['src/ErrorBoundary.tsx']);
+  });
+});
+
+describe('both repair paths carry the guard — the drift that cost the seven minutes', () => {
+  /**
+   * The restore existed since 2026-08-12 but lived ONLY in the agentic lane's tsc gate. The fast lane —
+   * the one most builds take, and the one the reported build took — had neither the restore nor the
+   * write guard, so the same boilerplate file was fought with model passes there. Two verify paths, one
+   * guard: exactly the duplicated-logic class this repo keeps paying for.
+   */
+  const simpleBuilder = readFileSync(join(process.cwd(), 'src/server/AgentV3/SimpleBuilder.ts'), 'utf8');
+  const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+
+  it('the fast lane restores boilerplate BEFORE spending a repair call', () => {
+    const restore = simpleBuilder.indexOf('scaffoldRestores(');
+    const repairCall = simpleBuilder.indexOf('await deps.repair(');
+    expect(restore).toBeGreaterThan(-1);
+    expect(restore).toBeLessThan(repairCall); // free and certain first, paid and probabilistic second
+  });
+
+  it('the fast lane guards its repair output', () => {
+    expect(simpleBuilder).toContain('protectBoilerplateInRepair(fixed)');
+  });
+
+  it('the agentic lane guards its repair output too', () => {
+    expect(route).toContain('protectBoilerplateInRepair(parseFileBlocks(t.text)');
+  });
+
+  it('boilerplate is dropped from the plan, so the FIRST pass cannot overwrite it either', () => {
+    // The 50/50 half: restoring after the fact is recovery; keeping it out of the plan is why it never
+    // needs recovering. The prompt line alone would be persuasion — the filter is what makes it true.
+    expect(simpleBuilder).toContain('planned.filter((m) => !isScaffoldBoilerplate(m.path))');
+    expect(manifestSystemPrompt('vite-react')).toContain('src/ErrorBoundary.tsx');
+    expect(manifestSystemPrompt('vite-react')).toContain('do NOT list them');
+  });
+
+  it('the fast lane honours the same kill switch as the agentic lane', () => {
+    expect(simpleBuilder).toContain("process.env.AGENTV3_SCAFFOLD_RESTORE !== 'off'");
   });
 });

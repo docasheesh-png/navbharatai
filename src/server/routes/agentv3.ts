@@ -130,7 +130,7 @@ import {
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard } from '../AgentV3/greenReviewPolicy';
-import { scaffoldFilesInTscErrors, canonicalScaffold } from '../AgentV3/scaffoldBoilerplate';
+import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver } from '../AgentV3/greenFreeze';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote } from '../AgentV3/verifyAfterFix';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
@@ -11682,7 +11682,18 @@ export function registerAgentV3Routes(app: Express): void {
               messages: [{ role: 'user', content: repairUserPrompt(prompt, check.errors, currentFiles) }],
               tools: [], maxTokens: 8000,
             });
-            const fixes = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
+            // Same guard the fast lane now carries: a REPAIR aimed at a file we own and that has one
+            // correct form is replaced with that form. The restore above already put it back once — this
+            // is what stops this very pass from immediately undoing that and starting the loop again.
+            const guarded = protectBoilerplateInRepair(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })));
+            const fixes = guarded.files;
+            if (guarded.overridden.length > 0) {
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'SCAFFOLD_REWRITE_REFUSED',
+                message: `A repair tried to rewrite ${guarded.overridden.length} file(s) NavBharatAI ships (${guarded.overridden.join(', ')}); the known-good version was kept instead. A repair never needs to change these.`,
+                autoResolved: true,
+              });
+            }
             for (let i = 0; i < fixes.length; i++) {
               await dispatcher.dispatch({ id: `tscgate-w${i}`, name: 'write_file', input: { path: fixes[i].path, content: fixes[i].content } }, 'frontend');
             }

@@ -15,6 +15,7 @@
 
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { judgeRepair } from './repairAcceptance';
+import { scaffoldRestores, protectBoilerplateInRepair, isScaffoldBoilerplate, SCAFFOLD_BOILERPLATE } from './scaffoldBoilerplate';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
@@ -150,6 +151,9 @@ export function manifestSystemPrompt(framework: string): string {
     '- One file per REAL unit of the app. Never a separate file for a single tiny helper, type or constant —',
     '  co-locate it with its only user. Fewer, cohesive files beat many thin ones.',
     '- Do NOT list node_modules, lockfiles, or build output.',
+    // The persuasion half of the boilerplate fix; SimpleBuilder drops these from the parsed plan
+    // regardless, so a model that ignores this line still cannot overwrite them.
+    `- These files are PROVIDED and already correct — do NOT list them, do not rewrite them: ${Object.keys(SCAFFOLD_BOILERPLATE).join(', ')}.`,
   ].join('\n');
 }
 
@@ -680,9 +684,21 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // The plan call is a REAL model call on this build's REAL provider chain, and it is the only
       // latency measurement that exists before a single file is generated. See canFinishAfterPreamble.
       const planCallMs = Date.now() - laneStartedAt;
-      const manifest = parseFileManifest(manifestText);
+      // THE OTHER HALF OF THE SEVEN MINUTES (50/50 law). Restoring src/ErrorBoundary.tsx after the fact
+      // is recovery; this is why it needed recovering. The manifest prompt hands the model the scaffold
+      // list and says "edit/extend", so the plan can — and did — include a file we ship correct, and the
+      // very FIRST generation pass overwrote it with a version missing the `extends React.Component`
+      // clause. The prompt now says these are provided, and this filter means that instruction cannot be
+      // ignored: a boilerplate path is dropped from the plan whatever the model answered.
+      const planned = parseFileManifest(manifestText);
+      const droppedBoilerplate = planned.filter((m) => isScaffoldBoilerplate(m.path)).map((m) => m.path);
+      const manifest = droppedBoilerplate.length ? planned.filter((m) => !isScaffoldBoilerplate(m.path)) : planned;
+      if (droppedBoilerplate.length) {
+        deps.log?.(`Skipping ${droppedBoilerplate.length} file(s) NavBharatAI already provides — they are correct as shipped: ${droppedBoilerplate.join(', ')}.`);
+      }
       // Recorded BEFORE the minFiles bail: a manifest too small to be worth this lane is exactly the
-      // case the one-shot lane exists for, and it must still be able to see that number.
+      // case the one-shot lane exists for, and it must still be able to see that number. Counted AFTER
+      // the filter, because that is the number of files this build will actually write.
       plannedFiles = manifest.length;
       try { deps.onPlanned?.(manifest.length); } catch { /* an ETA hook must never affect a build */ }
       if (manifest.length < minFiles) throw new Error('manifest_too_small');
@@ -962,6 +978,29 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     // byte-identical error set, the model is stuck and every further attempt burns a model call + verify
     // round to fail the same way — hand off to the full builder now. Safe: only ever fires while the build
     // is ALREADY failing (!verdict.ok), so it can never turn a passing build into a failing one.
+    // DETERMINISTIC FIRST — put back the boilerplate WE ship before spending a model call on it.
+    //
+    // The agentic lane has done this since 2026-08-12; THIS lane never did, and the two verify paths
+    // drifted apart in silence. A real build (2026-08-23) whose preview was already rendering then spent
+    // seven minutes and four tsc runs on src/ErrorBoundary.tsx here, in the lane without the guard,
+    // while the other lane would have fixed it for free in one write. That is the duplicated-logic class
+    // this repo keeps paying for; the restore now lives in both places, and `protectBoilerplateInRepair`
+    // below means a repair cannot re-break it afterwards.
+    //
+    // Costs nothing on a healthy build: `scaffoldRestores` returns {} unless tsc actually blames one of
+    // our own files, and the extra verify only runs when something was genuinely put back.
+    if (!verdict.ok && process.env.AGENTV3_SCAFFOLD_RESTORE !== 'off') {
+      try {
+        const restores = scaffoldRestores(Object.fromEntries([...byPath].map(([p, f]) => [p, f.content])), verdict.errors);
+        const restoreFiles = Object.entries(restores).map(([path, content]) => ({ path, content }));
+        if (restoreFiles.length > 0) {
+          await deps.writeFiles(restoreFiles);
+          for (const f of restoreFiles) byPath.set(f.path, f);
+          deps.log?.(`Put ${restoreFiles.length} NavBharatAI-provided file(s) back to their known-good version — no repair pass needed for those.`);
+          verdict = await deps.verify().catch(() => ({ ok: true, errors: '', ran: false }));
+        }
+      } catch { /* a free restore is best-effort — fall through to the model repair below */ }
+    }
     let promptingErrors = verdict.errors;
     while (!verdict.ok && attempt < maxRepairs && deps.repair) {
       attempt++;
@@ -981,6 +1020,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract, strategy); } catch { fixed = []; }
       fixed = fixed.filter((f) => f && f.path && f.content);
       if (!fixed.length) break;
+      // PREVENTION BY CONSTRUCTION, not by persuasion. A repair aimed at a file we own and that has one
+      // correct form is replaced with that form — the model may propose it, it cannot land it. This is
+      // what stops the four-rewrites-of-the-same-file loop rather than merely recovering from it.
+      {
+        const guarded = protectBoilerplateInRepair(fixed);
+        if (guarded.overridden.length > 0) {
+          deps.log?.(`Kept ${guarded.overridden.length} NavBharatAI-provided file(s) at their known-good version instead of applying a rewrite: ${guarded.overridden.join(', ')}.`);
+        }
+        fixed = guarded.files as OneShotFile[];
+      }
       // ACCEPTANCE TEST (real build report 2026-08-23: a repair took the app from 4 errors to 41 and was
       // kept, because the only brake here was byte-IDENTICAL errors and 41 is not identical to 4). A
       // repair is a HYPOTHESIS; snapshot what it is about to overwrite so a regression can be undone.

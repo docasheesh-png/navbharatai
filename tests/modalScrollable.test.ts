@@ -25,7 +25,11 @@ describe('modal cards must cap their height and scroll (phone-reachability tripw
       const offenders: string[] = [];
       for (const m of src.matchAll(CARD_RE)) {
         const cls = m[1];
-        const capped = /\bmax-h-\[/.test(cls);
+        // A cap is a cap whether it is a Tailwind `max-h-[…]` or the shared `nb-sheet` class.
+        // `nb-sheet` (index.css, 2026-08-23) is the STRICTER of the two: it caps against the VISIBLE
+        // viewport via `dvh`, where a raw `vh` fraction is measured against the mobile LARGE viewport
+        // and therefore still lets the card's bottom sit under the browser toolbar.
+        const capped = /\bmax-h-\[/.test(cls) || /\bnb-sheet\b/.test(cls);
         const scrolls = /\boverflow-y-auto\b|\boverflow-auto\b/.test(cls);
         // A card that delegates scrolling to an inner body is fine — it still must be capped.
         if (!capped || (!scrolls && !/\bflex\b/.test(cls))) {
@@ -41,7 +45,7 @@ describe('modal cards must cap their height and scroll (phone-reachability tripw
     const idx = src.indexOf('{/* Import Repo Modal */}');
     expect(idx).toBeGreaterThan(-1);
     const block = src.slice(idx, idx + 1400);
-    expect(block).toContain('max-h-[85vh]');
+    expect(block).toContain('nb-sheet');
     expect(block).toContain('overflow-y-auto');
   });
 

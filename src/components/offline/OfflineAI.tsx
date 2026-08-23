@@ -411,7 +411,7 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
 
       {/* Offline Thinking (beta) panel — honest, opt-in, on-device LLM */}
       {betaOpen && (
-        <div className="shrink-0 border-b border-white/5 bg-[#0d1117] px-4 py-3.5 space-y-3 max-h-[70vh] overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="shrink-0 border-b border-white/5 bg-[#0d1117] px-4 py-3.5 space-y-3 max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-top-2 duration-200">
           <div className="flex items-start gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-fuchsia-500 to-indigo-600 flex items-center justify-center shrink-0 ring-1 ring-white/10"><Cpu className="w-4 h-4 text-white" /></div>
             <div className="min-w-0">

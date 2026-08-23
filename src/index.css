@@ -242,6 +242,52 @@ button, [role='button'], nav, header, footer {
     display: none;
   }
 
+  /* ── MODAL SHEET GEOMETRY — one definition for every full-screen dialog ──────────────────────
+     🔒 ROOT CAUSE THIS EXISTS TO KILL (admin 2026-08-23, phone: "niche scroll nahi hota hai").
+     Dialogs capped themselves with `max-h-[85vh]`. On a mobile browser `vh` is the LARGE viewport —
+     the height the page would have if the URL/toolbar were hidden — so a `85vh` card is measured
+     against a box that is ~100-150px taller than what the user can actually see, and its bottom
+     lands underneath the browser's own toolbar. The failure is worse than "clipped": the scroll
+     container inside the card is also sized from that too-tall box, so when the content only just
+     overflows there is nothing to scroll and the browser offers no scroll at all. The buttons at the
+     bottom of the sheet — Visit your website, Publish again — become permanently unreachable.
+
+     `dvh` is the unit that tracks the VISIBLE viewport; the `vh` line above it is the fallback for
+     any engine that does not know `dvh` (it is the old behaviour, never worse than today). The
+     safe-area insets matter in the Capacitor bundled app, where the WebView draws edge-to-edge; in a
+     desktop browser every env() resolves to 0 and these rules are a no-op there.
+
+     Use them as a PAIR: `nb-sheet-overlay` on the fixed backdrop, `nb-sheet` on the card. The card
+     then caps at "whatever is really visible", so no dialog has to guess a viewport fraction again. */
+  .nb-sheet-overlay {
+    height: 100vh;
+    height: 100dvh;
+    padding-top: max(1rem, var(--nb-safe-top));
+    padding-bottom: max(1rem, var(--nb-safe-bottom));
+    padding-left: max(0.75rem, var(--nb-safe-left));
+    padding-right: max(0.75rem, var(--nb-safe-right));
+  }
+
+  /* The same height authority for a sheet that is meant to touch the screen edges — a phone bottom
+     sheet. No gutter, only the device's own safe area, so the design stays edge-to-edge while the
+     centring/height still happen inside the visible viewport rather than the large one. */
+  .nb-sheet-overlay-flush {
+    height: 100vh;
+    height: 100dvh;
+    padding-top: var(--nb-safe-top);
+    padding-bottom: var(--nb-safe-bottom);
+    padding-left: var(--nb-safe-left);
+    padding-right: var(--nb-safe-right);
+  }
+
+  /* `min-height: 0` is as load-bearing as the cap: without it a flex child of this card defaults to
+     `min-height: auto` and refuses to shrink, which pushes its own `overflow-y-auto` body past the
+     cap and re-creates the exact bug above one level down. */
+  .nb-sheet {
+    max-height: 100%;
+    min-height: 0;
+  }
+
 
 }
 

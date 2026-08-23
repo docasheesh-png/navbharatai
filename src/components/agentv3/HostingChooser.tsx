@@ -347,7 +347,7 @@ export function HostingChooser({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      className="nb-sheet-overlay fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       role="dialog"
       aria-label="Publish your app"
@@ -365,7 +365,12 @@ export function HostingChooser({
           Phone and tablet keep 512px — that was already right and is deliberately untouched — and only
           lg (≥1024px, genuinely a desktop) opens up. The same container also holds the domain-connect
           flow with its DNS records table, which is the view that suffered most from the narrow cap. */}
-      <div className="w-full max-w-lg lg:max-w-4xl max-h-[85vh] flex flex-col bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
+      {/* HEIGHT CAP, 2026-08-23: an 85vh Tailwind cap became `nb-sheet`. 85vh is 85% of the MOBILE LARGE
+          viewport, so on a phone this card's bottom sat under the browser toolbar and the domain
+          screen's own last controls — Publish again, Visit <domain> — could not be reached or even
+          scrolled to (admin: "last page ... waha bhi niche scroll nahi hota hai"). `nb-sheet` caps
+          against the VISIBLE viewport instead; see the definition in index.css. */}
+      <div className="nb-sheet w-full max-w-lg lg:max-w-4xl flex flex-col bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-5 py-3.5 border-b border-zinc-800">
           <div className="flex items-center gap-2">

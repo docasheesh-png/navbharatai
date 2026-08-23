@@ -1467,7 +1467,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
          </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      {/* `relative` is LOAD-BEARING (admin 2026-08-23, phone: "files niche scroll nahi hoti").
+          The mobile sidebar below is absolutely positioned, and without a positioned ancestor here it
+          resolved against the component ROOT — i.e. against a box that also contains the header above
+          and the bottom tab bar below. Anchoring it to THIS row instead makes its box exactly the
+          workspace area by construction, so no code has to know how tall the header or the tab bar is. */}
+      <div className="flex-1 flex overflow-hidden relative">
         {/* Activity Bar (Desktop) */}
         {!isMobile && (
            <ActivityBar 
@@ -1485,9 +1490,21 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: isMobile ? '100%' : ((activeScreen === 'ai' || activeScreen === 'git') ? 385 : 260), opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
+              /* 🔒 THE PHONE SCROLL BUG THIS FIXES (admin 2026-08-23). The mobile branch used to be an
+                 absolute `inset-0` carrying a 36px top offset AND `h-full`. That is OVER-CONSTRAINED:
+                 with `top` and `height` both set, CSS ignores `bottom` — so the panel began 36px down
+                 and was still a full root-height tall, ending 36px BELOW the root, with the 4rem +
+                 safe-area bottom tab bar covering ~100px more. The file list's scroll container
+                 therefore ran roughly 134px past anything on screen.
+
+                 That is why scrolling read as DEAD rather than merely clipped: a container taller than
+                 the screen does not NEED to scroll, so the browser offered no scroll at all and the
+                 last files were unreachable. Plain `inset-0` inside the (now `relative`) workspace row
+                 derives the height from the layout instead of from a hardcoded header offset, so the
+                 two can never drift apart again. */
               className={cn(
-                "h-full z-40 bg-[#161b22] border-r border-[#2b2b2b] shrink-0 overflow-hidden flex flex-col select-none",
-                isMobile && "absolute inset-0 top-9"
+                "z-40 bg-[#161b22] border-r border-[#2b2b2b] shrink-0 overflow-hidden flex flex-col select-none",
+                isMobile ? "absolute inset-0" : "h-full"
               )}
             >
                {isMobile && (
@@ -1496,7 +1513,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                      <button onClick={() => setIsSidebarOpen(false)} aria-label="Close sidebar" className="p-2 bg-white/5 rounded-xl"><X className="w-4 h-4" /></button>
                   </div>
                )}
-               {renderSidebarContent()}
+               {/* Every sidebar screen gets the SAME bounded, shrinkable slot. `min-h-0` is what lets a
+                   screen's own `overflow-y-auto` actually scroll instead of growing past the panel and
+                   being clipped by the `overflow-hidden` above — the one flexbox trap this file keeps
+                   re-learning (see the identical note in the Search screen and in FileExplorer). */}
+               <div className="flex-1 min-h-0 flex flex-col">
+                  {renderSidebarContent()}
+               </div>
             </motion.div>
           )}
         </AnimatePresence>

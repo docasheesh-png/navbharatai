@@ -24,11 +24,15 @@ describe('the Publish dialog is desktop-sized on desktop', () => {
   it('KEEPS the phone width — the admin said phone was already right', () => {
     // The fix must be additive. Replacing the base width would have "fixed" desktop by breaking the
     // one surface that was not broken.
-    expect(src).toMatch(/className="w-full max-w-lg lg:/);
+    expect(src).toMatch(/className="nb-sheet w-full max-w-lg lg:/);
   });
 
   it('still caps its height, so a long list scrolls inside the dialog and not the page', () => {
-    expect(src).toContain('max-h-[85vh]');
+    // The cap moved from `max-h-[85vh]` to the shared `nb-sheet` class (2026-08-23) because 85vh is
+    // 85% of the mobile LARGE viewport — taller than the screen, which is how the dialog's own last
+    // controls ended up under the browser toolbar with no scroll offered. Still capped, better unit.
+    expect(src).toContain('nb-sheet');
+    expect(src).not.toMatch(/className="nb-sheet[^"]*max-h-\[/);
   });
 
   it('the cards still go two-up once there is room for them', () => {

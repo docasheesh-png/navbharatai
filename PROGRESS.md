@@ -40465,6 +40465,77 @@ as an open item rather than half-built.
 
 ---
 
+## 2026-08-23 — Vertical scroll was dead on two phone screens. One root cause, and it was not "missing overflow-y-auto".
+
+**Admin report (phone, two surfaces):**
+1. Code Studio → **Files**: *"sabhi files niche scroll kar ke dekhi nahi ja sakti — vertical scroll kaam
+   nahi kar raha hai."* The file tree opened, the top of the list was fine, and the last files simply
+   could not be reached.
+2. **Publish** → after the final DNS submit, the last screen (Visit your website / Publish again):
+   *"waha bhi niche scroll nahi hota hai."*
+
+### The root cause both share
+
+Neither screen was missing a scroll container. **Both had one — sized from a height LARGER than the
+area the user can actually see.** That distinction is the whole fix: a container taller than the screen
+does not *need* to scroll, so the browser offers **no scroll at all** and the content at its bottom is
+permanently unreachable. Adding `overflow-y-auto` to either screen would have changed nothing, which is
+why the obvious patch was the wrong one.
+
+**Surface 1 — the IDE sidebar (`CodeStudio.tsx`).** The mobile panel was
+`absolute inset-0` + a 36px top offset **and** `h-full`. That is over-constrained: with `top` and
+`height` both set, CSS **ignores `bottom`**. So the panel began 36px down and was still a full
+root-height tall — it ended ~36px *below* the root, and the 4rem + safe-area bottom tab bar (z-57,
+above it) covered ~100px more. The file list's scroll container therefore extended roughly **134px past
+anything on screen**. Worse, the absolute box resolved against the component ROOT — a box that also
+contains the header and the tab bar — because the workspace row had no `relative`.
+
+**Surface 2 — the publish sheet (`HostingChooser.tsx`, `PublishCelebration.tsx`).** The dialog capped
+itself at `max-h-[85vh]`. On a mobile browser **`vh` is the LARGE viewport** — the height the page would
+have if the URL/toolbar were hidden — so 85vh is measured against a box ~100–150px taller than the
+visible one. The card's bottom sat under Safari's toolbar, and the body's scroll height was computed
+from that same too-tall box. `PublishCelebration` was worse still: **no cap and no scroll at all**, so a
+card taller than a short phone overflowed off both ends with nothing to scroll — the Open / Copy / Share
+row, the entire point of the screen, was unreachable.
+
+### The fixes (root cause, not symptom)
+
+- **Sidebar geometry derived from layout, not hardcoded pixels.** The workspace row is now `relative`,
+  and the mobile sidebar is a plain `absolute inset-0` inside it — no `top-9`, no `h-full`. Its box IS
+  the workspace area by construction, so no code has to know how tall the header or the tab bar is.
+  `renderSidebarContent()` also got a `flex-1 min-h-0 flex flex-col` slot, so **every** sidebar screen
+  (files, search, git, AI, settings) is bounded and shrinkable — not just the reported one.
+- **One shared sheet geometry, in `index.css`.** `.nb-sheet-overlay` (+ `.nb-sheet-overlay-flush` for
+  edge-to-edge phone sheets) makes the backdrop `100dvh` — the unit that tracks the *visible* viewport —
+  with `100vh` above it as the fallback for engines without `dvh`, plus the safe-area insets that matter
+  in the Capacitor bundled app. `.nb-sheet` then caps the card at `max-height: 100%` with
+  `min-height: 0`. No dialog has to guess a viewport fraction again.
+- **Siblings hunted (rule 3).** The `vh` cap was not in two files, it was in fourteen. Every full-screen
+  sheet moved to `nb-sheet` (Publish, Publish celebration, Vishwakarma unlock, framework picker,
+  Import/Push, Bot connect + simulator, Nav App Store detail + install, three admin detail modals), and
+  **every remaining `max-h-[Nvh]` in the tree** — dropdowns, log panes, lightboxes — now carries a
+  `supports-[height:100dvh]:max-h-[Ndvh]` companion, the same idiom `App.tsx` already used for the shell.
+
+### Why this cannot come back (rule 4, step 4)
+
+`tests/mobileScrollGeometry.test.ts` (8 tests) locks it: the shared CSS must keep its `dvh` cap *and*
+its `vh` fallback; the two reported screens must use it; the exact over-constrained `top-9` + `h-full`
+pair may never return; and a **repo-wide scan fails CI on any bare `max-h-[Nvh]` without a `dvh`
+companion**. The rule is repo-wide on purpose — this bug class reached the admin twice, from two
+different files. Two existing tripwires (`modalScrollable`, `publishModalWidth`) were updated to accept
+`nb-sheet` as the cap: they encoded the *old* `85vh` convention, which was itself the next bug, so they
+now assert the stricter unit rather than the one that failed.
+
+### Honest note on desktop
+
+`nb-sheet` caps at the visible viewport minus a 1rem gutter, where the old value was 85%/88%/90% of it.
+On a desktop browser `dvh` equals `vh`, so nothing moves except that a *content-tall* dialog may now be
+slightly taller before it starts scrolling. Short dialogs are unchanged — a cap is a ceiling, not a
+height.
+
+### Verification
+
+`npx tsc --noEmit` clean · `npx vitest run` — see the run recorded with the merge commit.
 ## 2026-08-23 (Phase 1+2) — The E2B bill gets a live surface and an alarm
 
 The admin's largest single infrastructure line — measured at ~$172/month (~₹15,000) across 1,260

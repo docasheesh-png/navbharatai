@@ -85,7 +85,7 @@ export function PublishCelebration({ kind, url, appName, onClose }: PublishCeleb
 
   return createPortal(
     <div
-      className="fixed inset-0 flex items-center justify-center p-4"
+      className="nb-sheet-overlay fixed inset-0 flex items-center justify-center"
       style={{ zIndex: CELEBRATION_Z, background: 'rgba(2,6,12,0.72)' }}
       role="dialog"
       aria-modal="true"
@@ -113,8 +113,13 @@ export function PublishCelebration({ kind, url, appName, onClose }: PublishCeleb
         </div>
       )}
 
+      {/* This card had NO height cap and NO scroll at all (fixed 2026-08-23). Centred inside a
+          `fixed inset-0` box that a mobile browser measures against its LARGE viewport, a card taller
+          than the visible area overflowed off BOTH ends with nothing to scroll — so on a short phone
+          the Open / Copy / Share row, the whole point of the screen, was simply not reachable.
+          `nb-sheet` caps it to what is really visible and the card scrolls inside that. */}
       <div
-        className="relative w-full max-w-md rounded-3xl border border-white/10 bg-[#0d1117] p-6 shadow-2xl"
+        className="nb-sheet relative w-full max-w-md overflow-y-auto overscroll-contain rounded-3xl border border-white/10 bg-[#0d1117] p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <button

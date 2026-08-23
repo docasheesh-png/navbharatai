@@ -1736,8 +1736,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           the point is that a suspension is decided WITH the account in front of you, not from a
           complaint alone. Rendered at the dashboard root so it can sit above either surface. */}
       {account && (
-        <div className="fixed inset-0 z-[60] bg-black/75 flex items-center justify-center p-4" onClick={() => setAccount(null)}>
-          <div className="w-full max-w-2xl max-h-[88vh] overflow-y-auto bg-[#0d1117] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="nb-sheet-overlay fixed inset-0 z-[60] bg-black/75 flex items-center justify-center" onClick={() => setAccount(null)}>
+          <div className="nb-sheet w-full max-w-2xl overflow-y-auto bg-[#0d1117] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
             {account.loading ? (
               <p className="text-sm text-white/60">Opening account…</p>
             ) : account.error ? (
@@ -1891,8 +1891,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   are right here — reading a complaint and then hunting for the account in another tab
                   is how reports stop getting handled. */}
               {openReport && (
-                <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setOpenReport(null)}>
-                  <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto bg-[#161b22] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+                <div className="nb-sheet-overlay fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setOpenReport(null)}>
+                  <div className="nb-sheet w-full max-w-lg overflow-y-auto bg-[#161b22] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
                     {openReport.loading ? (
                       <p className="text-sm text-white/60">Opening…</p>
                     ) : openReport.error ? (
@@ -2702,8 +2702,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               {/* Detail viewer for the selected report */}
               {(selectedReport || selectedReportLoading) && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setSelectedReport(null)}>
-                  <div className="bg-[#0d1117] border border-white/15 rounded-[1.5rem] w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setSelectedReport(null)}>
+                  <div className="nb-sheet bg-[#0d1117] border border-white/15 rounded-[1.5rem] w-full max-w-3xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
                       <div className="min-w-0">
                         <h4 className="text-sm font-black text-white truncate">{selectedReport?.meta.appLabel ?? 'Loading…'}</h4>

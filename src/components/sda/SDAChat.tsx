@@ -753,8 +753,8 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           className="fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-4"
           onClick={() => setLightbox(null)}
         >
-          <div className="relative max-w-[95vw] max-h-[92vh] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
-            <img src={lightbox.src} alt={lightbox.name} className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain" />
+          <div className="relative max-w-[95vw] max-h-[92vh] supports-[height:100dvh]:max-h-[92dvh] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
+            <img src={lightbox.src} alt={lightbox.name} className="max-w-full max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] rounded-2xl shadow-2xl object-contain" />
             <p className="text-[10px] text-white/60 font-mono truncate max-w-full">{lightbox.name}</p>
             <button onClick={() => setLightbox(null)} className="absolute -top-3 -right-3 w-8 h-8 bg-white/10 hover:bg-white/25 rounded-full flex items-center justify-center text-white transition-colors border border-white/20">
               <X className="w-4 h-4" />

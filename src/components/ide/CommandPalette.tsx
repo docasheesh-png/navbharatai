@@ -98,7 +98,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                />
             </div>
             
-            <div className="max-h-[40vh] overflow-y-auto py-2 no-scrollbar">
+            <div className="max-h-[40vh] supports-[height:100dvh]:max-h-[40dvh] overflow-y-auto py-2 no-scrollbar">
                {filteredItems.length === 0 ? (
                   <div className="px-4 py-8 text-center text-[#858585] text-xs">
                      No commands found for "{query}"

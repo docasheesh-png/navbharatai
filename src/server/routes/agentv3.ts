@@ -19,6 +19,7 @@ import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenS
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
+import { measuredRemainingMs, measuredEtaText, firstEtaLine } from '../AgentV3/progressEta';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
@@ -8508,6 +8509,19 @@ export function registerAgentV3Routes(app: Express): void {
     // How many times the budget has been re-baselined. Threaded through liveEtaTick so a build that
     // has already broken its estimate stops making fresh countdown promises.
     let etaRevisions = 0;
+    // MEASURED ETA state (2026-08-23). Everything above predicts from the PROMPT, which is how "Make an
+    // VPN App" — a prompt with no page-words and no feature-words — scored the floor of the formula and
+    // promised ~3 min for a build that ran 18m 42s. These two fields let the heartbeat stop predicting
+    // and start measuring: how many files the plan actually asked for, and when the first one landed.
+    // See progressEta.ts for why measurement beats every constant we could tune here.
+    let etaPlannedFiles = 0;
+    let etaFirstFileAt = 0;
+    /** Stamp the first file's arrival — the start of the only interval we can honestly measure. */
+    const noteEtaFileWritten = (): void => { if (etaFirstFileAt === 0) etaFirstFileAt = Date.now(); };
+    /** Record the plan's real size. Only ever grows: a later, larger plan supersedes an earlier guess. */
+    const noteEtaPlannedFiles = (n: number): void => {
+      if (Number.isFinite(n) && n > etaPlannedFiles) etaPlannedFiles = Math.floor(n);
+    };
 
     // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
@@ -8520,7 +8534,26 @@ export function registerAgentV3Routes(app: Express): void {
       etaTick += 1;
       if (etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0) {
         try {
-          const elapsedMs = Date.now() - etaStartMs;
+          const now = Date.now();
+          const elapsedMs = now - etaStartMs;
+          // MEASUREMENT FIRST (2026-08-23). Once the plan's size is known and enough files have landed
+          // to average, the remaining time is extrapolated from THIS build's own observed pace — on this
+          // provider chain, at this tier, under whatever rate limiting is happening right now. It needs
+          // no calibration constant, so it cannot be wrong about a model nobody benchmarked, and it
+          // fixes the 6x miss at its cause rather than re-tuning the prompt heuristic that produced it.
+          //
+          // It returns null in every case where it would be guessing — no plan, too few files, or the
+          // file phase already over (a repair loop is genuinely unpredictable) — and the honest
+          // re-baselining fallback below then owns the line exactly as it does today.
+          const measured = measuredRemainingMs({ plannedFiles: etaPlannedFiles, filesDone: writtenFiles.size, firstFileAt: etaFirstFileAt, now });
+          if (measured !== null) {
+            // Re-anchor the fallback's budget too, so if measurement later stops applying (the build
+            // enters repair) liveEtaTick continues from the measured total rather than from the stale
+            // prompt guess it was still carrying.
+            etaTotalMs = elapsedMs + measured;
+            events.emit({ type: 'narration', agent: 'architect', text: measuredEtaText(elapsedMs, measured, writtenFiles.size, etaPlannedFiles), ts: now, id: 'eta-live' });
+            return;
+          }
           // RE-BASELINING tick (autopsy 2026-08-02): liveEtaTick returns the line AND an extended budget
           // when the build overruns, so an over-estimate build keeps showing a fresh, honest number
           // instead of freezing on one "wrapping up (a little longer than estimated)" line for 20+ min.
@@ -9026,7 +9059,12 @@ export function registerAgentV3Routes(app: Express): void {
             detail: etaBasisNote(past),
             autoResolved: true,
           });
-          events.emit({ type: 'narration', agent: 'architect', text: `⏱️ Estimated build time: ${est.etaText} — I'll keep you posted as I go.`, ts: Date.now() });
+          // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
+          // confidence alongside it; at confidence 0.4 that is a +/-60% band, and printing the single
+          // midpoint as "~3 min" was the code being more honest with itself than with the user. A first
+          // build also now says outright that the figure will be replaced, which is what makes the later
+          // measured update read as information instead of as a broken promise.
+          events.emit({ type: 'narration', agent: 'architect', text: firstEtaLine(est, past.length), ts: Date.now(), id: 'eta-live' });
         } catch { /* ETA is best-effort — never affects the build */ }
       }
       const budget = maxBuildBudgetUsd();
@@ -9767,6 +9805,7 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* security scan is best-effort — never blocks the build pipeline */ }
 
         writtenFiles.set(path, content);
+        noteEtaFileWritten();
         try {
           const cur = state.snapshot().todos;
           if (cur.length > 0) {
@@ -10119,6 +10158,10 @@ export function registerAgentV3Routes(app: Express): void {
             const overNote = overBudgetNote(manifest.length, fileBudgetForPrompt(prompt));
             if (overNote) buildDiag.record({ phase: 'plan', severity: 'warning', code: 'FILE_BUDGET_EXCEEDED', message: overNote, autoResolved: true });
           } catch { /* budget telemetry is best-effort */ }
+          // THE ETA'S FIRST REAL FACT. Up to this point the estimate came from counting words in the
+          // prompt; this is the plan's actual size, and it is what lets the heartbeat measure instead of
+          // guess (progressEta.ts). Best-effort — a failure here just leaves the prompt estimate in place.
+          try { noteEtaPlannedFiles(manifest.length); } catch { /* ETA is never worth failing a build for */ }
           if (manifest.length >= 2) {
             const contract = ((await bpGenerate(contractSystemPrompt(framework), contractUserPrompt(prompt, manifest))) || '').trim();
             const block = blueprintAdvisoryBlock(manifest, contract);
@@ -11262,7 +11305,7 @@ export function registerAgentV3Routes(app: Express): void {
           merge: mergeWorkspaceFiles,
           emit: (e) => events.emit(e),
         });
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // OBSERVABILITY (deep-test App #2, 2026-07-13): when the fast lane falls back after a verify
         // failure, record the ACTUAL compiler error text so the report can be mined for the true cause

@@ -571,6 +571,15 @@ export interface SimpleBuildDeps {
    * a hook failure or slowness never affects or delays the build. Omit it (default) = today's behavior.
    */
   onFilesReady?: (files: OneShotFile[]) => void | Promise<void>;
+  /**
+   * Called the moment the file plan is parsed, with how many files it asked for.
+   *
+   * This is the first honest measurement of how big the app is. Everything before it — the ETA, the
+   * file budget, the cost pre-flight — is derived from counting words in the prompt, which is how
+   * "Make an VPN App" scored the minimum of every formula and promised ~3 min for an 18-minute build.
+   * Fired BEFORE the `minFiles` bail, so a plan too small for this lane still reports its size.
+   */
+  onPlanned?: (plannedFiles: number) => void;
 }
 
 export interface SimpleBuildResult {
@@ -674,6 +683,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // Recorded BEFORE the minFiles bail: a manifest too small to be worth this lane is exactly the
       // case the one-shot lane exists for, and it must still be able to see that number.
       plannedFiles = manifest.length;
+      try { deps.onPlanned?.(manifest.length); } catch { /* an ETA hook must never affect a build */ }
       if (manifest.length < minFiles) throw new Error('manifest_too_small');
       // LENS A — design the SHARED CONTRACT once, up front, so the isolated per-file calls agree on
       // names/shapes by construction (best-effort + bounded: a failure/timeout here just leaves `contract`

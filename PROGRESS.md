@@ -40026,3 +40026,101 @@ nothing is lost, so there is nothing to confirm. Test-locked as an ORDERING asse
 answer "naya chat kaise shuru karun".
 
 Gate: both tsc + build + FULL vitest (17,699 passing, 1 skipped).
+
+---
+
+## 2026-08-23 — #2587 never frame a host we have just seen dead
+
+The preview iframe would still point at a sandbox host after the health endpoint had reported the port
+down, so the user got the vendor's own error page inside our UI — the exact screenshot class the preview
+door (#2576/#2582) was built to end, surviving on one path the door did not cover.
+
+`PreviewSurface` now refuses to frame at all when `health.livePortUp === false`, not only when the fetch
+itself failed: `setPortDown(res.ok && health?.livePortUp === false)`, and the refuse-to-frame condition
+widened to `unreachable || (portDown && !diagnosing)`. A dead machine shows our own auto-retrying panel.
+
+`tests/previewUnreachable.test.ts` kept its original anchor rather than being loosened around the change —
+the anchor was repointed and three assertions added, because a test edited to match new behaviour proves
+nothing about the old guarantee.
+
+## 2026-08-23 — #2592 the scaffold shipped a build script pointing at a file it never wrote
+
+From a real user's report ("Make an VPN App"), sent while the build was still running at 18m 42s against
+a ~3 min estimate. **The app was already working at minute 11** — preview published, three screens
+rendering, the agent's own words "perfectly render ho raha hai". Everything after that was the engine
+fighting itself.
+
+**Root cause 1.** `ViteReactProvider`'s package.json runs `tsc -p tsconfig.build.json && vite build`.
+`ViteReactProviderContents` EXPORTS `tsconfigBuild`. `ViteReactProvider` never wrote it. So `npm run build`
+died with TS5058 on every app this provider has ever made. The builder then "repaired" it by copying
+tsconfig.json — a different config — producing **96,610 characters** of fresh type errors on an app that
+had rendered correctly a minute earlier.
+
+Nothing caught it because **the dev server never runs the build script**: `npm run dev` transpiles with
+esbuild and never reads that file, so the gap was invisible in every preview and surfaced only at the one
+moment it mattered. `tests/scaffoldScriptsResolve.test.ts` now fails for any scaffold whose package.json
+scripts name a tsconfig it does not ship — verified by re-introducing the bug and watching it go red.
+
+**Root cause 2.** The user's `src/ErrorBoundary.tsx` produced "Property 'setState' does not exist" for
+seven minutes across four tsc runs. Our template is correct; the builder had overwritten a provided,
+working file with one missing the `extends React.Component<Props, State>` clause, then rewrote it three
+more times without restoring it. `main.tsx` already carried a "provided and correct" header for exactly
+this reason; `ErrorBoundary` now does too, naming the failure it prevents.
+
+Not claimed as fixed, and recorded instead: the 4→41 batch-repair regression, the ~3 min estimate against
+18 min actual, and the engine spending seven minutes on a file it had been given correct.
+
+## 2026-08-23 — OPEN ROOT CAUSE (rule 6): a finished, working app breaks under the user by itself
+
+The admin reported a user running their completed app for roughly 5–6 minutes before it broke on its own,
+and called it life-threatening for NavBharatAI. It is. Diagnosed to two independent causes, both confirmed
+in our own code. **Neither is fixed** — the admin explicitly asked for the analysis without a build, and
+two of the remedies need a decision only they can make. Recorded here so no session has to re-derive it.
+
+**Cause A — the idle reaper pauses a VM under a user who is actively using the app.**
+`sandboxReaper.idleLimitMs()` defaults to 5 minutes and `E2BActuator._sweepIdleSandboxes` measures that
+window from `_lastActivity`, which is stamped only when OUR engine touches the sandbox (a file write, a
+command, taking the sandbox). A user browsing their finished app talks straight to the sandbox host and
+never touches our pipe, so five minutes after the build ends the sweep sees an idle workspace and pauses
+the machine mid-use. The timing the admin reported matches exactly. The sweep IS build-aware
+(`setBuildActive`), which is what makes 5 minutes safe DURING a build — there is no equivalent hold for a
+user simply using the result.
+
+This is the bug class recorded repeatedly this month: an artifact standing in for its validity. Here,
+"no operations on our pipe" stands in for "nobody is using this app" — and the two are close to inverted,
+because the engine is most idle exactly when the user is most engaged.
+
+**Cause B — the build keeps writing into the tree the preview serves.**
+`greenFreeze.ts`'s own header records that twelve write-capable passes run after `previewGreen = true`
+and nine are live; five passes remain on `ALLOWED_PASSES`. `PreviewSurface` debounces `file_changed` into
+a reload, so a half-written mid-repair state hot-reloads into the user's running app. The VPN report shows
+16 `write_file` and 8 `edit_file` calls after the app was proven working at minute 11.
+
+**Why the build does not stop when the app works:** "done" is defined as the model's task list being
+exhausted or `maxBuildSeconds` (1800s) elapsing. A working app is not a terminating condition.
+`ADVISORY_CAP_MS` (120s) bounds only post-success advisory work.
+
+**The remedy proposed to the admin, in order:**
+1. **Preview heartbeat.** The iframe pings the door while its tab is visible; idle becomes
+   `now − max(last engine operation, last user heartbeat)`, with an absolute viewing cap and an honest
+   "paused to save cost, tap to resume". Small, needs no decision, and kills Cause A outright.
+2. **Stop the build at green.** Terminate once the app is proven in a real browser and the user's asked-for
+   features are present; everything further becomes an OFFER rather than an automatic write. Also cuts
+   build time and E2B cost.
+3. **Serve the green build from our own infrastructure, not from the VM.** Snapshot the built output at
+   green, have the preview door serve those bytes, and pause the sandbox immediately after a build. A
+   finished frontend app then has no VM behind it to die — "sandbox not found", "closed port" and the
+   reaper all stop applying to it, and the bill falls. Full-stack apps keep the snapshot + heartbeat path.
+
+**Awaiting the admin's decision on two forks:** whether the engine may keep polishing automatically after
+green (recommendation: no — offer instead; automatic polish is what produced the 96k-error avalanche), and
+whether a user viewing their preview may hold a VM up to a cap (recommendation: yes — ~₹7/hour against an
+app that dies is not a close call).
+
+**How other builders avoid this, for the record:** Lovable serves versioned deployments with one-click
+rollback; Bolt runs the app in the user's own browser so no server decision can kill it; v0 issues
+immutable per-generation deployments the AI never edits in place; Replit keeps the VM tied to the user's
+own workspace with explicit checkpoints; Cursor/Windsurf apply agent edits as a reviewed atomic diff;
+Firebase Studio hibernates on USER presence rather than tool activity; Codespaces holds the machine open
+on client connection and warns before stopping. The common property none of our paths has: the agent's
+working tree is never the user's running app, and idleness is never measured on the agent's pipe.

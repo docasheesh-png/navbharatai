@@ -40462,3 +40462,119 @@ as an open item rather than half-built.
 
 `npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json --noEmit` clean · `npx vitest run` —
 **1418 files, 17,937 passed, 4 skipped, 0 failed**.
+
+---
+
+## 2026-08-23 (Phase 1+2) — The E2B bill gets a live surface and an alarm
+
+The admin's largest single infrastructure line — measured at ~$172/month (~₹15,000) across 1,260
+sandboxes — had **no live surface at all**. Its cost appeared inside one build's report and was never
+aggregated, so it could double overnight and nothing in the product would have said a word. Token
+spend at least had FinOps findings; the VM bill had nothing.
+
+### What shipped
+
+**Real VM seconds now flow into the Monitor timeline.** `billableSandboxDetail` gained a third return
+value, `measuredSeconds`, and the reason it lives in THAT function rather than being measured again
+elsewhere is the capping rule: bill only the seconds inside this build's own window, never idle time
+between builds. That rule is subtle and hard-won, and a second copy of it would drift until the cost
+graph and the bill described different builds. **One measurement, three views of it.**
+
+The distinction that matters: `seconds`/`usd` are what the USER was charged, and are deliberately zero
+whenever sandbox billing is off or no rate is configured — a money path must never charge for
+something we cannot price. But NavBharatAI **paid for that VM time either way**, and that is the
+figure the admin needs.
+
+**Four new tiles**: Live sandboxes · VM time · VM cost · Total spend (AI + VM).
+
+`Live sandboxes` reads the DURABLE sandbox records, not the in-process active-build map — that map
+lives in one Cloud Run instance's memory, so a tile built on it would show a different number
+depending on which instance answered. That is worse than no tile, because it looks authoritative.
+Unreadable store ⇒ `—`, never a confident zero.
+
+**Money is shown only when `E2B_USD_PER_HOUR` is really set.** `sandboxUsdPerHour` falls back to a
+round $0.10 that its own docs admit is a placeholder; a guess displayed beside measured token spend
+reads as equally real, and this is the number the admin would act on to cut a bill. Seconds are always
+shown; rupees are `null` with the tile saying why. The SERVER prices it (it holds the rate) and the
+client just reads it — a client-side copy of the same sum was written and then deleted, because two
+copies are how two surfaces start disagreeing.
+
+**A spike alert.** VM spend in the recent window against the same-length window before it — a baseline
+the data itself supplies, with no stored "normal day" to maintain. Both halves come from ONE query,
+split in memory, because two reads could straddle a bucket flush and disagree. Two guards stop it
+crying wolf: a minimum absolute spend (₹2 → ₹6 is a 3× rise and completely uninteresting), and a zero
+baseline is "nothing to compare", not an infinite spike. It rides the SAME cooldown/all-clear
+machinery as the other alerts — a second notifier would mean a second set of dedupe bugs.
+
+**A cost spike is NOT gated on the build window being judgeable.** An idle VM burning money with nobody
+building is exactly the case worth hearing about.
+
+Tunables: `MONITOR_SANDBOX_SPIKE_MULTIPLE` (3), `MONITOR_SANDBOX_SPIKE_MIN_USD` (1).
+
+### A test that failed for the right reason
+
+`tests/sandboxBilling.test.ts` pinned the old return shape and went red. Its INTENT — a money path
+must fail toward charging less — is untouched, so it was updated to the new shape and **strengthened**:
+there is now an explicit test that the admin's `measuredSeconds` can never reach the billing decision.
+Without it, unbilled VM time could one day land on a user's invoice, which is the exact thing the
+sandbox-billing flags exist to prevent.
+
+### Verification
+
+`npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json --noEmit` clean · `npx vitest run` —
+**1418 files, 17,961 passed, 4 skipped, 0 failed**.
+
+### Still open (rule 6): email alerts
+
+Alerts reach the in-app notification bell only. There is **no email-sending code in this repository at
+all** — no mail dependency in `package.json`, no provider key. So an overnight failure is seen the next
+morning. Building it needs a provider account and an API key, which is the admin's decision and the
+admin's money; the honest state is to say so rather than half-build it.
+
+---
+
+## 2026-08-23 (Phase 3) — Alerts can now leave the app
+
+Alerts reached the in-app notification bell only, which is seen when someone opens the app. A failure
+at 2am was a morning discovery. This adds email delivery — and, just as importantly, makes the
+UNCONFIGURED state visible instead of silent.
+
+### The design decisions worth keeping
+
+**No new dependency.** The send is a POST to the provider's HTTP API using the runtime's own `fetch`,
+not a mail SDK. A monitoring path should not be able to break a build by adding a package, and the
+request is four lines of JSON.
+
+**"Not configured" is a real, visible state.** With no key or no verified sender, the Monitor shows a
+line saying alerts reach the app only, and exactly which setting is missing. It never silently no-ops.
+An admin who BELIEVES they will be emailed, and will not, finds out at the worst possible moment — so
+the banner is shown whether or not anything is currently firing.
+
+**Every missing piece names itself.** No key, no sender, and no recipient each produce their own
+message. "Email is not set up" would leave the admin guessing which of three things to fix, and
+guessing at a config screen is how a feature stays off for months.
+
+**The key-without-sender case is treated as NOT configured.** A provider rejects a send from an
+unverified address, so without that check the key would look configured while every send failed — the
+worst of both states.
+
+**The bell is delivered FIRST and never depends on email.** It is the channel guaranteed to exist, so
+an email provider that is down, slow or misconfigured can never cost the admin the in-app
+notification. A failed send is logged with the provider's real status (401 means the key, 403 usually
+means an unverified sender) and never reported as sent.
+
+### What the admin has to do to turn it on
+
+Create a provider account (Resend's free tier is far larger than this needs), verify a sender, then
+set in Cloud Run: `ALERT_EMAIL_API_KEY`, `ALERT_EMAIL_FROM`, and optionally `ALERT_EMAIL_TO`
+(defaults to the admin list). Nothing else changes — the same alerts that already reach the bell start
+reaching the inbox. `ALERT_EMAIL_ENDPOINT` can point at another provider with a compatible shape.
+
+This closes the open item recorded earlier the same day. It was left open rather than half-built
+because it needs an account and a credential that are the admin's decision and the admin's money; the
+code is now complete and inert until those exist.
+
+### Verification
+
+`npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json --noEmit` clean · `npx vitest run` —
+**1419 files, 17,976 passed, 4 skipped, 0 failed**.

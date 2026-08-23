@@ -20,6 +20,7 @@ import { getProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { metricsTimeline } from '../lib/metricsTimeline';
+import { resolveEmailConfig } from '../lib/alertEmail';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
@@ -454,6 +455,17 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     };
 
     const timeline = await metricsTimeline.series(hours).catch(() => null);
+
+    // LIVE SANDBOXES — the number that answers "what is running right now", and the one that is
+    // actually costing money this second (a running E2B VM bills by wall-clock; a paused one does not).
+    //
+    // Read from the DURABLE sandbox records, not from the in-process active-build map: that map lives
+    // in one Cloud Run instance's memory, so a tile built on it would show a different number depending
+    // on which instance answered the request — worse than no tile, because it looks authoritative.
+    // null (not 0) when the store cannot be read, so the UI shows "—" rather than a confident zero.
+    const liveSandboxes = await sandboxStore.listRecent(200)
+      .then((records) => records.filter((r) => !r.pausedAt).length)
+      .catch(() => null);
     const providerStats = guard(() => getProviderStats());
 
     // The same composite health inputs the dedicated /health-score endpoint reports, from the same
@@ -487,6 +499,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // deploy resets it and a number that silently restarts at zero reads as an outage.
       snapshot,
       instanceUptimeSeconds: Math.round(process.uptime()),
+      liveSandboxes,
+      // Whether alerts can reach the admin OUTSIDE the app, and plainly why not when they cannot.
+      // Never a secret: only the configured flag and the reason travel, never the key or the sender.
+      emailAlerts: (() => {
+        const cfg = resolveEmailConfig();
+        return { configured: cfg.configured, reason: cfg.reason, recipients: cfg.configured ? cfg.to.length : 0 };
+      })(),
       alerts: guard(() => evaluateAlerts(snapshot)).value ?? [],
       health: health.value,
       healthError: health.error,

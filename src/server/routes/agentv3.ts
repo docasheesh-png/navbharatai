@@ -1293,12 +1293,25 @@ export interface BillingLedgerView {
  * minutes during the change and then deleted, because both of its call sites had moved and a helper
  * nothing calls is the start of a second implementation.
  */
+/**
+ * `measuredSeconds` is a THIRD number, and it answers a different question from the other two.
+ *
+ * `seconds`/`usd` are what the USER was charged, and they are deliberately zero whenever sandbox
+ * billing is off or no real rate is configured — a money path must never charge for something we
+ * cannot price. But NavBharatAI still PAID for that VM time either way, and the admin's Monitor needs
+ * that figure to answer "why is the E2B bill this size?".
+ *
+ * It is returned from THIS function rather than measured again elsewhere: the capping rule above (bill
+ * only the seconds inside this build's own window, never idle time between builds) is subtle and
+ * hard-won, and a second copy of it would drift until the cost graph and the bill described different
+ * builds. One measurement, three views of it.
+ */
 function billableSandboxDetail(
   actuator: unknown,
   workspaceId: string | null | undefined,
   buildStartedAtMs?: number,
-): { seconds: number; usd: number } {
-  const none = { seconds: 0, usd: 0 };
+): { seconds: number; usd: number; measuredSeconds: number } {
+  const none = { seconds: 0, usd: 0, measuredSeconds: 0 };
   try {
     const fn = (actuator as any)?.sandboxHeldSeconds;
     if (typeof fn !== 'function' || !workspaceId) return none;
@@ -1325,8 +1338,11 @@ function billableSandboxDetail(
     const billable = Math.min(seconds, buildSeconds);
     const usd = sandboxBillableUsd(sandboxCost(billable));
     // Seconds travel only when they were CHARGED. Reporting time we did not bill for would put a
-    // number next to a ₹0 the user cannot reconcile.
-    return usd > 0 ? { seconds: billable, usd } : none;
+    // number next to a ₹0 the user cannot reconcile. `measuredSeconds` carries the real VM time
+    // regardless, for the admin-only cost view — see the note on the return type.
+    return usd > 0
+      ? { seconds: billable, usd, measuredSeconds: billable }
+      : { ...none, measuredSeconds: billable };
   } catch {
     return none;
   }
@@ -8591,7 +8607,7 @@ async function noteBuildOutcome(
       let watchdogBilledUsd = 0;
       // Measured OUTSIDE the try, because the user-facing breakdown below needs the same pair the bill
       // used — a second measurement taken later would count different seconds.
-      let watchdogLivePreview = { seconds: 0, usd: 0 };
+      let watchdogLivePreview = { seconds: 0, usd: 0, measuredSeconds: 0 };
       if (ok && billingCtx.providerLedger) {
         try {
           watchdogLivePreview = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt);
@@ -8603,6 +8619,7 @@ async function noteBuildOutcome(
             isEdit: isEditMode,
             ms: Date.now() - (billingCtx.buildStartedAt ?? Date.now()),
             providerUsage: decided.reconciledProviderUsage,
+            sandboxSeconds: watchdogLivePreview.measuredSeconds,
           });
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
           buildDiagRef?.setCacheReadInputTokens(billingCtx.cacheReadInputTokens ?? 0);
@@ -14909,6 +14926,8 @@ async function noteBuildOutcome(
         isEdit: isEditMode,
         ms: Date.now() - buildStartedAt,
         providerUsage: reconciledProviderUsage,
+        // OUR VM cost, measured whether or not the user was charged for it.
+        sandboxSeconds: livePreviewCharge.measuredSeconds,
       });
       let effectiveBilledUsd: number = decidedBilledUsd;
       // WHY a build ended up free — recorded into the build report's billing section (admin

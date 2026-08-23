@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   decideAlertActions, snapshotFromWindow, alertMessage, resolvedMessage,
   runAlertSweep, alertCooldownMs, alertWindowHours, alertsEnabled,
+  detectSandboxSpike, sandboxSpikeMultiple, sandboxSpikeMinUsd,
   type AlertState,
 } from './monitorAlerts';
 import { evaluateAlerts, type MetricAlert } from './metricsAlerts';
@@ -13,8 +14,9 @@ const alert = (id: string, severity: 'critical' | 'warning' = 'critical'): Metri
 
 const summary = (over: Partial<TimelineSummary>): TimelineSummary => ({
   builds: 0, buildsOk: 0, buildsFailed: 0, buildMs: 0, previewOk: 0,
-  aiRequests: 0, inputTokens: 0, outputTokens: 0, costMicroUsd: 0,
-  successRate: null, previewRate: null, avgBuildMs: null, costUsd: 0, ...over,
+  aiRequests: 0, inputTokens: 0, outputTokens: 0, costMicroUsd: 0, sandboxSeconds: 0,
+  successRate: null, previewRate: null, avgBuildMs: null, costUsd: 0,
+  sandboxUsd: null, sandboxRateConfigured: false, ...over,
 });
 
 describe('decideAlertActions — announce once, then stay quiet', () => {
@@ -192,5 +194,95 @@ describe('monitorAlerts — configuration', () => {
     expect(alertWindowHours()).toBe(24);
     if (prevC === undefined) delete process.env.MONITOR_ALERT_COOLDOWN_MINUTES; else process.env.MONITOR_ALERT_COOLDOWN_MINUTES = prevC;
     if (prevW === undefined) delete process.env.MONITOR_ALERT_WINDOW_HOURS; else process.env.MONITOR_ALERT_WINDOW_HOURS = prevW;
+  });
+});
+
+describe('detectSandboxSpike — the VM bill alarm', () => {
+  const opts = { multiple: 3, minUsd: 1 };
+
+  it('fires when recent VM spend is several times the previous window', () => {
+    const a = detectSandboxSpike({ recentUsd: 12, baselineUsd: 3, ...opts });
+    expect(a).not.toBeNull();
+    expect(a!.id).toBe('sandbox-cost-spike');
+    expect(a!.message).toContain('4.0×');
+  });
+
+  it('stays silent below the multiple', () => {
+    expect(detectSandboxSpike({ recentUsd: 5, baselineUsd: 3, ...opts })).toBeNull();
+  });
+
+  it('ignores a big MULTIPLE on trivial money — ₹2 to ₹6 is not an incident', () => {
+    // Without this guard the alert fires on almost every quiet-then-busy hour and stops being read.
+    expect(detectSandboxSpike({ recentUsd: 0.6, baselineUsd: 0.1, ...opts })).toBeNull();
+  });
+
+  it('treats a zero baseline as "nothing to compare", not as an infinite spike', () => {
+    expect(detectSandboxSpike({ recentUsd: 50, baselineUsd: 0, ...opts })).toBeNull();
+  });
+
+  it('says nothing when VM time was never priced — no rate, no money to compare', () => {
+    expect(detectSandboxSpike({ recentUsd: null, baselineUsd: 3, ...opts })).toBeNull();
+    expect(detectSandboxSpike({ recentUsd: 12, baselineUsd: null, ...opts })).toBeNull();
+  });
+
+  it('survives nonsense numbers instead of alerting on them', () => {
+    expect(detectSandboxSpike({ recentUsd: NaN, baselineUsd: 3, ...opts })).toBeNull();
+    expect(detectSandboxSpike({ recentUsd: 12, baselineUsd: Infinity, ...opts })).toBeNull();
+  });
+
+  it('names it as OUR infrastructure, so it is never mistaken for a user charge', () => {
+    const a = detectSandboxSpike({ recentUsd: 12, baselineUsd: 3, ...opts });
+    expect(a!.message).toContain('not a user charge');
+  });
+
+  it('has sane, clamped configuration', () => {
+    const prevM = process.env.MONITOR_SANDBOX_SPIKE_MULTIPLE;
+    const prevU = process.env.MONITOR_SANDBOX_SPIKE_MIN_USD;
+    delete process.env.MONITOR_SANDBOX_SPIKE_MULTIPLE;
+    delete process.env.MONITOR_SANDBOX_SPIKE_MIN_USD;
+    expect(sandboxSpikeMultiple()).toBe(3);
+    expect(sandboxSpikeMinUsd()).toBe(1);
+    process.env.MONITOR_SANDBOX_SPIKE_MULTIPLE = '0.5';   // would fire constantly
+    expect(sandboxSpikeMultiple()).toBe(3);
+    process.env.MONITOR_SANDBOX_SPIKE_MULTIPLE = '999';
+    expect(sandboxSpikeMultiple()).toBe(20);
+    if (prevM === undefined) delete process.env.MONITOR_SANDBOX_SPIKE_MULTIPLE; else process.env.MONITOR_SANDBOX_SPIKE_MULTIPLE = prevM;
+    if (prevU === undefined) delete process.env.MONITOR_SANDBOX_SPIKE_MIN_USD; else process.env.MONITOR_SANDBOX_SPIKE_MIN_USD = prevU;
+  });
+});
+
+describe('runAlertSweep — a cost spike is real even with no builds', () => {
+  const base = {
+    now: () => 1_000,
+    windowHours: 1,
+    cooldownMs: 60_000,
+    notify: async () => undefined,
+    readAndWriteState: async (mutate: any) => mutate({}, 1_000),
+    readSummary: async () => summary({ builds: 0 }),
+  };
+
+  it('notifies about an idle VM burning money even though no build ran', () => {
+    // An idle VM burning money with nobody building is EXACTLY the case worth hearing about, so the
+    // cost alert must not be gated on the build window being judgeable.
+    const sent: string[] = [];
+    return runAlertSweep({
+      ...base,
+      notify: async (m) => { sent.push(m); },
+      extraAlerts: async () => [{
+        id: 'sandbox-cost-spike', severity: 'warning' as const,
+        message: 'VM spend spiked', metric: 'sandbox.costUsd', value: 4, threshold: 3,
+      }],
+    }).then((res) => {
+      expect(res.notified).toBe(1);
+      expect(sent[0]).toContain('VM spend spiked');
+    });
+  });
+
+  it('a failing extra-alert source cannot break the sweep', async () => {
+    const res = await runAlertSweep({
+      ...base,
+      extraAlerts: async () => { throw new Error('timeline down'); },
+    });
+    expect(res.skipped).toBe('no-window');
   });
 });

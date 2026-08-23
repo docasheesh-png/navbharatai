@@ -23,8 +23,14 @@ describe('the reviewer writes only while the app is not yet working', () => {
     expect(reviewerShouldWrite({ previewGreen: true })).toBe(false);
   });
 
-  it('an app that has NOT rendered yet is still repaired — we are earning green', () => {
-    expect(reviewerShouldWrite({ previewGreen: false })).toBe(true);
+  it('an app PROVEN not to render is still repaired — we are earning green', () => {
+    // The original rule here was simply `!previewGreen ⇒ write`, and that is the assertion this
+    // replaces. It conflated "we looked and it was broken" with "we could not look", and the second
+    // case is a very likely-fine app being rewritten on no evidence (admin 2026-08-23). The intent it
+    // was protecting — a genuinely broken build still gets the reviewer's repair — is kept exactly,
+    // and now needs the evidence it always implied.
+    expect(reviewerShouldWrite({ previewGreen: false, previewProvenBroken: true, buildOk: true })).toBe(true);
+    expect(reviewerShouldWrite({ previewGreen: false, buildOk: false })).toBe(true);
   });
 
   it('the kill switch restores the old always-write behaviour', () => {
@@ -125,8 +131,14 @@ describe('it is actually wired into the build', () => {
   const routes = readFileSync(join(__dirname, '../routes/agentv3.ts'), 'utf8');
 
   it('the reviewer write pass is gated on the app not being green', () => {
-    expect(routes).toContain('reviewerShouldWrite({ previewGreen })');
+    // Asserts the EVIDENCE reaches the rule, not just that the rule is called. A call site that
+    // dropped `previewProvenBroken` would compile, pass a shape check, and silently restore the old
+    // "not green ⇒ rewrite it" behaviour on every build whose preview could not be verified.
+    expect(routes).toContain('reviewerShouldWrite({ previewGreen, previewProvenBroken, buildOk: result.ok })');
     expect(routes).toContain('const greenStopReview =');
+    // And that the evidence is only ever set from a CONCLUSIVE verdict — never from an unpainted
+    // snapshot (ignorance) or a dead dev server (a process problem no code edit can fix).
+    expect(routes).toContain('!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true');
   });
 
   it('when green-stopping, the findings are OFFERED and the write loop is skipped', () => {
@@ -139,5 +151,47 @@ describe('it is actually wired into the build', () => {
   it('a GREEN app is not marked not-ok by the reviewer\'s opinions', () => {
     // The false-success holder must not fire when we are green-stopping — a rendering app ships.
     expect(routes).toContain('!isImportTurn && !greenStopReview) reviewCriticalsUnresolved');
+  });
+});
+
+describe('IGNORANCE IS NOT A LICENCE TO EDIT (admin 2026-08-23, "reviewer band kar dein?")', () => {
+  /**
+   * `previewGreen: false` always meant two different things at once — "we looked and it was broken"
+   * and "we could not look at all" — and the original rule treated them the same. The second is the
+   * state a build reaches when there is no sandbox, when the snapshot was taken before the app
+   * painted, or when the dev server had stopped: the app in front of the user is very likely FINE,
+   * and rewriting it on no evidence is the re-break class Green Stop exists to end, surviving in the
+   * one state nobody had separated out.
+   */
+  it('does NOT write when the build succeeded but the preview could not be verified', () => {
+    expect(reviewerShouldWrite({ previewGreen: false, previewProvenBroken: false, buildOk: true })).toBe(false);
+  });
+
+  it('treats a missing signal the same way — absent is not "broken"', () => {
+    // A caller that has not been updated must fall on the SAFE side, not the editing side.
+    expect(reviewerShouldWrite({ previewGreen: false, buildOk: true })).toBe(false);
+  });
+
+  it('DOES write when the app was opened and seen broken', () => {
+    // Positive evidence of a defect is exactly what the reviewer's repair is for.
+    expect(reviewerShouldWrite({ previewGreen: false, previewProvenBroken: true, buildOk: true })).toBe(true);
+  });
+
+  it('DOES write when the build itself reported failure — there is no working app to protect', () => {
+    expect(reviewerShouldWrite({ previewGreen: false, previewProvenBroken: false, buildOk: false })).toBe(true);
+  });
+
+  it('still never writes to a GREEN app, whatever else is true', () => {
+    for (const buildOk of [true, false]) {
+      for (const previewProvenBroken of [true, false]) {
+        expect(reviewerShouldWrite({ previewGreen: true, previewProvenBroken, buildOk })).toBe(false);
+      }
+    }
+  });
+
+  it('the kill switch still restores the old always-write behaviour', () => {
+    const env = { AGENTV3_GREEN_STOP: 'off' } as never;
+    expect(reviewerShouldWrite({ previewGreen: true, previewProvenBroken: false, buildOk: true, env })).toBe(true);
+    expect(reviewerShouldWrite({ previewGreen: false, previewProvenBroken: false, buildOk: true, env })).toBe(true);
   });
 });

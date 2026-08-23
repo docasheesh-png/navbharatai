@@ -35,6 +35,12 @@ export interface PlatformBuildRecord {
    * The real per-call counts live in `/api/admin/llm-latency`, which reads the trace spans.
    */
   providerUsage: Record<string, { inputTokens: number; outputTokens: number }>;
+  /**
+   * Real E2B VM seconds this build held — OUR infrastructure cost, not the user's bill. It is measured
+   * whether or not sandbox billing is switched on, because NavBharatAI pays for the VM either way and
+   * the admin's cost view is the thing that answers "why is the E2B bill this size?".
+   */
+  sandboxSeconds?: number;
 }
 
 /**
@@ -59,6 +65,7 @@ export function recordPlatformBuild(rec: PlatformBuildRecord): void {
       previewAllowed: rec.previewAllowed,
       isEdit: rec.isEdit,
       ms: Math.max(0, Math.round(rec.ms || 0)),
+      sandboxSeconds: Math.max(0, Math.round(rec.sandboxSeconds || 0)),
     });
   } catch { /* telemetry never breaks a build */ }
 }

@@ -34,6 +34,8 @@ interface MonitorResponse {
   usdInr: number;
   snapshot: any;
   instanceUptimeSeconds: number;
+  /** Sandboxes running right now (durable, cross-instance). null = the store could not be read. */
+  liveSandboxes: number | null;
   alerts: any[];
   health: { score: any; inputs: any } | null;
   healthError: string | null;
@@ -48,7 +50,7 @@ interface MonitorResponse {
     from: number;
     to: number;
     points: MonitorPoint[];
-    summary: any;
+    summary: { sandboxUsd?: number | null; sandboxRateConfigured?: boolean } | null;
     providers: Record<string, any>;
   };
 }
@@ -201,6 +203,12 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
   const tokenSeries = useMemo(() => extractSeries(points, 'tokens'), [points]);
   const latencySeries = useMemo(() => extractSeries(points, 'latency'), [points]);
 
+  // The SERVER prices VM time, and only when a real rate is configured — it holds E2B_USD_PER_HOUR,
+  // and pricing it again here would be the same sum in two places, free to drift. A null means "not
+  // priced", which the tile says out loud instead of showing ₹0.
+  const sandboxRateConfigured = data?.timeline?.summary?.sandboxRateConfigured;
+  const sandboxWindowUsd = data?.timeline?.summary?.sandboxUsd ?? null;
+
   const health = data?.health?.score ?? null;
   const alerts = Array.isArray(data?.alerts) ? data!.alerts : [];
   const insights = Array.isArray(data?.insights) ? data!.insights : [];
@@ -285,6 +293,39 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
           value={chartsLive ? formatInr(microUsdToInr(totals.costMicroUsd, usdInr)) : '—'}
           sub={chartsLive ? `${compactNumber(totals.tokens)} tokens` : 'Awaiting telemetry'}
           Icon={IndianRupee}
+        />
+      </div>
+
+      {/* ── OUR infrastructure cost, and what is running right now. ────────────────────────────
+          The E2B VM bill is the largest single line in the platform's costs and had no live surface
+          at all: it could double overnight and nothing in the product would have said a word. These
+          are ADMIN cost figures, never a user charge. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Tile
+          label="Live sandboxes"
+          value={data?.liveSandboxes == null ? '—' : String(data.liveSandboxes)}
+          sub={data?.liveSandboxes == null ? 'Store unreadable' : 'Running now — billed by the minute'}
+          tone={(data?.liveSandboxes ?? 0) > 0 ? 'text-sky-400' : 'text-white'}
+          Icon={Server}
+        />
+        <Tile
+          label="VM time"
+          value={chartsLive ? humanDuration(totals.sandboxSeconds * 1000) : '—'}
+          sub={windowLabel}
+          Icon={Clock}
+        />
+        <Tile
+          label="VM cost"
+          value={chartsLive && sandboxWindowUsd != null ? formatInr(microUsdToInr(sandboxWindowUsd * 1_000_000, usdInr)) : '—'}
+          sub={sandboxRateConfigured === false ? 'Set E2B_USD_PER_HOUR to price it' : 'Our infrastructure, not a user charge'}
+          tone={sandboxRateConfigured === false ? 'text-[#8b949e]' : 'text-orange-400'}
+          Icon={IndianRupee}
+        />
+        <Tile
+          label="Total spend"
+          value={chartsLive ? formatInr(microUsdToInr(totals.costMicroUsd + (sandboxWindowUsd ?? 0) * 1_000_000, usdInr)) : '—'}
+          sub={sandboxRateConfigured === false ? 'AI only — VM not priced' : 'AI + VM, this window'}
+          Icon={Cpu}
         />
       </div>
 

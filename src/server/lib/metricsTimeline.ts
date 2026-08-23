@@ -30,6 +30,7 @@ import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
 import { setMetricsSink } from './metrics';
 import { metricsStore } from './metricsStore';
+import { sandboxUsdPerHour } from '../AgentV3/sandboxCost';
 
 export const TIMELINE_COLLECTION = 'metrics_timeline';
 
@@ -48,6 +49,15 @@ export interface TimelineCounters {
   inputTokens: number;
   outputTokens: number;
   costMicroUsd: number;
+  /**
+   * Seconds of real E2B sandbox time this bucket's builds held.
+   *
+   * Tracked SEPARATELY from cost because the rate is configured rather than read back from the
+   * provider: seconds are a measurement and can always be shown, while rupees depend on
+   * E2B_USD_PER_HOUR actually being set. Storing the money instead of the time would bake today's
+   * rate into history and make a later rate correction unrepresentable.
+   */
+  sandboxSeconds: number;
 }
 
 /** One point on the chart. `observed:false` marks a bucket that had NO document — a real zero when
@@ -84,6 +94,16 @@ export interface TimelineSummary extends TimelineCounters {
   previewRate: number | null;
   avgBuildMs: number | null;
   costUsd: number;
+  /**
+   * What the VM time in this window cost NavBharatAI, or null when no real rate is configured.
+   *
+   * null rather than a number computed from the placeholder rate: `sandboxUsdPerHour` falls back to a
+   * round $0.10 that is admitted in its own docs to be a guess, and a guess shown next to measured
+   * token spend would be read as equally real. The SECONDS are always available either way.
+   */
+  sandboxUsd: number | null;
+  /** Whether E2B_USD_PER_HOUR is actually set — so the UI can say why money is missing. */
+  sandboxRateConfigured: boolean;
 }
 
 const MINUTE = 60_000;
@@ -116,13 +136,13 @@ export function bucketStartMs(ms: number, bucket: number): number {
 export function emptyCounters(): TimelineCounters {
   return {
     builds: 0, buildsOk: 0, buildsFailed: 0, buildMs: 0, previewOk: 0,
-    aiRequests: 0, inputTokens: 0, outputTokens: 0, costMicroUsd: 0,
+    aiRequests: 0, inputTokens: 0, outputTokens: 0, costMicroUsd: 0, sandboxSeconds: 0,
   };
 }
 
 const COUNTER_KEYS: (keyof TimelineCounters)[] = [
   'builds', 'buildsOk', 'buildsFailed', 'buildMs', 'previewOk',
-  'aiRequests', 'inputTokens', 'outputTokens', 'costMicroUsd',
+  'aiRequests', 'inputTokens', 'outputTokens', 'costMicroUsd', 'sandboxSeconds',
 ];
 
 function num(v: unknown): number {
@@ -166,13 +186,22 @@ export function fillSeries(
 export function summarize(points: TimelinePoint[]): TimelineSummary {
   const total = emptyCounters();
   for (const p of points || []) for (const k of COUNTER_KEYS) total[k] += num(p[k]);
+  const rateConfigured = sandboxRateIsConfigured();
   return {
     ...total,
     successRate: total.builds > 0 ? total.buildsOk / total.builds : null,
     previewRate: total.builds > 0 ? total.previewOk / total.builds : null,
     avgBuildMs: total.builds > 0 ? Math.round(total.buildMs / total.builds) : null,
     costUsd: total.costMicroUsd / 1_000_000,
+    sandboxUsd: rateConfigured ? (total.sandboxSeconds / 3600) * sandboxUsdPerHour() : null,
+    sandboxRateConfigured: rateConfigured,
   };
+}
+
+/** Is a REAL sandbox rate configured, or would we be pricing with the admitted placeholder? Pure. */
+export function sandboxRateIsConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  const n = Number(env.E2B_USD_PER_HOUR);
+  return Number.isFinite(n) && n > 0;
 }
 
 /** Firestore field paths cannot contain `.`/`/` etc, and a provider id is free text. Pure. */
@@ -218,13 +247,14 @@ class MetricsTimeline {
   }
 
   /** Record one build outcome. Never throws — metrics must never break a build. */
-  recordBuild(o: { ok: boolean; previewAllowed?: boolean; ms?: number }, now = Date.now()): void {
+  recordBuild(o: { ok: boolean; previewAllowed?: boolean; ms?: number; sandboxSeconds?: number }, now = Date.now()): void {
     try {
       const b = this.bucketFor(now);
       b.counters.builds += 1;
       if (o.ok) b.counters.buildsOk += 1; else b.counters.buildsFailed += 1;
       if (o.previewAllowed) b.counters.previewOk += 1;
       b.counters.buildMs += Math.max(0, Math.round(o.ms ?? 0));
+      b.counters.sandboxSeconds += Math.max(0, Math.round(o.sandboxSeconds ?? 0));
       this.maybeFlush();
     } catch { /* never break a build on telemetry */ }
   }
@@ -398,7 +428,7 @@ export const metricsTimeline = new MetricsTimeline();
 export function attachMetricsTimeline(): void {
   setMetricsSink({
     onBuild: (o) => {
-      metricsTimeline.recordBuild({ ok: o.ok, previewAllowed: o.previewAllowed, ms: o.ms });
+      metricsTimeline.recordBuild({ ok: o.ok, previewAllowed: o.previewAllowed, ms: o.ms, sandboxSeconds: o.sandboxSeconds });
       // ALSO persist the DAILY snapshot here. It used to be saved only from routes/build.ts — the
       // legacy Engineer-AI builder — which is the same blindness the timeline work fixed for the live
       // registry, one file further along and missed on the first pass: with no legacy build running,

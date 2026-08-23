@@ -169,15 +169,30 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
 
   it('any doubt bills ZERO — a money path must fail toward charging less', () => {
     const at = route.indexOf('function billableSandboxDetail');
-    const fn = route.slice(at, at + 2200);
+    const fn = route.slice(at, at + 2600);
     expect(fn).toContain("if (typeof fn !== 'function' || !workspaceId) return none;");
     expect(fn).toContain('catch {\n    return none;');
-    // …and `none` is genuinely nothing — otherwise every guard above would be pointing at a value
-    // that could quietly become non-zero.
-    expect(fn).toContain('const none = { seconds: 0, usd: 0 };');
+    // …and `none` is genuinely nothing on the BILLED fields — otherwise every guard above would be
+    // pointing at a value that could quietly become non-zero.
+    expect(fn).toContain('const none = { seconds: 0, usd: 0, measuredSeconds: 0 };');
     // Seconds are reported only when they were CHARGED, so the user can never see a duration next to
-    // a ₹0 they cannot reconcile.
-    expect(fn).toContain('return usd > 0 ? { seconds: billable, usd } : none;');
+    // a ₹0 they cannot reconcile. `measuredSeconds` is the ADMIN's infrastructure figure and travels
+    // either way — which is exactly why the unbilled branch must still zero `seconds` and `usd`.
+    expect(fn).toContain('{ seconds: billable, usd, measuredSeconds: billable }');
+    expect(fn).toContain('{ ...none, measuredSeconds: billable }');
+  });
+
+  it('the admin cost figure can NEVER become a user charge', () => {
+    // measuredSeconds exists so the Monitor can show what NavBharatAI spent on VMs. If it ever fed
+    // the billing decision, unbilled VM time would start landing on a user's invoice — the exact
+    // thing the sandbox-billing flags exist to prevent.
+    const at = route.indexOf('function billableSandboxDetail');
+    const fn = route.slice(at, at + 2600);
+    // The unbilled branch spreads `none`, so both money fields come from the zero object.
+    expect(fn).toContain('{ ...none, measuredSeconds: billable }');
+    // And the billing decision is fed by `.usd`, never by `.measuredSeconds`.
+    expect(route).not.toContain('measuredSeconds,\n        powerLevelReqEffective');
+    expect(route).not.toContain('livePreviewCharge.measuredSeconds)');
   });
 
   it('the report says whether it reached the bill', () => {

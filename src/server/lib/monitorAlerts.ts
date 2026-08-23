@@ -31,7 +31,7 @@ import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
 import { evaluateAlerts, type MetricAlert } from './metricsAlerts';
 import type { MetricsSnapshot } from './metrics';
-import { metricsTimeline, type TimelineSummary } from './metricsTimeline';
+import { metricsTimeline, summarize, type TimelineSummary } from './metricsTimeline';
 import { saveNotification } from './AdminNotificationStore';
 import { adminEmailList } from './adminEmails';
 
@@ -154,6 +154,58 @@ export function resolvedMessage(alertId: string): string {
   return `🟢 NavBharatAI Monitor — resolved: ${label} is back within its normal range.`;
 }
 
+/**
+ * VM-COST SPIKE — the alert that exists because this is the admin's largest bill.
+ *
+ * E2B is measured at roughly ₹15,000/month, and nothing in the product would have said a word if it
+ * doubled overnight. Token spend has an alert of sorts (FinOps findings); the VM bill had nothing.
+ *
+ * It compares the RECENT window against the SAME-LENGTH window before it, so it needs no stored
+ * baseline and no notion of a "normal day" — a comparison the data itself supplies. Two guards keep
+ * it from crying wolf:
+ *   • a MINIMUM absolute spend, so a jump from ₹2 to ₹6 (a 3× rise, and completely uninteresting)
+ *     stays silent, and
+ *   • a quiet baseline is not a spike: with nothing to compare against, we say nothing rather than
+ *     treating "the first activity in a while" as an incident.
+ *
+ * Pure.
+ */
+export function detectSandboxSpike(opts: {
+  recentUsd: number | null;
+  baselineUsd: number | null;
+  multiple: number;
+  minUsd: number;
+}): MetricAlert | null {
+  const { recentUsd, baselineUsd, multiple, minUsd } = opts;
+  // A null on either side means the rate is not configured, so there is no money to compare.
+  if (recentUsd == null || baselineUsd == null) return null;
+  if (!Number.isFinite(recentUsd) || !Number.isFinite(baselineUsd)) return null;
+  if (recentUsd < minUsd) return null;          // too small to be worth waking anyone for
+  if (baselineUsd <= 0) return null;            // nothing to compare against — not a spike
+  const ratio = recentUsd / baselineUsd;
+  if (ratio < multiple) return null;
+  return {
+    id: 'sandbox-cost-spike',
+    severity: 'warning',
+    message: `Build-machine (VM) spend is ${ratio.toFixed(1)}× the previous window — $${recentUsd.toFixed(2)} against $${baselineUsd.toFixed(2)}. This is our infrastructure bill, not a user charge.`,
+    metric: 'sandbox.costUsd',
+    value: Math.round(ratio * 100) / 100,
+    threshold: multiple,
+  };
+}
+
+/** How many times the previous window's VM spend counts as a spike. */
+export function sandboxSpikeMultiple(): number {
+  const raw = Number(process.env.MONITOR_SANDBOX_SPIKE_MULTIPLE);
+  return Number.isFinite(raw) && raw > 1 ? Math.min(20, raw) : 3;
+}
+
+/** Below this much spend in the window, a spike is not worth a notification. */
+export function sandboxSpikeMinUsd(): number {
+  const raw = Number(process.env.MONITOR_SANDBOX_SPIKE_MIN_USD);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 1;
+}
+
 export interface AlertSweepDeps {
   /** Read the window under judgement. */
   readSummary: () => Promise<TimelineSummary | null>;
@@ -163,6 +215,14 @@ export interface AlertSweepDeps {
   now: () => number;
   windowHours: number;
   cooldownMs: number;
+  /**
+   * Alerts that come from somewhere other than the build-rate rules (today: the VM-cost spike).
+   *
+   * They join the SAME notify/cooldown/all-clear machinery rather than getting their own delivery
+   * path — a second notifier would mean a second set of dedupe bugs, and the admin would have no way
+   * to tell why one kind of alert repeats and another does not.
+   */
+  extraAlerts?: () => Promise<MetricAlert[]>;
 }
 
 export interface AlertSweepResult {
@@ -176,11 +236,14 @@ export interface AlertSweepResult {
 export async function runAlertSweep(deps: AlertSweepDeps): Promise<AlertSweepResult> {
   try {
     const summary = await deps.readSummary();
+    const extra = await (deps.extraAlerts ? deps.extraAlerts().catch(() => []) : Promise.resolve([]));
     const snapshot = snapshotFromWindow(summary);
-    // No window, or too few builds to judge: say nothing. Absence of data is not an incident.
-    if (!snapshot) return { skipped: 'no-window', notified: 0, resolved: 0 };
+    // No window, or too few builds to judge: say nothing about BUILD health. A cost spike is still
+    // real without builds in the window — an idle VM burning money is exactly the case worth hearing
+    // about — so the extra alerts are not gated on it.
+    if (!snapshot && extra.length === 0) return { skipped: 'no-window', notified: 0, resolved: 0 };
 
-    const alerts = evaluateAlerts(snapshot);
+    const alerts = [...(snapshot ? evaluateAlerts(snapshot) : []), ...extra];
     const actions = await deps.readAndWriteState((prev, nowMs) =>
       decideAlertActions(alerts, prev, nowMs, deps.cooldownMs));
     if (!actions) return { skipped: 'no-storage', notified: 0, resolved: 0 };
@@ -210,6 +273,23 @@ export async function runMonitorAlertSweep(): Promise<AlertSweepResult> {
       const series = await metricsTimeline.series(windowHours);
       // An unreadable series has no summary worth judging — availability is checked, not assumed.
       return series.available ? series.summary : null;
+    },
+    extraAlerts: async () => {
+      // Compare the recent window against the SAME-LENGTH window immediately before it. Reading a
+      // double-length series and splitting it costs ONE query instead of two, and guarantees both
+      // halves come from the same read — two reads could straddle a bucket flush and disagree.
+      const doubled = await metricsTimeline.series(windowHours * 2);
+      if (!doubled.available || doubled.points.length < 2) return [];
+      const half = Math.floor(doubled.points.length / 2);
+      const baseline = summarize(doubled.points.slice(0, half));
+      const recent = summarize(doubled.points.slice(half));
+      const spike = detectSandboxSpike({
+        recentUsd: recent.sandboxUsd,
+        baselineUsd: baseline.sandboxUsd,
+        multiple: sandboxSpikeMultiple(),
+        minUsd: sandboxSpikeMinUsd(),
+      });
+      return spike ? [spike] : [];
     },
     readAndWriteState: async (mutate) => {
       const db = getDb();

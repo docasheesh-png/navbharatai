@@ -2563,11 +2563,30 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['metrics', 'stats', 'cost', 'admin', 'dashboard', 'builds', 'usage', 'ai cost', 'success rate', 'observability', 'logs', 'monitoring'],
   },
   {
+    id: 'admin-monitor',
+    name: 'Live Monitor (admin home)',
+    path: 'Admin Dashboard → Monitor (the page that opens on login)',
+    description: `The admin panel's observability home — a live, time-ranged view of what the platform is doing right now, in the spirit of a Grafana dashboard but built inside NavBharatAI (no extra server, no monthly bill, and Cloud Run's own infrastructure graphs stay free in Google Cloud Monitoring).
+• TIME RANGE — 1 hour / 6 hours / 24 hours / 7 days, with 30-second auto-refresh that can be switched off
+• LIVE TILES — builds in the window, success rate, how often the preview really rendered, average build time, and AI cost in ₹
+• CHARTS — build activity as succeeded-vs-failed bars per 5-minute bucket, AI spend, token throughput, and average build duration
+• ENGINE COST SPLIT — which engine spent what (admin-only; provider names never appear on a user screen)
+• PLATFORM HEALTH — the composite health / reliability / risk score, from the same real signals as /api/admin/health-score
+• ALERTS, WASTE FINDINGS AND INSIGHTS — what is worth acting on, derived from live metrics, never predicted
+• SERVER LOGS — the newest entries, so "something is wrong" becomes a line you can read
+• BUSINESS — everything the old Overview tab held (revenue, registered users, website hits, active users, tokens, margin, publish capacity, provider ranking and token burn, recent purchases) is on this same page, below the live charts
+HONESTY: when the telemetry store cannot be read, the charts are SUPPRESSED and the page says it cannot see — it never draws a reassuring flat zero line, because a broken feed and a quiet night must not look identical. A rate nobody has measured shows as "—", never as 0%.
+Backend: GET /api/admin/monitor (one composed call) over the 5-minute time-series in Firestore (metrics_timeline).`,
+    howToUse: 'Admin login required. Open the Admin Dashboard — the Monitor is the page it opens on. Pick a time range at the top right (6h is the default), and leave "Auto 30s" on to watch it live.',
+    relatedFeatures: ['admin-metrics', 'admin-ai-insights', 'build-performance-analytics'],
+    keywords: ['monitor', 'monitoring', 'grafana', 'dashboard', 'live', 'observability', 'charts', 'graph', 'admin home', 'health', 'uptime', 'server logs', 'real time', 'nigrani', 'monitoring kaise', 'admin panel'],
+  },
+  {
     id: 'admin-ai-insights',
     name: 'AI Insights & NL Telemetry Query',
-    path: 'Admin Dashboard → Overview → AI Insights card (admin only)',
+    path: 'Admin Dashboard → Monitor → Insights card (admin only)',
     description: `Admin-only "AI Insights" card that turns the live metrics into readable, ACTIONABLE observations — build success rate, preview rate, average build time, repair burden, top-spend provider + share, and the per-request cost spread between providers. Every insight is DETERMINISTICALLY derived from real recorded metrics (no hallucination, no projections) and severity-tagged (good/info/warning/critical). Includes a natural-language query box: ask "what is my cost?", "how many builds failed?", "which provider is cheapest?", "why are builds slow?" and get an exact answer from the real snapshot; an unrecognized question honestly lists what CAN be answered instead of guessing. Also generates a plain-text ops report. Backend: GET /api/admin/insights and POST /api/admin/insights/query. Shows an honest "no telemetry yet" state until data exists.`,
-    howToUse: 'Admin login required. Open the Admin Dashboard → Overview tab → the "AI Insights" card appears with the current insights. Type a question in the box (cost, success rate, speed, providers, preview, volume) and press Ask.',
+    howToUse: 'Admin login required. Open the Admin Dashboard → Monitor tab (the home page) → the "Insights" card appears with the current insights. Type a question in the box (cost, success rate, speed, providers, preview, volume) and press Ask.',
     relatedFeatures: ['admin-metrics', 'build-performance-analytics', 'build-reliability-metrics'],
     keywords: ['ai insights', 'insights', 'nl query', 'natural language', 'ask metrics', 'ops report', 'telemetry query', 'cost question', 'admin insights', 'recommendations', 'aiops'],
   },

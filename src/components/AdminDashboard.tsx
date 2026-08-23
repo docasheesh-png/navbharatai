@@ -8,6 +8,7 @@ import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildRepor
 import { firstPassHeadline, FIRST_PASS_TARGET, type FirstPassMetaStats } from '../lib/firstPassQuality';
 import { copyTextToClipboard } from '../lib/copyText';
 import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts';
+import { MonitorPanels } from './admin/MonitorPanels';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
 
 interface AdminDashboardProps {
@@ -15,10 +16,13 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
-type TabId = 'overview' | 'users' | 'engines' | 'revenue' | 'reports' | 'userreports' | 'security' | 'settings';
+type TabId = 'monitor' | 'users' | 'engines' | 'revenue' | 'reports' | 'userreports' | 'security' | 'settings';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
-  { id: 'overview',  label: 'Overview',    icon: Activity },
+  // HOME = the live Monitor (2026-08-23). The old Overview content was not removed — it is rendered
+  // BELOW the live charts on this same page, so every number the admin already relied on is still
+  // here, one screen earlier. Moved rather than copied: two copies of these panels would drift.
+  { id: 'monitor',   label: 'Monitor',      icon: Activity },
   { id: 'users',     label: 'Users',        icon: Users },
   { id: 'engines',   label: 'AI Engines',   icon: Cpu },
   { id: 'revenue',   label: 'Revenue',      icon: IndianRupee },
@@ -85,7 +89,7 @@ const statCard = (label: string, value: string | number, sub: string, color: str
 );
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLogout }) => {
-  const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const [activeTab, setActiveTab] = useState<TabId>('monitor');
   // ── User reports (admin 2026-08-21) ──────────────────────────────────────
   const [userReports, setUserReports] = useState<any[]>([]);
   const [reportsLoading, setReportsLoading] = useState(false);
@@ -811,7 +815,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }, [adminToken, insightQuestion]);
 
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
-  useEffect(() => { if (activeTab === 'overview') { fetchHealthScore(); fetchInsights(); fetchChannels(); } }, [activeTab, fetchHealthScore, fetchInsights, fetchChannels]);
+  useEffect(() => { if (activeTab === 'monitor') { fetchHealthScore(); fetchInsights(); fetchChannels(); } }, [activeTab, fetchHealthScore, fetchInsights, fetchChannels]);
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
   useEffect(() => { if (activeTab === 'settings') { fetchPromos(); fetchUpdateCohort(); } }, [activeTab, fetchPromos, fetchUpdateCohort]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
@@ -1005,8 +1009,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       ) : (
         <>
           {/* ── OVERVIEW TAB ── */}
-          {activeTab === 'overview' && (
+          {activeTab === 'monitor' && (
             <div className="space-y-6">
+              {/* LIVE MONITOR — real time-series from the platform's own telemetry. Everything below it
+                  is the business view the Overview tab used to hold, unchanged. */}
+              <MonitorPanels adminToken={adminToken} />
+
+              <div className="pt-1">
+                <h2 className="text-[11px] font-black text-white uppercase tracking-widest">Business</h2>
+                <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest mt-0.5">
+                  Revenue, users and lifetime usage — from Firestore, not the live window above
+                </p>
+              </div>
+
               {/* Row 1: 4 key metrics */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'Verified payments', 'bg-emerald-500', IndianRupee)}

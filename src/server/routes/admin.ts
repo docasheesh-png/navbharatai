@@ -20,6 +20,7 @@ import { getProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { metricsTimeline } from '../lib/metricsTimeline';
+import { usdInrRate } from '../lib/UsdInrRate';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
@@ -479,6 +480,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     res.json({
       generatedAt: Date.now(),
       windowHours: hours,
+      // The live conversion rate, so the client shows ₹ from one shared source instead of hardcoding
+      // a rate that would silently drift away from what the user is actually billed.
+      usdInr: usdInrRate(),
       // Cumulative since THIS instance booted — labelled as such by the client, because a Cloud Run
       // deploy resets it and a number that silently restarts at zero reads as an outage.
       snapshot,

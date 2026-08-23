@@ -40578,3 +40578,91 @@ code is now complete and inert until those exist.
 
 `npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json --noEmit` clean · `npx vitest run` —
 **1419 files, 17,976 passed, 4 skipped, 0 failed**.
+## 2026-08-23 (evening) — the four that finish "app tute na", and the blind spot behind all of them
+
+The admin's standing instruction for this batch: *"ab jo bacha hai, woh aise kar ke build karo, jisse v5 jo
+app banaye to tute na… jitna ho sake perfect no error app bane."*
+
+### #2602 — a runtime repair must leave the app BETTER, not merely still painting
+
+**This corrects an entry written earlier the same day.** That one recorded the runtime auto-fix loop as
+"the same unguarded shape #2594 fixed". It is not: `verifyAfterFix` already snapshots the green app,
+applies the repair, re-renders it in a real browser and rolls back if it broke. Reading the code rather
+than trusting my own note is what found the real gap.
+
+That net asks exactly one question — did the app still RENDER — and rendering is a weaker test than
+working. A repair that fixes one runtime error while introducing two more still paints, so it is kept,
+and with `AGENTV3_AUTOFIX_ATTEMPTS` defaulting to 1 that is the version that ships: one error before we
+touched the app, three after, every gate saying yes.
+
+`judgeRuntimeRepair` now sits beside `judgeRepair` in ONE module, with the same three answers and the
+same reasoning, differing only in the unit counted. A test asserts the two agree on identical evidence,
+so a future edit cannot let a repair be judged good by one path and bad by the other. Order is
+deliberate: the render check short-circuits first (a broken app is never console-counted), the count is
+read after the verify browse has reloaded the page, and an unreadable console is UNPROVEN — it keeps the
+repair, exactly as the existing net keeps an inconclusive render.
+
+### #2604 — the one command no gate ever ran
+
+`BuildOutcome.ts` has always declared `prodBuildOk?: boolean | null` with the comment "tsc clean but
+`npm run build` broke", and **nothing in the codebase ever set it.** `tsc --noEmit` type-checks, the
+preview proves the DEV server renders, the vaccine runs the app's tests — nobody ran the command Publish,
+the APK workflow and every deploy provider depend on.
+
+That blind spot is why the scaffold could ship a build script pointing at a tsconfig it never wrote,
+failing on EVERY app that provider made, invisibly, until a user hit it mid-build (#2592). The dev server
+never runs the build script, so no preview could ever have shown it.
+
+Deliberately a DETECTOR, not a gate: it runs after the app is delivered and green, can never block or
+fail a build, and does NOT feed `classifyBuildOutcome` — a green, rendering app whose production build is
+broken is a working app with a shipping problem, and calling it BUILD_FAILED would both lie to the user
+and change what they are charged. Three outcomes, not two: "could not run" is UNVERIFIED and is not told
+to the user at all, because it is our infrastructure and not their app. A placeholder build script
+(`echo`, `true`, `exit 0`, bare `:`) is skipped rather than passed.
+
+### #2613 — a finished app outlives its machine
+
+By the time a build is green we already HAVE the built output — #2604 just produced `dist/` to prove the
+app packages. Those bytes ARE the app: no VM, no port, no dev server, no wake-up. They are kept on the
+same permanent host Publish uses, and the door hands the user THAT when the machine is finally gone.
+
+**Its own channel, and that is the load-bearing decision.** `deployStatic` publishes to
+`makeChannelId(workspaceId)` — the channel the user's own Publish button uses. A snapshot written there
+would mean an edit that broke the app silently REPLACED the version somebody deliberately shipped. The
+channel is now a defaulted parameter, so the two paths cannot drift in how they publish while remaining
+unable to collide.
+
+Only when the machine is genuinely gone: `asleep` gets the snapshot, `starting` does not — a booting
+machine is seconds away, and replacing a live app that is still starting with a stale copy of itself
+would lose the very edits the user is waiting to see. A full-stack app is SKIPPED rather than
+half-served: its server runs inside the sandbox, so a static copy would render the shell and fail every
+request behind it — an app that looks alive and does nothing is worse than an honest expiry. Judged from
+the app's own package.json, because the framework label the client sends is a request and the scripts are
+a fact. And the user is told which version they are looking at, in our own chrome, not styled as an error.
+
+### The method note this batch earned twice
+
+Four existing tests broke across these changes, and every one broke for the same reason:
+
+**A test that locates code by POSITION, or by a FIXED CHARACTER WINDOW, silently stops covering what it
+names the moment anything is inserted.**
+
+  • `previewDoorRoute` found the port redirect as "the first res.redirect in the slice"; the snapshot
+    fallback added an earlier one, to a permanent host with no port to verify.
+  • `previewDoorRoute` (again, earlier in the day) sliced to the NEXT route, and a newly added route
+    landed between them, so "every await is bounded" began measuring a different route entirely.
+  • `prodBuildGateWiring` read a fixed 2600-character window that the snapshot block pushed its catch past.
+  • `greenFreeze` pinned a line by the comment that happened to follow it.
+
+All four were REPOINTED, never weakened, and each repoint states the guarantee more directly than the
+locator it replaced. Two gained new assertions the original never had — that the door slice really is
+just the door, and that the snapshot is decided before any port is probed.
+
+### Open, honestly
+
+  • A deep agentic build with `AGENTV3_BLUEPRINT` off never learns a plan size, so the measured ETA does
+    not engage and behaviour is byte-identical to before.
+  • Full-stack apps get no snapshot, by design — the honest "preview expired" page stands for them.
+  • Two decisions still with the admin: whether `ok:true` should survive a build whose reviewer reports
+    build-breaking issues (a billing question), and the 20-second resume-cutover policy, offered but not
+    built.

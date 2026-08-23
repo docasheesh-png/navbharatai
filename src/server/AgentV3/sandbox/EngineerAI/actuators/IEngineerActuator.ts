@@ -149,6 +149,12 @@ export interface IEngineerActuator {
    */
   setBuildActive?(workspaceId: string, active: boolean): void;
   /**
+   * Record that a real person is looking at this workspace's preview right now, so the idle sweep does
+   * not pause a machine somebody is actively using. Optional: an actuator with no idle sweep (Local)
+   * has nothing to tell. See E2BActuator.noteUserActivity.
+   */
+  noteUserActivity?(workspaceId: string): boolean;
+  /**
    * Search for workspace files whose content matches ANY of the given terms
    * (grep -rl style). Used by ContextRetriever to rank files by relevance to
    * the current task. Skips node_modules/.git/dist. Returns relative paths.

@@ -304,6 +304,7 @@ import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
 import { buildRecipe, revivalConfirmedMessage, revivalUnconfirmedMessage } from '../AgentV3/previewRevival';
 import { comparePreviewUrl, measurementDescribesUserView, stalePreviewMessage } from '../AgentV3/previewUrlFreshness';
 import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage } from '../AgentV3/previewDoor';
+import { previewKeepAliveEnabled, isTopLevelNavigation, shouldServeKeepAliveShell, keepAliveShellPage } from '../AgentV3/previewKeepAlive';
 import { buildPortSweepCommand, portCandidates, parsePortSweep } from '../AgentV3/sandbox/EngineerAI/actuators/portSweep';
 import { decideAppSignature, appSignatureNotice } from '../AgentV3/appSignatureEntitlement';
 import { probeHostingPlan } from '../lib/hostingPlan';
@@ -4045,10 +4046,60 @@ export function registerAgentV3Routes(app: Express): void {
       if (found === null) return page(200, 'starting');
       const live = await raceTimeout(actuator.getPortUrl(ws, found), 5_000, 'doorPortUrl').catch(() => '');
       if (!live) return page(200, 'starting');
-      return res.redirect(302, applyPreviewDomain(String(live)));
+      const target = applyPreviewDomain(String(live));
+      // A POPPED-OUT tab gets the keep-alive shell instead of a bare redirect; our own iframe keeps the
+      // 302 byte-for-byte. See previewKeepAlive.ts: the tab a user actually watches their app in is the
+      // only place that can honestly say "someone is using this", and until now it was the one place
+      // with none of our JavaScript in it — which is how the idle sweep paused a machine mid-use.
+      if (shouldServeKeepAliveShell({
+        enabled: previewKeepAliveEnabled(),
+        topLevel: isTopLevelNavigation(req.headers['sec-fetch-dest'] as string | undefined),
+        targetUrl: target,
+      })) {
+        const q = new URLSearchParams({
+          ws,
+          exp: String(req.query?.exp ?? ''),
+          sig: String(req.query?.sig ?? ''),
+        }).toString();
+        return res.status(200).type('html').send(keepAliveShellPage({
+          targetUrl: target,
+          keepAlivePath: `/api/agentv3/preview-keepalive?${q}`,
+        }));
+      }
+      return res.redirect(302, target);
     } catch {
       // Whatever went wrong, the answer is still OUR page — the vendor's edge is never the fallback.
       return page(200, 'starting');
+    }
+  });
+
+  /**
+   * "Somebody is looking at this app right now."
+   *
+   * Deliberately the cheapest endpoint in this file: it verifies the SAME signed door token the shell
+   * was served with, stamps the activity clocks, and returns. It runs NO sandbox command — a keep-alive
+   * that cost a round trip into the VM would be a worse version of the health probe it exists beside,
+   * and one that could fail would be able to break the page it is keeping alive.
+   *
+   * It cannot create or resume anything: `noteUserActivity` only writes timestamps. A ping for a
+   * sandbox this instance does not hold still writes the durable record, which is what every other
+   * instance's sweep reads before pausing — see E2BActuator.noteUserActivity.
+   */
+  app.post('/api/agentv3/preview-keepalive', previewPollRateLimiter(), async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (!previewDoorEnabled() || !previewKeepAliveEnabled()) { res.status(404).json({ ok: false }); return; }
+      const ws = typeof req.query?.ws === 'string' ? req.query.ws : '';
+      if (!verifyDoorToken(ws, typeof req.query?.exp === 'string' ? req.query.exp : null,
+        typeof req.query?.sig === 'string' ? req.query.sig : null, doorSecret(), Date.now())) {
+        res.status(403).json({ ok: false }); return;
+      }
+      const actuator = buildActuator();
+      const held = actuator.noteUserActivity ? actuator.noteUserActivity(ws) : false;
+      res.status(200).json({ ok: true, held });
+    } catch {
+      // Never surface an error to a page whose only job is to show the user their app.
+      res.status(200).json({ ok: false });
     }
   });
 

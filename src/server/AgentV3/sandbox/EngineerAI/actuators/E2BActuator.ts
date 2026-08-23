@@ -22,6 +22,14 @@ import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
 import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
 import { idleLimitMs, reapAfterMs, sandboxesToReap, shouldTouchDurable } from '../../../sandboxReaper';
 
+/**
+ * How often a stream of user-activity pings is written to the durable record.
+ *
+ * Well inside the 5-minute idle window so a single dropped write cannot let a viewed app be paused,
+ * and slow enough that a viewer costs one Firestore write a minute rather than one per ping.
+ */
+const USER_ACTIVITY_WRITE_MS = 60_000;
+
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
 // idle sweep fires before E2B kills the sandbox on its own.
@@ -577,6 +585,42 @@ export class E2BActuator implements IEngineerActuator {
     return true;
   }
 
+  /**
+   * A real person is looking at this app right now — treat that as activity.
+   *
+   * THE GAP THIS CLOSES (admin report 2026-08-23, a finished app dying under its user after ~5 min):
+   * idle is measured from the last SANDBOX operation, and somebody using their app performs none —
+   * their browser talks to the sandbox host, never to us. The Live tab's watchdog papered over that
+   * only while our own preview pane was the visible surface; a popped-out preview tab had none of our
+   * JavaScript, so the sweep paused a machine somebody was actively using.
+   *
+   * Stamps BOTH clocks on purpose. The in-memory one is what this instance's 5-minute sweep reads; the
+   * durable one is what every OTHER instance's sweep can read, and a ping can land on any instance.
+   * Returns whether this instance is the one holding the sandbox, for honest diagnostics only.
+   */
+  noteUserActivity(workspaceId: string): boolean {
+    if (!workspaceId) return false;
+    const now = Date.now();
+    this._lastActivity.set(workspaceId, now);
+    const held = this.sandboxes.get(workspaceId);
+    // NOT `_touchDurable`. That one is throttled to `touchIntervalMs` (5 min) because it rides the hot
+    // path of every file write during a build, and 5 min is exactly the idle limit — a durable stamp
+    // written no more often than the window it has to beat is a coin flip. User activity is rare
+    // enough (one ping a minute per viewer, and capped by the shell's own ceiling) to write on its own
+    // throttle, chosen to sit comfortably inside the window rather than on its edge.
+    if (held?.sandboxId) {
+      const lastWrite = this._lastUserActivityWrite.get(workspaceId) ?? 0;
+      if (now - lastWrite >= USER_ACTIVITY_WRITE_MS) {
+        this._lastUserActivityWrite.set(workspaceId, now);
+        void sandboxStore.touch(workspaceId, held.sandboxId).catch(() => {});
+      }
+    }
+    return !!held;
+  }
+
+  /** Last time a user-activity ping was written durably, per workspace. See noteUserActivity. */
+  private _lastUserActivityWrite = new Map<string, number>();
+
   private async _sweepIdleSandboxes(): Promise<void> {
     const now = Date.now();
     const limit = idleLimitMs();
@@ -584,6 +628,17 @@ export class E2BActuator implements IEngineerActuator {
       if (this._buildInFlight(workspaceId, now)) continue;
       const last = this._lastActivity.get(workspaceId) ?? now;
       if (now - last > limit) {
+        // LAST CHECK BEFORE A PAUSE THAT CAN BREAK A RUNNING APP. A keep-alive ping from the user's
+        // preview tab may have landed on a DIFFERENT Cloud Run instance, whose stamp lives only in the
+        // durable record. Reading it here costs one document read and only on the rare tick where we
+        // were about to pause anyway — and it is the difference between "nobody is using this" and
+        // "nobody told THIS process about it", which are not the same fact.
+        const durable = await sandboxStore.getRecord(workspaceId).catch(() => null);
+        const durableAt = Number(durable?.updatedAt);
+        if (Number.isFinite(durableAt) && durableAt > 0 && now - durableAt <= limit) {
+          this._lastActivity.set(workspaceId, durableAt);
+          continue;
+        }
         await this.pauseSandbox(sandbox.sandboxId).catch(() => {});
         this._lastActivity.delete(workspaceId);
         this._lastDurableTouch.delete(workspaceId);

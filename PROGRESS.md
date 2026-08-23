@@ -40124,3 +40124,96 @@ own workspace with explicit checkpoints; Cursor/Windsurf apply agent edits as a 
 Firebase Studio hibernates on USER presence rather than tool activity; Codespaces holds the machine open
 on client connection and warns before stopping. The common property none of our paths has: the agent's
 working tree is never the user's running app, and idleness is never measured on the agent's pipe.
+
+---
+
+## 2026-08-23 — the admin's three items from the VPN report, fixed one at a time (#2593, #2594, #2595)
+
+The admin named three separate defects out of the "Make an VPN App" report and said explicitly that
+claiming one fix covered all three would be a lie. Three changes, three root causes, three PRs.
+
+### #2593 — the ETA said "~3 min" and the build ran 18m 42s
+
+**Root cause: the number came from counting words in the prompt.** `complexityFromPrompt` looks for
+page-words and feature-words; "Make an VPN App" has neither, so it scored the floor of the formula
+(moduleCount 1, featureCount 1) and `heuristicEstimateMs` returned 120s + 45s + 8s = 173s. **The
+shorter and more ambitious the request, the smaller the estimate** — exactly backwards, and the bare
+one-line app request is the most common prompt shape there is.
+
+Adding "vpn" to a keyword list was rejected as the surface patch: `appComplexitySignals.ts` exists
+precisely because two detectors kept private keyword lists, drifted, and routed the same prompt two
+different ways. It buys a day, until "make a music app".
+
+**The fix removes the guess rather than improving it.** New pure `progressEta.ts` extrapolates the
+remaining time from the plan's real file count and this build's own observed pace — on this provider
+chain, at this tier, under whatever rate limiting is happening. There is no calibration constant in
+it, so it cannot be wrong about a model nobody benchmarked. It returns null — never a number —
+whenever it would be guessing: no plan, fewer than three files (one file gives zero intervals to
+average), or every planned file already written, which is a repair loop and genuinely unpredictable.
+
+Second dishonesty fixed at the same call site: the first line printed `est.etaText`, the single point
+estimate, and threw away the lowMs/highMs band and the confidence the SAME call had just computed. At
+confidence 0.4 the estimator says ±60% while the UI said "~3 min".
+
+Wiring test-pinned in `tests/measuredEtaWiring.test.ts` because dropping any connection fails
+silently. Honest limitation: a deep agentic build with `AGENTV3_BLUEPRINT` off never learns a plan
+size, so measurement does not engage and behaviour is byte-identical to before.
+
+### #2594 — a batch repair took the app from 4 compile errors to 41 and was kept
+
+**Root cause: the repair loop had no acceptance test.** It wrote whatever the model returned; its only
+brake was byte-IDENTICAL errors. 41 is not identical to 4, so the brake stayed off, the worse files
+were committed to the sandbox AND to the loop's own map, and the next ladder rung began from the
+damaged state. **The loop could measure whether it was stuck; it could not measure whether it was
+going backwards.**
+
+Everywhere else this codebase treats a repair as a proposal that must earn its place —
+`verifyAfterFix`, `designHealGuard`, GreenGuard. The fast lane's repair loop was the one place with no
+such gate, and it is the one that runs on nearly every build.
+
+"Worse" is a strict count of compiler diagnostics, deliberately NOT "different errors" — trading four
+errors for four others may mean one fixed and one revealed, and refusing that would stall the ladder
+on the builds it exists to rescue. On a regression the previous version goes back into the sandbox
+FIRST and the map second, the verdict is restored so the next prompt is not reasoning from discarded
+output, and the ladder continues from the better state.
+
+A regressing repair that also CREATED files is kept and the loop STOPS: undoing only the overwrites
+would leave a half-applied state, and green-freeze's full-deny already settled that a half-landed
+coordinated change is worse than none of it.
+
+`countTscErrors` lives beside `hasTscErrors` in `TscGate` — same single-parser discipline.
+`hasTscErrors` cannot tell 4 from 41, which is precisely how this got through.
+
+### #2595 — seven minutes spent on a file the engine had been given correct
+
+**Root cause is drift, not a missing idea.** The deterministic restore for `src/ErrorBoundary.tsx` has
+existed since 2026-08-12 and was wired into ONE of the two verify paths. The agentic tsc gate had it;
+SimpleBuilder's repair loop — the lane most builds take, and the lane this build took — had neither
+the restore nor a write guard. `scaffoldRestores` was exported and never called.
+
+Three layers, applying the 50/50 law (recovery is half the work; preventing the condition is the other
+half):
+1. **Out of the plan.** The manifest prompt hands the model the scaffold list and says "edit/extend",
+   so the plan included a file we ship correct and the FIRST generation pass overwrote it. The prompt
+   now names these as provided, and SimpleBuilder DROPS them from the parsed manifest regardless of
+   what the model answered — the prompt line alone would be persuasion; the filter makes it true.
+2. **A repair cannot land a change to them.** `protectBoilerplateInRepair` swaps repair output aimed at
+   a boilerplate path for canonical content, in BOTH lanes. Scoped to repair output only; the builder
+   may legitimately write these paths when a user asks for different wording.
+3. **Restore before paying for a model pass.** The fast lane now runs the same free restore, before the
+   first repair call. Costs nothing on a healthy build, honours the same `AGENTV3_SCAFFOLD_RESTORE=off`
+   kill switch.
+
+### Method note — every guard was watched failing
+
+`onPlanned` removed, the revert branch flipped to 'keep', the plan filter neutralised: each time the
+matching tests went red before being restored. A guard nobody has seen fail is just a comment.
+
+### OPEN FOLLOW-UP (rule 6): the runtime auto-fix loop has the same unguarded shape
+
+`routes/agentv3.ts`'s runtime-error auto-fix loop applies its repair without comparing the error count
+before and after, exactly as SimpleBuilder's did. It is NOT covered by #2594 because its signal is
+captured browser errors rather than tsc diagnostics, so `judgeRepair`'s counter does not apply
+unchanged. Converting it needs its own decision about what "worse" means for runtime errors (a new
+error class? more occurrences of the same one?), and half-converting it would be worse than leaving
+it. Recorded here rather than quietly skipped.

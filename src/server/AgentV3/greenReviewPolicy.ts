@@ -44,10 +44,39 @@ export function greenStopEnabled(env: NodeJS.ProcessEnv = process.env): boolean 
  */
 export function reviewerShouldWrite(input: {
   previewGreen: boolean;
+  /**
+   * Did we OPEN the app and SEE it broken? Not "it is not green" — positively observed as broken.
+   *
+   * `previewGreen: false` covers two completely different situations, and the original rule treated
+   * them the same: (1) we looked and the app was broken, and (2) we never managed to look at all — no
+   * sandbox, a snapshot taken before the app painted, a dead dev server. Only the first is a reason to
+   * let the reviewer rewrite the code.
+   */
+  previewProvenBroken?: boolean;
+  /** Did the BUILD itself report success? A build that failed has no working app to protect. */
+  buildOk?: boolean;
   env?: NodeJS.ProcessEnv;
 }): boolean {
   if (!greenStopEnabled(input.env)) return true; // switched off → today's behaviour, always write
-  return !input.previewGreen; // green → suggest, not write
+  if (input.previewGreen) return false;          // proven working → suggest, never rewrite
+  // A build that says it FAILED has produced nothing worth protecting, so the reviewer's repair is one
+  // of the things still trying to rescue it. Writing here cannot break a working app; there isn't one.
+  if (input.buildOk === false) return true;
+  // Proven broken with a build that claims success — the reviewer's fix is exactly what this case is
+  // for, and there is a real defect to aim it at.
+  if (input.previewProvenBroken) return true;
+  // EVERYTHING ELSE IS IGNORANCE, AND IGNORANCE IS NOT A LICENCE TO EDIT (admin 2026-08-23).
+  //
+  // The build says it worked and we could not verify the preview — no sandbox, an unpainted snapshot,
+  // a dev server that had stopped. The app in front of the user is very likely FINE, and letting the
+  // reviewer rewrite it on no evidence is the same re-break class Green Stop exists to end, surviving
+  // in the one state nobody had separated out. PreviewVerify already draws this exact line for the
+  // repair passes: an inconclusive snapshot means "do nothing", and a dead server means restart a
+  // process, never edit code — a code repair cannot fix a dead process, and paying a model to act as
+  // a process supervisor is how one home page took forty-five minutes.
+  //
+  // The findings are not lost: they become the same offer a green app's findings become.
+  return false;
 }
 
 /**

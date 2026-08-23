@@ -13046,6 +13046,16 @@ async function noteBuildOutcome(
       // may — a build that merely "finished" is not proof the app works, and protecting a state we
       // never verified would be the same lie in a new place.
       let previewGreen = false;
+      /**
+       * Did we OPEN the app and SEE it broken — as opposed to never managing to look?
+       *
+       * `previewGreen === false` has always meant two different things at once: "we looked and it was
+       * broken" and "we could not look". Only the first is evidence, and only the first is a reason to
+       * let the reviewer rewrite a build that otherwise reports success. Set exclusively where a
+       * conclusive verdict says the app did not render — never on an inconclusive snapshot (ignorance)
+       * and never on a dead dev server (a process problem no code edit can fix). See greenReviewPolicy.
+       */
+      let previewProvenBroken = false;
       // THE WAKE-UP GUARANTEE, as a fact rather than a hope. `true` = the revival recipe is stored AND
       // was read back, so this preview can be brought up again without guessing. `false` = the preview
       // works but the recipe could not be stored, which the user is told plainly at the only moment it
@@ -13068,6 +13078,9 @@ async function noteBuildOutcome(
           // admin actually saw, yet the rescue upgraded to success). The full-workspace readiness result
           // that found it is already on the diagnostics timeline — no re-analysis.
           const runtimeCrashBlocker = buildDiag.hasRuntimeCrashBlocker();
+          // We looked, the answer was conclusive, and the app did not render. That — and only that — is
+          // evidence a repair has something real to aim at.
+          if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
           if (renderRescueConfirmsSuccess({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length, runtimeCrashBlocker })) {
             result = { ...result, ok: true, summary: result.summary || 'The app builds and the live preview renders correctly.' };
             renderRescued = true;
@@ -13123,6 +13136,7 @@ async function noteBuildOutcome(
           try {
             if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
           } catch { /* console capture is best-effort */ }
+          if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
           if (verdict.rendered && consoleErrs.length === 0) {
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Preview verified — I opened the running app in a browser and it renders correctly.', ts: Date.now() });
             // Honesty upgrade (autopsy 2026-07-11): the real-browser check just CONFIRMED the app renders,
@@ -14396,7 +14410,7 @@ async function noteBuildOutcome(
           // and the working app ships untouched. The user's actual requests (a missing requested feature,
           // a real runtime error) are handled by their own passes and keep fixing automatically — this
           // governs only the reviewer's opinions. Kill switch: AGENTV3_GREEN_STOP=off. See greenReviewPolicy.
-          const greenStopReview = !reviewerShouldWrite({ previewGreen }) && autoFixItems.length > 0 && !isImportTurn;
+          const greenStopReview = !reviewerShouldWrite({ previewGreen, previewProvenBroken, buildOk: result.ok }) && autoFixItems.length > 0 && !isImportTurn;
           // FALSE-SUCCESS GUARD: a real build turn (never an import/survey turn, where findings stay
           // advisory by design) whose reviewer found [CRITICAL]s is NOT-ok until they are verifiably
           // fixed. Set the holder NOW (before the bounded fix pass) so the verdict is honest even if

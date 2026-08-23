@@ -305,6 +305,8 @@ import { buildRecipe, revivalConfirmedMessage, revivalUnconfirmedMessage } from 
 import { comparePreviewUrl, measurementDescribesUserView, stalePreviewMessage } from '../AgentV3/previewUrlFreshness';
 import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage } from '../AgentV3/previewDoor';
 import { previewKeepAliveEnabled, isTopLevelNavigation, shouldServeKeepAliveShell, keepAliveShellPage } from '../AgentV3/previewKeepAlive';
+import { scoreBuildOutcome, shouldAutoReport, autoReportReason, complaintInText } from '../AgentV3/buildOutcomeSignals';
+import { buildOutcomeStore, buildOutcomeTrackingEnabled, watchedMsFrom, type BuildOutcomeRecord } from '../AgentV3/BuildOutcomeStore';
 import { buildPortSweepCommand, portCandidates, parsePortSweep } from '../AgentV3/sandbox/EngineerAI/actuators/portSweep';
 import { decideAppSignature, appSignatureNotice } from '../AgentV3/appSignatureEntitlement';
 import { probeHostingPlan } from '../lib/hostingPlan';
@@ -3097,6 +3099,92 @@ export function registerAgentV3Routes(app: Express): void {
     res.json({ ...diag, live, freeProviders });
   });
 
+/**
+ * A signal about how a finished build is actually going for its user — record it, and if the picture
+ * has turned bad, send the admin that build's report WITHOUT anyone pressing anything.
+ *
+ * This is the whole of "Option A" (admin 2026-08-23), chosen over a 1-5 star popup: every input is
+ * something the person does anyway, so there is nothing to dismiss and nothing to grow tired of. See
+ * buildOutcomeSignals.ts for why a star was rejected and what "bad" is allowed to mean.
+ *
+ * BEST-EFFORT AT EVERY STEP, and never awaited into a user-facing response. A quality signal that
+ * could slow down or fail a user's request would be a worse bug than the one it exists to catch.
+ */
+/**
+ * The verified identity to stamp on an automatic report. Read from the TOKEN, never the body — an
+ * auto-report must be as attributable as a user-pressed one, and a body-supplied identity would let a
+ * caller put somebody else's name on it.
+ */
+async function outcomeIdentity(req: Request): Promise<{ userId: string | null; email: string | null; name: string | null }> {
+  const userId = await verifyFirebaseToken(req).catch(() => null);
+  if (!userId) return { userId: null, email: null, name: null };
+  const [email, name] = await Promise.all([
+    resolveVerifiedEmail(userId).catch(() => null),
+    resolveVerifiedName(userId).catch(() => null),
+  ]);
+  return { userId, email, name };
+}
+
+async function noteBuildOutcome(
+  workspaceId: string,
+  patch: Partial<BuildOutcomeRecord>,
+  identity: { userId: string | null; email: string | null; name: string | null },
+): Promise<void> {
+  if (!buildOutcomeTrackingEnabled() || !workspaceId) return;
+  try {
+    const rec = await buildOutcomeStore.note(workspaceId, patch);
+    // No record means no build has finished for this workspace — there is nothing to judge, and
+    // inventing one here would be inventing a build that never happened.
+    if (!rec || !rec.buildId) return;
+    const judgement = scoreBuildOutcome({
+      buildOk: rec.buildOk === true,
+      complained: typeof rec.complained === 'boolean' ? rec.complained : null,
+      askedForRepair: rec.askedForRepair === true,
+      invested: rec.invested === true,
+      previewWatchedMs: watchedMsFrom(rec),
+    });
+    if (!shouldAutoReport(judgement.verdict, typeof rec.reportedAt === 'number' && rec.reportedAt > 0)) return;
+    // CLAIM BEFORE BUILDING THE RECORD. The signals arrive on separate requests that can land on
+    // different instances a tap apart (a complaint and a Diagnose press), and two instances each
+    // reading "not reported yet" is exactly how the admin gets the same report twice.
+    const now = Date.now();
+    if (!(await buildOutcomeStore.claimReport(workspaceId, rec.buildId, now))) return;
+    const report = await loadDiagnostics(workspaceId).catch(() => null);
+    if (!report) return; // nothing to send; the claim stands so we do not retry a report that cannot exist
+    // The WHOLE session, exactly as the manual Report button gathers it — the failure a user hits is
+    // usually explained by an earlier turn, and a single-build record throws that away.
+    let sessionBuilds: BuildDiagnosticsReport[] = [];
+    try {
+      const metaList = await listDiagnosticsHistory(workspaceId, 20).catch(() => []);
+      const full = (await Promise.all(
+        metaList.map((h) => getDiagnosticsHistoryItem(workspaceId, h.id).catch(() => null)),
+      )).filter(Boolean) as BuildDiagnosticsReport[];
+      const byStart = new Map<number, BuildDiagnosticsReport>();
+      for (const r of full) byStart.set(r.startedAt, r);
+      byStart.set(report.startedAt, report);
+      sessionBuilds = [...byStart.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+    } catch { sessionBuilds = []; }
+    const record = buildAdminReportRecord(report, {
+      userId: identity.userId,
+      email: identity.email,
+      name: identity.name,
+      workspaceId,
+      buildId: rec.buildId,
+      reportedAt: now,
+    }, sessionBuilds);
+    // SAY IT WAS AUTOMATIC, and why. An admin who cannot tell a machine-sent report from a user-sent
+    // one cannot tell whether a real person was upset enough to press a button — which is a different
+    // and more urgent fact.
+    try {
+      record.meta.summary = `${autoReportReason(judgement)} ${record.meta.summary ?? ''}`.trim().slice(0, 400);
+    } catch { /* the summary is a nicety; the report is the point */ }
+    const saved = await saveAdminBuildReport(record);
+    try {
+      audit('AGENTV3_AUTO_REPORT', { workspaceId, buildId: rec.buildId, verdict: judgement.verdict, saved });
+    } catch { /* the honesty layer must never throw */ }
+  } catch { /* a quality signal must never affect a user request */ }
+}
+
   // Build diagnostics — the structured issue report from the user's LAST build (every struggle
   // v5.0 hit: provider fallbacks, tool errors, "replied without building" nudges, readiness
   // blockers, sandbox problems). Owner-scoped (keyed by the caller's userId). The v5.0 panel's
@@ -3695,6 +3783,14 @@ export function registerAgentV3Routes(app: Express): void {
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    // OPTION A — a PERSON pressing Diagnose / Restart / Wake up is evidence their app is not working.
+    // Nobody does that to an app that works. `userInitiated` is what separates it from the watchdog's
+    // own automatic heal of a sleeping sandbox, which is routine and must never be read as a failure —
+    // that false alarm is exactly what would teach the admin to stop reading these reports.
+    // Fire-and-forget: a quality signal must never delay a user waiting on a repair.
+    if (req.body?.userInitiated === true) {
+      void (async () => { await noteBuildOutcome(workspaceId, { askedForRepair: true }, await outcomeIdentity(req)); })();
+    }
     // STREAMED PROGRESS (opt-in via body.stream) — the boot legitimately takes 30-90s on a cold
     // sandbox, and a single silent POST gave the user no way to tell "loading" from "stuck". The
     // stream emits REAL stage events (stage-count-based percentages — never a fake time-based bar)
@@ -4097,6 +4193,18 @@ export function registerAgentV3Routes(app: Express): void {
       const actuator = buildActuator();
       const held = actuator.noteUserActivity ? actuator.noteUserActivity(ws) : false;
       res.status(200).json({ ok: true, held });
+      // OPTION A — the strongest FREE positive signal there is: the app is on somebody's screen, right
+      // now, and they have not complained. Recorded AFTER the response so it can never add latency to
+      // a page whose only job is to show the user their app.
+      const seenAt = Date.now();
+      void (async () => {
+        const rec = await buildOutcomeStore.get(ws).catch(() => null);
+        if (!rec) return; // no finished build to judge
+        await noteBuildOutcome(ws, {
+          previewFirstSeenAt: rec.previewFirstSeenAt ?? seenAt,
+          previewLastSeenAt: seenAt,
+        }, await outcomeIdentity(req));
+      })();
     } catch {
       // Never surface an error to a page whose only job is to show the user their app.
       res.status(200).json({ ok: false });
@@ -6135,6 +6243,10 @@ export function registerAgentV3Routes(app: Express): void {
         ...(typecheckWarning ? { warning: typecheckWarning } : {}),
         ...(firstPublish && url ? { firstPublish: true } : {}),
       });
+      // OPTION A — the strongest "this app is good" evidence in the whole product, because it costs the
+      // user real effort. It OUTRANKS every negative signal (buildOutcomeSignals.ts): somebody who put
+      // their app on the internet did not get a broken one, whatever they grumbled about on the way.
+      void (async () => { await noteBuildOutcome(workspaceId, { invested: true }, await outcomeIdentity(req)); })();
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Could not publish your app. Please try again.' });
     }
@@ -7513,6 +7625,16 @@ export function registerAgentV3Routes(app: Express): void {
     // break it. Clearing here does not depend on any prior build's cleanup running, so no teardown path
     // can leak a latch into the next build.
     try { clearGreenLatch(workspaceId); } catch { /* best-effort */ }
+    // OPTION A — the user told us themselves. This runs BEFORE the new build settles, so the record it
+    // judges is still the PREVIOUS build's — which is the one they are complaining about. `complaintInText`
+    // is deliberately narrow: "add a dark mode" is not a complaint, and a false positive here sends the
+    // admin a report about a perfectly good build, which is how a reporting channel stops being read.
+    // Fire-and-forget so it can never delay the build the user just asked for.
+    try {
+      if (complaintInText(prompt)) {
+        void (async () => { await noteBuildOutcome(workspaceId, { complained: true }, await outcomeIdentity(req)); })();
+      }
+    } catch { /* a quality signal must never affect a build */ }
     // Phase G1 — git as the third organ: durably persist every real git checkpoint as it is emitted,
     // so the commit timeline survives sandbox recycling and is visible across sessions/devices (not just
     // this session's RAM). Best-effort — a persist failure never affects the build or the stream.
@@ -8531,6 +8653,14 @@ export function registerAgentV3Routes(app: Express): void {
     // Visible to the deadline timer above so it can finalize a finished build as SUCCESS instead of
     // "paused". Set the moment a build lane produces a successful result (before advisory post-work).
     let buildResultRef: { ok: boolean; summary: string; steps?: number; billedUsd?: number } | null = null;
+    /**
+     * This build's id, hoisted so the request's FINALLY can see it.
+     *
+     * `buildId` itself is declared deeper in, past the point a failure can jump over — and the finally
+     * is exactly where the build-outcome record has to be opened, because that is the one place every
+     * ending (success, failure, watchdog, Stop) passes through.
+     */
+    let outcomeBuildId: string | null = null;
     // FALSE-SUCCESS GUARD (deep-test 2026-07-21): `buildResultRef` above captures the architect's
     // OPTIMISTIC success BEFORE the post-build reviewer validates it. When the reviewer then finds
     // [CRITICAL] issues that are NOT verifiably fixed (the C9 auto-fix never ran, failed, or — the real
@@ -8716,6 +8846,7 @@ export function registerAgentV3Routes(app: Express): void {
       // the "Build report" export can be validated to belong to THIS build and can NEVER hand back a
       // previous, different app's report (the Jungle-Runner-for-Expense-Tracker bug).
       const buildId = randomUUID();
+      outcomeBuildId = buildId;
       const promptHash = computePromptHash(prompt);
       emit({ type: 'build_meta', buildId, promptHash, workspaceId });
       const buildDiag = new BuildDiagnostics({
@@ -15310,6 +15441,17 @@ export function registerAgentV3Routes(app: Express): void {
       // the FINALLY on purpose: a deferral that only ends on the happy path would leave a user staring
       // at a stale app after any failure, which is the failure mode the deferral exists to prevent.
       try { events.emit({ type: 'build_phase', phase: 'idle', ts: Date.now() }); } catch { /* best-effort */ }
+      // OPTION A — open a fresh outcome record for the build that just ended, so the signals the user
+      // generates over the next few minutes (a complaint, a Diagnose press, how long they actually
+      // watch it) have somewhere to land. A full overwrite, never a merge: carrying the PREVIOUS
+      // build's complaint forward would report an app that has since been fixed, and carrying its
+      // reported-flag forward would silence the next genuine failure. Deliberately not awaited — a
+      // quality signal must never add latency to the end of a build.
+      try {
+        if (buildOutcomeTrackingEnabled()) {
+          if (outcomeBuildId) void buildOutcomeStore.startBuild(workspaceId, outcomeBuildId, buildResultRef?.ok === true).catch(() => {});
+        }
+      } catch { /* best-effort — never affects a build */ }
       activeBuilds.delete(buildKey);
       // Only clear the registry slot if it is STILL this build — a Stop may have already
       // replaced it with a newer run. End every attached stream.

@@ -188,7 +188,8 @@ describe('the wiring', () => {
      * one. Remove this button and the phase becomes a capability removal.
      */
     expect(surface).toContain("{diagnosing ? 'Starting the live server…' : 'Diagnose'}");
-    expect(surface).toContain('onClick={() => void runDiagnose()}');
+    // `true` = a PERSON pressed it, which the server treats as a build-quality signal (the watchdog passes false).
+    expect(surface).toContain('onClick={() => void runDiagnose(true)}');
   });
 
   it('a refusal is shown to the user with its real reason', () => {

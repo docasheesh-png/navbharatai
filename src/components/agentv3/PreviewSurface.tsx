@@ -252,7 +252,16 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // show this boot can put the view back when it fails instead of stranding the user on a dead tab.
   // Which button started this, so the progress line uses that button's own words (see previewRestart).
   const [wakeIntent, setWakeIntent] = useState(false);
-  const runDiagnose = useCallback(async (): Promise<boolean> => {
+  /**
+   * @param userInitiated TRUE only when a PERSON pressed Diagnose / Restart / Wake up.
+   *
+   * The watchdog calls this too, and the difference matters: an automatic heal of a sleeping sandbox
+   * is routine housekeeping, while a person reaching for the repair button is evidence their app is
+   * not working. The server treats the second as a build-quality signal (buildOutcomeSignals.ts), so
+   * conflating them would send the admin a report every time our own watchdog did its job — the false
+   * alarm that teaches people to stop reading reports.
+   */
+  const runDiagnose = useCallback(async (userInitiated = false): Promise<boolean> => {
     if (!workspaceId) return false;
     setDiagnosing(true);
     setDiagResult(null);
@@ -264,7 +273,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         // stream:true → NDJSON: real stage events (+ seconds heartbeat during the long
         // install/boot step) followed by the terminal result — so a 30-90s cold boot shows
         // WHAT is happening and that it is alive, instead of one silent spinner.
-        body: JSON.stringify({ workspaceId, userId, email, framework, stream: true }),
+        body: JSON.stringify({ workspaceId, userId, email, framework, stream: true, userInitiated }),
       });
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
@@ -1081,7 +1090,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
               a 90-second sandbox reboot — is how a user learns to distrust both. */}
           {canOfferRestart({ mode, url: effectiveUrl, workspaceId }) && (
             <button
-              onClick={() => { setWakeIntent(false); void runDiagnose(); }}
+              onClick={() => { setWakeIntent(false); void runDiagnose(true); }}
               disabled={diagnosing}
               aria-label="Restart the server"
               className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-50"
@@ -1171,7 +1180,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
                 : 'The app stopped running. Your files are safe — waking it up usually brings it straight back.'}
             </span>
             <button
-              onClick={() => { setWakeIntent(true); void runDiagnose(); }}
+              onClick={() => { setWakeIntent(true); void runDiagnose(true); }}
               className="shrink-0 rounded-md bg-sky-600 px-2.5 py-1 font-semibold text-white hover:bg-sky-500"
             >
               Wake up
@@ -1277,7 +1286,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
                 {workspaceId && (
                   <div className="pt-1">
                     <button
-                      onClick={() => void runDiagnose()}
+                      onClick={() => void runDiagnose(true)}
                       disabled={diagnosing}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold"
                       title="Check the real state of the dev server inside your sandbox — installs, starts, and reports the exact cause if it still doesn't come up"

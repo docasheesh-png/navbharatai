@@ -309,6 +309,7 @@ import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage
 import { previewKeepAliveEnabled, isTopLevelNavigation, shouldServeKeepAliveShell, keepAliveShellPage } from '../AgentV3/previewKeepAlive';
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
+import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE } from '../AgentV3/previewSnapshot';
 import { scoreBuildOutcome, shouldAutoReport, autoReportReason, complaintInText } from '../AgentV3/buildOutcomeSignals';
 import { buildOutcomeStore, buildOutcomeTrackingEnabled, watchedMsFrom, type BuildOutcomeRecord } from '../AgentV3/BuildOutcomeStore';
 import { buildPortSweepCommand, portCandidates, parsePortSweep } from '../AgentV3/sandbox/EngineerAI/actuators/portSweep';
@@ -4125,7 +4126,18 @@ async function noteBuildOutcome(
       const sandboxId = actuator.getSandboxId
         ? await raceTimeout(actuator.getSandboxId(ws), 4_000, 'doorSandboxId').catch(() => null)
         : null;
-      if (!sandboxId) return page(200, 'asleep');
+      if (!sandboxId) {
+        // THE MACHINE IS GONE, NOT ASLEEP. Retrying against it will never succeed, so if a VM-free
+        // copy of this app exists, hand the user their app rather than a spinner. Only in this state:
+        // a sandbox that exists but has not opened its port yet is usually seconds away, and replacing
+        // a live app that is still starting with a STALE copy of itself would lose the very edits the
+        // user is waiting to see.
+        const rec = await raceTimeout(sandboxStore.getRecord(ws), 3_000, 'doorSnapshot').catch(() => null);
+        if (shouldServeSnapshot({ enabled: previewSnapshotEnabled(), doorState: 'asleep', snapshotUrl: rec?.snapshotUrl })) {
+          return res.redirect(302, String(rec!.snapshotUrl));
+        }
+        return page(200, 'asleep');
+      }
       // The PROVEN port leads the sweep — recorded the moment this app last genuinely rendered — and
       // the sweep verifies whatever it claims: the door never redirects to a port it did not just see
       // answer. This is what kills the 3000-vs-5000 loop: no url is ever believed about a port again.
@@ -4313,6 +4325,25 @@ async function noteBuildOutcome(
       );
       const describesUserView = measurementDescribesUserView(urlVerdict);
 
+      // Is the user currently being shown the VM-free copy? True only when the machine is genuinely
+      // gone AND a snapshot exists — the same condition the door itself applies, read from the same
+      // record, so the two can never tell the user different stories.
+      let snapshotServing = false;
+      let snapshotTakenAt: number | null = null;
+      try {
+        if (previewSnapshotEnabled() && livePortUp !== true) {
+          const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'healthSnapshot').catch(() => null);
+          const sandboxGone = !(await raceTimeout(
+            buildActuator().getSandboxId ? buildActuator().getSandboxId!(workspaceId) : Promise.resolve(null),
+            3_000, 'healthSandboxId',
+          ).catch(() => null));
+          if (sandboxGone && shouldServeSnapshot({ enabled: true, doorState: 'asleep', snapshotUrl: rec?.snapshotUrl })) {
+            snapshotServing = true;
+            snapshotTakenAt = typeof rec?.snapshotAt === 'number' ? rec.snapshotAt : null;
+          }
+        }
+      } catch { /* the note is a nicety; the door already does the real work */ }
+
       const health = classifyPreviewHealth({
         hasFiles: fileCount > 0,
         liveBackend: diag.livePreviewAvailable,
@@ -4346,6 +4377,11 @@ async function noteBuildOutcome(
         currentPreviewUrl: currentPreviewUrl || null,
         previewUrlStale: urlVerdict === 'stale',
         ...(urlVerdict === 'stale' ? { previewUrlNote: stalePreviewMessage() } : {}),
+        // A VM-FREE COPY EXISTS AND THE MACHINE DOES NOT. The door is already handing the user their
+        // app rather than a spinner (previewSnapshot.ts); this is what lets the surface SAY so. It
+        // matters: they are looking at the last built version, and without being told they would
+        // report a bug about an edit that is simply not in this copy.
+        ...(snapshotServing ? { snapshotServing: true, snapshotNote: SNAPSHOT_NOTE, snapshotAt: snapshotTakenAt } : {}),
       });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
@@ -13633,6 +13669,37 @@ async function noteBuildOutcome(
             });
             const note = prodBuildUserNote(verdict);
             if (note) events.emit({ type: 'narration', agent: 'architect', text: note, ts: Date.now() });
+            // A FINISHED APP SHOULD NOT NEED A RENTED COMPUTER TO STAY ALIVE (previewSnapshot.ts).
+            //
+            // The build we just ran to prove this app packages ALSO produced its `dist/` — and those
+            // bytes are the app. They need no VM, no port and no wake-up. Keeping them on the same
+            // permanent host Publish uses means that when the sandbox is finally gone (it pauses in
+            // five idle minutes and expires soon after), the user sees their app instead of a page
+            // retrying against a machine that is never coming back.
+            //
+            // ITS OWN CHANNEL, never the publish one: a snapshot must never be able to replace the
+            // version somebody deliberately shipped. Skipped entirely for a full-stack app, whose
+            // server lives inside the sandbox — a static copy of that would render the shell and fail
+            // every request behind it, which is worse than an honest expiry.
+            if (verdict.ok && previewSnapshotEnabled() && snapshotSuitable(pkgRaw) && actuator.downloadDistFiles) {
+              try {
+                const dist = await withTimeout(actuator.downloadDistFiles(workspaceId), 60_000, 'snapshot-dist');
+                if (dist && dist.size > 0) {
+                  const url = await withTimeout(
+                    new FirebaseHostingDeployer().deployStatic(workspaceId, dist, snapshotChannelId(workspaceId)),
+                    90_000, 'snapshot-deploy',
+                  );
+                  if (url) {
+                    await sandboxStore.saveSnapshot(workspaceId, url, Date.now()).catch(() => {});
+                    buildDiag.record({
+                      phase: 'readiness', severity: 'info', code: 'PREVIEW_SNAPSHOT_SAVED',
+                      message: 'Kept a permanent copy of this build, so the preview still works after its live server expires.',
+                      autoResolved: true,
+                    });
+                  }
+                }
+              } catch { /* a fallback copy must never be able to affect the build it is copying */ }
+            }
           }
         } catch { /* the detector must never affect a build it is only observing */ }
       }

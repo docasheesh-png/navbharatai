@@ -110,3 +110,59 @@ export function judgeRepair(input: RepairJudgementInput): RepairJudgement {
   }
   return { action: 'revert', beforeCount, afterCount, reason: `${worse} — putting the previous version back.` };
 }
+
+/**
+ * THE SAME QUESTION, ASKED OF A RUNTIME REPAIR.
+ *
+ * The runtime-error auto-fix loop already has a net — `verifyAfterFix` snapshots the green app, applies
+ * the repair, re-renders it and rolls back if it broke. That net is real, and an earlier note in this
+ * session was WRONG to call the loop unguarded.
+ *
+ * But it asks only "does the app still RENDER". Rendering is a weaker test than working, and the gap it
+ * leaves is exactly the one `judgeRepair` closes for compile errors: a repair that fixes one runtime
+ * error while introducing two more still renders, so it is kept — and with the default of one attempt
+ * it then ships. The user's app had one error before we touched it and three after, and every gate
+ * said yes.
+ *
+ * So the rule is the same rule, and it lives here rather than in the route so "worse" can never come to
+ * mean two different things in the two places a repair is judged. Only the unit of measurement differs:
+ * compiler diagnostics there, actionable console errors here.
+ */
+export interface RuntimeRepairInput {
+  /** Did the app still render after the repair? */
+  stillRenders: boolean;
+  /** Actionable runtime errors that PROMPTED the repair. */
+  beforeCount: number;
+  /** Actionable runtime errors after it. null = the console could not be read. */
+  afterCount: number | null;
+}
+
+export interface RuntimeRepairJudgement {
+  action: 'keep' | 'revert';
+  reason: string;
+}
+
+export function judgeRuntimeRepair(input: RuntimeRepairInput): RuntimeRepairJudgement {
+  if (!input?.stillRenders) {
+    return { action: 'revert', reason: 'the app no longer rendered after this repair' };
+  }
+  // UNPROVEN IS NOT PROOF AGAINST. A console we could not read tells us nothing, and reverting a repair
+  // that may well have been correct — throwing away a real fix on no evidence — is the same mistake in
+  // the opposite direction. The existing net already treats an inconclusive render this way.
+  if (typeof input.afterCount !== 'number') {
+    return { action: 'keep', reason: 'the app still renders; its console could not be read, so the repair was not judged further' };
+  }
+  const before = Number.isFinite(input.beforeCount) ? Math.max(0, input.beforeCount) : 0;
+  if (input.afterCount > before) {
+    return {
+      action: 'revert',
+      reason: `the app still renders, but this repair left MORE runtime errors than it found (${before} → ${input.afterCount}) — putting the previous version back`,
+    };
+  }
+  return {
+    action: 'keep',
+    reason: input.afterCount < before
+      ? `runtime errors went from ${before} to ${input.afterCount}`
+      : `runtime errors stayed at ${before} — different errors, so progress is still possible`,
+  };
+}

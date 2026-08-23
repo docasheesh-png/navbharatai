@@ -307,6 +307,7 @@ import { buildRecipe, revivalConfirmedMessage, revivalUnconfirmedMessage } from 
 import { comparePreviewUrl, measurementDescribesUserView, stalePreviewMessage } from '../AgentV3/previewUrlFreshness';
 import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage } from '../AgentV3/previewDoor';
 import { previewKeepAliveEnabled, isTopLevelNavigation, shouldServeKeepAliveShell, keepAliveShellPage } from '../AgentV3/previewKeepAlive';
+import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { scoreBuildOutcome, shouldAutoReport, autoReportReason, complaintInText } from '../AgentV3/buildOutcomeSignals';
 import { buildOutcomeStore, buildOutcomeTrackingEnabled, watchedMsFrom, type BuildOutcomeRecord } from '../AgentV3/BuildOutcomeStore';
 import { buildPortSweepCommand, portCandidates, parsePortSweep } from '../AgentV3/sandbox/EngineerAI/actuators/portSweep';
@@ -13853,7 +13854,30 @@ async function noteBuildOutcome(
                 const shot = await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl!), 35_000, 'verify-after-fix');
                 const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
                 if (v.inconclusive || v.serverDown) throw new Error('cannot re-verify'); // unproven → keep, do not revert on a guess
-                return v.rendered;
+                if (!v.rendered) return false;
+                // RENDERING IS NOT WORKING (2026-08-23). Until now this net asked only whether the app
+                // still painted — so a repair that fixed one runtime error while introducing two more
+                // passed, and with the default of a single attempt it then shipped: one error before we
+                // touched the app, three after, and every gate said yes. Same rule as the compile-side
+                // acceptance test (#2594), same module, so "worse" can never mean two different things
+                // in the two places a repair is judged. The browse above has just reloaded the page, so
+                // what we read here is the post-repair console, not the pre-repair one.
+                let afterCount: number | null = null;
+                try {
+                  const cap = await actuator.getConsoleErrors!(workspaceId, fixStart);
+                  afterCount = cap.captured === false ? null : filterActionableErrors(cap.errors).length;
+                } catch { afterCount = null; /* unreadable console is unproven, never proof against */ }
+                const rj = judgeRuntimeRepair({ stillRenders: true, beforeCount: captured.length, afterCount });
+                if (rj.action === 'revert') {
+                  try {
+                    buildDiag.record({
+                      phase: 'build', severity: 'warning', code: 'RUNTIME_FIX_REGRESSED',
+                      message: rj.reason, autoResolved: true,
+                    });
+                  } catch { /* diagnostics best-effort */ }
+                  return false;
+                }
+                return true;
               };
               const vr = await verifyAfterFix<Record<string, string>>({
                 snapshot: async () => (await collectWorkspaceFiles(actuator, workspaceId)).files,

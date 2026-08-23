@@ -91,3 +91,36 @@ describe('the guarantees, executed rather than grepped', () => {
     }).verdict).toBe('bad');
   });
 });
+
+describe('the runtime auto-fix net asks "is it better", not just "does it paint"', () => {
+  /**
+   * `verifyAfterFix` already reverted a repair that stopped the app rendering. It did NOT notice a
+   * repair that kept it rendering while tripling its runtime errors — which, with the default of one
+   * attempt, then shipped. Same rule as the compile-side gate, same module.
+   */
+  it('the render check runs FIRST and short-circuits — a broken app is never console-counted', () => {
+    const i = route.indexOf('const reRenderOk = async (): Promise<boolean> => {');
+    expect(i).toBeGreaterThan(-1);
+    const body = route.slice(i, i + 2200);
+    expect(body.indexOf('if (!v.rendered) return false;')).toBeLessThan(body.indexOf('getConsoleErrors!(workspaceId, fixStart)'));
+  });
+
+  it('it counts the POST-repair console, from the moment the fix began', () => {
+    const i = route.indexOf('const reRenderOk = async (): Promise<boolean> => {');
+    const body = route.slice(i, i + 2200);
+    // `fixStart` is stamped before the repair runs, and the browse above has just reloaded the page —
+    // so this window holds the repaired app's errors, not the ones that prompted the repair.
+    expect(body).toContain('getConsoleErrors!(workspaceId, fixStart)');
+    expect(body).toContain('judgeRuntimeRepair({ stillRenders: true, beforeCount: captured.length');
+  });
+
+  it('an unreadable console keeps the repair rather than reverting on a guess', () => {
+    const i = route.indexOf('const reRenderOk = async (): Promise<boolean> => {');
+    const body = route.slice(i, i + 2200);
+    expect(body).toContain('catch { afterCount = null;');
+  });
+
+  it('a reverted regression is recorded honestly, not silently undone', () => {
+    expect(route).toContain("code: 'RUNTIME_FIX_REGRESSED'");
+  });
+});

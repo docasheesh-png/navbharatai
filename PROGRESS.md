@@ -39991,3 +39991,38 @@ Reading the files is best-effort and only happens when the script named no port,
 today's behaviour untouched.
 
 Gate: both tsc + build + FULL vitest (17,693 passing, 1 skipped).
+
+## 2026-08-23 — free chat had no "new chat", and the code for it was already written
+
+Admin: *"free me new chat kaise start hogi? koi option banaya hai? nahi banaya hai."* They were right,
+and the shape of it is the notable part.
+
+**`startNewChat` already existed** — correct, complete, returned from `useSessionManager`, and with
+**no caller anywhere in the codebase**. Pro v5.0 had its own "+ New chat"; History had one but only in
+its EMPTY state (so a user with any history never saw it); the free chat had nothing. This is the
+fourth instance in two days of a capability existing while one surface does not use it —
+`serverListenPort` (preview port), `isAgentV3FreeUser` (import gate), `detectBackendPresence`
+(publish), and now this.
+
+🔒 **Why it needs no "are you sure".** `startNewChat` mints a NEW session id BEFORE clearing anything,
+and that ordering is the entire safety property: the transcript is auto-saved to History keyed by the
+CURRENT id, so clearing the messages WITHOUT a new id would make the user's next message overwrite the
+conversation they just left. With the new id the old chat stays in History, intact and reopenable —
+nothing is lost, so there is nothing to confirm. Test-locked as an ORDERING assertion, not a mention.
+
+**Two real defects in the dead code, fixed rather than shipped as found:**
+
+1. **It hardcoded an English welcome and skipped the LANGUAGE PICKER.** A user who had not yet chosen a
+   language would have been silently put into English by pressing New chat — a regression on a rule
+   the admin has stated directly ("AI response hamesha user ki language me"). It now uses App's own
+   `initialNbiMessages`, passed in, so the picker still appears and the text cannot drift from the one
+   App shows on first load.
+2. **It carried THREE copies of that welcome line** — two for the transcript, a third inside the saved
+   session record. That is how a saved session can describe a conversation that never happened, and
+   how a future edit to one silently disagrees with the others. Now computed once and used for both.
+   The dead `isVishwakarma` branch that referenced a removed variable went with it.
+
+`AppKnowledgeBase` updated (the entry and its keywords, English + Hinglish) so every AI in the app can
+answer "naya chat kaise shuru karun".
+
+Gate: both tsc + build + FULL vitest (17,699 passing, 1 skipped).

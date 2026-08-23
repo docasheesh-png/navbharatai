@@ -107,3 +107,41 @@ describe('the port hint', () => {
     expect(door).toContain('Number.isInteger(hintRaw) && hintRaw > 0 && hintRaw < 65536');
   });
 });
+
+/**
+ * NEVER FRAME A HOST THAT IS NOT SERVING (admin screenshot 2026-08-23).
+ *
+ * The frame showed "Closed Port Error — The sandbox … is running but there's no service running on
+ * port 3000" as though it were the user's app, while our own banner above it correctly reported the
+ * problem. The health probe curls the port from INSIDE the machine, so when it says the port is down,
+ * whatever the BROWSER fetches from that host is the provider's error page by definition — there is
+ * nothing else it could be.
+ *
+ * `unreachable` could not carry this: that means the origin did not answer at all, and here it answers
+ * perfectly well, with a stranger's page.
+ */
+describe('a host with nothing on its port is never framed', () => {
+  it('the server reports livePortUp explicitly, not only folded into a status string', () => {
+    expect(route).toContain('livePortUp: describesUserView ? livePortUp : null,');
+  });
+
+  it('the client refuses to frame on portDown, and only on an EXPLICIT false', () => {
+    // An older server sends no field; `=== false` keeps that case on today's behaviour rather than
+    // blanking the preview for everyone the moment the field is missing.
+    expect(surface).toContain('setPortDown(res.ok && health?.livePortUp === false);');
+    expect(surface).toContain('{unreachable || (portDown && !diagnosing) ? (');
+  });
+
+  it('it stands down while a wake/diagnose is in flight — that is when the port is MEANT to be down', () => {
+    // Without the guard, pressing Wake up would replace the app with the not-serving panel for the
+    // whole reboot, which reads as "it broke" at exactly the moment it is being fixed.
+    expect(surface).toContain('portDown && !diagnosing');
+  });
+
+  it('a reading from ANOTHER machine can never trigger it', () => {
+    // Same rule as `serving`: a port that is up (or down) on a machine the user is not looking at is
+    // not a statement about their view.
+    const line = route.split('\n').find((l) => l.includes('livePortUp: describesUserView')) || '';
+    expect(line).toContain('describesUserView ?');
+  });
+});

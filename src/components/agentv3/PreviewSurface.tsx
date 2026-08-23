@@ -200,6 +200,8 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
    * genuinely different state with a different remedy.
    */
   const [unreachable, setUnreachable] = useState(false);
+  /** The machine answers, but nothing is serving on the port — see the note where this is set. */
+  const [portDown, setPortDown] = useState(false);
   const [sandbox, setSandbox] = useState<{ livePreviewAvailable: boolean; actuator: string; previewDomainWarning: string | null } | null>(null);
   // LIVE FAILOVER (admin report 858f6d7b) — a broken in-browser preview must never be a dead end while
   // the real app is running on the sandbox. Both refs are once-per-workspace guards; `failoverNote`
@@ -471,7 +473,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         const health = await res.json().catch(() => null) as {
           status?: unknown; serving?: unknown; servingProblems?: unknown;
           currentPreviewUrl?: unknown; previewUrlStale?: unknown; previewUrlNote?: unknown;
-          doorUrl?: unknown;
+          doorUrl?: unknown; livePortUp?: unknown;
         } | null;
         {
           // Adopt the FIRST door link, keep it while fresh, replace it only near expiry, and DROP it
@@ -501,6 +503,19 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             : 'Your preview moved to a new server — reconnecting you to it now.');
         }
         if (res.ok && health && typeof health.status === 'string') status = health.status;
+        /**
+         * NOTHING IS LISTENING ON THE PORT — so the frame must not show that host (admin screenshot
+         * 2026-08-23). The health probe curls the port from INSIDE the machine, so when it reports the
+         * port down, whatever the BROWSER fetches from that host is the sandbox provider's own error
+         * page, by definition — never the user's app. Framing it put "Closed Port Error … Connection
+         * refused on port 3000" on screen as though it were their app: a vendor name the white-label
+         * law forbids, over an app that was simply not started yet.
+         *
+         * `unreachable` could not carry this: that means the origin did not answer AT ALL, and here it
+         * answers perfectly well — with a stranger's page. Only an explicit `false` counts, so an
+         * older server (no field) behaves exactly as before.
+         */
+        setPortDown(res.ok && health?.livePortUp === false);
         setHealth(status);
         // NOT-SERVING (admin report 2026-08-06): the port answers but the page is a 404 / "Cannot GET".
         // We used to render that page inside the iframe AS the user's app. Record it so the UI can say
@@ -1119,7 +1134,11 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             <div className="h-full w-1/3 bg-indigo-500 animate-pulse" />
           </div>
         )}
-        {unreachable ? (
+        {/* `portDown` joins `unreachable` here: both mean "whatever that host returns is not your app".
+            The door normally prevents this from ever being reached, but it only takes over once the
+            server has minted a link — and this is the one moment the raw address would otherwise be
+            framed. Belt and braces, on the path that has burned the user three times. */}
+        {unreachable || (portDown && !diagnosing) ? (
           /**
            * THE URL IS NOT ANSWERING — so we do NOT frame it (admin report 2026-08-13, mitrify).
            *

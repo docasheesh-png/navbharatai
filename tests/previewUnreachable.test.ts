@@ -37,8 +37,12 @@ const surface = readFileSync(join(process.cwd(), 'src/components/agentv3/Preview
  * explanation out of the file to make a test pass, which is the wrong trade every time.
  */
 function unreachableJsx(): string {
-  const at = surface.indexOf('unreachable ? (');
-  expect(at, 'the unreachable branch must exist').toBeGreaterThan(0);
+  // The condition grew a second trigger on 2026-08-23 — `portDown`, for a host that answers with the
+  // provider's "no service running on port N" page — so the anchor is the branch's opening rather than
+  // one exact expression. Both triggers mean the same thing: whatever that host returns is not the
+  // user's app, so it must not be framed.
+  const at = surface.indexOf('{unreachable ||');
+  expect(at, 'the refuse-to-frame branch must exist').toBeGreaterThan(0);
   // Bounded at the ELSE arm, not by a character count. A fixed window overshot into the reachable
   // branch, whose iframe carries a literal `sandbox="allow-scripts …"` attribute — an ordinary HTML
   // attribute that a blunt vendor-name search reads as a vendor name. The branch has to be delimited
@@ -99,5 +103,30 @@ describe('the vendor error page is not framed as the user\'s app', () => {
     const branch = unreachableJsx();
     expect(branch).toContain('Check again');
     expect(branch).toContain("setMode('inbrowser')");
+  });
+});
+
+/**
+ * THE SECOND TRIGGER (admin screenshot 2026-08-23). The same vendor page reached the user again, by a
+ * different route: the host ANSWERED — with "Closed Port Error … Connection refused on port 3000" —
+ * so `unreachable` (which means the origin did not answer at all) never fired, and the frame kept it.
+ *
+ * The health probe curls the port from INSIDE the machine, so when it reports the port down, whatever
+ * the browser fetches from that host is the provider's page by definition. There is nothing else it
+ * could be, which is what makes this a safe thing to refuse rather than a guess.
+ */
+describe('a host that answers with nothing serving is refused too', () => {
+  it('portDown shares the branch with unreachable — one honest state, not two', () => {
+    expect(surface).toContain('{unreachable || (portDown && !diagnosing) ? (');
+  });
+
+  it('it fires only on an EXPLICIT false, so an older server changes nothing', () => {
+    expect(surface).toContain("setPortDown(res.ok && health?.livePortUp === false);");
+  });
+
+  it('it stands down during a wake — the port is MEANT to be down while the server reboots', () => {
+    // Without this, pressing Wake up would swap the app for the not-serving panel for the whole
+    // reboot, which reads as "it just broke" at precisely the moment it is being repaired.
+    expect(surface).toContain('portDown && !diagnosing');
   });
 });

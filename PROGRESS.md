@@ -40217,3 +40217,88 @@ captured browser errors rather than tsc diagnostics, so `judgeRepair`'s counter 
 unchanged. Converting it needs its own decision about what "worse" means for runtime errors (a new
 error class? more occurrences of the same one?), and half-converting it would be worse than leaving
 it. Recorded here rather than quietly skipped.
+
+---
+
+## 2026-08-23 — The admin panel gets a real Monitor, and user apps get a Grafana that runs (PR #2598)
+
+The admin asked what Grafana is and how NavBharatAI should use it. Grafana does not collect anything —
+it draws data somebody else stored — so the question split into a data half and a display half, and
+the data half is where the real problem turned out to be.
+
+### The finding that changed the shape of the work
+
+The admin panel's **Platform Health Score, AI Insights, FinOps findings, `/api/admin/metrics`** and
+the daily `metrics_snapshots` history are all fed by the shared registry in `src/server/lib/metrics.ts`.
+
+That registry had exactly ONE feeder: `routes/build.ts`, the **legacy Engineer-AI builder**. AgentV3 —
+NavBharatAI Pro, where essentially every real user build happens — recorded **nothing** into it.
+
+The panels were not doing wrong arithmetic. They were blind to the platform's actual workload while
+presenting themselves as platform health. Building a dashboard on top of that would have been a
+beautiful screen over data that does not describe the product, so the wiring was fixed first (rule 4
+step 5: fix the system's honesty, not only the code).
+
+### What shipped, in three slices
+
+**1. Telemetry that can be charted, fed by the real engine.**
+AgentV3 records every finished build into the shared registry from BOTH settle paths (normal settle +
+watchdog/advisory finalizer) through one shared helper — the same two paths that drifted apart on
+billing in Fix 67, which is why it is a helper and not inlined twice. Per-provider tokens are priced
+with the SAME live rate card the real-cost billing uses, so the cost graph and the bill cannot tell two
+different stories about one build. New `metricsTimeline` stores the same counters in 5-minute buckets;
+writes are Firestore `increment`s so several Cloud Run instances writing one bucket add up instead of
+overwriting, and deltas batch in memory and flush at most once a minute per instance (~1,440 tiny
+writes a day, not one per AI call). Wiring goes through a sink hook so `metrics.ts` stays pure and
+every existing call site feeds the Monitor with no change at those call sites.
+
+**2. The Monitor is now the admin panel's home page.**
+Time range 1h/6h/24h/7d with 30s auto-refresh; tiles for builds, success rate, how often the preview
+really rendered, average build time and AI cost in ₹; charts for build activity (succeeded vs failed
+per bucket), AI spend, token throughput and build duration; engine cost split; platform health; alerts,
+waste findings and insights; and the newest server logs. **The old Overview content was moved, not
+deleted** — it renders below the live charts on the same page, so every business number the admin
+relied on is still there, one screen earlier, with a test that fails if any of it disappears.
+
+**3. Apps NavBharatAI builds now ship a Grafana that runs.**
+`generate_metrics` used to emit a `/metrics` endpoint and tell the user to "point Prometheus/Grafana at
+it" — true, and useless: homework most people never do, so the endpoint sat unread. It now also emits a
+`monitoring/` folder that starts with one command and opens on a dashboard already populated from the
+app's own metrics (request rate, 5xx as a share of traffic, latency p50/p95/p99, busiest routes, memory,
+event-loop lag), datasource and dashboard auto-provisioned.
+
+### The honesty rule this work is built around
+
+A dashboard whose feed is down looks exactly like a dashboard reporting a quiet night — both are flat
+and green. So when the telemetry store cannot be read, the charts are **suppressed** and the page says
+it cannot see, rather than drawing a reassuring zero line. A gap-filled bucket is marked
+`observed:false`; a rate nobody measured renders as `—`, never `0%`. The decision is a pure function
+(`feedState`) and is unit-tested.
+
+Same principle in the generated stack: **no default Grafana password.** The factory login is
+admin/admin, so the compose file requires `GRAFANA_ADMIN_PASSWORD` and fails with a readable message
+when it is unset. A refusal to start is honest; a console anyone can log into is not. And the
+`host-gateway` entry is what stops the whole stack coming up green while scraping nothing on Linux.
+
+### Why we did NOT stand up Grafana for NavBharatAI itself
+
+Self-hosting it would add a VM and a monthly bill to render numbers we already hold behind an
+admin-authenticated API — two weeks after the `e2b-custom-domain-proxy` VM was deleted to save
+₹1,350/month. Cloud Run's own infrastructure graphs are already free in Google Cloud Monitoring. If the
+admin wants the Grafana UI over our business metrics later, the zero-infra path is Grafana Cloud's free
+tier with two datasources: Google Cloud Monitoring for the infrastructure, and the Infinity plugin
+reading `/api/admin/monitor` for ours. Recorded here so a later session does not re-propose a VM.
+
+### Verification
+
+`npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json --noEmit` clean · `npx vitest run` —
+**1410 files, 17,832 passed, 4 skipped, 0 failed**. CI green on every pushed commit before merge.
+
+### Open item (rule 6)
+
+`aiRequests` in the timeline counts one recorded entry per provider per build for AgentV3 builds, not
+the true number of individual API calls — the per-call count is not available at the settle point and
+is deliberately not invented. Token and cost totals are exact. The Monitor therefore surfaces builds,
+tokens and cost rather than a request count; real per-call counts remain in `/api/admin/llm-latency`,
+which reads the trace spans. Closing this properly means carrying a call counter through the billing
+ledger, which is a separate change to the ledger's shape.

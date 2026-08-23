@@ -261,6 +261,14 @@ export interface BuildHealth {
   ready: boolean;
   blockers: string[];
   warnings: string[];
+  /**
+   * Was the finished app actually SEEN RUNNING (opened in a real browser and rendered)?
+   *
+   * `undefined` on an older server payload — the card then keeps today's wording. `false` means the
+   * score is capped and the label says "not verified": a perfect score has to be earned, and
+   * "no problems were found" and "nothing was ever checked" both produce zero problems.
+   */
+  provenRunning?: boolean;
 }
 
 export function initialAgentV3State(): AgentV3ClientState {

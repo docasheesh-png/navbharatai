@@ -196,6 +196,14 @@ export interface BuildHealth {
   ready: boolean;
   blockers: string[];
   warnings: string[];
+  /**
+   * Was the finished app actually SEEN RUNNING — opened in a real browser and rendered?
+   *
+   * Absent on an older payload. It exists because a perfect score used to be the DEFAULT rather than
+   * something earned: "no problems were found" and "nothing was ever checked" both produce zero
+   * problems, so a build whose app never started scored the same 100/100 as one proven to work.
+   */
+  provenRunning?: boolean;
 }
 
 export type AgentEventType = AgentEvent['type'];

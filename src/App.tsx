@@ -99,10 +99,8 @@ const DeploySuccessPanel = _lz(() => import('./components/panels/DeploySuccessPa
 
 const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
 const ProfessionalHistoryView = _lz(() => import('./components/professionals/ProfessionalHistoryView'), 'ProfessionalHistoryView');
-import { motion, AnimatePresence } from 'motion/react';
 import axios from 'axios';
 
-import { AgentProgress, BuildStep } from './components/ide/AgentProgress';
 import { useBuild } from './components/ide/BuildContext';
 import { getThemeClasses } from './lib/theme';
 import { useDevLogs } from './hooks/useDevLogs';
@@ -114,12 +112,8 @@ import { useZipImport } from './hooks/useZipImport';
 import { useGitHubConnect } from './hooks/useGitHubConnect';
 import { useSettings } from './hooks/useSettings';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
-import { Agent, isVishwakarmaAgent } from './types/agents';
 import { Message, ChatSession, ApiKeys, ViewType, SettingsScreen, FileSystem, ErrorContext } from './types';
 import { generateUCI } from './lib/chatUtils';
-import {
-  stripFences, buildSourceAppPreview, buildUniversalPreview, injectHarness,
-} from './lib/previewUtils';
 import { sanitizeFirestoreData } from './lib/firestoreUtils';
 import { safeLocalJson } from './lib/safeLocalJson';
 
@@ -134,12 +128,6 @@ import { saveFile, loadAllFiles, clearWorkspace, deleteFile as storageDeleteFile
 import { getAgentV3WorkspaceId } from './lib/agentv3Workspace';
 import { chunkFilesForSync, totalFilesBytes } from './lib/chunkFilesForSync';
 import { type ApnapanProfile, loadApnapanProfile, saveApnapanProfile, updateApnapanProfile } from './lib/apnapanEngine';
-import {
-  type VersionSnapshot,
-  buildVersionSnapshot,
-  appendVersionSnapshot,
-} from './lib/versionSnapshot';
-import { validateDeployInput, buildDeployBody } from './lib/deployRequest';
 import { isZipFile, isTextFile, classifyZipSize } from './lib/uploadClassify';
 import {
   DEFAULT_HOME_DATA,

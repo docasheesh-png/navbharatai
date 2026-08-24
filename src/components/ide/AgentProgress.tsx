@@ -1,5 +1,4 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, Circle, AlertCircle } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 

@@ -16,7 +16,7 @@ import { PreviewSurface } from '../agentv3/PreviewSurface';
 import { uploadZipProject } from '../../lib/zipProjectUpload';
 import { zipReplaceWarningFor } from '../../lib/zipReplaceWarning';
 import { zipAccept, acceptZipPick, notZipMessage } from '../../lib/zipPicker';
-import { auth } from '../../App';
+import { auth } from '../../lib/firebase';
 import { AgentV3MiniChat } from './AgentV3MiniChat';
 import { SecurityScan } from './SecurityScan';
 import { VirtualKeyboard } from './VirtualKeyboard';

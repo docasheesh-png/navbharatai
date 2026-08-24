@@ -8,7 +8,10 @@
 // ever loaded FIRST, the default app carried the WRONG authDomain and Google sign-in state got
 // cross-origin-partitioned (the exact silent first-login failure the custom domain was built to
 // fix). Now there is exactly ONE init, built from the ONE config (src/config/firebase.ts), and
-// App.tsx re-exports from here so every existing `import { auth } from './App'` keeps working.
+// THE one place Firebase is initialised, and now the one place `auth`/`db` are imported FROM.
+// App.tsx used to re-export them so features could take them off the app root; that re-export was
+// removed on 2026-08-24 because it formed an import cycle through the root and made the client
+// bundle unsplittable. Every consumer imports from here directly — see tests/appModuleGraph.test.ts.
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, initializeAuth, setPersistence, browserLocalPersistence, indexedDBLocalPersistence, signOut as fbSignOut } from 'firebase/auth';

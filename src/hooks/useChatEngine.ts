@@ -14,8 +14,8 @@ import type { Message, ErrorContext, ViewType, FileSystem } from '../types';
 import { classifyError } from '../lib/appUtils';
 import { asMessageArray } from '../lib/chatUtils';
 import { trackEvent } from '../lib/analytics';
-import { auth, rememberGithubOwner } from '../App';
-
+import { auth } from '../lib/firebase';
+import { rememberGithubOwner } from '../lib/githubTokenStore';
 export interface ChatEngineDeps {
   // values read
   input: string;

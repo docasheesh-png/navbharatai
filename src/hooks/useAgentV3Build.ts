@@ -7,8 +7,7 @@ import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../com
 import { conversationToEvents, conversationToUserMessages, isUnfinishedBuild, type PersistedConversation } from '../components/agentv3/agentV3History';
 import { shouldSurfaceStreamError, reconnectOutcome, type ReconnectOutcome } from './agentV3StreamError';
 import { nextLivePollDelayMs, resumeSinceSeq, LIVE_POLL_FAST_MS } from './livePollPolicy';
-import { auth } from '../App';
-
+import { auth } from '../lib/firebase';
 // FILE-REVEAL PACING (admin 2026-07-23 — "one by one user ko dikhe … har 2 file ke bich ~5–10 sec"):
 // reveal generated files ONE BY ONE with a ~6s gap so the user watches files land while the backend keeps
 // building, instead of a burst-then-stall. HONEST (rule 2): only real events, in real order — the terminal

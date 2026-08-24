@@ -4,7 +4,7 @@ import {
   MessageSquare, GitBranch, Globe, Zap, StopCircle, RotateCcw,
   Send, Bot, User, Copy, Check, Link2, Pencil, Move, Rocket, ExternalLink, HelpCircle
 } from 'lucide-react';
-import { auth } from '../../App';
+import { auth } from '../../lib/firebase';
 import { BotBuildHelp, type HelpMode } from './BotBuildHelp';
 
 type NodeType = 'start' | 'message' | 'menu' | 'condition' | 'api' | 'end';

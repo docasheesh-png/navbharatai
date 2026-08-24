@@ -952,7 +952,25 @@ export class BuildDiagnostics {
         this.notify();
         break;
       case 'preview':
-        this.record({ phase: 'preview', severity: 'info', code: 'PREVIEW_PUBLISHED', message: `Preview published at ${e.url}`, autoResolved: true });
+        // "PUBLISHED" CLAIMED MORE THAN WE KNEW (admin report 2026-08-24, a Next.js racing game).
+        //
+        // The timeline: `npm run dev` returned, the port was listening, we recorded "Preview published
+        // at <url>" — and THIRTY-ONE SECONDS LATER recorded PREVIEW_NOT_RENDERED, "the server returned
+        // 404 / Cannot GET". The url was handed over as a finished thing and then found not to work.
+        //
+        // The readiness test is not wrong: a listening port IS the right signal to publish on, and for
+        // an API-only app a 404 on `/` is a perfectly healthy dev server (see PreviewVerify). What was
+        // wrong is the WORD. Next.js dev binds its port immediately and compiles a route on the first
+        // request, so "the port is up" and "your app answers" are seconds to a minute apart — and only
+        // the second one is what "published" sounds like to the person reading it.
+        //
+        // So the line now says what was actually established. The render check that follows either
+        // upgrades it or contradicts it, and either way the reader was never told more than we knew.
+        this.record({
+          phase: 'preview', severity: 'info', code: 'PREVIEW_PUBLISHED',
+          message: `Preview address is live at ${e.url} — the server is listening. Whether the app itself renders is checked next.`,
+          autoResolved: true,
+        });
         break;
       case 'narration': {
         const t = (e.text || '').trim();

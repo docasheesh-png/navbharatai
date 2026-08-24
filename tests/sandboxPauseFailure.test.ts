@@ -80,6 +80,9 @@ describe('both sweeps are wired to the answer', () => {
     const body = src.slice(at, src.indexOf('\n  }', at));
     expect(body).toContain('} finally {');
     const fin = body.slice(body.indexOf('} finally {'));
-    expect(fin).toContain('this.sandboxes.delete(wid);');
+    // REPOINTED (same day): the drop now goes through `_dropSandbox`, which also clears the billing
+    // clock and the origin — see sandboxDropState.test.ts. The guarantee asserted here is unchanged
+    // and stronger: the reference is let go whatever happened, and nothing derived from it survives.
+    expect(fin).toContain('this._dropSandbox(wid);');
   });
 });

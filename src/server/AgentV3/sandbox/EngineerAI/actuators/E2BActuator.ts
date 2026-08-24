@@ -668,6 +668,34 @@ export class E2BActuator implements IEngineerActuator {
    */
   private _pauseFailures = new Map<string, number>();
 
+  /**
+   * Forget a workspace's live sandbox AND everything derived from it.
+   *
+   * ⚠️ WHY THIS IS ONE FUNCTION (found 2026-08-24, auditing two same-day changes against each other).
+   * THREE separate sites drop a dead or degraded sandbox so the next `getSandbox` builds a fresh one,
+   * and every one of them deleted from `this.sandboxes` alone. The moment `_sandboxStartedAt` began
+   * being read for MONEY, that became a real defect: `getSandbox` re-stamps only when the map has no
+   * entry, so a replacement machine inherited the DEAD one's start time and `sandboxHeldSeconds`
+   * counted minutes on a VM that no longer existed.
+   *
+   * The user's bill is protected by an unrelated cap (a build is never charged more sandbox time than
+   * its own duration), so this was not an overcharge — but the ADMIN's cost figure is uncapped by
+   * design, and it is the number the E2B analysis is built on. A cost investigation reading inflated
+   * seconds is worse than one reading none.
+   *
+   * The class, not the instance: this state lives in several maps, so any site that forgets one is a
+   * silent drift. One function to drop a sandbox means there is one place to keep correct.
+   *
+   * ⚠️ `_fileCache` is DELIBERATELY NOT cleared here. A fresh sandbox comes back empty and the replay
+   * of those cached files is what saves the build — dropping them would turn a recoverable dead
+   * sandbox into lost work. Only the sweeps clear it, and only for a workspace going idle.
+   */
+  private _dropSandbox(workspaceId: string): void {
+    this.sandboxes.delete(workspaceId);
+    this._sandboxStartedAt.delete(workspaceId);
+    this._sandboxOrigin.delete(workspaceId);
+  }
+
   /** Record a pause we could not confirm and return the new count. */
   private _notePauseFailure(workspaceId: string): number {
     const n = (this._pauseFailures.get(workspaceId) ?? 0) + 1;
@@ -1009,7 +1037,7 @@ export class E2BActuator implements IEngineerActuator {
       // and the corpse was reused forever. isDeadSandboxError catches the reaped/not-running/network
       // shapes too, so the next getSandbox recreates (and replays the cached source files).
       if (e instanceof Error && (isDeadSandboxError(e.message) || / timed out after /.test(e.message)) && this.sandboxes.get(workspaceId) === sandbox) {
-        this.sandboxes.delete(workspaceId);
+        this._dropSandbox(workspaceId);
       }
       throw e;
     }
@@ -1525,7 +1553,7 @@ export class E2BActuator implements IEngineerActuator {
         // dropped exactly as a dead one is — the next getSandbox creates a fresh one and replays the
         // cached files, a path in production since 2026-07-05 rather than a new one invented here.
         if (recordCommandLatency(this._latency, command, Date.now() - t0) && this.sandboxes.get(workspaceId) === sb) {
-          this.sandboxes.delete(workspaceId);
+          this._dropSandbox(workspaceId);
           this._latency = newSandboxLatencyState(); // the fresh sandbox starts with a clean record
         }
         return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
@@ -1535,7 +1563,7 @@ export class E2BActuator implements IEngineerActuator {
         const realExit = resolveThrownCommandExit(err);
         const dead = isDeadSandboxSignal({ exitCode: realExit, durationMs: Date.now() - t0, stdout: err?.stdout, stderr: err?.stderr, errorMessage: err?.message });
         if (attempt === 0 && dead && this.sandboxes.get(workspaceId) === sb) {
-          this.sandboxes.delete(workspaceId); // drop the reaped sandbox reference
+          this._dropSandbox(workspaceId); // drop the reaped sandbox reference and its derived state
           try { sb = await this.getSandbox(workspaceId); continue; } // recreate (replays source) + retry once
           catch { /* recreate itself failed (E2B down) → fall through to an honest error */ }
         }
@@ -2061,8 +2089,8 @@ ${paintWaitJs('p')}
       // likeliest case) the object is a paused machine that answers nothing; if the sandbox is gone,
       // it is a dead pointer; if it is alive and merely unpausable, `getSandbox` reconnects to it by
       // its durable id, which resumes it and works. Keeping it was the only outcome with no recovery.
-      for (const [wid, sb] of this.sandboxes) {
-        if (sb.sandboxId === sandboxId) this.sandboxes.delete(wid);
+      for (const [wid, sb] of [...this.sandboxes]) {
+        if (sb.sandboxId === sandboxId) this._dropSandbox(wid);
       }
     }
   }

@@ -67,6 +67,16 @@ export interface NbaiDomainConnectProps {
   /** A build/publish is already running — the button shows it instead of pretending to be idle. */
   publishBusy?: boolean;
   /**
+   * What the publish actually SAID — the server's own words, verbatim, from the host that owns the
+   * request (a build error with the compiler's output, a refusal, or the live link).
+   *
+   * 🔒 A PROP AND NOT A DETAIL OF EACH HOST, on purpose. Both hosts of this screen already held this
+   * text; one rendered it beside the screen and the other rendered it on a view the user was not
+   * looking at, which is how the domain screen came to have a Publish button that could fail in total
+   * silence. Making it an input of the screen that owns the button means the next host cannot forget.
+   */
+  publishResult?: string;
+  /**
    * Take this app off NavBharatAI hosting. Resolves to '' on success, or an HONEST message.
    *
    * Absent ⇒ the control is not rendered at all. A remove button with nothing behind it is the dead
@@ -411,7 +421,7 @@ export function relativeRecordName(name: string, domain: string): string {
 }
 
 
-export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy, publishFreshness, onUnpublish }: NbaiDomainConnectProps) {
+export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy, publishResult, publishFreshness, onUnpublish }: NbaiDomainConnectProps) {
   /**
    * OPENS WITH WHAT YOU ALREADY TYPED (admin 2026-08-22: "abhi lagta hai sab gayab ho gaya").
    *
@@ -1170,7 +1180,25 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 </button>
                 )}
                 {p.note && <p className="text-[11px] text-zinc-400 leading-relaxed">{p.note}</p>}
-                {publishBlocked && <p className="text-[11px] text-amber-300 leading-relaxed">{publishBlocked}</p>}
+                {/* WHAT HAPPENED WHEN THEY PRESSED IT (admin 2026-08-24: "yeh theek se deploy ho hi
+                    nahi raha hai").
+
+                    🔒 THE BUG THIS CLOSES. This screen had a Publish button whose OUTCOME rendered on
+                    a different view. The synchronous refusal was passed back and shown here; the
+                    asynchronous one — the server's real answer, which is the only one that can say a
+                    build failed or an app cannot be hosted — was written to state that the publish
+                    sheet renders only in its `choose` branch. So a user standing on the domain screen
+                    pressed Publish, watched a spinner run and stop, saw NOTHING, and was told again by
+                    the box above to "press Publish". A loop with no information in it, over a message
+                    that existed the whole time.
+
+                    Precedence is deliberate: a refusal that stopped this attempt outranks the text of
+                    the last one, which the host has not cleared because the request never started. */}
+                {(publishBlocked || publishResult) && (
+                  <p className={`text-[11px] leading-relaxed whitespace-pre-wrap break-words ${publishBlocked ? 'text-amber-300' : 'text-zinc-300'}`}>
+                    {publishBlocked || publishResult}
+                  </p>
+                )}
               </div>
             );
           })()}

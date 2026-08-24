@@ -96,7 +96,7 @@ describe('🔒 the deploy implementation is shared, not copied', () => {
     // A user who connected their own domain must get the fresh build on it. This is the line that does
     // it, and it must not be duplicated into a second path where it can be forgotten.
     const fn = routes.slice(routes.indexOf('const makeDeployFn ='), routes.indexOf("app.post('/api/agentv3/publish'"));
-    expect(fn).toContain('workspaceHasFirebaseDomain');
+    expect(fn).toContain('publishToCustomDomainSite');
     expect(fn).toContain('deployToSite');
     expect(fn).toContain('withDeploymentPersistence');
   });

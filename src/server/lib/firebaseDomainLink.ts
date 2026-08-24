@@ -74,11 +74,20 @@ export async function setDomainSuspended(domain: string, reason: string | null):
   } catch { /* best-effort — the hosting-side detach is the enforcement; this is bookkeeping */ }
 }
 
-/** The Firebase-connected domains for a workspace (empty on any error — fail-open). */
-export async function firebaseDomainsForWorkspace(workspaceId: string): Promise<string[]> {
+/**
+ * The Firebase-connected domains for a workspace, or NULL when we could not ask.
+ *
+ * 🔒 WHY THE NULL EXISTS (admin 2026-08-24, "yeh theek se deploy ho hi nahi raha hai"). The fail-open
+ * wrapper below collapses "this workspace has no domain" and "the lookup failed" into the same empty
+ * array — and the publish path used that array to decide whether to deploy to the user's own domain.
+ * So a Firestore hiccup read as "nothing to publish to", the domain deploy was skipped, and the user
+ * was told their app was live while their domain kept serving an error page, with no trace anywhere.
+ * A caller that must be honest about which of the two happened needs them to be different values.
+ */
+export async function firebaseDomainsForWorkspaceStrict(workspaceId: string): Promise<string[] | null> {
   try {
     const db = getDb() as any;
-    if (!db) return [];
+    if (!db) return null;   // no database handle is "could not ask", never "no domains"
     const snap = await getDocs(
       query(
         collection(db, COLLECTION),
@@ -93,8 +102,18 @@ export async function firebaseDomainsForWorkspace(workspaceId: string): Promise<
     });
     return out;
   } catch {
-    return [];
+    return null;
   }
+}
+
+/**
+ * The Firebase-connected domains for a workspace (empty on any error — fail-open).
+ *
+ * Kept for the callers whose behaviour on an unreadable lookup should genuinely be "carry on as if
+ * there were none". Anything that PUBLISHES should use the strict form above instead.
+ */
+export async function firebaseDomainsForWorkspace(workspaceId: string): Promise<string[]> {
+  return (await firebaseDomainsForWorkspaceStrict(workspaceId)) ?? [];
 }
 
 /** True when the workspace has at least one Firebase-connected custom domain (fail-open → false). */

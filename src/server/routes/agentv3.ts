@@ -311,7 +311,8 @@ import { lastDevServerLaunch } from '../AgentV3/devServerLaunchLog';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
 import { firebaseCustomDomainsEnabled } from '../lib/firebaseCustomDomain';
-import { workspaceHasFirebaseDomain } from '../lib/firebaseDomainLink';
+import { firebaseDomainsForWorkspaceStrict } from '../lib/firebaseDomainLink';
+import { publishToCustomDomainSite, type CustomDomainPublishOutcome } from '../AgentV3/customDomainPublish';
 // Side-effect imports: each provider self-registers into the DeployProviders registry on load.
 import '../AgentV3/VercelProvider';
 import '../AgentV3/NetlifyProvider';
@@ -5805,7 +5806,22 @@ export function registerAgentV3Routes(app: Express): void {
    * republish and the durable deployment record. A second copy would be the kind of duplicate that
    * quietly loses one of those three.
    */
-  const makeDeployFn = (opts: { userId: string | null; githubToken?: string; providerId: string }) => {
+  const makeDeployFn = (opts: {
+    userId: string | null;
+    githubToken?: string;
+    providerId: string;
+    /**
+     * Where the custom-domain half of the publish reports what happened.
+     *
+     * 🔒 IT USED TO REPORT NOWHERE (admin 2026-08-24). A publish writes to TWO places — the shared
+     * channel whose link we hand back, and, for a workspace with a connected domain, that workspace's
+     * own site, which is the only one the domain actually serves. The second was best-effort with a
+     * `console.warn`, so the user was told "your app is live" while their domain stayed empty and
+     * nothing on any screen said so. The deploy function returns only a URL, so the outcome needs a
+     * place to land: this sink is it. Optional, because the AI `deploy` tool has no surface to show it.
+     */
+    onDomainOutcome?: (outcome: CustomDomainPublishOutcome) => void;
+  }) => {
     const provider = getDeployProvider(opts.providerId)
       ?? getDeployProvider(DEFAULT_DEPLOY_PROVIDER)
       ?? getDeployProvider('firebase')!;
@@ -5816,13 +5832,22 @@ export function registerAgentV3Routes(app: Express): void {
         // connected domain, ALSO publish the same build to its dedicated site so the domain serves the
         // fresh app. Best-effort — a failure here never fails the primary publish, which is already live.
         if (opts.providerId === 'firebase' && firebaseCustomDomainsEnabled()) {
-          try {
-            if (await workspaceHasFirebaseDomain(ws)) {
-              await new FirebaseHostingDeployer().deployToSite(ws, files);
-            }
-          } catch (e) {
-            console.warn('[agentv3] custom-domain site publish failed (primary publish is live):', e);
+          const outcome = await publishToCustomDomainSite({
+            workspaceId: ws,
+            // STRICT: an unreadable lookup must not read as "no domain connected" — that is one of the
+            // three silent paths this replaces. See firebaseDomainsForWorkspaceStrict.
+            listDomains: () => firebaseDomainsForWorkspaceStrict(ws),
+            deployToSite: () => new FirebaseHostingDeployer().deployToSite(ws, files),
+          });
+          if (!outcome.ok) {
+            // The REAL reason stays here, for the logs and the admin — never in the user's message
+            // (it literally names the hosting vendor; see the white-label law in CLAUDE.md).
+            console.warn(
+              `[agentv3] custom-domain site publish did not complete (primary publish is live): `
+              + `${outcome.reason || 'unknown'} (attempts: ${outcome.attempts})`,
+            );
           }
+          try { opts.onDomainOutcome?.(outcome); } catch { /* reporting must never fail a live publish */ }
         }
         return url;
       },
@@ -6059,9 +6084,12 @@ export function registerAgentV3Routes(app: Express): void {
 
       // 2. DEPLOY, through the SAME tool the agent uses — so the custom-domain republish, the
       //    production-database migration, the liveness probe and the durable record all still run.
+      // WHAT HAPPENED TO THEIR OWN DOMAIN — captured, because until now it happened nowhere the user
+      // could see it (admin 2026-08-24). See makeDeployFn's onDomainOutcome.
+      let domainOutcome: CustomDomainPublishOutcome | null = null;
       const dispatcher = new ToolDispatcher(
         actuator, workspaceId, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-        makeDeployFn({ userId, githubToken, providerId }),
+        makeDeployFn({ userId, githubToken, providerId, onDomainOutcome: (o) => { domainOutcome = o; } }),
       );
       const result = await dispatcher.dispatch({ id: 'publish', name: 'deploy', input: {} });
       if (result.is_error) {
@@ -6079,9 +6107,21 @@ export function registerAgentV3Routes(app: Express): void {
       }
       // `firstPublish` travels only when it is TRUE and there is a real URL to celebrate with — a
       // celebration flag on a publish that produced no link would be a promise with nothing behind it.
+      /**
+       * BOTH warnings travel, and the domain one goes FIRST.
+       *
+       * The typecheck note is about how the build was produced; the domain note is about the thing the
+       * user was actually trying to achieve. When both apply, the one that changes what they should do
+       * next belongs at the top. Joined rather than replaced — dropping either would recreate, in
+       * miniature, the exact swallowing this change exists to end.
+       */
+      const domainNote: string = (domainOutcome as CustomDomainPublishOutcome | null)?.note ?? '';
+      const warning = [domainNote, typecheckWarning].filter(Boolean).join('\n\n');
       res.json({
         ok: true, url, message: result.content,
-        ...(typecheckWarning ? { warning: typecheckWarning } : {}),
+        ...(warning ? { warning } : {}),
+        // Lets the connect screen stop claiming the domain is done when this publish did not reach it.
+        ...(domainNote ? { domainPublished: false } : {}),
         ...(firstPublish && url ? { firstPublish: true } : {}),
       });
     } catch (err: any) {

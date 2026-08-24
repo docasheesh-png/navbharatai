@@ -41184,3 +41184,84 @@ survive their release build, or must be kept out of it.** The vaccine already ha
 version of this for unit tests (`suitePresentButRunnerMissing`). The scaffolds are now the same. Worth
 watching for a third instance — if one appears, the answer is a single "does this project's build
 typecheck what we just wrote?" check at every scaffold site rather than a third bespoke exclude.
+
+---
+
+## 2026-08-24 — the 24-framework sweep, measured end to end
+
+Admin: *"ek ek framework pakad ke 0 to 100 check karo. 24 framework hai, to 24 bar apko individually
+test karna hoga. 2 test: 1. app ban rahi hai ya nahi, 2. capacitor apk ban raha hai ya nahi."*
+
+Every scaffold was dumped from our own `TemplateRegistry` and really installed and built. Nothing in
+the table below is from documentation or memory.
+
+### Test 1 — does an app build? **4 of 24 could not. All 24 now do.**
+
+| Framework | Before | Cause | After |
+|---|---|---|---|
+| **vite-react** ⭐ | BUILD FAIL | `@types/react` + `@types/react-dom` absent | ✅ builds |
+| **angular** | BUILD FAIL | `(click)="count++"` — no `++` in Angular templates | ✅ builds |
+| **sveltekit** | INSTALL FAIL | `@sveltejs/vite-plugin-svelte` absent | ✅ installs |
+| **nuxt** | INSTALL FAIL | npm resolver crash; our retry never fired | ✅ installs |
+
+Already green, confirmed by real builds: `vue` `svelte` `solid` `preact` `lit` `alpine` `astro`
+`vanilla` `nextjs` `remix` `node-express` `hono` `nestjs` `fastify` `python-fastapi` `django` `flask`
+`go` `spring-boot` (Maven `BUILD SUCCESS`, jar produced) `static`.
+
+⚠️ **A correction on my own measurement, recorded because it nearly became a false finding.** The
+backend sweep first reported `spring-boot|FAIL`. It had not failed — my script treated *any* output as
+failure, and the JVM prints its `JAVA_TOOL_OPTIONS` proxy banner to stderr on every invocation. Re-run
+against the EXIT CODE it is a clean `BUILD SUCCESS`. A test whose pass condition is "printed nothing"
+will mislabel every tool that greets you.
+
+### The vite-react finding is the important one
+
+It is the DEFAULT framework, so `npm run build` failed on **every app made with it**. Without React's
+types, `React.Component` has no members and `this.setState`/`this.props` vanish from a perfectly
+correct class.
+
+**And this exact error pair was "fixed" once already.** On 2026-08-23 a user hit it, the model rewrote
+`ErrorBoundary.tsx` four times, and the response was a *"PROVIDED AND CORRECT — do not rewrite this
+file"* banner on that file. The banner treated the SYMPTOM — the file was always correct — while the
+cause, two missing packages, survived untouched, so every later app failed identically. The banner is
+still worth keeping; it was never the fix.
+
+**Nuxt is the same shape one level down.** The installer already retried with `--legacy-peer-deps`,
+gated on `/ERESOLVE|peer dep/`. Nuxt fails with `Cannot read properties of null (reading 'edgesOut')`
+— npm's resolver CRASHING mid peer-walk, the same class of failure wearing a TypeError. The retry
+never fired, so no Nuxt app could ever install. Now a named, tested matcher (`npmInstallFallback.ts`).
+**Fifth instance this month** of *the capability existed and its trigger did not match reality* —
+after `serverListenPort`, `isAgentV3FreeUser`, `detectBackendPresence`, `startNewChat`.
+
+### Test 2 — the APK. **15 capable, 9 structurally impossible.**
+
+`detectWebDir` knew three answers (Vite/Next/CRA) and guessed `dist` for the rest. Measured:
+
+| Framework | Real output | Was guessing |
+|---|---|---|
+| Angular | `dist/app/browser` | `dist` |
+| SvelteKit | `build` | `dist` |
+| Nuxt | `.output/public` | `dist` |
+| Remix | `build/client` | `dist` |
+
+So Capacitor was pointed at a folder that does not exist and the APK failed or shipped EMPTY, with
+nothing saying why. Angular is the worst: `dist/` really exists — server bundles, no `index.html` — so
+a wrong guess finds a real folder. Now checked BEFORE the Vite branch, since all three build THROUGH
+Vite and were being caught by it.
+
+**Nine can never produce an APK:** `node-express` `hono` `nestjs` `fastify` `python-fastapi` `flask`
+`spring-boot` `go` `django`. They answer with JSON and have no screens; an APK from one installs,
+opens, and shows a blank page. Promising "an APK for all 24" would be a fake success that reaches
+somebody's phone. They refuse honestly, with the reason and the alternative, BEFORE a GitHub repo is
+created. `apkRefusalForProject` asks the FILES rather than a stored framework id — an app that began
+as an Express API and grew a React front end must still be packageable — and reuses `planDeployment`
+so the ship path and the publish path can never disagree about the same app.
+
+### Honest limit (rule 6)
+
+This container has Java, Maven, Gradle, Go and Python but **no Android SDK**, so a real `.apk` was not
+produced here. What breaks per-framework is not the Gradle step — that is identical for all of them —
+it is which folder Capacitor is pointed at and whether it exists. That is what was measured, and it is
+the whole of the difference between an APK that works and one that opens blank.
+
+Shipped in #2635, along with the pinch-zoom lock and the E2E-typecheck fix.

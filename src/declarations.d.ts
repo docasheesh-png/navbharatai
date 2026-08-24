@@ -610,7 +610,6 @@ declare module 'firebase-admin';
 declare module '@google/genai';
 declare module '@google-cloud/vertexai';
 declare module '@anthropic-ai/sdk';
-declare module 'simple-git';
 declare module 'typescript';
 declare module 'express';
 declare module 'cashfree-pg';

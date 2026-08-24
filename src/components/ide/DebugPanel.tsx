@@ -13,7 +13,7 @@
 // anyway to find out. So the panel is now single-purpose: breakpoints, which are completely real, plus
 // one sentence naming what is missing. Nothing to press that cannot be pressed.
 
-import { Bug, X, MapPin, Trash2 } from 'lucide-react';
+import { Bug, X, Trash2 } from 'lucide-react';
 import type { BreakpointMap } from '../../lib/breakpoints';
 import { breakpointList, breakpointCount } from '../../lib/breakpoints';
 

@@ -8,7 +8,7 @@ import type { AgentMode } from '../../types';
 import type { ThemeMode } from '../../lib/theme';
 import type { PreviewProblem } from '../../lib/previewProblems';
 import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
-import { resolveAppSource, hasAnalysableApp, appSourceGuidance } from '../../lib/workspaceSource';
+import { resolveAppSource, hasAnalysableApp } from '../../lib/workspaceSource';
 import { hasConflictMarkers } from '../../lib/merge3';
 import type { User as FirebaseUser } from 'firebase/auth';
 

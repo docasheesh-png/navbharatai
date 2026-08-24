@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GitBranch, Loader2, Search, Send, Sparkles, Copy, Download } from 'lucide-react';
+import { GitBranch, Search, Send, Sparkles, Copy, Download } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 
 /**

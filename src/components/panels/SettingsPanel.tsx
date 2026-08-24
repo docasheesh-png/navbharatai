@@ -1,14 +1,6 @@
 import React, { lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import {
-  Settings, X, ChevronRight, ChevronLeft, Monitor, LayoutDashboard, Lock, Database,
-  GitFork, Terminal, Activity, GitBranch, Bot, MessageSquare, Wand2, Bug, Code,
-  TestTube, Globe, GitMerge, Gauge, Minimize2, Moon, Layout, Puzzle, LayoutTemplate,
-  Figma, Rocket, Smartphone, Package, IndianRupee, Users2, Palette, TrendingUp,
-  BarChart2, Cpu, Eye, EyeOff, Github, List, LogOut, GitBranch as GitBranchIcon,
-  Folder, Check, Search, RefreshCw, Box, Zap, Globe as GlobeIcon, Search as SearchIcon,
-  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail, Scale, FileText,
-} from 'lucide-react';
+import { Settings, X, ChevronRight, ChevronLeft, Monitor, LayoutDashboard, Lock, Database, GitFork, Activity, GitBranch, Bot, Globe, Smartphone, BarChart2, Cpu, Github, List, LogOut, GitBranch as GitBranchIcon, Folder, Check, Search, RefreshCw, Box, Zap, Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail, Scale, FileText } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { authedHeaders } from '../../lib/authHeaders';
 // META only — the ~45 KB of document bodies must never enter the main chunk (bundle budget);
@@ -20,7 +12,7 @@ import {
   getStoredFontScale, applyFontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_STEP, FONT_SCALE_DEFAULT,
 } from '../../lib/a11y';
 import { readTapFeedbackPrefs, writeTapFeedbackPrefs, type TapFeedbackPrefs } from '../../lib/tapFeedbackPrefs';
-import { SettingsScreen, ViewType, ApiKeys, PROVIDER_CONFIG } from '../../types';
+import { SettingsScreen, ViewType, ApiKeys } from '../../types';
 import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { THEME_MODES } from '../../lib/theme';
 import type { ThemeMode } from '../../lib/theme';

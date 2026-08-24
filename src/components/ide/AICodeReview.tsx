@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Code, Bug, Shield, Zap, AlertCircle, CheckCircle2, ChevronRight, ChevronDown, RefreshCw, Copy, Star, Info, X, Check, Download, Play, Lightbulb, Github, Box } from 'lucide-react';
+import { useState } from 'react';
+import { Code, Bug, Shield, Zap, AlertCircle, CheckCircle2, ChevronRight, ChevronDown, Copy, Star, Info, X, Check, Download, Play, Lightbulb, Github, Box } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { ChatSession } from '../../types';
 

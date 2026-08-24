@@ -1,10 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Search, Copy, Check, Star, X, Layout, Type, Square,
-  LayoutGrid, FileText, Bell, Table, MousePointer,
-  Navigation, Image, CreditCard, AlignLeft, Anchor,
-  ChevronRight, Eye, Loader2, History, AlertTriangle, Save,
-} from 'lucide-react';
+import { Search, Copy, Check, Star, X, Layout, Type, Square, LayoutGrid, Bell, Table, MousePointer, Navigation, Image, CreditCard, AlignLeft, Anchor, ChevronRight, Eye, Loader2, History, AlertTriangle, Save } from 'lucide-react';
 import { insertSnippet, pageLoadsTailwind, snippetNeedsTailwind } from '../../lib/htmlInsert';
 import { AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp } from './AppTargetPicker';
 

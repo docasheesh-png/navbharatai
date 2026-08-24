@@ -1,6 +1,5 @@
 // P-DESIGN.4 — Sparkline / line chart (dependency-free SVG). Thin renderer over chartGeometry.linePoints.
 
-import React from 'react';
 import { linePoints } from './chartGeometry';
 
 export interface SparklineProps {

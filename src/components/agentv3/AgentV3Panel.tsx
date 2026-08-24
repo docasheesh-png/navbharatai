@@ -9,14 +9,7 @@ const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ defaul
 // A2 — the REAL shell. LAZY on purpose: it pulls xterm (~70 KB gz), which must never land on the
 // first-paint path for the many users who never open a terminal.
 const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
-import {
-  Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen,
-  History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare,
-  Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
-  ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
-  FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
-  Star, Search, Mic, Camera, Volume2, Key,
-} from 'lucide-react';
+import { Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Github, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
 import { PublishCelebration } from './PublishCelebration';
@@ -42,13 +35,13 @@ import type { ReportPickerItem } from '../../lib/reportPicker';
 import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { SplitDivider } from './SplitDivider';
-import { loadSplit, saveSplit, clampSplit, MIN_PANE_PX, paneSplitVars } from './splitPane';
+import { loadSplit, saveSplit, clampSplit, paneSplitVars } from './splitPane';
 import { NextSuggestionsBulb } from './NextSuggestionsBulb';
 import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
-import { STARTER_TEMPLATES, partitionStarters } from './starterTemplates';
+import { partitionStarters } from './starterTemplates';
 import { StarterSketch } from './StarterSketch';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes, MAX_ATTACHMENT_BYTES } from '../../lib/attachmentLimits';

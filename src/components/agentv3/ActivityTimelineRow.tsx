@@ -8,7 +8,7 @@
 // tab; the expansion says so instead of pretending to have it.
 
 import { useState } from 'react';
-import { ChevronRight, Loader2, X, Check, FileCode, Terminal as TerminalIcon, Search, BookOpen, Bot, Globe, ClipboardList, FileDiff } from 'lucide-react';
+import { ChevronRight, X, Check, FileCode, Terminal as TerminalIcon, Search, BookOpen, Bot, Globe, ClipboardList, FileDiff } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { ActivityEntry } from './agentV3Types';
 import type { ChatBlock, TimelineMsgLike } from './activityTimeline';

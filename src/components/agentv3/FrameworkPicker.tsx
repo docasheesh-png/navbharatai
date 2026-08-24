@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { FRAMEWORK_OPTIONS as FRAMEWORKS, type FrameworkOption } from './frameworkOptions';
 
 export type { FrameworkOption };

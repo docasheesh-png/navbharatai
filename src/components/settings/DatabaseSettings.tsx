@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { DB_PROVIDERS, envKeysFor, dbProvider, type DbProviderId } from '../../lib/dbProviders';
-import { Database, ExternalLink, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
+import { Database, ExternalLink, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { listSecrets, saveSecret, deleteSecret } from '../../lib/secretsApi';
 import { SupabaseConnectCard } from './SupabaseConnectCard';

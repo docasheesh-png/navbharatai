@@ -1,10 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import {
-  MousePointer2, Layers, ChevronRight, ChevronDown,
-  Type, Palette, AlignLeft, AlignCenter, AlignRight,
-  AlignJustify, Bold, Italic, RotateCcw, PanelRight,
-  PanelRightClose, ListTree
-} from 'lucide-react';
+import { MousePointer2, Layers, ChevronRight, ChevronDown, AlignLeft, AlignCenter, AlignRight, AlignJustify, RotateCcw, PanelRight, PanelRightClose, ListTree } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { LAYOUT_MODES, isFlex, isLayoutMode } from './visualLayout';
 

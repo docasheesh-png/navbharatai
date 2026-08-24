@@ -8,11 +8,8 @@
  *   4. Personal info  — editable display name, bio, phone
  *   5. Connected accounts — Google / GitHub status
  */
-import React, { useEffect, useState, useCallback } from 'react';
-import {
-  User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight,
-  Edit3, Save, X, RefreshCw, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone,
-} from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, Edit3, Save, X, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { ApiKeysCard } from './ApiKeysCard';

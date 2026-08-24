@@ -1,11 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  Monitor, Smartphone, RefreshCcw,
-  ExternalLink, Maximize2, Shield, Globe,
-  Search, Download, Package,
-  Share2, Copy, Check, X, Wifi, Pen, Eye, ChevronDown, ChevronUp,
-  Zap, Tag, Camera
-} from 'lucide-react';
+import { Monitor, Smartphone, RefreshCcw, ExternalLink, Maximize2, Shield, Globe, Search, Download, Share2, Copy, Check, X, Wifi, Pen, Eye, ChevronDown, ChevronUp, Zap, Tag, Camera } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { VisualEditor } from './VisualEditor';
 

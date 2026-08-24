@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Loader2, Bot } from 'lucide-react';
+import { Send, Bot } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import ReactMarkdown from 'react-markdown';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';

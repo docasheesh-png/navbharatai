@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Paintbrush, Download, Check, X, Copy, RefreshCw, Globe, Image as ImageIcon, Monitor, Smartphone, Sun, Moon } from 'lucide-react';
+import { useState } from 'react';
+import { Paintbrush, Download, Check, Copy, RefreshCw, Image as ImageIcon, Monitor, Smartphone, Sun, Moon } from 'lucide-react';
 
 interface BrandConfig {
   appName: string;

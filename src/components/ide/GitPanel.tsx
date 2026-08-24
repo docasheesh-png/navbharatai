@@ -1,14 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  GitBranch, Github, History, Plus, 
-  Check, ArrowUpCircle, RefreshCcw, Search,
-  GitCommit, GitPullRequest, GitMerge, MoreHorizontal,
-  LogOut, Loader2, Rocket, Cloud, Terminal, 
-  CheckCircle2, AlertCircle, Settings, Key, 
-  FolderOpen, Globe, Layout, Layers, 
-  Play, Server, Trash2, Cpu, FileText, Download, 
-  Copy, AlertTriangle, ChevronDown, Sparkles, Clock, Lock, Unlock, ArrowUpRight
-} from 'lucide-react';
+import { GitBranch, Github, History, RefreshCcw, Search, Loader2, Rocket, Cloud, Terminal, CheckCircle2, AlertCircle, Settings, Key, Globe, Layout, Layers, Play, Server, Cpu, Download, Copy, AlertTriangle, ChevronDown, Sparkles, Clock, Lock } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';

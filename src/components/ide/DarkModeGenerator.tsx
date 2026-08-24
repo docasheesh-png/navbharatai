@@ -1,8 +1,5 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import {
-  Moon, Sun, Copy, Download, Check, ChevronDown, ChevronUp,
-  Zap, Sliders, RefreshCw, Code2, Layers, PaintBucket, Loader2, Save, History, AlertTriangle
-} from 'lucide-react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Moon, Sun, Copy, Download, Check, ChevronDown, ChevronUp, Zap, Sliders, Code2, Layers, PaintBucket, Loader2, Save, History, AlertTriangle } from 'lucide-react';
 import { resolveAppSource, hasAnalysableApp } from '../../lib/workspaceSource';
 import { injectStyleBlock, injectScriptBlock, canCarryStylesheet } from '../../lib/cssInjection';
 import { AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp } from './AppTargetPicker';

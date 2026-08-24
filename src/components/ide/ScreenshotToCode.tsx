@@ -1,17 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, DragEvent, ChangeEvent, ClipboardEvent } from 'react';
-import {
-  Upload,
-  X,
-  Copy,
-  Loader2,
-  AlertCircle,
-  ChevronDown,
-  ChevronUp,
-  Clock,
-  Check,
-  Image as ImageIcon,
-  Clipboard,
-} from 'lucide-react';
+import { Upload, X, Copy, AlertCircle, ChevronDown, ChevronUp, Clock, Check, Image as ImageIcon, Clipboard } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface ScreenshotToCodeProps {

@@ -1,10 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  ShieldAlert, ShieldCheck, Play, Search, 
-  Download, History, AlertTriangle, Info, 
-  Bug, Lock, FileCode, CheckCircle2, Loader2,
-  RefreshCcw, Globe, Terminal, Shield, ChevronUp, ChevronDown
-} from 'lucide-react';
+import React, { useState } from 'react';
+import { ShieldAlert, ShieldCheck, Play, Download, History, Globe, Shield, ChevronUp, ChevronDown } from 'lucide-react';
 import type { ScanFinding } from '../../server/lib/securityScan';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';

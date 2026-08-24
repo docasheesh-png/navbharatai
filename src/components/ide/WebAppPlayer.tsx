@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Flag, Lock, Check, Sparkles, Gamepad2, Type } from 'lucide-react';
+import { X, Flag, Lock, Sparkles, Gamepad2, Type } from 'lucide-react';
 import { authedHeaders } from '../../lib/authHeaders';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { auth } from '../../lib/firebase';

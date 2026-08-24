@@ -21,20 +21,12 @@ import { AgentV3MiniChat } from './AgentV3MiniChat';
 import { SecurityScan } from './SecurityScan';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { CursorPopup } from './CursorPopup';
-import { IDEScreen, TerminalLine, Tab } from '../../types/ide';
+import { IDEScreen, Tab } from '../../types/ide';
 import { AgentMode } from './ModeSelector';
 import { ThemeMode, getThemeClasses, THEME_MODES } from '../../lib/theme';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
-import {
-  Menu as MenuIcon, X, Maximize2, Minimize2,
-  ChevronUp, ChevronDown, Rocket, Command, Search, Keyboard,
-  Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2,
-  MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck, UploadCloud,
-  BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces,
-  RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle, AlertCircle, Loader2,
-  Files as FilesIcon, GitBranch, Terminal as TerminalIcon
-} from 'lucide-react';
+import { Menu as MenuIcon, X, Maximize2, Minimize2, ChevronUp, ChevronDown, Search, Keyboard, Bot, Monitor, FileCode, Plus, AlignJustify, Map, Code2, MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck, UploadCloud, BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces, RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle, AlertCircle, Loader2, Files as FilesIcon, GitBranch, Terminal as TerminalIcon } from 'lucide-react';
 
 interface CodeStudioProps {
   files: Record<string, string>;

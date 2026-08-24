@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle2, Circle, Loader2, AlertCircle } from 'lucide-react';
+import { CheckCircle2, Circle, AlertCircle } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 
 export type BuildStepStatus = 'pending' | 'running' | 'complete' | 'error';

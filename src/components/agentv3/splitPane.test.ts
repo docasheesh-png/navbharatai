@@ -1,11 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  SPLIT_DEFAULT, MIN_PANE_PX, SPLIT_STEPS,
-  splitBounds, clampSplit, splitFromPointer, nextSplitAction, paneWidthPx, loadSplit, saveSplit,
-  DEVICE_WIDTHS, splitForPaneWidth, matchedDevice, dividerLeftPx, DIVIDER_PX, trackWidth,
-} from './splitPane';
+import { SPLIT_DEFAULT, MIN_PANE_PX, SPLIT_STEPS, splitBounds, clampSplit, splitFromPointer, nextSplitAction, paneWidthPx, loadSplit, saveSplit, DEVICE_WIDTHS, splitForPaneWidth, matchedDevice, dividerLeftPx, DIVIDER_PX } from './splitPane';
 
 /**
  * The movable chat ⇆ workspace border (admin 2026-08-17).

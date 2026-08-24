@@ -1,8 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { auth, db } from '../lib/firebase';
-import { 
-  collection, query, orderBy, onSnapshot, doc, updateDoc, arrayUnion, serverTimestamp 
-} from 'firebase/firestore';
+import { useState, useEffect } from 'react';
+import { db } from '../lib/firebase';
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   MessageSquare, User, Clock, AlertCircle, ChevronDown, ChevronUp, Send, CheckCircle2, Flag

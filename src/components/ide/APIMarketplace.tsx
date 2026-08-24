@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Package, Search, Star, Zap, Globe, Copy, Check, Code, BookOpen, Layers, Shield, Database, Play, Plus, X } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Package, Search, Star, Copy, Check, Code, Shield, Plus, X } from 'lucide-react';
 
 interface APIItem {
   id: string;

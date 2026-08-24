@@ -18,7 +18,7 @@
 // and it is never writable, because rows that look live but go nowhere are a lie about where the
 // user's data is.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Database, RefreshCw, Download, Search, AlertCircle, Table, ArrowUpDown, Copy, Check, ChevronLeft, ChevronRight, Columns, Plus, Edit2, Trash2, X, Lock, Link2, Play, Zap, Upload } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { Breadcrumb } from '../ui/Breadcrumb';

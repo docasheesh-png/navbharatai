@@ -1,9 +1,5 @@
 import React from 'react';
-import { 
-  Files, Search, GitBranch, LayoutGrid, 
-  Settings, Monitor, Bug, Move,
-  ShieldAlert, Keyboard
-} from 'lucide-react';
+import { Files, Search, GitBranch, Settings, Move, ShieldAlert, Keyboard } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { IDEScreen } from '../../types/ide';
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Loader2, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { AgentV3Panel } from './AgentV3Panel';
 import type { FilesPanelProps } from '../panels/FilesPanel';

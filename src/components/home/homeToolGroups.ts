@@ -9,11 +9,7 @@
 // are genuine settings, not builder tools.
 
 import type { ComponentType } from 'react';
-import {
-  Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitBranch, Gauge, Minimize2,
-  Palette, Layout, Puzzle, LayoutTemplate, Moon, Figma, Rocket, Smartphone, CloudUpload, Search,
-  Package, IndianRupee, Users2, TrendingUp, Share2, Database, Languages, FlaskConical,
-} from 'lucide-react';
+import { Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitBranch, Gauge, Minimize2, Palette, Layout, Puzzle, LayoutTemplate, Moon, Figma, Rocket, Smartphone, Search, Package, IndianRupee, Users2, TrendingUp, Share2, Database, Languages, FlaskConical } from 'lucide-react';
 
 /** A lucide icon component (version-independent — the package's type export name has changed across releases). */
 type IconType = ComponentType<{ className?: string }>;

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Wand2, Sparkles, Download, Palette, RefreshCw, Copy, Trash2, Clock, Layers, Star, Check, Image as ImageIcon } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Wand2, Sparkles, Download, Palette, Copy, Trash2, Clock, Star, Check, Image as ImageIcon } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';

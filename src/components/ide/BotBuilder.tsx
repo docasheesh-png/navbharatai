@@ -1,9 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import {
-  Play, Download, Webhook, Trash2, Plus, X, ChevronRight,
-  MessageSquare, GitBranch, Globe, Zap, StopCircle, RotateCcw,
-  Send, Bot, User, Copy, Check, Link2, Pencil, Move, Rocket, ExternalLink, HelpCircle
-} from 'lucide-react';
+import { Play, Download, Trash2, Plus, X, ChevronRight, MessageSquare, GitBranch, Globe, Zap, StopCircle, RotateCcw, Send, Bot, User, Copy, Check, Link2, Pencil, Move, Rocket, ExternalLink, HelpCircle } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import { BotBuildHelp, type HelpMode } from './BotBuildHelp';
 

@@ -5,7 +5,6 @@
  * Shows the "About NavBharatAI" page with admin-editable headline, description,
  * team, and vision fields.
  */
-import React from 'react';
 import { motion } from 'motion/react';
 import { Shield, Bot, Camera, Edit2, User, Eye } from 'lucide-react';
 

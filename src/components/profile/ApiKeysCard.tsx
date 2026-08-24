@@ -2,7 +2,7 @@
 //
 // Lets a signed-in user create, view (metadata only), and revoke their public API keys. The plaintext
 // key is shown exactly ONCE right after creation (the server never returns it again), with a copy button.
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Key, Trash2, Copy, Check, Plus, AlertTriangle } from 'lucide-react';
 
 interface ApiKeyMeta {

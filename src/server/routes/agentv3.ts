@@ -8032,6 +8032,22 @@ async function noteBuildOutcome(
         const needsDb = detectNeedsDatabase(importedFiles);
         const declaredEnvVars = envVarNames(importedFiles);
         importPreviewBoot = (async () => {
+          // HOLD THE MACHINE OPEN WHILE THIS RUNS — and this is the whole reason the admin's report had
+          // NEITHER a boot success nor a boot failure recorded (2026-08-24).
+          //
+          // The idle sweep measures inactivity from the last SANDBOX OPERATION, and `npm install &&
+          // npm run dev` is ONE long command: it stamps activity when it starts and then goes quiet for
+          // minutes. The build that launched it has already released its own hold (`setBuildActive
+          // false`), so five minutes in, the sweep sees an idle workspace and pauses the machine —
+          // killing the install mid-flight. The awaiting promise then never resolves, neither the
+          // success nor the failure branch runs, and the report's own promise ("its verdict is recorded
+          // here even if it lands after the reply stream closes") is quietly broken by silence.
+          //
+          // `setBuildActive` is the mechanism that already exists for exactly this, and a background
+          // boot is as much "work in flight" as a build is. Released in the finally so a crash cannot
+          // leave a workspace pinned; the flag also expires on its own past one max-length build.
+          try { actuator.setBuildActive?.(workspaceId, true); } catch { /* the boot proceeds either way */ }
+          let bootVerdictRecorded = false;
           try {
             const provided: Record<string, string> = {};
             if (needsDb && typeof actuator.provisionBackend === 'function') {
@@ -8320,6 +8336,10 @@ async function noteBuildOutcome(
               }
               const bootUrl = winner.url;
               const served = winner.served;
+              // Reaching a verdict AT ALL is what the finally below checks for. Set here rather than in
+              // each of the branches beneath, so a future branch cannot forget it and be misreported as
+              // a boot that was cut off.
+              bootVerdictRecorded = true;
               if (bootUrl) emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
               // BOOT LOG DIAGNOSER (admin task 2, 2026-08-05 — Mitrify build d5f0a2bc): the boot log
               // is IN HAND here, and on that build it named the exact cause (`ECONNREFUSED …:5432` at
@@ -8373,6 +8393,7 @@ async function noteBuildOutcome(
                 phase: 'preview', severity: 'warning', code: 'IMPORT_PREVIEW_BOOT_FAILED',
                 message: (dbNote || 'Dev server did not come up within the boot window.').slice(0, 400), autoResolved: false,
               });
+              bootVerdictRecorded = true;
             }
             // PHASE LEAK (Mitrify report a876b7bb): 'checking the live preview' was entered above and
             // never exited, so the heartbeat told the user "checking the live preview, 293s" for five
@@ -8394,7 +8415,22 @@ async function noteBuildOutcome(
               phase: 'preview', severity: 'warning', code: 'IMPORT_PREVIEW_BOOT_FAILED',
               message: (dbNote || 'Preview boot timed out or threw before a verdict could be read.').slice(0, 400), autoResolved: false,
             });
+            bootVerdictRecorded = true;
             opts.diag?.exitPhase?.(); // the throw path must not leak the phase either (safe no-op if none)
+          } finally {
+            // SILENCE IS NOT A VERDICT. If neither branch above ran, this boot was cut off rather than
+            // finished — and the report must say so instead of simply having no preview entry at all,
+            // which is indistinguishable from "we never tried" to whoever reads it next.
+            if (!bootVerdictRecorded) {
+              try {
+                opts.diag?.record({
+                  phase: 'preview', severity: 'warning', code: 'IMPORT_PREVIEW_BOOT_CUT_OFF',
+                  message: 'The background live-preview boot was cut off before it could reach a verdict, so whether this app starts is UNKNOWN — not failed. Open the Preview tab and press Diagnose to boot it with a visible log.',
+                  autoResolved: false,
+                });
+              } catch { /* diagnostics are best-effort */ }
+            }
+            try { actuator.setBuildActive?.(workspaceId, false); } catch { /* the flag expires by itself */ }
           }
         })();
       }

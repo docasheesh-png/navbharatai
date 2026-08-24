@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   sandboxesToReap, idleLimitMs, maxBuildMs, reapAfterMs, touchIntervalMs, shouldTouchDurable,
+  buildFlagExpiryMs, MISSED_TOUCHES_BEFORE_REAP,
   type ReapableSandbox,
 } from '../src/server/AgentV3/sandboxReaper';
 
@@ -42,25 +43,47 @@ describe('the defaults', () => {
 });
 
 describe('the reaper can never reach a running build', () => {
-  it('waits out a whole max-length build plus a margin, not just the idle limit', () => {
-    // 30-minute build ceiling + 10-minute margin = 40 minutes, far past the 5-minute idle limit. The
-    // durable reaper deliberately does NOT follow the idle window down: it catches sandboxes orphaned
-    // by an instance recycle, where no in-memory build hold survives to protect a running build.
-    expect(reapAfterMs({})).toBe(40 * MIN);
+  it('waits out three missed durable stamps plus a margin, not a whole build', () => {
+    // THIS ASSERTION USED TO READ `toBe(40 * MIN)` AND `> maxBuildMs`, AND THAT WAS THE OLD RULE.
+    //
+    // The 40 minutes came from a time when the durable record was written ONLY when a build finished,
+    // so it could not tell a running build from an abandoned one and the sole safe cut-off was a whole
+    // build-length away. The touch fixed that; the cut-off was never lowered (see reapAfterMs). What
+    // protects a live build now is the STAMP, not the length of the window — so the window is derived
+    // from the stamp, and this asserts that instead.
+    expect(reapAfterMs({})).toBe(20 * MIN);
     expect(reapAfterMs({})).toBeGreaterThan(idleLimitMs({}));
-    expect(reapAfterMs({})).toBeGreaterThan(maxBuildMs({}));
+    expect(reapAfterMs({})).toBe(touchIntervalMs({}) * MISSED_TOUCHES_BEFORE_REAP + 5 * MIN);
   });
 
-  it('follows the admin raising the build ceiling — the margin moves with it', () => {
-    // If a build may legally run 90 minutes, the reaper must not fire at 40.
+  it('the BUILD-FLAG expiry follows the admin raising the build ceiling — the margin moves with it', () => {
+    // THIS PROPERTY MOVED HOUSE, IT DID NOT DISAPPEAR. "If a build may legally run 90 minutes, don't
+    // fire at 40" is about the in-memory hold that stops the 5-minute sweep pausing a RUNNING build —
+    // and that is now `buildFlagExpiryMs`. It was the same function as the orphan window until
+    // 2026-08-24, which is exactly why shortening the window would silently have shortened this.
     const env = { AGENTV3_MAX_BUILD_SECONDS: String(90 * 60) };
-    expect(reapAfterMs(env)).toBe(100 * MIN);
+    expect(buildFlagExpiryMs(env)).toBe(100 * MIN);
+    // The ORPHAN window deliberately does NOT move with the build ceiling any more: how long an
+    // abandoned sandbox should bill for has nothing to do with how long a build may run.
+    expect(reapAfterMs(env)).toBe(20 * MIN);
   });
 
-  it('never reaps a record younger than the longest legal build', () => {
-    for (const ageMinutes of [0, 1, 5, 15, 29, 30, 39]) {
+  it('never reaps a record younger than the window', () => {
+    // The upper ages here used to run to 39 minutes because the window was 40. The guarantee is the
+    // same; only the number it is measured against moved.
+    for (const ageMinutes of [0, 1, 5, 15, 19]) {
       expect(sandboxesToReap([rec('s', ageMinutes)], T0, {}), `age ${ageMinutes}m`).toHaveLength(0);
     }
+  });
+
+  it('what actually protects a LIVE build is the stamp, not the window', () => {
+    // Worth stating outright, because the old window looked like the protection and was not. A build
+    // running anywhere refreshes its record every touch interval, so its age never approaches the
+    // window at all — a 29-minute-old build that is still stamping presents as seconds old.
+    const stillStamping = rec('live', 0);          // touched a moment ago by the build that owns it
+    expect(sandboxesToReap([stillStamping], T0, {})).toHaveLength(0);
+    // And one that genuinely stopped stamping 25 minutes ago is exactly what should be reclaimed.
+    expect(sandboxesToReap([rec('abandoned', 25)], T0, {})).toHaveLength(1);
   });
 
   it('reaps once the record is genuinely older than that', () => {
@@ -167,6 +190,9 @@ describe('keeping a live build looking alive', () => {
   });
 
   it('refreshes far more often than the reaper waits — the safety margin, stated as a test', () => {
-    expect(touchIntervalMs({})).toBeLessThan(reapAfterMs({}) / 4);
+    // Stated against the constant rather than an arbitrary quarter: a live build gets exactly
+    // MISSED_TOUCHES_BEFORE_REAP chances to stamp before the reaper stops believing it, and the margin
+    // buys one more. Dividing by 4 happened to hold at the old numbers and says nothing about why.
+    expect(reapAfterMs({})).toBeGreaterThan(touchIntervalMs({}) * MISSED_TOUCHES_BEFORE_REAP);
   });
 });

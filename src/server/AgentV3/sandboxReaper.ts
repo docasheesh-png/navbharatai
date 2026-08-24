@@ -64,14 +64,61 @@ export function maxBuildMs(env: NodeJS.ProcessEnv = process.env): number {
 }
 
 /**
+ * How many consecutive durable touches a live build may miss before the reaper stops believing it.
+ *
+ * Three is the point where "Firestore is briefly unhappy" stops being the likely explanation: a live
+ * build writes its stamp every `touchIntervalMs`, so missing three means fifteen minutes of failed
+ * writes on a build that is otherwise running normally.
+ */
+export const MISSED_TOUCHES_BEFORE_REAP = 3;
+
+/**
  * How stale a DURABLE record must be before the reaper will touch it.
  *
- * Always at least one whole max-length build plus a margin beyond the idle limit, so the reaper can
- * never reach a sandbox a build is still using — however long that build is configured to run.
+ * ⚠️ THIS CONSTANT WAS LEFT BEHIND BY ITS OWN FIX (found 2026-08-24, from the admin's E2B bill).
+ *
+ * It used to be `maxBuildMs + 10 minutes` — forty minutes with the default 30-minute build cap — and
+ * the reason is written a few lines below, in `touchIntervalMs`'s own comment: the durable record USED
+ * TO BE WRITTEN ONLY WHEN A BUILD FINISHED, so `updatedAt` meant "when the sandbox was last released"
+ * and could not tell a running build from an abandoned one. With no way to see liveness, the only safe
+ * cut-off was a whole build-length away.
+ *
+ * That was then fixed: a live build now refreshes the stamp every few minutes, and the comment says so
+ * explicitly — "makes the timestamp mean what the reaper needs it to mean: last known activity". The
+ * cut-off it existed to compensate for was never lowered afterwards.
+ *
+ * So an orphan — and every Cloud Run deploy makes them, because the instance that created a sandbox
+ * disappears while the sandbox keeps billing — sat for FORTY minutes before anything could pause it,
+ * on a machine costing $0.083/hour. Deriving the window from the TOUCH interval (the thing that now
+ * actually signals liveness) instead of from the build cap (which no longer does) halves it to twenty,
+ * with the same guarantee and a better reason behind it.
+ *
+ * The idle limit is still a floor, and the in-memory sweep — which skips anything this instance holds
+ * and anything with a build in flight — remains the precise first line. This is only the net beneath.
  */
+/**
+ * How long the in-memory "a build is in flight" flag stays trusted.
+ *
+ * ⚠️ DELIBERATELY SEPARATE FROM `reapAfterMs`, AND THE TWO MUST NOT BE RE-MERGED. They were one
+ * function until 2026-08-24, and shortening the orphan window would silently have shortened this too —
+ * which is the one change in this file that can break a running build.
+ *
+ * The flag exists so the 5-minute in-memory sweep never pauses a sandbox a build is using. A long model
+ * call performs NO sandbox operation, so a build can legitimately go quiet for many minutes; if the flag
+ * expired first, the sweep would see an idle workspace and pause the machine mid-build. It therefore has
+ * to outlast the LONGEST BUILD THAT MAY LEGALLY RUN, which is exactly what `maxBuildMs` means — and has
+ * nothing to do with how quickly an ABANDONED sandbox should be reclaimed.
+ *
+ * It still expires, because a build that crashes between `setBuildActive(true)` and `(false)` would
+ * otherwise pin its VM forever — a far more expensive bug than the one the flag prevents.
+ */
+export function buildFlagExpiryMs(env: NodeJS.ProcessEnv = process.env): number {
+  return maxBuildMs(env) + 10 * 60_000;
+}
+
 export function reapAfterMs(env: NodeJS.ProcessEnv = process.env): number {
-  const MARGIN_MS = 10 * 60_000;
-  return Math.max(idleLimitMs(env), maxBuildMs(env) + MARGIN_MS);
+  const MARGIN_MS = 5 * 60_000;
+  return Math.max(idleLimitMs(env), touchIntervalMs(env) * MISSED_TOUCHES_BEFORE_REAP + MARGIN_MS);
 }
 
 /**

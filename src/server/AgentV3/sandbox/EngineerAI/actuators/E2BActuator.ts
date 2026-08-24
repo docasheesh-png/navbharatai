@@ -20,7 +20,7 @@ import { postgresWatchdogCommand, mergeEnvVar } from '../../../postgresProvision
 import { resolveTemplateId } from './fullstackRouting';
 import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
 import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
-import { idleLimitMs, reapAfterMs, sandboxesToReap, shouldTouchDurable } from '../../../sandboxReaper';
+import { idleLimitMs, reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable } from '../../../sandboxReaper';
 
 /**
  * How often a stream of user-activity pings is written to the durable record.
@@ -578,7 +578,9 @@ export class E2BActuator implements IEngineerActuator {
   private _buildInFlight(workspaceId: string, now: number): boolean {
     const startedAt = this._activeBuilds.get(workspaceId);
     if (startedAt === undefined) return false;
-    if (now - startedAt > reapAfterMs()) {
+    // buildFlagExpiryMs, NOT reapAfterMs — see the note on both. This must outlast the longest build
+    // that may legally run; the orphan window is a different question with a different answer.
+    if (now - startedAt > buildFlagExpiryMs()) {
       this._activeBuilds.delete(workspaceId);
       return false;
     }

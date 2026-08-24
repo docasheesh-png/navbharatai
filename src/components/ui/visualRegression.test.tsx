@@ -1,11 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Button } from './Button';
-import { Badge } from './Badge';
-import { Card } from './Card';
 import { Input, Select } from './Input';
-import { Tabs } from './Tabs';
-import { Tooltip } from './Tooltip';
 import { Skeleton, SkeletonText, SkeletonCard, SkeletonList, SkeletonGrid, SkeletonTree } from './Skeleton';
 
 /**
@@ -26,18 +22,7 @@ describe('UI primitives — visual/structural regression (static markup snapshot
     expect(html).toMatchSnapshot();
   });
 
-  it('Badge variants', () => {
-    const html = (['neutral', 'success', 'warning', 'danger', 'info'] as const)
-      .map((variant) => renderToStaticMarkup(<Badge variant={variant}>{variant}</Badge>))
-      .join('\n');
-    expect(html).toMatchSnapshot();
-  });
 
-  it('Card with header + action', () => {
-    expect(
-      renderToStaticMarkup(<Card title="Title" action={<Button size="sm">Do</Button>}>Body</Card>),
-    ).toMatchSnapshot();
-  });
 
   it('Input + Select (valid + invalid)', () => {
     const html = [
@@ -48,17 +33,7 @@ describe('UI primitives — visual/structural regression (static markup snapshot
     expect(html).toMatchSnapshot();
   });
 
-  it('Tabs (active state)', () => {
-    expect(
-      renderToStaticMarkup(
-        <Tabs items={[{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }]} value="a" onChange={() => {}} />,
-      ),
-    ).toMatchSnapshot();
-  });
 
-  it('Tooltip', () => {
-    expect(renderToStaticMarkup(<Tooltip label="hi"><span>x</span></Tooltip>)).toMatchSnapshot();
-  });
 
   it('Skeleton family', () => {
     const html = [

@@ -7,7 +7,6 @@
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 export type ButtonSize = 'sm' | 'md' | 'lg';
-export type BadgeVariant = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
 
 const BUTTON_BASE =
   'inline-flex items-center justify-center gap-2 font-semibold rounded-lg transition-colors ' +
@@ -31,21 +30,6 @@ export function buttonClasses(variant: ButtonVariant = 'primary', size: ButtonSi
   return `${BUTTON_BASE} ${BUTTON_VARIANTS[variant] ?? BUTTON_VARIANTS.primary} ${BUTTON_SIZES[size] ?? BUTTON_SIZES.md}`;
 }
 
-const BADGE_VARIANTS: Record<BadgeVariant, string> = {
-  neutral: 'bg-white/10 text-[#c9d1d9] border-white/10',
-  success: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-  warning: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  danger: 'bg-red-500/15 text-red-300 border-red-500/30',
-  info: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
-};
-
-/** Resolve the full className for a Badge. Pure. */
-export function badgeClasses(variant: BadgeVariant = 'neutral'): string {
-  return `inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${
-    BADGE_VARIANTS[variant] ?? BADGE_VARIANTS.neutral
-  }`;
-}
-
 /** Resolve the surface className for a Card. Pure. */
 export function cardClasses(): string {
   return 'bg-[#161b22] border border-white/10 rounded-2xl';
@@ -62,15 +46,11 @@ export function inputClasses(invalid = false): string {
   );
 }
 
-// ── P-DESIGN.2 — Overlay & interaction primitives (Popover / Drawer / BottomSheet) ──
-// Pure class resolvers for the overlay atoms, so their look/positioning vocabulary lives here too.
-
-export type OverlaySide = 'left' | 'right';
-
-/** Full-screen dimming backdrop shared by Drawer / BottomSheet. Pure. */
-export function overlayBackdropClasses(): string {
-  return 'fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm';
-}
+// ── P-DESIGN.2 — Overlay primitives ────────────────────────────────────────────────
+// Popover is the only overlay atom left: the Drawer and BottomSheet components, and the
+// backdrop + Badge resolvers that existed only for them, were removed on 2026-08-24 as
+// unreachable. `cardClasses` below is deliberately kept — Card.tsx went, but two live panels
+// (ProjectInsightsPanel, GalleryPanel) use the resolver directly.
 
 /** Floating panel for a click-triggered Popover (anchored under its trigger). Pure. */
 export function popoverPanelClasses(): string {
@@ -80,19 +60,3 @@ export function popoverPanelClasses(): string {
   );
 }
 
-/** Side Drawer panel that slides in from the left or right. Pure. */
-export function drawerPanelClasses(side: OverlaySide = 'right'): string {
-  return (
-    'fixed top-0 bottom-0 z-[90] w-[min(90vw,22rem)] bg-[#161b22] border-white/10 shadow-2xl ' +
-    'flex flex-col ' +
-    (side === 'right' ? 'right-0 border-l' : 'left-0 border-r')
-  );
-}
-
-/** Bottom-sheet panel that slides up from the bottom (mobile-friendly). Pure. */
-export function bottomSheetClasses(): string {
-  return (
-    'fixed left-0 right-0 bottom-0 z-[90] max-h-[85vh] rounded-t-2xl bg-[#161b22] border-t border-white/10 ' +
-    'shadow-2xl flex flex-col'
-  );
-}

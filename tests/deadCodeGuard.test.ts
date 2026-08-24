@@ -86,15 +86,9 @@ const KNOWN_UNREACHABLE = new Set([
   // scripts/loadTest.mjs runs this logic INLINE and names this file as its unit-tested source, so
   // its test is the only coverage the running logic has.
   'src/server/lib/loadTestStats.ts',
-  // An unused UI kit whose two tests ALSO cover live siblings (Button, Input, Select, Popover), so
-  // removing it needs those tests trimmed rather than deleted. Deferred deliberately, not forgotten.
-  'src/components/ui/Badge.tsx',
-  'src/components/ui/BottomSheet.tsx',
-  'src/components/ui/Card.tsx',
-  'src/components/ui/Drawer.tsx',
-  'src/components/ui/Tabs.tsx',
-  'src/components/ui/Tooltip.tsx',
-  'src/components/ui/index.ts',
+  // (The unused UI kit that sat here — Badge, Card, Tabs, Tooltip, Drawer, BottomSheet and the
+  // barrel — was removed on 2026-08-24 once its two tests were trimmed of the dead cases. The
+  // allowlist is meant to shrink; the staleness test below is what keeps it honest.)
 ]);
 
 describe('dead-code guard — every source file must be reachable from a real entry point', () => {

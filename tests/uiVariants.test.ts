@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buttonClasses, badgeClasses, cardClasses, inputClasses } from '../src/components/ui/variants';
+import { buttonClasses, cardClasses, inputClasses } from '../src/components/ui/variants';
 
 /** P-DESIGN.1 — UI primitive variant resolvers (pure). */
 
@@ -22,16 +22,10 @@ describe('variants — buttonClasses', () => {
   });
 });
 
-describe('variants — badgeClasses', () => {
-  it('maps each status to its colour', () => {
-    expect(badgeClasses('success')).toContain('emerald');
-    expect(badgeClasses('danger')).toContain('red');
-    expect(badgeClasses('warning')).toContain('amber');
-    expect(badgeClasses('info')).toContain('indigo');
-    expect(badgeClasses()).toContain('text-[#c9d1d9]'); // neutral default
-  });
-});
 
+// badgeClasses was removed with the unused Badge component on 2026-08-24; cardClasses stays
+// because two live panels (ProjectInsightsPanel, GalleryPanel) use the resolver directly even
+// though Card.tsx itself went.
 describe('variants — cardClasses / inputClasses', () => {
   it('card uses the shared surface token', () => {
     expect(cardClasses()).toContain('bg-[#161b22]');

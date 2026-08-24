@@ -151,12 +151,17 @@ describe('the client never calls an endpoint the server does not have', () => {
 
   it('the generated-app template island is gone from our own source tree', () => {
     // src/pages/InventoryPage.tsx + ProductTable + ProductForm were sample code for apps we GENERATE,
-    // sitting in NavBharatAI's own src/ and imported by nothing. CodeGenerator.ts keeps its own copies
-    // keyed by those filenames, so deleting the files changes nothing for a generated app — it only
-    // stops our tree from carrying pages that call /api/products, a route we do not serve.
+    // sitting in NavBharatAI's own src/ and imported by nothing — pages that call /api/products, a
+    // route we do not serve.
     for (const f of ['src/pages/InventoryPage.tsx', 'src/components/ProductTable.tsx', 'src/components/ProductForm.tsx']) {
       expect(existsSync(join(process.cwd(), f))).toBe(false);
     }
-    expect(readFileSync(join(process.cwd(), 'src/server/BuildEngine/CodeGenerator.ts'), 'utf8')).toContain('src/pages/InventoryPage.tsx');
+    // This used to also assert that src/server/BuildEngine/CodeGenerator.ts still held its own copies
+    // of those templates, which was the reason deleting the pages was safe. That whole engine went on
+    // 2026-08-24: nothing imported BuildEngine from either entry point or any tooling script, so the
+    // copies it held were never served to a generated app either. The live scaffolds are AgentV3's
+    // (goldenScaffolds/ and sandbox/AppMakerLab/generator/templates/), which the framework-parity
+    // suites cover. Asserting the engine is GONE keeps the fact recorded instead of deleting the test.
+    expect(existsSync(join(process.cwd(), 'src/server/BuildEngine'))).toBe(false);
   });
 });

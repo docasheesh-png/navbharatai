@@ -117,7 +117,11 @@ describe('the vendor error page is not framed as the user\'s app', () => {
  */
 describe('a host that answers with nothing serving is refused too', () => {
   it('portDown shares the branch with unreachable — one honest state, not two', () => {
-    expect(surface).toContain('{unreachable || (portDown && !diagnosing) ? (');
+    // Asserts the two share ONE branch, not the branch's exact literal text — that literal has since
+    // grown a third term (framingUnchecked) without changing anything about this guarantee, and a test
+    // that breaks on an addition it does not care about is a test that gets weakened to shut it up.
+    const branch = surface.match(/\{unreachable \|\| \(portDown && !diagnosing\)[^?]*\? \(/);
+    expect(branch, 'unreachable and portDown must share one refuse-to-frame branch').not.toBeNull();
   });
 
   it('it fires only on an EXPLICIT false, so an older server changes nothing', () => {
@@ -128,5 +132,47 @@ describe('a host that answers with nothing serving is refused too', () => {
     // Without this, pressing Wake up would swap the app for the not-serving panel for the whole
     // reboot, which reads as "it just broke" at precisely the moment it is being repaired.
     expect(surface).toContain('portDown && !diagnosing');
+  });
+});
+
+describe('never frame a machine address nobody has checked yet (admin screenshot, live 2026-08-24)', () => {
+  /**
+   * `doorUrl`, `unreachable` and `portDown` are ALL set only from the health probe's reply. Until it
+   * answers, all three sit at their "nothing is wrong" defaults — so the FIRST render framed the raw
+   * machine address with nothing checked at all. That is exactly the moment a resumed sandbox has not
+   * started its dev server, so the provider's own "Closed Port Error" page — sandbox id and all —
+   * filled the frame while our honest "Waking your preview…" bar sat directly above it.
+   *
+   * The guarantee already written here covers a host we have SEEN down. This is the state before that:
+   * not "seen down", but "not looked at".
+   */
+  const surface = readFileSync(join(process.cwd(), 'src/components/agentv3/PreviewSurface.tsx'), 'utf8');
+
+  it('the refuse-to-frame condition covers the unchecked window', () => {
+    expect(surface).toContain('{unreachable || (portDown && !diagnosing) || framingUnchecked ? (');
+  });
+
+  it('a known door url clears it — the door is our own route and can only return our own page', () => {
+    expect(surface).toContain('const framingUnchecked = !doorUrl && !previewChecked && shouldWatchLivePreview({');
+  });
+
+  it('it only waits when the probe is actually going to run', () => {
+    // During a build the watchdog is deliberately asleep, so waiting for an answer that never comes
+    // would replace the streaming first paint with a permanent spinner. Same rule, one source.
+    const i = surface.indexOf('const framingUnchecked =');
+    const block = surface.slice(i, i + 700);
+    expect(block).toContain('autoResume: !!autoResume');
+    expect(block).toContain('paneVisible');
+    expect(block).toContain('documentHidden');
+  });
+
+  it('the flag is set on BOTH probe outcomes — a bad answer is still an answer', () => {
+    expect(surface).toContain('setPreviewChecked(true); // the probe ANSWERED');
+    const good = surface.indexOf('setPreviewChecked(true);\n        setUnreachable(false);');
+    expect(good).toBeGreaterThan(-1);
+  });
+
+  it('and is reset per workspace, so a new app never inherits the last one’s answer', () => {
+    expect(surface).toContain("setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false);");
   });
 });

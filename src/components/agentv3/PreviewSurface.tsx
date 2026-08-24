@@ -203,6 +203,22 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const [unreachable, setUnreachable] = useState(false);
   /** The machine answers, but nothing is serving on the port — see the note where this is set. */
   const [portDown, setPortDown] = useState(false);
+  /**
+   * Has the health probe ANSWERED yet for this workspace?
+   *
+   * ROOT CAUSE (admin screenshot, live, 2026-08-24 — an Express app on port 3000 mid-wake): `doorUrl`,
+   * `unreachable` and `portDown` are ALL set only from the health probe's reply. Until it answers, all
+   * three sit at their "nothing is wrong" defaults, so the very first render frames `effectiveUrl` —
+   * the RAW machine address — with nothing checked at all. That is precisely the moment a resumed
+   * sandbox has not started its dev server yet, so the frame filled with the provider's own
+   * "Closed Port Error" page, sandbox id and all, while our own honest "Waking your preview…" bar sat
+   * directly above it.
+   *
+   * The guarantee this file already states — never frame a host whose port we have seen down — was
+   * written for a host we had CHECKED. This is the state before that: not "seen down", but "not looked
+   * at". Same lesson as the reviewer fix the day before: ignorance is not a licence, here to FRAME.
+   */
+  const [previewChecked, setPreviewChecked] = useState(false);
   const [sandbox, setSandbox] = useState<{ livePreviewAvailable: boolean; actuator: string; previewDomainWarning: string | null } | null>(null);
   // LIVE FAILOVER (admin report 858f6d7b) — a broken in-browser preview must never be a dead end while
   // the real app is running on the sandbox. Both refs are once-per-workspace guards; `failoverNote`
@@ -245,7 +261,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // Reset the viewport to Auto on a new/changed workspace too — a leftover Mobile/Tablet device frame
   // from the previous app would otherwise misrepresent the next one.
   useEffect(() => {
-    setFoundUrl(''); setDoorUrl(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto');
+    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto');
     // The failover guards are per-project state: a new workspace gets a fresh chance to rescue itself.
     failedOverToLive.current = false; userPickedInBrowser.current = false; setFailoverNote('');
   }, [workspaceId]);
@@ -344,6 +360,25 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
    * user is looking at.
    */
   const popoutHref = doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl;
+  /**
+   * Would framing right now mean pointing at a RAW machine address nobody has checked?
+   *
+   * True only in the window between opening the Live tab and the health probe answering — and only
+   * when that probe is actually going to run. During a BUILD the watchdog is deliberately asleep
+   * (`shouldWatchLivePreview` requires the panel to be idle), so waiting for an answer that will never
+   * come would replace the streaming first paint with a permanent spinner. In that case this stays
+   * false and the behaviour is byte-identical to before.
+   *
+   * A known `doorUrl` also clears it outright: the door is OUR route, it resolves the machine itself
+   * and can only ever return our own page — framing it is safe with nothing checked.
+   */
+  const framingUnchecked = !doorUrl && !previewChecked && shouldWatchLivePreview({
+    autoResume: !!autoResume,
+    mode,
+    hasWorkspace: !!workspaceId,
+    paneVisible,
+    documentHidden: typeof document !== 'undefined' && document.visibilityState === 'hidden',
+  });
   const lastUrlProp = useRef(url);
   useEffect(() => {
     if (url !== lastUrlProp.current) {
@@ -549,11 +584,13 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             : null);
         }
         // The probe answered, so whatever it says, the origin is reachable.
+        setPreviewChecked(true);
         setUnreachable(false);
       } catch {
         // The probe could not complete. Status stays null so we never reboot on a guess — but the
         // fact itself is no longer swallowed, because it is what tells the user why the frame is
         // showing a stranger's error page.
+        setPreviewChecked(true); // the probe ANSWERED — that the answer is bad is the point
         setUnreachable(true);
       }
       const h = healRef.current;
@@ -1231,7 +1268,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             The door normally prevents this from ever being reached, but it only takes over once the
             server has minted a link — and this is the one moment the raw address would otherwise be
             framed. Belt and braces, on the path that has burned the user three times. */}
-        {unreachable || (portDown && !diagnosing) ? (
+        {unreachable || (portDown && !diagnosing) || framingUnchecked ? (
           /**
            * THE URL IS NOT ANSWERING — so we do NOT frame it (admin report 2026-08-13, mitrify).
            *

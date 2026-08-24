@@ -31,7 +31,14 @@ export interface SavedTemplate {
 
 export interface TemplatesPanelProps {
   user: { uid: string } | null;
-  templates: TemplateDefinition[];
+  /**
+   * The gallery to show. OPTIONAL, defaulting to this module's own `CURATED_TEMPLATES`
+   * (2026-08-24): App.tsx used to import that constant purely to hand it straight back here,
+   * which pinned this whole ~80 KB module to the first-paint bundle and made lazy-loading the
+   * panel pointless. The data lives beside the component that renders it; the prop stays for a
+   * caller that genuinely wants a different list.
+   */
+  templates?: TemplateDefinition[];
   savedTemplates: SavedTemplate[];
   hasGeneratedCode: boolean;
   onSelectTemplate: (prompt: string) => void;
@@ -332,7 +339,7 @@ It must hold a steady frame rate on a cheap Android phone.`,
 
 export function TemplatesPanel({
   user,
-  templates,
+  templates = CURATED_TEMPLATES,
   savedTemplates,
   hasGeneratedCode,
   onSelectTemplate,

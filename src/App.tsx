@@ -8,24 +8,11 @@ import { resolveGithubConnectionForUser } from './lib/githubConnection';
 import { sanitizeFileMap } from './lib/fileMapSanitize';
 import { computeTabClose } from './lib/tabClose';
 // AgentV3Panel is rendered via ProV3Surface (the gated v5.0 surface), not directly here.
-import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
-import { GitViewPanel } from './components/panels/GitViewPanel';
-import { DeploySuccessPanel } from './components/panels/DeploySuccessPanel';
-import { AboutPanel } from './components/panels/AboutPanel';
-import { AdminLoginPanel } from './components/panels/AdminLoginPanel';
 // FilesPanel → moved to ViewPanels.tsx
-import { DonationPanel } from './components/panels/DonationPanel';
-import { BillingPanel } from './components/panels/BillingPanel';
-import { ProfilePage } from './components/profile/ProfilePage';
-import { DeployModal } from './components/panels/DeployModal';
-import { WorkspacePane } from './components/panels/WorkspacePane';
-import { SettingsPanel } from './components/panels/SettingsPanel';
-import { ProV3Surface } from './components/agentv3/ProV3Surface';
 import { v3MobileFooterActive, type V3FooterApi } from './components/agentv3/v3FooterApi';
 import { shouldRenderV3Surface, v3SurfaceDisplayClass } from './components/agentv3/v3SurfaceMount';
 import { restoreV3Tab, v3TabIsOpen, v3IsActive, V3_TAB_FLAG, V3_ACTIVE_FLAG } from './components/agentv3/v3TabPersistence';
 import { clearStickySession } from './components/agentv3/v3SessionContinuity';
-import { NBIChatPanel } from './components/panels/NBIChatPanel';
 // Lazy — keeps the bundled AppKnowledgeBase (imported by the Offline AI) OUT of the main index chunk,
 // so it loads as its own split chunk only when the user opens Offline AI (bundle-budget safe).
 const OfflineAI = lazy(() => import('./components/offline/OfflineAI').then((m) => ({ default: m.OfflineAI })));
@@ -34,7 +21,6 @@ import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
 // AgentV3Launcher removed — v5.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
-import { ConnectMyWebsitePanel } from './components/panels/ConnectMyWebsitePanel';
 import { fetchBuildSession } from './services/buildService';
 import {
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
@@ -56,20 +42,15 @@ import {
 } from 'lucide-react';
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
-import { AdminDashboard } from './components/AdminDashboard';
 // Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
 // native shell so the Play Console health declarations stay truthful. Web is untouched.
 import { isNativeApp } from './lib/mobileNative';
 import { medicalViewBlocked } from './lib/playCompliance';
 // SDAChat kept eager — used immediately on tab open
-import { SDAChat } from './components/sda/SDAChat';
-import { ProfessionalsView } from './components/professionals/ProfessionalsView';
-import { ProfessionalChat } from './components/professionals/ProfessionalChat';
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
 import { ReportSheet } from './components/ReportSheet';
 import { useShakeToReport } from './hooks/useShakeToReport';
-import { RepoAnalystTool } from './components/repoAnalyst/RepoAnalystTool';
 // EngineerAIChat retired — replaced by NavBharatAI Pro v5.0 (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
@@ -96,7 +77,6 @@ import { authGateDecision, isAuthGatedView } from './lib/authGate';
 import { initPushNotifications, teardownPushNotifications } from './lib/pushNotifications';
 
 // ── Eager imports — always needed on first render ───────────────────────────
-import { AIChat } from './components/ide/AIChat';
 
 // ── Lazy imports still used directly in App.tsx ──────────────────────────────
 // Helper: wraps a named export into the {default} shape lazy() requires
@@ -106,6 +86,37 @@ const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
 const SecretManager    = _lz(() => import('./components/SecretManager'),        'SecretManager');
 const DatabaseSettings = _lz(() => import('./components/settings/DatabaseSettings'), 'DatabaseSettings');
 const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
+
+// ── Route-level views, lazy (2026-08-24) ──────────────────────────────────────────────────────
+// Every one of these renders INSIDE the <Suspense> boundary around the view switcher, and none
+// of them is the default view — so nobody downloads a screen they have not opened. They were
+// static imports, which is what kept ~640 KB of app code in ONE first-paint chunk even though
+// the build already emitted 92 chunks.
+//
+// This only became possible on 2026-08-24, when App.tsx stopped being importable: while a
+// cycle ran back through the root, splitting DUPLICATED the shared graph instead of dividing
+// it (an earlier attempt cost ~170 KB — see vite.config.ts). See tests/appModuleGraph.test.ts.
+//
+// TopNav, SidebarNav and HomeView are deliberately NOT here: the first two render outside the
+// boundary and are always visible, and HomeView is the default view — making it lazy would put
+// a loading state on every cold start to save nothing.
+const GitViewPanel = _lz(() => import('./components/panels/GitViewPanel'), 'GitViewPanel');
+const ProV3Surface = _lz(() => import('./components/agentv3/ProV3Surface'), 'ProV3Surface');
+const TemplatesPanel = _lz(() => import('./components/panels/TemplatesPanel'), 'TemplatesPanel');
+const SettingsPanel = _lz(() => import('./components/panels/SettingsPanel'), 'SettingsPanel');
+const AdminLoginPanel = _lz(() => import('./components/panels/AdminLoginPanel'), 'AdminLoginPanel');
+const BillingPanel = _lz(() => import('./components/panels/BillingPanel'), 'BillingPanel');
+const NBIChatPanel = _lz(() => import('./components/panels/NBIChatPanel'), 'NBIChatPanel');
+const SDAChat = _lz(() => import('./components/sda/SDAChat'), 'SDAChat');
+const ProfessionalsView = _lz(() => import('./components/professionals/ProfessionalsView'), 'ProfessionalsView');
+const ProfessionalChat = _lz(() => import('./components/professionals/ProfessionalChat'), 'ProfessionalChat');
+const ProfilePage = _lz(() => import('./components/profile/ProfilePage'), 'ProfilePage');
+const ConnectMyWebsitePanel = _lz(() => import('./components/panels/ConnectMyWebsitePanel'), 'ConnectMyWebsitePanel');
+const RepoAnalystTool = _lz(() => import('./components/repoAnalyst/RepoAnalystTool'), 'RepoAnalystTool');
+const DonationPanel = _lz(() => import('./components/panels/DonationPanel'), 'DonationPanel');
+const AboutPanel = _lz(() => import('./components/panels/AboutPanel'), 'AboutPanel');
+const DeploySuccessPanel = _lz(() => import('./components/panels/DeploySuccessPanel'), 'DeploySuccessPanel');
+
 const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
 const ProfessionalHistoryView = _lz(() => import('./components/professionals/ProfessionalHistoryView'), 'ProfessionalHistoryView');
 import { motion, AnimatePresence } from 'motion/react';
@@ -2713,7 +2724,6 @@ export default function App() {
   };
 
   // Phase 1.7 — template list lives in TemplatesPanel.tsx (CURATED_TEMPLATES).
-  const templates = CURATED_TEMPLATES;
 
   const themeClasses = getThemeClasses(theme);
 
@@ -3650,7 +3660,6 @@ export default function App() {
             // Phase 1.7 — extracted to TemplatesPanel component
             <TemplatesPanel
               user={user}
-              templates={templates}
               savedTemplates={savedTemplates}
               hasGeneratedCode={hasGeneratedCode}
               onSelectTemplate={(prompt) => { setInput(prompt); toggleTab('nbi_chat'); }}

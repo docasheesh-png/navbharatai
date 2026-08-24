@@ -81,12 +81,81 @@ export interface ClaimContradiction {
   measured: string;
 }
 
-/** Phrases that assert a clean console. Deliberately narrow — a mention of errors is not a claim. */
-const CONSOLE_CLEAN = /\b(no|zero|without any|free of)\s+(browser\s+)?console\s+errors?\b|\bconsole\s+is\s+clean\b|\bno errors? in the (browser )?console\b/i;
-/** Phrases that assert we looked at a screenshot. */
-const SCREENSHOT_SEEN = /\b(screenshot|screen shot)\b[^.]{0,40}\b(shows?|confirms?|verif|proves?)\b|\bverified[^.]{0,30}\bscreenshot\b|\bस्क्रीनशॉट\b/i;
-/** Phrases that assert the live preview renders. */
-const PREVIEW_RENDERS = /\b(preview|app)\s+(is\s+)?(now\s+)?(live|working|renders?|rendering)\b|\blive preview (is )?(working|up)\b/i;
+/**
+ * Phrases that assert a clean console. Deliberately narrow — a mention of errors is not a claim.
+ *
+ * Hinglish included for the same reason as APP_DELIVERED and PREVIEW_RENDERS: the engine mirrors the
+ * user's language, so a guard that only reads English is off for whoever typed Hindi. Note the shape
+ * is INVERTED here — this claim IS a negation ("koi error nahi"), so unlike the preview patterns the
+ * "nahi" is the thing being matched rather than the thing being excluded.
+ */
+const CONSOLE_CLEAN = new RegExp([
+  /\b(no|zero|without any|free of)\s+(browser\s+)?console\s+errors?\b/,
+  /\bconsole\s+is\s+clean\b/,
+  /\bno errors? in the (browser )?console\b/,
+  // Hinglish: "console me koi error nahi", "koi console error nahi hai", "console bilkul saaf hai"
+  /\b(?:console|कंसोल)\b[^.!\n]{0,30}?\b(?:koi\s+)?(?:error|errors|गलती)\b[^.!\n]{0,15}?\b(?:nahi|nahin|नहीं)\b/,
+  /\bkoi\s+(?:console\s+)?error\s+nahi\b/,
+  /\b(?:console|कंसोल)\b[^.!\n]{0,20}?\b(?:saaf|साफ)\b/,
+].map((r) => r.source).join('|'), 'i');
+
+/**
+ * Phrases that assert we looked at a screenshot.
+ *
+ * The Devanagari spelling was already here; the LATIN Hinglish forms were not, which is the way most
+ * Hindi-speaking users actually type. "screenshot dekha", "screenshot me dikh raha hai" are the same
+ * claim as "the screenshot confirms" and were passing straight through.
+ */
+const SCREENSHOT_SEEN = new RegExp([
+  /\b(screenshot|screen shot)\b[^.]{0,40}\b(shows?|confirms?|verif|proves?)\b/,
+  /\bverified[^.]{0,30}\bscreenshot\b/,
+  /\bस्क्रीनशॉट\b/,
+  // Hinglish: "screenshot dekha", "screenshot me dikh raha hai", "screenshot se confirm hua"
+  /\bscreenshot\b[^.!\n]{0,30}?\b(?:dekh[aiy]|dikh\s*rah[aiy]|dikha|confirm)\b/,
+].map((r) => r.source).join('|'), 'i');
+/**
+ * Phrases that assert the live preview renders.
+ *
+ * ⚠️ THIS GUARD WAS SILENTLY OFF FOR HALF OUR USERS (found 2026-08-24). It was English-only, while
+ * APP_DELIVERED two patterns below already carries Hindi/Hinglish with the reason written beside it:
+ * "the engine mirrors the user's language, so the same lie arrives in whichever one they typed." The
+ * same argument applies here and had simply not been made twice.
+ *
+ * It matters because of what the admin actually received (transcript 2026-08-12): "App tayyar hai! 🎉
+ * App live hai: <link>" — and the link showed a Closed Port Error. That one happened to slip through
+ * on `app live`, which the English pattern matches by accident; "app chal rahi hai", "preview chal
+ * raha hai" and "sab kaam kar raha hai" did not match at all. An honesty guard that depends on which
+ * language the user happened to type in is not a guard.
+ *
+ * Still deliberately narrow. It matches an ASSERTION that the thing is up, never a mention of it —
+ * "preview khul jayega", "preview dekho", and a next step are all untouched.
+ *
+ * ONE KNOWN IMPRECISION, stated rather than hidden: the ORIGINAL English alternative still fires on
+ * "preview live" inside a Hinglish sentence like "Kya preview live hai?" or "preview live karne ki
+ * koshish kar raha hoon". Left alone deliberately — the consequence is benign (the note appended says
+ * "no browser check confirmed the preview rendering", which is TRUE on any run that reaches here), and
+ * tightening a pattern 33 passing tests depend on would risk a real regression to remove a redundancy.
+ * The case that actually mattered — a NEGATION being "corrected" as though it were a boast — is closed.
+ */
+const PREVIEW_RENDERS = new RegExp([
+  /\b(preview|app)\s+(is\s+)?(now\s+)?(live|working|renders?|rendering)\b/,
+  /\blive preview (is )?(working|up)\b/,
+  // Hinglish: "app chal rahi hai", "preview chal raha hai", "app sahi chal raha hai"
+  /\b(?:preview|app|ऐप)\b[^.!\n]{0,30}?\b(?:chal rah[aiy]|chal gay[ai]|chalu ho gay[ai]|चल रह[ाी] है)\b/,
+  // Hinglish: "preview kaam kar raha hai", "sab kaam kar raha hai"
+  /\b(?:kaam kar rah[aiy]|काम कर रह[ाी] है)\b/,
+  // Hinglish: "app live ho gaya", "preview live hai" — the shape the admin's own report carried.
+  //
+  // ADJACENT ON PURPOSE, not a 20-character window. The loose version matched three sentences that
+  // are the OPPOSITE of a claim, and each would have had the platform "correct" an honest summary:
+  //   "Preview abhi live NAHI hai"          — a negation, i.e. exactly what honesty sounds like
+  //   "Main preview live KARNE ki koshish"  — an intention, not an assertion
+  //   "Kya preview live hai?"               — a question
+  // Requiring `live` to sit directly on its verb kills the first two (a negation or a verb always
+  // comes between), and the lookahead kills the third. Same discipline as APP_DELIVERED's note that
+  // an intention is never a claim.
+  /\b(?:live|लाइव)\s+(?:ho\s+gay[ai]|hai|है)\b(?!\s*[?？])/,
+].map((r) => r.source).join('|'), 'i');
 
 /**
  * Phrases that assert the REQUESTED APP HAS BEEN DELIVERED.

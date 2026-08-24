@@ -292,3 +292,102 @@ describe('it is wired into the build', () => {
     expect(routes).toContain('CLAIM_UNSUPPORTED');
   });
 });
+
+/**
+ * THE GUARD WAS SILENTLY OFF FOR HALF OUR USERS (found 2026-08-24).
+ *
+ * `PREVIEW_RENDERS` was English-only while `APP_DELIVERED` already carried Hindi/Hinglish, with the
+ * reason written beside it: the engine mirrors the user's language, so the same lie arrives in
+ * whichever one they typed. The admin's own transcript is the case — "App tayyar hai! 🎉 App live hai:
+ * <link>", and the link showed a Closed Port Error.
+ */
+describe('the preview claim is caught in the user\'s own language', () => {
+  const unverified = {
+    consoleCaptured: true,
+    screenshotTaken: true,
+    previewVerified: false,
+    sourceText: '',
+    sourceIsWholeApp: false,
+  };
+  const kinds = (text: string) => auditSummaryClaims(text, unverified).map((c) => c.kind);
+
+  it.each([
+    'App live hai: https://x.e2b.app',
+    'App chal rahi hai, dekh lijiye',
+    'Preview chal raha hai',
+    'Sab kaam kar raha hai',
+    'App live ho gaya',
+  ])('catches an unverified claim written in Hinglish: %s', (text) => {
+    expect(kinds(text)).toContain('preview-renders');
+  });
+
+  it('does NOT correct a NEGATION — that sentence is the honesty we want', () => {
+    // The dangerous false positive, and the reason the pattern is adjacent rather than a 20-char
+    // window. "Preview abhi live nahi hai" says the true thing; appending "you claimed it works but we
+    // never checked" would punish the one summary that got it right.
+    expect(kinds('Preview abhi live nahi hai')).not.toContain('preview-renders');
+    expect(kinds('App abhi chal nahi rahi hai')).not.toContain('preview-renders');
+    expect(kinds('Yeh live nahi ho paya')).not.toContain('preview-renders');
+  });
+
+  it('says nothing when the preview WAS verified, whatever language the claim is in', () => {
+    const verified = { ...unverified, previewVerified: true };
+    for (const t of ['App live hai', 'Preview chal raha hai', 'The app is now live']) {
+      expect(auditSummaryClaims(t, verified).map((c) => c.kind)).not.toContain('preview-renders');
+    }
+  });
+});
+
+/**
+ * HUNTING THE SIBLINGS (rule 3). The preview gap above was not one pattern's oversight — every claim
+ * pattern in this file was written against English prose while the engine answers in whichever
+ * language the user typed. These two had the same hole.
+ */
+describe('the console and screenshot claims read Hinglish too', () => {
+  const nothingMeasured = {
+    consoleCaptured: false,
+    screenshotTaken: false,
+    previewVerified: true,
+    sourceText: '',
+    sourceIsWholeApp: false,
+  };
+  const kinds = (text: string) => auditSummaryClaims(text, nothingMeasured).map((c) => c.kind);
+
+  it.each([
+    'Console me koi error nahi hai',
+    'Koi console error nahi',
+    'Console bilkul saaf hai',
+  ])('catches an unbacked clean-console claim: %s', (text) => {
+    expect(kinds(text)).toContain('console-clean');
+  });
+
+  it('the console claim is an INVERTED shape — "nahi" is matched, not excluded', () => {
+    // Worth stating because the preview patterns above treat "nahi" as the signal to STAY SILENT. Here
+    // the claim itself is a negation, so the same word means the opposite thing. A future edit that
+    // "consistently" excludes nahi everywhere would silently disable this one.
+    expect(kinds('Console me koi error nahi hai')).toContain('console-clean');
+    // …and reporting real errors is never a claim of cleanliness.
+    expect(kinds('Console me 3 errors aa rahe hain')).not.toContain('console-clean');
+    expect(kinds('Console errors ko fix karna hai')).not.toContain('console-clean');
+  });
+
+  it.each([
+    'Screenshot dekha, sab theek hai',
+    'Screenshot me dikh raha hai',
+  ])('catches a look-at-the-screenshot claim in Latin Hinglish: %s', (text) => {
+    expect(kinds(text)).toContain('screenshot-seen');
+  });
+
+  it('an INTENTION to take a screenshot is not a claim of having seen one', () => {
+    expect(kinds('Main screenshot lunga')).not.toContain('screenshot-seen');
+    expect(kinds('Screenshot lene ki koshish ki')).not.toContain('screenshot-seen');
+    expect(kinds('I could not take a screenshot')).not.toContain('screenshot-seen');
+  });
+
+  it('says nothing when the measurement DID happen', () => {
+    const measured = { ...nothingMeasured, consoleCaptured: true, screenshotTaken: true };
+    for (const t of ['Console me koi error nahi hai', 'Screenshot dekha, sab theek hai']) {
+      expect(auditSummaryClaims(t, measured)).toEqual([]);
+    }
+  });
+});

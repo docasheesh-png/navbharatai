@@ -49,6 +49,14 @@ export interface SandboxRecord {
   snapshotUrl?: string;
   /** When that snapshot was taken — so the surface can say how old the copy is, rather than guess. */
   snapshotAt?: number;
+  /**
+   * The port this app SAYS it serves on, read from its own scripts/config (declaredPort.ts).
+   *
+   * Strictly weaker than `recipe.port`, which is a port we have SEEN serving — and stored anyway,
+   * because a preview that has never once come up has no recipe at all, and that is precisely when the
+   * door was falling through to a common-ports guess and landing on 3000 for an app on 5000.
+   */
+  declaredPort?: number;
 }
 
 class SandboxStore {
@@ -108,6 +116,18 @@ class SandboxStore {
         { merge: true },
       );
     } catch { /* best-effort — a fallback copy must never be able to fail a build */ }
+  }
+
+  /** Remember the port this app declares. Merged — it must outlive builds that produce no preview. */
+  async saveDeclaredPort(workspaceId: string, port: number): Promise<void> {
+    const db = this.getDb();
+    if (!db || !workspaceId || !Number.isInteger(port) || port <= 0) return;
+    try {
+      await db.collection('agentv3_sandboxes').doc(workspaceId).set(
+        { workspaceId, declaredPort: port, updatedAt: Date.now() },
+        { merge: true },
+      );
+    } catch { /* a port hint must never be able to fail a build */ }
   }
 
   /**

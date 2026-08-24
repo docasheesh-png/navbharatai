@@ -172,3 +172,24 @@ describe('a host with nothing on its port is never framed', () => {
     expect(line).toContain('describesUserView ?');
   });
 });
+
+describe('the declared port sits between the proven one and the guess', () => {
+  it('the door reads the record once and feeds the declared port into the sweep', () => {
+    // Without it, an app whose preview never came up has NOTHING between the recipe and "try 3000" —
+    // which is the reported failure exactly: an Express app on 5000 offered a 3000 error page.
+    expect(door).toContain('const doorRecord = await raceTimeout(sandboxStore.getRecord(ws)');
+    expect(door).toContain('doorRecord?.declaredPort');
+    const declared = door.indexOf('hint.push(declaredHint)');
+    const sweep = door.indexOf('portCandidates(recipe?.port, hint)');
+    expect(declared).toBeGreaterThan(-1);
+    expect(declared).toBeLessThan(sweep); // it must be in the list BEFORE the sweep is built
+  });
+
+  it('the PROVEN port still leads — a declaration never outranks something we saw serving', () => {
+    expect(door).toContain('portCandidates(recipe?.port, hint)');
+  });
+
+  it('one record read serves both decisions, so they cannot see different states', () => {
+    expect((door.match(/sandboxStore\.getRecord\(ws\)/g) || []).length).toBe(1);
+  });
+});

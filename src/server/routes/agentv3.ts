@@ -310,6 +310,7 @@ import { previewKeepAliveEnabled, isTopLevelNavigation, shouldServeKeepAliveShel
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
 import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE } from '../AgentV3/previewSnapshot';
+import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { scoreBuildOutcome, shouldAutoReport, autoReportReason, complaintInText } from '../AgentV3/buildOutcomeSignals';
 import { buildOutcomeStore, buildOutcomeTrackingEnabled, watchedMsFrom, type BuildOutcomeRecord } from '../AgentV3/BuildOutcomeStore';
 import { buildPortSweepCommand, portCandidates, parsePortSweep } from '../AgentV3/sandbox/EngineerAI/actuators/portSweep';
@@ -4140,6 +4141,9 @@ async function noteBuildOutcome(
         return page(403, 'refused');
       }
       const actuator = buildActuator();
+      // ONE record read for the whole request: the snapshot fallback and the declared-port hint both
+      // need it, and reading it twice would let the two halves of one decision see different states.
+      const doorRecord = await raceTimeout(sandboxStore.getRecord(ws), 3_000, 'doorRecord').catch(() => null);
       const sandboxId = actuator.getSandboxId
         ? await raceTimeout(actuator.getSandboxId(ws), 4_000, 'doorSandboxId').catch(() => null)
         : null;
@@ -4149,9 +4153,8 @@ async function noteBuildOutcome(
         // a sandbox that exists but has not opened its port yet is usually seconds away, and replacing
         // a live app that is still starting with a STALE copy of itself would lose the very edits the
         // user is waiting to see.
-        const rec = await raceTimeout(sandboxStore.getRecord(ws), 3_000, 'doorSnapshot').catch(() => null);
-        if (shouldServeSnapshot({ enabled: previewSnapshotEnabled(), doorState: 'asleep', snapshotUrl: rec?.snapshotUrl })) {
-          return res.redirect(302, String(rec!.snapshotUrl));
+        if (shouldServeSnapshot({ enabled: previewSnapshotEnabled(), doorState: 'asleep', snapshotUrl: doorRecord?.snapshotUrl })) {
+          return res.redirect(302, String(doorRecord!.snapshotUrl));
         }
         return page(200, 'asleep');
       }
@@ -4164,6 +4167,11 @@ async function noteBuildOutcome(
       // port that has never earned a recipe still resolves instead of waiting forever.
       const hintRaw = Number(typeof req.query?.p === 'string' ? req.query.p : NaN);
       const hint = Number.isInteger(hintRaw) && hintRaw > 0 && hintRaw < 65536 ? [hintRaw] : [];
+      // The port the APP DECLARES sits between the proven one and the common list: weaker than a port
+      // we have seen serving, far stronger than a guess. Without it, an app whose preview never came up
+      // has nothing at all between the recipe and "try 3000" — which is the reported failure exactly.
+      const declaredHint = Number(doorRecord?.declaredPort);
+      if (Number.isInteger(declaredHint) && declaredHint > 0 && declaredHint < 65536) hint.push(declaredHint);
       const sweep = await raceTimeout(
         actuator.runCommand(ws, buildPortSweepCommand(portCandidates(recipe?.port, hint))),
         20_000, 'doorPortSweep',
@@ -13730,6 +13738,30 @@ async function noteBuildOutcome(
         try {
           let pkgRaw: string | undefined;
           try { pkgRaw = await actuator.readFile(workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+          // WHAT PORT DOES THIS APP SAY IT SERVES ON (declaredPort.ts, admin report 2026-08-24)?
+          //
+          // Captured here, on EVERY successful build, because the alternative — the proven-port recipe —
+          // only exists once a preview has genuinely come up. An app whose preview has never once
+          // rendered has no recipe at all, and that is exactly when the door fell through to a common-
+          // ports guess and offered 3000 for an Express app serving on 5000. The engine had even read
+          // the port and written it into its own reply; it just never captured it for a machine to use.
+          // Bounded reads, all best-effort — a port hint must never be able to affect a build.
+          try {
+            const portFiles: Record<string, string | undefined> = { 'package.json': pkgRaw };
+            for (const path of DECLARED_PORT_FILES) {
+              if (path === 'package.json' || portFiles[path] !== undefined) continue;
+              try { portFiles[path] = await withTimeout(actuator.readFile(workspaceId, path), 4_000, 'declared-port'); } catch { /* absent is normal */ }
+            }
+            const declared = declaredPortFrom(portFiles);
+            if (declared) {
+              await sandboxStore.saveDeclaredPort(workspaceId, declared.port).catch(() => {});
+              buildDiag.record({
+                phase: 'preview', severity: 'info', code: 'DECLARED_PORT',
+                message: `This app declares it serves on port ${declared.port} (from ${declared.source}). The preview will try that before any common-port guess.`,
+                autoResolved: true,
+              });
+            }
+          } catch { /* best-effort — never affects the build */ }
           // No real build script — nothing to prove, and running a placeholder would "pass" without
           // building anything, which is the fake success this whole check exists to prevent.
           if (buildScriptFrom(pkgRaw)) {

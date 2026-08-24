@@ -40797,3 +40797,69 @@ Android `.aab` run **#88** and iOS `.ipa` run **#64** both green; the iOS workfl
 processing, so green means it genuinely reached TestFlight. #2616 landed after both, and is
 SERVER-ONLY — server changes reach installed app users immediately, so the #88 bundle is still current
 for the frontend and no rebuild is needed.
+
+---
+
+## 2026-08-24 — "yeh theek se deploy ho hi nahi raha hai": the publish that half-happened, silently
+
+**The report.** The admin's connect screen read `ownership: active · host: active · SSL: active`, the
+publish reported the app live, and `mitrify.com` served an empty-site error page. All three were true
+at the same time.
+
+**Root cause (PR #2619).** A publish writes to **two** places: the shared channel whose link we hand
+back, and — for a workspace with a connected domain — that workspace's OWN site, which is the only one
+the custom domain serves. The second was best-effort, in one line:
+
+```ts
+try { if (await workspaceHasFirebaseDomain(ws)) await deployToSite(ws, files); }
+catch (e) { console.warn('custom-domain site publish failed (primary publish is live):', e); }
+```
+
+Its failure went to a Cloud Run log nobody reads. So "Your app is live at …" was reported — over a
+link that genuinely worked — while the domain had never received the build, and **no surface anywhere
+said so**. Report the part that worked, swallow the part that did not: rule 2's fake success in its
+purest form, and unfalsifiable from outside, which is why the admin reasonably concluded the DOMAIN
+connection was broken and went back to re-checking DNS that was correct all along.
+
+**Three silent paths, not one** — which is why the fix is a module and not a bigger try/catch:
+
+| | before | now |
+|---|---|---|
+| the site deploy threw | swallowed | honest note naming the domain |
+| the domain lookup threw | `firebaseDomainsForWorkspace` returns `[]` on ANY error, so a database hiccup read as "no domain connected" and skipped the deploy with no trace | `firebaseDomainsForWorkspaceStrict` returns `null` for "could not ask" |
+| the deploy failed transiently | no retry — one blip cost the user their domain until they happened to publish again | retried once; a 4xx is not (repeating it only makes them wait through a second upload) |
+
+`publishToCustomDomainSite` makes the outcome a VALUE. The primary publish is still never failed by it
+— the app really is live — but "live" no longer means "and your domain was updated" unless it was. The
+user-facing note names the DOMAIN, never the hosting vendor; the raw reason rides in `reason`, for logs
+and the admin only (white-label law).
+
+**The second half — why the user saw nothing at all.** The domain screen's Publish button had its
+OUTCOME rendered on a different view: the synchronous refusal was passed back and shown, but the
+server's real answer — the only one that can say a build failed or an app cannot be hosted — went to
+state the publish sheet renders **only in its `choose` branch**. A user standing on the domain screen
+pressed Publish, watched a spinner run and stop, saw NOTHING, and was told again to press Publish. The
+result is now an INPUT of the screen that owns the button, so neither host can be the silent one.
+`ConnectMyWebsitePanel` had rendered it correctly beside the screen — which is exactly how the other
+host could quietly not render it at all.
+
+**PR #2620 — the loop after that.** A connected domain with no release says "press Publish". For an app
+with no website half that instruction can only be refused. Same shape as the three-day "waiting for
+DNS" over a permanent conflict: telling someone to do a thing that will never work is not a wrong
+label, it is wasted days. The status route now asks the app's shape — only when it is about to say
+"press Publish", reading four manifests BY PATH (`loadWorkspaceFilesByPath`) instead of the whole
+workspace — and hides the button in that certain case.
+
+Two deliberate refusals to guess, both test-locked: **fullstack is silent** (with a backend host and
+splittable wiring the publish route genuinely does deploy the server and publish the website half —
+warning that user off would stop a working feature, worse than the loop it fixes), and **silent on
+doubt** (an unreadable workspace is treated as static-sufficient, exactly as today).
+
+**The pattern this is the fifth instance of.** A capability existed and one call site did not use it —
+`serverListenPort`, `isAgentV3FreeUser`, `detectBackendPresence`, `startNewChat`, and now the publish
+outcome, which two hosts held and one rendered. The countermeasure that generalises: make the thing an
+INPUT of the component that owns the action, so a new call site cannot forget it.
+
+**Open, honestly.** Executing the fullstack split end-to-end (building the frontend with the injected
+env and deploying both halves in order) is still decision-layer-only. The Render Blueprint connect
+remains a one-time step in Render's own UI that only the admin can complete.

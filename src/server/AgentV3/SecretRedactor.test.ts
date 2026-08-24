@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { redactSecrets, containsSecret } from './SecretRedactor';
+import { redactSecrets, containsSecret, redactEventForUser } from './SecretRedactor';
 
 describe('redactSecrets — provider key shapes', () => {
   it('masks an OpenAI/Anthropic sk- key', () => {
@@ -116,5 +116,79 @@ describe('containsSecret', () => {
   });
   it('is false for clean text', () => {
     expect(containsSecret('hello world')).toBe(false);
+  });
+});
+
+describe('markdown is the format this mostly guards now (admin report 2026-08-24)', () => {
+  /**
+   * An imported repo documented its own admin login, the model quoted it into its reply, and a REAL
+   * password reached the user's chat AND the durable report — which DOES run every field through
+   * redactSecrets. The pattern was written for `KEY=value` config text; the text it guards today is
+   * markdown prose written by a model.
+   */
+  const REAL = '### ⚠️ Admin Access\n- **URL:** `/admin/login`\n- **ID:** `aashishcpmt09`\n- **Password:** `7742039808`';
+
+  it('masks the exact string that got through', () => {
+    const out = redactSecrets(REAL);
+    expect(out).not.toContain('7742039808');
+    expect(out).toContain('[REDACTED');
+  });
+
+  it('the username beside it is NOT masked — a login id is not a credential', () => {
+    // Over-masking teaches people to ignore the mask. Only the secret half is the secret.
+    expect(redactSecrets(REAL)).toContain('aashishcpmt09');
+  });
+
+  it('handles each markdown shape a model actually writes', () => {
+    for (const line of [
+      '- **Password:** `7742039808`',
+      '**token:** `ghp_aaaaaaaaaaaa`',
+      '*secret*: `abcdefghijkl`',
+      '`api_key`: `abcdef123456`',
+      'password: `7742039808`',
+    ]) {
+      expect(redactSecrets(line), line).toContain('[REDACTED');
+    }
+  });
+
+  it('every shape that already worked still works — the pattern was widened, not replaced', () => {
+    expect(redactSecrets('PASSWORD=hunter2secret')).toBe('PASSWORD=[REDACTED:secret]');
+    expect(redactSecrets('api_key: "abcdef123456"')).toBe('api_key: "[REDACTED:secret]"');
+    expect(redactSecrets('password: 7742039808')).toBe('password: [REDACTED:secret]');
+  });
+
+  it('leaves ordinary prose alone', () => {
+    for (const s of ['The password field is required.', 'Reset your password here.', 'passwords are hashed']) {
+      expect(redactSecrets(s), s).toBe(s);
+    }
+  });
+});
+
+describe('redactEventForUser — the live stream had no net at all', () => {
+  it('masks the summary a user reads', () => {
+    const ev = { type: 'result', ok: true, summary: 'Admin **Password:** `7742039808`' };
+    const out = redactEventForUser(ev);
+    expect(out.summary).not.toContain('7742039808');
+  });
+
+  it('masks narration text too', () => {
+    const out = redactEventForUser({ type: 'narration', text: 'set password: `7742039808`' });
+    expect(out.text).not.toContain('7742039808');
+  });
+
+  it('leaves structural fields untouched — it can never mangle what the client parses', () => {
+    const ev = { type: 'result', ok: true, url: 'https://x/api?token=abc', steps: 4, summary: 'clean' };
+    expect(redactEventForUser(ev)).toEqual(ev);
+  });
+
+  it('returns the SAME object when nothing needed masking — no churn on the hot path', () => {
+    const ev = { type: 'narration', text: 'Building your app…' };
+    expect(redactEventForUser(ev)).toBe(ev);
+  });
+
+  it('survives anything that is not an event', () => {
+    expect(redactEventForUser(null)).toBeNull();
+    expect(redactEventForUser(undefined)).toBeUndefined();
+    expect(redactEventForUser('x')).toBe('x');
   });
 });

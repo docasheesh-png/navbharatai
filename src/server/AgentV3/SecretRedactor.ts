@@ -70,9 +70,34 @@ const URL_CRED_RE = /\b([a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s/:@]+):([^\s/@]+)@/g;
  * The value must be non-trivial (>= 6 chars) to skip empty/placeholder assignments.
  */
 const SECRET_KEY_NAME = /(?:secret|password|passwd|pwd|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|auth[_-]?token|client[_-]?secret|credential|conn(?:ection)?[_-]?string)/i;
+/**
+ * MARKDOWN IS THE FORMAT THIS NOW MOSTLY GUARDS, AND IT DEFEATED THE ORIGINAL PATTERN.
+ *
+ * ROOT CAUSE (admin build report 2026-08-24, reproduced against this exact function): an imported repo
+ * documented its own admin login, the model quoted it into its reply, and the whole chain — the chat
+ * summary AND the durable report, which DOES run every field through `redactSecrets` — carried a real
+ * password through untouched.
+ *
+ * The pattern was written for config files and shell output, where a secret looks like `KEY=value`.
+ * The highest-volume text it guards today is MARKDOWN PROSE WRITTEN BY A MODEL, where the same secret
+ * looks like:
+ *
+ *     - **Password:** `7742039808`
+ *
+ * Two things defeated it, and both are one character wide:
+ *   • the emphasis markers — `**` sits between the key and the colon AND immediately after the colon,
+ *     where the old pattern allowed only whitespace;
+ *   • the backtick — it was neither an accepted quote character nor excluded from the value class, so
+ *     a code-spanned value could not match at all.
+ *
+ * Emphasis is now allowed on both sides of the separator, and the backtick joins ' and " as a quote.
+ * Written as one pattern rather than a second function on purpose: a redactor with two versions is a
+ * redactor with one that is out of date.
+ */
+const MD_EMPHASIS = '(?:\\*{1,2}|_{1,2}|`)?';
 const ASSIGNMENT_RE = new RegExp(
-  // (1:key)(2:sep)(3:gap-ws)(4:quote)(5:value)(\4:matching close quote)
-  `\\b([A-Za-z0-9_.-]*${SECRET_KEY_NAME.source}[A-Za-z0-9_.-]*\\s*)([=:])(\\s*)(['"]?)([^\\s'"\`]{6,})(\\4)`,
+  // (1:key)(2:md)(3:sep)(4:md)(5:gap-ws)(6:quote)(7:value)(\6:matching close quote)
+  `\\b([A-Za-z0-9_.-]*${SECRET_KEY_NAME.source}[A-Za-z0-9_.-]*)${MD_EMPHASIS}\\s*([=:])${MD_EMPHASIS}(\\s*)(['"\`]?)([^\\s'"\`]{6,})(\\4)`,
   'gi',
 );
 
@@ -102,6 +127,10 @@ export function redactSecrets(input: unknown): string {
     out = out.replace(URL_CRED_RE, (_m, prefix: string) => `${prefix}:${mask('credential')}@`);
 
     // 4. Secret-named assignments (KEY=value / KEY: value) — preserve original spacing/quotes.
+    // The emphasis groups are non-capturing, so the callback's arguments are unchanged: the key, the
+    // separator, the whitespace gap and the quote. Anything the pattern skipped over (the `**` of a
+    // bold label) is deliberately NOT reconstructed — dropping it leaves "**Password:*** [secret]",
+    // which is still readable and, more importantly, cannot leave the value behind.
     out = out.replace(ASSIGNMENT_RE, (_m, key: string, sep: string, gap: string, q: string) =>
       `${key}${sep}${gap}${q}${mask('secret')}${q}`,
     );
@@ -179,5 +208,37 @@ export function redactDeep(value: unknown, depth = 0): unknown {
     return value;
   } catch {
     return value;
+  }
+}
+
+/**
+ * Mask credentials in the human-readable fields of an event bound for the user.
+ *
+ * WHY AN EVENT-SHAPED HELPER RATHER THAN redactSecrets AT EACH CALL SITE: the build stream has dozens
+ * of emit points and gains more every week, so "remember to redact here" is a convention, and
+ * conventions rot. Putting it on the event itself means a new event type is covered the day it is
+ * added, and an emit somebody forgets to think about is covered anyway.
+ *
+ * Deliberately touches ONLY the fields a person reads — `text` (narration/thinking) and `summary` (the
+ * final result). Structural fields (ids, urls, counts, tool payloads) are left exactly as they are, so
+ * this can never mangle something the client parses. Anything that is not an object comes back
+ * untouched, and `redactSecrets` returns its input unchanged when there is nothing to mask, which is
+ * the overwhelming majority of events.
+ */
+export function redactEventForUser<T>(event: T): T {
+  if (!event || typeof event !== 'object') return event;
+  try {
+    const e = event as Record<string, unknown>;
+    let changed = false;
+    const out: Record<string, unknown> = { ...e };
+    for (const field of ['text', 'summary'] as const) {
+      const v = e[field];
+      if (typeof v !== 'string' || !v) continue;
+      const masked = redactSecrets(v);
+      if (masked !== v) { out[field] = masked; changed = true; }
+    }
+    return (changed ? out : event) as T;
+  } catch {
+    return event; // a redactor that could throw would be able to kill the stream it is protecting
   }
 }

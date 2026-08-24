@@ -260,7 +260,7 @@ import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
-import { redactPII } from '../AgentV3/SecretRedactor';
+import { redactPII, redactEventForUser } from '../AgentV3/SecretRedactor';
 import { audit } from '../lib/audit';
 import { notePersistenceFailure, persistenceHealth } from '../lib/persistenceHealth';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
@@ -7690,7 +7690,21 @@ async function noteBuildOutcome(
     // on this raw stream instead of through AgentEventStream (where every other event is covered). Done
     // at the choke point so none of the ~15 `emit({type:'result'})` call sites has to remember, and the
     // timeline records exactly the text the user saw.
-    const emit = (e: unknown): void => { const ev = honestResultEvent(e); sessionTimeline.record(ev); broadcastBuild(rb, ev); };
+    /**
+     * THE ONE PLACE EVERYTHING THE USER SEES PASSES THROUGH — so it is the one place credentials can
+     * be stopped (admin build report 2026-08-24).
+     *
+     * An imported repo documented its own admin login, the model quoted it into its reply, and a REAL
+     * password reached the chat. The durable report already ran every field through `redactSecrets`;
+     * the live stream ran through nothing at all. Redacting per call site would mean remembering it at
+     * every emit forever — the convention-rots problem this codebase has solved twice already by moving
+     * the invariant to where the thing actually happens.
+     *
+     * Only the fields a person READS are touched (narration text, the final summary), so no structural
+     * field can be mangled, and `redactSecrets` returns its input unchanged when there is nothing to
+     * mask — which is almost every event.
+     */
+    const emit = (e: unknown): void => { const ev = redactEventForUser(honestResultEvent(e)); sessionTimeline.record(ev); broadcastBuild(rb, ev); };
     // Exposed to the finally so the LAST background checkpoint is flushed on every exit path
     // (success, error, abort). Held outside the try because `dispatcher` is block-scoped to it.
     let dispatcherForFlush: { flushCheckpoints: () => Promise<void>; markBuildActive: (active: boolean) => void } | undefined;

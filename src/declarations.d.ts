@@ -615,7 +615,7 @@ declare module 'typescript';
 declare module 'express';
 declare module 'cashfree-pg';
 declare module 'dotenv/config';
-declare module 'cheerio';
+
 declare module 'openai';
 declare module 'vite';
 declare module 'multer';

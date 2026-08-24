@@ -4,11 +4,21 @@ import App from './App.tsx';
 import './index.css';
 import { installDomTranslateGuard } from './lib/domTranslateGuard';
 import { clampFontScale, FONT_SCALE_STORAGE_KEY } from './lib/a11y';
+import { installZoomLock } from './lib/zoomLock';
 
 // FIRST, before React touches the DOM: make removeChild/insertBefore resilient so Google Translate (Chrome's
 // "Translate to Hindi", very common on this India-facing app) can't crash React with "Failed to execute
 // 'insertBefore' on 'Node' … not a child of this node". Keeps translation working instead of disabling it.
 installDomTranslateGuard();
+
+// NO PINCH-ZOOM (admin 2026-08-24: "do unglio se jaise webpage zoom karte hai woh zoom app me nahi
+// hona chahiye"). Installed here rather than in the native-shell block below on purpose: the CSS and
+// meta-tag layers of this already apply everywhere, and every other native-feel fix in index.css
+// (tap-highlight, pull-to-refresh, rubber-band) is global too — gating only this one to Capacitor
+// would leave the installed PWA behaving differently from the store build for no reason anyone could
+// state. On desktop it is inert: `gesturestart` is a touch/trackpad-pinch event, and ctrl+wheel and
+// the browser's own zoom are deliberately untouched. See src/lib/zoomLock.ts.
+installZoomLock(typeof document !== 'undefined' ? document : null);
 import { BuildProvider } from './components/ide/BuildContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { offlineQueue, installOfflineQueueFlush } from './lib/offlineQueue';

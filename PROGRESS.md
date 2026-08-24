@@ -41265,3 +41265,108 @@ it is which folder Capacitor is pointed at and whether it exists. That is what w
 the whole of the difference between an APK that works and one that opens blank.
 
 Shipped in #2635, along with the pinch-zoom lock and the E2E-typecheck fix.
+
+---
+
+## 2026-08-24 (evening) — the cost autopsy: a measured bill, and the levers it named
+
+The admin sent every provider dashboard before and after three real builds, plus the builds' own
+reports. That pairing — our token counts against the providers' own billing — is the first time this
+project has VERIFIED its cost model rather than asserted it.
+
+### The verification, because it is the part that makes everything below trustworthy
+
+Three Kimi figures moved by exactly the same amount across the window (today's consumption, total
+consumption, and the balance falling): **$0.40294**. Computed from the reports' token counts against
+`providerRates.ts`: **$0.41058**.
+
+**1.9% apart, and ours the HIGHER of the two.** The billing engine's cost model is accurate, and errs
+in the safe direction. Anthropic moved $0.00 and xAI $0.00 — the cheap-floor routing is not a policy on
+paper, it is what actually happens.
+
+For the three builds: real cost ≈ ₹43, billed ₹152.99, structural margin 3.6×. All three were free-tier
+or free-list, so the honest bottom line is **₹43 out and ₹0 in** — the margin is correct and has simply
+not been collected from anyone yet.
+
+### THE FINDING THAT REORDERED EVERYTHING: the machines cost far more than the models
+
+Anthropic this month: **$0.21**. E2B over 30 days: **$120.74**. The AI bill is a rounding error next to
+the sandbox bill, and every cost conversation before this one had it backwards.
+
+1,257 sandboxes billed 1,498 vCPU-hours — **1.19 hours EACH**, for builds that take 3 to 18 minutes.
+Roughly six sevenths of the E2B bill is machine that is not building anything.
+
+### #2634 — the orphan window was left behind by its own fix
+
+`reapAfterMs` was `max(idleLimit, maxBuildMs + 10min)` = 40 minutes, and its own comment explained why:
+a live build could not be told apart from an abandoned one, so the cut-off had to clear the longest
+legal build. **That stopped being true when the durable touch shipped** — a live build now refreshes its
+stamp every few minutes. The constant outlived its reason and nobody went back for it. Halved to 20
+minutes, derived from the touch interval rather than from the build cap, so it tracks the fact it
+depends on instead of a number that used to imply it.
+
+### #2638 — the biggest lever: a finished app stops holding a machine
+
+The idle sweep pauses an unused sandbox in 5 minutes. The Live tab's watchdog probes every 150 seconds
+by running a command INSIDE the sandbox, and any sandbox command resets the idle clock. **150 < 300, so
+the sweep could never win**: an open preview tab billed for exactly as long as it was open.
+
+Once a build is finished and a VM-free copy exists (#2613), the machine is no longer the only place the
+app lives. The probe stands down, the sweep it was beating pauses the sandbox, and the user loses
+nothing. Every condition is a reason NOT to (never during a build, never without a snapshot, never past
+a 24h trust window, never when the app changed after the snapshot), so the default stays today's
+behaviour. Being wrong costs a resume the user would have paid for anyway.
+
+### #2631 — "published" claimed more than we had established
+
+    14:18:52  PREVIEW_PUBLISHED     "Preview published at https://3000-….e2b.app"
+    14:19:23  PREVIEW_NOT_RENDERED  "the server returned 404 / Cannot GET"
+
+The url was handed over as finished and found not to work 31 seconds later; the user's next message was
+"Preview chal ke band ho gaya". Their instinct was right about the app and wrong about the moment — it
+had never worked, rather than having worked and stopped.
+
+The readiness test is NOT the defect: a listening port is the right thing to publish on, and a 404 on
+`/` is a healthy API-only dev server. `next dev` binds its port immediately and compiles a route on the
+FIRST REQUEST, so "the port is up" and "your app answers" can be a minute apart. Only the word was
+wrong, and only the word changed.
+
+### #2641 — a test suite the app cannot run
+
+The build wrote four test files importing `vitest` and `@playwright/test` and declared neither; the
+build's OWN REVIEWER said so, and the vaccine recorded TEST_SUITE_UNVERIFIED. The reconciler that
+should have caught it has worked since 2026-07-13 and simply had no test packages in its allowlist — so
+the app that most needed it, one the engine had just written tests for, was the single shape it could
+not see. Fixed with a SEPARATE dev allowlist, because a test runner in `dependencies` ships to
+production; a test pins that the two lists never share a name.
+
+### The lever table, as it now stands
+
+| Lever | Saving | State |
+|---|---|---|
+| Idle 15 → 5 min | ~₹4,470/mo | done earlier |
+| Orphan 40 → 20 min | half the orphan share | #2634 |
+| **A finished app stops holding a machine** | **the largest** | **#2638** |
+| Pause immediately after a build | ~₹500/mo | open |
+
+### Model-side savings, measured rather than guessed
+
+  • **Cache made re-reading cheap, not free.** Build C: 654,848 of 721,982 input tokens were cache
+    reads, costing $0.0982 — **49% of that build's entire model bill**. Fewer turns is therefore a
+    direct saving, and it sits ON TOP of caching rather than instead of it.
+  • **The shadow fast lane is real money for discarded output** — $0.0147 against the build's own
+    $0.0262 on the smallest of the three, i.e. **56%**. Worth understanding before it is worth keeping.
+  • k2.7 costs ~60% more than k2.5/k2.6 across input, output and cache. The weak ladder already climbs
+    only on failure; the thing to protect is that it never inverts.
+
+### Still open, honestly
+
+  • `ok: true` and money charged on a build whose own RELEASE_GATE says "nothing here was ever proven to
+    RUN" — now known to be COMMON rather than exceptional (3 of 4 recent builds), which makes it a
+    policy question rather than an edge case. The admin's decision.
+  • TIME_TO_FIRST_CALL of 111-231s across five builds, with one 43-second stretch recording nothing.
+  • `sandboxCost` is absent from the newest reports though present on 2026-08-23's — so E2B time is not
+    reaching the billed cost on those builds.
+  • The agent runs `lsof`, which is NOT installed in the sandbox, and `|| echo "Port 3000 is free"`
+    turns the missing binary into a confident false statement. `PortDiscovery.LISTENING_PORTS_COMMAND`
+    exists for exactly this and the agent does not know about it.

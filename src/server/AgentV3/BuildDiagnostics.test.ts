@@ -1521,3 +1521,40 @@ describe('HUGE_PROMPT_DISCARDED — the buried headline', () => {
     expect(d.report().issues.some((i) => i.code === 'HUGE_PROMPT_DISCARDED')).toBe(false);
   });
 });
+
+describe('the preview line must not claim more than was established', () => {
+  /**
+   * ADMIN REPORT 2026-08-24, a Next.js racing game. The timeline, from the report itself:
+   *   14:18:52  PREVIEW_PUBLISHED  "Preview published at https://3000-….e2b.app"
+   *   14:19:23  PREVIEW_NOT_RENDERED  "the server returned 404 / Cannot GET"
+   * The url was handed over as a finished thing and found not to work 31 seconds later. The user's
+   * next message was "Preview chal ke band ho gaya".
+   *
+   * The readiness test is NOT the defect: a listening port is the right thing to publish on, and for an
+   * API-only app a 404 on `/` is a healthy dev server. Next.js dev simply binds its port immediately
+   * and compiles a route on the FIRST REQUEST, so "the port is up" and "your app answers" are up to a
+   * minute apart — and only the second is what "published" sounds like.
+   */
+  it('says the ADDRESS is live and that rendering is still to be checked', () => {
+    const d = new BuildDiagnostics({});
+    d.ingestEvent({ type: 'preview', url: 'https://3000-abc.e2b.app', ts: Date.now() } as never);
+    const rec = d.report().issues.find((i) => i.code === 'PREVIEW_PUBLISHED')!;
+    expect(rec.message).toContain('https://3000-abc.e2b.app');
+    expect(rec.message).toContain('listening');
+    expect(rec.message).toContain('checked next');
+  });
+
+  it('no longer states the flat claim that was contradicted 31 seconds later', () => {
+    const d = new BuildDiagnostics({});
+    d.ingestEvent({ type: 'preview', url: 'https://x.e2b.app', ts: Date.now() } as never);
+    const rec = d.report().issues.find((i) => i.code === 'PREVIEW_PUBLISHED')!;
+    expect(rec.message).not.toMatch(/^Preview published at/);
+  });
+
+  it('the code is unchanged, so nothing that reads the timeline by code breaks', () => {
+    // Only the WORDS were overstating. Renaming the code would break every reader for no gain.
+    const d = new BuildDiagnostics({});
+    d.ingestEvent({ type: 'preview', url: 'https://y.e2b.app', ts: Date.now() } as never);
+    expect(d.report().issues.some((i) => i.code === 'PREVIEW_PUBLISHED')).toBe(true);
+  });
+});

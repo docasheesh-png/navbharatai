@@ -13,8 +13,16 @@
  * path of every visitor, for nothing. Nothing flagged it, because `noUnusedLocals` is off. #2630 and
  * #2634 removed them; this stops the next one.
  *
- * When the ~122 locals are cleaned up, delete this script and set `noUnusedLocals: true` in
- * tsconfig.json instead — one compiler flag beats a bespoke gate.
+ * When the ~100 remaining unused LOCALS are cleaned up, delete this script and set
+ * `noUnusedLocals: true` in tsconfig.json instead — one compiler flag beats a bespoke gate.
+ *
+ * ⚠️ TWO ERROR CODES, NOT ONE — and missing the second is a bug this script shipped with.
+ * TypeScript reports an unused import binding as TS6133, but when EVERY binding in a declaration is
+ * unused it reports the whole line as TS6192 instead, with no name attached. The first version
+ * matched only TS6133, so it printed "✅ No unused imports" while SEVEN entire import declarations
+ * sat unused in App.tsx and AgentProgress.tsx — the exact case that costs the most, since a whole
+ * unused declaration is a whole module kept on the load path. TS6192 needs no line-shape judgement:
+ * the code only ever refers to an import declaration, so it is always an offender.
  */
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -45,12 +53,21 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   const cache = new Map();
   const offenders = [];
+
+  // TS6133 — ONE binding unused. Only counts when the line is part of an import statement.
   for (const m of out.matchAll(/^(.+?)\((\d+),(\d+)\): error TS6133: '([^']+)' is declared but its value is never read\./gm)) {
     const [, file, line, , name] = m;
     if (!cache.has(file)) {
       try { cache.set(file, readFileSync(file, 'utf8').split('\n')); } catch { cache.set(file, []); }
     }
     if (isImportLine(cache.get(file), Number(line))) offenders.push(`${file}:${line}  ${name}`);
+  }
+
+  // TS6192 — EVERY binding in the declaration is unused. Always an import by definition, so no
+  // line-shape check applies. See the header: omitting this let seven whole declarations through.
+  for (const m of out.matchAll(/^(.+?)\((\d+),(\d+)\): error TS6192: All imports in import declaration are unused\./gm)) {
+    const [, file, line] = m;
+    offenders.push(`${file}:${line}  (entire import declaration)`);
   }
 
   if (offenders.length) {

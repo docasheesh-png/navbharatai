@@ -41010,3 +41010,107 @@ cannot be misreported as a cut-off.
   • CLOSED the same day by #2627: CREDENTIAL_SILENCE_RULE — "say where, never what" — now travels
     beside LANGUAGE_RULE on every path that produces user-facing text, including the hand-composed
     chat paths, because the turn that leaked was a SURVEY (a chat answer about code), not a build.
+
+---
+
+## 2026-08-24 — "Bahut sa faltu code hai" — what the measurement actually said, and the five changes that followed
+
+The admin asked for every line to face one question: *is this really needed?* The honest answer to
+the premise came first, before any deletion.
+
+### The premise was half wrong, and saying so was the useful part
+
+A full import graph from both real entry points found **1,496 of 1,696 source files genuinely
+reachable** — only 3.6% was dead. And of the exports that a scan called "unused", the overwhelming
+majority were TypeScript `type`/`interface` declarations that compile to **zero bytes**, or pure
+functions exported for their tests and used in their own file — this repo's own discipline, not
+waste. Agreeing that the app was "full of useless code" would have led to deleting 3.6% of the source
+and leaving the user with an app exactly as heavy as before.
+
+**The app was heavy for a completely different reason, and one line caused it.**
+
+### P1 (#2629) — the app root was a dependency
+
+`src/lib/authHeaders.ts` line 6 read `import { auth } from '../App'`. `App.tsx` statically imported
+~84 modules; `authedFetch` uses `authHeaders`; nearly every feature uses `authedFetch`. That closed a
+cycle through the root, and a bundler reads a cycle as "these cannot be separated" — which is why 55
+of the 92 lazy chunks were under 5 KB while the real code sat in one 640 KB monolith, and why an
+earlier hand-split had made first paint ~170 KB WORSE (recorded in `vite.config.ts`).
+
+None of the six symbols App.tsx exported were created there. They moved to real modules
+(`lib/authHeaders`, `lib/localStorageSafe`, `lib/githubTokenStore`), 23 importers were repointed, and
+`App.tsx` now exports only its component. Measured proof the cycle broke: GitPanel, forced into its
+own chunk, fell from **283.5 KB to 159.6 KB** — the App.tsx graph it had been dragging.
+
+### P2 (#2630) — the part the user feels
+
+16 route-level views were static imports despite rendering inside the view switcher's `<Suspense>`
+and none being the default view. Now `lazy()`:
+
+| | Before | After |
+|---|---|---|
+| Largest chunk (every user, every cold visit) | 640.3 KB gz | **354.9 KB gz** |
+| First paint total | 744.5 KB gz | **460.0 KB gz** (−38%) |
+| Total JS across all chunks | 1441 KB | 1486 KB (+45) |
+
+Total rose because splitting is not free (92 → 183 chunks). Recorded as a real increase in
+`bundleBudget.mjs` rather than waved through, and the largest-chunk ceiling was TIGHTENED 700 → 400
+so the win cannot drift back silently. `experimentalMinChunkSize` was measured against the 104
+sub-2 KB chunks and REJECTED: it saved 8 KB of total while pushing the entry back up to 360.6 KB.
+
+Four imports were dead on arrival — AdminDashboard, AIChat, WorkspacePane, DeployModal were imported
+into App.tsx and never referenced. `tsconfig` has no `noUnusedLocals`, so nothing flagged them.
+
+### P3 (#2632) — 252 files, 15,781 lines, and three near-misses
+
+The abandoned AppMakerLab engine and the subsystems only it reached. **The three scan errors caught
+before deleting anything are the part worth keeping:**
+
+1. **Tooling scripts are entry points.** Walking only from `main.tsx` and `server.ts` marked the whole
+   QualityEvaluationEngine and PreviewRunner dead — 24 files `scripts/quality-gate.ts` really uses.
+2. **`import 'x';` with no `from` is still an import.** `routes/agentv3.ts` registers the Vercel,
+   Netlify and Cloudflare deploy providers exactly that way; a from-only pattern called all three
+   dead, and their tokens are live in production.
+3. **Ambient `.d.ts` files** are loaded by tsc without an import — `declarations.d.ts` is 622 lines
+   and deleting it breaks the build outright.
+
+A fourth was caught by the suite, not by reasoning: `deadEndpointSweep.test.ts` asserted on
+`BuildEngine/CodeGenerator.ts` **by reading the path**, which no import graph can see.
+
+### P4 (#2633) — 114 MB out of the production image
+
+`lighthouse` and `cheerio`, imported nowhere. `lighthouse` is the instructive one: it passes a grep
+for its own name, because `data.lighthouseResult` in `routes/telemetry.ts` is the JSON shape Google's
+PageSpeed REST API returns. Production `node_modules` measured 849 MB → 735 MB with
+`npm ci --omit=dev` on both lockfiles. `@types/dockerode` and the two Capacitor platforms moved to
+devDependencies; both mobile workflows install with a plain `npm ci`, so the release paths are
+unaffected. **This does not make the app lighter for a user** — it is cold start, registry storage
+and CVE surface.
+
+### P5 (#2636) + the gap it shipped with
+
+Three gates: no unused imports (415 bindings removed across 68 files), a dead-code guard encoding all
+three false-positive classes above, and a rule that every runtime dependency is actually imported.
+Each found something on its first run — `MessageContent.tsx` (224 lines, rendered nowhere) and
+`simple-git` (whose only user went in P3).
+
+🔒 **AND THE GATE SHIPPED WITH A BUG, found the same day.** It matched only `TS6133`. TypeScript
+reports a declaration whose bindings are ALL unused as **`TS6192`** instead, with no name attached —
+so it printed "✅ No unused imports" while SEVEN entire import declarations sat unused in `App.tsx`
+and `AgentProgress.tsx`. That is the most expensive shape of the bug, not the least: a whole unused
+declaration keeps a whole module on the load path. Fixed, tested, and removing those seven orphaned
+three more files (`deployRequest.ts`, `versionSnapshot.ts`, `types/agents.ts`) which went with their
+tests.
+
+### Two things deliberately NOT done, and why
+
+- **~100 unused LOCALS** (dead `useState` setters, mostly App.tsx) and turning on `noUnusedLocals`.
+  An automated sweep was written, run, and **reverted**: it turned
+  `const [shared, setShared] = useState(false)` into `const [setShared] = useState(false)` — array
+  destructuring is positional, so dropping the unused FIRST element silently rebinds the setter to
+  the value. It also cut multi-line function bodies in half. Unused locals cost nothing at runtime;
+  the risk was real and the benefit was hygiene. Left for a careful, reviewed change.
+- **The unused `src/components/ui` kit** (Badge, Card, Tabs, Tooltip, Drawer, BottomSheet, the
+  barrel). Its two tests also cover LIVE siblings (Button, Input, Select, Popover), so it needs those
+  tests trimmed and snapshots regenerated — surgery that does not belong in a bulk deletion. It sits
+  in the dead-code guard's allowlist with that reason recorded.

@@ -41502,3 +41502,97 @@ they recover machine time that was escaping the timers entirely.
 **Recorded as an open item (rule 6):** the true remaining E2B numbers cannot be judged until a month
 of builds runs with the measurement in #2643 working. Before then, any further cost claim would be an
 estimate wearing a measurement's clothes — which is the thing this whole day was spent removing.
+
+---
+
+## 2026-08-24 (continued) — one disease, six organs: the artifact-for-evidence sweep
+
+Five more root causes after the cost work above (#2647–#2651). They were found separately, and only
+after the fifth did the shape become obvious enough to hunt on purpose.
+
+**THE PATTERN, stated once so a future session recognises it in one reading: something WAS taken as
+proof that something IS.** In every case an artifact of an attempt was read as the attempt's outcome,
+and the code was correct about the artifact and wrong about the world.
+
+| # | The artifact | Read as | What it actually proved |
+|---|---|---|---|
+| #2644 | we called `pause` | the machine is paused | nothing — the call could fail |
+| #2645 | `lsof \|\| echo "free"` printed | the port is free | nothing — three worlds print it |
+| #2648 | a resume ID existed | we resumed | nothing — connect can be refused |
+| #2649 | the files this build wrote | the whole app | only what this turn touched |
+| #2650 | `playwright.config.ts` exists | tests exist | intent, never coverage |
+| #2651 | `.catch(() => 0)` | zero files | nothing — the count failed |
+
+### #2647 — the honesty guard was silently off for half our users
+
+`claimAudit` is what stops the platform saying something that never happened ("no console errors" when
+the console could not be captured). Every pattern was written against English prose, while the engine
+mirrors the user's language. For anyone typing Hindi or Hinglish the guard read a sentence it could
+not parse and stayed silent. **A guard that depends on which language the user typed in is not a
+guard.** The reason was already written in the file one pattern below the gap; it had simply not been
+applied to the other three.
+
+The admin's own transcript is the case: "App tayyar hai! 🎉 App live hai: `<link>`" — link showed a
+Closed Port Error. It slipped through on `app live`, which the English pattern matches by accident.
+
+The dangerous half was the false positive. A first version allowed a 20-character window and matched
+"Preview abhi live NAHI hai" — a NEGATION, i.e. exactly what honesty sounds like. Correcting that
+would punish the one summary that got it right. Adjacency plus a lookahead closes it.
+
+### #2648 — "resumed=yes" meant an ID existed, not that we resumed
+
+Five reports carried `resumed=yes` with 200ms setup, while three of the same five recorded the durable
+store holding 22-24 files against a sandbox that read ONE, and four had to restart a stopped dev
+server. Those cannot describe one machine. `getSandbox` falls through a REFUSED `Sandbox.connect` to a
+brand-new empty `Sandbox.create`, and the report said nothing. The consequence is not cosmetic: an
+empty machine means every file restored one write at a time, a dev server restarted, dependencies
+possibly reinstalled — a large share of the 111-231s the user waits and of the E2B time we pay for.
+
+### #2649 — the journey check was shown the wrong files
+
+`Object.fromEntries(writtenFiles)`. On an edit that touched two components, `src/App.tsx` is not among
+them, so the only check that proves an app really SAVES data reported "no page components were found".
+Most builds after the first are edits, so this is the common case. Now derived from the durable
+snapshot with this turn's writes on top, at no extra I/O.
+
+Second half: for a GAME "no page" is CORRECT, and it read as an accusation. `appHasNoDataEntry`
+already existed and the gate already read it; the sentence a human reads did not.
+
+**And the mistake I made twice while fixing it**, kept in the code comments because it is this
+module's own bug class turned inward: "no data entry found" is an ABSENCE, equally true of a canvas
+game, an empty file map, and a project we hold one utility file for. Two existing tests caught it, in
+two rounds. The verdict now needs POSITIVE evidence that the project draws something.
+
+### #2650 — a config file was accepted as proof that tests exist
+
+One report carried both "this project already has an end-to-end setup, which was left alone" AND
+"playwright: COULD NOT RUN — the suite matched no test files". A config, zero tests, and a skip rule
+guaranteeing it stays that way. **Self-inflicted and self-sustaining**: our own scaffold writes a
+config AND a spec, and files do go missing from a recycled sandbox — lose the spec, keep the config,
+and the gap is permanent. Safe to fix because the writer is create-only.
+
+### #2651 — a count that FAILED was reported as a count of zero
+
+Five sites: `.catch(() => 0)` → `reason: 'not_started'` → the client renders **"Nothing has been built
+yet."** A store hiccup told a user their project did not exist. This fallback is the most dangerous of
+the six because its value is INDISTINGUISHABLE from a real measurement: `null` announces itself, `0`
+argues its case.
+
+### Method note for whoever reads this next
+
+The first five were found by reading real build reports. The sixth was found by **searching for the
+shape on purpose**, and that took minutes rather than a report cycle. If a seventh is wanted, the
+query is not a bug report — it is: *where does this code treat "we tried" as "it happened", or a
+fallback value as a measurement?* Grep for `.catch(() => 0)`, `.catch(() => [])`, `?? 0` on anything
+named `count`/`ms`/`seconds`, and any `has*`/`is*` predicate whose body checks a path rather than
+content.
+
+### Also corrected in this stretch
+
+- The **"shadow fast lane is 56% waste"** line from the earlier autopsy is WRONG and must not be acted
+  on — see the correction above. The fast lane is real work, billed correctly.
+- I told the admin the journey check "fails in 80% of builds". Four of those five reports are the SAME
+  game project. The `writtenFiles` defect is real and general; **that frequency is not established by
+  this evidence** and was overstated.
+- Store build: an `.aab` and an `.ipa` were dispatched from `main` after this cluster merged, because
+  two of the nine PRs changed FRONTEND code and bundled-mode installs cannot receive that any other way.

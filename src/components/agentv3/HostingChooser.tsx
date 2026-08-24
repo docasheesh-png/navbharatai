@@ -396,6 +396,10 @@ export function HostingChooser({
               onBack={() => setView('choose')}
               onPublish={() => publish(NBAI_HOST_ID, { away: true })}
               publishBusy={busy}
+              /* The server's own answer, on the view the user is standing on. It renders below in the
+                 `choose` branch only — which is exactly how a Publish button on THIS view came to
+                 succeed or fail in complete silence (admin 2026-08-24). */
+              publishResult={publishStatus}
               publishFreshness={publishState?.freshness}
               /* The SAME takedown the "Your published apps" list uses — one implementation, so the
                  domain screen can never drift into taking a site down differently from the list. */

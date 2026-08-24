@@ -149,13 +149,13 @@ export function ConnectMyWebsitePanel({ onBack, uid }: ConnectMyWebsitePanelProp
               onBack={() => setSelected(null)}
               onPublish={publishSelected}
               publishBusy={publishing}
+              /* The publish RESULT, verbatim. It used to be rendered BELOW this component, by this
+                 panel — which worked, and was also the reason the other host of the same screen could
+                 quietly not render it at all. It is an input of the screen now, so the button and the
+                 answer to pressing it can never again live on different surfaces. */
+              publishResult={publishMsg}
               publishFreshness={publishState?.freshness}
             />
-            {/* The publish RESULT, shown here because this panel owns the request. Verbatim, and it
-                stays put until the next attempt — a message that vanishes is a message nobody read. */}
-            {publishMsg && (
-              <p className="text-[11px] text-zinc-300 whitespace-pre-wrap leading-relaxed px-1">{publishMsg}</p>
-            )}
           </div>
         ) : (
           <div className="flex flex-col gap-3">

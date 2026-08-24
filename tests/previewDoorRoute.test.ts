@@ -95,7 +95,13 @@ describe('the door route', () => {
 
 describe('the client side of the door', () => {
   it('the live iframe prefers the door and falls back to the stored address for an older server', () => {
-    expect(surface).toContain('src={doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl}');
+    // Asserts the PRECEDENCE this test names — the door is preferred over the stored machine address —
+    // rather than the src expression's exact text. It has since gained a higher-precedence term (the
+    // saved copy served while a finished app's machine is deliberately asleep) which changes nothing
+    // about the door-vs-stored-url ordering this guards.
+    const src = surface.match(/src=\{[^}]*doorUrl[^}]*\}/)!;
+    expect(src, 'the live iframe must still resolve through the door').not.toBeNull();
+    expect(src[0].indexOf('doorUrl')).toBeLessThan(src[0].indexOf('effectiveUrl'));
   });
 
   it('NATIVE SHELL: the src goes through resolveApiHref — an iframe is a navigation the fetch patch never sees', () => {

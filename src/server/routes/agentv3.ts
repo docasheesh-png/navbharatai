@@ -312,6 +312,7 @@ import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
 import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
+import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
 import { scoreBuildOutcome, shouldAutoReport, autoReportReason, complaintInText } from '../AgentV3/buildOutcomeSignals';
 import { buildOutcomeStore, buildOutcomeTrackingEnabled, watchedMsFrom, type BuildOutcomeRecord } from '../AgentV3/BuildOutcomeStore';
 import { buildPortSweepCommand, portCandidates, parsePortSweep } from '../AgentV3/sandbox/EngineerAI/actuators/portSweep';
@@ -1653,6 +1654,21 @@ export function drainRunningBuilds(): number {
 function isBuildRunning(buildKey: string): boolean {
   const rb = runningBuilds.get(buildKey);
   return !!rb && !rb.ended;
+}
+
+/**
+ * Is ANY live build currently attached to this workspace?
+ *
+ * The registry is keyed by build key, not by workspace, so answering "is this workspace busy" means
+ * scanning it. Small by construction (one entry per in-flight build), and the alternative — assuming a
+ * workspace is idle — is what would let a cost optimisation interfere with a running build.
+ */
+function isBuildRunningFor(workspaceId: string | null | undefined): boolean {
+  if (!workspaceId) return false;
+  for (const rb of runningBuilds.values()) {
+    if (isBuildRunningForWorkspace(rb, workspaceId)) return true;
+  }
+  return false;
 }
 
 /**
@@ -4266,7 +4282,32 @@ async function noteBuildOutcome(
       let livePortUp: boolean | null = null;
       let pageRendered: boolean | null = null;
       let pageProblems: string[] = [];
-      if (diag.livePreviewAvailable) {
+      /**
+       * STOP PAYING FOR A MACHINE NOBODY NEEDS (snapshotServeDecision.ts).
+       *
+       * Measured: 1,257 sandboxes billed 1,498 vCPU-hours — 1.19 hours EACH, for builds that take 3-18
+       * minutes. The idle sweep pauses an unused sandbox in five minutes, and the reason it almost never
+       * gets to is THIS probe: it runs a command inside the sandbox every 150 seconds, and any sandbox
+       * command refreshes the idle clock. An open preview tab therefore bills for as long as it is open.
+       *
+       * Once a build is finished and a VM-free copy of it exists, the machine is no longer the only
+       * place the app lives — so we stop touching it, the sweep it was beating pauses it, and the user
+       * loses nothing. Never while a build runs, never for a full-stack app, never without a snapshot.
+       */
+      const idleServe = await (async () => {
+        try {
+          if (!previewSnapshotEnabled()) return null;
+          const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'healthIdleServe').catch(() => null);
+          if (!canServeFromSnapshot({
+            buildRunning: isBuildRunningFor(workspaceId),
+            snapshotUrl: rec?.snapshotUrl,
+            snapshotAt: rec?.snapshotAt,
+            now: Date.now(),
+          })) return null;
+          return { url: String(rec!.snapshotUrl), at: Number(rec!.snapshotAt) };
+        } catch { return null; }
+      })();
+      if (diag.livePreviewAvailable && !idleServe) {
         try {
           const actuator = buildActuator();
           const sandboxId = actuator.getSandboxId ? await raceTimeout(actuator.getSandboxId(workspaceId), 4_000, 'previewHealthSandbox').catch(() => null) : null;
@@ -4408,6 +4449,10 @@ async function noteBuildOutcome(
         // matters: they are looking at the last built version, and without being told they would
         // report a bug about an edit that is simply not in this copy.
         ...(snapshotServing ? { snapshotServing: true, snapshotNote: SNAPSHOT_NOTE, snapshotAt: snapshotTakenAt } : {}),
+        // The machine is deliberately asleep and the saved copy is answering for the app. Distinct from
+        // `snapshotServing` above, which means the machine is GONE — here it is alive and we are simply
+        // not waking it. The client frames the copy and says so; nothing is broken and nothing is lost.
+        ...(idleServe ? { idleSnapshotUrl: idleServe.url, idleSnapshotNote: SNAPSHOT_IDLE_NOTE, snapshotAt: idleServe.at } : {}),
       });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });

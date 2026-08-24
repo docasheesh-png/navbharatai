@@ -66,14 +66,56 @@ import { pathToFileURL } from 'node:url';
 // The lesson worth keeping: raising a ceiling to admit a main-chunk regression hides it behind a bigger
 // number. Split first, measure, and only then decide whether the REMAINDER is honest feature growth.
 
+// -- 2026-08-24: THE ROUTE-LEVEL SPLIT. Read this before changing either JS number. -------------
+//
+// App.tsx statically imported 16 route-level views (GitPanel, Settings, Billing, the v5.0 surface,
+// AdminDashboard, Doctor AI, Professionals, ...). None is the default view, and all render inside the
+// view switcher's <Suspense>, so nobody needed them on first paint -- but a static import is a static
+// import, and they sat in the entry chunk for every visitor. They are now `lazy()`.
+//
+// The MEASURED result, and the honest trade in it:
+//   * largest chunk (the entry EVERY user downloads): 640.3 -> 354.9 KB gz -- 285 KB less, 45% off
+//   * total JS across all chunks:                     1441  -> 1486   KB gz -- 45 KB MORE
+//
+// Total grew because splitting is not free: the build went from 92 chunks to 183, and each carries
+// module-wrapper overhead. That is the right trade -- the entry is paid by everyone on every cold
+// visit, while the new chunks are paid only by someone who actually opens that screen -- but it IS a
+// real increase and it is recorded here as one rather than waved through.
+//
+// `output.experimentalMinChunkSize: 10_000` was tried against exactly this (104 of the chunks are
+// under 2 KB) and REJECTED on measurement: it merged 183 chunks down to 145 and saved 8 KB of total,
+// while pushing the entry back UP to 360.6 KB. It made the number that matters worse to improve the
+// number that does not. Do not re-propose it without new measurements.
+//
+// THE LARGEST-CHUNK CEILING IS DELIBERATELY TIGHTENED, NOT LEFT AT 700. Leaving it there would let
+// the entry chunk drift 345 KB back up in silence -- undoing this whole change with nothing failing.
+// 400 KB is the new measurement plus ~13% headroom. If a future change needs more than that, the
+// question to answer first is "what did I just put on the first-paint path", not "what should the
+// ceiling be".
+
+/**
+ * What `main` actually measured when the budgets below were last set. EXPORTED so the unit test can
+ * assert "every budget is above today's real size" without hardcoding its own copy of these numbers.
+ *
+ * It used to hardcode them (567 / 918 / 33), and by 2026-08-24 all three were from a long-dead build
+ * — so the test asserted the budgets cleared a bar reality had left years behind, and it FAILED the
+ * moment the largest-chunk ceiling was correctly tightened to 400. A number that must match another
+ * number belongs in one place. Update this in the same edit as BUDGETS, always.
+ */
+export const LAST_MEASURED = {
+  largestChunkGzipKB: 354.9,
+  totalJsGzipKB: 1486.1,
+  totalCssGzipKB: 47.7,
+};
+
 export const BUDGETS = {
-  /** Largest single JS chunk, gzipped. Measured 648.5 KB on 2026-08-11 (the main entry). */
-  largestChunkGzipKB: 700,
-  /** Sum of all JS chunks INCLUDING lazy ones, gzipped. Measured 1347.6 KB on 2026-08-11 (feature KB +
-   *  the lazily loaded xterm terminal emulator + the lazily loaded zip reader — see header). */
-  totalJsGzipKB: 1450,
-  /** Sum of all CSS, gzipped. Measured 39.3 KB on 2026-08-11. */
-  totalCssGzipKB: 50,
+  /** Largest single JS chunk, gzipped. Measured 354.9 KB on 2026-08-24 (the main entry). */
+  largestChunkGzipKB: 400,
+  /** Sum of all JS chunks INCLUDING lazy ones, gzipped. Measured 1486.1 KB on 2026-08-24 -- see the
+   *  note above for why this rose while the chunk everyone downloads fell by 285 KB. */
+  totalJsGzipKB: 1600,
+  /** Sum of all CSS, gzipped. Measured 47.7 KB on 2026-08-24. */
+  totalCssGzipKB: 55,
 };
 
 /**

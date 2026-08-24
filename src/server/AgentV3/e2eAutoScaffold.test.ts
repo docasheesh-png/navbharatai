@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  shouldAutoScaffoldE2e, hasExistingE2e, hasUserInterface, e2eAutoScaffoldNote,
+  shouldAutoScaffoldE2e, hasExistingE2e, hasUserInterface, e2eAutoScaffoldNote, e2eConfigTestDir,
 } from './e2eAutoScaffold';
 
 const uiApp = { 'index.html': '<div id=root>', 'src/App.tsx': 'export default () => null;' };
@@ -26,17 +26,61 @@ describe('shouldAutoScaffoldE2e', () => {
     expect(d.reason).toContain('left untouched');
   });
 
-  it('never clobbers an E2E setup the project already has', () => {
+  it('never clobbers end-to-end TESTS the project already has', () => {
+    // REPOINTED, NOT WEAKENED (2026-08-24). This used to list `playwright.config.ts` alongside real
+    // spec files and assert one shared sentence for all four. That conflated a config with a suite,
+    // and the conflation was the bug: a real report carried BOTH "already has an end-to-end setup,
+    // which was left alone" AND "playwright: COULD NOT RUN — the suite matched no test files". The
+    // project most in need of the net was the only one refused it, on every build.
+    //
+    // The test's INTENT — never overwrite someone's suite — is unchanged and still asserted here. The
+    // config cases moved to their own tests below, where each gets the answer it actually deserves.
     for (const existing of [
-      { 'playwright.config.ts': '' },
-      { 'cypress.config.js': '' },
       { 'e2e/login.spec.ts': '' },
       { 'tests/e2e/checkout.test.ts': '' },
     ]) {
       const d = shouldAutoScaffoldE2e({ ...base, files: { ...uiApp, ...existing } });
       expect(d.scaffold, JSON.stringify(existing)).toBe(false);
-      expect(d.reason).toContain('already has an end-to-end setup');
+      expect(d.reason).toContain('already has end-to-end tests');
     }
+  });
+
+  it('a CONFIG with no tests is exactly when to write one — a config is intent, not coverage', () => {
+    // The reported case. Our own scaffold writes a config AND a spec, and files do go missing from a
+    // recycled sandbox; losing the spec while keeping the config used to make the gap permanent.
+    const d = shouldAutoScaffoldE2e({ ...base, files: { ...uiApp, 'playwright.config.ts': '' } });
+    expect(d.scaffold).toBe(true);
+  });
+
+  it('...and the writer cannot clobber that config, because it only ever creates', () => {
+    // Which is what makes the line above safe: the route reads each path first and skips any that
+    // exists, so a user's own config survives untouched while the missing spec is added beside it.
+    const route = readFileSync(join(__dirname, '../../server/routes/agentv3.ts'), 'utf8');
+    expect(route).toContain('if (exists) continue;');
+  });
+
+  it('declines when the config points its tests somewhere we would not write', () => {
+    // A spec nothing runs is worse than an honest skip — it looks like coverage. The directory is
+    // named so the user can act on it.
+    const d = shouldAutoScaffoldE2e({
+      ...base,
+      files: { ...uiApp, 'playwright.config.ts': "export default { testDir: './tests' }" },
+    });
+    expect(d.scaffold).toBe(false);
+    expect(d.reason).toContain('`tests/`');
+  });
+
+  it('but an UNSPECIFIED testDir is compatible — Playwright scans from the config down', () => {
+    // So `e2e/smoke.spec.ts` is found, and writing it is useful rather than dead. Treating this as
+    // incompatible would have declined the single most common shape of the bug being fixed.
+    expect(e2eConfigTestDir({ 'playwright.config.ts': 'export default {}' })).toBe('');
+    expect(shouldAutoScaffoldE2e({ ...base, files: { ...uiApp, 'playwright.config.ts': 'export default {}' } }).scaffold).toBe(true);
+  });
+
+  it('leaves Cypress alone — it has its own conventions', () => {
+    const d = shouldAutoScaffoldE2e({ ...base, files: { ...uiApp, 'cypress.config.js': '' } });
+    expect(d.scaffold).toBe(false);
+    expect(d.reason).toContain('Cypress');
   });
 
   it('skips an API-only project — a browser test there could only ever fail', () => {

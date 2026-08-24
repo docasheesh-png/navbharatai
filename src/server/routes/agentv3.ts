@@ -58,6 +58,7 @@ import {
   editModePrefix,
   dateContextBlock,
   LANGUAGE_RULE,
+  CREDENTIAL_SILENCE_RULE,
   awaitApproval,
   resolveApproval,
   GitManager,
@@ -6996,7 +6997,7 @@ async function noteBuildOutcome(
         const roleRecall = (() => {
           try { return sessionRecallContextLine(getWorkspaceMemory(roleWorkspaceId).snapshot().episodes); } catch { return ''; }
         })();
-        const system = LANGUAGE_RULE + '\n\n' + roleSystemPrompt(chatRole) + '\n\n' + recencyDirective() + roleRecall + formatRoleContext(fileTree, picked);
+        const system = LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' + roleSystemPrompt(chatRole) + '\n\n' + recencyDirective() + roleRecall + formatRoleContext(fileTree, picked);
         const roleRouter = AIRouterManager.getRouter('free');
         const { response } = await raceTimeout(roleRouter.route(prompt, system), 45_000, 'roleChat.route');
         const fullReply = response.content || '';
@@ -7587,7 +7588,7 @@ async function noteBuildOutcome(
           const { response } = await raceTimeout(
             chatRouter.route(
               chatPrompt,
-              LANGUAGE_RULE + '\n\n' +
+              LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' +
                 "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
                 "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
                 "mention which model you are.\n\n" + CREATOR_IDENTITY + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + recencyDirective() + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +

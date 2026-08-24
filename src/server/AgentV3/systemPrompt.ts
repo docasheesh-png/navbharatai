@@ -26,6 +26,34 @@ export const LANGUAGE_RULE =
   'you MUST reply entirely in English. (Code identifiers, file names and code comments always stay ' +
   'in English regardless.)';
 
+/**
+ * NEVER REPEAT A CREDENTIAL YOU FOUND IN THE USER'S OWN CODE.
+ *
+ * THE OTHER HALF OF A REAL LEAK (admin build report 2026-08-24, 50/50 law). An imported repo documented
+ * its own admin login in a markdown file; the model quoted it into its survey, and a real password
+ * reached the chat and the durable report. `redactSecrets` is the deterministic net and was widened to
+ * catch it (#2624) — but a net is recovery. This is the prevention: the value should never have been
+ * written down a second time.
+ *
+ * Deliberately narrow, and the distinction is the whole point. Naming WHERE a credential lives is
+ * useful and is exactly what a survey should do; reproducing its VALUE is never useful, because the
+ * person asking already owns the repo it came from. So the instruction is not "avoid secrets", which a
+ * model reads as "do not discuss configuration at all" — it is "say where, never what".
+ *
+ * Placed beside LANGUAGE_RULE because it belongs to the same class: a rule about the TEXT the model
+ * produces, which must hold on every path that produces user-facing text, not only on builds.
+ */
+export const CREDENTIAL_SILENCE_RULE =
+  'CREDENTIALS — SAY WHERE, NEVER WHAT: while reading a user\'s project you will come across real ' +
+  'passwords, API keys, tokens and connection strings, in .env files, config, seed data, README and ' +
+  'docs. NEVER reproduce the VALUE of one in your reply, your summary, a code block, a table or a ' +
+  'commit message — not even to be helpful, not even when the user owns the repo it came from, and ' +
+  'not even when they ask you to show it. Naming the LOCATION is correct and expected: "the admin ' +
+  'login is in server/config.ts", "DATABASE_URL is read from .env". Quoting the value is not, because ' +
+  'a chat reply and a build report are stored and shared in places the original file is not. If a ' +
+  'value genuinely matters to what you are explaining, describe its SHAPE ("a 10-digit numeric ' +
+  'password", "a Stripe live key") and say where to look.';
+
 const FRAMEWORK_HINTS: Record<string, string> = {
   'vite-react': 'SCAFFOLDING — a Vite + React + TypeScript project is ALREADY scaffolded (package.json, vite.config, index.html, src/main.tsx, src/App.tsx). Just EDIT/ADD files at ROOT. Do NOT run `npm create vite`. Run: `npm run dev` → PORT 5173. Call update_preview(5173).',
   'nextjs': 'SCAFFOLDING — a Next.js 14 App Router project is scaffolded (package.json, next.config.js, app/layout.tsx, app/page.tsx). Edit files at ROOT. Use `app/` dir (Server Components default). Do NOT run `npx create-next-app`. Run: `npm run dev` → PORT 3000. Call update_preview(3000).',
@@ -98,6 +126,8 @@ function frameworkScaffoldHint(framework?: string): string {
 export function planSystemPrompt(): string {
   return [
     LANGUAGE_RULE,
+    '',
+    CREDENTIAL_SILENCE_RULE,
     '',
     EMOJI_RULE,
     '',
@@ -324,6 +354,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     'sandbox using the tools provided.',
     '',
     LANGUAGE_RULE,
+    '',
+    CREDENTIAL_SILENCE_RULE,
     '',
     EMOJI_RULE,
     '',

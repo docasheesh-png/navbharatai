@@ -45,7 +45,7 @@ export type { AgentRunnerOptions, AgentRunResult } from './AgentRunner';
 export { resolveModel, sonnetModel, opusModel, haikuModel, fastBuildModel, opusNormalModel, ladderModel } from './models';
 export { toPowerLevel, powerSpec, type PowerLevel, type ClaudeEffort, type PowerSpec } from './powerLevel';
 export type { ClaudeLadderTier } from './models';
-export { architectSystemPrompt, planSystemPrompt, editModePrefix, dateContextBlock, LANGUAGE_RULE } from './systemPrompt';
+export { architectSystemPrompt, planSystemPrompt, editModePrefix, dateContextBlock, LANGUAGE_RULE, CREDENTIAL_SILENCE_RULE } from './systemPrompt';
 export { awaitApproval, resolveApproval, pendingApprovalCount } from './Approvals';
 export {
   NORMAL_MULTIPLIER,

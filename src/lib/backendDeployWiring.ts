@@ -184,3 +184,34 @@ export function managedDeployOutcome(
     ],
   };
 }
+
+/**
+ * THE ONE-TIME CONNECT, SPELLED OUT — because "in Render → New → Blueprint, pick your repo" is a
+ * sentence, and the person reading it has never opened Render (2026-08-24).
+ *
+ * `managedDeployOutcome`'s `needs-connect` branch is honest about WHAT is left but assumes the reader
+ * knows their way around somebody else's dashboard. The admin asked to be guided through exactly this
+ * step, which is the tell: if the person who commissioned the feature needs a walkthrough, every user
+ * does. So the same outcome now carries numbered steps with their OWN repo named in them.
+ *
+ * 🔒 THE LINK IS AN ACCELERATOR, NEVER THE ONLY PATH. Render's `render.com/deploy?repo=…` flow reads
+ * the `render.yaml` we already generated, which is exactly this case — but it is somebody else's URL
+ * and we do not control it. So the manual route ("New → Blueprint") is listed as a real step beside
+ * it, not as a fallback in small print: if the link ever changes, the guide still works. Claiming a
+ * third party's URL is guaranteed would be the same overreach as claiming a build passed without
+ * running it.
+ *
+ * Returns [] when there is no usable repo — a numbered guide that cannot name your repository is worse
+ * than the plain sentence, because it looks like it was written for someone else. PURE.
+ */
+export function renderConnectSteps(repoUrl: string): string[] {
+  const url = String(repoUrl ?? '').trim().replace(/\/+$/, '');
+  if (!/^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(url)) return [];
+  const repoPath = url.slice('https://github.com/'.length);
+  return [
+    `1. Open ${url.replace('https://github.com/', 'render.com/deploy?repo=https://github.com/')} — or go to Render and choose New → Blueprint.`,
+    `2. Pick the repository ${repoPath}. Your project already contains render.yaml, so Render reads the settings from it — you do not have to fill anything in.`,
+    '3. Give it a name and press Apply / Create. Render builds it once; this is the only time you do this.',
+    '4. Come back here and press Deploy backend again. From now on every deploy runs from NavBharatAI.',
+  ];
+}

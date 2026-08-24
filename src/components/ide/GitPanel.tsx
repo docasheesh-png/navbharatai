@@ -14,7 +14,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { TEMPLATE_PROJECTS } from './SyncedTemplates';
 import { deployCapability, sanitizeZipName, unavailableDeployMessage, isV5DeployProvider } from '../../lib/deployCapability';
-import { isBackendDeployHost, buildBackendConfigInjection, canOfferManagedDeploy, managedDeployRequest, managedDeployOutcome } from '../../lib/backendDeployWiring';
+import { isBackendDeployHost, buildBackendConfigInjection, canOfferManagedDeploy, managedDeployRequest, managedDeployOutcome, renderConnectSteps } from '../../lib/backendDeployWiring';
 import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { authedFetch } from '../../lib/authedFetch';
 
@@ -768,6 +768,12 @@ export const GitPanel: React.FC<GitPanelProps> = ({
       const json = await res.json().catch(() => null);
       const outcome = managedDeployOutcome(res.status, json);
       addLines(outcome.lines);
+      // THE ONE-TIME CONNECT, SPELLED OUT (2026-08-24). "Render → New → Blueprint" is a sentence
+      // written for someone who has used Render before; the admin asked to be walked through this
+      // exact step, which is the tell that everyone needs it. The steps name the user's OWN repo, and
+      // are empty when we cannot name it — a guide that describes somebody else's repository is worse
+      // than the plain sentence it replaces.
+      if (outcome.kind === 'needs-connect') addLines(renderConnectSteps(body.repoUrl));
       if (outcome.kind === 'deployed' && json?.url) {
         setDeployedUrl(String(json.url));
         setDeployStatus('deployed');

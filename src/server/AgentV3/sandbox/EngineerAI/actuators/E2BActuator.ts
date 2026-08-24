@@ -20,7 +20,7 @@ import { postgresWatchdogCommand, mergeEnvVar } from '../../../postgresProvision
 import { resolveTemplateId } from './fullstackRouting';
 import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
 import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
-import { idleLimitMs, reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable } from '../../../sandboxReaper';
+import { idleLimitMs, reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, shouldMarkPausedAfterFailure } from '../../../sandboxReaper';
 
 /**
  * How often a stream of user-activity pings is written to the durable record.
@@ -624,6 +624,22 @@ export class E2BActuator implements IEngineerActuator {
   /** Last time a user-activity ping was written durably, per workspace. See noteUserActivity. */
   private _lastUserActivityWrite = new Map<string, number>();
 
+  /**
+   * Consecutive pauses we asked for and could not confirm, per workspace.
+   *
+   * In memory on purpose. An instance recycle resets it to zero, which restarts the retries — the safe
+   * direction, since the expensive mistake is giving up on a machine that is still running. A durable
+   * counter would buy nothing but a schema change and a way to persist a wrong verdict.
+   */
+  private _pauseFailures = new Map<string, number>();
+
+  /** Record a pause we could not confirm and return the new count. */
+  private _notePauseFailure(workspaceId: string): number {
+    const n = (this._pauseFailures.get(workspaceId) ?? 0) + 1;
+    this._pauseFailures.set(workspaceId, n);
+    return n;
+  }
+
   private async _sweepIdleSandboxes(): Promise<void> {
     const now = Date.now();
     const limit = idleLimitMs();
@@ -642,7 +658,11 @@ export class E2BActuator implements IEngineerActuator {
           this._lastActivity.set(workspaceId, durableAt);
           continue;
         }
-        await this.pauseSandbox(sandbox.sandboxId).catch(() => {});
+        // THE ANSWER MATTERS. This used to be `.catch(() => {})` — a pause that failed was recorded
+        // as one that worked, and `markPaused` below then hid a still-running machine from the orphan
+        // reaper (`sandboxesToReap` skips anything already flagged paused). Nothing was left that
+        // could stop it, and nothing reported a fault. See PAUSE_ATTEMPTS_BEFORE_GIVING_UP.
+        const paused = await this.pauseSandbox(sandbox.sandboxId).catch(() => false);
         this._lastActivity.delete(workspaceId);
         this._lastDurableTouch.delete(workspaceId);
         // Cleared because a PAUSED machine is not being held — the next resume starts a new clock, and
@@ -650,7 +670,13 @@ export class E2BActuator implements IEngineerActuator {
         // again go permanently unmeasured. See the note there.
         this._sandboxStartedAt.delete(workspaceId);
         this._fileCache.delete(workspaceId); // free the recreate-restore cache for an idle workspace (a resume reconnects + restores from E2B; a fresh build re-populates)
-        await sandboxStore.markPaused(workspaceId).catch(() => {});
+        // The in-memory bookkeeping goes either way, because `pauseSandbox` has already dropped the
+        // reference and this sweep only ever iterates sandboxes it holds. But the DURABLE flag is the
+        // reaper's off switch, so it is written only for a pause we actually saw succeed. On failure
+        // the record stays live and the orphan reaper — whose window is wider than this one — becomes
+        // the thing that reclaims it, which is exactly the safety net it was built to be.
+        if (paused) await sandboxStore.markPaused(workspaceId).catch(() => {});
+        else this._notePauseFailure(workspaceId);
       }
     }
     await this._sweepOrphanSandboxes().catch(() => {});
@@ -681,15 +707,24 @@ export class E2BActuator implements IEngineerActuator {
     for (const rec of sandboxesToReap(records, now)) {
       if (this.sandboxes.has(rec.workspaceId)) continue; // in use here — the sweep above owns it
       const paused = await this.pauseSandbox(rec.sandboxId).catch(() => false);
-      // Stamp it either way. If the pause succeeded the compute is stopped; if it failed the sandbox
-      // is already gone or already paused. Re-trying it every two minutes forever helps in neither
-      // case, and the record stays so a returning user can still resume by id.
-      await sandboxStore.markPaused(rec.workspaceId).catch(() => {});
+      // ⚠️ THIS USED TO STAMP EITHER WAY, and the reason given was only half true. "If it failed the
+      // sandbox is already gone or already paused" covers two of the three failure modes; the third is
+      // a throttled or timed-out API call against a sandbox that is very much alive and billing. For
+      // that one, stamping is the worst possible move: `sandboxesToReap` skips a record flagged paused,
+      // so the single line meant to save money retired the only thing that could still save it.
+      //
+      // Retry instead, and give up only after enough attempts to tell a transient error from a machine
+      // that is genuinely gone. Being wrong now costs one API call per sweep rather than an hour of
+      // compute — and the record is kept regardless, so a returning user still resumes by id.
       if (paused) {
+        this._pauseFailures.delete(rec.workspaceId);
+        await sandboxStore.markPaused(rec.workspaceId).catch(() => {});
         this._lastActivity.delete(rec.workspaceId);
         this._lastDurableTouch.delete(rec.workspaceId);
         this._sandboxStartedAt.delete(rec.workspaceId);
         this._fileCache.delete(rec.workspaceId);
+      } else if (shouldMarkPausedAfterFailure(this._notePauseFailure(rec.workspaceId))) {
+        await sandboxStore.markPaused(rec.workspaceId).catch(() => {});
       }
     }
   }
@@ -1972,14 +2007,20 @@ ${paintWaitJs('p')}
       // resource directly, even if this instance never held the live object.
       // Bounded (10s, like create/connect) so a throttled E2B API can't leave the
       // periodic idle-sweep's fire-and-forget pause promise hanging forever.
-      const ok = await withTimeout(Sandbox.pause(sandboxId), 10_000, 'Sandbox.pause');
-      // Drop any live reference so the next run reconnects (and auto-resumes).
+      return await withTimeout(Sandbox.pause(sandboxId), 10_000, 'Sandbox.pause');
+    } catch {
+      return false;
+    } finally {
+      // DROP THE LIVE REFERENCE WHATEVER HAPPENED — this used to run only on success.
+      //
+      // A handle we could not confirm is a lie in every failure mode, and each one is repaired by
+      // letting go: if the pause actually landed (a 10s timeout on a call that then succeeded is the
+      // likeliest case) the object is a paused machine that answers nothing; if the sandbox is gone,
+      // it is a dead pointer; if it is alive and merely unpausable, `getSandbox` reconnects to it by
+      // its durable id, which resumes it and works. Keeping it was the only outcome with no recovery.
       for (const [wid, sb] of this.sandboxes) {
         if (sb.sandboxId === sandboxId) this.sandboxes.delete(wid);
       }
-      return ok;
-    } catch {
-      return false;
     }
   }
 

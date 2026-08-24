@@ -10023,14 +10023,47 @@ async function noteBuildOutcome(
           // read once, rather than a second store round-trip on the critical path.
           projectFilesAtTurnStart = saved;
           const scanT0 = Date.now();
-          const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+          // ⚠️ A SCAN THAT FAILED IS NOT AN EMPTY SANDBOX — and this line used to say it was.
+          //
+          // `.catch(() => ({ files: {}, skipped: [] }))` turned an unreachable sandbox into "we looked
+          // and found nothing", which the File Guardian reads as total data loss: it records
+          // `sandbox recycled/empty` in the admin report and plans a FULL restore of every stored file.
+          // Both are wrong, and the restore is doomed anyway — a sandbox we cannot list is one we
+          // cannot write to either, so those writes throw and the outer catch swallows them, leaving a
+          // build running against a broken machine and a false data-loss finding in its report.
+          //
+          // The actuator already got this right and its comment says so: `listFiles` deliberately
+          // distrusts an empty fast-path result because "a genuinely empty workspace and a
+          // silently-failed find look identical", and falls through to a slow path that THROWS. The
+          // information existed. This caller was the one discarding it.
+          //
+          // Same pattern as the six others found today (see PROGRESS.md): a fallback value standing in
+          // for a measurement that never happened.
+          let scanFailed = false;
+          const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => {
+            scanFailed = true; // could not look — never "nothing is there"
+            return { files: {} as Record<string, string>, skipped: [] as string[] };
+          });
           const scanMs = Date.now() - scanT0;
+          if (scanFailed) {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'WORKSPACE_SCAN_FAILED', autoResolved: false,
+              message: 'The workspace could not be read to check it against the saved copy, so the file '
+                + 'guardian was skipped this turn. This is NOT a report that files are missing — nothing '
+                + 'was compared.',
+              detail: `durable store holds ${Object.keys(saved).length} file(s) · scan failed after ${scanMs}ms`,
+            });
+          }
           // `existing.skipped` MUST be passed: those paths ARE in the sandbox, the scan just declined
           // to read them (excluded/too large/binary/unreadable/past a cap). Judged without it, they
           // looked missing — a false data-loss report AND an overwrite of possibly-newer content by an
           // older snapshot (mitrify autopsy 2026-08-04). See planFileGuardian's header.
           const plan = planFileGuardian(saved, existing.files, existing.skipped);
-          if (plan.count > 0) {
+          // !scanFailed is the whole point: with a failed scan EVERY stored file looks missing, so this
+          // branch would claim total data loss and then rewrite the entire project into a sandbox we
+          // could not even list — writes that throw, are caught by the outer handler, and leave a build
+          // running against a broken machine with a false finding in its report.
+          if (plan.count > 0 && !scanFailed) {
             // Fix 37c (admin: "data kyu udha, report me likh kar aaye"): record the OBSERVED cause of
             // the loss the guardian is about to repair — an empty sandbox listing means the ephemeral
             // sandbox was recycled/cold; a partial gap means specific files went missing. This lands
@@ -10077,7 +10110,7 @@ async function noteBuildOutcome(
                 : `🛡️ Recovered ${plan.count} file(s) that were missing — pulled back from history.`,
               ts: Date.now(),
             });
-          } else {
+          } else if (!scanFailed) {
             // THE COMMON CASE MUST BE TIMED TOO. A healthy resumed project restores nothing, but it
             // still paid for the durable read and the sandbox scan — and instrumenting only the repair
             // branch would leave the ordinary build exactly as silent as it is today, which is the

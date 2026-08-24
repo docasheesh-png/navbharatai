@@ -9947,8 +9947,22 @@ async function noteBuildOutcome(
           } catch { /* best-effort — a failed recall must never block the turn */ }
         }
         try {
+          // ⏱️ THE SILENT STRETCH THIS MEASURES (admin build reports: TIME_TO_FIRST_CALL 111-231s, with
+          // one 43s gap where NOTHING was recorded). Setup already reports `Workspace ready in Ns` after
+          // ensureWorkspace — and then goes quiet through the three steps below, which are the ones that
+          // grow with the SIZE of an existing project: reading every stored file, scanning the sandbox
+          // for what is already there, and writing back whatever is missing, one round-trip at a time.
+          //
+          // `longestSilentGap` can only name a stretch BETWEEN two recorded findings, so an unrecorded
+          // step is invisible to it twice over: it cannot be blamed, and it makes the gap around it look
+          // larger than any single cause. Recording the split is not a fix for the wait — it is what
+          // makes the next report able to say WHICH of the three to fix, instead of another 43s void.
+          const restoreT0 = Date.now();
           const saved = await loadWorkspaceFiles(workspaceId);
+          const loadMs = Date.now() - restoreT0;
+          const scanT0 = Date.now();
           const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+          const scanMs = Date.now() - scanT0;
           // `existing.skipped` MUST be passed: those paths ARE in the sandbox, the scan just declined
           // to read them (excluded/too large/binary/unreadable/past a cap). Judged without it, they
           // looked missing — a false data-loss report AND an overwrite of possibly-newer content by an
@@ -9974,10 +9988,19 @@ async function noteBuildOutcome(
                 `durable store holds ${Object.keys(saved).length} file(s); the live sandbox read ${existingCount}${skippedCount > 0 ? ` (plus ${skippedCount} present but not read — excluded/too large/binary)` : ''} and was genuinely missing ${plan.count} of the stored file(s) — restoring ${plan.count} (mode: ${plan.mode}). The durable store + GitHub history retained everything; only the ephemeral sandbox lost state.`,
               );
             } catch { /* diagnostics are best-effort */ }
+            const writeT0 = Date.now();
             await writeWorkspaceFiles(actuator, workspaceId, plan.restore);
             // A recycled sandbox loses binary assets too (they aren't in the text-file store or the
             // sandbox scan) — re-materialize them from the durable asset store alongside the files.
             await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
+            try {
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+                message: `Project restored in ${Math.round((Date.now() - restoreT0) / 1000)}s`,
+                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s)) · sandbox scan `
+                  + `${scanMs}ms · wrote ${plan.count} missing file(s) + assets ${Date.now() - writeT0}ms`,
+              });
+            } catch { /* timing is observation only — it must never affect a build */ }
             // The guardian used to restore files SILENTLY — no file_changed event, so the client's
             // "Files (N)" count (and the agent's own file-count answers in plain chat, above) stayed
             // stuck at the pre-restore number even though the workspace genuinely has plan.count more
@@ -9992,6 +10015,18 @@ async function noteBuildOutcome(
                 : `🛡️ Recovered ${plan.count} file(s) that were missing — pulled back from history.`,
               ts: Date.now(),
             });
+          } else {
+            // THE COMMON CASE MUST BE TIMED TOO. A healthy resumed project restores nothing, but it
+            // still paid for the durable read and the sandbox scan — and instrumenting only the repair
+            // branch would leave the ordinary build exactly as silent as it is today, which is the
+            // whole complaint. Recorded at info with no repair language, because nothing was wrong.
+            try {
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+                message: `Project checked in ${Math.round((Date.now() - restoreT0) / 1000)}s — nothing needed restoring`,
+                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s)) · sandbox scan ${scanMs}ms`,
+              });
+            } catch { /* timing is observation only — it must never affect a build */ }
           }
           // PRE-FLIGHT DEP SYNC (quiz-app autopsy 2026-07-17): the well-known-dep reconcile used to
           // run ONLY inside the end-of-build readiness pass — an INTERRUPTED build (internet cut,
@@ -10464,24 +10499,48 @@ async function noteBuildOutcome(
       // (inferred from past successful builds) as advisory defaults so the Architect leans toward
       // how this user likes to build when they don't specify a stack. Best-effort and additive —
       // returns '' (no change) for a new user or on any error; never blocks or alters the build.
-      try {
-        const prefContext = await userPreferenceStore.contextFor(userId);
-        if (prefContext) architectSystem = `${prefContext}\n\n---\n\n${architectSystem}`;
-      } catch { /* preference context is best-effort — a failure leaves the prompt unchanged */ }
+      // ⏱️ FETCHED TOGETHER, APPLIED IN ORDER (build-setup investigation, from TIME_TO_FIRST_CALL).
+      //
+      // These three were three sequential `await`s: a preference read, then an ADR read, then a lesson
+      // read, each a separate store round-trip on the critical path the user waits through. Nothing in
+      // any of them depends on the others — they were sequential only because they were written one
+      // after another, three separate features at three different times.
+      //
+      // The ORDER they are applied in still matters, because each prepends to `architectSystem` and the
+      // result is the model's prompt. So the fetches overlap and the application stays exactly as it
+      // was — the prompt is byte-identical, which is what makes this safe to do at all (and matters
+      // doubly with AGENTV3_CACHE_PREFIX, where a reordered prefix would cost a cache miss per build).
+      //
+      // Each keeps its OWN failure isolation. `allSettled`, not `all`: one unavailable store must leave
+      // the other two contexts in the prompt, exactly as three independent try/catches did.
+      const contextT0 = Date.now();
+      const [prefSettled, adrSettled, brainSettled] = await Promise.allSettled([
+        userPreferenceStore.contextFor(userId),
+        adrStore.contextFor(userId, workspaceId),
+        userLessonBrainStore.contextFor(userId),
+      ]);
+      const contextMs = Date.now() - contextT0;
+      const prefContext = prefSettled.status === 'fulfilled' ? prefSettled.value : '';
+      if (prefContext) architectSystem = `${prefContext}\n\n---\n\n${architectSystem}`;
       // GA-6 — Persistent engineering memory: inject this PROJECT's prior architecture decisions (ADRs)
       // so a follow-up build stays consistent with the established stack instead of re-deciding blind.
       // Additive + best-effort — '' (no change) for a first build or on any error; never blocks a build.
-      try {
-        const adrContext = await adrStore.contextFor(userId, workspaceId);
-        if (adrContext) architectSystem = `${adrContext}\n\n---\n\n${architectSystem}`;
-      } catch { /* ADR context is best-effort — a failure leaves the prompt unchanged */ }
+      const adrContext = adrSettled.status === 'fulfilled' ? adrSettled.value : '';
+      if (adrContext) architectSystem = `${adrContext}\n\n---\n\n${architectSystem}`;
       // Cross-Project Lesson Brain: inject the user's highest-confidence lessons learned across ALL
       // their PAST projects (proven fixes + reflections), so wisdom from project A helps project B.
       // Additive + best-effort — '' (no change) for a new user or on any error; never blocks a build.
+      const brainContext = brainSettled.status === 'fulfilled' ? brainSettled.value : '';
+      if (brainContext) architectSystem = `${brainContext}\n\n---\n\n${architectSystem}`;
       try {
-        const brainContext = await userLessonBrainStore.contextFor(userId);
-        if (brainContext) architectSystem = `${brainContext}\n\n---\n\n${architectSystem}`;
-      } catch { /* brain context is best-effort — a failure leaves the prompt unchanged */ }
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+          message: `Personal context loaded in ${contextMs}ms`,
+          detail: `preferences, past decisions and cross-project lessons, fetched concurrently · `
+            + `applied: ${[prefContext && 'preferences', adrContext && 'decisions', brainContext && 'lessons']
+              .filter(Boolean).join(', ') || 'none (new user or first build)'}`,
+        });
+      } catch { /* timing is observation only — it must never affect a build */ }
       // P-AI.4 — NLU: recognize the concrete services the user named in THIS prompt (Razorpay,
       // Supabase, Clerk, …) and inject them as explicit requirements so the agent wires those exact
       // choices instead of substituting its own defaults. Additive + best-effort — '' when nothing

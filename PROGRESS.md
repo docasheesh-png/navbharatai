@@ -41370,3 +41370,135 @@ production; a test pins that the two lists never share a name.
   • The agent runs `lsof`, which is NOT installed in the sandbox, and `|| echo "Port 3000 is free"`
     turns the missing binary into a confident false statement. `PortDiscovery.LISTENING_PORTS_COMMAND`
     exists for exactly this and the agent does not know about it.
+
+---
+
+## 2026-08-24 — the E2B bill, root-caused: four fixes, and a correction to my own autopsy
+
+Continuation of the cost autopsy above. Every open item it listed is now either fixed or has an
+honest verdict; two of them turned out to be bigger than the autopsy realised, and one of them was
+something I had got wrong.
+
+### 1. A resumed sandbox was billing ZERO for its machine time — permanently (PR #2643)
+
+The autopsy noted only that `sandboxCost` was "absent from the newest reports". The cause is worse
+than an absence: `_sandboxStartedAt` was stamped ONLY on the create/connect path in `getSandbox`. The
+idle sweep DELETES that stamp when it pauses a workspace, but leaves the sandbox object in
+`this.sandboxes` — so every later build for that workspace returns from the WARM early-exit above the
+stamp and never restores it. `sandboxHeldSeconds` then returns null, honestly reported as "not
+measured", and `sandboxCost` bills ZERO. Not for one build: **permanently, for that workspace on that
+server instance.**
+
+The evidence is exactly that shape. 2026-08-23's build was a fresh create and recorded 443s ≈ $0.0102.
+Every build on the 24th came back to a paused-then-resumed sandbox and recorded no sandbox cost at
+all — while the provider billed $124.05 for the month regardless. With `AGENTV3_BILL_SANDBOX=on` that
+whole difference was absorbed by NavBharatAI.
+
+Re-stamping on the warm path is a RESTORATION, not a patch: after a pause and a resume the machine's
+clock genuinely restarts, so "held since now" is the true answer. Guarded by `has`, so a never-paused
+sandbox keeps its original start time.
+
+**Why the class existed (the 50/50 half).** One map was written on one of two paths into the same
+function, and the second path was added later for warmth. Nothing failed when it drifted — a missing
+measurement reports itself as "not measured", which reads like an honest absence rather than a bug.
+It survived a month that way.
+
+### 2. A pause that FAILED was recorded as one that worked (PR #2644) — the big one
+
+Both sandbox sweeps asked E2B to pause a machine and then wrote the durable `pausedAt` flag
+**regardless of the answer**: the idle sweep discarded the boolean with `.catch(() => {})`, the orphan
+sweep captured it and marked anyway, on the argument that a failure means the sandbox is "already gone
+or already paused".
+
+That covers two of the three failure modes. The third is a throttled or timed-out API call against a
+machine that is very much alive and billing — and for that one, marking is the worst available move.
+`sandboxesToReap` skips any record already flagged paused, so **the single line meant to save money
+retired the only thing left that could save it.** The sandbox was simultaneously invisible to the
+in-memory sweep, whose activity stamp had just been deleted. Nothing could stop it; it billed until
+E2B's own 60-minute lifetime; and the logs recorded a success.
+
+This is the right shape for the month's unexplained number: **an average billed life of about an hour
+on a service whose idle window is 5 minutes and whose orphan window is 20.** Both timers had already
+been tightened this month, and neither could explain the gap — because a sandbox in this state is past
+the reach of both.
+
+It is also a **preview-death path**, not only a cost leak, which is the answer to the racing-game
+report: on a failed pause the map entry survived, so the next build returned a handle to a machine
+that might already be paused, and every command against it failed. That is a "Closed Port Error"
+screenshot with a billing bug behind it.
+
+Fixed three ways: `pauseSandbox` drops its live reference in a `finally` (an unconfirmed handle is a
+lie in every failure mode, and letting go repairs all three — `getSandbox` then reconnects by durable
+id, which auto-resumes); the idle sweep writes `markPaused` only for a pause it saw succeed; the
+orphan sweep retries and gives up only after three unconfirmed attempts.
+
+**Why the class existed.** A cost sweep is written to be best-effort so it can never break a build,
+and `.catch(() => {})` is how that is normally expressed. The step is right — discarding the RESULT is
+what turned best-effort into "assume it worked". The distinction only becomes visible when a
+downstream reader treats the write as authoritative, which `pausedAt` does.
+
+### 3. The engine reasoned from a check that never ran (PR #2645)
+
+A build spent seven minutes rebuilding around `lsof -i:3000 || echo "Port 3000 is free"`. That line
+prints its confident sentence in three different worlds — the port is free, the tool is missing, the
+command errored — and they are indistinguishable in the output. The same bug class as everything else
+this month: an artifact standing in for the thing it was meant to prove.
+
+The rule added to the architect prompt attacks the SHAPE, not the tool. "lsof is not installed" is a
+claim about a sandbox image that changes, so a prompt asserting it would go stale and eventually teach
+something false; `<check> || echo "<conclusion>"` is unsound whether or not the tool exists. A
+prohibition alone would only make the model invent a different unsound check, so the rule hands over
+the platform's own `/proc/net/tcp` reader — imported from `PortDiscovery`, never retyped, so the two
+cannot drift — and then points at the two answers the model already had: the scaffolding note states
+the port, and the sandbox prints "[health-check] dev server is UP on port N".
+
+### 4. The 43-second void in setup (PR #2646)
+
+`TIME_TO_FIRST_CALL` reported 111–231s with a 43s stretch where nothing was recorded. The instrument
+was working correctly: `longestSilentGap` can only name a stretch BETWEEN two recorded findings, so a
+step that records nothing is invisible to it twice over — it can never be blamed, and it makes the gap
+around it look larger than any single cause could explain.
+
+Setup said "Workspace ready in Ns" after `ensureWorkspace` and then went quiet through exactly the
+steps that grow with the SIZE of an existing project: reading every stored file, scanning the sandbox
+for what is already there, writing back what is missing. Those now report their own time, split into
+the three costs that can be shortened separately, on BOTH branches — a healthy project restores
+nothing but still paid for the read and the scan.
+
+One real latency fix found while looking: three personal-context loads (preferences, past
+architecture decisions, cross-project lessons) ran as three sequential store round-trips on the
+critical path, sequential only because they were written one after another as three features at three
+different times. They now fetch concurrently. The apply ORDER is unchanged — each prepends to the
+model's prompt, so order is content, and with `AGENTV3_CACHE_PREFIX` a reordered prefix would be a
+cache miss on every build, turning a latency fix into a cost regression. `allSettled` rather than
+`all`, so one unavailable store cannot drop the other two contexts.
+
+### A correction to my own autopsy: the "shadow fast lane" is not waste
+
+The autopsy above recorded the fast lane as "56% of a small build's model cost for discarded output".
+That is wrong on both counts, and reading the code rather than the ledger name is what showed it.
+
+The fast lane is not a shadow: when it succeeds it IS the build, and when it fails its files are
+SALVAGED into the workspace and handed to the full builder as its own prior work. Its tokens are
+billed correctly, through `captureTurnUsage`, attributed to the provider that actually delivered.
+`shadowFastLaneTokens` is an OBSERVATION ledger — it exists to answer "what share of a build is the
+fast lane?" without that answer accidentally becoming a charge. The name describes the ledger, not the
+work. **There is no unbilled lane and no discarded output; that line of the autopsy should not be
+acted on.**
+
+### Honest verdict on the one lever NOT taken
+
+"Pause the sandbox immediately after a build" (~₹500/mo in the lever table) is a **bad trade as
+stated, and it is not being built.** The saving is real but capped: 1,260 sandboxes × 5 minutes is
+~105 hours ≈ $8.70/month, and only for builds where the user genuinely walks away. Against that, it
+adds a resume wait to the single most common action in the product — build, look, tweak. The
+constitution's own proactive layer is explicit that the experience the user feels outranks an internal
+metric, and trust is the product.
+
+Both timer levers it would have joined are already spent (`AGENTV3_SANDBOX_IDLE_MINUTES` = 5,
+`reapAfterMs` = 20 min), which is precisely why the two fixes above matter more than a third timer:
+they recover machine time that was escaping the timers entirely.
+
+**Recorded as an open item (rule 6):** the true remaining E2B numbers cannot be judged until a month
+of builds runs with the measurement in #2643 working. Before then, any further cost claim would be an
+estimate wearing a measurement's clothes — which is the thing this whole day was spent removing.

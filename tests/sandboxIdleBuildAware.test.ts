@@ -18,7 +18,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { idleLimitMs, reapAfterMs, maxBuildMs } from '../src/server/AgentV3/sandboxReaper';
+import { idleLimitMs, reapAfterMs, buildFlagExpiryMs, maxBuildMs } from '../src/server/AgentV3/sandboxReaper';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 const codeOnly = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -39,11 +39,17 @@ describe('the idle window', () => {
     }
   });
 
-  it('🔒 does NOT shorten the durable reaper, which must still clear a whole build', () => {
-    // reapAfterMs catches sandboxes orphaned by an instance recycle, where no in-memory hold exists.
-    // Lowering the idle window must never drag that below one full max-length build plus a margin.
-    expect(reapAfterMs({} as NodeJS.ProcessEnv)).toBeGreaterThan(maxBuildMs({} as NodeJS.ProcessEnv));
-    expect(reapAfterMs({} as NodeJS.ProcessEnv)).toBe(maxBuildMs({} as NodeJS.ProcessEnv) + 10 * 60_000);
+  it('🔒 does NOT shorten the durable reaper — that window is decided independently', () => {
+    // THE GUARANTEE IS UNCHANGED; ITS MEASURING STICK MOVED. This asserted `> maxBuildMs`, because the
+    // orphan window used to BE `maxBuildMs + margin`. It no longer is (2026-08-24): a live build now
+    // stamps its durable record, so the window is derived from that stamp instead — see reapAfterMs.
+    // What this test protects is that lowering the IDLE window cannot drag the orphan window down with
+    // it, and that is still true and still worth pinning.
+    expect(reapAfterMs({} as NodeJS.ProcessEnv)).toBeGreaterThan(idleLimitMs({} as NodeJS.ProcessEnv));
+    expect(reapAfterMs({} as NodeJS.ProcessEnv)).toBe(20 * 60_000);
+    // And the thing that DOES still have to clear a whole build is the in-memory hold, which is now its
+    // own function precisely so this reduction could not touch it.
+    expect(buildFlagExpiryMs({} as NodeJS.ProcessEnv)).toBeGreaterThan(maxBuildMs({} as NodeJS.ProcessEnv));
   });
 });
 
@@ -72,7 +78,10 @@ describe('🔒 the sweep skips a live build', () => {
     // the sweep saves, and nobody would notice for weeks.
     expect(actuator).toContain('_buildInFlight');
     expect(actuator).toContain('this._activeBuilds.delete(workspaceId)');
-    expect(actuator).toMatch(/now - startedAt > reapAfterMs\(\)/);
+    // `buildFlagExpiryMs`, not `reapAfterMs` — the two were one function until 2026-08-24, and this
+    // assertion is where a future re-merge would be caught: the hold must expire on the BUILD ceiling,
+    // never on the orphan window, or a long build gets paused mid-run by the 5-minute sweep.
+    expect(actuator).toMatch(/now - startedAt > buildFlagExpiryMs\(\)/);
   });
 });
 

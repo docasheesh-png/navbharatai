@@ -645,6 +645,9 @@ export class E2BActuator implements IEngineerActuator {
         await this.pauseSandbox(sandbox.sandboxId).catch(() => {});
         this._lastActivity.delete(workspaceId);
         this._lastDurableTouch.delete(workspaceId);
+        // Cleared because a PAUSED machine is not being held — the next resume starts a new clock, and
+        // `getSandbox` re-stamps it on BOTH paths (warm and create) so a resumed workspace can never
+        // again go permanently unmeasured. See the note there.
         this._sandboxStartedAt.delete(workspaceId);
         this._fileCache.delete(workspaceId); // free the recreate-restore cache for an idle workspace (a resume reconnects + restores from E2B; a fresh build re-populates)
         await sandboxStore.markPaused(workspaceId).catch(() => {});
@@ -720,6 +723,23 @@ export class E2BActuator implements IEngineerActuator {
       // gets killed mid-run. Fire-and-forget — failure is non-fatal.
       existing.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
       this._touchDurable(workspaceId, existing.sandboxId);
+      // A WARM SANDBOX STILL NEEDS A START TIME, and its absence was costing real money.
+      //
+      // ROOT CAUSE (admin's own build reports, 2026-08-23 vs 2026-08-24). `_sandboxStartedAt` was
+      // stamped ONLY on the create/connect path below. The idle sweep DELETES it when it pauses a
+      // sandbox — but leaves the sandbox in `this.sandboxes`, so every later build for that workspace
+      // returns right here and never re-stamps. `sandboxHeldSeconds` then returns null, which is
+      // honestly reported as "not measured", and `sandboxCost` bills ZERO. Permanently, for that
+      // workspace on that instance.
+      //
+      // The evidence is exactly that shape: the 23rd's build was a fresh create and recorded
+      // `443s ≈ $0.0102`; every build on the 24th came back to a paused-then-resumed sandbox and
+      // recorded no sandbox cost at all — while E2B billed us $124.05 for the month regardless.
+      //
+      // Re-stamping here is CORRECT rather than a patch: after a pause and resume the machine's clock
+      // genuinely restarts, so "held since now" is the true answer. Guarded by `has`, so a sandbox that
+      // was never paused keeps its original start time and nothing about a normal build changes.
+      if (!this._sandboxStartedAt.has(workspaceId)) this._sandboxStartedAt.set(workspaceId, Date.now());
       return existing;
     }
 

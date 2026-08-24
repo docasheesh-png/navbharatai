@@ -375,6 +375,15 @@ function extractDevPort(command: string): number {
  * Phase 2 actuator: each workspaceId gets its own real e2b.dev cloud sandbox
  * (separate VM, real OS-level isolation). Requires E2B_API_KEY.
  */
+/**
+ * How a workspace's sandbox was obtained on the most recent `getSandbox`.
+ *
+ * `created-after-failed-resume` is the one worth reading: we HAD a sandbox id, asked for it, and got
+ * an error — so the machine handed back is empty and everything the workspace owns has to be restored
+ * into it. That is expensive and it is invisible in a report that only says "resumed=yes".
+ */
+export type SandboxOrigin = 'warm' | 'resumed' | 'created-after-failed-resume' | 'created-fresh';
+
 export class E2BActuator implements IEngineerActuator {
   private sandboxes = new Map<string, Sandbox>();
   private templateRegistry = new TemplateRegistry();
@@ -625,6 +634,32 @@ export class E2BActuator implements IEngineerActuator {
   private _lastUserActivityWrite = new Map<string, number>();
 
   /**
+   * HOW THIS WORKSPACE'S SANDBOX WAS OBTAINED — the outcome, not the intent.
+   *
+   * ⚠️ WHY THIS EXISTS (five real build reports, 2026-08-24). Every one of them recorded
+   * `resumed=yes` with setup finishing in ~200ms, and three of the five ALSO recorded that the durable
+   * store held 22-24 files while the live sandbox read ONE. Those two sentences cannot both describe a
+   * successful resume, and the report gave no way to tell which was wrong.
+   *
+   * The reason is that `resumed=yes` never meant "we resumed". It was
+   * `resumeSandboxId ? 'yes' : 'no (cold)'` — a report on whether an ID EXISTED, printed as though it
+   * were a report on what happened. `getSandbox` will happily fall through a failed `Sandbox.connect`
+   * to a brand-new EMPTY `Sandbox.create`, and nothing above it could see the difference. Same bug
+   * class as every other one in this file's history: an artifact standing in for the thing it was
+   * meant to prove.
+   *
+   * Observation only. Nothing branches on it — it exists so the next report can name which of
+   * "resumed", "fell back to a fresh machine" or "already warm" actually happened, which is the
+   * difference between a diagnosable data-loss finding and a contradictory one.
+   */
+  private _sandboxOrigin = new Map<string, SandboxOrigin>();
+
+  /** How this workspace's current sandbox was obtained, or null if we have not made one this process. */
+  sandboxOrigin(workspaceId: string): SandboxOrigin | null {
+    return this._sandboxOrigin.get(workspaceId) ?? null;
+  }
+
+  /**
    * Consecutive pauses we asked for and could not confirm, per workspace.
    *
    * In memory on purpose. An instance recycle resets it to zero, which restarts the retries — the safe
@@ -775,6 +810,7 @@ export class E2BActuator implements IEngineerActuator {
       // genuinely restarts, so "held since now" is the true answer. Guarded by `has`, so a sandbox that
       // was never paused keeps its original start time and nothing about a normal build changes.
       if (!this._sandboxStartedAt.has(workspaceId)) this._sandboxStartedAt.set(workspaceId, Date.now());
+      this._sandboxOrigin.set(workspaceId, 'warm');
       return existing;
     }
 
@@ -803,13 +839,20 @@ export class E2BActuator implements IEngineerActuator {
       try {
         sandbox = await withTimeout(Sandbox.connect(resumeId, this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.connect');
         await sandbox.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
+        this._sandboxOrigin.set(workspaceId, 'resumed');
       } catch {
         sandbox = await withTimeout(Sandbox.create(this._opts(undefined, framework)), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
         freshCreate = true;
+        // THE CASE THE OLD LINE COULD NOT SAY. We had an id, asked for it, and were refused — so this
+        // machine is EMPTY and every file the workspace owns must be restored into it. Recorded here
+        // rather than inferred later, because by the time the File Guardian sees an empty sandbox the
+        // reason is gone.
+        this._sandboxOrigin.set(workspaceId, 'created-after-failed-resume');
       }
     } else {
       sandbox = await withTimeout(Sandbox.create(this._opts(undefined, framework)), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
       freshCreate = true;
+      this._sandboxOrigin.set(workspaceId, 'created-fresh');
     }
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');

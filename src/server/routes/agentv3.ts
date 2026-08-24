@@ -1300,6 +1300,25 @@ export interface BillingLedgerView {
  * nothing calls is the start of a second implementation.
  */
 /**
+ * How this workspace's sandbox was actually obtained, for the setup report.
+ *
+ * Duck-typed off the actuator for the same reason `sandboxHeldSeconds` is: the LOCAL actuator used in
+ * dev and CI has no sandbox to have an origin, and a hard dependency would make an observability line
+ * a reason the route cannot load. Absence returns null and the report says "unreported" — which is the
+ * honest word for it, and is exactly what the old `resumed=yes` refused to say.
+ */
+function sandboxOriginOf(actuator: unknown, workspaceId: string): string | null {
+  try {
+    const fn = (actuator as { sandboxOrigin?: (id: string) => string | null })?.sandboxOrigin;
+    if (typeof fn !== 'function' || !workspaceId) return null;
+    const origin = fn.call(actuator, workspaceId);
+    return typeof origin === 'string' && origin ? origin : null;
+  } catch {
+    return null; // an observation must never be a reason a build fails
+  }
+}
+
+/**
  * `measuredSeconds` is a THIRD number, and it answers a different question from the other two.
  *
  * `seconds`/`usd` are what the USER was charged, and they are deliberately zero whenever sandbox
@@ -9562,8 +9581,20 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
             message: `Workspace ready in ${Math.round((Date.now() - setupT0) / 1000)}s`,
+            // ⚠️ `resumed=yes` USED TO MEAN "an id existed", NOT "we resumed" — and it was printed as
+            // though it were the second. Five real reports (2026-08-24) carried `resumed=yes` with
+            // ~200ms setup while three of them ALSO recorded the durable store holding 22-24 files
+            // against a live sandbox that read ONE. Both sentences cannot describe one successful
+            // resume, and nothing in the report could say which was wrong, because `getSandbox` falls
+            // through a REFUSED Sandbox.connect to a brand-new empty machine and said nothing.
+            //
+            // The actuator now records what actually happened, so the two lines can be read together:
+            // "created a fresh machine because the resume was refused" beside "restoring 24 files" is
+            // a complete, diagnosable story instead of a contradiction. The id we ASKED for is kept
+            // alongside it, because "had an id and still came up cold" is the interesting case.
             detail: `resume-id lookup ${resumeLookupMs}ms · sandbox create/connect + scaffold + install `
-              + `${ensureWorkspaceMs}ms · resumed=${resumeSandboxId ? 'yes' : 'no (cold)'}`,
+              + `${ensureWorkspaceMs}ms · had-resume-id=${resumeSandboxId ? 'yes' : 'no'} · `
+              + `sandbox=${sandboxOriginOf(actuator, workspaceId) ?? 'unreported'}`,
           });
         } catch { /* timing is observation only — it must never affect a build */ }
         // PREVIEW SYNC FIX (LearnLoop autopsy): the scaffold's root manifests (package.json, index.html,

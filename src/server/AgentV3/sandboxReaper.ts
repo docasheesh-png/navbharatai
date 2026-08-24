@@ -173,3 +173,36 @@ export function shouldTouchDurable(
   if (last > now) return true; // clock went backwards — refresh rather than trust it
   return now - last >= touchIntervalMs(env);
 }
+
+/**
+ * How many times a pause may fail before we stop believing the sandbox is still there.
+ *
+ * ⚠️ THE BUG THIS EXISTS FOR (found 2026-08-24, reading the sweeps against the bill). Both sweeps
+ * called `pauseSandbox` and then marked the durable record paused REGARDLESS of the answer — the idle
+ * one discarded the boolean entirely, the orphan one captured it and marked anyway. `sandboxesToReap`
+ * skips any record whose `pausedAt` is at least as new as its `updatedAt`, so one failed pause made a
+ * STILL-RUNNING machine invisible to the only thing left that could stop it. It then billed until
+ * E2B's own 60-minute lifetime, and nothing anywhere reported a fault: the sweep had logged success.
+ *
+ * That is the whole shape of this month's mystery — an average billed life of about an hour on a
+ * service whose idle window is five minutes and whose orphan window is twenty.
+ *
+ * So a failure now means RETRY, not "record it as done". Bounded, because the orphan reaper's own
+ * comment was right about the other half: a sandbox that is genuinely gone would otherwise be retried
+ * every two minutes forever. Three attempts is the same reasoning as MISSED_TOUCHES_BEFORE_REAP — far
+ * enough past a transient API error or a throttled call to mean something real, cheap enough that
+ * being wrong costs one API call rather than an hour of compute.
+ */
+export const PAUSE_ATTEMPTS_BEFORE_GIVING_UP = 3;
+
+/**
+ * After a pause we could not confirm, may we write `pausedAt` — the flag that retires the record?
+ *
+ * Only once retrying has stopped being worth it. Marking early is the expensive mistake (a running
+ * machine nothing will ever look at again); marking late costs one wasted API call per sweep. Pure.
+ */
+export function shouldMarkPausedAfterFailure(failedAttempts: number): boolean {
+  const n = Number(failedAttempts);
+  if (!Number.isFinite(n)) return false; // unknown → keep trying; the cheap side of the trade
+  return n >= PAUSE_ATTEMPTS_BEFORE_GIVING_UP;
+}

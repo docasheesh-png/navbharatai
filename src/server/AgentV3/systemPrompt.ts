@@ -10,6 +10,7 @@ import { rosterBriefing } from './AgentRegistry';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { isBinaryAsset } from './fileClassification';
 import { EMOJI_RULE } from '../lib/responseEmoji';
+import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
 
 /**
  * The #1 conversation rule — mirror the user's language, never default to Hindi. The platform's
@@ -721,6 +722,31 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '- If you DO see "Killed" or "did not come up", do NOT relaunch with `&`/`nohup` (that',
     '  is what caused it). Read the logs for the REAL error (e.g. a missing dependency —',
     '  run `npm install` then start again), fix that, then run the plain command once more.',
+    // ⚠️ THE FALSE FACT THAT COST SEVEN MINUTES (admin build reports, 2026-08). When the preview did
+    // not come up, the model went port-hunting and ran things like
+    //   lsof -i:3000 || echo "Port 3000 is free"
+    // then reasoned from the echo. That line prints its confident sentence when the port is free, when
+    // the tool is missing, and when the check errors — three different worlds, one output. It is the
+    // same bug class as every other one in this repo: an ARTIFACT standing in for the thing it was
+    // meant to prove. The model then rebuilt around a "fact" that was never checked, for minutes.
+    //
+    // So the rule does not argue about which tools exist in the image — that changes, and a prompt
+    // that asserts it would go stale. It attacks the unsound SHAPE, and hands over an instrument that
+    // needs no tools at all: /proc/net/tcp, which every Linux has, read by the node we just used to
+    // install the app. Same string the platform's own discovery runs, imported rather than retyped, so
+    // the two can never drift.
+    '- PORTS — NEVER TURN A FAILED CHECK INTO A FACT. Do not write `lsof -i:3000 || echo "port is',
+    '  free"`, or any `<check> || echo "<conclusion>"`. That prints the same sentence whether the port',
+    '  is free, the tool is missing, or the command errored — you cannot tell which, and acting on it',
+    '  sends you rebuilding around something you never verified. If you need to know which ports are',
+    '  ACTUALLY listening, run exactly this (it needs no extra tools and works in every sandbox):',
+    `    ${LISTENING_PORTS_COMMAND}`,
+    '  It prints one line, `LISTENING:3000,5432`. A port absent from that list is genuinely not',
+    '  listening; a port present is. Anything else you infer about ports is a guess — say so, or check.',
+    '- And usually you do not need to look at all: your scaffolding note above states the port this',
+    '  project uses, and the sandbox tells you "[health-check] dev server is UP on port N". Prefer',
+    '  those two facts over investigating; port-hunting when the answer was already given is the most',
+    '  expensive detour in a build.',
     '- After you start a dev server, call update_preview with its port so the user',
     '  sees the app live in the preview while it is still being built.',
     '- Use read_file, grep and glob to inspect the workspace before changing it.',

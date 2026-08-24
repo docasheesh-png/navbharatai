@@ -119,12 +119,23 @@ const APP_COMPONENT = `import { Component } from '@angular/core';
     <div style="padding: 2rem; font-family: sans-serif;">
       <h1>Hello from Angular!</h1>
       <p>Count: {{ count }}</p>
-      <button (click)="count++">Increment</button>
+      <button (click)="increment()">Increment</button>
     </div>
   \`,
 })
 export class AppComponent {
   count = 0;
+  // 🔒 A METHOD, NOT \`count++\` IN THE TEMPLATE (verified by a real build, 2026-08-24). Angular's
+  // template language is NOT JavaScript: it has no increment operator, so \`(click)="count++"\` does not
+  // merely lint badly — it fails to COMPILE, and every Angular app this scaffold made was dead on
+  // arrival:
+  //
+  //     NG5002: Parser Error: Unexpected end of expression: count++ ...
+  //     NG50:   The value 'undefined' cannot be used here.
+  //
+  // The same rule rules out \`--\`, \`+=\` and \`new\` in a template. Calling a component method is the
+  // idiomatic Angular answer and is what \`ng new\` itself generates.
+  increment(): void { this.count++; }
 }
 `;
 

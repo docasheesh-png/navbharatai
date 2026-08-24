@@ -169,6 +169,33 @@ export function detectWebDir(files: Record<string, string>, kind: 'built' | 'sta
   if (outDir) return outDir[1].replace(/^\.\//, '').replace(/\/+$/, '');
   // Otherwise the framework decides the folder.
   const { deps, build } = packageInfo(files);
+  /**
+   * 🔒 THE FOUR THAT WERE SILENTLY WRONG (measured by really building all 24 scaffolds, 2026-08-24).
+   *
+   * Everything below used to fall through to `dist`, and for these four that folder is not where the
+   * site is. Capacitor was therefore pointed at a path that does not exist, and the APK either failed
+   * to assemble or shipped EMPTY — with nothing saying why, because a wrong guess looks exactly like
+   * a right one until somebody opens the app on a phone.
+   *
+   * Angular is the nastiest of the four and is checked first: its `application` builder nests the
+   * browser bundle one level BELOW `outputPath`, so `dist/` genuinely exists — full of server bundles
+   * and stats, with no index.html anywhere in it. A folder that exists and is wrong beats a missing
+   * one for wasting somebody's afternoon.
+   *
+   * Ordered before the Vite check on purpose: SvelteKit, Nuxt and Remix all build THROUGH Vite and
+   * would otherwise be caught by `deps.vite` and told `dist`.
+   */
+  if (deps['@angular/core'] || /\bng build\b/.test(build)) {
+    // Read the real outputPath when angular.json is present; `dist/app` is this scaffold's default.
+    const ng = files['angular.json'] || '';
+    const out = ng.match(/"outputPath"\s*:\s*"([^"]+)"/);
+    const base = (out ? out[1] : 'dist/app').replace(/^\.\//, '').replace(/\/+$/, '');
+    return base.endsWith('/browser') ? base : `${base}/browser`;
+  }
+  if (deps['@sveltejs/kit']) return 'build';                    // adapter-static writes here
+  if (deps.nuxt || /\bnuxt (build|generate)\b/.test(build)) return '.output/public'; // nuxt generate
+  if (deps['@remix-run/react'] || /remix vite:build/.test(build)) return 'build/client';
+  if (deps.astro || /\bastro build\b/.test(build)) return 'dist';
   if (deps.next || /next build/.test(build)) return 'out';               // static export → out (SSR flagged elsewhere)
   if (deps['react-scripts'] || /react-scripts build/.test(build)) return 'build'; // Create React App
   if (deps.vite || /vite build/.test(build)) return 'dist';

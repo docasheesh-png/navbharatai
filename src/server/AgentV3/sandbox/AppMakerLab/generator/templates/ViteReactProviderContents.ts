@@ -20,6 +20,26 @@ export const packageJson = JSON.stringify({
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    // 🔒 @types/react AND @types/react-dom ARE LOAD-BEARING (verified by a real build, 2026-08-24).
+    //
+    // They were absent, and the build script is `tsc -p tsconfig.build.json && vite build` — so
+    // `npm run build` failed on EVERY app made with this, NavBharatAI's DEFAULT framework:
+    //
+    //     src/ErrorBoundary.tsx(29,39): error TS2339: Property 'setState' does not exist on type 'ErrorBoundary'.
+    //     src/ErrorBoundary.tsx(35,17): error TS2339: Property 'props'    does not exist on type 'ErrorBoundary'.
+    //
+    // Without React's types, `React.Component` has no members, so `this.setState` and `this.props`
+    // vanish from a class that is written perfectly correctly.
+    //
+    // ⚠️ AND THIS IS THE SECOND TIME THIS EXACT ERROR PAIR WAS "FIXED". On 2026-08-23 a real user hit
+    // it, the model rewrote ErrorBoundary.tsx four times trying to satisfy it, and the response was to
+    // add a large "PROVIDED AND CORRECT — do not rewrite this file" banner to that file. That banner
+    // treated the SYMPTOM: it told the model to stop touching a correct file while the cause — these
+    // two missing packages — survived untouched, so every later app kept failing the same way. The
+    // banner is still worth keeping (the model should not rewrite that file), but it was never the
+    // fix. This is. Proven by installing exactly these two and watching the same scaffold build clean.
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "typescript": "^5.5.3",
     "vite": "^5.4.1",

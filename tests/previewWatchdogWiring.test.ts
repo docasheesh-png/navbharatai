@@ -45,12 +45,27 @@ describe('the preview watchdog is gated on real in-app visibility', () => {
     expect(read('src/components/ide/CodeStudio.tsx')).toContain('paneVisible');
   });
 
-  it('the health route really does touch the sandbox — the premise of this whole gate', () => {
+  it('the health route still touches the sandbox — the premise of this whole gate', () => {
     // If this ever stops being true the gate becomes belt-and-braces rather than load-bearing, and
     // whoever changes it should see this test and know that.
+    //
+    // Bounded by the route's own END rather than a fixed 4000 characters: the window was outgrown the
+    // moment anything was inserted above the probe, which is the same fixed-window failure this repo
+    // has now hit seven times. The guarantee is unchanged.
     const route = read('src/server/routes/agentv3.ts');
     const at = route.indexOf("'/api/agentv3/preview-health'");
+    const end = route.indexOf("app.post('/api/agentv3/", at + 10);
     expect(at).toBeGreaterThan(-1);
-    expect(route.slice(at, at + 4000)).toContain('actuator.runCommand');
+    expect(end).toBeGreaterThan(at);
+    expect(route.slice(at, end)).toContain('actuator.runCommand');
+  });
+
+  it('but it stands the probe down when a saved copy can answer instead', () => {
+    // The premise above is now CONDITIONAL, and that is deliberate (snapshotServeDecision.ts): the
+    // probe's sandbox command is what resets the idle clock, so on a finished app with a VM-free copy
+    // it is the thing standing between us and the sweep. Asserted here so the two facts are read
+    // together — "it touches the sandbox" is true, and "only when it must" is the reason it is cheap.
+    const route = read('src/server/routes/agentv3.ts');
+    expect(route).toContain('if (diag.livePreviewAvailable && !idleServe) {');
   });
 });

@@ -232,6 +232,9 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const [liveReloadKey, setLiveReloadKey] = useState(0);
   /** Set when the server is serving the VM-free copy of this app because its machine has expired. */
   const [snapshotNote, setSnapshotNote] = useState('');
+  /** The saved copy to frame while a FINISHED app's machine is deliberately left asleep, and its note. */
+  const [idleSnapshotUrl, setIdleSnapshotUrl] = useState('');
+  const [idleSnapshotNote, setIdleSnapshotNote] = useState('');
   // "Diagnose" — reuses the build loop's real dev-server boot sequence (install/pre-kill/start/
   // port-wait/one retry) instead of guessing, so the empty state can show the REAL internal
   // reason the live preview isn't up (and self-heal + restore the URL when it actually comes up).
@@ -261,7 +264,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // Reset the viewport to Auto on a new/changed workspace too — a leftover Mobile/Tablet device frame
   // from the previous app would otherwise misrepresent the next one.
   useEffect(() => {
-    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto');
+    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setIdleSnapshotUrl(''); setIdleSnapshotNote(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto');
     // The failover guards are per-project state: a new workspace gets a fresh chance to rescue itself.
     failedOverToLive.current = false; userPickedInBrowser.current = false; setFailoverNote('');
   }, [workspaceId]);
@@ -527,6 +530,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           status?: unknown; serving?: unknown; servingProblems?: unknown;
           currentPreviewUrl?: unknown; previewUrlStale?: unknown; previewUrlNote?: unknown;
           doorUrl?: unknown; livePortUp?: unknown; snapshotServing?: unknown; snapshotNote?: unknown;
+          idleSnapshotUrl?: unknown; idleSnapshotNote?: unknown;
         } | null;
         {
           // Adopt the FIRST door link, keep it while fresh, replace it only near expiry, and DROP it
@@ -574,6 +578,14 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         // one: without this line they would report a bug about an edit that is simply not in this copy.
         setSnapshotNote(res.ok && health?.snapshotServing === true && typeof health.snapshotNote === 'string'
           ? health.snapshotNote : '');
+        // THE MACHINE IS ALIVE AND WE ARE DELIBERATELY NOT WAKING IT (snapshotServeDecision.ts).
+        // Distinct from the case above, where it is GONE. The build is finished, a saved copy of the
+        // app exists, and framing that copy is what lets the idle sweep finally pause a sandbox that
+        // this very poll was otherwise keeping awake — measured at ~1.19 billed hours per sandbox.
+        const idleUrl = res.ok && typeof health?.idleSnapshotUrl === 'string' && /^https?:\/\//i.test(health.idleSnapshotUrl)
+          ? health.idleSnapshotUrl : '';
+        setIdleSnapshotUrl(idleUrl);
+        setIdleSnapshotNote(idleUrl && typeof health?.idleSnapshotNote === 'string' ? health.idleSnapshotNote : '');
         setHealth(status);
         // NOT-SERVING (admin report 2026-08-06): the port answers but the page is a 404 / "Cannot GET".
         // We used to render that page inside the iframe AS the user's app. Record it so the UI can say
@@ -1235,6 +1247,15 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             retrying against a machine that is never coming back (previewSnapshot.ts) — this says which
             version they are looking at. Deliberately NOT an error style: nothing is wrong with their
             app, it is simply the copy from its last build. */}
+        {/* The finished app is being served from its saved copy so no machine is held open for it.
+            Deliberately the same calm style as the expired-machine note and NOT an error: nothing is
+            wrong, nothing is missing, and the only thing the user could be surprised by — that an edit
+            brings the live server back — is what the line says. */}
+        {!snapshotNote && idleSnapshotNote && (
+          <div className="flex items-start gap-2 px-3 py-2 border-b border-zinc-700 bg-zinc-900/60 text-[11px] text-zinc-300">
+            <span className="flex-1">{idleSnapshotNote}</span>
+          </div>
+        )}
         {snapshotNote && (
           <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/30 text-[11px] text-amber-200">
             <span className="flex-1">{snapshotNote}</span>
@@ -1299,7 +1320,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
                 address, so a dead sandbox resolves to our own reconnecting page instead of a vendor
                 error, and a moved app resolves to wherever it now lives. A remount (reload button,
                 watchdog) re-resolves. effectiveUrl stays as the fallback for an older server. */}
-            <iframe key={liveReloadKey} title="Live preview" src={doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; }} className="w-full h-full bg-white border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+            <iframe key={liveReloadKey} title="Live preview" src={idleSnapshotUrl || (doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl)} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; }} className="w-full h-full bg-white border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
           </ResponsiveFrame>
         )}
       </div>

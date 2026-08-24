@@ -7,7 +7,17 @@ const PKG = JSON.stringify({
   private: true,
   scripts: { dev: 'vite dev --host 0.0.0.0 --port 5173', build: 'vite build', preview: 'vite preview --host 0.0.0.0 --port 4173' },
   dependencies: { '@sveltejs/kit': '^2.5.0', svelte: '^5.0.0' },
-  devDependencies: { '@sveltejs/adapter-node': '^5.0.0', vite: '^5.2.0' },
+  // 🔒 @sveltejs/vite-plugin-svelte IS REQUIRED AND WAS MISSING (verified by a real install,
+  // 2026-08-24). svelte.config.js below imports `vitePreprocess` from it on its very first lines, so
+  // the package is not optional tooling — it is a direct import of the config the build loads first.
+  // Without it `npm install` itself failed, which means NOT ONE SvelteKit app this scaffold produced
+  // could ever start. SvelteKit's own `npm create svelte` has always included it; it was simply
+  // omitted here, and nothing checked because no test ever ran a real install.
+  devDependencies: {
+    '@sveltejs/adapter-node': '^5.0.0',
+    '@sveltejs/vite-plugin-svelte': '^3.1.1',
+    vite: '^5.2.0',
+  },
   type: 'module',
 }, null, 2);
 

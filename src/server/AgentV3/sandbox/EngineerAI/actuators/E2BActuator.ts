@@ -44,6 +44,7 @@ import {
 } from '../../../PreviewVerify';
 import { assertWriteAllowed } from '../../../greenFreeze';
 import { shellQuote } from '../../../../lib/shellQuote';
+import { needsLegacyPeerDeps } from '../../../npmInstallFallback';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -532,8 +533,8 @@ export class E2BActuator implements IEngineerActuator {
       // Fell through: let the ERESOLVE branch below look at the ORIGINAL log too.
     }
 
-    // Step 3: ERESOLVE peer-dep conflict — retry with --legacy-peer-deps
-    if (/ERESOLVE|peer dep(endenc)?/i.test(installLog)) {
+    // Step 3: peer-dep conflict — retry with --legacy-peer-deps
+    if (needsLegacyPeerDeps(installLog)) {
       const retry = await sandbox.commands.run('npm install --legacy-peer-deps', {
         cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
       }).catch((err: any) => commandFailureResult(err));

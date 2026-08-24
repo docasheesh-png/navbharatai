@@ -35,6 +35,7 @@ import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
 import { preflightAndHeal, preflightUserMessage } from '../lib/mobileShipPreflight';
 import { aiRepairEnabled, aiRepairModelChain, normalizeRepairTier } from '../lib/mobileBuildAiRepair';
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
+import { apkRefusalForProject } from '../lib/frameworkCapability';
 
 /** GitHub's own limit on a repository name, plus the characters it accepts. */
 export function isValidRepoName(name: string): boolean {
@@ -131,6 +132,24 @@ export function registerMobileSetupRoutes(app: Express): void {
       try { await mergeWorkspaceFiles(workspaceId, preflight.changed); } catch { /* the push still proceeds */ }
     }
     appFiles = preflight.files;
+
+    /**
+     * 🔒 IS THERE ANYTHING FOR AN APP TO SHOW? (admin 2026-08-24, the 24-framework sweep.)
+     *
+     * Nine of the twenty-four frameworks in the picker — Express, Hono, NestJS, Fastify, FastAPI,
+     * Flask, Spring Boot, Go, Django — build a server that answers with JSON. They have no screens.
+     * Packaged into Capacitor they produce an APK that installs, opens, and shows a blank page: a file
+     * was created, and it is useless to whoever installs it. That is the fake success rule 2 forbids,
+     * and it is worse here than elsewhere because the artefact reaches somebody's phone.
+     *
+     * Refused BEFORE the GitHub repo is created, so a project that cannot become an app does not leave
+     * a half-prepared repository behind for the user to clean up.
+     *
+     * Refuses only on POSITIVE evidence — any screen at all, or any shape the classifier cannot call a
+     * server, proceeds exactly as before. See apkRefusalForProject.
+     */
+    const noUi = apkRefusalForProject(appFiles);
+    if (noUi) return res.status(422).json({ error: noUi, code: 'no-ui' });
 
     const includeIos = ios !== false;
     // Pin the Android JDK to what THIS app's Capacitor major needs (read from its package.json), so the

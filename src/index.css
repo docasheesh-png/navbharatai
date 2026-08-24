@@ -33,6 +33,21 @@ html, body {
    horizontal scrolling — only the boundary overscroll that triggered nav. */
 * {
   overscroll-behavior-x: none;
+  /* NO PINCH-ZOOM (admin 2026-08-24: "do unglio se jaise webpage zoom karte hai woh zoom app me nahi
+     hona chahiye"). `pan-x pan-y` permits both scroll directions and withholds exactly two gestures:
+     pinch-zoom and double-tap-zoom.
+
+     🔒 ON `*` DELIBERATELY, AND IT HAS TO BE. Pinch is a gesture of the two elements UNDER THE
+     FINGERS, not of the document — so declaring it on `html, body` alone leaves it working the moment
+     both fingers land on any ordinary div, which is essentially always. The universal selector is
+     also the SAFEST place for it rather than the most aggressive: `*` has zero specificity, so any
+     component that one day genuinely needs its own touch-action (a drawing canvas, a custom slider)
+     overrides this simply by declaring it.
+
+     Nothing in the app sets touch-action today (grepped), so this changes no existing behaviour, and
+     ordinary scrolling — including inside every nested scroll container — is untouched. See
+     src/lib/zoomLock.ts for why CSS alone does not finish the job on iOS. */
+  touch-action: pan-x pan-y;
 }
 
 /* NATIVE-FEEL FIX (admin audit 2026-07-26). The default mobile tap-highlight paints a translucent

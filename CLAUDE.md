@@ -875,6 +875,14 @@ same way a green Cloud Run deploy is — it is not optional cleanup.
 **What counts as a trigger (use judgement — do NOT over-build):**
 - ✅ A roadmap **phase/Tier** completes, or a named milestone (a cluster of merged PRs that forms
   one shippable increment), or the admin explicitly asks for a build.
+- ✅ **STANDING INSTRUCTION (admin 2026-08-24, verbatim: "jab jab mai bolu to aab aur ipa bana
+  dena"): whenever the admin asks, build BOTH — the Android `.aab` AND the iOS `.ipa`, together.**
+  Not one or the other, and no waiting for a phase boundary: their word IS the trigger. Both
+  workflows are dispatched (`android-aab.yml` and `ios-ipa.yml`, ref `main`), both are polled to
+  green in the background, and both run URLs are reported back. ⚠️ Build from **`main`**, after the
+  work is merged — an `.aab` cut from a feature branch is not the app anyone is shipping. And per
+  the BUNDLED-MODE note above, a FRONTEND change reaches installed users ONLY through a fresh
+  bundle, which is precisely why this instruction exists.
 - ❌ NOT every individual small PR. Each `.aab` run consumes CI and burns a Play `versionCode`
   (it auto-increments per run), so batch to phase/checkpoint boundaries, not micro-commits.
 

@@ -22,8 +22,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="NavBharatAI" />
 
-    <!-- Safe-area / notch support -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Safe-area / notch support, and NO PINCH-ZOOM (admin 2026-08-24: "do unglio se jaise webpage
+         zoom karte hai woh zoom app me nahi hona chahiye").
+
+         `user-scalable=no, maximum-scale=1` is the ANDROID half of the answer and is honoured there.
+         iOS has ignored it since Safari 10, on purpose — so on iPhone this line does nothing on its
+         own and the real blocker is the `gesturestart` handler in src/lib/zoomLock.ts. The CSS
+         `touch-action: pan-x pan-y` in index.css is the third layer (Chrome's standards-based one).
+         All three are needed; each platform answers to a different mechanism. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     
     <!-- Open Graph (Metadata for WhatsApp, Telegram, Discord link sharing) -->
     <meta property="og:title" content="NavBharatAI v5.0" />

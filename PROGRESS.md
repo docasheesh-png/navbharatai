@@ -40863,3 +40863,34 @@ INPUT of the component that owns the action, so a new call site cannot forget it
 **Open, honestly.** Executing the fullstack split end-to-end (building the frontend with the injected
 env and deploying both halves in order) is still decision-layer-only. The Render Blueprint connect
 remains a one-time step in Render's own UI that only the admin can complete.
+
+### 2026-08-24 (later) — the Render Blueprint step: guided, and an OPEN root cause recorded honestly
+
+**What shipped.** `managedDeployOutcome`'s `needs-connect` branch was honest about what was left —
+"in Render → New → Blueprint, pick your repo" — but written for someone who has used Render before.
+The admin asked to be walked through that exact step, which is the tell: if the person who
+commissioned the feature needs a walkthrough, every user does. `renderConnectSteps(repoUrl)` now
+returns four numbered steps naming the user's OWN repository, shown only on that branch. It returns
+`[]` when the repo cannot be named — a guide that describes somebody else's repository is worse than
+the plain sentence it replaces. The Render deploy link is offered as an ACCELERATOR beside the manual
+route in the same step, never instead of it: it is a third party's URL and we do not control it.
+
+**🔴 OPEN ROOT CAUSE (rule 6) — the one-time Blueprint connect should not exist at all.** The real fix
+is not a better guide, it is no manual step: Render's API can CREATE a service from a repo, and we
+already generate the `render.yaml` it would read. `renderDeploy.ts` only ever LISTS services and
+triggers a deploy on one that already exists, so a user with no service gets an instruction instead of
+a backend.
+
+**Why it was NOT built today, stated plainly rather than attempted:** this session's network egress to
+Render's API documentation is blocked (`api-docs.render.com` — 403 at the proxy), so the exact request
+body for service creation could not be verified. Writing that call from memory would either 400 —
+which the user would experience as exactly the failure we are removing — or, worse, succeed with a
+wrong shape and create a MISCONFIGURED, possibly billable service in the user's own Render account.
+Guessing at an API that spends someone else's money is precisely the 0.01%-doubt case safeguard #3
+exists for.
+
+**To close it:** verify `POST /v1/services` (required fields, the `serviceDetails` /
+`envSpecificDetails` nesting, allowed `plan`/`region`/runtime values) and how `ownerId` is obtained
+from `GET /v1/owners`; then create-if-absent inside `deployBackendToRender`, AFTER `matchRenderService`
+finds nothing, so it can never duplicate an existing service. The free plan must be explicit, and the
+honest fallback to the guide above must remain for every failure path.

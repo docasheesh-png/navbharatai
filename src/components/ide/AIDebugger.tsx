@@ -1,9 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import {
-  Bug, Wand2, Copy, Check, ChevronDown, ChevronRight,
-  Loader2, Clock, X, History, Shield,
-  Lightbulb, Search, Code2, CheckCircle2, FileSearch
-} from 'lucide-react';
+import { Bug, Wand2, Copy, Check, ChevronDown, ChevronRight, Clock, X, History, Shield, Lightbulb, Search, Code2, CheckCircle2, FileSearch } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { AppScanPanel } from './AppScanPanel';
 

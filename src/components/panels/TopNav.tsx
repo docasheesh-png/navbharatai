@@ -4,7 +4,6 @@ import { Menu, X, RotateCcw, LogOut, Maximize2, User, Settings, ChevronDown, Shi
 import { cn } from '../../lib/utils';
 import type { ViewType } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { signOut } from 'firebase/auth';
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from '../../lib/signOutFlow';
 import { signOutEverywhere } from '../../lib/firebase';
 import {

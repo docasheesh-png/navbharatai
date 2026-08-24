@@ -1,9 +1,5 @@
-import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import {
-  Github, ExternalLink, ShieldCheck, Sparkles, X, CreditCard, Loader2,
-  Clock, Link as LinkIcon, AlertCircle, Settings, Globe, Lock,
-} from 'lucide-react';
+import { Github, ExternalLink, ShieldCheck, Sparkles, X, CreditCard, Clock, Link as LinkIcon, AlertCircle, Settings, Globe, Lock } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { AuthComponent } from '../AuthComponent';

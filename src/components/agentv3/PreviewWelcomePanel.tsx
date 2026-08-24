@@ -13,7 +13,7 @@
 // user who had built nothing). The copy and the state rule live there, unit-tested; this file is only
 // the picture.
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import makeInIndia from '../../assets/make-in-india.jpg';
 import { welcomeLine, WELCOME_HEADLINE, WELCOME_LINE_MS } from './previewWelcome';
 

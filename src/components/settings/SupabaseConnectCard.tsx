@@ -14,7 +14,7 @@
 //    genuinely usable — the server earns that verdict by polling, so the UI does not have to guess.
 //  • Disconnect says plainly that Supabase must be told separately; we do not imply we revoked it.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Database, Check, Loader2, ExternalLink, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
 import { V3_TAB_FLAG, V3_VIEW } from '../agentv3/v3TabPersistence';

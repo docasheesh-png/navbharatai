@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  CheckCircle2, Clock, Play, Plus, AlertCircle,
-  RefreshCcw, Loader2, ChevronDown, ChevronRight, Trash2, X
-} from 'lucide-react';
+import { CheckCircle2, Clock, Play, Plus, AlertCircle, RefreshCcw, ChevronDown, ChevronRight, Trash2, X } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { resolveAppSource, hasAnalysableApp, appSourceGuidance } from '../../lib/workspaceSource';

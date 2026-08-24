@@ -8,7 +8,6 @@
 // aria-hidden throughout: it is decoration beside a label that already says what the template is, so
 // announcing "group of empty divs" to a screen reader would be noise, not information.
 
-import React from 'react';
 import { sketchFor, type SketchShape } from './starterSketchShapes';
 
 /** One bar/box in a sketch. `w` is a percentage so the whole thing scales with its container. */

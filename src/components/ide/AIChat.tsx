@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { playTapTone } from '../../lib/tapTone';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
-import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Search, Volume2 } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Heart, Zap, ShieldCheck, Languages, ShieldAlert, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -9,7 +9,7 @@ import ReactMarkdown from 'react-markdown';
 import { AttachMenu } from '../AttachMenu';
 import { saveSecret } from '../../lib/secretsApi';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
-import { AgentProgress, BuildStep } from './AgentProgress';
+import { AgentProgress } from './AgentProgress';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { MessageEditActions } from '../chat/MessageEditActions';

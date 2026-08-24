@@ -22,24 +22,7 @@ import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
 // AgentV3Launcher removed — v5.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
 import { fetchBuildSession } from './services/buildService';
-import {
-  Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
-  Terminal, Activity, Cpu, Settings, X, Shield, ShieldCheck, Eye, EyeOff, Lock, Wallet, CreditCard,
-  Globe, FileCode, GitBranch, Play, Monitor, Search, ChevronRight, Gamepad2, Sparkles,
-  FolderOpen, Trash2, Plus, FilePlus, FolderPlus, Save, MoreHorizontal, Rocket, LayoutDashboard, Database, 
-  Github, HardDrive, RefreshCw, Menu, History, Clock, Smartphone, ThumbsUp, ThumbsDown, Copy, Check,
-  Link as LinkIcon, List, GitCommit, Share2, Box, Folder, UploadCloud, ChevronLeft,
-  Edit2, Camera, Upload, Download, Image as ImageIcon, Info, LogIn,
-  GitFork, GitMerge, History as HistoryIcon, UserPlus, LogOut, CheckCircle2, AlertCircle, RotateCcw,
-  Gift, Palette,
-  Mic, BarChart2, Languages, Layout, TrendingUp,
-  Bug, Gauge, Puzzle, Search as SearchIcon,
-  Globe as GlobeIcon, Users2, Figma,
-  Bell, Minimize2, Moon, IndianRupee as RupeeIcon,
-  Wand2, Package,
-  Kanban, CloudUpload, LayoutTemplate, HeartPulse,
-  Briefcase, FileText, LayoutGrid, Layers
-} from 'lucide-react';
+import { Bot, Zap, MessageSquare, Heart, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Minimize2, Briefcase, LayoutGrid, Layers } from 'lucide-react';
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
 // Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
@@ -53,14 +36,11 @@ import { ReportSheet } from './components/ReportSheet';
 import { useShakeToReport } from './hooks/useShakeToReport';
 // EngineerAIChat retired — replaced by NavBharatAI Pro v5.0 (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { triggerCashfreeCheckout } from './services/paymentService';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, getRedirectResult, GithubAuthProvider, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { onAuthStateChanged, getRedirectResult, GithubAuthProvider, User as FirebaseUser } from 'firebase/auth';
 // One shared, tested describer for social sign-in outcomes (see socialSignInPolicy).
 import { socialRedirectFailureMessage, authErrorDetail } from './components/socialSignInPolicy';
-import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
-import { firebaseConfig } from './config/firebase';
 
 // Firebase init now lives in ONE place — src/lib/firebase.ts (root-cause fix 2026-07-11: a second
 // initializeApp there with a stale JSON config either crashed with app/duplicate-app or, load-order
@@ -124,7 +104,7 @@ import axios from 'axios';
 
 import { AgentProgress, BuildStep } from './components/ide/AgentProgress';
 import { useBuild } from './components/ide/BuildContext';
-import { ThemeMode, THEME_MODES, getThemeClasses } from './lib/theme';
+import { getThemeClasses } from './lib/theme';
 import { useDevLogs } from './hooks/useDevLogs';
 import { usePaymentEngine } from './hooks/usePaymentEngine';
 import { usePreviewBundler } from './hooks/usePreviewBundler';
@@ -135,14 +115,8 @@ import { useGitHubConnect } from './hooks/useGitHubConnect';
 import { useSettings } from './hooks/useSettings';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { Agent, isVishwakarmaAgent } from './types/agents';
-import {
-  Message, ChatSession, ApiKeys, AppSecret, BrainConfig,
-  ViewType, SettingsScreen, FileSystem, ErrorType, ErrorContext, Log, PROVIDER_CONFIG,
-} from './types';
-import {
-  generateUCI, getRandomElement, generateSmartHeuristicSummary,
-  dedupAndSortMessages,
-} from './lib/chatUtils';
+import { Message, ChatSession, ApiKeys, ViewType, SettingsScreen, FileSystem, ErrorContext } from './types';
+import { generateUCI } from './lib/chatUtils';
 import {
   stripFences, buildSourceAppPreview, buildUniversalPreview, injectHarness,
 } from './lib/previewUtils';
@@ -151,32 +125,22 @@ import { safeLocalJson } from './lib/safeLocalJson';
 
 // AuthComponent → moved to AppModals
 // ReportProblemComponent → lazy above
-import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
 import { OtherAIView } from './components/home/OtherAIView';
 import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
 import { makeWorkspaceSyncer, type WorkspaceSyncer } from './lib/workspaceSync';
-import { saveFile, saveAllFiles, loadAllFiles, clearWorkspace, deleteFile as storageDeleteFile } from './lib/storage';
+import { saveFile, loadAllFiles, clearWorkspace, deleteFile as storageDeleteFile } from './lib/storage';
 import { getAgentV3WorkspaceId } from './lib/agentv3Workspace';
 import { chunkFilesForSync, totalFilesBytes } from './lib/chunkFilesForSync';
-import type { PreviewProblem } from './lib/previewProblems';
-import {
-  type ApnapanProfile,
-  APNAPAN_DEFAULT_PROFILE,
-  loadApnapanProfile,
-  saveApnapanProfile,
-  updateApnapanProfile,
-} from './lib/apnapanEngine';
+import { type ApnapanProfile, loadApnapanProfile, saveApnapanProfile, updateApnapanProfile } from './lib/apnapanEngine';
 import {
   type VersionSnapshot,
   buildVersionSnapshot,
   appendVersionSnapshot,
 } from './lib/versionSnapshot';
-import { pickGreetingForAgent } from './lib/agentGreetings';
 import { validateDeployInput, buildDeployBody } from './lib/deployRequest';
 import { isZipFile, isTextFile, classifyZipSize } from './lib/uploadClassify';
-import { resolveSessionSurface } from './lib/sessionRouting';
 import {
   DEFAULT_HOME_DATA,
   DEFAULT_ABOUT_DATA,

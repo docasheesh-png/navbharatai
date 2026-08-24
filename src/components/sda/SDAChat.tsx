@@ -1,14 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import {
-  Send, Loader2, AlertTriangle, BookOpen, FileText, User,
-  Stethoscope, ClipboardList, X, RefreshCw,
-  Paperclip, Image as ImageIcon, FileSearch,
-  Mic, MicOff, Download, BarChart2, Pill, TestTube,
-  Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2
-} from 'lucide-react';
+import { Send, AlertTriangle, BookOpen, FileText, User, Stethoscope, ClipboardList, X, RefreshCw, Paperclip, FileSearch, Mic, MicOff, Download, BarChart2, Pill, TestTube, Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
-import { TirangaLoader } from '../ui/TirangaLoader';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import ReactMarkdown from 'react-markdown';
 import { doc, getDoc, setDoc } from 'firebase/firestore';

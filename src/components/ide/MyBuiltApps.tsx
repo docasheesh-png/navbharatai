@@ -20,7 +20,7 @@
 //    the middle of fixing an old one, so every row's state is read live from GitHub rather than cached,
 //    and a build whose file has gone says so and offers a rebuild instead.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Package, RefreshCw, Trash2, AlertTriangle, Clock, CheckCircle2, X } from 'lucide-react';
 import { PublishToNavStore } from './PublishToNavStore';
 

@@ -1,7 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { 
-  Keyboard, X, RotateCcw, Search, Move, ChevronDown
-} from 'lucide-react';
+import { Keyboard, X, Search, Move, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 

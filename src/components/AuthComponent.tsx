@@ -22,7 +22,7 @@ import { Capacitor } from '@capacitor/core';
 import { raceNativeAuth, settleWithinOrProceed, preLoginWebSignOutAllowed } from '../lib/nativeAuthGuard';
 import { normalizePhone } from '../lib/phoneNumber';
 import { motion } from 'motion/react';
-import { X, AlertCircle, Loader2, Github } from 'lucide-react';
+import { X, AlertCircle, Github } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';

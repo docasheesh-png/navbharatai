@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Loader2, Sparkles, X, FileText, Clock, LogIn, Wallet } from 'lucide-react';
+import { Send, Sparkles, X, FileText, Clock, LogIn, Wallet } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';

@@ -1,10 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  FolderOpen, FileCode, Plus, FilePlus, FolderPlus,
-  ChevronRight, ChevronDown, MoreVertical, Trash2,
-  Edit2, HardDrive, Search, ArrowUpDown, SortAsc, Github, Lock, Image,
-  CheckSquare, Square, X, AlertTriangle
-} from 'lucide-react';
+import { FolderOpen, FileCode, FilePlus, FolderPlus, ChevronRight, ChevronDown, Trash2, HardDrive, Search, SortAsc, Github, Lock, Image, CheckSquare, Square, AlertTriangle } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { svgPreviewSrc } from '../../lib/svgPreview';
 import { motion, AnimatePresence } from 'motion/react';

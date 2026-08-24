@@ -4,7 +4,7 @@
  * Extracted from App.tsx (was the `activeView === 'deploy'` block, ~32 lines).
  * Shows the "App is Live!" success screen with the deployment URL.
  */
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import { Rocket, Globe, Copy, Check } from 'lucide-react';
 

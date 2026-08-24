@@ -10,7 +10,7 @@
  * never nag, forcing is a separate decision) are the part worth testing exhaustively, and they should
  * not be entangled with React.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { decideUpdate, updateMessage, parseStoreVersion, type UpdateVerdict } from '../lib/appUpdate';
 import { openAppStoreForUpdate, playUpdateAvailability } from '../lib/mobileNative';
 

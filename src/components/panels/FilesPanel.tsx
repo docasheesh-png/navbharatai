@@ -8,9 +8,9 @@
  *
  * Owns the hidden file input ref internally.
  */
-import React, { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { isSecretFile, maskSecretContent, maskNotice } from '../../lib/secretMask';
-import { FolderOpen, Upload, Download, FileCode, ChevronRight, History, GitCommit, RotateCcw, Loader2, Plus, Trash2, Pencil, Check, X, Copy, Eye } from 'lucide-react';
+import { FolderOpen, Upload, Download, FileCode, History, GitCommit, RotateCcw, Plus, Trash2, Pencil, Check, X, Copy, Eye } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { listBuildHistory, fetchBuildVersion } from '../../services/buildService';
 import type { VersionMeta } from '../../services/buildService';

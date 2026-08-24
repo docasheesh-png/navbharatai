@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { TestTube, Check, AlertCircle, Code, Download, Copy, Zap, FileCode, ChevronRight } from 'lucide-react';
+import { useState } from 'react';
+import { TestTube, Check, AlertCircle, Download, Copy, Zap, FileCode, ChevronRight } from 'lucide-react';
 import { sampleInputValue } from '../../server/QualityEvaluationEngine/TestDataManager';
 
 type TestStatus = 'pending' | 'pass' | 'fail' | 'skip';

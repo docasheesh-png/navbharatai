@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Download, X, Sparkles } from 'lucide-react';
 import { useAppUpdateNotice } from '../lib/appUpdateNotice';
 import { updateNoticeFor } from '../lib/updateNoticeI18n';

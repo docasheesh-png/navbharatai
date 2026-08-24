@@ -1,6 +1,5 @@
 // P-DESIGN.4 — Bar chart (dependency-free SVG). Thin renderer over chartGeometry.barLayout (pure).
 
-import React from 'react';
 import { barLayout } from './chartGeometry';
 
 export interface BarChartProps {

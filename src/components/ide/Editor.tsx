@@ -1,11 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MonacoEditor, { loader } from '@monaco-editor/react';
 import { cn } from '../../lib/utils';
-import {
-  X, Bug, Save, FileCode, Check,
-  ChevronRight, MoreVertical, RotateCcw, Search,
-  Globe, Paintbrush, Braces, FileText, Image, FolderOpen
-} from 'lucide-react';
+import { X, Bug, Save, FileCode, Check, ChevronRight, RotateCcw, Search, Globe, Paintbrush, Braces, FileText, Image, FolderOpen } from 'lucide-react';
 import type { FC, SVGProps } from 'react';
 
 type IconComponent = FC<SVGProps<SVGSVGElement> & { className?: string }>;

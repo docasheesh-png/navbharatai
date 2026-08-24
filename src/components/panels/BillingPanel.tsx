@@ -8,7 +8,6 @@
  * Pure render — all state and side effects stay in App.tsx and are threaded in
  * via explicit typed props. No behavior change.
  */
-import React from 'react';
 import { cn } from '../../lib/utils';
 import { FreeGiftBanner } from './FreeGiftBanner';
 import { HostingPlanCard } from './HostingPlanCard';

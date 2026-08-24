@@ -6,7 +6,7 @@
 // build never writes — so the preview looked permanently "disconnected" from the v5.0 engine.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles } from 'lucide-react';
+import { RotateCcw, ExternalLink, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles } from 'lucide-react';
 import { canOfferRestart, restartStatusLine } from './previewRestart';
 import { nextDoorUrl } from './previewDoorClient';
 import { resolveApiHref } from '../../lib/apiBase';
@@ -23,7 +23,7 @@ import { shouldFailoverToLive, liveFailoverNotice, noLiveRescueNotice, rescueAct
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
-import { frameworkRunsInBrowser, serverFrameworkLabel } from '../../lib/frameworkDetect';
+import { frameworkRunsInBrowser } from '../../lib/frameworkDetect';
 import { inBrowserRefusal } from './inBrowserRefusal';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { LIVE_SERVER_PAID_NOTE, LIVE_SERVER_PAID_TAG, isLiveServerNoticeDismissed, dismissLiveServerNotice } from '../../lib/liveServerNotice';

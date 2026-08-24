@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Puzzle, Search, Zap, Check, X, Plus, Settings, Download, RefreshCw, Shield, Database, Globe, BarChart2, Layers, ChevronRight } from 'lucide-react';
+import { useState } from 'react';
+import { Puzzle, Search, Check, X, Plus, Shield } from 'lucide-react';
 
 interface Plugin {
   id: string;

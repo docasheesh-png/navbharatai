@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Languages, Globe, Plus, Trash2, Check, X, Copy, Download, Search, Edit2, ChevronRight, RefreshCw, Upload, FileCode } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Languages, Plus, Trash2, Check, X, Copy, Download, Search, Upload } from 'lucide-react';
 
 interface TranslationKey {
   key: string;

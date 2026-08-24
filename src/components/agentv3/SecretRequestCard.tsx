@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Key, Eye, EyeOff, ChevronDown, Loader2, AlertCircle, Sparkles, HelpCircle } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { findRecipeSource } from '../../lib/credentialRecipes';

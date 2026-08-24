@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Donut } from './Donut';
 import { BarChart } from './BarChart';

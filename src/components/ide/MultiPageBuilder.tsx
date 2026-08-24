@@ -1,10 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { escapeHtml } from '../../lib/escapeHtml';
-import {
-  Plus, FileCode, GripVertical, MoreVertical, Pencil, Copy, Trash2,
-  Download, FolderOpen, FileText, Globe, Layout, Eye, X, ChevronRight,
-  Palette, AlignLeft, Menu, Layers, Check, Monitor, RefreshCw, Loader2, History, AlertTriangle
-} from 'lucide-react';
+import { Plus, FileCode, GripVertical, MoreVertical, Pencil, Copy, Trash2, Download, FolderOpen, Globe, Layout, Eye, X, ChevronRight, AlignLeft, Menu, Layers, Check, Monitor, Loader2, History, AlertTriangle } from 'lucide-react';
 import { AppTargetPicker, useUserApps, useAppFiles, saveFilesToApp } from './AppTargetPicker';
 import { useIsNarrow } from '../../hooks/useIsNarrow';
 

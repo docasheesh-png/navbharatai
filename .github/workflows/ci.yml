@@ -65,6 +65,15 @@ jobs:
       - name: Typecheck (frontend)
         run: npm run typecheck
 
+      # An unused import is not a style nit — it keeps its whole module on the load path. App.tsx
+      # imported five components it never rendered (AdminDashboard, AIChat, WorkspacePane,
+      # DeployModal, MessageContent): ~50 KB gzipped shipped to every visitor for nothing, and
+      # nothing flagged it because `noUnusedLocals` is off (it would also fail on ~122 unused LOCALS,
+      # which are a separate, behaviour-touching cleanup). Retire this step for the compiler flag
+      # once those are done — see the script header.
+      - name: No unused imports (dead weight on the first-paint path)
+        run: node scripts/noUnusedImports.mjs
+
       - name: Typecheck (server modules - strict guardrail)
         run: npm run typecheck:server
 

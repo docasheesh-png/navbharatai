@@ -1,7 +1,6 @@
 // Authenticated client for the /api/push device-token endpoints — mirrors secretsApi.ts exactly (same
 // auth-header pattern, same bounded-timeout fetch, same honest-error surfacing).
 
-import { auth } from './firebase';
 import { authHeader as authHeaders } from './authHeaders';
 
 

@@ -153,7 +153,10 @@ describe('a host with nothing on its port is never framed', () => {
     // An older server sends no field; `=== false` keeps that case on today's behaviour rather than
     // blanking the preview for everyone the moment the field is missing.
     expect(surface).toContain('setPortDown(res.ok && health?.livePortUp === false);');
-    expect(surface).toContain('{unreachable || (portDown && !diagnosing) ? (');
+    // Same repoint as previewUnreachable's: assert that portDown shares the refuse-to-frame branch,
+    // not the branch's exact literal. That literal has since grown a third term (framingUnchecked,
+    // 2026-08-24) which changes nothing about this guarantee.
+    expect(surface).toMatch(/\{unreachable \|\| \(portDown && !diagnosing\)[^?]*\? \(/);
   });
 
   it('it stands down while a wake/diagnose is in flight — that is when the port is MEANT to be down', () => {

@@ -322,9 +322,14 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       if (j.available === false) {
         // Honest dormant state, matching the git panel's calm copy — the project's files are safe;
         // the sandbox just needs waking. Never a fake prompt.
-        const message = j.reason === 'dormant'
-          ? `Workspace is dormant after a restart — your ${j.savedFileCount} saved file${j.savedFileCount === 1 ? '' : 's'} ${j.savedFileCount === 1 ? 'is' : 'are'} safe. Send a message in NavBharatAI Pro v5.0 chat to bring the sandbox back online, then the terminal works again.`
-          : 'Sandbox not active yet — start a build in NavBharatAI Pro v5.0 chat to bring the terminal online.';
+        // 'unknown' means the server could not COUNT this workspace's files, which is not the same as
+        // counting none — it used to be flattened into the second message below, telling someone with a
+        // real project to go start one. See workspaceDormancy.ts on the server.
+        const message = j.reason === 'unknown'
+          ? 'Could not check this workspace just now — try again in a moment.'
+          : j.reason === 'dormant'
+            ? `Workspace is dormant after a restart — your ${j.savedFileCount} saved file${j.savedFileCount === 1 ? '' : 's'} ${j.savedFileCount === 1 ? 'is' : 'are'} safe. Send a message in NavBharatAI Pro v5.0 chat to bring the sandbox back online, then the terminal works again.`
+            : 'Sandbox not active yet — start a build in NavBharatAI Pro v5.0 chat to bring the terminal online.';
         setStatus({ kind: 'unavailable', message });
         term.write(`\x1b[90m${message}\x1b[0m\r\n`);
         // The exact precondition, dim and on its own line. It is meaningless to most users and

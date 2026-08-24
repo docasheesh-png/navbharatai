@@ -310,8 +310,17 @@ describe('Code Studio shows the SAME app the rest of the product does', () => {
     expect(fn).toContain('sanitizeWakeError');
     // Only attempted for a workspace that really holds a project, and only when a sandbox exists to wake.
     const open = routes.slice(routes.indexOf("app.post('/api/agentv3/shell/open'"), routes.indexOf("app.get('/api/agentv3/shell/stream'"));
-    expect(open).toContain('hasProject > 0 && canWake');
+    // REPOINTED, AND MADE RENAME-PROOF (2026-08-24). This asserted the literal `hasProject > 0 &&
+    // canWake`, so renaming the variable broke a test whose subject had not changed — the seventh time
+    // a fixed literal in this repo stopped covering the thing it names. Matched on the SHAPE instead:
+    // a positive file count AND the autowake gate, whatever the count is called.
+    expect(open).toMatch(/\w+ \?\? 0\) > 0 && canWake|\w+ > 0 && canWake/);
     expect(open).toContain("AGENTV3_TERMINAL_AUTOWAKE !== 'off'");
+    // AND IT MUST STILL FAIL CLOSED ON AN UNKNOWN COUNT. The count now yields null when it could not
+    // be taken (workspaceDormancy.ts), and `null > 0` is false in JS — but only by accident of
+    // coercion, which is not a thing to rely on. `?? 0` states the intent: a count we do not have is
+    // not a reason to create a billed sandbox.
+    expect(open).toContain('countWorkspaceFiles(workspaceId).catch(() => null)');
     // The open ANSWERS instead of blocking: a waking workspace is reported as such with progress.
     expect(open).toContain("reason: 'waking'");
     // And the user is told it is happening — resuming a sandbox takes real seconds.

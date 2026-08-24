@@ -26,8 +26,22 @@ export function appendLogChunk(prev: string, chunk: string, maxChars: number = R
   return nl >= 0 && nl < cut.length - 1 ? cut.slice(nl + 1) : cut;
 }
 
-/** What the pane should say when it has no lines to show. Never blank — a blank pane explains nothing. */
-export function runtimeLogEmptyMessage(status: 'idle' | 'live' | 'dormant' | 'not_started', hasLog: boolean): string {
+/**
+ * What the pane should say when it has no lines to show. Never blank — a blank pane explains nothing.
+ *
+ * ⚠️ 'unknown' IS NOT A COSMETIC ADDITION (2026-08-24). The server used to turn a FAILED file count
+ * into the number zero, and zero meant `not_started`, and this function renders that as "Nothing has
+ * been built yet". So a store hiccup told a user their project did not exist — on a workspace they had
+ * built. It is the most alarming sentence this product can show, produced by an error nobody saw.
+ *
+ * The server now distinguishes the three, so this must too. The message invites a retry rather than
+ * explaining anything, because "we could not check just now" is genuinely all we know.
+ */
+export function runtimeLogEmptyMessage(
+  status: 'idle' | 'live' | 'dormant' | 'not_started' | 'unknown',
+  hasLog: boolean,
+): string {
+  if (status === 'unknown') return 'Could not check this workspace just now — try again in a moment.';
   if (status === 'not_started') return 'Nothing has been built yet — build an app and its logs appear here.';
   if (status === 'dormant') return 'Your app is not running right now. Send a message to bring it back online, then its logs appear here.';
   if (status === 'live' && !hasLog) return 'Your app is running but has not printed anything yet.';

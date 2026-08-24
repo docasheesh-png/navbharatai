@@ -217,6 +217,7 @@ import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WA
 import { pickerItems } from '../../lib/reportPicker';
 import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } from '../AgentV3/SpaFallbackAnalysis';
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
+import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormancy';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
 import { withE2eExcluded, e2eExcludeNote } from '../AgentV3/e2eTypecheck';
@@ -5367,11 +5368,12 @@ async function noteBuildOutcome(
     // ('dormant' — durable files exist) versus one that was never built ('not_started'). The UI shows
     // the same non-scary "send a message to bring it online" copy the git panel uses.
     if (execResult.available === false) {
-      const fileCount = await countWorkspaceFiles(workspaceId).catch(() => 0);
+      // `null`, never 0 — a count that FAILED is not a count of zero. See workspaceDormancy.ts.
+      const fileCount = await countWorkspaceFiles(workspaceId).catch(() => null);
       res.json({
         ...execResult,
-        reason: fileCount > 0 ? 'dormant' : 'not_started',
-        savedFileCount: fileCount,
+        reason: dormancyReason(fileCount),
+        savedFileCount: reportableFileCount(fileCount),
       });
       return;
     }
@@ -5409,8 +5411,9 @@ async function noteBuildOutcome(
     // Same honest dormant states the terminal and git panel use — never an empty pane pretending the
     // app is running silently when the sandbox simply is not warm.
     if (exec.available === false) {
-      const fileCount = await countWorkspaceFiles(workspaceId).catch(() => 0);
-      res.json({ available: false, reason: fileCount > 0 ? 'dormant' : 'not_started', savedFileCount: fileCount });
+      // `null`, never 0 — a count that FAILED is not a count of zero. See workspaceDormancy.ts.
+      const fileCount = await countWorkspaceFiles(workspaceId).catch(() => null);
+      res.json({ available: false, reason: dormancyReason(fileCount), savedFileCount: reportableFileCount(fileCount) });
       return;
     }
     const window = parseRuntimeLogOutput(exec.stdout, offset);
@@ -5449,8 +5452,9 @@ async function noteBuildOutcome(
     }
     const exec = await execInSession(workspaceId, buildServicesProbeCommand(), userId ?? undefined);
     if (exec.available === false) {
-      const fileCount = await countWorkspaceFiles(workspaceId).catch(() => 0);
-      res.json({ available: false, reason: fileCount > 0 ? 'dormant' : 'not_started', savedFileCount: fileCount });
+      // `null`, never 0 — a count that FAILED is not a count of zero. See workspaceDormancy.ts.
+      const fileCount = await countWorkspaceFiles(workspaceId).catch(() => null);
+      res.json({ available: false, reason: dormancyReason(fileCount), savedFileCount: reportableFileCount(fileCount) });
       return;
     }
     // parseListeningPorts is PortDiscovery's — the production-proven one, not a second parser.
@@ -5668,9 +5672,14 @@ async function noteBuildOutcome(
     // Holding this request open through a cold sandbox create is what produced "took too long to
     // wake (90s)" on a wake that was actually succeeding.
     if (!host) {
-      const hasProject = await countWorkspaceFiles(workspaceId).catch(() => 0);
+      // `null` when the count could not be taken — see workspaceDormancy.ts. This site DELIBERATELY
+      // keeps today's conservative behaviour on an unknown and does not wake: waking creates a real
+      // billed sandbox, and spending money on a guess is the wrong direction to fail in. What changes
+      // is that the fall-through below now says "unknown" instead of telling the user their project
+      // was never started — the honest answer invites a retry, which is what actually works.
+      const savedFiles = await countWorkspaceFiles(workspaceId).catch(() => null);
       const canWake = process.env.AGENTV3_TERMINAL_AUTOWAKE !== 'off' && !!process.env.E2B_API_KEY?.trim();
-      if (hasProject > 0 && canWake) {
+      if ((savedFiles ?? 0) > 0 && canWake) {
         let wake = startTerminalWake(workspaceId, userId ?? undefined);
         if (wake.phase === 'ready') {
           host = ptyHostForSession(workspaceId, userId ?? undefined);
@@ -5678,7 +5687,7 @@ async function noteBuildOutcome(
           if (!host) { terminalWakes.delete(workspaceId); wake = startTerminalWake(workspaceId, userId ?? undefined); }
         }
         if (!host) {
-          res.json({ available: false, reason: 'waking', wake: wakePublicState(wake), savedFileCount: hasProject });
+          res.json({ available: false, reason: 'waking', wake: wakePublicState(wake), savedFileCount: reportableFileCount(savedFiles) });
           return;
         }
       }
@@ -5728,12 +5737,13 @@ async function noteBuildOutcome(
     const cause = !session ? 'no_session'
       : !session.runner ? 'no_runner'
       : 'runner_not_pty';
-    const fileCount = await countWorkspaceFiles(workspaceId).catch(() => 0);
+    // `null`, never 0 — a count that FAILED is not a count of zero. See workspaceDormancy.ts.
+      const fileCount = await countWorkspaceFiles(workspaceId).catch(() => null);
     res.json({
       available: false,
-      reason: fileCount > 0 ? 'dormant' : 'not_started',
+      reason: dormancyReason(fileCount),
       cause,
-      savedFileCount: fileCount,
+      savedFileCount: reportableFileCount(fileCount),
     });
   });
 

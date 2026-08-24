@@ -21,6 +21,35 @@ import { analyzeDependencies, type DependencyIssue } from './DependencyAnalysis'
  * features, styles, assets, config) — those must fall through to "verify", never auto-suggested.
  * Every entry here is an unambiguous, real npm package an AgentV3-generated React/Vite app uses.
  */
+/**
+ * Test-runner packages — declared in devDependencies, never in dependencies.
+ *
+ * THE DEFECT (admin build report 2026-08-24, and the REVIEWER caught it before we did): a build wrote
+ * `app/page.test.tsx`, `e2e/smoke.spec.ts` and `playwright.config.ts`, importing `vitest` and
+ * `@playwright/test` — and declared neither. Its own reviewer wrote: *"Test file imports vitest but the
+ * package is not listed in package.json devDependencies. The `declare module 'vitest'` block at the top
+ * is a workaround for missing types."* The vaccine then reported TEST_SUITE_UNVERIFIED — a suite that
+ * exists and cannot run, which is the worst of both: it looks like coverage and proves nothing.
+ *
+ * The reconciler that should have caught this has worked since 2026-07-13, and simply had no test
+ * packages in its allowlist. So the app that most needed the fix — one the engine had just written
+ * tests for — was the one shape it could not see.
+ *
+ * SEPARATE FROM `WELL_KNOWN_DEPS` BECAUSE THE SECTION MATTERS. Putting a test runner in `dependencies`
+ * ships it to production, bloats every install and is exactly the mistake a careful reviewer would flag
+ * next. Same allowlist discipline: real packages, known-good caret ranges, nothing ambiguous.
+ */
+export const WELL_KNOWN_DEV_DEPS: Record<string, string> = {
+  vitest: '^2',
+  '@vitest/coverage-v8': '^2',
+  '@playwright/test': '^1',
+  '@testing-library/react': '^16',
+  '@testing-library/dom': '^10',
+  '@testing-library/jest-dom': '^6',
+  '@testing-library/user-event': '^14',
+  jsdom: '^25',
+};
+
 export const WELL_KNOWN_DEPS: Record<string, string> = {
   'react-router-dom': '^6',
   'react-router': '^6',
@@ -281,7 +310,9 @@ export function planDependencyAutoFix(missing: readonly DependencyIssue[]): Depe
     const name = issue.package;
     if (typeof name !== 'string' || !name || seen.has(name)) continue;
     seen.add(name);
-    const version = WELL_KNOWN_DEPS[name];
+    // Both allowlists, one planner. A test runner is as autofixable as axios — the only difference is
+    // which SECTION of package.json it belongs in, and that is decided where it is written.
+    const version = WELL_KNOWN_DEPS[name] ?? WELL_KNOWN_DEV_DEPS[name];
     if (version) autofixable.push({ package: name, version });
     else needsReview.push(name);
   }
@@ -349,16 +380,30 @@ export function applyWellKnownMissingDeps(files: Record<string, string>): Depend
   const asObj = (v: unknown): Record<string, string> =>
     v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, string>) : {};
   const deps = { ...asObj(pkg.dependencies) };
-  const declaredElsewhere = new Set([...Object.keys(asObj(pkg.devDependencies)), ...Object.keys(asObj(pkg.peerDependencies))]);
+  const devDeps = { ...asObj(pkg.devDependencies) };
+  const peer = new Set(Object.keys(asObj(pkg.peerDependencies)));
   const added: Array<{ package: string; version: string }> = [];
+  let addedDev = false;
   for (const fix of plan.autofixable) {
-    if (fix.package in deps || declaredElsewhere.has(fix.package)) continue; // idempotent — never overwrite
-    deps[fix.package] = fix.version;
+    // Already declared ANYWHERE — dependencies, devDependencies or peerDependencies — is left alone.
+    // Idempotent by construction; this must never overwrite a version the project chose.
+    if (fix.package in deps || fix.package in devDeps || peer.has(fix.package)) continue;
+    // THE SECTION IS PART OF THE FIX, not a detail. A test runner in `dependencies` ships to production
+    // and bloats every install — the very thing a careful reviewer flags next.
+    if (Object.prototype.hasOwnProperty.call(WELL_KNOWN_DEV_DEPS, fix.package)) {
+      devDeps[fix.package] = fix.version;
+      addedDev = true;
+    } else {
+      deps[fix.package] = fix.version;
+    }
     added.push(fix);
   }
   if (added.length === 0) return unchanged;
 
   pkg.dependencies = Object.fromEntries(Object.entries(deps).sort(([a], [b]) => a.localeCompare(b)));
+  // Written only when something was actually added, so a project with no devDependencies does not gain
+  // an empty block it never had.
+  if (addedDev) pkg.devDependencies = Object.fromEntries(Object.entries(devDeps).sort(([a], [b]) => a.localeCompare(b)));
   let out: string;
   try { out = `${JSON.stringify(pkg, null, 2)}\n`; JSON.parse(out); } catch { return unchanged; }
   return { files: { ...files, 'package.json': out }, added };

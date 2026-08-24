@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planDependencyAutoFix, applyWellKnownMissingDeps, WELL_KNOWN_DEPS, pinKnownDepsInPackageJson, pinKnownDepsInInstallCommand, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { planDependencyAutoFix, applyWellKnownMissingDeps, WELL_KNOWN_DEPS, WELL_KNOWN_DEV_DEPS, pinKnownDepsInPackageJson, pinKnownDepsInInstallCommand, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
 
 const pkg = (deps: Record<string, string> = {}, extra: Record<string, unknown> = {}) =>
   JSON.stringify({ name: 'app', version: '0.1.0', dependencies: deps, ...extra }, null, 2);
@@ -228,5 +228,78 @@ describe('pinKnownDepsInPackageJson (LearnLoop autopsy — force Prisma → ^6 i
     expect(pinKnownDepsInPackageJson('not json {').changed).toEqual([]);
     const clean = JSON.stringify({ dependencies: { react: '^18' } }, null, 2);
     expect(pinKnownDepsInPackageJson(clean)).toEqual({ content: clean, changed: [] });
+  });
+});
+
+describe('a test suite the app cannot run is worse than no test suite', () => {
+  /**
+   * ADMIN BUILD REPORT 2026-08-24 — and the build's OWN REVIEWER caught it before we did:
+   *   "Test file imports vitest but the package is not listed in package.json devDependencies. The
+   *    `declare module 'vitest'` block at the top is a workaround for missing types."
+   * The vaccine then recorded TEST_SUITE_UNVERIFIED: a suite that exists and cannot run, which looks
+   * like coverage and proves nothing.
+   *
+   * The reconciler that should have caught this has worked since 2026-07-13 and simply had no test
+   * packages in its allowlist — so the app that most needed it, one the engine had just written tests
+   * for, was the single shape it could not see.
+   */
+  it('declares the test packages the build itself imported', () => {
+    const r = applyWellKnownMissingDeps({
+      'package.json': pkg({ next: '14' }),
+      'app/page.test.tsx': "import { describe, it } from 'vitest';",
+      'e2e/smoke.spec.ts': "import { test } from '@playwright/test';",
+    });
+    const out = JSON.parse(r.files['package.json']);
+    expect(out.devDependencies).toHaveProperty('vitest');
+    expect(out.devDependencies).toHaveProperty('@playwright/test');
+  });
+
+  it('puts them in devDependencies, NEVER in dependencies', () => {
+    // The section is part of the fix. A test runner in `dependencies` ships to production and bloats
+    // every install — exactly what a careful reviewer flags next.
+    const r = applyWellKnownMissingDeps({
+      'package.json': pkg({}),
+      'a.test.ts': "import { expect } from 'vitest';",
+    });
+    const out = JSON.parse(r.files['package.json']);
+    expect(out.dependencies).not.toHaveProperty('vitest');
+    expect(out.devDependencies).toHaveProperty('vitest');
+  });
+
+  it('still routes a runtime package to dependencies in the same pass', () => {
+    const r = applyWellKnownMissingDeps({
+      'package.json': pkg({}),
+      'a.tsx': "import axios from 'axios';",
+      'a.test.tsx': "import { it } from 'vitest';",
+    });
+    const out = JSON.parse(r.files['package.json']);
+    expect(out.dependencies).toHaveProperty('axios');
+    expect(out.devDependencies).toHaveProperty('vitest');
+    expect(out.devDependencies).not.toHaveProperty('axios');
+  });
+
+  it('never overwrites a version the project already chose, in any section', () => {
+    const r = applyWellKnownMissingDeps({
+      'package.json': JSON.stringify({ name: 'a', dependencies: {}, devDependencies: { vitest: '^1.2.3' } }, null, 2),
+      'a.test.ts': "import { it } from 'vitest';",
+    });
+    expect(JSON.parse(r.files['package.json']).devDependencies.vitest).toBe('^1.2.3');
+    expect(r.added.find((a) => a.package === 'vitest')).toBeUndefined();
+  });
+
+  it('does not invent an empty devDependencies block when nothing needed one', () => {
+    const r = applyWellKnownMissingDeps({
+      'package.json': pkg({}),
+      'a.tsx': "import axios from 'axios';",
+    });
+    expect(JSON.parse(r.files['package.json'])).not.toHaveProperty('devDependencies');
+  });
+
+  it('the two allowlists never disagree about a package', () => {
+    // One name in both would make the section it lands in depend on lookup order — a bug that would
+    // only ever show up as a mysteriously bloated production install.
+    for (const name of Object.keys(WELL_KNOWN_DEV_DEPS)) {
+      expect(WELL_KNOWN_DEPS, `${name} is in both allowlists`).not.toHaveProperty(name);
+    }
   });
 });

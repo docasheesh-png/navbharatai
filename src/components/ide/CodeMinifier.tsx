@@ -16,8 +16,7 @@ import {
   PanelLeft,
 } from 'lucide-react';
 import { resolveAppSource } from '../../lib/workspaceSource';
-import { authedHeaders } from '../../App';
-
+import { authedHeaders } from '../../lib/authHeaders';
 // Code Minifier & Optimizer (admin 2026-07-26).
 //
 // WHAT CHANGED AND WHY. This screen used to be a bare textarea: the user had to find their own code,

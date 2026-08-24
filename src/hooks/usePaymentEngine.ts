@@ -10,8 +10,7 @@ import axios from 'axios';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { triggerCashfreeCheckout } from '../services/paymentService';
 import { safeLocalJson } from '../lib/safeLocalJson';
-import { authedHeaders } from '../App';
-
+import { authedHeaders } from '../lib/authHeaders';
 /** Free-tier daily message ceiling for anonymous (not-signed-in) users. */
 export const FREE_DAILY_MESSAGES = 10;
 

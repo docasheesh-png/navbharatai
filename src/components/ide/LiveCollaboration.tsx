@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Users, Video, Wifi, MessageSquare, Share2, Plus, Trash2, X, Check, Copy, Clock, Edit2, Globe, RefreshCw, MessageCircle, CheckCircle2, Sparkles, Bot, Send, Code2, Briefcase, ChevronDown, Zap } from 'lucide-react';
-import { db } from '../../App';
+import { db } from '../../lib/firebase';
 import { doc, setDoc, getDoc, deleteDoc, onSnapshot, collection, addDoc, getDocs, query, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { lineOfOffset, offsetRangeOfLine, buildAnnotation, sortAnnotations, type CommentAnnotation } from '../../lib/collabAnnotations';
 import { isNativeApp } from '../../lib/mobileNative';

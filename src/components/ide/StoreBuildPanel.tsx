@@ -5,7 +5,7 @@ import {
   Loader2, Github, Download, CheckCircle2, AlertTriangle, ExternalLink,
   Rocket, Key, RefreshCw, Wrench, FileJson, CircleStop,
 } from 'lucide-react';
-import { authedHeaders } from '../../App';
+import { authedHeaders } from '../../lib/authHeaders';
 // The workflow filenames come from the ONE shared registry the server's dispatch allow-list also reads.
 // Hand-written copies here and on the server are exactly why "Build my APK now" did nothing: this file
 // asked for android-apk.yml while the server's own list had never heard of it.

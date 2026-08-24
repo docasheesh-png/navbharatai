@@ -12,7 +12,11 @@ import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
 
 const getIdToken = vi.fn();
-vi.mock('../src/App', () => ({
+// Mocks `src/lib/firebase`, NOT `src/App` (updated 2026-08-24). The module under test used to take
+// `auth` off the app ROOT, which is the import cycle that made the client bundle unsplittable — see
+// tests/appModuleGraph.test.ts. Mocking the root also meant this suite could pass while the real
+// dependency was wrong; it now mocks the module `authHeaders` genuinely depends on.
+vi.mock('../src/lib/firebase', () => ({
   get auth() { return { currentUser: currentUser as unknown }; },
 }));
 

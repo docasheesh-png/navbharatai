@@ -88,25 +88,12 @@ import { firebaseConfig } from './config/firebase';
 import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib/firebase';
 import { readRedirectMarker, clearRedirectMarker, redirectReturnVerdict, redirectLostMessage } from './lib/redirectSignInMarker';
 import { readRoster, writeRoster, rememberAccount } from './lib/accountRoster';
-export { auth, db };
+import { authedHeaders } from './lib/authHeaders';
+import { LS_EVICTABLE, safeLS } from './lib/localStorageSafe';
+import { rememberGithubOwner, clearGithubConnection, readGithubOwner } from './lib/githubTokenStore';
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from './lib/signOutFlow';
 import { authGateDecision, isAuthGatedView } from './lib/authGate';
 import { initPushNotifications, teardownPushNotifications } from './lib/pushNotifications';
-
-/**
- * Build request headers carrying the signed-in user's Firebase ID token. SECURITY: the wallet/sync
- * routes now verify this token server-side (requireUserMatch) instead of trusting the :userId in the
- * path — so these calls MUST send it. Best-effort: a missing token just omits the header (the server
- * then rejects with 401, which the best-effort callers handle gracefully).
- */
-export async function authedHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { ...(extra || {}) };
-  try {
-    const tok = await auth.currentUser?.getIdToken();
-    if (tok) headers.Authorization = `Bearer ${tok}`;
-  } catch { /* token unavailable — header omitted */ }
-  return headers;
-}
 
 // ── Eager imports — always needed on first render ───────────────────────────
 import { AIChat } from './components/ide/AIChat';
@@ -150,8 +137,6 @@ import {
 } from './lib/previewUtils';
 import { sanitizeFirestoreData } from './lib/firestoreUtils';
 import { safeLocalJson } from './lib/safeLocalJson';
-// Re-exported for SDAChat.tsx which imports sanitizeFirestoreData from App
-export { sanitizeFirestoreData };
 
 // AuthComponent → moved to AppModals
 // ReportProblemComponent → lazy above
@@ -193,15 +178,6 @@ import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
 
 // Large keys that can be evicted when localStorage is nearly full.
 // Ordered from least-important to most-important.
-const LS_EVICTABLE = [
-  'navbharat_versions',
-  'navbharat_last_app',
-  'navbharat_gh_context',
-  'navbharat_pro_messages',
-  'navbharat_sessions',
-];
-
-/** localStorage.setItem that auto-evicts large non-essential keys on QuotaExceededError. */
 // D21: derive a human-friendly app name from the user's build prompt
 function inferAppName(prompt: string): string {
   const p = prompt.trim();
@@ -222,42 +198,6 @@ function inferAppName(prompt: string): string {
     }
   }
   return 'NavBharat App';
-}
-
-export function safeLS(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch (e: unknown) {
-    if (e instanceof DOMException && (e.code === 22 || e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
-      // Evict stale large keys one by one until it fits
-      for (const evict of LS_EVICTABLE) {
-        if (evict === key) continue;
-        localStorage.removeItem(evict);
-        try {
-          localStorage.setItem(key, value);
-          return;
-        } catch {}
-      }
-    }
-  }
-}
-
-// sanitizeFirestoreData → imported from src/lib/firestoreUtils.ts (re-exported below imports)
-
-// The GitHub OAuth connection is bound to the NavBharatAI user who authorized it (see
-// src/lib/githubConnection.ts). 'gh_owner_uid' records that owner so a token can never carry to a
-// different user on the same browser. Stamp the owner whenever a token is stored; clear the whole
-// connection on logout or when a different user signs in.
-const GH_OWNER_KEY = 'gh_owner_uid';
-export function rememberGithubOwner(uid: string | null | undefined): void {
-  try { localStorage.setItem(GH_OWNER_KEY, uid || ''); } catch { /* storage unavailable */ }
-}
-export function clearGithubConnection(): void {
-  try {
-    localStorage.removeItem('gh_token');
-    localStorage.removeItem('gh_token_signal');
-    localStorage.removeItem(GH_OWNER_KEY);
-  } catch { /* storage unavailable */ }
 }
 
 export default function App() {
@@ -1236,7 +1176,7 @@ export default function App() {
         // account" bug). resolveGithubConnectionForUser decides keep / claim / clear.
         try {
           const stored = localStorage.getItem('gh_token');
-          const owner = localStorage.getItem(GH_OWNER_KEY);
+          const owner = readGithubOwner();
           const r = resolveGithubConnectionForUser(currentUser.uid, stored, owner);
           if (r.reason === 'cleared-different-user') {
             clearGithubConnection();

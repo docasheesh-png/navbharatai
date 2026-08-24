@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, RotateCcw, Save, Check, X, Loader2, History, ChevronDown, FolderOpen } from 'lucide-react';
 import { filesHaveRealContent } from '../../lib/workspaceSource';
-import { authedHeaders } from '../../App';
-
+import { authedHeaders } from '../../lib/authHeaders';
 // Code Versioning — "Time Machine" (admin 2026-07-24): a simple, mobile-first way for a NON-technical
 // user to go back to an earlier version of their app. It reads the DURABLE, cross-device build-history
 // (every build is auto-saved as a restore point). A dropdown at the top lets a user with more than one

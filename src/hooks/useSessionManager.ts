@@ -9,7 +9,9 @@
 import { collection, query, where, getDocs, doc, deleteDoc } from 'firebase/firestore';
 import type { User as FirebaseUser } from 'firebase/auth';
 import type { Message, ChatSession, ViewType } from '../types';
-import { db, authedHeaders, safeLS } from '../App';
+import { authedHeaders } from '../lib/authHeaders';
+import { db } from '../lib/firebase';
+import { safeLS } from '../lib/localStorageSafe';
 import { generateUCI, getRandomElement, generateSmartHeuristicSummary, dedupAndSortMessages, asMessageArray } from '../lib/chatUtils';
 import { pickGreetingForAgent } from '../lib/agentGreetings';
 import { resolveSessionSurface } from '../lib/sessionRouting';

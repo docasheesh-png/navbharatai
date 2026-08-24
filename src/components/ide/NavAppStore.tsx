@@ -4,7 +4,7 @@ import {
   CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package,
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
-import { authedHeaders } from '../../App';
+import { authedHeaders } from '../../lib/authHeaders';
 import { resolveApiHref } from '../../lib/apiBase';
 import { isNativeApp } from '../../lib/mobileNative';
 import { mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsFor } from './storeReviewQueue';

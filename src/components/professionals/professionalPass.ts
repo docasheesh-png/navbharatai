@@ -13,8 +13,7 @@
 // messages they have left today. The response still carries `hasPass`/`priceInr`/`passDays` because
 // the server endpoint is unchanged for now; nothing reads them any more.
 
-import { authedHeaders } from '../../App';
-
+import { authedHeaders } from '../../lib/authHeaders';
 export interface PassStatus {
   enabled: boolean;
   signedIn: boolean;

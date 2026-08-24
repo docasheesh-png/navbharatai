@@ -10,7 +10,7 @@ const allowInlineImages = (url: string, key: string, node: unknown): string =>
 import { ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, Flag, X, MessageSquare, Send, Loader2 } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { cn } from '../lib/utils';
-import { db, auth } from '../App';
+import { auth, db } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
 export const MessageContent = ({ text, sender, user }: { text: string; sender: 'user' | 'ai'; user: any }) => {

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, FolderOpen, FileCode, AlertTriangle } from 'lucide-react';
-import { authedHeaders } from '../../App';
-
+import { authedHeaders } from '../../lib/authHeaders';
 // "Which app, and which file?" — the one shared answer for every Design & Build tool.
 //
 // WHY THIS EXISTS (admin 2026-07-27): Multi-Page, Components, Design System, Dark Mode and Figma each

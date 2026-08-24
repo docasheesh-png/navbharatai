@@ -10,7 +10,7 @@ import {
   Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail, Scale, FileText,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { authedHeaders } from '../../App';
+import { authedHeaders } from '../../lib/authHeaders';
 // META only — the ~45 KB of document bodies must never enter the main chunk (bundle budget);
 // LegalDocPage dynamic-imports the full registry into its own lazy chunk.
 import { LEGAL_META } from '../../content/legal/meta';

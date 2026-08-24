@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Send, Image as ImageIcon, Check, Loader2 } from 'lucide-react';
-import { authedHeaders } from '../App';
+import { authedHeaders } from '../lib/authHeaders';
 import { MESSAGE_MAX, type ReportTargetKind } from '../lib/userReport';
 import { compressForReport } from '../lib/reportImage';
 

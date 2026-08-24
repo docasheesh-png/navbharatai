@@ -4,8 +4,7 @@
 // repos), and fetchUserRepos. Code moved BYTE-IDENTICAL — pure relocation, zero logic change. Deps are
 // injected; App.tsx destructures the SAME identifiers back, so every JSX/effect caller is unchanged.
 
-import { clearGithubConnection } from '../App';
-
+import { clearGithubConnection } from '../lib/githubTokenStore';
 export interface GitHubConnectDeps {
   activeView: any;
   currentSessionId: string;

@@ -80,8 +80,8 @@ import { checkpointDisplayName } from '../../lib/checkpointLabel';
 import { useAppServices } from '../../hooks/useAppServices';
 import { activeMentionQuery, rankMentionSuggestions, applyMentionSuggestion } from '../../lib/fileMentionPicker';
 import { runtimeLogEmptyMessage } from '../../lib/runtimeLogBuffer';
-import { db, sanitizeFirestoreData } from '../../App';
-
+import { db } from '../../lib/firebase';
+import { sanitizeFirestoreData } from '../../lib/firestoreUtils';
 /** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
  *  Returns {} for the synthetic admin / anonymous users (no Firebase user) — the server falls back
  *  to its claimed-id + random-sessionId check for those. */

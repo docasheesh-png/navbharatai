@@ -41596,3 +41596,68 @@ content.
   this evidence** and was overstated.
 - Store build: an `.aab` and an `.ipa` were dispatched from `main` after this cluster merged, because
   two of the nine PRs changed FRONTEND code and bundled-mode installs cannot receive that any other way.
+
+---
+
+## 2026-08-24 (close-out) — the seventh instance, and one the sweep found in its own work
+
+### #2653a — a sandbox we could not READ was reported as a sandbox with nothing IN it
+
+Seventh instance of the day's pattern. The File Guardian read the sandbox through
+`collectWorkspaceFiles(...).catch(() => ({ files: {}, skipped: [] }))`, so an UNREACHABLE sandbox became
+"we looked and found nothing". The guardian reads that as total data loss: `sandbox recycled/empty` in
+the admin report, plus a FULL restore of every stored file — into a machine it could not even list, so
+those writes throw, are swallowed by the outer handler, and the build carries on broken while its
+report accuses a project that lost nothing.
+
+**The information already existed**, which is what makes this a discard rather than a gap.
+`E2BActuator.listFiles` deliberately distrusts an empty fast-path result — its own comment says "a
+genuinely empty workspace and a silently-failed find look identical here" — and falls through to a slow
+path that THROWS. The actuator got it right; the caller threw the answer away in one line.
+
+Both conclusions are now withheld on a failed scan: no data-loss claim, no full restore, and no
+"nothing needed restoring" either — that quiet branch asserts a clean comparison, and reaching it would
+be the same lie wearing a reassuring face.
+
+### #2653b — a replacement sandbox inherited the DEAD one's billing clock
+
+Found by auditing the day's own two changes against each other, not from a report. #2643 re-stamps
+`_sandboxStartedAt` only when the map has no entry (correct — a running sandbox keeps its clock), and
+#2648 added `_sandboxOrigin` beside it. But THREE sites drop a dead or degraded sandbox and every one
+deleted from `this.sandboxes` ALONE, so the replacement inherited the dead machine's start time.
+
+**Scope stated honestly: NOT an overcharge.** The user's bill is capped at the build's own duration by
+an unrelated rule someone got right earlier. The ADMIN's figure is uncapped by design and is what the
+whole E2B analysis rests on — a cost investigation reading inflated seconds is worse than one reading
+none.
+
+Fixed as a class: `_dropSandbox` is the only way to forget a sandbox, and a test COUNTS the direct
+`this.sandboxes.delete` calls so a fourth site cannot quietly reintroduce the drift. `_fileCache` is
+deliberately NOT cleared there — replaying those files is what saves a build from a dead sandbox, and
+dropping them would turn recoverable into lost. `pauseSandbox` now iterates a COPY while dropping, since
+a skipped entry is a sandbox whose clock never resets.
+
+**The class proved itself the same day the maps were added.** That is the argument for centralising
+state-clearing, in one sentence.
+
+### Store builds — both green, both from `main` after the cluster merged
+
+- Android `.aab`: run 32771767154 ✅ — the admin downloads `navbharatai-release-aab` and uploads to Play
+  Console (Claude cannot: the keystore and the Play account stay with the admin).
+- iOS `.ipa`: run 32771776885 ✅ — dispatched with `upload: true`, and the workflow waits for Apple's
+  processing, so green genuinely means it reached TestFlight.
+
+Triggered because two of the eleven PRs changed FRONTEND code, and bundled mode (`webDir: 'dist'`, no
+`server.url`) means installed users cannot receive that any other way.
+
+### The day in one line
+
+Eleven PRs, and **eight instances of a single bug class**: a stale URL read as a live preview · "we
+called pause" as "it paused" · `lsof || echo` as a free port · a resume ID as a resume · this turn's
+writes as the whole app · a config as a test suite · a failed count as zero files · an unreadable
+sandbox as an empty one.
+
+The first five came from reading real build reports, one report-cycle each. The sixth came from
+searching for the SHAPE on purpose — minutes. The eighth came from distrusting the day's own new code.
+**That progression is the finding**, more than any individual fix: the method got cheaper each time the
+question got more general.

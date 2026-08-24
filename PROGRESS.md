@@ -40894,3 +40894,45 @@ exists for.
 from `GET /v1/owners`; then create-if-absent inside `deployBackendToRender`, AFTER `matchRenderService`
 finds nothing, so it can never duplicate an existing service. The free plan must be explicit, and the
 honest fallback to the guide above must remain for every failure path.
+
+---
+
+## 2026-08-24 — #2622: the preview framed a machine nobody had checked
+
+From a LIVE screenshot, not a report: an Express app on port 3000, ten seconds into a wake-up. Our own
+honest "Waking your preview — restored 3 of your saved keys…" bar at the top, and directly below it,
+filling the frame, the sandbox provider's own "Closed Port Error" page — naming the vendor and the
+sandbox id, and telling the user their app was broken when the truthful answer was "its server has not
+started yet".
+
+**ROOT CAUSE, and it is unconditional.** `doorUrl`, `unreachable` and `portDown` are ALL set only from
+the health probe's reply. Until it answers, all three sit at their "nothing is wrong" defaults — so the
+FIRST render frames `effectiveUrl`, the raw machine address, with nothing checked at all. That window is
+exactly when a resumed sandbox has not yet started its dev server, which is why it surfaces on precisely
+the case the door was built for.
+
+**The guarantee existed, for a different state.** PreviewSurface already refused to frame a host whose
+port we had SEEN down (#2587), and the comment above `unreachable` states the whole reason including the
+white-label point. But "seen down" and "not looked at" are different facts and only the first had a
+branch. Same lesson as #2616 the day before, one layer out: ignorance is not a licence — there to edit,
+here to frame.
+
+`framingUnchecked` reuses `shouldWatchLivePreview` — the same rule the watchdog itself uses — so the two
+can never disagree about whether an answer is coming. During a BUILD the watchdog is deliberately
+asleep, so waiting there would replace the streaming first paint with a permanent spinner; it stays
+false and behaviour is byte-identical. A known `doorUrl` clears it outright.
+
+**HONEST LIMIT, recorded because the screenshot invites the wrong conclusion:** this stops the vendor's
+page being shown. It does NOT make the dev server start faster. The app in the screenshot was mid-wake
+and genuinely not serving. What changed is that those seconds now show our own reconnecting panel.
+
+**Two more anchor breakages, both the same shape as yesterday's four** — assertions pinning the
+refuse-to-frame branch's exact literal, which grew a third term that changes nothing about what they
+guarantee. Repointed to assert the SHAPE (that `unreachable` and `portDown` share one branch). Six in
+two days, all one lesson: a test that breaks on an addition it does not care about is a test that gets
+weakened to shut it up.
+
+**Not rebuilt for mobile.** #2622 is a FRONTEND change, so it does not reach installed Play/TestFlight
+users until the next signed build — but it is one small PR, and CLAUDE.md is explicit that a bundle is
+batched to phase/checkpoint boundaries rather than burnt on each one. The web is fixed on deploy; this
+rides the next batch.

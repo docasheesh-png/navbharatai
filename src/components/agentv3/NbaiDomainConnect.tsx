@@ -39,6 +39,8 @@ interface DomainStatus {
   /** The app's publish state — is anything live, when did it go live, is it behind the app?
    *  Absent on an older server, which `publishButton` renders as a plain, claimless "Publish". */
   publish?: { live: boolean; url: string | null; publishedAt: number | null; freshness: PublishFreshness } | null;
+  /** Why pressing Publish cannot put this app on the domain (a server app). '' / absent = it can. */
+  publishBlocked?: string | null;
   /** Firebase's OWN explanation of why the domain is stuck. Absent on an older server. */
   issues?: string[];
   /** When the hosting service last looked at the user's DNS (ISO). Absent on an older server. */
@@ -104,9 +106,38 @@ export interface NbaiDomainConnectProps {
  * Pure + exported for tests.
  */
 export function connectStage(
-  s: { active: boolean; ownershipState: string; hostState: string; sslState: string; serving?: { state: string; note: string } | null },
+  s: {
+    active: boolean; ownershipState: string; hostState: string; sslState: string;
+    serving?: { state: string; note: string } | null;
+    /**
+     * Why pressing Publish cannot help THIS app — '' or absent for the ordinary app, where it can.
+     * The server forms this from the app's own manifests; see domainPublishBlockNote.
+     */
+    publishBlocked?: string | null;
+  },
 ): { headline: string; action: 'check' | 'none' | 'publish'; note: string; tone?: 'ok' | 'warn' } {
   if (s.active) {
+    /**
+     * 🔒 NEVER SEND SOMEONE AT A BUTTON THAT CANNOT WORK (admin 2026-08-24).
+     *
+     * The branch below is right for almost every app: nothing is published, so press Publish. For an
+     * app with a server half it is an instruction that can only be refused — the publish route will
+     * not upload a running server to a static CDN, and rightly so. The screen would then say "press
+     * Publish", the button would refuse, and the screen would say it again. That is the same shape as
+     * the three-day "waiting for DNS" over a permanent conflict, and it is fixed the same way: say the
+     * true next step, and take the useless action off the screen rather than leaving it to fail.
+     *
+     * Checked BEFORE the nothing_published branch because it is the more specific fact about the same
+     * situation, and silent unless the server positively identified a server app.
+     */
+    if (s.publishBlocked) {
+      return {
+        headline: 'Connected — but this app needs its server part deployed first.',
+        action: 'none',
+        tone: 'warn',
+        note: s.publishBlocked,
+      };
+    }
     // 🔒 "LIVE!" MUST BE EARNED (admin 2026-08-21, mitrify.com). This used to claim Live the moment
     // ownership/host/SSL went active — but those three describe DNS and a CERTIFICATE, not whether
     // anything was ever published to the site the domain points at. A domain connected AFTER the last
@@ -1154,7 +1185,12 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
 
               It drives the SAME pipeline as the main Publish button (passed in as `onPublish`), so
               this is a second entry point to one implementation, never a second implementation. */}
-          {result.active && onPublish && (() => {
+          {/* NOT SHOWN when the server has positively identified an app static hosting can never
+              serve (see domainPublishBlockNote — a bare server, not a fullstack app, so there is no
+              configuration under which this button could work). A button that can only ever refuse is
+              the dead button this codebase keeps deleting; the box above already says what to do
+              instead. It returns by itself the moment the app is publishable. */}
+          {result.active && onPublish && !result.publishBlocked && (() => {
             // This screen's own reading wins once it has one; until then the caller's, so the dot the
             // user followed in here does not blink out and back.
             const freshness = result.publish?.freshness ?? publishFreshness;

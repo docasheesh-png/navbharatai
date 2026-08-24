@@ -29,6 +29,8 @@ import { verifyRecordsLive } from '../lib/domainDnsVerify';
 import { checkDomainServing } from '../lib/domainServingCheck';
 import { siteHasRelease } from '../lib/firebaseCustomDomain';
 import { resolvePublishState } from '../AgentV3/publishState';
+import { planDeployment, domainPublishBlockNote } from '../AgentV3/deployPlan';
+import { loadWorkspaceFilesByPath } from '../AgentV3/WorkspaceFileStore';
 
 /**
  * Firebase-NATIVE custom-domain routes (Slice 2) — connect a user's own domain directly to their
@@ -208,7 +210,30 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       // the workspace's files were last written. Both reads are metadata-only and bounded, and either
       // one missing yields `unknown`, which the UI renders as silence rather than a guess.
       const publish = await resolvePublishState(workspaceId, everPublished);
-      res.json({ ...status, displayRecords, dnsCheck, serving, publish });
+      /**
+       * CAN "PRESS PUBLISH" EVEN WORK FOR THIS APP? (admin 2026-08-24.)
+       *
+       * Asked ONLY when we are about to tell them to press it — an app that is already serving needs
+       * no verdict, and paying four document reads on every status poll for a question nobody asked
+       * is how a correct feature becomes too expensive to keep. `loadWorkspaceFilesByPath` fetches the
+       * manifests by id: no listing, no whole-workspace load.
+       *
+       * 🔒 SILENT ON DOUBT. An unreadable workspace yields `{}`, and `planDeployment` calls that
+       * static-sufficient — so the note is '' and the screen says exactly what it says today. A
+       * classifier that guessed would start telling users with perfectly publishable apps not to
+       * publish them, which is a worse failure than the one it fixes.
+       */
+      let publishBlocked = '';
+      if (serving?.state === 'nothing_published') {
+        try {
+          const manifests = await loadWorkspaceFilesByPath(
+            workspaceId as string,
+            ['package.json', 'requirements.txt', 'pyproject.toml', 'Pipfile'],
+          );
+          publishBlocked = domainPublishBlockNote(planDeployment(manifests));
+        } catch { /* never let a shape check break a status screen */ }
+      }
+      res.json({ ...status, displayRecords, dnsCheck, serving, publish, ...(publishBlocked ? { publishBlocked } : {}) });
     } catch (err: any) {
       sendSafeError(res, 500, 'Failed to check domain status. Please try again.', err, 'nbai domain status');
     }

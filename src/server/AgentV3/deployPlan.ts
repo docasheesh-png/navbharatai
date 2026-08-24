@@ -231,6 +231,45 @@ export function staticHostingRefusal(plan: DeployPlan): string {
     + 'provider. Nothing has been published, so nothing is broken.';
 }
 
+/**
+ * WHAT THE DOMAIN SCREEN MAY SAY — because "press Publish" is the wrong instruction for some apps.
+ *
+ * 🔒 THE LOOP THIS ENDS (admin 2026-08-24). A connected domain whose site has no release makes the
+ * connect screen say, correctly, "Connected — one last step: press Publish." For an app with a server
+ * half that is an instruction that CANNOT succeed: the publish route refuses it — rightly, since
+ * uploading an Express app to a static CDN produces exactly the broken site the user is complaining
+ * about. So the screen sends them at a button, the button refuses, the screen says press it again.
+ *
+ * That is the same failure as the three-day "waiting for DNS" on a permanent conflict: telling someone
+ * to do a thing that will never work is not a wrong label, it is wasted days. So the screen is given
+ * the app's shape and says the true next step instead.
+ *
+ * Returns '' when static hosting IS sufficient — the ordinary case, where "press Publish" is right and
+ * nothing should be added. PURE.
+ */
+export function domainPublishBlockNote(plan: DeployPlan): string {
+  if (plan.staticHostingSufficient) return '';
+  /**
+   * 🔒 FULLSTACK IS DELIBERATELY SILENT, and getting this wrong would have been worse than the bug.
+   *
+   * A fullstack app is not always refused: when the user has a backend host configured AND its own
+   * code says it can be split, the publish route deploys the server, bakes the address into the build
+   * and publishes the website half — a path that genuinely works. Telling that user "pressing Publish
+   * will not put anything on your domain" would be a confident, wrong instruction that stops a
+   * working feature, which is a worse failure than the loop this function exists to end.
+   *
+   * Only a shape with NO website half at all is unambiguous: no configuration, key or wiring makes a
+   * bare server servable by static hosting, so the refusal is certain and can be stated up front. For
+   * fullstack the publish route decides with the facts this poll does not have, and its refusal is now
+   * shown on this very screen (see NbaiDomainConnect's publishResult) rather than swallowed.
+   */
+  if (plan.shape !== 'node-server' && plan.shape !== 'python-server') return '';
+  const what = plan.backend?.framework ?? 'server';
+  return `Your app is a ${what} that has to keep running, not a website made of files, so a domain on `
+    + 'NavBharatAI cannot serve it on its own. Deploy the server part first. Pressing Publish before '
+    + 'that will not put anything on your domain.';
+}
+
 /** What the server can actually do about a backend right now — supplied by the caller, never assumed. */
 export interface BackendCapability {
   /** A real deploy can run this instant (a Render key resolved, the user's or the server's). */

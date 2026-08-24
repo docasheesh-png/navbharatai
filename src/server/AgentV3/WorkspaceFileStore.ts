@@ -309,6 +309,38 @@ export async function loadWorkspaceFiles(workspaceId: string): Promise<Record<st
 }
 
 /**
+ * Read a FEW named files by path, without loading the whole workspace.
+ *
+ * WHY THIS EXISTS (2026-08-24). Deciding whether an app can be hosted on static hosting needs exactly
+ * four manifests (`package.json`, `requirements.txt`, `pyproject.toml`, `Pipfile`) — and the only
+ * durable reader available was `loadWorkspaceFiles`, which pulls EVERY file's content. On a status
+ * poll that is an absurd cost for four documents, and it is the kind of cost that quietly makes a
+ * correct feature too expensive to keep. `fileDocId` is deterministic, so the docs can be fetched by
+ * id directly: at most `paths.length` reads, no listing, no metadata scan.
+ *
+ * Missing paths are simply absent from the result — a caller cannot tell "no such file" from "the read
+ * failed", so this is only for callers whose behaviour on an empty answer is safe (see planDeployment,
+ * which treats an unrecognised app as ordinary static files). Never throws.
+ */
+export async function loadWorkspaceFilesByPath(
+  workspaceId: string,
+  paths: readonly string[],
+): Promise<Record<string, string>> {
+  const db = getDb();
+  if (!db || paths.length === 0) return {};
+  const out: Record<string, string> = {};
+  try {
+    const filesCol = db.collection(COLLECTION).doc(workspaceId).collection('files');
+    const snaps = await Promise.all(paths.map((p) => filesCol.doc(fileDocId(p)).get().catch(() => null)));
+    for (const snap of snaps) {
+      const data = snap?.exists ? snap.data() : null;
+      if (data && typeof data.path === 'string' && typeof data.content === 'string') out[data.path] = data.content;
+    }
+  } catch { /* absent is the same as unreadable to every caller of this — see the note above */ }
+  return out;
+}
+
+/**
  * Cheap, metadata-only count of a workspace's persisted files — reads ONLY the metadata doc,
  * NOT every file's content (so it is safe on the hot path before a build). Used to make intent
  * classification workspace-aware: a non-empty workspace means a follow-up instruction should be

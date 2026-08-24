@@ -2309,7 +2309,26 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      dotenv could change which value wins. An IMPORT turn is excluded for the ordinary reason
     //      (the user asked us not to change their files); their apps keep the sandbox-level .env
     //      sourcing that already exists. Considered ✓.
-    expect(count).toBe(18);
+    //   1× the AMBIENT-SHIM removal (admin APK report 2026-08-24) — explicitly gated on `!isImportTurn`.
+    //      It deletes a `declare module 'x'` block from a file that also IMPORTS 'x', which TypeScript
+    //      rejects outright ("Cannot redeclare block-scoped variable 'devices'") — the hand-written stub
+    //      that stopped a user's Next.js app, and therefore their APK, from building at all. Removal is
+    //      never a judgement call: either the real types exist and the stub was redundant, or they do
+    //      not and the honest "Cannot find module" error returns, naming the actual problem. A WILDCARD
+    //      declaration (`declare module '*.css'`) can never match — that is the correct way to type an
+    //      asset import and deleting one would break working apps. It deliberately does NOT require
+    //      result.ok: this defect is a CAUSE of a failed build (same discipline as the vite.config
+    //      ensure), and it edits only files that genuinely carry the collision. Considered ✓.
+    //   1× the E2E TYPECHECK EXCLUDE (same report) — gated on `hasE2eFiles && !isImportTurn`. It adds
+    //      `playwright.config.ts` and `e2e` to the project's tsconfig `exclude`, because the E2E
+    //      scaffold writes TypeScript importing `@playwright/test` and deliberately does not install
+    //      it — fatal in a Next.js app, whose build typechecks the project root. It runs for ANY
+    //      project holding those files, not only a fresh scaffold, because the create-only writer
+    //      would otherwise never repair the app that already has the broken config. Conservative by
+    //      construction: it leaves an unparseable tsconfig untouched, leaves a Vite-style config that
+    //      builds only `src/` byte-identical, and writes nothing when the entries are already there.
+    //      Considered ✓.
+    expect(count).toBe(20);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

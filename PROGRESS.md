@@ -41114,3 +41114,73 @@ tests.
   barrel). Its two tests also cover LIVE siblings (Button, Input, Select, Popover), so it needs those
   tests trimmed and snapshots regenerated — surgery that does not belong in a bulk deletion. It sits
   in the dead-code guard's allowlist with that reason recorded.
+## 2026-08-24 — APK build report: a test file we wrote stopped a user's app from building
+
+**The report.** A user's `Build Android APK (installable)` run failed in "Build the web app" after 48s:
+
+```
+./playwright.config.ts:3:16
+Type error: Cannot redeclare block-scoped variable 'devices'.
+  1 | declare module '@playwright/test' {
+  3 |   export const devices: Record<string, any>;
+  6 | import { defineConfig, devices } from '@playwright/test';
+```
+
+### The five buckets
+
+- ✅ **Self-healed: 0.** Nothing recovered this. Under the 50/50 law that is not the failure — the
+  failure is that a self-heal would have been needed at all.
+- 🔀 **Worked around: 1 (and it is the visible defect).** The original error was `Cannot find module
+  '@playwright/test'`. Someone answered it by declaring the package's types at the top of the file
+  that imports it. A textbook surface patch, and it does not even work.
+- ⏭️ **Skipped: 0.**
+- ❌ **Still broken: 1.** The app could not build at all, so no APK existed.
+- 🥵 **Struggle: the whole run.** 48 seconds and four green steps spent to reach a file that could
+  never have compiled.
+
+### Root cause — every link is ours
+
+1. `e2eAutoScaffold` writes `playwright.config.ts` + `e2e/*.spec.ts` into the user's project and
+   **deliberately does not install `@playwright/test`**. That reasoning is sound on its own terms:
+   adding a package to somebody's project to run a test for them is a different thing.
+2. But that leaves TypeScript in their project importing a package it does not have. In a **Next.js**
+   app this is fatal — `next build` typechecks the project root, our test config included.
+3. A shim was therefore inevitable. And a `declare module 'x'` block in a file that also imports `'x'`
+   is an *augmentation*: its exported names collide with the import's bindings. The symptom moved from
+   "cannot find module" to "cannot redeclare `devices`", and the app stopped building entirely.
+
+**The 50/50 half nobody had done:** the bug is not the bad shim. It is that we wrote a file into a
+user's app which their build typechecks and which cannot possibly compile.
+
+### This is a SIBLING of a fix already in the repo — which is how we know it is a class
+
+On **2026-08-11** an APK build failed because a broken `*.test.tsx` was typechecked by the release
+build; the answer was `tsconfig.build.json` excluding tests (`FrameworkFoundation.ts`). Right, and
+incomplete in two ways this closes: `playwright.config.ts` at the project ROOT is neither `*.test.*`
+nor `*.spec.*`, and **`next build` reads `tsconfig.json`, never our `tsconfig.build.json`**. A Vite
+scaffold was safe only by accident — its `include` is `["src"]` and the config sits outside it.
+
+### The fix, both halves
+
+- **Prevention** (`e2eTypecheck.ts`): the E2E paths are added to the project's tsconfig `exclude`, so
+  a file we wrote for testing can never fail the app's build. Runs for **any** project holding those
+  files, not only a fresh scaffold — the create-only writer would otherwise never repair the app that
+  already carries the broken config. Conservative by construction: an unparseable tsconfig is left
+  untouched, a Vite-style config that builds only `src/` comes back byte-identical, and nothing is
+  written when the entries are already there.
+- **Repair** (`ambientModuleShim.ts`): the colliding `declare module` block is removed, so the file
+  itself is fixed rather than merely hidden from the build. Removal is never a judgement call —
+  either the real types exist and the stub was redundant, or they do not and the honest "Cannot find
+  module" returns, naming the actual problem. **Wildcard declarations (`declare module '*.css'`) can
+  never match**; deleting one would break working apps, which would be far worse than the bug.
+
+Both are gated on `!isImportTurn` and both are recorded in the census in `agentv3.test.ts` (18 → 20)
+that forces every new file-writer to be audited for the read-only turn.
+
+### Proactive (rule 5 step 6)
+
+The general lever this exposes: **anything NavBharatAI writes into a user's project must be able to
+survive their release build, or must be kept out of it.** The vaccine already handles the honest
+version of this for unit tests (`suitePresentButRunnerMissing`). The scaffolds are now the same. Worth
+watching for a third instance — if one appears, the answer is a single "does this project's build
+typecheck what we just wrote?" check at every scaffold site rather than a third bespoke exclude.

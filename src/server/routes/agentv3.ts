@@ -219,6 +219,8 @@ import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } 
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
+import { withE2eExcluded, e2eExcludeNote } from '../AgentV3/e2eTypecheck';
+import { findAmbientShimCollisions, stripCollidingAmbientShims, ambientShimNote } from '../AgentV3/ambientModuleShim';
 import {
   planSmokeChecks, classifySmokeStatus, summarizeSmoke, smokeCurlCommand, parseCurlStatus,
   type SmokePlan, type SmokeResult,
@@ -13753,6 +13755,76 @@ async function noteBuildOutcome(
               message: `No end-to-end suite was added — ${decision.reason}.`,
               autoResolved: true,
             });
+          }
+          /**
+           * 🔒 AND NOW KEEP THAT NET OUT OF THE APP'S BUILD (admin APK report 2026-08-24).
+           *
+           * The scaffold above writes TypeScript that imports `@playwright/test` and deliberately does
+           * NOT install it. In a Next.js app that is fatal: next build typechecks every root .ts, so a
+           * file we wrote for TESTING stops the user's app from building — and their APK from
+           * existing. The user's run died on `Cannot redeclare block-scoped variable 'devices'`,
+           * which was itself a shim someone pasted in to silence the missing module: the surface patch
+           * was inevitable once the file was there and uncompilable.
+           *
+           * Excluding the E2E paths from the app's typecheck is the fix at the cause. It keeps the
+           * scaffold's promise (we add no packages to your project) AND makes the file harmless.
+           *
+           * 🔑 RUN FOR EVERY PROJECT THAT HAS THE FILES, not only the one we just scaffolded — an app
+           * given the config on an earlier build is exactly the app already broken by it, and the
+           * create-only writer above will never touch that config again. This is the repair for those.
+           *
+           * Conservative by construction: `withE2eExcluded` does nothing to a config it cannot parse,
+           * nothing to one that already builds only `src/` (a Vite scaffold, safe by accident), and
+           * nothing when the entries are already there — so an untouched project stays byte-identical.
+           */
+          const projectNow: Record<string, string> = { ...e2eFiles, ...Object.fromEntries(writtenFiles) };
+          /**
+           * 🔒 AND UNDO THE SHIM THAT MADE IT WORSE.
+           *
+           * The exclude above stops a test file failing the app's BUILD. It does not repair the file,
+           * and the admin's was genuinely broken: someone had answered `Cannot find module
+           * '@playwright/test'` by declaring the module's types at the top of the file that imports
+           * it, which TypeScript rejects outright (`Cannot redeclare block-scoped variable
+           * 'devices'`). Leaving that in place would mean the user's own `npx playwright test` and
+           * their editor stay broken while only our build looks fine — half a fix.
+           *
+           * Removing it is never a judgement call: either the real types exist and the stub was
+           * redundant, or they do not and the HONEST error comes back, naming what is actually wrong.
+           * Wildcard declarations (`declare module '*.css'`) can never match — see the module.
+           */
+          if (!isImportTurn) {
+            const shims = findAmbientShimCollisions(projectNow);
+            const fixedPaths = new Set(shims.map((s) => s.path));
+            for (const path of fixedPaths) {
+              const stripped = stripCollidingAmbientShims(projectNow[path]);
+              if (stripped.source === projectNow[path]) continue;
+              projectNow[path] = stripped.source;
+              writtenFiles.set(path, stripped.source);
+              try { await actuator.writeFile(workspaceId, path, stripped.source); } catch { /* store copy is fixed */ }
+            }
+            if (shims.length > 0) {
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'AMBIENT_SHIM_REMOVED',
+                message: ambientShimNote(shims), autoResolved: true,
+              });
+            }
+          }
+          const hasE2eFiles = Object.keys(projectNow)
+            .some((p) => p === 'playwright.config.ts' || p.startsWith('e2e/'));
+          if (hasE2eFiles && !isImportTurn) {
+            let tsconfigRaw = '';
+            try { tsconfigRaw = await actuator.readFile(workspaceId, 'tsconfig.json'); } catch { tsconfigRaw = ''; }
+            if (tsconfigRaw) {
+              const excluded = withE2eExcluded(tsconfigRaw);
+              if (excluded.changed) {
+                await actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text);
+                writtenFiles.set('tsconfig.json', excluded.text);
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'E2E_EXCLUDED_FROM_BUILD',
+                  message: e2eExcludeNote(excluded.added), autoResolved: true,
+                });
+              }
+            }
           }
         } catch { /* the net is additive — a failure here never touches the build result */ }
       }

@@ -31,6 +31,8 @@
 // assemble or shipped empty — and nothing said why, because a wrong guess looks exactly like a right
 // one until someone opens the app.
 
+import { planDeployment } from '../AgentV3/deployPlan';
+
 export type ApkCapability =
   /** Its normal build already emits a static site. Nothing to configure. */
   | 'ready'
@@ -167,4 +169,35 @@ export function apkRefusal(cap: FrameworkCapability, frameworkName: string): str
  */
 export function apkCapableFrameworkIds(): string[] {
   return FRAMEWORK_CAPABILITIES.filter((c) => c.apk !== 'no-ui').map((c) => c.id);
+}
+
+/**
+ * Does this PROJECT have anything an app could show? Asked of the real files, not of a stored id.
+ *
+ * 🔒 THE FILES ARE THE AUTHORITY, and deliberately so. A framework id is what the user picked once,
+ * possibly weeks ago; the files are what they have now. An app that began as an Express API and grew
+ * a React front end must be packageable, and one scaffolded from a UI template whose screens were all
+ * deleted must not be — neither of which an id can tell you.
+ *
+ * 🔒 IT REUSES `planDeployment` RATHER THAN CLASSIFYING AGAIN. That module already answers "what shape
+ * is this app" for the publish path, from the same manifests, and it is already tested and measured. A
+ * second classifier here would be the duplicated-then-drifted logic rule 4 exists to prevent — and the
+ * drift would show up as the two features disagreeing about the same app.
+ *
+ * Returns '' — meaning "go ahead" — unless the project is POSITIVELY a server with no screens. Every
+ * uncertain case builds, exactly as it does today: refusing a working app is far worse than packaging
+ * an odd one.
+ */
+export function apkRefusalForProject(files: Record<string, string>): string {
+  const all = files ?? {};
+  const paths = Object.keys(all);
+  // Any real screen at all ⇒ there is something to show. Checked FIRST, so a fullstack app that
+  // genuinely has a front end is never refused on the strength of its server half.
+  const hasUi = paths.some((p) => /(^|\/)index\.html$/i.test(p) || /\.(tsx|jsx|vue|svelte|astro)$/i.test(p));
+  if (hasUi) return '';
+  const shape = planDeployment(all).shape;
+  if (shape !== 'node-server' && shape !== 'python-server') return '';
+  return 'This project is a server that answers requests — it has no screens, so there is nothing for '
+    + 'a phone app to show. An app built from it would install and open to a blank page. Deploy it as '
+    + 'a backend instead, and make the app from the front-end project that talks to it.';
 }

@@ -61,7 +61,7 @@
     "dotenv": "^17.2.3",
     "e2b": "^2.30.0",
     "es-module-lexer": "^2.3.1",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "express-rate-limit": "^8.6.2",

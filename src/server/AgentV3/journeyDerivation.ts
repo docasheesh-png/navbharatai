@@ -305,6 +305,30 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
   return out.slice(0, MAX_JOURNEYS);
 }
 
+/**
+ * Does this project actually DRAW something — a canvas, a 3D renderer, a DOM mount?
+ *
+ * ⚠️ POSITIVE EVIDENCE, and it exists because I got this wrong twice in one sitting. "No data entry
+ * found" is an ABSENCE, and an absence is true of a canvas game, of an empty file map, and of a
+ * project we happen to be holding one utility file for. Concluding "this is a game, a dashboard or a
+ * landing page" from an absence is the same mistake this whole module was built to stop — a report
+ * confidently describing an app it has no evidence about. Two existing tests caught it.
+ *
+ * So the "nothing to prove here" answer now requires a reason to believe there IS a user interface,
+ * and merely fails to find data entry in it. Deliberately broad in WHAT counts as drawing (a game, a
+ * chart dashboard and a landing page reach the screen very differently) and strict in requiring that
+ * something does.
+ */
+function hasRenderSurface(files: Record<string, string>): boolean {
+  for (const src of Object.values(files ?? {})) {
+    if (!src) continue;
+    if (/<canvas\b|getContext\s*\(|\brenderer\.render\s*\(|\bnew\s+THREE\./i.test(src)) return true;
+    if (/createRoot\s*\(|ReactDOM\.render\s*\(|\.mount\s*\(|createApp\s*\(/.test(src)) return true;
+    if (/document\.(?:body|getElementById|querySelector)\b[^\n]{0,60}(?:innerHTML|appendChild)/.test(src)) return true;
+  }
+  return false;
+}
+
 /** Why a derivation produced nothing — so a quiet report is explained rather than merely quiet. */
 export function noJourneyReason(files: Record<string, string>): string {
   // THE SAME CANDIDATE LIST THE DERIVATION USES. When these two disagree the report gives a reason that
@@ -312,7 +336,27 @@ export function noJourneyReason(files: Record<string, string>): string {
   // from" about a React game whose whole UI lives in src/App.tsx — a file deriveJourneys looks at and
   // this function did not. One list, so the explanation always describes what actually happened.
   const pages = journeyCandidates(files ?? {});
-  if (pages.length === 0) return 'no page components were found to derive a user journey from';
+  if (pages.length === 0) {
+    // ⚠️ NO PAGE FOUND HAS TWO VERY DIFFERENT MEANINGS, AND ONLY ONE IS A FINDING ABOUT THE APP
+    // (admin benchmark reports, 2026-08-24). A Three.js racing game has no App.tsx, no pages/
+    // directory and no form — its whole UI is a canvas in src/game.ts. All of that is CORRECT for a
+    // game, yet the single old sentence, "no page components were found to derive a user journey
+    // from", reads as a deficiency. It appeared on all four of the admin's benchmark builds.
+    //
+    // `appHasNoDataEntry` already exists for exactly this distinction, and the release gate already
+    // reads it ('none-derivable'). It simply was not consulted by the sentence a human reads. Asking
+    // it here separates "there is nothing here to check" from "we could not find where to check",
+    // which are not the same fact and only one of them is about the app's quality.
+    //
+    // REQUIRES POSITIVE EVIDENCE OF A UI — see hasRenderSurface. An absence of data entry is equally
+    // true of a canvas game, an empty file map and a project we are holding one utility file for, and
+    // only the first of those is "there is nothing here to prove".
+    if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) {
+      return 'this app has no data-entry surface at all — a game, a dashboard or a landing page has '
+        + 'nothing to save and reload, so there is no such journey to prove';
+    }
+    return 'no page components were found to derive a user journey from';
+  }
   const anyForm = pages.some((p) => inputTags(files[p] || '').length > 0);
   if (!anyForm) return 'this app has no form for a journey to fill in — nothing here takes user input';
   return 'the forms in this app have no field this check could address honestly (no name, id, placeholder, '

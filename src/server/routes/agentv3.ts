@@ -8919,6 +8919,24 @@ async function noteBuildOutcome(
     // of every file the agent writes (reliable — straight from the write op, not a later listFiles that
     // can come back empty). See the "DURABLE FILE SAVE" block for the normal-completion path.
     const writtenFiles = new Map<string, string>();
+    /**
+     * THE PROJECT AS IT STOOD WHEN THIS TURN BEGAN — every file, not just the ones this turn writes.
+     *
+     * ⚠️ WHY (five real build reports, 2026-08-24: JOURNEY_NOT_DERIVED in four of five builds). The
+     * journey check — the ONLY thing that proves an app really saves data rather than only appearing
+     * to — was derived from `writtenFiles`, which is what THIS BUILD wrote. On an edit that touched two
+     * components, `src/App.tsx` is not among them, so the search found no page to start from and
+     * reported "no page components were found to derive a user journey from".
+     *
+     * That sentence is about the APP. The truth was about the SEARCH: we had only looked at the handful
+     * of files this turn happened to write. Third time today that a partial artifact stood in for the
+     * whole thing, and the cost here is that our strongest evidence almost never ran.
+     *
+     * Filled from the read the File Guardian already performs, so this costs no extra I/O. Null means
+     * that read did not happen or failed — in which case the journey falls back to `writtenFiles`,
+     * exactly as it behaves today.
+     */
+    let projectFilesAtTurnStart: Record<string, string> | null = null;
 
     // P-PME.4 — LIVE, ADAPTIVE ETA state. The up-front estimate (set below at build start) is a
     // realistic total; the heartbeat below recomputes the REMAINING time every 2 min and emits it,
@@ -9991,6 +10009,9 @@ async function noteBuildOutcome(
           const restoreT0 = Date.now();
           const saved = await loadWorkspaceFiles(workspaceId);
           const loadMs = Date.now() - restoreT0;
+          // Reused far below by the journey check (see projectFilesAtTurnStart) — the whole project,
+          // read once, rather than a second store round-trip on the critical path.
+          projectFilesAtTurnStart = saved;
           const scanT0 = Date.now();
           const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
           const scanMs = Date.now() - scanT0;
@@ -13752,7 +13773,13 @@ async function noteBuildOutcome(
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
       ) {
         try {
-          const journeyFiles = Object.fromEntries(writtenFiles);
+          // THE WHOLE PROJECT, overlaid with what this turn wrote — never `writtenFiles` alone.
+          //
+          // Order matters: the durable snapshot is the base and this turn's writes go ON TOP, so a file
+          // this build just changed is judged by its NEW content while every file it did not touch is
+          // still there to be found. Deriving from the writes alone is what made the journey report
+          // "this app has no page components" about apps that plainly have them.
+          const journeyFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
           // A marker unique to this build, so "the item appeared" cannot pass on pre-existing data.
           const marker = `nbai-${buildStartedAt.toString(36)}`;
           const journeys = deriveJourneys({

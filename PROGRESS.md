@@ -40936,3 +40936,77 @@ weakened to shut it up.
 users until the next signed build — but it is one small PR, and CLAUDE.md is explicit that a bundle is
 batched to phase/checkpoint boundaries rather than burnt on each one. The web is fixed on deploy; this
 rides the next batch.
+
+---
+
+## 2026-08-24 — the Mitrify report autopsy: one leak, one guess, one silence
+
+The admin sent a real build report (Mitrify, an imported Express app) and asked what was needed to fix
+the recurring preview failure permanently. The autopsy found three things, and they turned out to be
+one chain.
+
+### 🔴 #2624 — a REAL admin password reached the chat and the durable report
+
+The imported repo documented its own admin login; the model quoted it into its survey. Both the reply
+and the stored report carried `- **Password:** \`7742039808\`` untouched.
+
+**TWO failures, and the first is the one worth remembering.** `redactSecrets` RAN AND DID NOT MATCH —
+`redactReportSecrets` already passes `summary` through it, so this was never a missing call. Reproduced
+against the live function before a line was changed.
+
+The pattern was written for config files (`KEY=value`). The text it guards TODAY is markdown prose
+written by a model, and two things defeated it, both one character wide: the emphasis markers (`**`
+sits between the key and the colon AND right after it, where only whitespace was allowed) and the
+backtick (neither an accepted quote nor excluded from the value class, so a code-spanned value could
+not match at all). Widened in the ONE shared pattern — a redactor with two versions is a redactor with
+one that is out of date — and the username beside the password is deliberately NOT masked, because
+over-masking teaches people to ignore the mask.
+
+Second: the durable report was redacted and **the live stream was not**. `redactEventForUser` now sits
+on the route's single `emit`. It touches only `text` and `summary`, returns the SAME object when
+nothing needed masking, and swallows any error — a redactor that could throw could kill the stream it
+protects.
+
+Honest limit, and the reason the admin was told to rotate: this stops the leak from here on. It cannot
+un-send what already reached the chat, and the value is still in that build's stored report.
+
+### #2625 — the preview guessed a port the app had already told us
+
+The app serves on 5000. The preview never came up during the build, so no proven-port recipe was ever
+stored, and the door fell through to the common list and offered 3000. **The engine had READ the port
+and written "serves on port 5000" into its own reply** — the information existed, in prose, and was
+never captured anywhere a machine could use.
+
+Two modules already deal with ports and neither could answer this: `PortDiscovery` asks the OS which
+ports are LISTENING (right when something runs, useless when nothing does) and `PortBindingAnalysis`
+reports a hardcoded port as a DEFECT. `declaredPort.ts` reads what the app DECLARES, ranked by the
+strength of the source — an explicit `--port` in the dev script beats an env example beats a
+`process.env.PORT || N` fallback beats a framework config — and every one of them stays weaker than a
+port we have SEEN serving. Null when the app says nothing, and null means unknown, never a default.
+
+### #2626 — the background boot was killed by our own idle sweep, and said nothing
+
+The message that starts a background preview boot promises "its verdict is recorded here even if it
+lands after the reply stream closes". The report had NEITHER a success nor a failure entry — no verdict
+at all, which reads exactly like "we never tried".
+
+**Root cause, and it is the same clock as #2597.** Idle is measured from the last SANDBOX OPERATION and
+`npm install && npm run dev` is ONE long command: one stamp, then minutes of quiet. The build that
+launched it had already released its hold, so the sweep paused the machine mid-install, the promise
+never resolved, and neither branch ran. That silence is ALSO why no recipe existed — which is what sent
+the door guessing in #2625. One cause, two symptoms.
+
+Fixed with the mechanism that already exists (`setBuildActive`, taken before the first await, released
+in a finally, self-expiring) rather than a second flag that would need keeping in step. And silence is
+no longer a verdict: `IMPORT_PREVIEW_BOOT_CUT_OFF` records it as UNKNOWN — never "failed", because
+being cut off says nothing about the user's app. The flag is set at the BRANCH POINT so a future branch
+cannot be misreported as a cut-off.
+
+### Still open from this autopsy, honestly
+
+  • `ok: true` and ₹12.16 charged on a build whose own RELEASE_GATE says "nothing here was ever proven
+    to RUN". That is a billing decision and sits with the admin.
+  • TIME_TO_FIRST_CALL was 111s, with a 43s stretch recording nothing at all.
+  • CLOSED the same day by #2627: CREDENTIAL_SILENCE_RULE — "say where, never what" — now travels
+    beside LANGUAGE_RULE on every path that produces user-facing text, including the hand-composed
+    chat paths, because the turn that leaked was a SURVEY (a chat answer about code), not a build.

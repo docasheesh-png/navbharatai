@@ -222,6 +222,7 @@ import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/auth
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
 import { withE2eExcluded, e2eExcludeNote } from '../AgentV3/e2eTypecheck';
 import { findAmbientShimCollisions, stripCollidingAmbientShims, ambientShimNote } from '../AgentV3/ambientModuleShim';
+import { shapeConflict } from '../AgentV3/appIdentity';
 import {
   planSmokeChecks, classifySmokeStatus, summarizeSmoke, smokeCurlCommand, parseCurlStatus,
   type SmokePlan, type SmokeResult,
@@ -4200,7 +4201,30 @@ async function noteBuildOutcome(
       // The PROVEN port leads the sweep — recorded the moment this app last genuinely rendered — and
       // the sweep verifies whatever it claims: the door never redirects to a port it did not just see
       // answer. This is what kills the 3000-vs-5000 loop: no url is ever believed about a port again.
-      const recipe = await raceTimeout(sandboxStore.getRecipe(ws), 3_000, 'doorRecipe').catch(() => null);
+      /**
+       * 🔒 THE RECIPE MUST STILL DESCRIBE THE APP THAT IS HERE (admin 2026-08-25 — the piano).
+       *
+       * This is the exact line that served the previous app. The recipe's port LEADS the sweep, so a
+       * recipe left behind by an earlier app in this workspace sends the sweep to that app's port
+       * first — and if its dev server is still alive there, the sweep verifies a real server and the
+       * door redirects with full confidence. The verification was never wrong; it was answering about
+       * the wrong app.
+       *
+       * The comparison costs nothing extra: `declaredPort` is read from the SAME durable document,
+       * and it is rewritten on every verified preview (see ToolDispatcher's supersede block), so it
+       * is the freshest statement of what THIS app serves on. When the two positively disagree, the
+       * recipe is describing something else and is set aside — the sweep then leads with the declared
+       * port, which is what we would have used had no recipe ever existed.
+       *
+       * Fail-safe by construction (see appIdentity.ts): an unknown value is silence, never a
+       * conflict, so a workspace with no declaredPort keeps its recipe and behaves exactly as before.
+       */
+      const recipeRaw = await raceTimeout(sandboxStore.getRecipe(ws), 3_000, 'doorRecipe').catch(() => null);
+      const recipeConflict = shapeConflict(
+        { port: recipeRaw?.port, framework: recipeRaw?.framework, devCommand: recipeRaw?.devCommand },
+        { port: doorRecord?.declaredPort },
+      );
+      const recipe = recipeConflict ? null : recipeRaw;
       // The client's displayed port rides in unsigned as `p` (see makeDoorPath for why unsigned is
       // safe): it slots in AFTER the proven port and BEFORE the common list, so an app on an unusual
       // port that has never earned a recipe still resolves instead of waiting forever.

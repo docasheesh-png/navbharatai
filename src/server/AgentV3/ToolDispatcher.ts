@@ -7661,7 +7661,17 @@ export class ToolDispatcher {
         // output directory existed, and five files is not zero. Emptiness was the only thing anyone
         // checked, and a placeholder is not empty. See publishablePayload.ts for why this is ONE
         // signal and why it refuses to guess at a second.
-        const publishable = publishableVerdict(entryPagesOf(files));
+        //
+        // The SECOND signal needs the workspace's own file list. Best-effort and deliberately so: if
+        // the listing fails we pass `undefined`, the check skips, and behaviour is exactly today's. A
+        // publish blocked by OUR blindness is the failure mode this guard exists to prevent, so it
+        // must never be the thing that stops one.
+        let sourcePaths: string[] | undefined;
+        try { sourcePaths = await this.actuator.listFiles(this.workspaceId); } catch { sourcePaths = undefined; }
+        const publishable = publishableVerdict(entryPagesOf(files), {
+          distPaths: [...files.keys()],
+          sourcePaths,
+        });
         if (!publishable.ok) throw new Error(publishable.reason);
         const url = await this.deploy(this.workspaceId, files);
         this.events?.emit({ type: 'preview', url, ts: Date.now() });

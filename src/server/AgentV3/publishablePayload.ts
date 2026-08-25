@@ -38,11 +38,47 @@ const SCAFFOLD_MARKERS = [
 /** Which entry files can carry the placeholder. */
 const ENTRY = /(^|\/)index\.html$/i;
 
+/**
+ * Source files that are UNAMBIGUOUSLY a user interface, and that a build must therefore turn into
+ * something shippable.
+ *
+ * Framework component extensions only, on purpose. A `.ts` file is not evidence — an Express app is
+ * full of them and has no browser bundle to produce. `.tsx/.jsx/.vue/.svelte` exist for one reason,
+ * and a plain HTML/CSS site (a first-class thing this platform builds) never contains one. That is
+ * what keeps the second signal below from ever firing on a working app.
+ */
+const UI_SOURCE = /\.(tsx|jsx|vue|svelte)$/i;
+
+/** What a build produces when it actually compiled that source: script or stylesheet assets. */
+const BUILT_ASSET = /\.(js|mjs|cjs|css)$/i;
+
+/**
+ * Files the PLATFORM writes into every app, which are therefore not evidence that anything was built.
+ *
+ * ⚠️ MY OWN FIRST VERSION OF THIS GUARD MISSED THE VERY PUBLISH IT WAS WRITTEN FOR, and the test above
+ * is what caught it. `appDefaults.ts` adds a manifest, a robots.txt, an icon and a service worker to
+ * every app — and `sw.js` matches BUILT_ASSET. So the reported payload (index.html + those four)
+ * looked like it contained a script, and the check stayed silent on the exact case it exists for.
+ *
+ * The lesson is the same one this whole week has been about: "a .js file is present" is an artifact,
+ * and it was standing in for "the build emitted something". Ours do not count as theirs.
+ */
+const PLATFORM_INJECTED = /^(sw\.js|manifest\.webmanifest|robots\.txt|icon\.svg)$/i;
+
 export interface PublishableVerdict {
   /** May this be published as the user's app? */
   ok: boolean;
   /** The honest sentence to show, when it may not. Empty when ok. */
   reason: string;
+}
+
+/** What the caller knows about the workspace, for the second signal. Both optional — absent means
+ *  "not checked", and an unchecked thing never blocks a publish. */
+export interface PublishContext {
+  /** Every path in the dist we are about to upload. */
+  distPaths?: string[];
+  /** Every path in the workspace, so we can see whether it holds UI source at all. */
+  sourcePaths?: string[];
 }
 
 /**
@@ -52,7 +88,7 @@ export interface PublishableVerdict {
  * pure and cheap. An empty map is left to the caller's own emptiness check — two errors for one
  * condition would be worse than one.
  */
-export function publishableVerdict(entryPages: string[]): PublishableVerdict {
+export function publishableVerdict(entryPages: string[], ctx: PublishContext = {}): PublishableVerdict {
   for (const page of entryPages) {
     const text = String(page ?? '');
     if (SCAFFOLD_MARKERS.some((re) => re.test(text))) {
@@ -67,6 +103,51 @@ export function publishableVerdict(entryPages: string[]): PublishableVerdict {
       };
     }
   }
+
+  /**
+   * SECOND SIGNAL — A CONTRADICTION, NOT A SUSPICION (added 2026-08-25 when the admin asked for this
+   * to be rock-solid rather than merely closed).
+   *
+   * The marker above catches the exact page that shipped. It would NOT catch the same failure with a
+   * different placeholder, an edited one, or none at all — and the underlying fault is not the text,
+   * it is that a build produced nothing from source that plainly needed compiling.
+   *
+   * So this compares two facts we already hold, and fires only when they cannot both be true: the
+   * workspace contains COMPONENT files (.tsx/.jsx/.vue/.svelte — code whose only purpose is a user
+   * interface), and the thing we are about to publish contains no script or stylesheet at all. There
+   * is no reading of that pair in which the user's app is in the payload.
+   *
+   * Why it cannot fire on a working app:
+   *   • a plain HTML/CSS site has no component files          → first condition fails
+   *   • an Express/API project has .ts but no components       → first condition fails
+   *   • any app that really built has assets in its output     → second condition fails
+   *   • either list missing (the caller could not look)        → skipped entirely, never assumed
+   *
+   * That last one matters most: this must degrade to today's behaviour when we cannot see, because a
+   * publish blocked by our own blindness is the failure mode this whole file exists to prevent.
+   */
+  const dist = ctx.distPaths;
+  const source = ctx.sourcePaths;
+  if (Array.isArray(dist) && Array.isArray(source) && dist.length > 0 && source.length > 0) {
+    const hasUiSource = source.some((p) => UI_SOURCE.test(String(p ?? '')));
+    const hasBuiltAsset = dist.some((p) => {
+      const path = String(p ?? '');
+      // Root-anchored: a bundler's own `assets/sw.js` is real output, while the platform's is not.
+      if (PLATFORM_INJECTED.test(path)) return false;
+      return BUILT_ASSET.test(path);
+    });
+    if (hasUiSource && !hasBuiltAsset) {
+      return {
+        ok: false,
+        reason:
+          'Your app\'s code was not included in what would be published. The project has interface '
+          + 'files, but the build produced a page with no script or stylesheet — so the published site '
+          + 'would be an empty shell. This usually means the build ran somewhere other than where your '
+          + 'app lives. Ask the AI to build the app, then publish again.',
+      };
+    }
+  }
+
   return { ok: true, reason: '' };
 }
 

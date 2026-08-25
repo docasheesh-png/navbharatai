@@ -29,6 +29,7 @@
 // (`removed`) kills both, link included.
 
 import * as admin from 'firebase-admin';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { getServerDb } from './serverDb';
 import { listEqNewestFirst } from './firestoreIndexSafe';
@@ -298,6 +299,7 @@ export function verifyAppPassword(password: string, hash: string | undefined, sa
 
 const COLLECTION = 'nav_store_web_apps';
 const FILES_SUB = 'files';
+const BAKED_SUB = 'baked';
 const REPORTS_SUB = 'reports';
 const BATCH = 400;
 
@@ -341,6 +343,53 @@ export async function saveWebApp(app: WebStoreApp, files: Record<string, string>
     commits.push(b.commit());
   }
   await Promise.all(commits);
+}
+
+
+// ── The BAKED page: compile once at publish, serve forever ─────────────────────────────────────────
+//
+// WHY (admin 2026-08-25: "app mart me app jaldi open ho"). Opening a store app used to do, on every
+// Cloud Run instance's first serve of it: one doc read + a subcollection read of EVERY file + a
+// 200–500 ms server-side compile (measured) — all between the viewer's tap and their first pixel.
+// The in-memory cache hid this only per instance, and instances recycle on every deploy. The page is
+// fully determined at publish time, so that is when it is built; open becomes one small doc read.
+//
+// Stored GZIPPED in a single doc under the app. A typical compiled page is 75–190 KB raw and
+// 21–23 KB gzipped, so the 1 MiB doc ceiling holds pages up to several MB of raw HTML. A page whose
+// gzip does not fit is simply not baked — the serve-time compile path still exists and still works,
+// so "too big to bake" degrades to "as slow as today", never to broken. Same on read: any missing or
+// unreadable bake falls through to compile. The bake can only make things faster, by construction.
+/** Firestore's 1 MiB doc cap, with headroom for field names + metadata. */
+const BAKED_MAX_GZ_BYTES = 950_000;
+
+export async function saveWebAppBakedPage(id: string, version: number, html: string): Promise<boolean> {
+  const d = db();
+  if (!d) return false;
+  const gz = gzipSync(Buffer.from(html, 'utf8'));
+  if (gz.length > BAKED_MAX_GZ_BYTES) return false; // honest skip — serve-time compile covers it
+  await d.collection(COLLECTION).doc(id).collection(BAKED_SUB).doc('page')
+    .set({ version, gz, bakedAt: Date.now() });
+  return true;
+}
+
+/** The baked page for EXACTLY this version, or null — an old bake must never outlive a re-publish. */
+export async function getWebAppBakedPage(id: string, version: number): Promise<string | null> {
+  const d = db();
+  if (!d) return null;
+  try {
+    const doc = await d.collection(COLLECTION).doc(id).collection(BAKED_SUB).doc('page').get();
+    if (!doc.exists) return null;
+    const data = doc.data() as { version?: number; gz?: unknown };
+    if (data.version !== version) return null;
+    // The admin SDK hands a bytes field back as a Buffer; anything else (a manually edited doc, an
+    // emulator quirk) is treated as no bake rather than parsed hopefully.
+    const raw = data.gz;
+    const buf = Buffer.isBuffer(raw) ? raw : raw instanceof Uint8Array ? Buffer.from(raw) : null;
+    if (!buf || buf.length === 0) return null;
+    return gunzipSync(buf).toString('utf8');
+  } catch {
+    return null; // unreadable bake = no bake; the compile path serves
+  }
 }
 
 export async function getWebApp(id: string): Promise<WebStoreApp | null> {

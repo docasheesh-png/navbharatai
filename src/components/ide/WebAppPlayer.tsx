@@ -160,6 +160,14 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
 
   useEffect(() => {
     let cancelled = false;
+    // OPEN AND META IN PARALLEL (admin 2026-08-25, "app mart me app jaldi open ho"). This used to be
+    // two SEQUENTIAL round trips — fetch the listing, and only then request the page — so every open
+    // paid a full extra network round trip before the first pixel. The open no longer waits: it fires
+    // immediately, and a private app's open simply answers 401 requiresPassword, which the handler
+    // below already turns into the password prompt. The trade, stated: a private app now costs one
+    // tiny guaranteed-401 request it used to avoid — private apps are the rare case, and a wasted
+    // ~200-byte request beats every public open being a round trip slower.
+    void open();
     void (async () => {
       try {
         const res = await fetch(`/api/nav-store/web/app/${encodeURIComponent(appId)}`);
@@ -170,10 +178,7 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
           return;
         }
         setMeta(data.app as PlayerMeta);
-        // Public apps open immediately; private ones wait for the password rather than burning a
-        // guaranteed-401 round trip.
         if ((data.app as PlayerMeta).requiresPassword) setNeedsPassword(true);
-        else void open();
       } catch {
         if (!cancelled) setError('Could not reach the store.');
       }

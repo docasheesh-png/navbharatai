@@ -45,6 +45,7 @@ import {
 import {
   evaluateWebPublish, hashAppPassword, verifyAppPassword, toPublicWebApp, newWebAppId,
   saveWebApp, getWebApp, getWebAppFiles, listListedWebApps, listMyWebApps, listUnlistedWebApps,
+  saveWebAppBakedPage, getWebAppBakedPage,
   updateWebApp, makeWebAppPublic, bumpWebAppCounter, removeWebApp, reportWebApp,
   recordRemixOrigin, getRemixOrigin, keyShapedEnvVars,
   sanitizeScreenshots, saveWebAppScreenshots, getWebAppScreenshots,
@@ -512,6 +513,16 @@ export function registerNavStoreRoutes(app: Express): void {
    * can be reused for every viewer of that version — the compile cost is paid once per version per
    * instance, and 10,000 viewers of one app cost the same CPU as one. Keyed by id+version; bounded.
    */
+  /**
+   * Bake the store app id in, which flips window.NavData from its per-device preview backend to the
+   * REAL shared rows — the difference between "a chat app that talks to yourself" and one that talks
+   * to everyone. Injected at SERVE time in both branches (baked page and live compile), never stored
+   * in the bake, so the bake stays a pure function of the published files.
+   */
+  const withStoreAppId = (html: string, id: string): string => {
+    const idTag = `<script>window.__NBAI_STORE_APP_ID=${JSON.stringify(id)};</script>`;
+    return html.includes('<body>') ? html.replace('<body>', `<body>${idTag}`) : idTag + html;
+  };
   const webPlayerCache = new Map<string, { html: string; kind: string }>();
   const WEB_PLAYER_CACHE_MAX = 40;
 
@@ -635,6 +646,17 @@ export function registerNavStoreRoutes(app: Express): void {
         version: (existing?.version ?? 0) + 1,
       };
       await saveWebApp(record, gate.files);
+      // BAKE THE PAGE NOW, while we already hold the files (admin 2026-08-25, "app mart me app
+      // jaldi open ho"): the page a viewer gets is fully determined at publish time, so compiling it
+      // per-instance on first open was pure repeated latency — one doc read now replaces a
+      // subcollection read + a 200–500 ms compile on every cold serve. Best-effort by design: the
+      // publish already saved app + files above, and a failed or skipped bake (page too big for a
+      // doc) only means opens fall back to today's serve-time compile — slower, never broken.
+      try {
+        const hdrHost = req.get('host');
+        const bakeOrigin = hdrHost ? `${(req.headers['x-forwarded-proto'] as string) || req.protocol || 'https'}://${hdrHost}` : undefined;
+        await saveWebAppBakedPage(id, record.version, renderPreview(VirtualFileSystem.fromRecord(gate.files), bakeOrigin, `store-${id}`));
+      } catch (e) { logStoreError('web/publish bake', e); }
       // Screenshots replace wholesale, in their own subcollection — best-effort so a screenshot write
       // failure never fails a publish whose app + files already saved. screenshotCount above stays
       // honest to what was ACCEPTED; getWebAppScreenshots is what the detail view actually serves.
@@ -686,6 +708,12 @@ export function registerNavStoreRoutes(app: Express): void {
       const cacheKey = `${found.id}@${found.version}`;
       let compiled = webPlayerCache.get(cacheKey);
       if (!compiled) {
+        // FAST PATH — the page baked at publish time: one small doc read instead of every file +
+        // a compile. Version-checked inside, so a re-publish can never serve its predecessor.
+        const baked = await getWebAppBakedPage(found.id, found.version);
+        if (baked) compiled = { html: withStoreAppId(baked, found.id), kind: 'web' };
+      }
+      if (!compiled) {
         const files = await getWebAppFiles(found.id);
         if (Object.keys(files).length === 0) return res.status(404).json({ error: 'This app has no published files.' });
         const hdrHost = req.get('host');
@@ -694,13 +722,11 @@ export function registerNavStoreRoutes(app: Express): void {
         // The SAME compiler the in-browser preview uses — one engine, one set of guarantees. The
         // client renders this html in a sandboxed iframe WITHOUT allow-same-origin (opaque origin),
         // so a store app can never read the platform's storage or tokens.
-        let html = renderPreview(vfs, origin, `store-${found.id}`);
-        // Bake the store app id in, which flips window.NavData from its per-device preview backend to
-        // the REAL shared rows — the difference between "a chat app that talks to yourself" and one
-        // that talks to everyone. Injected at serve time because only the store knows the id.
-        const idTag = `<script>window.__NBAI_STORE_APP_ID=${JSON.stringify(found.id)};</script>`;
-        html = html.includes('<body>') ? html.replace('<body>', `<body>${idTag}`) : idTag + html;
-        compiled = { html, kind: 'web' };
+        const html = renderPreview(vfs, origin, `store-${found.id}`);
+        compiled = { html: withStoreAppId(html, found.id), kind: 'web' };
+      }
+      // One L1 write for BOTH sources (baked doc or live compile), so a hot app costs zero reads.
+      if (!webPlayerCache.has(cacheKey)) {
         webPlayerCache.set(cacheKey, compiled);
         if (webPlayerCache.size > WEB_PLAYER_CACHE_MAX) {
           const oldest = webPlayerCache.keys().next().value;

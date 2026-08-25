@@ -578,6 +578,17 @@ the code (it is actually read somewhere) on 2026-07-11.
   Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
   GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
   (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
+- **Live daily-life data for the chat AIs (added 2026-08-25):** `RAPIDAPI_KEY` (✅ **SET in Cloud Run by
+  the admin 2026-08-25** — ONE RapidAPI key covering the subscribed marketplace APIs: IRCTC
+  (`irctc1.p.rapidapi.com`, live train running status + PNR) and AeroDataBox (flight status); the admin
+  also subscribed an IMDb API the same day, whose exact host is pending a screenshot before it is wired —
+  do NOT guess the host, several APIs share the name. Read by `src/server/lib/transitLive.ts`; without the
+  key every path honestly degrades to web search, never an invented "live" answer). Companion keys, NOT
+  set yet: `BRAVE_API_KEY` (search-quality upgrade over the DuckDuckGo fallback, read by
+  `AgentV3/WebSearch.ts`), `TMDB_API_KEY` (movies-now-playing source in `lib/liveDataSources.ts` — may be
+  superseded by the admin's IMDb API once its host is known). Key-free live sources (weather/AQI/currency/
+  PIN codes) need no env at all. ⚠️ Open licensing item recorded in PROGRESS.md 2026-08-25: the no-key
+  weather source (Open-Meteo) is licensed non-commercial — license or swap it before heavy real traffic.
 - **Sonic Chat (Amazon Nova Sonic voice — EXPERIMENTAL, route `/sonic`, admin 2026-07-13):**
   `SONIC_CHAT_ENABLED`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (= `us-east-1`),
   plus optional `SONIC_MODEL_ID` / `SONIC_VOICE_ID`. All set in Cloud Run 2026-07-13. The feature is

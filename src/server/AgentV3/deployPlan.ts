@@ -105,6 +105,48 @@ const script = (pkg: Pkg | null, name: string): string => {
 };
 
 /**
+ * Does this project really import a Node server framework in its own source? Checked the same way
+ * `pythonServer` below checks Python — by a real import/require statement in a real file.
+ */
+function importsNodeServer(files: Record<string, string>): [string, string] | null {
+  for (const [path, content] of Object.entries(files)) {
+    if (!/\.(js|jsx|ts|tsx|mjs|cjs)$/i.test(path) || typeof content !== 'string') continue;
+    for (const [dep, name] of NODE_SERVER_DEPS) {
+      const escaped = dep.replace(/[/@.-]/g, '\\$&');
+      // An import or require of the module itself — not a mention of its name in prose, a variable or
+      // a longer package name (`express-rate-limit` is middleware for somebody else's server).
+      const imported = new RegExp(`(^|\\n)\\s*import[^\\n]*['"\`]${escaped}['"\`]`).test(content)
+        || new RegExp(`require\\(\\s*['"\`]${escaped}['"\`]\\s*\\)`).test(content);
+      if (imported) return [dep, name];
+    }
+  }
+  return null;
+}
+
+/**
+ * 🔒 A SERVER FRAMEWORK IN devDependencies IS NOT, ON ITS OWN, A SERVER (admin report 2026-08-25).
+ *
+ * The old rule read `dependencies` and `devDependencies` as one set. A frontend-only app that merely
+ * carried `express` as a DEV dependency — which our own builder scaffolds, and which `npm ci
+ * --omit=dev` does not even install in production — was therefore classified as having a server half,
+ * and publish REFUSED it. The user was told their website could not go on website hosting.
+ *
+ * The asymmetry with `pythonServer` was the tell: Python was always established from a manifest OR a
+ * real import in a real file, while Node was established from package.json alone. So the rule is now
+ * the same on both sides, and it is still POSITIVE EVIDENCE ONLY:
+ *   • a PRODUCTION dependency  ⇒ a server (a real Express app declares it there), or
+ *   • a real import/require in the app's own source ⇒ a server, wherever it was declared, or even
+ *     if it was never declared at all — which is strictly MORE detection than before, not less.
+ * A dev-only dependency that nothing imports is what it looks like: a dev-time tool. PURE.
+ */
+function nodeServer(pkg: Pkg | null, files: Record<string, string>): BackendPart | null {
+  const prod = new Set(Object.keys(pkg?.dependencies ?? {}));
+  const hit = NODE_SERVER_DEPS.find(([d]) => prod.has(d)) ?? importsNodeServer(files);
+  if (!hit) return null;
+  return { runtime: 'node', startCommand: script(pkg, 'start') || '', framework: hit[1] };
+}
+
+/**
  * Does any file look like a Python server? Checked by IMPORT, not just by a requirements file, so an
  * app that vendors its dependencies is still recognised.
  */
@@ -149,13 +191,7 @@ export function planDeployment(files: Record<string, string>): DeployPlan {
   const paths = Object.keys(files);
 
   // ── A server process? ────────────────────────────────────────────────────────────────────────
-  let backend: BackendPart | null = null;
-  const nodeHit = NODE_SERVER_DEPS.find(([d]) => deps.has(d));
-  if (nodeHit) {
-    backend = { runtime: 'node', startCommand: script(pkg, 'start') || '', framework: nodeHit[1] };
-  } else {
-    backend = pythonServer(files);
-  }
+  const backend: BackendPart | null = nodeServer(pkg, files) ?? pythonServer(files);
 
   // ── Something to serve from a CDN? ───────────────────────────────────────────────────────────
   let frontend: FrontendPart | null = null;

@@ -6284,7 +6284,26 @@ async function noteBuildOutcome(
         for (const p of ['package.json', 'requirements.txt', 'pyproject.toml', 'Pipfile']) {
           try { planFiles[p] = await actuator.readFile(workspaceId, p); } catch { /* absent is normal */ }
         }
-        const plan = planDeployment(planFiles);
+        /**
+         * 🔒 A REFUSAL IS MADE ON THE REAL FILES, NEVER ON THE MANIFESTS ALONE (admin 2026-08-25).
+         *
+         * Only these four manifests were ever handed to the planner, so its file-based detection — the
+         * half that asks whether the app's own source actually IMPORTS a server framework — could never
+         * fire here. The verdict came down to package.json, and a frontend-only app carrying `express`
+         * as a DEV dependency was told its website could not go on website hosting.
+         *
+         * Two stages on purpose. The cheap manifest pass runs first and, for the ordinary static app,
+         * is the whole story — that path costs exactly what it did before. Only an app about to be
+         * REFUSED pays for the real files, and it is the one case where being right is worth a read.
+         * `src` is kept so the wiring analysis below reuses it instead of loading twice.
+         */
+        let plan = planDeployment(planFiles);
+        let src: Record<string, string> | null = null;
+        if (!plan.staticHostingSufficient) {
+          src = await loadWorkspaceFiles(workspaceId).catch(() => null);
+          // The sandbox manifests win over the durable copies — they are the freshest truth.
+          if (src) plan = planDeployment({ ...src, ...planFiles });
+        }
         if (!plan.staticHostingSufficient) {
           /**
            * Resolve what we can ACTUALLY do about the backend — the user's own Render key first, the
@@ -6300,10 +6319,7 @@ async function noteBuildOutcome(
            * to "ship whole", which is the answer that WORKS when we cannot tell — see apiWiring.ts.
            */
           let wiring: ReturnType<typeof analyzeApiWiring> | null = null;
-          if (plan.shape === 'fullstack') {
-            const src = await loadWorkspaceFiles(workspaceId).catch(() => null);
-            if (src) wiring = analyzeApiWiring(src);
-          }
+          if (plan.shape === 'fullstack' && src) wiring = analyzeApiWiring(src);
           /**
            * THE JOIN — the half nobody automates (slice 4).
            *

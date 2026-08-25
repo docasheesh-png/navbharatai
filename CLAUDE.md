@@ -546,6 +546,21 @@ the code (it is actually read somewhere) on 2026-07-11.
   treats an unknown as "no update", so a misconfiguration shows NOTHING rather than a false prompt.
   Automating this needs a Play Developer service account, which this project does not have — until then
   one number is set by hand after each upload, and that is stated plainly rather than pretended away.
+  ✅ **SET by the admin 2026-08-25: `ANDROID_LATEST_VERSION_CODE = 91`** — the first PRODUCTION release.
+  Verified against the pipeline rather than taken on trust: `android-aab.yml` sets
+  `ANDROID_VERSION_CODE: ${{ github.run_number }}`, the run was **#91**, and Play displayed
+  `91 (1.0.91)`. Three independent statements of the same number.
+  ⚠️ **SET WHILE THE RELEASE IS STILL IN GOOGLE'S REVIEW**, which is safe here for a reason worth
+  recording rather than re-deriving: production was **Inactive** — NavBharatAI has never had an Android
+  build on any public track — so there is no installed base to prompt. `shouldPromptUpdate` needs the
+  RUNNING build's own versionCode to compare against, and only a native shell has one; a web user is
+  never prompted at all. The number therefore reaches nobody until the review passes and someone
+  installs 91, by which point it is exactly right.
+  🔴 **THE RULE THIS ESTABLISHES, for every LATER release:** setting this key BEFORE the new build is
+  actually downloadable on Play would point real users at a store page still showing the version they
+  already have — the precise false-positive `appUpdate.ts` names as the way this feature becomes
+  hated. From release #2 onward: **upload → wait for Play to say live → then set the number.** The
+  first release is the only one where the order does not matter.
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),

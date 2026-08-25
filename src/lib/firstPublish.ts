@@ -43,13 +43,26 @@ export interface CelebrationInput {
 /**
  * Decide what to show. Pure.
  *
- * A missing URL means there is nothing to celebrate WITH — no link, no card, whatever the server said
- * about it being the first. An unreachable check (`linkLive: null`) is treated as LIVE: the server
- * confirmed the publish, and a browser that cannot make the check (offline, blocked, CORS) is not
- * evidence the user's app is broken. Only a real, answered "no" downgrades the moment.
+ * A missing URL means there is nothing to celebrate WITH — no link, no card. An unreachable check
+ * (`linkLive: null`) is treated as LIVE: the server confirmed the publish, and a browser that cannot
+ * make the check (offline, blocked, CORS) is not evidence the user's app is broken. Only a real,
+ * answered "no" downgrades the moment.
+ *
+ * ⚠️ EVERY SUCCESSFUL PUBLISH NOW GETS THIS SCREEN, not only the first (admin 2026-08-25: "aaj app
+ * NavBharatAI par publish ho jaye to celebration animation aana chahiye, aur publish app par jaane ka
+ * button aur copy link ka option").
+ *
+ * The original design fired once per user, on the reasoning that the fiftieth publish is not an
+ * occasion. That was right about the FIREWORKS and wrong about the SCREEN. What follows a publish is
+ * the same three things every single time — see it, copy it, send it — and before this they arrived as
+ * one line of grey text behind a sheet full of other buttons. A user republishing after a fix needs
+ * that link exactly as much as a first-timer does.
+ *
+ * `firstPublish` is therefore no longer a gate; it is kept on the input because the SURFACE still uses
+ * it — the wording differs for someone seeing their first live link. A flag that changes the copy is
+ * not the same as a flag that decides whether the user gets their link at all.
  */
 export function celebrationFor(input: CelebrationInput): CelebrationKind {
-  if (!input.firstPublish) return 'none';
   if (!input.url.trim()) return 'none';
   if (input.linkLive === false) return 'pending';
   return input.reducedMotion ? 'calm' : 'celebrate';

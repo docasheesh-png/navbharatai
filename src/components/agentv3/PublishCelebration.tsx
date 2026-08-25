@@ -41,10 +41,19 @@ export interface PublishCelebrationProps {
   url: string;
   /** The app's name, when known — it makes the share message personal. */
   appName?: string;
+  /**
+   * Is this the user's first-ever live link? Wording only.
+   *
+   * Since 2026-08-25 EVERY successful publish shows this screen, so the flag stopped deciding whether
+   * the user sees their link and now decides only how it is introduced. The difference is worth
+   * keeping: "your app is on the internet" is a moment the first time and a statement of the obvious
+   * the tenth, and a product that says the same sentence every time stops being read.
+   */
+  firstPublish?: boolean;
   onClose: () => void;
 }
 
-export function PublishCelebration({ kind, url, appName, onClose }: PublishCelebrationProps) {
+export function PublishCelebration({ kind, url, appName, firstPublish = false, onClose }: PublishCelebrationProps) {
   const [showParticles, setShowParticles] = useState(kind === 'celebrate');
   const [copied, setCopied] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -134,7 +143,7 @@ export function PublishCelebration({ kind, url, appName, onClose }: PublishCeleb
         <div className="text-center">
           <div className="mx-auto mb-3 text-4xl" aria-hidden="true">{pending ? '🚀' : '🎉'}</div>
           <h2 className="text-xl font-black text-white">
-            {pending ? 'Your app is on its way' : 'Your app is live'}
+            {pending ? 'Your app is on its way' : firstPublish ? 'Your app is live' : 'Update published'}
           </h2>
           <p className="mt-1 text-[12px] leading-relaxed text-zinc-400">
             {pending
@@ -142,7 +151,11 @@ export function PublishCelebration({ kind, url, appName, onClose }: PublishCeleb
               // Saying "live" here and handing over a link that shows an error would be the worst
               // possible first impression — so we say exactly what we know.
               ? 'It is published and the address below is yours. It can take a minute to answer the first time — try Open in a moment.'
-              : 'This is your app, on the internet, at your own address. Anyone you send it to can open it.'}
+              : firstPublish
+                ? 'This is your app, on the internet, at your own address. Anyone you send it to can open it.'
+                // A republish is not a lesser event, but it IS a different one: the address has not
+                // changed and the person already knows what it is for. Say what actually changed.
+                : 'Your latest changes are live at the same address. Anyone with the link sees them now.'}
           </p>
         </div>
 

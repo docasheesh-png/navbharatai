@@ -5,13 +5,34 @@ import { celebrationFor, whatsappShareUrl, shareText, prettyUrl, FIREWORK_MS } f
 
 const base = { firstPublish: true, url: 'https://demo.mitrify.in', linkLive: true, reducedMotion: false };
 
-describe('celebrationFor — a celebration must be rare, and must be true', () => {
+describe('celebrationFor — every successful publish, and only when it is true', () => {
   it("celebrates the user's first live link", () => {
     expect(celebrationFor(base)).toBe('celebrate');
   });
 
-  it('never celebrates a later publish — rarity is the whole point', () => {
-    expect(celebrationFor({ ...base, firstPublish: false })).toBe('none');
+  it('celebrates a LATER publish too — the link matters every time', () => {
+    // REVERSED DELIBERATELY (admin 2026-08-25), and the previous test is worth remembering rather
+    // than deleting: it asserted "never celebrates a later publish — rarity is the whole point".
+    //
+    // That was right about the FIREWORKS and wrong about the SCREEN. What follows a publish is the
+    // same three things every time — see the link, copy it, send it — and before this they arrived as
+    // one line of grey text behind a sheet full of other buttons. Someone republishing after a fix
+    // needs that link exactly as much as a first-timer does.
+    //
+    // `firstPublish` survives as INPUT because the surface still uses it for wording. A flag that
+    // changes the copy is not the same as a flag that decides whether the user gets their link.
+    expect(celebrationFor({ ...base, firstPublish: false })).toBe('celebrate');
+  });
+
+  it('...and a later publish is still refused when the link did not answer', () => {
+    // The honesty rule is not relaxed by the rule above: "every publish" means every publish that is
+    // actually live. A repeat publish gets the same downgrade a first one would.
+    expect(celebrationFor({ ...base, firstPublish: false, linkLive: false })).toBe('pending');
+  });
+
+  it('with no URL there is nothing to show, first publish or not', () => {
+    expect(celebrationFor({ ...base, url: '   ' })).toBe('none');
+    expect(celebrationFor({ ...base, firstPublish: false, url: '' })).toBe('none');
   });
 
   it('refuses to celebrate when the link did NOT answer — it says "on its way" instead', () => {
@@ -119,5 +140,49 @@ describe('the moment is wired end to end', () => {
   it('makes no sound', () => {
     const card = src('src/components/agentv3/PublishCelebration.tsx');
     expect(card).not.toMatch(/new Audio|\.play\(\)|<audio/);
+  });
+});
+
+/**
+ * ⚠️ WIDENED FROM "FIRST PUBLISH" TO "EVERY PUBLISH" (admin 2026-08-25: "aaj app NavBharatAI par
+ * publish ho jaye to celebration animation aana chahiye, aur publish app par jaane ka button aur copy
+ * link ka option... new page par, aisi page par jyada bheed/buttons theek nahi lag rahe").
+ *
+ * Two complaints in one sentence, and they have different fixes. The screen was gated to a user's
+ * FIRST publish, so a republish returned them to the publish sheet with their address as a line of
+ * grey text. And the sheet stayed OPEN underneath the card when it did appear — the crowding.
+ */
+describe('every publish ends on its own screen, not in the sheet', () => {
+  const panel = src('src/components/agentv3/AgentV3Panel.tsx');
+
+  it('the celebration is no longer gated on it being the first publish', () => {
+    // The gate was `if (data?.firstPublish === true && ...url)`. It is now the link alone.
+    expect(panel).not.toContain('if (data?.firstPublish === true && typeof data?.url');
+    expect(panel).toContain("if (typeof data?.url === 'string' && data.url) {");
+  });
+
+  it('but the server still owns the answer to "is this their first?"', () => {
+    // Unchanged and load-bearing: a browser flag would repeat the moment on a new phone and erase it
+    // for anyone who cleared their storage. It just steers the WORDING now instead of the gate.
+    expect(panel).toContain('firstPublish: data?.firstPublish === true');
+  });
+
+  it('closes the publish sheet, so the card is not stacked on a crowded one', () => {
+    expect(panel).toContain('setShowHostingChooser(false);');
+  });
+
+  it('...and closes it only AFTER there is something to replace it with', () => {
+    // Dismissing the sheet on every publish attempt would take a FAILED publish's own error message
+    // off the screen with it. The order is the safeguard.
+    const at = panel.indexOf("if (typeof data?.url === 'string' && data.url) {");
+    const block = panel.slice(at, at + 900);
+    expect(block.indexOf("if (kind === 'none') return;")).toBeLessThan(block.indexOf('setShowHostingChooser(false);'));
+  });
+
+  it('the card reads differently on a republish — the same sentence every time stops being read', () => {
+    const card = src('src/components/agentv3/PublishCelebration.tsx');
+    expect(card).toContain('Update published');
+    expect(card).toContain('Your app is live');
+    expect(card).toContain('firstPublish');
   });
 });

@@ -79,6 +79,8 @@ export function backendDeployOffer(input: {
   ownRepo?: { owner: string; repo: string } | null;
   githubConnected?: boolean;
   keySource?: BackendKeySource;
+  /** The workspace the deploy request is built from. Without it there is no request to send. */
+  workspaceId?: string;
 }): BackendDeployOffer {
   const code = String(input.code ?? '');
   const none: BackendDeployOffer = {
@@ -103,7 +105,11 @@ export function backendDeployOffer(input: {
 
   const owner = String(input.ownRepo?.owner ?? '').trim();
   const repo = String(input.ownRepo?.repo ?? '').trim();
-  const repoPath = owner && repo ? `${owner}/${repo}` : '';
+  // The deploy request needs BOTH a repo to match on and the workspace it belongs to, so a missing
+  // workspace withholds the button rather than offering a call that cannot be built. In practice this
+  // cannot happen — the panel appears only after a publish REFUSAL, and publish rejects a request with
+  // no workspace before it gets that far — so it is defence in depth, not a case the wording targets.
+  const repoPath = owner && repo && String(input.workspaceId ?? '').trim() ? `${owner}/${repo}` : '';
 
   if (!repoPath) {
     return {

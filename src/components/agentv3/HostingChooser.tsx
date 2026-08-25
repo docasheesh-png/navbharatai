@@ -291,6 +291,7 @@ export function HostingChooser({
     ownRepo: deployRepo ?? ownRepo ?? null,
     githubConnected,
     keySource: backendKeySource ?? null,
+    workspaceId,
   });
   const [backendBusy, setBackendBusy] = useState(false);
   const [backendLines, setBackendLines] = useState<string[]>([]);

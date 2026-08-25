@@ -5,6 +5,7 @@ import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type PublishRefusalCode } fro
 import { deployDecision, planDeployment } from '../src/server/AgentV3/deployPlan';
 
 const REPO = { owner: 'asheesh', repo: 'my-app' };
+const WS = 'ws-1';
 
 describe('backendDeployOffer — the branch the publish refusal always assumed existed', () => {
   it('stays out of the way when publish was not refused', () => {
@@ -14,7 +15,7 @@ describe('backendDeployOffer — the branch the publish refusal always assumed e
   });
 
   it('offers a real deploy when the app has a repo behind it', () => {
-    const o = backendDeployOffer({ code: 'backend-deploy-available', ownRepo: REPO, keySource: 'user' });
+    const o = backendDeployOffer({ code: 'backend-deploy-available', ownRepo: REPO, workspaceId: WS, keySource: 'user' });
     expect(o.show).toBe(true);
     expect(o.canDeploy).toBe(true);
     expect(o.repoPath).toBe('asheesh/my-app');
@@ -22,7 +23,7 @@ describe('backendDeployOffer — the branch the publish refusal always assumed e
   });
 
   it('names the account when the deploy would run on OUR key, without removing the button', () => {
-    const o = backendDeployOffer({ code: 'backend-deploy-available', ownRepo: REPO, keySource: 'server' });
+    const o = backendDeployOffer({ code: 'backend-deploy-available', ownRepo: REPO, workspaceId: WS, keySource: 'server' });
     expect(o.canDeploy).toBe(true);
     expect(o.note).toMatch(/RENDER_API_KEY/);
   });
@@ -43,12 +44,18 @@ describe('backendDeployOffer — the branch the publish refusal always assumed e
   });
 
   it('a half-formed repo is no repo — it would build a request that cannot match', () => {
-    expect(backendDeployOffer({ code: 'backend-deploy-available', ownRepo: { owner: 'asheesh', repo: '  ' } }).canDeploy).toBe(false);
-    expect(backendDeployOffer({ code: 'backend-deploy-available', ownRepo: { owner: '', repo: 'my-app' } }).canDeploy).toBe(false);
+    expect(backendDeployOffer({ code: 'backend-deploy-available', ownRepo: { owner: 'asheesh', repo: '  ' }, workspaceId: WS }).canDeploy).toBe(false);
+    expect(backendDeployOffer({ code: 'backend-deploy-available', ownRepo: { owner: '', repo: 'my-app' }, workspaceId: WS }).canDeploy).toBe(false);
+  });
+
+  it('a repo with no workspace is still no request — the button is not offered', () => {
+    const o = backendDeployOffer({ code: 'backend-deploy-available', ownRepo: REPO, workspaceId: '' });
+    expect(o.canDeploy).toBe(false);
+    expect(o.steps.length).toBeGreaterThan(0);
   });
 
   it('with nothing able to deploy at all, the way in is the user own key', () => {
-    const o = backendDeployOffer({ code: 'needs-server-hosting', ownRepo: REPO });
+    const o = backendDeployOffer({ code: 'needs-server-hosting', ownRepo: REPO, workspaceId: WS });
     expect(o.show).toBe(true);
     expect(o.canDeploy).toBe(false);
     expect(o.cta).toBe('save-render-key');

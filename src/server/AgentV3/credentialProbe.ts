@@ -215,6 +215,36 @@ const PROBES: ProbeSpec[] = [
   },
 ];
 
+/**
+ * IS THIS VERDICT ABOUT *THIS* APP? — the relevance filter (admin 2026-08-25).
+ *
+ * THE REPORT: "har ek build report me yeh message kyu aata hai?", about
+ * "\u274c Razorpay did not accept this key". Nothing was wrong with the probe. The problem is WHO it
+ * was aimed at: the whole VAULT is merged into every app's `.env` and then probed on every build, so a
+ * Razorpay key saved once for one payment app is re-checked — and re-complained about — while building
+ * a racing game, a to-do list, anything. The user is handed a payment error on a build that has no
+ * payments in it, over and over, and cannot act on it from where they are standing.
+ *
+ * That is worse than noise. A warning that appears on every single build, that the user learns is not
+ * about the thing they are doing, is a warning they stop reading — and the next one WILL matter.
+ *
+ * So the rule: a verdict is narrated only when the app's own code actually reads that variable.
+ *
+ * `referenced` is the env names found in the app's source (the same scan `devSecretsBoot` already
+ * runs), or `null` when we could not scan at all. NULL KEEPS EVERYTHING — ignorance must not silently
+ * delete a real warning, which is this repo's standing rule and the exact mistake Green Guard was
+ * making the same week. Prefix-insensitive on both sides, so `VITE_X` and `X` are one variable. PURE.
+ */
+export function relevantToApp<T extends { names: string[] }>(
+  verdicts: readonly T[],
+  referenced: readonly string[] | null,
+): T[] {
+  if (referenced === null) return [...verdicts];
+  const bare = (n: string) => String(n ?? '').replace(/^(?:VITE_|NEXT_PUBLIC_|REACT_APP_)/, '');
+  const used = new Set(referenced.map(bare));
+  return verdicts.filter((v) => (v.names || []).some((n) => used.has(bare(n))));
+}
+
 /** A saved value, ignoring the browser-exposure prefix so `VITE_X` satisfies a probe that needs `X`. */
 function lookup(values: Record<string, string>, wanted: string): { name: string; value: string } | null {
   const bare = (n: string) => n.replace(/^(?:VITE_|NEXT_PUBLIC_|REACT_APP_)/, '');

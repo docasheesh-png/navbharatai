@@ -11,7 +11,7 @@ import { buildPreKillPortCommand } from './sandbox/EngineerAI/actuators/devServe
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { inspectCredentials } from './credentialSafety';
-import { probeCredentials, realProbeFetch, credentialProbeEnabled, type ProbeVerdict } from './credentialProbe';
+import { probeCredentials, realProbeFetch, credentialProbeEnabled, relevantToApp, type ProbeVerdict } from './credentialProbe';
 import { planSecretRequest, secretRequestPrompt, secretRequestResult, type SecretAsk } from './secretRequest';
 
 /**
@@ -61,7 +61,8 @@ import { securitySummary } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
 import { injectAppSignature, hasAppSignature } from './appSignature';
 import { mergeDotEnv, gitignoreWithEnv, dotEnvValue } from '../secrets/appSecretsEnv';
-import { ensureBootEnv } from './devSecretsBoot';
+import { ensureBootEnv, ENV_SCAN_COMMAND } from './devSecretsBoot';
+import { envNamesFromGrep } from './ImportPreview';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
@@ -743,15 +744,43 @@ export class ToolDispatcher {
       // card perfectly and no money ever arrives, which the user discovers days later from a missing
       // settlement. Deterministic and catalogue-driven, so a clean vault costs nothing and an
       // unrecognised value says nothing at all. Advisory only — it can never block or fail a build.
+      // ── WHICH VARIABLES DOES *THIS* APP ACTUALLY READ? (admin 2026-08-25: "har ek build report me
+      // yeh message kyu aata hai?") ───────────────────────────────────────────────────────────────
+      // The whole vault is merged into every app's `.env` above, and both notices below were then
+      // aimed at the VAULT rather than at this app — so a Razorpay key saved once for one payment app
+      // was re-checked, and re-complained about, while building a racing game or a to-do list. A
+      // warning that appears on every build and is never about what the user is doing is a warning
+      // they stop reading, and the next one will matter.
+      //
+      // ONE bounded grep — the same scan the boot path already runs, and this whole method runs once
+      // per build — answers it. `null` means we could not scan, and null keeps EVERYTHING: ignorance
+      // must never silently delete a real warning.
+      let referencedEnvNames: string[] | null = null;
+      let credWarnings: ReturnType<typeof inspectCredentials> = [];
+      try { credWarnings = inspectCredentials(this.userSecretsEnv); } catch { credWarnings = []; }
+      if (probed.length > 0 || credWarnings.length > 0) {
+        try {
+          const scan = await withTimeout(this.actuator.runCommand(this.workspaceId, ENV_SCAN_COMMAND), 10_000, 'probe-relevance');
+          referencedEnvNames = envNamesFromGrep(scan?.stdout ?? '');
+        } catch { referencedEnvNames = null; /* could not tell → say everything, exactly as before */ }
+      }
       try {
-        for (const w of inspectCredentials(this.userSecretsEnv)) {
+        for (const w of credWarnings) {
+          // A LEAKED SECRET IS ALWAYS SAID, RELEVANT OR NOT — and that asymmetry is deliberate. A value
+          // saved under a VITE_/NEXT_PUBLIC_ name must be rotated at the provider whatever this app
+          // does with it, so relevance cannot make it safe to withhold. The test-key notice is the
+          // opposite: it says "this app will look like it takes money and will not", which is a
+          // statement about an app that actually charges — meaningless on one that does not.
+          if (w.kind !== 'exposed-secret' && relevantToApp([{ names: [w.name] }], referencedEnvNames).length === 0) continue;
           this.events?.emit({ type: 'narration', agent: 'architect', text: w.message, ts: Date.now() });
         }
       } catch { /* a warning that fails is silence, never a broken build */ }
       // …and what the providers themselves said. Only a REJECTED key and a PROVEN one are worth a line:
       // "we could not reach Stripe" is noise on a build the user is watching, and it is already recorded
       // for the admin report. A key that works earns its green tick because it was actually checked.
-      for (const p of probed) {
+      // Same relevance rule as above — a verdict about a key this app never reads is not this build's
+      // business, and saying it anyway is what made the message appear on every single build.
+      for (const p of relevantToApp(probed, referencedEnvNames)) {
         if (p.status !== 'rejected' && p.status !== 'working') continue;
         this.events?.emit({ type: 'narration', agent: 'architect', text: p.message, ts: Date.now() });
       }

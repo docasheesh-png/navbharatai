@@ -42102,3 +42102,56 @@ users until a fresh `.aab`/`.ipa` is built. Recorded here so it is not assumed t
 
 **Verification for the batch:** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ ·
 `npx vitest run` ✅ · CI green before every merge.
+
+## 2026-08-25 — daily-life live answers in every chat AI ("train kab hai, bus kaha milegi, flight kitna late hai … live location bhi")
+
+**Admin request:** every chat AI (Free, Professionals, Pro v5) should answer daily-life questions from
+the latest information — transit timings, delays, nearest-X, rates — up to a train's live location.
+"Jo build kar sakte ho karo, jo Cloud Run me set karna ho bata dena."
+
+**What already existed:** `liveSearchContext.ts` (2026-07-12) — recency-gated real web search feeding
+all three chat surfaces, plus `recencyDirective` date anchoring. Verified wired in `routes/chat.ts`,
+`professionals/engine.ts`, `routes/agentv3.ts`. This work widens that one shared module, so all three
+surfaces improve at once with no call-site changes.
+
+**Shipped:**
+1. **Daily-life + Hinglish triggers** (`DAILY_LIFE_SIGNAL`, `ROMAN_RECENCY`+`ROMAN_FACT`): transit
+   (train/bus/metro/flight/PNR/platform), fuel/gold/mandi rates, mausam/AQI/traffic, bijli cut, board
+   results, holidays, movie times, nearest-ATM/hospital/pharmacy. Every pattern is an INTENT, not a
+   bare noun — "train a model" and "abhi ye error fix karo" must NOT pay search latency (test-pinned).
+   Romanized recency words count only beside a fact-question word for the same reason.
+2. **Query shaping** (`shapeSearchQuery`): "train 12301 kaha pahunchi" → `train 12301 live running
+   status today`; PNR → `PNR <n> status`; flight → dated status query. Anything not understood passes
+   through VERBATIM — rewriting an ununderstood query can only lose information.
+3. **Top-result page read**: the model now gets the top page's text (SSRF-guarded `webFetchUrl`, own
+   4s timeout, 3.5k char cap) beside the snippets. Any failure degrades to snippets-only — the page
+   read may only ever ADD grounding, never cost the reply.
+4. **`transitLive.ts` (new) — REAL live train/PNR/flight data, env-gated by `RAPIDAPI_KEY`.** The
+   honesty line: live position comes ONLY from a real feed; snippets can tell a schedule, not where
+   the train is now. Detection is conservative (5-digit number counts as a train only in a train-ish
+   sentence; 10 digits are a PNR only next to "PNR"; flights need an airline-code shape). The feed's
+   response is handed to the model as BOUNDED raw JSON (3k chars) rather than parsed fields — these
+   marketplace APIs drift shapes, and bounded raw data stays true where a field parser silently
+   breaks. No vendor name ever enters the block (White-Label). When the feed answers, the search is
+   skipped (live path is FASTER, not slower); no key / no match / feed down ⇒ '' and the search
+   fallback runs. Buses stated plainly: no reliable pan-India live bus feed exists — search path only.
+5. **`recencyDirective` additions**: location-dependent questions with no place named → ask the
+   city/area in one line, never guess where the user is; live-transit questions with no live data in
+   context → give the schedule, say plainly the live position is not available, point to the official
+   source (NTES / airline). Never invent a live position.
+6. **AppKnowledgeBase**: new "LATEST-DATE ANSWERS + DAILY-LIFE LIVE INFO" entry (same-PR rule).
+
+**Admin setup (both optional; everything above works without them, degrading honestly):**
+- `RAPIDAPI_KEY` → unlocks REAL live train position/PNR/flight status. rapidapi.com par free account →
+  "IRCTC" API (irctc1) aur "AeroDataBox" dono ko subscribe (free tier) → ek hi key Cloud Run me set.
+- `BRAVE_API_KEY` → search quality upgrade (Brave free tier 2,000/mo) — DuckDuckGo fallback se behtar.
+
+**Honest limits recorded:** (a) the first REAL RapidAPI response cannot be verified from this session
+(no key here) — the raw-JSON design makes shape drift safe, but the first live test after the key is
+set should be a real train number, and any weirdness comes back as a report; (b) "near me" without a
+named place is answered by ASKING the city — true geolocation from the phone is a separate client-side
+feature (Phase 2 candidate); (c) worst-case added latency on fresh-fact questions is ~4s (page read),
+live-feed path is ~5s max and skips the search entirely.
+
+**Verification:** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · `npx vitest run` —
+1386 files / 18099 passed (33 new tests).

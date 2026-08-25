@@ -72,7 +72,9 @@ export function recencyDirective(now: Date = new Date()): string {
   return `CURRENT DATE & RECENCY (MANDATORY):
 - Today's date is ${today} (India). Treat this as "now" for anything time-relative — "current", "latest", "this year", "these days", "abhi", "aaj".
 - Your training data has a cutoff and may be OUTDATED. For anything that changes over time — sports (team squads, captains, match/series results, tournament winners), news and current events, prices/rates, who currently holds a post/title/record, latest app or product versions, and any "latest / current / this year" question — DO NOT state old information as if it is the present.
-- If you are not certain your information is up to date, say so honestly, give the most recent you reliably know WITH its date/year, and tell the user to verify the very latest. NEVER present a past year's squad, winner, price, or office-holder as the current one.`;
+- If you are not certain your information is up to date, say so honestly, give the most recent you reliably know WITH its date/year, and tell the user to verify the very latest. NEVER present a past year's squad, winner, price, or office-holder as the current one.
+- LOCATION-DEPENDENT daily-life questions (nearest ATM/hospital/pharmacy, "bus kaha milegi", local timings, weather "yahan"): you do NOT know where the user is. If they haven't named a city/area/station, ask them for it in one short line first — never guess a place and answer as if it were theirs. Once a place is named, answer for that place.
+- LIVE TRANSIT (train running status/location, PNR, flight delay): answer from the live data provided in this conversation's context when present. If no live data is present, give what you can (schedule, typical route), say plainly that you don't have the live position, and point to the official source (NTES enquiry.indianrail.gov.in for trains, the airline/airport site for flights). Never invent a live position or delay.`;
 }
 
 

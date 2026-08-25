@@ -2649,6 +2649,30 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [verifyPhoneOpen, setVerifyPhoneOpen] = useState(false);
 
 
+  /**
+   * 🔒 ONE APP'S LIVE LINK MUST NEVER APPEAR ON ANOTHER APP (admin 2026-08-25, verbatim: "maine 1 app
+   * ko publish kiya … navbharat me bani sabhi app par publish, live site likh kar aane laga, check
+   * kiya to sabhi app me app no 1 hi show ho rahi").
+   *
+   * THE BUG WAS ONE MISSING LINE, and it was in the fetch below: `setLiveUrl` was called ONLY when a
+   * URL came back. So publishing app #1 set the state, and switching to app #2 — never published —
+   * left the fetch's `if` unsatisfied and app #1's URL simply STAYED. Every app in the account then
+   * advertised a "Live site" button that opened somebody else's app. The state was per-PANEL while the
+   * thing it described was per-WORKSPACE, and nothing reconciled the two.
+   *
+   * That is worse than a cosmetic glitch: the user is told their unpublished app is live, clicks
+   * through, and sees a completely different app — so they cannot tell which of their apps is actually
+   * published, and the one number that matters (is my work public yet?) is wrong for every app but one.
+   *
+   * THE CLEAR IS ITS OWN EFFECT, keyed on the workspace id ALONE. Two reasons it cannot be folded into
+   * the fetch:
+   *   • It must run BEFORE the network round-trip, not after — for the few hundred ms the fetch takes,
+   *     the old app's URL would otherwise still be on screen against the new app's name.
+   *   • The fetch also re-runs on `state.done` (a build finishing) for the SAME workspace. Clearing
+   *     there would blink the Live-site button off and on during every build.
+   */
+  useEffect(() => { setLiveUrl(null); setCelebration(null); }, [state.workspaceId]);
+
   // Fetch the persisted live URL whenever the workspace changes or a build/deploy finishes.
   useEffect(() => {
     const wsId = state.workspaceId;
@@ -2661,8 +2685,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         if (email) params.set('email', email);
         const res = await fetch(`/api/agentv3/deployment?${params.toString()}`, { headers: await authJsonHeaders() });
         const data = await res.json().catch(() => ({}));
-        if (!cancelled && typeof data?.url === 'string' && data.url) setLiveUrl(data.url);
-      } catch { /* best-effort — no live URL shown */ }
+        // ALWAYS assign, never only-on-success. "The server says this app has no live site" is a real
+        // answer and must overwrite whatever was there — treating it as "leave it alone" is precisely
+        // how another app's link survived into this one.
+        if (!cancelled) setLiveUrl(typeof data?.url === 'string' && data.url ? data.url : null);
+      } catch { /* unreachable ⇒ we do not know; the clear above already left it empty, which is honest */ }
     })();
     return () => { cancelled = true; };
   }, [state.workspaceId, state.done, userId, email]);
@@ -2713,6 +2740,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   /** Live state of the direct publish, so the button can report honestly instead of vanishing. */
   const [publishing, setPublishing] = useState(false);
   const [publishMsg, setPublishMsg] = useState('');
+  /**
+   * Sibling of the live-URL leak above, found by asking what ELSE on this panel describes ONE app
+   * while living for the whole session. `publishMsg` holds the last publish's own words — "Your app
+   * is live at <app #1's URL>" — and the Publish sheet renders it verbatim. Switching apps and
+   * reopening Publish showed that exact sentence again, about a different app.
+   *
+   * Declared here rather than beside the live-URL clear so the setter is defined before it is used.
+   */
+  useEffect(() => { setPublishMsg(''); }, [state.workspaceId]);
   /**
    * ADOPT THE FRAMEWORK THE SERVER DETECTED (2026-08-21).
    *

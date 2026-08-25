@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  decideGreenGuard, restorePlan, greenGuardMessage,
+  decideGreenGuard, restorePlan, greenGuardMessage, greenGuardUnverifiedMessage,
   greenWorkspaceKey, isGreenSnapshotKey, greenGuardEnabled, buildRemoveCommand,
   wantsAttemptBack, attemptWorkspaceKey, attemptRestoredMessage, KEEP_CHANGES_PHRASE,
 } from '../src/server/AgentV3/GreenGuard';
@@ -21,10 +21,10 @@ import {
 
 describe('LAYER 1 — a verified working app becomes the last known good', () => {
   it('saves whenever the turn ends green', () => {
-    const d = decideGreenGuard({ before: null, after: { green: true }, hasSnapshot: false });
+    const d = decideGreenGuard({ before: null, after: { green: true }, hasSnapshot: false, provenBroken: false });
     expect(d.action).toBe('save');
     // Even when a snapshot already exists — the newest working state is the one worth keeping.
-    expect(decideGreenGuard({ before: { green: true }, after: { green: true }, hasSnapshot: true }).action).toBe('save');
+    expect(decideGreenGuard({ before: { green: true }, after: { green: true }, hasSnapshot: true, provenBroken: false }).action).toBe('save');
   });
 
   /**
@@ -34,20 +34,20 @@ describe('LAYER 1 — a verified working app becomes the last known good', () =>
    * contradicting each other is exactly the failure class this project keeps killing.
    */
   it('says only what it MEASURED — "opened in a real browser and rendered", not "working"', () => {
-    const d = decideGreenGuard({ before: null, after: { green: true }, hasSnapshot: false });
+    const d = decideGreenGuard({ before: null, after: { green: true }, hasSnapshot: false, provenBroken: false });
     expect(d.reason).toMatch(/opened in a real browser and rendered/);
     expect(d.reason).not.toMatch(/verified working app/);
   });
 
   it('an unfinished build is still protected, but the record says so', () => {
-    const d = decideGreenGuard({ before: null, after: { green: true }, hasSnapshot: false, ready: false });
+    const d = decideGreenGuard({ before: null, after: { green: true }, hasSnapshot: false, provenBroken: false, ready: false });
     // Still saved: a snapshot that LOADS is worth protecting — the alternative is protecting nothing.
     expect(d.action).toBe('save');
     expect(d.reason).toMatch(/best known state, not a finished one/);
   });
 
   it('a build with no unresolved blocker carries no caveat', () => {
-    expect(decideGreenGuard({ before: null, after: { green: true }, hasSnapshot: false, ready: true }).reason)
+    expect(decideGreenGuard({ before: null, after: { green: true }, hasSnapshot: false, provenBroken: false, ready: true }).reason)
       .not.toMatch(/best known state/);
   });
 
@@ -59,25 +59,95 @@ describe('LAYER 1 — a verified working app becomes the last known good', () =>
 
 describe('LAYER 2 — a turn can never leave the user worse off than they started', () => {
   it('RESTORES when a working app stopped working this turn', () => {
-    const d = decideGreenGuard({ before: { green: true }, after: { green: false }, hasSnapshot: true });
+    const d = decideGreenGuard({ before: { green: true }, after: { green: false }, hasSnapshot: true, provenBroken: true });
     expect(d.action).toBe('restore');
     expect(d.reason).toMatch(/was verified working before this turn/);
   });
 
   it('does NOT restore on a build that was never green — there is nothing good to go back to', () => {
-    expect(decideGreenGuard({ before: { green: false }, after: { green: false }, hasSnapshot: true }).action).toBe('none');
-    expect(decideGreenGuard({ before: null, after: { green: false }, hasSnapshot: false }).action).toBe('none');
+    expect(decideGreenGuard({ before: { green: false }, after: { green: false }, hasSnapshot: true, provenBroken: true }).action).toBe('none');
+    expect(decideGreenGuard({ before: null, after: { green: false }, hasSnapshot: false, provenBroken: true }).action).toBe('none');
   });
 
   it('is HONEST when it believes the app was working but never captured it', () => {
-    const d = decideGreenGuard({ before: { green: true }, after: { green: false }, hasSnapshot: false });
+    const d = decideGreenGuard({ before: { green: true }, after: { green: false }, hasSnapshot: false, provenBroken: true });
     expect(d.action).toBe('none');
     expect(d.reason).toMatch(/no verified-good snapshot was captured/i);
   });
 
   it('an unknown/absent verdict is never treated as green (green must be EARNED)', () => {
-    expect(decideGreenGuard({ before: { green: true }, after: undefined, hasSnapshot: true }).action).toBe('restore');
-    expect(decideGreenGuard({ before: undefined, after: undefined, hasSnapshot: true }).action).toBe('none');
+    expect(decideGreenGuard({ before: { green: true }, after: undefined, hasSnapshot: true, provenBroken: true }).action).toBe('restore');
+    expect(decideGreenGuard({ before: undefined, after: undefined, hasSnapshot: true, provenBroken: true }).action).toBe('none');
+  });
+});
+
+describe('IGNORANCE IS NOT EVIDENCE — an unverifiable turn is never undone (admin report 2026-08-25)', () => {
+  it('KEEPS the turn when the app could not be opened, even though it was green before', () => {
+    const d = decideGreenGuard({
+      before: { green: true }, after: { green: false }, hasSnapshot: true, provenBroken: false,
+    });
+    expect(d.action).toBe('none');
+    expect(d.reason).toMatch(/could not be opened/i);
+    expect(d.reason).toMatch(/last known good version is still saved/i);
+  });
+
+  it('still RESTORES when the app was actually opened and seen broken', () => {
+    const d = decideGreenGuard({
+      before: { green: true }, after: { green: false }, hasSnapshot: true, provenBroken: true,
+    });
+    expect(d.action).toBe('restore');
+  });
+
+  it("THE ADMIN'S BUG, END TO END: a preview that is DOWN can no longer erase the speed edit", () => {
+    // The workspace was green once (snapshot exists). The user asks for more speed. The engine writes
+    // it. The preview cannot be opened at all — which is exactly what that build's prompt said was
+    // wrong. Before this fix every one of these turns RESTORED, so the speed edit vanished and the
+    // file went back to an older snapshot that still had speed 0 — "speed fir se 0 ho gayi".
+    const turns = Array.from({ length: 4 }, () => decideGreenGuard({
+      before: { green: true }, after: { green: false }, hasSnapshot: true, provenBroken: false,
+    }));
+    expect(turns.every((t) => t.action === 'none')).toBe(true);
+    expect(turns.some((t) => t.action === 'restore')).toBe(false);
+  });
+
+  it('a turn that ends GREEN is saved regardless of the flag — green outranks everything', () => {
+    for (const provenBroken of [true, false]) {
+      expect(decideGreenGuard({
+        before: { green: true }, after: { green: true }, hasSnapshot: true, provenBroken,
+      }).action).toBe('save');
+    }
+  });
+
+  it('tells the user their change was kept AND unchecked — never silently, never as "done"', () => {
+    const m = greenGuardUnverifiedMessage();
+    expect(m).toMatch(/could not open your app/i);
+    expect(m).toMatch(/saved/i);
+    expect(m).toMatch(/nothing was lost/i);
+    // White-label law: no vendor, model or infrastructure name may reach a user.
+    expect(m.toLowerCase()).not.toMatch(/e2b|sandbox|glm|kimi|claude|gemini|grok|anthropic|vite|playwright/);
+  });
+});
+
+describe('WIRING — the guard is told what was OBSERVED, not merely what was not green', () => {
+  const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+
+  it('passes the real observation flag into the decision', () => {
+    expect(route).toContain('provenBroken: previewProvenBroken,');
+  });
+
+  it('a route regression still counts as OBSERVED, so the veto keeps its teeth', () => {
+    // Without this the fix above would silently disable the route-fingerprint veto: it sets
+    // previewGreen = false after opening a page that did not render, which is an observation.
+    const at = route.indexOf('veto: Green Guard now restores');
+    expect(at).toBeGreaterThan(-1);
+    expect(route.slice(at, at + 600)).toContain('previewProvenBroken = true;');
+  });
+
+  it('the kept-but-unchecked branch tells the user and records an honest finding', () => {
+    const at = route.indexOf('── GREEN GUARD, LAYER 2');
+    const seg = route.slice(at, at + 7000);
+    expect(seg).toContain('greenGuardUnverifiedMessage()');
+    expect(seg).toContain('GREEN_GUARD_UNVERIFIED');
   });
 });
 
@@ -176,7 +246,10 @@ describe('removing what the failed attempt added — in the SANDBOX too', () => 
 describe('LAYER 2 WIRING — the guard is on the real save path and can never cost a user their files', () => {
   const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
   const at = route.indexOf('── GREEN GUARD, LAYER 2');
-  const seg = route.slice(at, at + 5200);
+  // Widened from 5200 when the kept-but-unchecked branch landed (2026-08-25). The window still means
+  // "inside the Green Guard block" — it ends just past the plain-save fallback, which is the block's
+  // last line — so every assertion below is still about this code and not something further down.
+  const seg = route.slice(at, at + 6400);
 
   it('sits at the durable file save — the exact line that used to overwrite a working app', () => {
     expect(at).toBeGreaterThan(-1);

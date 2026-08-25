@@ -49,10 +49,11 @@ export interface GreenDecision {
 
 /**
  * The one rule, stated once:
- *   • green now                     → SAVE it as the new last-known-good.
- *   • not green now, but was green  → RESTORE, because this turn made a working app not work.
- *   • never green                   → NONE. There is no good state to protect yet, and restoring a
- *                                     half-built app over a half-built app helps nobody.
+ *   • green now                        → SAVE it as the new last-known-good.
+ *   • OBSERVED broken now, was green   → RESTORE, because this turn made a working app not work.
+ *   • could not LOOK, was green        → NONE. Ignorance is not evidence — see below.
+ *   • never green                      → NONE. There is no good state to protect yet, and restoring a
+ *                                        half-built app over a half-built app helps nobody.
  * PURE.
  */
 export function decideGreenGuard(input: {
@@ -60,6 +61,41 @@ export function decideGreenGuard(input: {
   after: GreenState | null | undefined;
   /** False for the very first build of a workspace — there is nothing to protect yet. */
   hasSnapshot: boolean;
+  /**
+   * Did we OPEN the app and SEE it broken — as opposed to never managing to look?
+   *
+   * REQUIRED, and required ON PURPOSE (admin report 2026-08-25: "baar baar kehne par bhi gaadi ki
+   * speed kyu nahi badhi? pehle game theek chala, baad me speed fir se 0 kyu ho gayi?"). BOTH of those
+   * were this one line. `green: false` has always meant two completely different things — "we looked
+   * and it is broken" and "we could not look at all" — and Layer 2 restored on both. So on a workspace
+   * whose preview was DOWN (which is literally what that build's prompt said: "ab to preview hi nahi
+   * chal raha"), every turn ended not-green for a reason that had nothing to do with the user's edit,
+   * and every turn was rolled back to an older snapshot. The user asked for more speed, the engine
+   * wrote it, the guard undid it because it could not open a browser, and the next restore put back a
+   * snapshot from before the speed work — which is exactly "speed fir se 0". Repeat forever.
+   *
+   * `reviewerShouldWrite` in greenReviewPolicy.ts already draws this distinction for the reviewer; the
+   * guard simply was not told. The field is REQUIRED rather than optional so a future call site cannot
+   * quietly re-acquire the old behaviour by forgetting it — the typechecker asks the question instead.
+   *
+   * ONLY `true` may undo a user's work. Anything we did not observe leaves their turn ALONE, and the
+   * last-known-good snapshot is still kept, so nothing is lost either way: a genuinely broken edit is
+   * caught by the next turn that manages to look.
+   *
+   * THE HONEST COST, stated rather than glossed: an edit that both breaks the app AND takes the dev
+   * server down with it now SURVIVES the turn instead of being rolled back. Three things make that the
+   * better trade rather than a hole. (1) It is this repo's settled rule already — `verifyAfterFix` and
+   * `reviewerShouldWrite` both refuse to act on an inconclusive or server-down verdict, and Layer 2 was
+   * the only place that still did; aligning the outlier is the fix, not a new policy. (2) The dominant
+   * real cause of "cannot look" is not the user's code at all — it is a paused or reaped sandbox — and
+   * a dev server generally survives a syntax error by showing an overlay rather than exiting. (3) The
+   * snapshot is untouched, so the working app is still one restore away and the very next turn that
+   * manages to open a browser will observe the breakage and undo it. Set against that: the old
+   * behaviour destroyed real, correct work on every turn of a workspace whose preview was down, which
+   * is not a rare edge case — it is a build the admin actually lived through, asking for the same
+   * change over and over ("baar baar kehne par bhi") and being told each time that it was done.
+   */
+  provenBroken: boolean;
   /**
    * The build's own readiness verdict, when it has one. NOT part of the decision — a snapshot that
    * LOADS is worth protecting even when the app is unfinished, because the alternative is protecting
@@ -86,6 +122,15 @@ export function decideGreenGuard(input: {
     };
   }
   if (beforeGreen && input.hasSnapshot) {
+    if (input.provenBroken !== true) {
+      // WE NEVER LOOKED. Undoing the user's work on a guess is the one thing this guard must not do —
+      // it destroys real edits for reasons that live entirely outside their code (a paused sandbox, a
+      // dev server that stopped, a snapshot taken before the app painted). The good state stays saved.
+      return {
+        action: 'none',
+        reason: 'This turn\u2019s changes were kept: the app could not be opened to check them, and an unverified turn is never undone. The last known good version is still saved and untouched.',
+      };
+    }
     return { action: 'restore', reason: 'The app was verified working before this turn and is not working after it — the last known good state was restored.' };
   }
   if (beforeGreen && !input.hasSnapshot) {
@@ -176,6 +221,18 @@ export function greenGuardMessage(plan: RestorePlan): string {
   if (removed > 0) bits.push(`${removed} file${removed === 1 ? '' : 's'} added by that attempt removed`);
   const detail = bits.length > 0 ? ` (${bits.join(', ')})` : '';
   return `↩️ That change stopped your app from working, so I restored the last version that ran correctly${detail}. Your working app is back exactly as it was — nothing of it was lost, and the attempt is saved too. Tell me what you wanted and I'll try a different way — or reply "${KEEP_CHANGES_PHRASE}" if you meant to keep that version and carry on from there.`;
+}
+
+/**
+ * What the USER is told when their change was KEPT but could not be checked.
+ *
+ * The silent version of this state is what made the speed bug invisible for so long: the engine either
+ * said nothing or said "done". Neither is true. This says the two things that are actually true — the
+ * change is in place, and we could not confirm it — and it names the safety net that still exists, so
+ * "unverified" does not read as "at risk". No vendor or model name (the white-label law). PURE.
+ */
+export function greenGuardUnverifiedMessage(): string {
+  return '\u26a0\ufe0f I made your change, but I could not open your app to confirm it works this time. Your change is saved, and so is the last version that ran correctly \u2014 nothing was lost. Ask me to open the preview and I\u2019ll check it.';
 }
 
 /** Told to the user when the attempt is handed back — plainly, including what it does not promise. */

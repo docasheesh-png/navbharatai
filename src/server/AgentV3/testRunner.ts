@@ -217,6 +217,19 @@ export function suitePresentButRunnerMissing(files: string[], packageJsonRaw?: s
   return null;
 }
 
+/**
+ * Does a Playwright config claim the `e2e/` directory, so its specs are not vitest's to run?
+ *
+ * The narrow question on purpose. "Is there an e2e folder" would also match a project that keeps its
+ * own vitest tests there, and excluding those would silently skip a real suite. PURE.
+ */
+export function playwrightOwnsE2e(files: string[]): boolean {
+  const list = files || [];
+  const hasConfig = list.some((f) => /(^|\/)playwright\.config\.[cm]?[jt]s$/.test(String(f ?? '')));
+  if (!hasConfig) return false;
+  return list.some((f) => /(^|\/)e2e\/.+\.(spec|test)\.[cm]?[jt]sx?$/.test(String(f ?? '')));
+}
+
 export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPlan | null {
   const has = (re: RegExp) => files.some(f => re.test(f));
   const { testScript, deps } = parsePackageJson(packageJsonRaw);
@@ -248,7 +261,27 @@ export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPl
   // app for the result. A config file proves INTENT; the dependency proves it can actually run. The rule
   // is applied to all three runners, not just Playwright — vitest and jest had the identical hole.
   if ('vitest' in deps) {
-    return { framework: 'vitest', command: `${exec} vitest run`, reason: `Vitest is a declared dependency (${pm}).` };
+    // ⚠️ A PLAYWRIGHT SPEC MUST NOT BE RUN BY VITEST — and this was OUR OWN file failing OUR OWN gate
+    // (admin build report 2026-08-25, the day after #2650 started writing e2e specs).
+    //
+    // The user's report said `vitest: FAIL — failing: e2e/smoke.spec.ts`. That file is one WE wrote.
+    // Vitest's default include is `**/*.{test,spec}.?(c|m)[jt]s?(x)`, so it picks the Playwright spec
+    // up; the spec imports `@playwright/test`, which we deliberately do NOT install; and the app's own
+    // test suite is then reported as failing because of a file the platform put there.
+    //
+    // Exactly the chain `e2eTypecheck.ts` was written for one day earlier — "a test file must never be
+    // able to fail the app's release build. Every link in that chain is ours" — for tsconfig. Vitest
+    // was the sibling nobody hunted.
+    //
+    // CONDITIONAL, and that matters: a project with no Playwright config may legitimately keep its own
+    // VITEST tests in `e2e/`, and excluding those would silently skip a user's real suite — a quieter
+    // and worse bug than the one being fixed. The Playwright config is what makes that directory
+    // Playwright's.
+    //
+    // `--exclude` is ADDITIVE, verified against vitest itself rather than assumed ("Additional file
+    // globs to be excluded from test"): the default excludes — node_modules above all — survive.
+    const exclude = playwrightOwnsE2e(files) ? " --exclude 'e2e/**'" : '';
+    return { framework: 'vitest', command: `${exec} vitest run${exclude}`, reason: `Vitest is a declared dependency (${pm}).` };
   }
   if ('jest' in deps) {
     return { framework: 'jest', command: `${exec} jest --ci`, reason: `Jest is a declared dependency (${pm}).` };

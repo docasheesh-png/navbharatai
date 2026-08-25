@@ -218,6 +218,7 @@ import { pickerItems } from '../../lib/reportPicker';
 import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } from '../AgentV3/SpaFallbackAnalysis';
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
 import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormancy';
+import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
 import { withE2eExcluded, e2eExcludeNote } from '../AgentV3/e2eTypecheck';
@@ -13298,6 +13299,26 @@ async function noteBuildOutcome(
               scanFiles = merged;
             }
           }
+          // 🔴 A USER INTERFACE WITH NO WAY TO BUILD OR SERVE IT — the shared cause behind two separate
+          // reports (see uiWithoutBuild.ts). Checked HERE because `scanFiles` is already the whole
+          // project, so it costs no extra read. Advisory: it never blocks a build, because a project
+          // mid-way to a frontend is a legitimate state and refusing to save someone's work over a
+          // layout opinion would be worse than saying so plainly.
+          try {
+            const pkgTexts: string[] = [];
+            const entries = scanFiles instanceof Map ? scanFiles : new Map(Object.entries(scanFiles));
+            for (const [fp, content] of entries) {
+              if (/(^|\/)package\.json$/i.test(String(fp))) pkgTexts.push(String(content ?? ''));
+            }
+            const stranded = uiWithoutBuildVerdict({ paths: [...entries.keys()].map(String), packageJsonFiles: pkgTexts });
+            if (stranded.stranded) {
+              buildDiag.record({
+                phase: 'readiness', severity: 'warning', code: 'UI_WITHOUT_BUILD',
+                message: stranded.message, autoResolved: false, detail: stranded.examples.join(', '),
+              });
+            }
+          } catch { /* an advisory finding must never be able to affect a build */ }
+
           const killers = findBootKillingEnvGuards(scanFiles);
           if (killers.length > 0) {
             buildDiag.record({

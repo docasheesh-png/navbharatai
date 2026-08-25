@@ -52,6 +52,7 @@ import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { acceptZipPick, notZipMessage } from '../../lib/zipPicker';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId, takeRemixHandoff } from './v3SessionContinuity';
+import { showColdStart } from './coldStartPolicy';
 import { loadDraft, saveDraft } from './composerDraft';
 import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
@@ -3397,6 +3398,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     </>
   );
 
+  /**
+   * Does this session already have an app, and therefore NOT need the cold-start surface? The rule
+   * and the full root-cause story live in coldStartPolicy.ts — pure, so it is test-locked rather
+   * than re-derived here. Both signals are gathered at this level because only the panel has them:
+   * the handoff ref is set during the first render pass (before any fetch), and the rehydrated file
+   * list is matched to THIS workspace so a previously-open session's files can never vouch for it.
+   */
+  const rehydratedWsId = state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current);
+  const coldStartVisible = showColdStart({
+    convoLength: convo.length,
+    chatMode,
+    arrivedViaRemix: remixHandoffRef.current !== null,
+    workspaceFileCount: workspaceFiles !== null && workspaceFilesFor === rehydratedWsId
+      ? Object.keys(workspaceFiles).length
+      : null,
+  });
+
   return (
     <div className="flex flex-col h-full max-h-full w-full min-h-0 bg-zinc-950 text-zinc-100">
       {showHostingChooser && (
@@ -3674,7 +3692,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               const lastUser = [...convo].reverse().find((m) => m.role === 'user');
               return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
             })()}
-            {convo.length === 0 && (
+            {coldStartVisible && (
               <div className="text-sm text-zinc-500 mt-6 text-center">
                 <Bot className="w-8 h-8 mx-auto mb-2 text-indigo-400/60" />
                 {chatMode === 'planner'

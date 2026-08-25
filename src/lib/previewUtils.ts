@@ -1,3 +1,4 @@
+import { jsxDevRuntimeUrl } from './jsxDevRuntimeFacade';
 import type { FileSystem } from '../types/index';
 
 // ── Preview harness: injected into EVERY preview so it can never silently go blank ──
@@ -475,7 +476,9 @@ export function buildSourceAppPreview(f: FileSystem): string {
     'react-dom': ESM + 'react-dom' + rdVer,
     'react-dom/client': ESM + 'react-dom' + rdVer + '/client',
     'react/jsx-runtime': ESM + 'react' + reactVer + '/jsx-runtime',
-    'react/jsx-dev-runtime': ESM + 'react' + reactVer + '/jsx-dev-runtime',
+    // OUR OWN FACADE, never the CDN — see jsxDevRuntimeFacade.ts: React 19's production build
+    // exports `jsxDEV` as `void 0`, and we emit jsxDEV calls on purpose for the Visual Editor.
+    'react/jsx-dev-runtime': jsxDevRuntimeUrl(typeof location !== 'undefined' ? location.origin : ''),
   };
   // Add all package.json deps to importmap with version pins.
   // `?external=react,react-dom` makes esm.sh import (not bundle) React, so every

@@ -1,3 +1,4 @@
+import { jsxDevRuntimeUrl } from '../../lib/jsxDevRuntimeFacade';
 import type { Express, Request, Response, RequestHandler } from 'express';
 
 /** No-op middleware used when no rate limiter is injected (e.g. unit tests). */
@@ -183,7 +184,8 @@ export async function bundleForPreview(files: Record<string, string>): Promise<s
       'react-dom/': ESM + 'react-dom' + rdVer + '/',
       'react-dom/client': ESM + 'react-dom' + rdVer + '/client',
       'react/jsx-runtime': ESM + 'react' + reactVer + '/jsx-runtime',
-      'react/jsx-dev-runtime': ESM + 'react' + reactVer + '/jsx-dev-runtime',
+      // OUR OWN FACADE, never the CDN — see jsxDevRuntimeFacade.ts.
+      'react/jsx-dev-runtime': jsxDevRuntimeUrl(),
     };
     for (const pkg of barePackages) {
       if (!imapEntries[pkg]) {

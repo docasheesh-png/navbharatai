@@ -310,6 +310,7 @@ import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { lintDesign, designSummary } from '../AppMakerLab/intelligence/DesignLinter';
+import { publishableVerdict, entryPagesOf } from './publishablePayload';
 import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
@@ -7654,6 +7655,14 @@ export class ToolDispatcher {
         if (files.size === 0) {
           throw new Error('No built files found. Run "npm run build" to produce dist/ before deploying.');
         }
+        // …AND IT MUST BE THE USER'S APP, not the starter page (admin 2026-08-25). A publish reported
+        // success and handed over a link to "Welcome to Navbharat AI Sandbox — ask AI to build
+        // something". Every gate had passed and each was individually right: the build exited 0, an
+        // output directory existed, and five files is not zero. Emptiness was the only thing anyone
+        // checked, and a placeholder is not empty. See publishablePayload.ts for why this is ONE
+        // signal and why it refuses to guess at a second.
+        const publishable = publishableVerdict(entryPagesOf(files));
+        if (!publishable.ok) throw new Error(publishable.reason);
         const url = await this.deploy(this.workspaceId, files);
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
         // P-PIPE.78 — honest bundle size from the dist map we already downloaded (zero extra I/O,

@@ -41970,3 +41970,44 @@ The day's earlier pattern (an artifact standing in for its validity) recurred in
 more: `sw.js` counted as "the build emitted something" in a guard written against exactly that mistake,
 and the API-only warning went on one template when eight needed it. Both were caught by tests written
 in the same session — which is the argument for writing them before believing the fix.
+
+## 2026-08-25 — the open root cause from the publish autopsy, closed with admin approval
+
+`PROGRESS.md` recorded it the same day as an OPEN root cause rather than patching it silently, and the
+admin then approved the fix ("han, fix karo").
+
+**The flaw.** `planDeployment` read `dependencies` and `devDependencies` as ONE set, so a frontend-only
+app that merely carried `express` as a DEV dependency — which our own builder scaffolds, and which
+`npm ci --omit=dev` does not even install in production — was classified as having a server half, and
+publish REFUSED it. The user was told their website could not go on website hosting.
+
+**The asymmetry was the tell.** `pythonServer()` established a Python server from a manifest **OR a real
+import in a real file**. The Node side came down to package.json alone. So the class is fixed by making
+both sides ask the same question, and it is still POSITIVE EVIDENCE ONLY:
+- a **production** dependency ⇒ a server (a real Express app declares it there), or
+- a real `import`/`require` in the app's own source ⇒ a server, wherever it was declared **or even if it
+  was never declared at all** — strictly MORE detection than the old rule, not less.
+
+A dev-only dependency that nothing imports is what it looks like: a dev-time tool.
+
+**The second half — the route could never have benefited from the first.** The publish handler passed
+`planDeployment` exactly four manifests, so its file-based detection had nothing to read. Fixed in two
+stages so the ordinary static publish pays nothing: the cheap manifest pass runs first, and only an app
+about to be REFUSED loads the real workspace files and re-plans. `src` is loaded once and reused by the
+wiring analysis, which previously loaded it a second time.
+
+**Siblings checked (rule 3).** `frameworkCapability.ts` already passes all files, so it inherits the fix
+(and its own `hasUi` check still runs first). `nbaiDomains.ts` deliberately reads only the four manifests
+for cost, and the fix removes its false positive too — without a production dependency there is now no
+backend, so the domain screen stays silent, which is that function's documented safe default. Its
+remaining blind spot is an UNDECLARED server, where it stays silent while publish refuses; publish's
+refusal is already surfaced on that same screen.
+
+**Locked by tests.** `deployPlan.test.ts` pins seven cases including a dev-only express that IS imported
+(still a server), an undeclared Fastify (now detected), `express-rate-limit` (middleware, not a server),
+and express named only in prose. `publishSeedWiring.test.ts` pins the ROUTE half — that a would-be
+refusal re-plans with real files first, that the sandbox manifests win, that the load happens once, and
+that it sits inside the refusal branch so a static publish costs nothing.
+
+**Verification:** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · `npx vitest run` — 1375
+files / 17954 tests passed.

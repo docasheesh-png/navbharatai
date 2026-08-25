@@ -190,3 +190,88 @@ describe('deployDecision — splitting is an optimisation, not a requirement', (
     }
   });
 });
+
+/**
+ * A DEV DEPENDENCY IS NOT A SERVER (admin report 2026-08-25: "yeh publish to navbharat ai ho hi nahi
+ * raha").
+ *
+ * The rule read `dependencies` and `devDependencies` as one set, so a frontend-only app that merely
+ * carried `express` as a DEV dependency — which our own builder scaffolds, and which
+ * `npm ci --omit=dev` does not even install in production — was classified as having a server half and
+ * REFUSED at publish. The user was told their website could not go on website hosting.
+ *
+ * The asymmetry with the Python side was the tell: Python was always established from a manifest OR a
+ * real import in a real file, while Node came down to package.json alone. These tests pin the rule now
+ * being the same on both sides — and pin that it still errs toward DETECTING a server, never away.
+ */
+describe('planDeployment — a server framework must actually be a server', () => {
+  it('express in devDependencies alone does NOT make a frontend app a full-stack one', () => {
+    const p = planDeployment({
+      'package.json': pkg({
+        dependencies: { react: '^18' },
+        devDependencies: { vite: '^5', express: '^4' },
+        scripts: { build: 'vite build' },
+      }),
+      'src/App.tsx': 'export default function App() { return <h1>hi</h1>; }',
+    });
+    expect(p.shape).toBe('spa');
+    expect(p.staticHostingSufficient).toBe(true);
+    expect(p.backend).toBeNull();
+  });
+
+  it('express in dependencies IS a server — the case the refusal was built for', () => {
+    const p = planDeployment({
+      'package.json': pkg({
+        dependencies: { express: '^4', react: '^18' },
+        devDependencies: { vite: '^5' },
+        scripts: { build: 'vite build', start: 'node server.js' },
+      }),
+    });
+    expect(p.shape).toBe('fullstack');
+    expect(p.staticHostingSufficient).toBe(false);
+    expect(p.backend).toMatchObject({ runtime: 'node', framework: 'Express', startCommand: 'node server.js' });
+  });
+
+  it('a dev-only express that the app really IMPORTS is still a server', () => {
+    const p = planDeployment({
+      'package.json': pkg({ devDependencies: { vite: '^5', express: '^4' }, scripts: { build: 'vite build' } }),
+      'server.js': "const express = require('express');\nexpress().listen(3000);",
+    });
+    expect(p.shape).toBe('fullstack');
+    expect(p.staticHostingSufficient).toBe(false);
+  });
+
+  it('an UNDECLARED server is detected too — strictly more than the old rule saw', () => {
+    const p = planDeployment({
+      'package.json': pkg({ dependencies: {} }),
+      'api/index.mjs': "import fastify from 'fastify';\nfastify().listen({ port: 3000 });",
+    });
+    expect(p.shape).toBe('node-server');
+    expect(p.staticHostingSufficient).toBe(false);
+    expect(p.backend?.framework).toBe('Fastify');
+  });
+
+  it('middleware FOR somebody else server is not a server', () => {
+    const p = planDeployment({
+      'package.json': pkg({ dependencies: { 'express-rate-limit': '^7', react: '^18' }, devDependencies: { vite: '^5' } }),
+      'src/main.tsx': "import rateLimit from 'express-rate-limit';",
+    });
+    expect(p.backend).toBeNull();
+    expect(p.staticHostingSufficient).toBe(true);
+  });
+
+  it('merely NAMING express in prose or a variable is not importing it', () => {
+    const p = planDeployment({
+      'package.json': pkg({ devDependencies: { vite: '^5', express: '^4' } }),
+      'src/notes.ts': "// we used to use express here\nconst express = 'not the package';",
+    });
+    expect(p.backend).toBeNull();
+    expect(p.staticHostingSufficient).toBe(true);
+  });
+
+  it('the Python side is unchanged — a manifest marker still proves a server', () => {
+    const p = planDeployment({ 'requirements.txt': 'flask==3.0.0' });
+    expect(p.shape).toBe('python-server');
+    expect(p.staticHostingSufficient).toBe(false);
+  });
+});

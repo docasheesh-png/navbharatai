@@ -51,6 +51,84 @@ function getDb(): admin.firestore.Firestore | null {
   }
 }
 
+/** The paths this store could NOT hold, from a metadata snapshot. Never throws. */
+function metaOversized(meta: admin.firestore.DocumentSnapshot): string[] {
+  const raw = meta.exists ? meta.data()?.oversized : undefined;
+  return Array.isArray(raw) ? raw.filter((p): p is string => typeof p === 'string') : [];
+}
+
+/**
+ * BIG ASSETS GO TO CLOUD STORAGE (admin report 2026-08-25).
+ *
+ * Firestore's hard 1MB-per-document limit is the ONLY reason this store ever had a size cap. A user's
+ * app-store build failed because a phone screenshot they had added was past it: the asset was dropped,
+ * the pushed repo imported a file that was not in it, and Vite stopped the build on the runner. Telling
+ * them about it is not a fix — the picture is genuinely part of their app.
+ *
+ * An object store has no such limit, and this project already writes to one. So an asset too big for
+ * Firestore is written to the bucket and its Firestore document holds a POINTER instead of the bytes.
+ * Loads reassemble it, so every existing caller keeps receiving the same `{ path: dataUri }` map and
+ * none of them needs to know where a given asset came from.
+ *
+ * ⚠️ THIS BUCKET IS THE PRIVATE ONE, AND THAT IS CORRECT HERE. Workspace assets are the user's own
+ * unpublished files, so they want exactly the access model the App Store's APKs want and the OPPOSITE
+ * of a published app's. `bucketPublish.publishedAppsBucket` deliberately refuses this same fallback for
+ * that reason — the two are not interchangeable, and the difference is access, not size.
+ */
+function assetBucketName(env: NodeJS.ProcessEnv = process.env): string {
+  return String(env.WORKSPACE_ASSETS_BUCKET || env.NAV_STORE_BUCKET || env.FIREBASE_STORAGE_BUCKET || '').trim();
+}
+
+/**
+ * The ceiling that remains after the spill-over. Not a storage limit — a memory one: every asset is
+ * handled as a base64 string, and a caller that loads a whole workspace holds all of them at once. A
+ * 25MB photo in an app is a mistake worth reporting rather than silently carrying.
+ */
+const MAX_SPILLED_ASSET_BYTES = Math.max(
+  MAX_ASSET_BYTES,
+  Number(process.env.WORKSPACE_ASSET_MAX_BYTES) || 12 * 1024 * 1024,
+);
+
+function assetObjectPath(workspaceId: string, path: string): string {
+  return `workspace-assets/${workspaceId}/${assetDocId(path)}`;
+}
+
+/** Write one oversized asset's bytes to the bucket. Returns the object path, or null on any doubt. */
+async function spillAssetToBucket(workspaceId: string, path: string, dataUri: string): Promise<string | null> {
+  const bucket = assetBucketName();
+  if (!bucket) return null;
+  try {
+    const parsed = parseDataUri(dataUri);
+    if (!parsed) return null;
+    const bytes = Buffer.from(parsed.base64, 'base64');
+    const object = assetObjectPath(workspaceId, path);
+    await admin.storage().bucket(bucket).file(object).save(bytes, {
+      resumable: false,
+      contentType: parsed.mime || 'application/octet-stream',
+      // PRIVATE, like every other workspace file. Nothing serves these directly; they are read back
+      // by us and handed to whatever needs them.
+      metadata: { cacheControl: 'private, max-age=0' },
+    });
+    return object;
+  } catch (e) {
+    notePersistenceFailure('workspace_assets', 'write', e);
+    return null;
+  }
+}
+
+/** Read one spilled asset back as a data URI. Returns null when it cannot be read. */
+async function readSpilledAsset(object: string, mime: string): Promise<string | null> {
+  const bucket = assetBucketName();
+  if (!bucket || !object) return null;
+  try {
+    const [buf] = await admin.storage().bucket(bucket).file(object).download();
+    return `data:${mime || 'application/octet-stream'};base64,${buf.toString('base64')}`;
+  } catch (e) {
+    notePersistenceFailure('workspace_assets', 'read', e);
+    return null;
+  }
+}
+
 /** Deterministic, '/'-free Firestore doc id for an asset's workspace-relative path. */
 function assetDocId(path: string): string {
   return Buffer.from(path, 'utf8').toString('base64url').slice(0, 1500);
@@ -64,8 +142,22 @@ function assetDocId(path: string): string {
 export async function saveWorkspaceAssets(workspaceId: string, assets: Record<string, string>): Promise<void> {
   const db = getDb();
   if (!db) return;
-  const entries = Object.entries(assets || {}).filter(([, c]) => typeof c === 'string' && Buffer.byteLength(c, 'utf8') <= MAX_ASSET_BYTES);
-  if (entries.length === 0) return;
+  const all = Object.entries(assets || {}).filter(([, c]) => typeof c === 'string');
+  const entries = all.filter(([, c]) => Buffer.byteLength(c, 'utf8') <= MAX_ASSET_BYTES);
+  /**
+   * WHAT WOULD NOT FIT — recorded, not swallowed (admin report 2026-08-25).
+   *
+   * This filter used to drop oversized assets in silence, and nothing anywhere knew it had happened.
+   * A user's app-store build then failed on the runner with "Could not load …/772B17C5-….png": the
+   * app imported a phone screenshot, the screenshot was past this cap, and the pushed repo simply did
+   * not contain it. Every layer reported success — the store said `complete: true`, because it had
+   * successfully read everything it HELD.
+   *
+   * Keeping the names costs one array and makes the store able to say what it is missing, which is
+   * what turns a confusing red CI run into a sentence the user can act on.
+   */
+  const tooBig = all.filter(([, c]) => Buffer.byteLength(c, 'utf8') > MAX_ASSET_BYTES);
+  if (entries.length === 0 && tooBig.length === 0) return;
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);
     const assetsCol = root.collection('assets');
@@ -76,10 +168,30 @@ export async function saveWorkspaceAssets(workspaceId: string, assets: Record<st
       }
       await batch.commit();
     }
+
+    // ── TOO BIG FOR FIRESTORE ⇒ THE BUCKET, NOT THE BIN ──────────────────────────────────────────
+    // Each one that lands keeps a POINTER document, so it is a normal asset from every reader's point
+    // of view. Only the ones that genuinely could not be stored — no bucket configured, a failed
+    // write, or past the memory ceiling — stay on the `oversized` list, which is what makes that list
+    // mean "we do not have this" rather than "it was large".
+    const spilled: string[] = [];
+    const oversized: string[] = [];
+    for (const [path, dataUri] of tooBig) {
+      if (Buffer.byteLength(dataUri, 'utf8') > MAX_SPILLED_ASSET_BYTES) { oversized.push(path); continue; }
+      const object = await spillAssetToBucket(workspaceId, path, dataUri);
+      if (!object) { oversized.push(path); continue; }
+      const mime = parseDataUri(dataUri)?.mime || 'application/octet-stream';
+      await assetsCol.doc(assetDocId(path)).set({ path, storageObject: object, mime });
+      spilled.push(path);
+    }
     const meta = await root.get();
     const existing: string[] = meta.exists && Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
-    const union = Array.from(new Set([...existing, ...entries.map(([p]) => p)]));
-    await root.set({ paths: union, count: union.length, savedAt: Date.now() }, { merge: true });
+    const union = Array.from(new Set([...existing, ...entries.map(([p]) => p), ...spilled]));
+    const priorOversized: string[] = meta.exists && Array.isArray(meta.data()?.oversized) ? meta.data()!.oversized : [];
+    // An asset that fits on a LATER save leaves the oversized list — the user resized it, and a stale
+    // warning about a file we now hold would send them hunting for a problem that no longer exists.
+    const oversizedUnion = Array.from(new Set([...priorOversized, ...oversized])).filter((p) => !union.includes(p));
+    await root.set({ paths: union, count: union.length, oversized: oversizedUnion, savedAt: Date.now() }, { merge: true });
   } catch (e) {
     notePersistenceFailure('workspace_assets', 'write', e);
   }
@@ -107,29 +219,40 @@ export async function loadWorkspaceAssets(workspaceId: string): Promise<Record<s
  */
 export async function loadWorkspaceAssetsWithCompleteness(
   workspaceId: string,
-): Promise<{ assets: Record<string, string>; complete: boolean }> {
+): Promise<{ assets: Record<string, string>; complete: boolean; oversized: string[] }> {
   const db = getDb();
   // No database is not "no assets" — it is no answer.
-  if (!db) return { assets: {}, complete: false };
+  if (!db) return { assets: {}, complete: false, oversized: [] };
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);
     const meta = await root.get();
     // A workspace with no asset record genuinely has no assets — that IS a complete answer.
-    if (!meta.exists) return { assets: {}, complete: true };
+    if (!meta.exists) return { assets: {}, complete: true, oversized: [] };
     const paths: string[] = Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
-    if (paths.length === 0) return { assets: {}, complete: true };
+    if (paths.length === 0) return { assets: {}, complete: true, oversized: metaOversized(meta) };
     const allowed = new Set(paths);
     const docs = await root.collection('assets').get();
     const out: Record<string, string> = {};
+    // A pointer document holds no bytes — fetch those from the bucket. Done in parallel because a
+    // workspace can hold several, and one-at-a-time would add a round trip per picture to every ship.
+    const pointers = docs.docs
+      .map((d) => d.data())
+      .filter((data) => typeof data.path === 'string' && typeof data.storageObject === 'string' && allowed.has(data.path));
+    await Promise.all(pointers.map(async (data) => {
+      const uri = await readSpilledAsset(data.storageObject as string, String(data.mime || ''));
+      // An unreadable pointer is left OUT rather than filled with a placeholder: a caller that ships
+      // the app must find it missing and say so, not push a broken image believing it is fine.
+      if (uri) out[data.path as string] = uri;
+    }));
     for (const d of docs.docs) {
       const data = d.data();
       if (typeof data.path === 'string' && typeof data.dataUri === 'string' && allowed.has(data.path)) {
         out[data.path] = data.dataUri;
       }
     }
-    return { assets: out, complete: true };
+    return { assets: out, complete: true, oversized: metaOversized(meta) };
   } catch {
-    return { assets: {}, complete: false };
+    return { assets: {}, complete: false, oversized: [] };
   }
 }
 

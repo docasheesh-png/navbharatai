@@ -19,6 +19,7 @@ import type { Express, Request, Response } from 'express';
 import axios from 'axios';
 import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { loadWorkspaceAssetsWithCompleteness } from '../AgentV3/WorkspaceAssetStore';
+import { findMissingImportedAssets, missingAssetUserMessage } from '../AgentV3/missingAssetCheck';
 import { sessionWorkspaceId } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { generateShipKit } from '../lib/mobileShipKit';
@@ -175,6 +176,29 @@ export function registerMobileSetupRoutes(app: Express): void {
       appAssets,
       appAssetsComplete: assetLoad.complete,
     });
+
+    /**
+     * 🔒 DOES THE APP IMPORT A PICTURE THE REPO WILL NOT HAVE? (admin report 2026-08-25.)
+     *
+     * A real APK build failed on the runner with "Could not load …/attached_assets/772B17C5-….png
+     * (imported by client/src/pages/login.tsx)". The app previewed fine — the image exists in the
+     * sandbox — but the durable asset store silently drops anything over its Firestore size cap, which
+     * a phone screenshot passes easily, so the pushed repo imported a file it did not contain.
+     *
+     * Refused HERE for the same reason the compile pre-flight above is: found on the runner it costs
+     * the user five minutes, a log they cannot act on, and no idea what to do next. Found here it is
+     * one sentence naming the picture and the screen that uses it.
+     *
+     * Checked AFTER the heal, so a repair that removed the import clears the block by itself.
+     */
+    const missingAssets = findMissingImportedAssets(appFiles, Object.keys(appAssets));
+    if (missingAssets.length > 0) {
+      return res.status(422).json({
+        error: missingAssetUserMessage(missingAssets),
+        code: 'missing-assets',
+        missingAssets: missingAssets.slice(0, 10),
+      });
+    }
 
     try {
       const { created, defaultBranch } = await ensureRepo(headers, owner, repoName, `${name} — mobile app, prepared by NavBharatAI`);

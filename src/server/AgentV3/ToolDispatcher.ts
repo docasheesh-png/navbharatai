@@ -1,3 +1,4 @@
+import { repeatedReadNotice } from './repeatedReads';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
 import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAuditFix';
@@ -1860,6 +1861,19 @@ export class ToolDispatcher {
     }
   }
 
+  /**
+   * Every file this build has read, with its last-seen content — the basis for the repeated-read
+   * nudge. Per dispatcher, so it lives exactly as long as one build and never leaks across users.
+   * Content is held rather than hashed: the bodies are already in memory on the way past, and an exact
+   * comparison cannot produce a false "unchanged" the way a truncated hash could.
+   */
+  private _readLedger = new Map<string, { count: number; content: string }>();
+
+  /** Read counts for the build report. Exposed so the route can NAME the waste, not only nudge it. */
+  readLedgerCounts(): Map<string, number> {
+    return new Map([...this._readLedger].map(([p, r]) => [p, r.count]));
+  }
+
   async dispatch(call: ToolUse, agent: AgentRole = 'architect'): Promise<ToolResult> {
     // Secret redaction (R1.1, roadmap §3.2): tool_call input and tool_result summaries are
     // streamed to the user's screen, so a command/output that inlines an API key, a .env value
@@ -2108,12 +2122,26 @@ export class ToolDispatcher {
         // healthy file. start_line/end_line make any slice of a large file genuinely readable.
         const sl = typeof (input as Record<string, unknown>).start_line === 'number' ? Math.max(1, Math.floor((input as Record<string, unknown>).start_line as number)) : null;
         const el = typeof (input as Record<string, unknown>).end_line === 'number' ? Math.max(1, Math.floor((input as Record<string, unknown>).end_line as number)) : null;
-        if (sl === null && el === null) return full;
+        // ⚠️ THE SAME FILE, AGAIN, UNCHANGED — measured at 84% of all reads in a real build (see
+        // repeatedReads.ts for the numbers, and for why this is a NUDGE and not a cache: a cache saves
+        // a 200ms round-trip and none of what actually costs, because the turn is already spent and the
+        // body is already on its way into the context either way).
+        //
+        // The content is ALWAYS returned in full. Suppressing it would save real tokens and is exactly
+        // the wrong trade — if the model's context has been trimmed, "you already have this" leaves it
+        // unable to proceed at all.
+        const prior = this._readLedger.get(reqPath);
+        const readCount = (prior?.count ?? 0) + 1;
+        const unchanged = prior !== undefined && prior.content === full;
+        this._readLedger.set(reqPath, { count: readCount, content: full });
+        const notice = repeatedReadNotice(reqPath, readCount, unchanged);
+
+        if (sl === null && el === null) return notice ? `${notice}${full}` : full;
         const lines = full.split('\n');
         const from = (sl ?? 1) - 1;
         const to = el ?? lines.length;
         const slice = lines.slice(from, to).join('\n');
-        return `[lines ${from + 1}-${Math.min(to, lines.length)} of ${lines.length} — the file is complete on disk]\n${slice}`;
+        return `${notice}[lines ${from + 1}-${Math.min(to, lines.length)} of ${lines.length} — the file is complete on disk]\n${slice}`;
       }
 
       case 'write_file': {

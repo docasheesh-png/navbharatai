@@ -46,8 +46,34 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       return { ...state, workspaceId: event.workspaceId };
 
     // P0 — capture THIS build's unique identity so the report export can be validated against it.
-    case 'build_meta':
-      return { ...state, buildId: event.buildId, promptHash: event.promptHash, ...(event.workspaceId ? { workspaceId: event.workspaceId } : {}) };
+    //
+    // ⚠️ AND CLEAR WHAT BELONGED TO THE LAST BUILD (admin 2026-08-25: "plan ek baar — sirf 1st build me
+    // — actively working dikhta hai, baad me nahi").
+    //
+    // `todos` and `agents` were set by their events and NEVER reset, so at the start of every build
+    // after the first the panel showed the PREVIOUS build's finished plan, complete with its green
+    // "✓ Done". It stayed there until the new build's first `update_todo` arrived — which in a real
+    // report took three and a half minutes. By then the user had already read "Done" and stopped
+    // watching. The plan was not broken; it was showing the wrong build's.
+    //
+    // The buildId is the honest boundary and it is the SERVER's own: a new one means a new build, so
+    // anything scoped to a build is no longer true. Everything else here is deliberately kept —
+    // messages, files, diffs and history belong to the SESSION or the WORKSPACE, and clearing those
+    // would throw away the conversation the user is still reading.
+    //
+    // Guarded on the id actually CHANGING: `build_meta` can be re-sent for the same build (a resume,
+    // a reconnect), and wiping a running build's own live plan would be a far worse bug than the one
+    // this fixes.
+    case 'build_meta': {
+      const isNewBuild = !!event.buildId && event.buildId !== state.buildId;
+      return {
+        ...state,
+        buildId: event.buildId,
+        promptHash: event.promptHash,
+        ...(event.workspaceId ? { workspaceId: event.workspaceId } : {}),
+        ...(isNewBuild ? { todos: [], agents: {} } : {}),
+      };
+    }
 
     case 'stream_delta': {
       const kind = event.kind ?? 'text';

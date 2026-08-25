@@ -3252,6 +3252,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   }, [workspaceFiles, workspaceFilesFor, running]);
 
   // Plan (todo list) collapse toggle (Task 3) — keeps the chat area readable.
+  /**
+   * Is the plan expanded inside the Build/Plan/Advise menu?
+   *
+   * SEPARATE from `planCollapsed`, deliberately. That one belongs to the strip above the transcript;
+   * this one belongs to the menu. Sharing a single flag would mean opening the plan in one place
+   * silently changed the other, which is the kind of coupling that makes a UI feel haunted.
+   * Defaults CLOSED so the menu opens the size it always has.
+   */
+  const [menuPlanOpen, setMenuPlanOpen] = useState(false);
   const [planCollapsed, setPlanCollapsed] = useState(false);
 
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
@@ -4405,12 +4414,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {/* FULL TEAM HQ (Fix 60): on the 'max' tier a live build gets the premium team card —
                 real roster, real plan progress squares, live clock, and the "message the team"
                 affordance. Lower tiers keep the plain agent-chip strip (unchanged). */}
-            {showTeamHq(running, powerLevel) ? (
+            {/* ⚠️ THE AGENT CHIPS NO LONGER GET A ROW OF THEIR OWN (admin 2026-08-25: "mujhe 2 line
+                chahiye bas… in do ko mila kar ek me karo"). Three stacked strips sat between the
+                transcript and the input — plan, agent chips, then Send/Search/Clear — and on a phone
+                that is most of the screen spent on chrome. The chips are now the ChatToolbar's
+                leftSlot, which is already a justify-between row: progress on the left, actions on the
+                right, in the space one of them used to take.
+                TeamHqCard is deliberately NOT merged: it is a full card with a roster, a clock and
+                progress squares, and squeezing that into a toolbar would destroy it rather than move
+                it. Only the plain chip strip folds. */}
+            {showTeamHq(running, powerLevel) && (
               <TeamHqCard agents={state.agents} todos={state.todos} elapsedMs={teamElapsedMs} />
-            ) : agents.length > 0 && (
-              <div className="px-3 pt-2 flex gap-1.5 overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
-                {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
-              </div>
             )}
             {files.length > 0 && (
               <div className="px-3 pt-2 flex flex-wrap gap-1.5">
@@ -4451,9 +4465,46 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                           <span>{icon}</span>{label}
                           {m === 'build' && running && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="A build is running" />}
                           {m === 'planner' && roleThreads.planner.length > 0 && <span className="text-[9px] opacity-70">{Math.ceil(roleThreads.planner.length / 2)}</span>}
+                          {/* THE LIVE BUILD PLAN, WHERE THE USER LOOKS FOR IT (admin 2026-08-25:
+                              "plan ko… 3 selecter me 'plan' me bhi dikhao, yahan user jab chahe plan
+                              dekh sake, expand kar sake"). The strip above the transcript is easy to
+                              collapse and then forget; this badge is on the control they already open
+                              to change mode, so the plan is reachable at any moment without hunting.
+                              Shows the real count, or ✓ when every step is done. */}
+                          {m === 'planner' && state.todos.length > 0 && (
+                            <span
+                              className={`ml-auto text-[9px] font-mono px-1 rounded ${planComplete ? 'text-emerald-400' : 'text-indigo-300'}`}
+                              title={planComplete ? 'This build\u2019s plan is complete' : `This build\u2019s plan: ${planDone} of ${state.todos.length} steps done`}
+                            >
+                              {planComplete ? '\u2713' : `${planDone}/${state.todos.length}`}
+                            </span>
+                          )}
                           {m === 'advisor' && roleThreads.advisor.length > 0 && <span className="text-[9px] opacity-70">{Math.ceil(roleThreads.advisor.length / 2)}</span>}
                         </button>
                       ))}
+                      {/* …and the plan itself, expandable right here. Kept INSIDE the menu rather than
+                          opening another panel: the user asked to see it "jab chahe", and a second
+                          surface to dismiss is the opposite of that. Bounded height with its own
+                          scroll so a 20-step plan cannot grow the menu off the screen. */}
+                      {state.todos.length > 0 && (
+                        <div className="mt-1 border-t border-zinc-800 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setMenuPlanOpen((v) => !v)}
+                            className="w-full flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wider text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
+                            title={menuPlanOpen ? 'Hide the plan' : 'Show this build\u2019s plan'}
+                          >
+                            {menuPlanOpen ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+                            <span>Plan</span>
+                            <span className="text-zinc-500 normal-case font-normal">{planDone}/{state.todos.length}</span>
+                          </button>
+                          {menuPlanOpen && (
+                            <div className="mt-1 max-h-40 overflow-y-auto overscroll-contain px-1">
+                              <TodoList todos={state.todos} hideHeader />
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </>
                 )}
@@ -4644,6 +4695,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   underneath — the exact "+New chat leak" class this panel has been root-caused for twice. */}
               <div className="order-0 w-full mb-1">
                 <ChatToolbar
+                  /* Progress on the LEFT of the same row the actions live on. Scrollable, because a
+                     build can spawn several specialists and they must never push Send off a phone. */
+                  leftSlot={!showTeamHq(running, powerLevel) && agents.length > 0 ? (
+                    <div
+                      className="flex gap-1.5 overflow-x-auto overscroll-x-contain min-w-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                      style={{ WebkitOverflowScrolling: 'touch' }}
+                    >
+                      {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
+                    </div>
+                  ) : undefined}
                   messageCount={convo.length}
                   sendOnEnter={sendOnEnter}
                   onSendOnEnterChange={setSendOnEnter}

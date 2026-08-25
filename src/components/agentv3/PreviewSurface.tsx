@@ -124,6 +124,26 @@ export function veRgbToHex(color: string): string {
   return `#${h(+m[1])}${h(+m[2])}${h(+m[3])}`;
 }
 
+/**
+ * The preview's own toolbar row.
+ *
+ * ⚠️ IT WAS BEING CROPPED ON A PHONE (admin screenshot 2026-08-25). The row holds In-browser · Live ·
+ * four viewport buttons · Edit · Console · Reload, and a phone is not wide enough for them. Without a
+ * scroll container the overflow was simply CUT: Edit and the console were unreachable, and nothing on
+ * screen suggested anything was missing — the row just ended.
+ *
+ * `overflow-x-auto` makes the row swipeable instead. `overscroll-x-contain` stops that swipe turning
+ * into a page-level back-gesture at the ends, which is what makes it feel like a control rather than
+ * an accident. The scrollbar is hidden because a 2px bar under a 28px toolbar is noise on a desktop
+ * and invisible on a phone anyway; the content sitting flush at the edge is the affordance.
+ *
+ * ⚠️ EVERY CHILD MUST BE `shrink-0` or flexbox will squash them back to fit and the scroll never
+ * engages — the failure mode that makes this look like it did nothing.
+ */
+const TOOLBAR_ROW =
+  'flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400 '
+  + 'overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
+
 export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, buildPhase, bootSignal, onFixError, onFileEdited, onAskAiAboutElement }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean;
   /**
    * Is this pane the surface actually on screen INSIDE the app?
@@ -1077,7 +1097,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // In-browser first (the default). "Live server" shows a ● when a live URL is available so the
   // full-fidelity view is discoverable even though we no longer auto-switch to it.
   const switcher = (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1 shrink-0">
       <button onClick={() => { userPickedInBrowser.current = true; setMode('inbrowser'); }} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="Instant, always-available preview rendered in your browser — no server needed (default)">In-browser</button>
       {/* "Live server" wrapped onto two lines on a phone, which stretched this whole toolbar row
           (admin 2026-08-17). It says "Live" on small screens and the full "Live server" from sm up.
@@ -1106,7 +1126,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
 
   // Responsive viewport switcher — REAL device-width rendering (not a label), shown on BOTH previews.
   const viewportSwitcher = (
-    <div className="flex items-center gap-0.5 rounded border border-zinc-700 p-0.5">
+    <div className="flex items-center gap-0.5 rounded border border-zinc-700 p-0.5 shrink-0">
       {([
         ['auto', Maximize2, 'Auto — fills the panel (responsive to the available width)'],
         ['mobile', Smartphone, DEVICE_DIMS.mobile.label],
@@ -1130,11 +1150,11 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   if (mode === 'live' && effectiveUrl) {
     return (
       <div className="h-full flex flex-col">
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
+        <div className={TOOLBAR_ROW}>
           {switcher}
           {viewportSwitcher}
-          <span className="truncate flex-1">{effectiveUrl}</span>
-          <button onClick={() => setLiveReloadKey((k) => k + 1)} className="flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
+          <span className="truncate flex-1 min-w-0">{effectiveUrl}</span>
+          <button onClick={() => setLiveReloadKey((k) => k + 1)} className="shrink-0 flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           {/* RESTART THE SERVER — reachable while the preview is SHOWING (ROADMAP §8B B3).
               Diagnose only ever existed in the "No live preview yet" empty state, so a user whose
               preview URL still resolves but whose dev server has died — a blank page, a connection
@@ -1149,7 +1169,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
               onClick={() => { setWakeIntent(false); void runDiagnose(true); }}
               disabled={diagnosing}
               aria-label="Restart the server"
-              className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-50"
+              className="shrink-0 flex items-center gap-1 hover:text-zinc-200 disabled:opacity-50"
               title="Restart the server — reboots the dev server inside your sandbox and checks it really came up. Use this when the preview is blank or stuck."
             >
               {diagnosing ? <TirangaLoader className="w-3.5 h-3.5" /> : <Stethoscope className="w-3.5 h-3.5" />}
@@ -1167,7 +1187,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             shell (see server/AgentV3/previewKeepAlive.ts) and the sandbox stays up while it is watched.
             `effectiveUrl` remains the fallback for the case the door is off or has not been offered.
           */}
-          <a href={popoutHref} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
+          <a href={popoutHref} target="_blank" rel="noreferrer" className="shrink-0 flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
         </div>
         {paidNote}
         {/* A restart is a 30–90s sandbox reboot. A spinner alone for that long is indistinguishable
@@ -1331,10 +1351,10 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     const sandboxOff = sandbox && sandbox.livePreviewAvailable === false;
     return (
       <div className="h-full flex flex-col">
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
+        <div className={TOOLBAR_ROW}>
           {switcher}
-          <span className="flex-1 truncate">Live server</span>
-          <button onClick={() => void refreshSandbox()} className="flex items-center gap-1 hover:text-zinc-200" title="Re-check for the live preview (after the sandbox finishes starting)"><RotateCcw className="w-3.5 h-3.5" /></button>
+          <span className="flex-1 min-w-0 truncate">Live server</span>
+          <button onClick={() => void refreshSandbox()} className="shrink-0 flex items-center gap-1 hover:text-zinc-200" title="Re-check for the live preview (after the sandbox finishes starting)"><RotateCcw className="w-3.5 h-3.5" /></button>
         </div>
         {paidNote}
         <div className="flex-1 flex items-center justify-center p-6 text-center">
@@ -1404,16 +1424,16 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
+      <div className={TOOLBAR_ROW}>
         {switcher}
         {viewportSwitcher}
-        <span className="flex-1 truncate">{kind ? `In-browser preview (${kind})` : 'In-browser preview'}</span>
+        <span className="flex-1 min-w-0 truncate">{kind ? `In-browser preview (${kind})` : 'In-browser preview'}</span>
         {savingEdit && <TirangaLoader className="w-3.5 h-3.5 text-indigo-400" />}
         {!!html && !err && (
           <button
             onClick={() => { const next = !editMode; setEditMode(next); setIframeEditMode(next); }}
             disabled={savingEdit}
-            className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] border disabled:opacity-40 ${editMode ? 'bg-emerald-600 text-white border-emerald-500' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
+            className={`shrink-0 flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] border disabled:opacity-40 ${editMode ? 'bg-emerald-600 text-white border-emerald-500' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
             title={editMode ? 'Exit visual editing' : 'Visual Editor — click any element to select it (toolbar: text size, colour, bold, align); double-click to edit its text'}
           >
             {editMode ? <Eye className="w-3.5 h-3.5" /> : <Pen className="w-3.5 h-3.5" />}
@@ -1422,7 +1442,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         )}
         <button
           onClick={() => setConsoleOpen((v) => !v)}
-          className={`relative flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] ${consoleOpen ? 'bg-zinc-700 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
+          className={`shrink-0 relative flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] ${consoleOpen ? 'bg-zinc-700 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
           title="Console — everything your app prints, right here (no F12 needed)"
         >
           <Terminal className="w-3.5 h-3.5" />
@@ -1432,7 +1452,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             </span>
           )}
         </button>
-        <button onClick={() => void loadInBrowser()} disabled={loading || !workspaceId} className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
+        <button onClick={() => void loadInBrowser()} disabled={loading || !workspaceId} className="shrink-0 flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
           {loading ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
         </button>
       </div>

@@ -56,6 +56,13 @@ export interface PreviewCaptureContext {
   painted?: boolean;
   /** 'curl' can only ever return the static shell — it never executes the app's JavaScript. */
   source?: 'browser' | 'curl';
+  /**
+   * Does this workspace contain FRONTEND source — components, a page, an index.html?
+   *
+   * Only used to tell two very different situations apart when the preview answers with an API's JSON
+   * error. `undefined` = the caller could not tell, and then nothing changes.
+   */
+  hasFrontendFiles?: boolean;
 }
 
 /**
@@ -113,6 +120,22 @@ const JSON_ERROR_WORDS = /\b(error|failed|failure|required|missing|invalid|unaut
  * READS as a failure. `{"message":"API is running"}` is therefore left alone, while
  * `{"message":"secret option required for sessions"}` is caught.
  */
+/**
+ * Does this workspace contain FRONTEND source — something a browser is meant to render?
+ *
+ * The one fact that tells "your API returned an error" apart from "the preview is on the wrong port".
+ * Component extensions and an index.html only: a `.ts` file is not evidence, because an API project is
+ * full of them and has no page to show. PURE.
+ */
+export function hasFrontendSource(paths: Iterable<string>): boolean {
+  for (const p of paths) {
+    const path = String(p ?? '');
+    if (/(^|\/)index\.html$/i.test(path)) return true;
+    if (/\.(tsx|jsx|vue|svelte)$/i.test(path)) return true;
+  }
+  return false;
+}
+
 export function jsonErrorBody(html: string): string {
   const body = (html || '').trim();
   if (!body.startsWith('{') || body.length > 2000) return '';
@@ -186,7 +209,26 @@ export function analyzePreviewHtml(html: string, capture: PreviewCaptureContext 
   // markup, no "Cannot GET", no empty mount root. A machine-readable error is still an error.
   const jsonError = jsonErrorBody(h);
   if (jsonError) {
-    problems.push(`the server returned an error instead of the app: ${jsonError}`);
+    // ⚠️ THE SAME BODY MEANS TWO DIFFERENT THINGS, and calling both of them "your app returned an
+    // error" sent the admin looking for a bug that did not exist (screenshot 2026-08-25).
+    //
+    // Their preview showed `{"error":"Not found"}` — which is not a broken app. It is an Express
+    // server working perfectly and correctly reporting that nothing is routed at `/`. The app was
+    // fine; the PREVIEW WAS POINTED AT THE WRONG DOOR, at the backend instead of the site.
+    //
+    // The two are distinguishable, and by a fact we already hold: does this workspace contain
+    // frontend source at all? If it does, an API error at the preview URL is a port mismatch, and
+    // saying "your server returned an error" is a wrong diagnosis that costs the user a debugging
+    // session. If it does not, the app IS an API, and the original wording is right.
+    //
+    // `undefined` changes nothing — an unchecked thing never rewrites a verdict.
+    problems.push(
+      capture.hasFrontendFiles === true
+        ? `the preview is showing your API, not your web page — port answered with ${jsonError}, `
+          + 'which is the server correctly saying nothing is routed there. Your app has frontend files, '
+          + 'so the preview is pointed at the backend port instead of the site.'
+        : `the server returned an error instead of the app: ${jsonError}`,
+    );
   }
 
   // THE SANDBOX HOST'S OWN ERROR PAGE (real build report e61b13b1, Mitrify, 2026-08-10). The admin's

@@ -248,7 +248,7 @@ import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlan
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
-import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
+import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
@@ -13393,7 +13393,19 @@ async function noteBuildOutcome(
       ) {
         try {
           const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl');
-          const verdict = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+          // TRUE WHEN WE ARE SURE, `undefined` WHEN WE ARE NOT — never `false`.
+          //
+          // `writtenFiles` holds only THIS turn's writes, so a frontend file among them proves the
+          // project has a frontend, while their absence proves nothing at all (a backend-only edit
+          // writes none). Passing `false` there would be the artifact-for-evidence mistake this repo
+          // has spent the week removing, and it would produce the WRONG sentence — telling someone
+          // with a real web app that their API returned an error. Unknown falls back to today's
+          // wording, which is correct for an API and merely unhelpful for a site.
+          const verdict = analyzePreviewHtml(shot.html, {
+            painted: shot.painted,
+            source: shot.source,
+            hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
+          });
           let consoleErrs: string[] = [];
           try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the

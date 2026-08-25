@@ -1,4 +1,5 @@
 import { repeatedReadNotice } from './repeatedReads';
+import { healWouldOscillate } from './HealLedger';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
 import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAuditFix';
@@ -3186,6 +3187,11 @@ export class ToolDispatcher {
                 // What THIS pass read, captured before the snapshot is updated — comparing it with what
                 // the previous heal left is what tells a lost write apart from a re-firing detector.
                 const before = astFiles[fx.file];
+                // ⚠️ STOP AN OSCILLATION, don't just record it (admin report 2026-08-25: src/main.tsx
+                // healed ×4 with our own write intact each time). Three import fixers run over the same
+                // file; if two disagree about a symbol it goes X → Y → X for as many passes as the
+                // build allows, costing a write and a step every round and converging on nothing.
+                if (healWouldOscillate(this.workspaceId, fx.file, content)) continue;
                 astFiles[fx.file] = content;
                 try { await this.actuator.writeFile(this.workspaceId, fx.file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(fx.file, content); } catch { /* best-effort */ }
@@ -3208,6 +3214,9 @@ export class ToolDispatcher {
                 const content = addRes.files[file];
                 if (typeof content !== 'string') continue;
                 const before = astFiles[file];
+                // Same oscillation guard as the reconcile above — every heal site, or the loop survives
+                // through whichever one was left out.
+                if (healWouldOscillate(this.workspaceId, file, content)) continue;
                 astFiles[file] = content;
                 try { await this.actuator.writeFile(this.workspaceId, file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
@@ -3231,6 +3240,9 @@ export class ToolDispatcher {
                 const content = wrongRes.files[file];
                 if (typeof content !== 'string') continue;
                 const before = astFiles[file];
+                // Same oscillation guard as the reconcile above — every heal site, or the loop survives
+                // through whichever one was left out.
+                if (healWouldOscillate(this.workspaceId, file, content)) continue;
                 astFiles[file] = content;
                 try { await this.actuator.writeFile(this.workspaceId, file, content); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
@@ -3253,7 +3265,8 @@ export class ToolDispatcher {
             for (const [file, content] of Object.entries(astFiles)) {
               if (typeof content !== 'string') continue;
               const deduped = dedupeSameModuleImports(file, content);
-              if (deduped !== content) {
+              // Same oscillation guard as the reconcile above — whichever pair disagrees, the loop ends.
+              if (deduped !== content && !healWouldOscillate(this.workspaceId, file, deduped)) {
                 astFiles[file] = deduped;
                 try { await this.actuator.writeFile(this.workspaceId, file, deduped); } catch { /* best-effort */ }
                 try { this.onFileWrite?.(file, deduped); } catch { /* best-effort */ }

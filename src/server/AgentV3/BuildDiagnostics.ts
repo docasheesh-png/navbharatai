@@ -1383,6 +1383,13 @@ export function isExpectedNonzeroExit(command: string, exitCode: number | null):
   const segments = unquoted.split(/(?<!\|)\|(?!\|)/);
   const last = (segments[segments.length - 1] || '').trim();
   const base = (last.split(/\s+/)[0] || '').replace(/^.*\//, ''); // strip any path prefix
+  // ⚠️ `diff` ADDED 2026-08-25, and it had become a build's REPORTED ROOT CAUSE. A real report carried
+  //     rootCause: "$ diff <(grep …) <(grep …) → exit 1 (0s)"
+  // for a build whose diff had worked perfectly: the agent was comparing two lists of translation keys,
+  // and `diff` exits 1 precisely when the files DIFFER. Exit 1 is the ANSWER it went looking for. Same
+  // family as every name already on this line — a diagnostic tool reporting a finding, read as the tool
+  // failing. Exit 2 is a genuine diff error (a missing file) and stays a failure.
+  if (base === 'diff') return exitCode === 1 || exitCode < 0;
   if (/^(grep|egrep|fgrep|pkill|pgrep|killall|ss|netstat|lsof|fuser|ps|which|test)$/.test(base)) {
     return exitCode === 1 || exitCode < 0;
   }

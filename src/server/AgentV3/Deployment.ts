@@ -12,6 +12,7 @@
 // service-account JSON with the "Firebase Hosting Admin" role. A 403 means that role is missing.
 
 import { GoogleAuth } from 'google-auth-library';
+import { mirrorPublishToBucket, removePublishFromBucket } from './bucketPublish';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
@@ -94,6 +95,24 @@ export class FirebaseHostingDeployer {
         {},
         { headers },
       ));
+
+    // ROADMAP §10.3 — mirror the SAME files into Cloud Storage, so the Cloudflare Worker can serve
+    // published apps from a store with no channel cap and the ceiling stops being a ceiling.
+    //
+    // AFTER the release, and awaited but fully guarded: the publish has already succeeded by this
+    // line, so a bucket problem must not be able to undo it. `mirrorPublishToBucket` never throws.
+    //
+    // ONLY the workspace's own PUBLISH channel is mirrored. Preview snapshots pass a different
+    // channelId (previewSnapshot.ts), and mirroring those would double the storage for versions
+    // nobody browses to — the check is on the id rather than a parameter so a future caller cannot
+    // forget to pass it.
+    if (channelId === makeChannelId(workspaceId)) {
+      const mirror = await mirrorPublishToBucket(channelId, files);
+      if (mirror.attempted && (mirror.failed > 0 || mirror.error)) {
+        // Admin-only signal. The user's app is live either way; this says the bucket copy is not.
+        console.warn(`[PUBLISH-MIRROR] ${channelId}: ${mirror.uploaded} uploaded, ${mirror.failed} failed${mirror.error ? ` — ${mirror.error}` : ''}`);
+      }
+    }
     return publishedAppUrl(channelUrl, site);
   }
 
@@ -263,6 +282,14 @@ export class FirebaseHostingDeployer {
       await axios.delete(`${HOSTING_API}/sites/${site}/channels/${channelId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      // …and remove the bucket copy, so "take this app down" is true in BOTH places. Deleting only
+      // the channel would leave the mirror serving the app the moment the Worker prefers the bucket —
+      // a takedown that looks complete and is not. Guarded: the channel is already gone, and failing
+      // the whole takedown over the mirror would be worse than an orphaned object we can sweep later.
+      const removed = await removePublishFromBucket(channelId);
+      if (removed.attempted && !removed.deleted) {
+        console.warn(`[PUBLISH-MIRROR] takedown left bucket objects for ${channelId}: ${removed.error ?? 'unknown'}`);
+      }
       return true;
     } catch (err) {
       const status = (err as AxiosError)?.response?.status;

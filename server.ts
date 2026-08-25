@@ -90,6 +90,7 @@ import { registerSonicRoutes } from './src/server/sonic/sonicRoute';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
 import { attachMetricsTimeline } from './src/server/lib/metricsTimeline';
+import { serverLoad } from './src/server/lib/serverLoad';
 import { registerSyncRoutes } from './src/server/routes/sync';
 import { registerProfileRoutes } from './src/server/routes/profile';
 import { registerExportRoutes } from './src/server/routes/export';
@@ -298,6 +299,11 @@ setInterval(() => {
   // This middleware sets CORS headers for allowlisted native origins and short-circuits OPTIONS
   // preflights with 204 + reflected request headers. For same-origin web traffic (no Origin header),
   // it is a pure no-op.
+  // SERVER LOAD — count in-flight requests. Mounted FIRST so the count covers every request, not
+  // only the ones that survive the middleware below it; an "how busy is it" number that silently
+  // excludes rejected or redirected traffic would understate exactly the load worth seeing.
+  serverLoad.start();
+  app.use(serverLoad.middleware);
   app.use(corsMiddleware());
 
   // ── Rate Limiters (4.3) ──────────────────────────────────────────────────

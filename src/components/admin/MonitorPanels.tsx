@@ -24,7 +24,7 @@ import { Activity, AlertTriangle, RefreshCw, Cpu, IndianRupee, CheckCircle2, Clo
 import { stackedBarLayout, linePoints, donutSegments, axisTickIndices } from '../ui/charts/chartGeometry';
 import {
   RANGE_OPTIONS, timeLabel, humanDuration, percent, compactNumber, microUsdToInr, formatInr,
-  extractSeries, totalsFor, feedState, feedMessage, providerRows, rateTone,
+  extractSeries, totalsFor, feedState, feedMessage, providerRows, rateTone, formatBytes, serverLoadHeadline,
   type MonitorPoint, type RangeHours,
 } from './monitorFormat';
 
@@ -38,6 +38,19 @@ interface MonitorResponse {
   liveSandboxes: number | null;
   /** Can alerts reach the admin outside the app? Carries the reason, never the key. */
   emailAlerts?: { configured: boolean; reason: string; recipients: number };
+  /** How hard the instance that answered this request is working. */
+  serverLoad?: {
+    cpuPercent: number | null;
+    memoryRssBytes: number;
+    memoryLimitBytes: number | null;
+    memoryPercent: number | null;
+    eventLoopP50Ms: number | null;
+    eventLoopP99Ms: number | null;
+    inFlightRequests: number;
+    uptimeSeconds: number;
+    level: 'ok' | 'warn' | 'critical';
+    reason: string;
+  };
   alerts: any[];
   health: { score: any; inputs: any } | null;
   healthError: string | null;
@@ -261,6 +274,81 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
           </button>
         </div>
       </div>
+
+      {/* ── SERVER LOAD — first on the page, because if the server is struggling nothing else here
+          is the thing to look at. Event-loop lag leads: Node runs ONE thread, so when it is blocked
+          every user waits while CPU can still look calm. ── */}
+      {data?.serverLoad && (
+        <div className={`rounded-[1.5rem] border p-5 ${
+          data.serverLoad.level === 'critical' ? 'bg-red-500/5 border-red-500/30'
+          : data.serverLoad.level === 'warn' ? 'bg-amber-500/5 border-amber-500/30'
+          : 'bg-[#161b22] border-white/10'}`}>
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div className="min-w-0">
+              <h3 className={PANEL_TITLE}>Server load</h3>
+              <p className="text-[11px] text-white/80 mt-1 leading-relaxed">
+                {serverLoadHeadline(data.serverLoad.level, data.serverLoad.reason)}
+              </p>
+              {/* The caveat that keeps this honest: several instances run at once, and a request
+                  lands on whichever answers. This describes THAT one. */}
+              <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest mt-1.5">
+                One server instance — several run at once, and each request lands on whichever answers
+              </p>
+            </div>
+            <span className={`shrink-0 text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
+              data.serverLoad.level === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-400'
+              : data.serverLoad.level === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}>
+              {data.serverLoad.level === 'ok' ? 'healthy' : data.serverLoad.level}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="bg-black/30 rounded-xl p-3">
+              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">Waiting time</div>
+              <div className={`text-lg font-black font-mono mt-0.5 ${
+                data.serverLoad.eventLoopP99Ms == null ? 'text-[#8b949e]'
+                : data.serverLoad.eventLoopP99Ms >= 250 ? 'text-red-400'
+                : data.serverLoad.eventLoopP99Ms >= 100 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {data.serverLoad.eventLoopP99Ms == null ? '—' : `${data.serverLoad.eventLoopP99Ms}ms`}
+              </div>
+              <div className="text-[8px] text-[#484f58] font-bold uppercase tracking-wider mt-1">
+                Worst case{data.serverLoad.eventLoopP50Ms != null && ` · usual ${data.serverLoad.eventLoopP50Ms}ms`}
+              </div>
+            </div>
+            <div className="bg-black/30 rounded-xl p-3">
+              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">CPU</div>
+              <div className="text-lg font-black font-mono mt-0.5 text-white">
+                {data.serverLoad.cpuPercent == null ? '—' : `${data.serverLoad.cpuPercent}%`}
+              </div>
+              <div className="text-[8px] text-[#484f58] font-bold uppercase tracking-wider mt-1">Of one core</div>
+            </div>
+            <div className="bg-black/30 rounded-xl p-3">
+              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">Memory</div>
+              <div className={`text-lg font-black font-mono mt-0.5 ${
+                (data.serverLoad.memoryPercent ?? 0) >= 90 ? 'text-red-400'
+                : (data.serverLoad.memoryPercent ?? 0) >= 75 ? 'text-amber-400' : 'text-white'}`}>
+                {data.serverLoad.memoryPercent == null ? formatBytes(data.serverLoad.memoryRssBytes) : `${data.serverLoad.memoryPercent}%`}
+              </div>
+              <div className="text-[8px] text-[#484f58] font-bold uppercase tracking-wider mt-1">
+                {formatBytes(data.serverLoad.memoryRssBytes)}
+                {data.serverLoad.memoryLimitBytes ? ` of ${formatBytes(data.serverLoad.memoryLimitBytes)}` : ' · limit unknown'}
+              </div>
+            </div>
+            <div className="bg-black/30 rounded-xl p-3">
+              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">Handling now</div>
+              <div className="text-lg font-black font-mono mt-0.5 text-sky-400">{data.serverLoad.inFlightRequests}</div>
+              <div className="text-[8px] text-[#484f58] font-bold uppercase tracking-wider mt-1">Requests in flight</div>
+            </div>
+            <div className="bg-black/30 rounded-xl p-3">
+              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">Running for</div>
+              <div className="text-lg font-black font-mono mt-0.5 text-white">
+                {humanDuration(data.serverLoad.uptimeSeconds * 1000)}
+              </div>
+              <div className="text-[8px] text-[#484f58] font-bold uppercase tracking-wider mt-1">Since last deploy</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Live stat row over the selected window ── */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">

@@ -41,6 +41,20 @@
 const FIREBASE_PROJECT = 'gen-lang-client-0866594388';
 const APEX = 'mitrify.in';
 
+// ── BUCKET ORIGIN (ROADMAP §10.3) ─────────────────────────────────────────────────────────────────
+// Firebase Hosting serves a published app from a preview CHANNEL, and channels are a finite per-site
+// resource — past the cap, publishing stops for every user at once. Cloud Storage has no such limit.
+// The server already mirrors each publish into this bucket (bucketPublish.ts), so the Worker can
+// prefer the bucket and fall back to Firebase for anything not mirrored yet.
+//
+// ⚠️ SET THIS TO YOUR BUCKET NAME TO SWITCH THE ORIGIN. Leave it '' and the Worker behaves EXACTLY
+// as before — Firebase only. That is the revert: one empty string, no redeploy of anything else.
+//
+// The bucket must allow public reads on these objects (Storage Object Viewer for allUsers), because
+// this Worker fetches them anonymously. They are published apps — public by definition.
+const APPS_BUCKET = '';                       // e.g. 'navbharatai-published-apps'
+const APP_PREFIX = 'published-apps';          // must match bucketPublish.APP_PREFIX on the server
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -86,6 +100,23 @@ export default {
       }
     }
 
+    // ── BUCKET FIRST, FIREBASE AS THE FALLBACK ──────────────────────────────────────────────────
+    // Only for GET/HEAD: an object store cannot answer a POST, and an app's form submission must go
+    // to whatever origin it was going to before.
+    if (APPS_BUCKET && cacheable) {
+      const fromBucket = await serveFromBucket(sub, url.pathname);
+      if (fromBucket) {
+        const headers = new Headers(fromBucket.headers);
+        headers.set('x-nbai-origin', 'bucket');
+        headers.set('x-nbai-cache', 'MISS');
+        const out = new Response(fromBucket.body, { status: 200, headers });
+        ctx.waitUntil(cache.put(cacheKey, out.clone()));
+        return out;
+      }
+      // Nothing in the bucket for this app — fall through to Firebase, which is what keeps every
+      // app published before the mirror existed working with nothing to migrate.
+    }
+
     // Forward the request to Firebase with the ORIGIN host, so Firebase serves the right channel.
     // We do NOT forward the original Host header — Firebase routes by the .web.app hostname.
     const originReq = new Request(originUrl.toString(), {
@@ -122,3 +153,37 @@ export default {
     return out;
   },
 };
+
+/**
+ * Fetch one path for one app from the bucket, with the SPA fallback Firebase Hosting did for free.
+ *
+ * THE FALLBACK IS THE WHOLE POINT OF THIS FUNCTION. A single-page app owns its own routing: the user
+ * refreshes on `/dashboard`, and there is no object called `dashboard` — only `index.html`, which
+ * then renders that route in the browser. Firebase Hosting rewrote to index.html automatically. An
+ * object store returns 404, and the user sees a blank page on a link that worked yesterday. Without
+ * these ten lines, moving to the bucket would break every deep link on every published app.
+ *
+ * Returns null when the app has nothing in the bucket at all, so the caller falls back to Firebase.
+ * Cache headers come from the object's OWN metadata (set at upload), so the origin and the edge
+ * cannot disagree about how long something lives.
+ */
+async function serveFromBucket(sub, pathname) {
+  const base = `https://storage.googleapis.com/${APPS_BUCKET}/${APP_PREFIX}/${sub}`;
+  // A directory-style path ('/' or '/about/') means index.html inside it, exactly as a web server would.
+  const clean = pathname.replace(/^\/+/, '');
+  const key = !clean || clean.endsWith('/') ? `${clean}index.html` : clean;
+
+  const direct = await fetch(`${base}/${key}`);
+  if (direct.status === 200) return direct;
+
+  // A path with a file extension that is missing is a genuinely missing ASSET (a stylesheet, an
+  // image). Serving index.html in its place would return an HTML page with a 200 where a script was
+  // expected — the browser then fails with a confusing parse error instead of an honest 404.
+  if (/\.[a-z0-9]{1,8}$/i.test(key)) return null;
+
+  const spa = await fetch(`${base}/index.html`);
+  if (spa.status === 200) return spa;
+
+  // No index.html either ⇒ this app is not in the bucket. Fall back to Firebase.
+  return null;
+}

@@ -1,8 +1,12 @@
+import { repeatedReadNotice } from './repeatedReads';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
 import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAuditFix';
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
+import { decideSupersede } from './previewSupersede';
+import { sandboxStore } from './SandboxStore';
+import { buildPreKillPortCommand } from './sandbox/EngineerAI/actuators/devServerHost';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { inspectCredentials } from './credentialSafety';
@@ -1857,6 +1861,19 @@ export class ToolDispatcher {
     }
   }
 
+  /**
+   * Every file this build has read, with its last-seen content — the basis for the repeated-read
+   * nudge. Per dispatcher, so it lives exactly as long as one build and never leaks across users.
+   * Content is held rather than hashed: the bodies are already in memory on the way past, and an exact
+   * comparison cannot produce a false "unchanged" the way a truncated hash could.
+   */
+  private _readLedger = new Map<string, { count: number; content: string }>();
+
+  /** Read counts for the build report. Exposed so the route can NAME the waste, not only nudge it. */
+  readLedgerCounts(): Map<string, number> {
+    return new Map([...this._readLedger].map(([p, r]) => [p, r.count]));
+  }
+
   async dispatch(call: ToolUse, agent: AgentRole = 'architect'): Promise<ToolResult> {
     // Secret redaction (R1.1, roadmap §3.2): tool_call input and tool_result summaries are
     // streamed to the user's screen, so a command/output that inlines an API key, a .env value
@@ -2105,12 +2122,26 @@ export class ToolDispatcher {
         // healthy file. start_line/end_line make any slice of a large file genuinely readable.
         const sl = typeof (input as Record<string, unknown>).start_line === 'number' ? Math.max(1, Math.floor((input as Record<string, unknown>).start_line as number)) : null;
         const el = typeof (input as Record<string, unknown>).end_line === 'number' ? Math.max(1, Math.floor((input as Record<string, unknown>).end_line as number)) : null;
-        if (sl === null && el === null) return full;
+        // ⚠️ THE SAME FILE, AGAIN, UNCHANGED — measured at 84% of all reads in a real build (see
+        // repeatedReads.ts for the numbers, and for why this is a NUDGE and not a cache: a cache saves
+        // a 200ms round-trip and none of what actually costs, because the turn is already spent and the
+        // body is already on its way into the context either way).
+        //
+        // The content is ALWAYS returned in full. Suppressing it would save real tokens and is exactly
+        // the wrong trade — if the model's context has been trimmed, "you already have this" leaves it
+        // unable to proceed at all.
+        const prior = this._readLedger.get(reqPath);
+        const readCount = (prior?.count ?? 0) + 1;
+        const unchanged = prior !== undefined && prior.content === full;
+        this._readLedger.set(reqPath, { count: readCount, content: full });
+        const notice = repeatedReadNotice(reqPath, readCount, unchanged);
+
+        if (sl === null && el === null) return notice ? `${notice}${full}` : full;
         const lines = full.split('\n');
         const from = (sl ?? 1) - 1;
         const to = el ?? lines.length;
         const slice = lines.slice(from, to).join('\n');
-        return `[lines ${from + 1}-${Math.min(to, lines.length)} of ${lines.length} — the file is complete on disk]\n${slice}`;
+        return `${notice}[lines ${from + 1}-${Math.min(to, lines.length)} of ${lines.length} — the file is complete on disk]\n${slice}`;
       }
 
       case 'write_file': {
@@ -7570,6 +7601,43 @@ export class ToolDispatcher {
           return `WARNING: port ${port} did not respond.${healNote} Preview NOT published. If dependencies were still installing, you may call update_preview ONE more time; do not retry beyond that.`;
         }
         this.previewFails = 0;
+        /**
+         * 🔒 THE OLD APP MUST ACTUALLY LEAVE (admin 2026-08-25 — the piano-instead-of-UPI-API preview).
+         *
+         * This is the one moment we hold PROOF about the new app: its port was just verified UP. Any
+         * port this workspace's own records name that differs from it belongs to the PREVIOUS app —
+         * whose dev server, left running in the resumed sandbox, wins every honest probe the preview
+         * door makes (a live listener is a live listener; the door verified the wrong app perfectly).
+         * So: stop that server, retire the recipe that pointed at it, and record the new port as the
+         * declared one. Only record-named ports are ever freed — never a swept or guessed list — and
+         * database ports never (see previewSupersede.ts). Best-effort: a failure here degrades the
+         * preview, it must never touch a build that already succeeded.
+         */
+        try {
+          const [recipe, record] = await Promise.all([
+            sandboxStore.getRecipe(this.workspaceId),
+            sandboxStore.getRecord(this.workspaceId),
+          ]);
+          const decision = decideSupersede({ newPort: port, recipe, declaredPort: record?.declaredPort });
+          if (decision.staleports.length > 0) {
+            await withTimeout(
+              this.actuator.runCommand(this.workspaceId, buildPreKillPortCommand(decision.staleports)),
+              8_000, 'preview-supersede-kill',
+            ).catch(() => { /* the old server surviving is the status quo, not a new failure */ });
+          }
+          if (decision.retireRecipe || decision.staleports.length > 0) {
+            await sandboxStore.supersedeRecipe(this.workspaceId, port);
+            // Through the event stream, which BuildDiagnostics already listens to — this dispatcher
+            // holds no diagnostics handle of its own, and the user deserves the sentence too: it is
+            // the honest explanation of why the preview may have LOOKED like a different app until now.
+            if (decision.note) {
+              this.events?.emit({ type: 'narration', agent: 'architect', text: `🧹 ${decision.note}`, ts: Date.now() });
+            }
+          } else {
+            // Same app, same port — just keep the declared port fresh for the door.
+            await sandboxStore.saveDeclaredPort(this.workspaceId, port);
+          }
+        } catch { /* superseding is insurance for the NEXT view — never this build's problem */ }
         // Bake the "made by NavBharatAI" badge into the app's index.html the moment the preview is
         // genuinely up (port verified) — so the very preview the user sees, and any later deploy of
         // these same files, carries the signature. Gated by the user's Settings → General toggle;

@@ -110,7 +110,10 @@ export type AgentV3WireEvent =
   // per engine, so sending it would leak which engine ran (White-Label Law).
   | { type: 'context_usage'; pct: number; level: 'ok' | 'high' | 'critical'; note: string; ts: number }
   | { type: 'preview'; url: string; ts: number }
-  | { type: 'repo'; url: string; fullName: string; ts: number }
+  // `ownedByUser` says whether this repo lives in the USER's own GitHub account. It decides whether we
+  // may offer to deploy from it to THEIR host: the invisible platform-org repo (Email/Phone users)
+  // is not theirs, and their own Render account cannot see it.
+  | { type: 'repo'; url: string; fullName: string; ownedByUser?: boolean; ts: number }
   // Own-repo working-branch storage is active: edits are on `workBranch` inside the user's REAL repo,
   // to be merged into `baseBranch` via a PR. Drives the in-app "Ship to main" / "Revert" controls.
   | { type: 'own_repo'; owner: string; repo: string; workBranch: string; baseBranch: string; ts: number }
@@ -205,6 +208,8 @@ export interface AgentV3ClientState {
   /** The project's GitHub repo (the user's own, or platform-org), once git-native storage runs. */
   repoUrl?: string;
   repoFullName?: string;
+  /** True when `repoFullName` is a repo in the USER's own GitHub account (not the platform org). */
+  repoOwnedByUser?: boolean;
   /** Present when own-repo working-branch storage is active: edits live on `workBranch` in the user's
    *  REAL repo and reach `baseBranch` via a PR. Drives the "Ship to main" / "Revert last merge" UI. */
   ownRepo?: { owner: string; repo: string; workBranch: string; baseBranch: string };

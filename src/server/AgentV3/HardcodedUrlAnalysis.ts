@@ -32,6 +32,13 @@ const LOCALHOST_RE = /(?:https?|wss?):\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(
 const PRIVATE_IP_RE = /(?:https?|wss?):\/\/(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(?::\d+)?/i;
 // If the line reads configuration, the address is (almost always) a safe default.
 const ENV_RE = /process\.env\.|import\.meta\.env\.|getenv|process\.env\[/i;
+// A localhost inside a LOG statement is TEXT shown to a human, not an address the app calls —
+// `app.listen(PORT, () => console.log('http://localhost:' + PORT))` is the universal Node boilerplate
+// and breaks nothing in production. Flagging it (admin build report 2026-08-25, the UPI API: "1
+// hardcoded localhost URL(s)" on an app whose every endpoint was env-ported and curl-verified) is the
+// worse failure: a warning that fires on harmless, near-universal code teaches everyone to ignore the
+// warning, and the REAL signal — a fetch/axios/WebSocket aimed at localhost — dies with it.
+const LOG_LINE_RE = /(?:console\.(?:log|info|warn|error|debug)|logger\.\w+|\bprint(?:ln)?)\s*\(/i;
 
 /** Scan one file for hardcoded local/private URLs that are not env-var fallbacks. PURE. */
 export function scanHardcodedUrls(file: string, content: string): HardcodedUrlIssue[] {
@@ -42,6 +49,7 @@ export function scanHardcodedUrls(file: string, content: string): HardcodedUrlIs
     const line = lines[i];
     if (/^\s*(\/\/|\*)/.test(line)) continue; // skip comments
     if (ENV_RE.test(line)) continue; // env-based default — fine
+    if (LOG_LINE_RE.test(line)) continue; // a URL being PRINTED, not called — see LOG_LINE_RE
     const lm = line.match(LOCALHOST_RE);
     if (lm) {
       issues.push({ severity: 'medium', kind: 'localhost', file, line: i + 1, url: lm[0] });

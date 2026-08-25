@@ -186,7 +186,10 @@ export type AgentEvent =
    */
   | { type: 'framework'; framework: string; reason: 'imported' | 'detected'; ts: number }
   | { type: 'preview'; url: string; ts: number }
-  | { type: 'repo'; url: string; fullName: string; ts: number }
+  // `ownedByUser` decides whether this repo can be handed to the user's OWN host. A mirror in their
+  // GitHub account can; the invisible platform-org repo (Email/Phone users) cannot — their Render
+  // account cannot see it — and offering a deploy from it would be a button that could only fail.
+  | { type: 'repo'; url: string; fullName: string; ownedByUser?: boolean; ts: number }
   // Own-repo working-branch storage is active — drives the client's "Ship to main" / "Revert" controls.
   | { type: 'own_repo'; owner: string; repo: string; workBranch: string; baseBranch: string; ts: number }
   // A read-only role chat (planner/advisor) proposed concrete build steps — the user approves them

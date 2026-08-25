@@ -41746,3 +41746,268 @@ sets it. That empty string is the revert.
 
 `npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json --noEmit` clean · `npx vitest run` —
 **1425 files, 18,080 passed, 4 skipped, 0 failed**.
+
+---
+
+## 2026-08-25 — App Mart: broken for strangers, and slow for everyone. Three PRs (#2657, #2659, #2660).
+
+**Admin report 1 (screenshot):** an app published to the store worked for its creator and showed
+*"No React entry module found"* on a third device. **Admin report 2:** *"app mart me app jaldi
+open ho, kya kuch kar sakte ho?"*
+
+### #2657 — a published app must not be judged React by its package.json
+
+`isReactProject()` decided from `package.json` dependencies — and OUR OWN builder scaffolds `react`
+into package.json even for a vanilla HTML/canvas game. The game was routed to the React renderer,
+which found no module entry and served the error to every viewer. The creator never saw it because
+their preview runs on the live sandbox dev server, not this renderer — broken only for strangers,
+which is exactly the report's shape. The publish gate (`hasRenderableEntry`) makes the SAME
+inference, so it vouched for an app the player could not render.
+
+Fix: `choosePreviewKind` picks a framework renderer only when that framework's entry actually
+RESOLVES (the entry finders are now exported and are the single source of that decision). One case
+deliberately kept as an error: an index.html pointing at a local script the tree does not contain —
+static fallback there would be a blank page instead of a message. **Method note recorded on
+purpose:** the first hypothesis (publish filter dropping the entry) was DISPROVEN by reproducing
+with the real code before fixing — an external `<script src>` resolves fine; only the inline-script
+and stray-`.jsx` shapes broke. Locked by `tests/storeAppPreviewDispatch.test.ts` (7 cases).
+
+### #2659 — gzip the serving path (app-wide, and the biggest single number of the day)
+
+Nothing compressed anything: no middleware, and Cloud Run does not compress for you. The main app
+bundle travelled at **~1.28 MB raw** where **355 KB gzipped** would do — meaning the whole
+2026-08-24 bundle-split campaign was not reaching phones — and a store page at 75–190 KB where
+21–23 KB would do (measured). The filter is an **ALLOWLIST** (json/html/js/css/svg/manifest),
+because gzip buffers output and would silently break every live stream in the product — above all
+the v5 build's NDJSON progress under `text/plain`, which would have shown a builder a dead screen
+for the whole build. Tested over a real socket, including the untouched-stream case.
+
+### #2660 — bake the store page at publish; stop queueing the client's two requests
+
+Every Cloud Run instance's first serve of an app did a whole-subcollection file read plus a
+**200–500 ms server-side compile** (measured at 5/20/40 components). The page is fully determined
+at publish time, so publish now bakes it (gzipped, one doc, version-checked) and open is one small
+doc read. Best-effort in both directions: a failed/oversize bake falls back to the compile path —
+slower, never broken — and a stale-version bake is refused. The NavData id tag is injected at serve
+time on BOTH branches so a baked app still talks to the real shared rows. Client-side,
+`WebAppPlayer` fired meta → then open sequentially; they now fire together (trade recorded: one tiny
+guaranteed-401 for private apps).
+
+### Honest corrections in the same thread
+
+- Mid-investigation I claimed viewers download the 2.9 MB Babel compiler — **wrong**; my detection
+  string was bad, precompile works, and the claim was withdrawn in the moment it was checked.
+- Apps published BEFORE #2660 have no bake; they open via the (now gzipped) compile path until
+  their next re-publish bakes them. Recorded so nobody hunts a "bake miss" bug for old listings.
+
+### Verification
+
+Each PR through the full gate: both tsc projects clean, full suite green at its head
+(#2660: **1366 files, 17,810 passed, 0 failed**), boot-check PASS on the server-touching PRs.
+
+---
+
+## 2026-08-25 — "apke prompt se ye piano banaya hai": the previous app never left (#2662)
+
+**The report disproved the complaint's premise while confirming its pain.** The admin built a UPI
+Payment API (Express, port 3000) from a dictated prompt and the preview showed their PREVIOUS app — a
+piano, at 5173 — under a React+Vite badge. The attached build report proves the API was built
+correctly: framework `node-express`, all endpoints curl-tested, `PREVIEW_PUBLISHED` at `3000-…`. The
+piano's dev server was simply STILL RUNNING in the resumed sandbox, the stored revival recipe still
+said 5173 (only a browser-verified render rewrites it — a JSON API never earns one), and a live
+listener wins every honest probe the preview door makes. **The verification worked perfectly; it
+verified the wrong app's liveness.**
+
+Fixed at the moment of proof: when `update_preview` verifies the new port UP, record-named prior
+ports are freed (never swept/guessed ones, never database ports), the stale recipe is retired
+(`supersedeRecipe` — better no recipe than a proven recipe for a dead app), the new `declaredPort` is
+recorded, and the user is told in one honest line. `previewSupersede.ts`, pure, 16 tests.
+
+**Two more roots from the same report, both OUR false alarms:**
+- `server/routes/upi.js` "missing — the app crashes at runtime": under `module: nodenext`,
+  `import './x.js'` is the REQUIRED way to import `x.ts`. The scanner never substituted extensions,
+  so a correct import was flagged and the repair CREATED a literal `.js` stub — which Node resolves in
+  preference to the real `.ts`. **The false alarm actively broke a working app.** Scanner now mirrors
+  tsc's mapping; the tail-match sees through it for JS-ish extensions only (stripping `.css` would let
+  a missing stylesheet "match" an unrelated `.ts`).
+- "1 hardcoded localhost URL": it was `console.log('http://localhost:'+PORT)` — a URL being PRINTED,
+  not called. Log lines are now skipped; a `fetch('http://localhost…')` is still flagged.
+
+**Pattern count: instances six and seven in two days** of one class — state that lives longer than
+the thing it describes (live URL, publish message, publish state, celebration, preview recipe, the
+old dev server itself; plus the trigger-mismatch family before it). 🔴 **OPEN (the standing next
+step): a guard for the CLASS.** Concretely: every per-workspace durable/in-memory record should carry
+the identity (buildId or app fingerprint) of the app it describes, and every reader should discard a
+record whose identity is not the current one — one shared helper, not per-site vigilance. Recorded
+here so the next session builds the tap-washer instead of continuing to mop.
+
+## 2026-08-25 — "Publish on NavBharatAI" refused a full-stack app and pointed at a button that did not exist
+
+**Admin report (screenshot):** *"yeh publish to navbharat ai ho hi nahi raha."*
+
+**What was actually happening — the button was NOT dead, it was refusing with a reason.** The banner in
+the screenshot was the publish route's own 422: `POST /api/agentv3/publish` runs `planDeployment`, sees a
+full-stack app (a website plus an Express/Node server), and refuses rather than uploading a server to a
+static CDN — which would produce a site that loads while every button silently fails. That refusal is
+CORRECT and stays.
+
+**The real bug is the sentence after it.** The refusal ends `Use "Deploy backend" to put the whole app
+somewhere it can run`. A repo-wide search for "Deploy backend" across `src/**/*.tsx` returned **nothing**.
+The capability is real — `POST /api/agentv3/deploy-backend` → `renderDeploy.ts` is a wired Render deploy —
+but its only caller was `GitPanel.tsx`, buried in the IDE's Git panel. From the Publish sheet the
+instruction was unreachable: the user was told to press a control that did not exist on their screen.
+
+**The 50/50 half — why it could arise at all.** `deployDecision` returns a machine `code` whose own comment
+reads *"a machine code the client can branch on to show the right button"*, and **no client ever read it**
+(`grep 'backend-deploy-available'` found only the server and its own test). The decision was designed for a
+branch nobody wrote, so a message promising a button and the absence of that button could never contradict
+each other anywhere.
+
+**Fix (root cause, both halves):**
+- `src/lib/backendDeployOffer.ts` (new, PURE) — the missing branch. Turns the refusal code + what the client
+  knows (own repo, GitHub connected, whose Render key) into an honest offer.
+- `HostingChooser` renders it: a REAL **Deploy backend** button when the app has a repo behind it (wired to
+  the existing route via `managedDeployRequest` / `managedDeployOutcome` / `renderConnectSteps`), and — when
+  it genuinely cannot run yet — numbered prerequisites instead of a press that could only fail.
+- The publish 422 now carries `keySource`, so the panel can say that a deploy running on NavBharatAI's own
+  Render key cannot see a service in the user's own Render account, rather than sending them to do a
+  one-time step that could never close the loop.
+- `AgentV3Panel` captures `data.code` / `data.keySource` and passes them down.
+- `DEPLOY_BACKEND_LABEL` is shared, and `tests/backendDeployOffer.test.ts` asserts (a) the server's refusal
+  names exactly that label, and (b) **every** code `deployDecision` can emit has an offer branch that leaves
+  the user with something to do — so a new refusal code cannot ship into a dead end again.
+
+**Open root cause, recorded honestly (rule 6), NOT silently patched.** `planDeployment`'s `depNames()` reads
+**devDependencies** as well as dependencies, so a pure-frontend app that merely carries `express` as a dev
+dependency is classified `fullstack` and refused. Widening the gate is the one change that could re-open the
+original bug (an Express app published to a CDN as a broken site), so it was not made on my own judgement.
+The safe narrowing, if the admin wants it, is: refuse only when the frontend also shows evidence of talking
+to a server (`analyzeApiWiring` returning anything other than `'none'`).
+
+**Verification:** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · `npx vitest run` — 1374 files
+/ 17909 tests passed.
+
+**Follow-up in the same PR — a MIRROR repo is still the user's repo.** The first cut keyed the offer on
+`state.ownRepo`, which is set only for own-repo working-branch storage — so for most users the button would
+never have appeared. Most apps that reach GitHub at all land as a MIRROR in the user's own account
+(`routes/agentv3.ts` ~9751), which is equally deployable. The `repo` wire event now carries `ownedByUser`,
+set `true` for the own-repo target and the user-account mirror and **`false` for the invisible platform-org
+repo** — that one is not theirs, their own Render account cannot see it, and a deploy offered from it could
+only ever fail. An older server that sends no flag is treated as NOT theirs (the safe answer).
+---
+
+## 2026-08-25 — the weak-tier session: three blind spots, and one root cause behind two reports
+
+Admin's ask: *"v5 build engine ko aur rocksolid karo — weak providers par bhi complex app bana sake."*
+Nothing here was designed from a guess. Every item came from the admin's own reports or from reading a
+scaffold.
+
+### 🔴 THE ROOT CAUSE — read this one first (#2668, #2669)
+
+**The `node-express` scaffold ships exactly three files: `package.json`, `tsconfig.json`,
+`src/index.ts`. No Vite. No `index.html`. No React. Its build is
+`esbuild --platform=node --outfile=dist/index.js` — a NODE BUNDLE, not a website.**
+
+So React components written into that workspace are **dead by construction**. Nothing compiles them,
+nothing serves them, no page exists. And that single fact explains TWO reports that had been chased
+separately, each to a dead end:
+
+| Report | Symptom | Actually |
+|---|---|---|
+| the publish | shipped the starter page, called it live | `npm run build` produced no web output |
+| the preview | showed `{"error":"Not found"}` | the server correctly saying nothing is routed at `/` |
+
+**Neither was diagnosable from its own symptom.** That is the lesson worth keeping: two unexplained
+symptoms that resist separate investigation are evidence of one shared cause, and the way in was to
+stop chasing outcomes and read the CONDITION — which meant reading the template, not the reports.
+
+Fixed in both halves. `uiWithoutBuild.ts` detects the contradiction (UI source · no frontend builder in
+ANY package.json · no index.html — all three required, so it cannot fire on an ordinary project), and
+every API-only scaffold now warns the builder BEFORE it writes a line, with what to do instead.
+
+Two traps in the detector, both tested and both easy to get wrong: **every** package.json is read, not
+just the root (a monorepo keeps its builder in `client/`), and **`esbuild` is not counted** as a
+frontend builder — it is a bundler, just not for the web, and counting it would have cleared the very
+project the module exists for.
+
+⚠️ It is ADVISORY and must stay so. A project mid-way to a frontend is a legitimate state; refusing to
+save someone's work over a layout opinion is worse than saying so plainly.
+
+### #2665 — the 64KB stdout cap was blinding the engine on complex apps
+
+Two lines in a real report named it exactly: `Unterminated string in JSON at position 65536`, twice.
+65536 is 64KB — E2B's cap on `commands.run` stdout. Twice because `withDaemonRetry` re-ran the same
+doomed call.
+
+**Why it is a WEAK-TIER bug specifically:** both payloads GROW WITH THE APP, so a bigger app is likelier
+to trip them, and a weak model has the fewest turns to spare when one does.
+
+- **browser action metadata** — the script wrote its screenshot to a file for exactly this reason, with
+  a comment saying so, and wrote its metadata to stdout ONE LINE BELOW. The `JSON.parse` was unguarded,
+  so the model was told its BROWSER was broken when the browser had worked perfectly.
+- **the element scan** — same stdout, and the worst offender: every element carries a selector, text, a
+  rect and four computed styles. The richer the app, the more certainly truncated — and the caller's
+  try/catch turned that into "no elements found", indistinguishable from a simple page. The engine went
+  blind on complex apps and said nothing.
+
+Third and fourth siblings of one bug in one file (the dist reader and the screenshot came first, each
+after its own incident). A test now asserts NO stdout-only JSON parse remains.
+
+### #2666 — an API's honest 404 reported as a broken app
+
+Same body, two meanings. With frontend files in the project it is a PORT MISMATCH; without them the app
+IS an API and the old wording was right. The call site passes **true or undefined, never false** —
+`writtenFiles` holds only this turn's writes, so their absence proves nothing, and passing `false` would
+produce the wrong sentence for a real web app.
+
+### Method note, and an honest one
+
+I chased the publish and the preview separately and got nowhere, twice, and said so both times rather
+than shipping a third guess. Reading the scaffold took minutes and closed both. **When two symptoms
+resist separate investigation, stop investigating symptoms.**
+
+The day's earlier pattern (an artifact standing in for its validity) recurred inside my own fixes twice
+more: `sw.js` counted as "the build emitted something" in a guard written against exactly that mistake,
+and the API-only warning went on one template when eight needed it. Both were caught by tests written
+in the same session — which is the argument for writing them before believing the fix.
+
+## 2026-08-25 — the open root cause from the publish autopsy, closed with admin approval
+
+`PROGRESS.md` recorded it the same day as an OPEN root cause rather than patching it silently, and the
+admin then approved the fix ("han, fix karo").
+
+**The flaw.** `planDeployment` read `dependencies` and `devDependencies` as ONE set, so a frontend-only
+app that merely carried `express` as a DEV dependency — which our own builder scaffolds, and which
+`npm ci --omit=dev` does not even install in production — was classified as having a server half, and
+publish REFUSED it. The user was told their website could not go on website hosting.
+
+**The asymmetry was the tell.** `pythonServer()` established a Python server from a manifest **OR a real
+import in a real file**. The Node side came down to package.json alone. So the class is fixed by making
+both sides ask the same question, and it is still POSITIVE EVIDENCE ONLY:
+- a **production** dependency ⇒ a server (a real Express app declares it there), or
+- a real `import`/`require` in the app's own source ⇒ a server, wherever it was declared **or even if it
+  was never declared at all** — strictly MORE detection than the old rule, not less.
+
+A dev-only dependency that nothing imports is what it looks like: a dev-time tool.
+
+**The second half — the route could never have benefited from the first.** The publish handler passed
+`planDeployment` exactly four manifests, so its file-based detection had nothing to read. Fixed in two
+stages so the ordinary static publish pays nothing: the cheap manifest pass runs first, and only an app
+about to be REFUSED loads the real workspace files and re-plans. `src` is loaded once and reused by the
+wiring analysis, which previously loaded it a second time.
+
+**Siblings checked (rule 3).** `frameworkCapability.ts` already passes all files, so it inherits the fix
+(and its own `hasUi` check still runs first). `nbaiDomains.ts` deliberately reads only the four manifests
+for cost, and the fix removes its false positive too — without a production dependency there is now no
+backend, so the domain screen stays silent, which is that function's documented safe default. Its
+remaining blind spot is an UNDECLARED server, where it stays silent while publish refuses; publish's
+refusal is already surfaced on that same screen.
+
+**Locked by tests.** `deployPlan.test.ts` pins seven cases including a dev-only express that IS imported
+(still a server), an undeclared Fastify (now detected), `express-rate-limit` (middleware, not a server),
+and express named only in prose. `publishSeedWiring.test.ts` pins the ROUTE half — that a would-be
+refusal re-plans with real files first, that the sandbox manifests win, that the load happens once, and
+that it sits inside the refusal branch so a static publish costs nothing.
+
+**Verification:** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · `npx vitest run` — 1375
+files / 17954 tests passed.

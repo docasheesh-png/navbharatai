@@ -267,6 +267,44 @@ export function shouldAutoContinue(opts: { sawResult: boolean; alreadyContinued:
   return !opts.sawResult && !opts.alreadyContinued && opts.hasLastPrompt;
 }
 
+/**
+ * Should the header offer **Resume / Stop** for a build the SERVER still reports as running?
+ *
+ * THE BUG THIS CLOSES (admin, 2026-08-25): "app ban gayi, phir bhi Resume aur Stop dikh rahe hain."
+ * The build finishes, the summary and the cost render, `Build health: READY` appears — and the
+ * header still shows Resume + Stop until the preview finally loads. Resume is meaningless there (the
+ * user is already looking at the finished build) and Stop invites them to kill the preview boot they
+ * are waiting for.
+ *
+ * WHY IT HAPPENS. The server's `buildRunningHere` is COARSE: it stays true through the whole
+ * post-result tail — durable saves, the reviewer, and the dev-server boot the code elsewhere in this
+ * file describes as up to ~6 minutes of import-preview boot AFTER the result. So the status poll
+ * says "running" long after the build has delivered, and the poll was overwriting `serverBuildRunning`
+ * unconditionally — throwing away the stronger fact this session already held: the terminal `result`
+ * for this build has arrived.
+ *
+ * The scope check matters as much as the result check. `sawResult` belongs to the workspace that was
+ * attached when the result arrived; a poll about a DIFFERENT session must not be suppressed by it, or
+ * a build genuinely running in another tab would lose its Resume button. Hence the workspace ids must
+ * match for the suppression to apply — an account-wide poll (no workspace) is never suppressed.
+ *
+ * PURE + unit-tested.
+ */
+export function serverBuildNeedsAttention(opts: {
+  serverSaysRunning: boolean;
+  sawResult: boolean;
+  /** The workspace the poll asked about (undefined = account-wide). */
+  polledWorkspaceId?: string;
+  /** The workspace whose terminal result this session saw. */
+  resultWorkspaceId?: string;
+}): boolean {
+  if (!opts.serverSaysRunning) return false;
+  if (!opts.sawResult) return true;
+  // A result was seen — suppress only when the poll is about that same workspace.
+  if (!opts.polledWorkspaceId || !opts.resultWorkspaceId) return true;
+  return opts.polledWorkspaceId !== opts.resultWorkspaceId;
+}
+
 export function stallWatchdogAction(opts: { alive: boolean; sawResult: boolean }): 'reconnect' | 'finish' | 'error' {
   if (opts.alive) return 'reconnect';
   if (opts.sawResult) return 'finish';
@@ -292,6 +330,9 @@ export function useAgentV3Build(): UseAgentV3Build {
   // so the watchdog must not show "stopped responding" on a build that actually succeeded. Reset at
   // every build start (start/resume), set the instant `result` arrives on any stream path.
   const sawResultRef = useRef<boolean>(false);
+  // …and WHICH workspace that result belonged to, so a status poll about a DIFFERENT session is never
+  // suppressed by it (see serverBuildNeedsAttention).
+  const resultWorkspaceRef = useRef<string | undefined>(undefined);
   // V4-1a — the last user turn's shape (for auto-continue) + the once-per-interruption guard.
   const lastStartRef = useRef<{ prompt: string; opts: { userId?: string; email?: string; sessionId?: string; framework?: string } } | null>(null);
   const autoContinuedRef = useRef<boolean>(false);
@@ -456,6 +497,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         if ((event as { type?: string }).type === 'result' && !isStale(gen)) {
           if (sink) sink.sawResult = true; // build is terminal — a later stream drop is not a failure
           sawResultRef.current = true; // WATCHDOG — a later "not running" probe = finished, not stalled
+          resultWorkspaceRef.current = workspaceIdRef.current;
           setRunning(false);
           setServerBuildRunning(false);
         }
@@ -570,7 +612,15 @@ export function useAgentV3Build(): UseAgentV3Build {
       // which is precisely the "Resume shows, the click finds nothing" bug this closed (2026-08-17).
       const r = await fetch(`/api/agentv3/status?${params.toString()}`, { headers: await authJsonHeaders() });
       const j = await r.json().catch(() => ({}));
-      setServerBuildRunning(opts?.workspaceId ? j?.buildRunningHere === true : j?.buildRunning === true);
+      const serverSaysRunning = opts?.workspaceId ? j?.buildRunningHere === true : j?.buildRunning === true;
+      // NOT a blind overwrite: the server keeps saying "running" through the post-result tail, and
+      // this session already knows whether the build delivered. See serverBuildNeedsAttention.
+      setServerBuildRunning(serverBuildNeedsAttention({
+        serverSaysRunning,
+        sawResult: sawResultRef.current,
+        polledWorkspaceId: opts?.workspaceId,
+        resultWorkspaceId: resultWorkspaceRef.current,
+      }));
     } catch {
       /* best-effort probe — stay as-is on failure */
     }
@@ -1212,6 +1262,7 @@ export function useAgentV3Build(): UseAgentV3Build {
       // stall detector measures THIS build and never fires before the first event arrives.
       lastEventTsRef.current = Date.now();
       sawResultRef.current = false; // fresh build — its terminal result hasn't arrived yet
+      resultWorkspaceRef.current = undefined;
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -1371,6 +1422,7 @@ export function useAgentV3Build(): UseAgentV3Build {
             if ((event as { type?: string }).type === 'result' && !isStale(gen)) {
               sawResult = true; // build is terminal — a later stream drop is not a failure
               sawResultRef.current = true; // WATCHDOG — a later "not running" probe = finished, not stalled
+              resultWorkspaceRef.current = workspaceIdRef.current;
               setRunning(false);
               setServerBuildRunning(false);
             }

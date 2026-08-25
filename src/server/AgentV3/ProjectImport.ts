@@ -616,9 +616,16 @@ const RESOLVE_INDEX_RE = /\/index\.(?:tsx?|jsx?|mjs|cjs)$/i;
  */
 function existingModuleByTail(base: string, paths: Set<string>): string | undefined {
   const found = new Set<string>();
+  // TS-ESM: `./x.js` names `x.ts` (see the substitution note in findUnresolvedLocalImports). The
+  // extension-stripped form of the BASE is what matches the extension-stripped form of the file, so a
+  // mispathed `../api/upi.js` still finds the real `server/routes/upi.ts` instead of reporting
+  // "truly missing" and having a duplicate created. ONLY for JS-ish extensions — stripping `.css`
+  // here would let a genuinely missing `theme.css` "match" an unrelated `theme.ts`, and the mispath
+  // autofix would then rewrite a stylesheet import to point at TypeScript.
+  const bases = /\.(?:m|c)?jsx?$/i.test(base) ? [base, base.replace(RESOLVE_EXT_RE, '')] : [base];
   for (const p of paths) {
     const forms = [p, p.replace(RESOLVE_EXT_RE, ''), p.replace(RESOLVE_INDEX_RE, '')];
-    if (forms.some((f) => f === base || f.endsWith(`/${base}`))) found.add(p);
+    if (forms.some((f) => bases.some((b) => f === b || f.endsWith(`/${b}`)))) found.add(p);
   }
   return found.size === 1 ? [...found][0] : undefined;
 }
@@ -717,7 +724,23 @@ export function findUnresolvedLocalImports(files: Record<string, string>): Array
         base = normalizeRel(`src/${spec.slice(2)}`);
       }
       if (!base) continue; // bare package / builtin / other alias — dependency territory, not a missing file
-      const resolves = LOCAL_RESOLVE_SUFFIXES.some((s) => paths.has(base + s));
+      /**
+       * 🔒 TS-ESM EXTENSION SUBSTITUTION (admin build report 2026-08-25 — the UPI API). Under
+       * `"module": "nodenext"`, TypeScript REQUIRES `import './routes/upi.js'` to load `upi.ts` —
+       * the `.js` in the specifier is the correct, documented way to import a TypeScript file. This
+       * scanner appended suffixes to the full specifier (`upi.js.ts`…) and never substituted, so a
+       * perfectly correct import was reported as "1 missing file (the app crashes at runtime)" and
+       * the repair pass then CREATED a literal `upi.js` stub — which Node resolves in PREFERENCE to
+       * the real `upi.ts`, so the false alarm actively broke a working app. The exact false-positive
+       * class the self-import autopsy (2026-08-03) warned about: a wolf-cry that pollutes the
+       * codebase. Mapping mirrors tsc: .js→.ts/.tsx, .mjs→.mts, .cjs→.cts, .jsx→.tsx.
+       */
+      const tsTwins = base.endsWith('.js') ? [`${base.slice(0, -3)}.ts`, `${base.slice(0, -3)}.tsx`]
+        : base.endsWith('.mjs') ? [`${base.slice(0, -4)}.mts`]
+        : base.endsWith('.cjs') ? [`${base.slice(0, -4)}.cts`]
+        : base.endsWith('.jsx') ? [`${base.slice(0, -4)}.tsx`]
+        : [];
+      const resolves = LOCAL_RESOLVE_SUFFIXES.some((s) => paths.has(base + s)) || tsTwins.some((t) => paths.has(t));
       if (!resolves && !seen.has(base)) {
         seen.add(base);
         // If the SAME module exists at another path, this is a MISPATH (fix the import), not a

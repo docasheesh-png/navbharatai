@@ -273,3 +273,90 @@ describe('HostingChooser — "Your published apps"', () => {
     expect(calls).toBe(0);
   });
 });
+
+/**
+ * THE BUTTON THE REFUSAL NAMES (admin report 2026-08-25: "yeh publish to navbharat ai ho hi nahi raha").
+ *
+ * Publishing a full-stack app is refused — correctly — with a message ending "Use “Deploy backend” to
+ * put the whole app somewhere it can run". A repo-wide search for that control across the client found
+ * nothing: the refusal pointed at a screen that did not exist. These tests pin the control to the
+ * refusal code that names it, and pin the no-dead-button rule for the case where it cannot run yet.
+ */
+describe('HostingChooser — the backend-deploy offer', () => {
+  const OWN: OwnRepoInfo = { owner: 'asheesh', repo: 'my-app', workBranch: 'nbai', baseBranch: 'main' };
+
+  it('stays invisible for an ordinary app whose publish was never refused', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)]);
+    expect(html).not.toContain('Deploy backend');
+    expect(html).not.toContain('Your app has a server half');
+  });
+
+  it('shows a REAL Deploy backend button once the server refuses for needing a server', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)], {
+      publishRefusalCode: 'backend-deploy-available',
+      ownRepo: OWN,
+      workspaceId: 'ws-1',
+      authedFetch: async () => new Response('{}'),
+    });
+    expect(html).toContain('Your app has a server half');
+    expect(html).toContain('Deploy backend');
+    expect(html).toContain('asheesh/my-app');
+  });
+
+  it('offers steps, never a doomed press, when this app has no repository behind it', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)], {
+      publishRefusalCode: 'backend-deploy-available',
+      ownRepo: null,
+      githubConnected: false,
+      onConnectGitHub: () => {},
+      workspaceId: 'ws-1',
+    });
+    expect(html).toContain('Your app has a server half');
+    expect(html).toContain('GitHub repository');
+    expect(html).toContain('Connect GitHub');
+    // The button itself must NOT be offered — a deploy with no repo to match could only ever fail.
+    expect(html).not.toContain('>Deploy backend<');
+  });
+
+  it('names the account when the deploy would run on our own hosting key', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)], {
+      publishRefusalCode: 'backend-deploy-available',
+      ownRepo: OWN,
+      backendKeySource: 'server',
+      workspaceId: 'ws-1',
+    });
+    expect(html).toContain('RENDER_API_KEY');
+  });
+});
+
+/**
+ * A MIRROR REPO IS STILL THE USER'S REPO. `ownRepo` is set only for own-repo working-branch storage,
+ * but most apps that reach GitHub at all land as a mirror in the user's own account — equally
+ * deployable, and previously invisible to this offer. The platform-org repo stays excluded on
+ * purpose: it is not theirs, so a deploy from it could only fail.
+ */
+describe('HostingChooser — the backend-deploy offer accepts a mirror repo', () => {
+  it('offers the button for a repo in the user own account even without own-repo storage', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)], {
+      publishRefusalCode: 'backend-deploy-available',
+      ownRepo: null,
+      deployRepo: { owner: 'asheesh', repo: 'mirror-app' },
+      workspaceId: 'ws-1',
+    });
+    expect(html).toContain('Deploy backend');
+    expect(html).toContain('asheesh/mirror-app');
+  });
+
+  it('falls back to the prerequisites when there is no repo of their own at all', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)], {
+      publishRefusalCode: 'backend-deploy-available',
+      ownRepo: null,
+      deployRepo: null,
+      githubConnected: false,
+      onConnectGitHub: () => {},
+      workspaceId: 'ws-1',
+    });
+    expect(html).not.toContain('>Deploy backend<');
+    expect(html).toContain('Connect GitHub');
+  });
+});

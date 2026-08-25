@@ -10,6 +10,7 @@
 // the live AgentEvent stream and (b) accepts explicitly-recorded issues for signals that are not
 // events (a provider fallback, a sandbox-create timeout).
 
+import { toolCallDetail } from './toolCallTarget';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
@@ -903,12 +904,17 @@ export class BuildDiagnostics {
       case 'tool_call': {
         // Record EVERY tool call (the full activity timeline) and remember it as in-flight, so a
         // hang can be named ("stuck on X") instead of leaving an 11-minute blank in the report.
-        const tc = e as unknown as { tool?: unknown; callId?: unknown; ts?: number; agent?: unknown };
+        const tc = e as unknown as { tool?: unknown; callId?: unknown; ts?: number; agent?: unknown; input?: unknown };
         const tool = String(tc.tool ?? 'tool');
         const callId = typeof tc.callId === 'string' ? tc.callId : undefined;
         if (callId) this.pending.set(callId, { tool, ts: tc.ts ?? this.now() });
         this.lastActivity = tool;
-        this.record({ phase: 'tool', severity: 'info', code: 'TOOL_CALL', message: `▶ ${tool}`, autoResolved: true, detail: tc.agent ? `agent=${String(tc.agent)}` : undefined });
+        // WHAT IT WAS AIMED AT, not just which tool. Two thirds to three quarters of a weak build's
+        // turns are read_file and grep (measured, 2026-08-25) — and until now the report recorded
+        // `▶ read_file` with no target, so the one question that would say whether those turns are
+        // WASTE (is it reading the same file over and over?) could not be asked of any build we have
+        // ever run. See toolCallTarget for why no secret can reach this line.
+        this.record({ phase: 'tool', severity: 'info', code: 'TOOL_CALL', message: `▶ ${tool}`, autoResolved: true, detail: toolCallDetail(tc.agent, tc.input) });
         break;
       }
       case 'tool_result': {
@@ -1377,6 +1383,13 @@ export function isExpectedNonzeroExit(command: string, exitCode: number | null):
   const segments = unquoted.split(/(?<!\|)\|(?!\|)/);
   const last = (segments[segments.length - 1] || '').trim();
   const base = (last.split(/\s+/)[0] || '').replace(/^.*\//, ''); // strip any path prefix
+  // ⚠️ `diff` ADDED 2026-08-25, and it had become a build's REPORTED ROOT CAUSE. A real report carried
+  //     rootCause: "$ diff <(grep …) <(grep …) → exit 1 (0s)"
+  // for a build whose diff had worked perfectly: the agent was comparing two lists of translation keys,
+  // and `diff` exits 1 precisely when the files DIFFER. Exit 1 is the ANSWER it went looking for. Same
+  // family as every name already on this line — a diagnostic tool reporting a finding, read as the tool
+  // failing. Exit 2 is a genuine diff error (a missing file) and stays a failure.
+  if (base === 'diff') return exitCode === 1 || exitCode < 0;
   if (/^(grep|egrep|fgrep|pkill|pgrep|killall|ss|netstat|lsof|fuser|ps|which|test)$/.test(base)) {
     return exitCode === 1 || exitCode < 0;
   }

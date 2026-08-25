@@ -78,3 +78,51 @@ describe('Publish seeds the sandbox before it builds', () => {
     expect(check).toBeLessThan(deploy);
   });
 });
+
+/**
+ * A REFUSAL IS MADE ON THE REAL FILES (admin 2026-08-25).
+ *
+ * `planDeployment` learned to ask whether the app's own source really IMPORTS a server framework —
+ * the half that stops a dev-only `express` from being mistaken for a server. That half could never
+ * fire from this route, which handed the planner four manifests and nothing else. The pure rule can
+ * therefore be perfect while the route keeps refusing the same working app, which is exactly the
+ * silent rot this file exists to catch.
+ */
+describe('Publish classifies the app from its real files, not its manifests alone', () => {
+  it('a would-be REFUSAL re-plans with the workspace files before it refuses', () => {
+    const seg = publishRoute();
+    const firstPlan = seg.indexOf('planDeployment(planFiles)');
+    const load = seg.indexOf('loadWorkspaceFiles(workspaceId)');
+    const rePlan = seg.indexOf('planDeployment({ ...src, ...planFiles })');
+    const refusal = seg.indexOf('deployDecision(plan');
+    expect(firstPlan).toBeGreaterThan(-1);
+    expect(load).toBeGreaterThan(-1);
+    expect(rePlan).toBeGreaterThan(-1);
+    expect(refusal).toBeGreaterThan(-1);
+    // The order IS the fix: load and re-plan must both happen before anything is refused.
+    expect(firstPlan).toBeLessThan(load);
+    expect(load).toBeLessThan(rePlan);
+    expect(rePlan).toBeLessThan(refusal);
+  });
+
+  it('the sandbox manifests still win over the durable copies', () => {
+    // `{ ...src, ...planFiles }` and not the reverse — planFiles is read from the live sandbox and is
+    // the freshest truth about what this app declares.
+    expect(publishRoute()).toContain('planDeployment({ ...src, ...planFiles })');
+  });
+
+  it('the workspace files are loaded ONCE and reused by the wiring analysis', () => {
+    const seg = publishRoute();
+    // Two loads would double the cost of every refusal for no new information.
+    expect(seg.split('loadWorkspaceFiles(workspaceId)').length - 1).toBe(1);
+    expect(seg).toContain('analyzeApiWiring(src)');
+  });
+
+  it('the ordinary static publish pays NOTHING for this — the load is inside the refusal branch', () => {
+    const seg = publishRoute();
+    const guard = seg.indexOf('if (!plan.staticHostingSufficient)');
+    const load = seg.indexOf('loadWorkspaceFiles(workspaceId)');
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(load);
+  });
+});

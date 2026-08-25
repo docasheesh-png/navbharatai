@@ -218,10 +218,13 @@ import { pickerItems } from '../../lib/reportPicker';
 import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } from '../AgentV3/SpaFallbackAnalysis';
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
 import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormancy';
+import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
+import { repeatedReadSummary } from '../AgentV3/repeatedReads';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
 import { withE2eExcluded, e2eExcludeNote } from '../AgentV3/e2eTypecheck';
 import { findAmbientShimCollisions, stripCollidingAmbientShims, ambientShimNote } from '../AgentV3/ambientModuleShim';
+import { shapeConflict } from '../AgentV3/appIdentity';
 import {
   planSmokeChecks, classifySmokeStatus, summarizeSmoke, smokeCurlCommand, parseCurlStatus,
   type SmokePlan, type SmokeResult,
@@ -247,7 +250,7 @@ import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlan
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
-import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
+import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
@@ -4200,7 +4203,30 @@ async function noteBuildOutcome(
       // The PROVEN port leads the sweep — recorded the moment this app last genuinely rendered — and
       // the sweep verifies whatever it claims: the door never redirects to a port it did not just see
       // answer. This is what kills the 3000-vs-5000 loop: no url is ever believed about a port again.
-      const recipe = await raceTimeout(sandboxStore.getRecipe(ws), 3_000, 'doorRecipe').catch(() => null);
+      /**
+       * 🔒 THE RECIPE MUST STILL DESCRIBE THE APP THAT IS HERE (admin 2026-08-25 — the piano).
+       *
+       * This is the exact line that served the previous app. The recipe's port LEADS the sweep, so a
+       * recipe left behind by an earlier app in this workspace sends the sweep to that app's port
+       * first — and if its dev server is still alive there, the sweep verifies a real server and the
+       * door redirects with full confidence. The verification was never wrong; it was answering about
+       * the wrong app.
+       *
+       * The comparison costs nothing extra: `declaredPort` is read from the SAME durable document,
+       * and it is rewritten on every verified preview (see ToolDispatcher's supersede block), so it
+       * is the freshest statement of what THIS app serves on. When the two positively disagree, the
+       * recipe is describing something else and is set aside — the sweep then leads with the declared
+       * port, which is what we would have used had no recipe ever existed.
+       *
+       * Fail-safe by construction (see appIdentity.ts): an unknown value is silence, never a
+       * conflict, so a workspace with no declaredPort keeps its recipe and behaves exactly as before.
+       */
+      const recipeRaw = await raceTimeout(sandboxStore.getRecipe(ws), 3_000, 'doorRecipe').catch(() => null);
+      const recipeConflict = shapeConflict(
+        { port: recipeRaw?.port, framework: recipeRaw?.framework, devCommand: recipeRaw?.devCommand },
+        { port: doorRecord?.declaredPort },
+      );
+      const recipe = recipeConflict ? null : recipeRaw;
       // The client's displayed port rides in unsigned as `p` (see makeDoorPath for why unsigned is
       // safe): it slots in AFTER the proven port and BEFORE the common list, so an app on an unusual
       // port that has never earned a recipe still resolves instead of waiting forever.
@@ -6259,7 +6285,26 @@ async function noteBuildOutcome(
         for (const p of ['package.json', 'requirements.txt', 'pyproject.toml', 'Pipfile']) {
           try { planFiles[p] = await actuator.readFile(workspaceId, p); } catch { /* absent is normal */ }
         }
-        const plan = planDeployment(planFiles);
+        /**
+         * 🔒 A REFUSAL IS MADE ON THE REAL FILES, NEVER ON THE MANIFESTS ALONE (admin 2026-08-25).
+         *
+         * Only these four manifests were ever handed to the planner, so its file-based detection — the
+         * half that asks whether the app's own source actually IMPORTS a server framework — could never
+         * fire here. The verdict came down to package.json, and a frontend-only app carrying `express`
+         * as a DEV dependency was told its website could not go on website hosting.
+         *
+         * Two stages on purpose. The cheap manifest pass runs first and, for the ordinary static app,
+         * is the whole story — that path costs exactly what it did before. Only an app about to be
+         * REFUSED pays for the real files, and it is the one case where being right is worth a read.
+         * `src` is kept so the wiring analysis below reuses it instead of loading twice.
+         */
+        let plan = planDeployment(planFiles);
+        let src: Record<string, string> | null = null;
+        if (!plan.staticHostingSufficient) {
+          src = await loadWorkspaceFiles(workspaceId).catch(() => null);
+          // The sandbox manifests win over the durable copies — they are the freshest truth.
+          if (src) plan = planDeployment({ ...src, ...planFiles });
+        }
         if (!plan.staticHostingSufficient) {
           /**
            * Resolve what we can ACTUALLY do about the backend — the user's own Render key first, the
@@ -6275,10 +6320,7 @@ async function noteBuildOutcome(
            * to "ship whole", which is the answer that WORKS when we cannot tell — see apiWiring.ts.
            */
           let wiring: ReturnType<typeof analyzeApiWiring> | null = null;
-          if (plan.shape === 'fullstack') {
-            const src = await loadWorkspaceFiles(workspaceId).catch(() => null);
-            if (src) wiring = analyzeApiWiring(src);
-          }
+          if (plan.shape === 'fullstack' && src) wiring = analyzeApiWiring(src);
           /**
            * THE JOIN — the half nobody automates (slice 4).
            *
@@ -6310,7 +6352,11 @@ async function noteBuildOutcome(
             splitAdvised: wiring ? wiring.strategy === 'split' : undefined,
             wholeAppNote: wiring?.summary ?? '',
           });
-          res.status(422).json({ error: decision.message, code: decision.code, shape: plan.shape });
+          // `keySource` travels with the refusal because the CLIENT's offer depends on it: a deploy
+          // that would run on NavBharatAI's own hosting key cannot see a service the user created in
+          // their own Render account, and the panel has to say so rather than send them to do a
+          // one-time step that could never close the loop. Null when nothing can deploy at all.
+          res.status(422).json({ error: decision.message, code: decision.code, shape: plan.shape, keySource: key?.source ?? null });
           return;
           }
         }
@@ -9698,7 +9744,7 @@ async function noteBuildOutcome(
                 ownRepoTarget = target;
                 repoSync = new GitRepoSync(actuator, workspaceId);
                 const h = await repoSync.hydrateFromRepo(repoAuthedUrl, { branch: target.workBranch, fallbackBranch: target.baseBranch, overlayAnyContent: true });
-                events.emit({ type: 'repo', url: `https://github.com/${target.owner}/${target.repo}`, fullName: `${target.owner}/${target.repo}`, ts: Date.now() });
+                events.emit({ type: 'repo', url: `https://github.com/${target.owner}/${target.repo}`, fullName: `${target.owner}/${target.repo}`, ownedByUser: true, ts: Date.now() });
                 // Tell the client own-repo mode is active so it can offer the "Ship to main" / "Revert"
                 // controls scoped to this exact repo + branches (see /api/agentv3/ship, /revert).
                 events.emit({ type: 'own_repo', owner: target.owner, repo: target.repo, workBranch: target.workBranch, baseBranch: target.baseBranch, ts: Date.now() });
@@ -9719,7 +9765,7 @@ async function noteBuildOutcome(
                 repoSync = new GitRepoSync(actuator, workspaceId);
                 const h = await repoSync.hydrateFromRepo(repoAuthedUrl);
                 // Surface the repo so the UI can offer a "View on GitHub" link (full app control).
-                if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || `${login}/${repoName}`, ts: Date.now() });
+                if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || `${login}/${repoName}`, ownedByUser: true, ts: Date.now() });
                 events.emit({
                   type: 'narration', agent: 'architect',
                   text: h.hydrated
@@ -9745,7 +9791,7 @@ async function noteBuildOutcome(
                 repoNameRef = repoName;
                 repoSync = new GitRepoSync(actuator, workspaceId);
                 const h = await repoSync.hydrateFromRepo(repoAuthedUrl);
-                if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || repoName, ts: Date.now() });
+                if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || repoName, ownedByUser: false, ts: Date.now() });
                 if (h.hydrated) {
                   events.emit({ type: 'narration', agent: 'architect', text: 'Loaded your project from its GitHub repo.', ts: Date.now() });
                 }
@@ -13274,6 +13320,39 @@ async function noteBuildOutcome(
               scanFiles = merged;
             }
           }
+          // 🔴 A USER INTERFACE WITH NO WAY TO BUILD OR SERVE IT — the shared cause behind two separate
+          // reports (see uiWithoutBuild.ts). Checked HERE because `scanFiles` is already the whole
+          // project, so it costs no extra read. Advisory: it never blocks a build, because a project
+          // mid-way to a frontend is a legitimate state and refusing to save someone's work over a
+          // layout opinion would be worse than saying so plainly.
+          try {
+            const pkgTexts: string[] = [];
+            const entries = scanFiles instanceof Map ? scanFiles : new Map(Object.entries(scanFiles));
+            for (const [fp, content] of entries) {
+              if (/(^|\/)package\.json$/i.test(String(fp))) pkgTexts.push(String(content ?? ''));
+            }
+            // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
+            // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
+            // worked: a behavioural fix nobody measures is a hope.
+            try {
+              const line = repeatedReadSummary(dispatcher.readLedgerCounts());
+              if (line) {
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'REPEATED_READS',
+                  message: line, autoResolved: false,
+                });
+              }
+            } catch { /* an advisory finding must never affect a build */ }
+
+            const stranded = uiWithoutBuildVerdict({ paths: [...entries.keys()].map(String), packageJsonFiles: pkgTexts });
+            if (stranded.stranded) {
+              buildDiag.record({
+                phase: 'readiness', severity: 'warning', code: 'UI_WITHOUT_BUILD',
+                message: stranded.message, autoResolved: false, detail: stranded.examples.join(', '),
+              });
+            }
+          } catch { /* an advisory finding must never be able to affect a build */ }
+
           const killers = findBootKillingEnvGuards(scanFiles);
           if (killers.length > 0) {
             buildDiag.record({
@@ -13369,7 +13448,19 @@ async function noteBuildOutcome(
       ) {
         try {
           const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl');
-          const verdict = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+          // TRUE WHEN WE ARE SURE, `undefined` WHEN WE ARE NOT — never `false`.
+          //
+          // `writtenFiles` holds only THIS turn's writes, so a frontend file among them proves the
+          // project has a frontend, while their absence proves nothing at all (a backend-only edit
+          // writes none). Passing `false` there would be the artifact-for-evidence mistake this repo
+          // has spent the week removing, and it would produce the WRONG sentence — telling someone
+          // with a real web app that their API returned an error. Unknown falls back to today's
+          // wording, which is correct for an API and merely unhelpful for a site.
+          const verdict = analyzePreviewHtml(shot.html, {
+            painted: shot.painted,
+            source: shot.source,
+            hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
+          });
           let consoleErrs: string[] = [];
           try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the

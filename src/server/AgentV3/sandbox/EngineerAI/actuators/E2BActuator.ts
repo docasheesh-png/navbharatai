@@ -319,10 +319,58 @@ const {chromium}=require('playwright');
   // interaction (BENCHMARK #2/#3 + the restart-button fix, 2026-08-12) — so the model could never
   // verify a click and fell back to claiming PASS it had not confirmed. The TS side reads the bytes.
   require('fs').writeFileSync('${TOOLS_DIR}/last-action.png', buf);
-  process.stdout.write(JSON.stringify({result,url,cursorX,cursorY}));
+  // …AND SO DOES THE META, for exactly the same reason (admin report 2026-08-25). The comment above
+  // fixed the screenshot half and left this line on stdout, where the 64KB cap still applies. It is
+  // not a small payload: on a complex page a Playwright failure dumps candidate selectors and DOM
+  // context into \`result\`, blows past 65536, and the JSON arrives truncated — which is precisely the
+  // "Unterminated string in JSON at position 65536" the admin saw TWICE in one build (twice because
+  // withDaemonRetry retried the same doomed call). The engine lost its ability to interact with the
+  // app it had just built, on the builds most likely to need it.
+  //
+  // Capped as well as re-routed: an error message longer than this is useless to a model, and a cap
+  // means a future channel with its own limit cannot resurrect the same bug.
+  var meta=JSON.stringify({result:String(result).slice(0,4000),url,cursorX,cursorY});
+  try{require('fs').writeFileSync('${TOOLS_DIR}/last-action.json', meta);}catch(_e){}
+  // stdout is KEPT as a fallback: a sandbox that is already warm still holds the OLD script on disk,
+  // and the TS side prefers the file only when it can read one. Small now, because of the cap.
+  process.stdout.write(meta);
   process.exit(0);
 })().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
 `.trim();
+
+/**
+ * Read a browser action's metadata, and NEVER throw a raw parser error at the model.
+ *
+ * ⚠️ THE UNGUARDED `JSON.parse` THIS REPLACES cost the admin two dead tool calls in one build. It sat
+ * one line above a comment explaining that stdout is capped at 64KB — the screenshot had been moved to
+ * a file for exactly that reason and the meta had not. A truncated payload therefore surfaced as
+ * "Unterminated string in JSON at position 65536", twice (the retry re-ran the same doomed call), and
+ * the model was told its BROWSER was broken when the browser had worked perfectly.
+ *
+ * That distinction is the whole point of this function: a parse failure means WE could not read the
+ * answer, not that the action failed. Reported as such, in a sentence a model can act on. PURE.
+ */
+export function parseActionMeta(raw: string): { result: string; url?: string; cursorX?: number; cursorY?: number } {
+  const text = String(raw ?? '').trim();
+  if (!text) return { result: 'ERROR: the browser action returned nothing to read.' };
+  try {
+    const o = JSON.parse(text) as { result?: unknown; url?: unknown; cursorX?: unknown; cursorY?: unknown };
+    return {
+      result: typeof o?.result === 'string' ? o.result : '',
+      url: typeof o?.url === 'string' ? o.url : undefined,
+      cursorX: typeof o?.cursorX === 'number' ? o.cursorX : undefined,
+      cursorY: typeof o?.cursorY === 'number' ? o.cursorY : undefined,
+    };
+  } catch {
+    // Says which side failed, and what it means. A model reading "the browser is broken" would go and
+    // rebuild working code; reading this, it retries or moves on.
+    return {
+      result:
+        'ERROR: the browser action ran, but its report was too large to read back in one piece, so the '
+        + 'outcome is unknown. The page itself was not necessarily affected — try a narrower action.',
+    };
+  }
+}
 
 /** Wrap a string as a single shell argument (safe for arbitrary JSON payloads). */
 
@@ -1734,6 +1782,12 @@ ${paintWaitJs('p')}
     }
     return res;
   }).catch(function(){return [];});
+  // A FILE, for the third time in this file and the same reason: stdout is capped at 64KB, and this
+  // payload GROWS WITH THE PAGE — every element carries a selector, text, a rect and four computed
+  // styles. So the richer the app, the more certainly the scan was truncated, and the caller's
+  // try/catch turned that into "no elements found". The engine went blind on exactly the pages it
+  // most needed to see, and said nothing, because an empty scan looks like a simple page.
+  try{require('fs').writeFileSync('${TOOLS_DIR}/last-scan.json', JSON.stringify(out));}catch(_e){}
   process.stdout.write(JSON.stringify(out));
   await b.close();
 })().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1)});
@@ -1741,11 +1795,21 @@ ${paintWaitJs('p')}
     await sandbox.files.write(shotPath, shotBody);
     const script = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node ${shotPath} 2>/dev/null`;
     const run = await sandbox.commands.run(script, { cwd: TOOLS_DIR, timeoutMs: 30_000 }).catch(() => null);
-    if (!run || run.exitCode !== 0 || !run.stdout.trim()) return { elements: [], scanned: false };
+    if (!run || run.exitCode !== 0) return { elements: [], scanned: false };
+    // File first, stdout second — a warm sandbox still holds the old script, which writes no file.
+    const scanRaw = await sandbox.files
+      .read(`${TOOLS_DIR}/last-scan.json`)
+      .then((t) => String(t ?? '').trim())
+      .catch(() => '');
+    const raw = scanRaw || run.stdout.trim();
+    if (!raw) return { elements: [], scanned: false };
     try {
-      const parsed = JSON.parse(run.stdout.trim());
+      const parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? { elements: parsed, scanned: true } : { elements: [], scanned: false };
     } catch {
+      // `scanned: false` is the honest answer and always was — it says "we did not see", not "there is
+      // nothing there". Kept deliberately: the caller already treats the two differently, and the fix
+      // above is what makes this branch rare rather than routine on a complex app.
       return { elements: [], scanned: false };
     }
   }
@@ -1878,7 +1942,15 @@ ${paintWaitJs('p')}
       if (!result.stdout || result.exitCode !== 0) {
         throw new Error(`Browser action failed: ${result.stderr.slice(0, 300) || 'the browser was not reachable'}`);
       }
-      const meta = JSON.parse(result.stdout.trim()) as { result: string; url?: string; cursorX?: number; cursorY?: number };
+      // THE META COMES FROM A FILE TOO, for the same reason the screenshot does — see the script.
+      // stdout is capped at 64KB, and on a complex page a Playwright error dumps enough DOM context
+      // into `result` to pass it. Read the file first; fall back to stdout only when there is no file,
+      // which is what a sandbox still holding the OLD script looks like.
+      const metaRaw = await sandbox.files
+        .read(`${TOOLS_DIR}/last-action.json`)
+        .then((t) => String(t ?? '').trim())
+        .catch(() => '');
+      const meta = parseActionMeta(metaRaw || result.stdout.trim());
       // The screenshot comes from a FILE, never stdout — stdout is capped at 64KB and a base64 PNG blows
       // past it, which is exactly what broke every interaction with "Unterminated string in JSON at
       // position 65536". files.read has no such cap. A missing file degrades to no image, never a throw.

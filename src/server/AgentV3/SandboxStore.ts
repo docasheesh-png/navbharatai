@@ -177,6 +177,32 @@ class SandboxStore {
     }
   }
 
+  /**
+   * Retire a recipe that describes a PREVIOUS app (admin 2026-08-25 — the piano-instead-of-UPI-API
+   * preview). A recipe is only ever REWRITTEN by a browser-verified render, which an API that answers
+   * JSON never earns — so after the workspace's app changed, the old recipe stood forever, the door's
+   * sweep led with the old port, found the old dev server genuinely answering there, and confidently
+   * served the previous app. Deleting it is honest: better no recipe (the door sweeps from the
+   * declared port) than a proven recipe for an app that no longer exists. `declaredPort` is replaced,
+   * not deleted — the caller passes the port the CURRENT app just verified. Best-effort, never throws.
+   */
+  async supersedeRecipe(workspaceId: string, newDeclaredPort: number): Promise<void> {
+    const db = this.getDb();
+    if (!db || !workspaceId) return;
+    try {
+      await db.collection('agentv3_sandboxes').doc(workspaceId).set(
+        {
+          workspaceId,
+          recipe: admin.firestore.FieldValue.delete(),
+          ...(Number.isInteger(newDeclaredPort) && newDeclaredPort > 0 && newDeclaredPort < 65536
+            ? { declaredPort: newDeclaredPort } : {}),
+          updatedAt: Date.now(),
+        },
+        { merge: true },
+      );
+    } catch { /* best-effort — a stale recipe is a degraded preview, never a failed build */ }
+  }
+
   /** The stored revival recipe, or null when there is none / it is unusable. */
   async getRecipe(workspaceId: string): Promise<PreviewRecipe | null> {
     const db = this.getDb();

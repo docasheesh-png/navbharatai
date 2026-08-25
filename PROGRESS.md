@@ -42011,3 +42011,94 @@ that it sits inside the refusal branch so a static publish costs nothing.
 
 **Verification:** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · `npx vitest run` — 1375
 files / 17954 tests passed.
+
+---
+
+## 2026-08-25 — autopsy of the "Ab to preview hi nahi chal raha" report, and the UI batch (#2672–#2681)
+
+The admin uploaded a build report (workspace `agentv3-RyN1xjbfr…-c8720a66`, prompt *"Ab to preview hi
+nahi chal raha, fix karo"*, weak tier, `ok: true`) and asked three things: what did the autopsy actually
+fix, why did a racing game's car speed never increase despite repeated asks, and why did a game that ran
+correctly go back to speed 0 afterwards. The last two turned out to have ONE answer.
+
+### The five root causes, and the two the admin asked about
+
+**#2679 — the build reported success while its own guard threw the turn's work away.** This is the answer
+to BOTH speed questions. Green Freeze / Green Guard exists to protect a verified-green app from a heal
+that breaks it: when a change fails verification, the green snapshot is restored. That is correct. What
+was NOT correct is that the restore was **silent** — the user's summary still said the change was made.
+So the sequence the admin lived through was: ask for more speed → the engine writes it → the guard
+restores the previous file → the summary says "speed increased" → the car is exactly as slow as before →
+ask again → same loop. And "pehle game theek chala, baad me speed fir se 0" is the same mechanism running
+the other way: a later restore rolled the file back to an EARLIER green snapshot that still had the
+placeholder `speed = 0`. `greenGuardHonesty.ts` now makes the correction LEAD the summary
+(`⚠️ **Your change was not kept.**`), idempotently by marker, wired at the late summary-mutation point in
+`routes/agentv3.ts`. The user is now told the truth on the first attempt instead of the fourth.
+
+**The upstream half (the 50/50 law).** Honest reporting stops the loop but does not stop the car being
+born stationary. The architect prompt now carries a racing rule: in any racing, driving or flying game
+the player's vehicle **starts with a non-zero speed and can accelerate from the first frame**, and speed
+may be zero ONLY when the user explicitly asked for it — never as "the player will press a key first",
+never as a placeholder to fill in later. That is the admin's instruction encoded where it prevents the
+bug rather than heals it: *"next time jab bhi koi racing game banaya jaye, speed 0 sirf tab ho jab user
+bole."*
+
+**#2678 — every React-19 app's in-browser preview was dead.** React 19 ships
+`react-jsx-dev-runtime.production.js` with `jsxDEV = void 0`, while Babel's dev JSX transform emits
+`jsxDEV` calls (it needs `_debugSource` for click-to-source in the Visual Editor). So every preview of a
+React-19 app called `undefined(...)` on its first render. `public/vendor/jsx-dev-runtime.mjs` is a
+version-agnostic facade over `createElement`, referenced through one constant
+(`src/lib/jsxDevRuntimeFacade.ts`) and wired into all THREE importmaps — `previewUtils.ts`,
+`routes/preview.ts`, `runtime/ReactPreview.ts`. This is the literal answer to the report's prompt.
+
+**#2677 — vitest was running our own Playwright spec, and blaming the user's app.** My own regression
+from #2650: the e2e spec I added is matched by vitest's default include, so it failed under vitest and
+the failure was attributed to the built app. `playwrightOwnsE2e(files)` requires BOTH a Playwright config
+AND a spec under `e2e/` before excluding that directory — a config alone is not proof, which is the same
+artifact-vs-validity error this session kept finding.
+
+**#2680 — three import fixers were undoing each other, four times on one file.** Each fixer was correct
+in isolation; together they oscillated between two valid shapes and burned heal budget. `HealLedger` now
+records every shape it has SEEN (not just the last one) and `healWouldOscillate` refuses a write that
+returns a file to a shape already visited. Guarded at all four heal write sites in `ToolDispatcher.ts`.
+I first suspected `dedupeSameModuleImports`; tested it against four shapes, found it idempotent and
+lossless, and did NOT "fix" a function that was already correct — the guard belongs at the loop.
+
+**#2681 — a successful build was headlined with a colour palette.** `DESIGN_CONSISTENCY` was being
+reported as a successful build's `rootCause`. Fixed as a CLASS, not an instance: alongside the exact-code
+set there is now `NEVER_ROOT_CAUSE_FAMILIES` (`DESIGN_`, `ACCESSIBILITY_`, `DEPHEALTH_`) and
+`isNeverRootCause(code)`, because the same defect had already come back three times under a new code
+name. `PREVIEW_` is deliberately NOT a family — a dead preview genuinely can be a root cause.
+
+### The rest of the batch
+
+- **#2672** — the diagnostics record WHAT a tool call was aimed at, not only which tool ran, so a report
+  can name the file instead of the verb.
+- **#2673** — 84% of all file reads in a build were re-reads of an unchanged file.
+- **#2675** — a working `diff` (exit status 1 means "differs", not "failed") had become a build's reported
+  root cause. Same artifact-vs-validity class as the others.
+- **#2676** — the UI work the admin asked for from a mobile screenshot: the preview toolbar rows are now
+  horizontally swipeable with every control pinned `shrink-0` (they were cropped on a phone); the three
+  strips above the input became two, with the agent chips moved into the toolbar's `leftSlot`; the plan
+  is reachable from the Build/Plan/Advise dropup and expandable at any time; and the plan is now live on
+  EVERY build, not only the first — `build_meta` clears `todos` and `agents` when the buildId changes,
+  which is why the second build used to show the first build's finished plan.
+
+### Store builds
+
+`.aab` run 32844627786 ✅ and `.ipa` run 32844641917 ✅ (reached TestFlight). ⚠️ **#2676 is a FRONTEND
+change and shipped AFTER those runs** — under bundled Capacitor mode it does not reach installed app
+users until a fresh `.aab`/`.ipa` is built. Recorded here so it is not assumed to be live on mobile.
+
+### Open items (admin's call, not silently decided)
+
+1. **Should a build whose Green Guard threw the turn's work away be free?** My vote is yes — the user paid
+   for a change they did not receive. I have NOT changed billing: flipping `ok:false` also routes the
+   build down the failure path, and money behaviour is not something to alter unasked.
+2. **Dependabot #2611 (lucide-react 0.546 → 1.33) and #2610 (motion 12 → 13)** — major bumps whose visual
+   effect CI cannot judge. Recommend merging one at a time with a look at the app.
+3. **#2608 (firebase)** — CI red, but `tsc`, `vitest`, `audit:gate`, `license:gate`, `noUnusedImports` and
+   `build` all pass locally; the only CI step not reproduced locally is `npm run test:coverage`.
+
+**Verification for the batch:** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ ·
+`npx vitest run` ✅ · CI green before every merge.

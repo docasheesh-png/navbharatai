@@ -41840,3 +41840,80 @@ step): a guard for the CLASS.** Concretely: every per-workspace durable/in-memor
 the identity (buildId or app fingerprint) of the app it describes, and every reader should discard a
 record whose identity is not the current one — one shared helper, not per-site vigilance. Recorded
 here so the next session builds the tap-washer instead of continuing to mop.
+
+---
+
+## 2026-08-25 — the weak-tier session: three blind spots, and one root cause behind two reports
+
+Admin's ask: *"v5 build engine ko aur rocksolid karo — weak providers par bhi complex app bana sake."*
+Nothing here was designed from a guess. Every item came from the admin's own reports or from reading a
+scaffold.
+
+### 🔴 THE ROOT CAUSE — read this one first (#2668, #2669)
+
+**The `node-express` scaffold ships exactly three files: `package.json`, `tsconfig.json`,
+`src/index.ts`. No Vite. No `index.html`. No React. Its build is
+`esbuild --platform=node --outfile=dist/index.js` — a NODE BUNDLE, not a website.**
+
+So React components written into that workspace are **dead by construction**. Nothing compiles them,
+nothing serves them, no page exists. And that single fact explains TWO reports that had been chased
+separately, each to a dead end:
+
+| Report | Symptom | Actually |
+|---|---|---|
+| the publish | shipped the starter page, called it live | `npm run build` produced no web output |
+| the preview | showed `{"error":"Not found"}` | the server correctly saying nothing is routed at `/` |
+
+**Neither was diagnosable from its own symptom.** That is the lesson worth keeping: two unexplained
+symptoms that resist separate investigation are evidence of one shared cause, and the way in was to
+stop chasing outcomes and read the CONDITION — which meant reading the template, not the reports.
+
+Fixed in both halves. `uiWithoutBuild.ts` detects the contradiction (UI source · no frontend builder in
+ANY package.json · no index.html — all three required, so it cannot fire on an ordinary project), and
+every API-only scaffold now warns the builder BEFORE it writes a line, with what to do instead.
+
+Two traps in the detector, both tested and both easy to get wrong: **every** package.json is read, not
+just the root (a monorepo keeps its builder in `client/`), and **`esbuild` is not counted** as a
+frontend builder — it is a bundler, just not for the web, and counting it would have cleared the very
+project the module exists for.
+
+⚠️ It is ADVISORY and must stay so. A project mid-way to a frontend is a legitimate state; refusing to
+save someone's work over a layout opinion is worse than saying so plainly.
+
+### #2665 — the 64KB stdout cap was blinding the engine on complex apps
+
+Two lines in a real report named it exactly: `Unterminated string in JSON at position 65536`, twice.
+65536 is 64KB — E2B's cap on `commands.run` stdout. Twice because `withDaemonRetry` re-ran the same
+doomed call.
+
+**Why it is a WEAK-TIER bug specifically:** both payloads GROW WITH THE APP, so a bigger app is likelier
+to trip them, and a weak model has the fewest turns to spare when one does.
+
+- **browser action metadata** — the script wrote its screenshot to a file for exactly this reason, with
+  a comment saying so, and wrote its metadata to stdout ONE LINE BELOW. The `JSON.parse` was unguarded,
+  so the model was told its BROWSER was broken when the browser had worked perfectly.
+- **the element scan** — same stdout, and the worst offender: every element carries a selector, text, a
+  rect and four computed styles. The richer the app, the more certainly truncated — and the caller's
+  try/catch turned that into "no elements found", indistinguishable from a simple page. The engine went
+  blind on complex apps and said nothing.
+
+Third and fourth siblings of one bug in one file (the dist reader and the screenshot came first, each
+after its own incident). A test now asserts NO stdout-only JSON parse remains.
+
+### #2666 — an API's honest 404 reported as a broken app
+
+Same body, two meanings. With frontend files in the project it is a PORT MISMATCH; without them the app
+IS an API and the old wording was right. The call site passes **true or undefined, never false** —
+`writtenFiles` holds only this turn's writes, so their absence proves nothing, and passing `false` would
+produce the wrong sentence for a real web app.
+
+### Method note, and an honest one
+
+I chased the publish and the preview separately and got nowhere, twice, and said so both times rather
+than shipping a third guess. Reading the scaffold took minutes and closed both. **When two symptoms
+resist separate investigation, stop investigating symptoms.**
+
+The day's earlier pattern (an artifact standing in for its validity) recurred inside my own fixes twice
+more: `sw.js` counted as "the build emitted something" in a guard written against exactly that mistake,
+and the API-only warning went on one template when eight needed it. Both were caught by tests written
+in the same session — which is the argument for writing them before believing the fix.

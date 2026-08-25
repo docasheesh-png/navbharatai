@@ -1545,7 +1545,33 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   // `sourceIsWholeApp` in claimAudit.ts), so the admin's one-line verdict on a turn that worked was that
   // the platform had caught its own AI lying. Exactly the same shape as RELEASE_GATE directly above.
   'CLAIM_UNSUPPORTED',
+  // A WHOLE-APP DESIGN GRADE IS A TASTE NOTE, NOT A CAUSE (admin build report 2026-08-25). A build that
+  // succeeded — the game ran, the preview published — was headlined
+  //     rootCause: "Design consistency 50/100 (D) across 12 file(s) … 35 distinct colours"
+  // which tells the reader their build FAILED because of a colour palette. `DESIGN_PAGE_INCONSISTENT`
+  // was already here for exactly this reason; the whole-app grade was simply recorded under a
+  // different code and so kept its eligibility.
+  'DESIGN_CONSISTENCY',
+  // Same class, same report: an accessibility grade is a quality note about the app, never the reason
+  // a build did or did not work.
+  'ACCESSIBILITY',
 ]);
+
+/**
+ * ⚠️ FAMILIES, BECAUSE THE LIST ABOVE HAS NOW BEEN OUTFLANKED THREE TIMES BY A NEW NAME.
+ *
+ * Its own comments record the pattern: PREVIEW_NOT_RENDERED was fixed and came back as RELEASE_GATE;
+ * DEPHEALTH_ADVISORY was fixed and came back as DEPENDENCY_VULNERABILITIES; DESIGN_PAGE_INCONSISTENT
+ * was fixed and came back as DESIGN_CONSISTENCY. Each time the SET was correct and a new code walked
+ * around it, and each time a user read "your successful build's problem is …" about a taste note.
+ *
+ * A quality grade cannot be a cause whatever it is called. Matching the family closes the door on the
+ * fourth name before it is written, which is the only version of this fix that ends the sequence.
+ *
+ * Deliberately NARROW: only prefixes whose whole family is advisory BY DEFINITION. `PREVIEW_`, for
+ * instance, is NOT here — a preview that did not render genuinely can be why a build failed.
+ */
+const NEVER_ROOT_CAUSE_FAMILIES: readonly string[] = ['DESIGN_', 'ACCESSIBILITY_', 'DEPHEALTH_'];
 
 /**
  * Bucket a provider error into something countable.
@@ -1570,7 +1596,9 @@ export function classifyProviderFailure(reason: unknown): string {
 
 /** True when a finding is advisory-only and must never become the build's rootCause. Pure. */
 export function isNeverRootCause(code: string): boolean {
-  return NEVER_ROOT_CAUSE.has(code);
+  const c = String(code ?? '');
+  if (NEVER_ROOT_CAUSE.has(c)) return true;
+  return NEVER_ROOT_CAUSE_FAMILIES.some((prefix) => c.startsWith(prefix));
 }
 
 /**

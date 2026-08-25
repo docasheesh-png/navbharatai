@@ -557,6 +557,18 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  Then write only the GAME ITSELF — the levels, the rules, the content — passing it to the shell',
     '  through setup() and update(). Emit events for anything that should be seen or heard; never call',
     '  particles or audio from gameplay code.',
+    // 🏁 ADMIN 2026-08-25, from a real racing game: "baar baar kehne par gaadi ki speed kyu nahi badhayi
+    // ja rahi… speed 0 sirf aur sirf tab ho, jab user bole". A vehicle that will not move is not a
+    // difficulty setting — it is an unplayable game, and it is the single easiest way to ship one.
+    '  🏁 A VEHICLE STARTS MOVING, ALWAYS. In any racing, driving or flying game, the player\'s vehicle',
+    '  must have a NON-ZERO starting speed and must be able to accelerate from the very first frame.',
+    '  Speed may be zero ONLY if the user explicitly asked for it (a standing start, a countdown, a',
+    '  paused state they described). Never as a default, never as "the player will press a key first",',
+    '  and never as a placeholder you mean to fill in later.',
+    '  Concretely: initialise speed to a real value, apply acceleration in update() every frame, and if',
+    '  a start button or countdown gates the race, the vehicle MUST be moving the moment that gate',
+    '  opens. A car that sits at 0 with the game "running" is a broken game, not a hard one — and the',
+    '  user who reports it will describe it as "the speed is not increasing", not as "the car is stuck".',
     '  🔒 THE HUD IS A LAYOUT, NOT A PILE. This is the single most visible way a playable game still',
     '  looks broken, and it happens on the screen most players are actually holding — a phone. Every',
     '  overlay you put on top of the canvas (score, lives/hearts, level, timer, the "WASD to move"',

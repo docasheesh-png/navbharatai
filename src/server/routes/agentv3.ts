@@ -220,6 +220,7 @@ import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoSc
 import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormancy';
 import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
 import { repeatedReadSummary } from '../AgentV3/repeatedReads';
+import { greenGuardUndidWork, withGreenGuardCorrection, type GreenGuardRestoreFacts } from '../AgentV3/greenGuardHonesty';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
 import { withE2eExcluded, e2eExcludeNote } from '../AgentV3/e2eTypecheck';
@@ -8952,6 +8953,15 @@ async function noteBuildOutcome(
     // "paused". Set the moment a build lane produces a successful result (before advisory post-work).
     let buildResultRef: { ok: boolean; summary: string; steps?: number; billedUsd?: number } | null = null;
     /**
+     * What the Green Guard undid on this turn, if anything — for the SUMMARY, not just the report.
+     *
+     * Declared beside buildResultRef because the two have the same lifetime and the same problem: the
+     * guard runs deep inside the persist block, and the correction is applied much later, at the last
+     * point the summary still reaches the user. See greenGuardHonesty.ts for why a narration and an
+     * admin-only finding were not enough.
+     */
+    let greenGuardRestoreFacts: GreenGuardRestoreFacts | null = null;
+    /**
      * This build's id, hoisted so the request's FINALLY can see it.
      *
      * `buildId` itself is declared deeper in, past the point a failure can jump over — and the finally
@@ -15330,6 +15340,12 @@ async function noteBuildOutcome(
                   message: `Restored the last verified-working version: ${Object.keys(plan.write).length} file(s) put back, ${plan.remove.length} added by the failed attempt removed, ${plan.unchanged} already correct. The attempt itself is kept and was not discarded.`,
                   autoResolved: true,
                 });
+                // …AND THE USER MUST BE TOLD, IN THE SUMMARY THEY ACTUALLY READ (admin 2026-08-25).
+                // The narration above goes into a stream they have stopped watching and the finding
+                // into an admin-only report, while the build's own summary still said the change was
+                // delivered. See greenGuardHonesty.ts: from their chair, they asked for more speed,
+                // were told it was done, and nothing changed — twice.
+                greenGuardRestoreFacts = { restored: Object.keys(plan.write).length, removed: plan.remove.length };
               }
             } catch { /* the guard must never cost a user their save — fall through to the plain save */ }
           }
@@ -15895,6 +15911,13 @@ async function noteBuildOutcome(
       // into one total, reads as a deduction no matter how correct it is. Only on a SUCCESSFUL build —
       // a failed one is never charged, and `costBreakdown` is already null there, so this is the second
       // of two independent guards rather than the only one.
+      // ⚠️ IF THE GUARD UNDID THIS TURN'S WORK, THE SUMMARY MUST SAY SO — and it must LEAD, because a
+      // note under a green tick reads as a footnote to success. Applied here because this is the last
+      // point the summary still reaches the user, and idempotent because both the normal settle and
+      // the watchdog finalizer can arrive here.
+      if (greenGuardUndidWork(greenGuardRestoreFacts) && typeof result.summary === 'string') {
+        result = { ...result, summary: withGreenGuardCorrection(result.summary, greenGuardRestoreFacts!) };
+      }
       const livePreviewLine = costBreakdown && result.ok ? livePreviewChargeLine(costBreakdown) : '';
       if (livePreviewLine && typeof result.summary === 'string') {
         result = { ...result, summary: `${result.summary}\n\n${livePreviewLine}` };

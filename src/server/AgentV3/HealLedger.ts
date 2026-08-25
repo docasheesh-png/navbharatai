@@ -48,6 +48,25 @@ interface HealRecord {
   /** Hash of what we left behind on the most recent heal. */
   hash: string;
   /**
+   * Every content this build has ever written to this file, by hash.
+   *
+   * ⚠️ THIS IS WHAT CATCHES AN OSCILLATION (admin report 2026-08-25: src/main.tsx healed ×4, and this
+   * ledger's own verdict was `unchanged` — our write survived and a detector fired again on content it
+   * had already fixed). Three deterministic import fixers run over the same file in one pass: one
+   * reconciles named↔default, one adds a missing import, one removes a duplicate. If any two disagree
+   * about the same symbol, the file goes X → Y → X → Y for as many passes as the build allows.
+   *
+   * `hash` alone cannot see that: it only remembers the LAST thing we wrote, so X→Y→X looks like two
+   * ordinary heals. The set remembers that we have been here before.
+   *
+   * I did NOT guess which fixer is at fault, and deliberately did not "fix" one on a theory — I tested
+   * `dedupeSameModuleImports` against the shapes that would have made it the culprit (default+named,
+   * two named sets, exact duplicate, two defaults) and it is idempotent and loses no binding. Without
+   * the user's actual file the guilty pair cannot be identified, so the guard is at the LOOP, where it
+   * works whichever fixer is wrong.
+   */
+  seen: Set<string>;
+  /**
    * What a LATER pass found before healing again, compared with `hash` above.
    * 'unchanged' = our write survived; 'changed' = the file differs from what we left;
    * undefined = healed only once, so there is nothing to compare yet.
@@ -94,8 +113,38 @@ export function noteHeal(workspaceId: string, path: string, contentAfter: string
     const seenBefore = prev && contentBefore !== undefined
       ? (prev.seenBefore ?? (hashOf(contentBefore) === prev.hash ? 'unchanged' : 'changed'))
       : prev?.seenBefore;
-    ws.set(path, { times: (prev?.times ?? 0) + 1, hash: hashOf(contentAfter), ...(seenBefore ? { seenBefore } : {}) });
+    const seen = prev?.seen ?? new Set<string>();
+    if (contentBefore !== undefined) seen.add(hashOf(contentBefore));
+    seen.add(hashOf(contentAfter));
+    ws.set(path, { times: (prev?.times ?? 0) + 1, hash: hashOf(contentAfter), seen, ...(seenBefore ? { seenBefore } : {}) });
   } catch { /* bookkeeping must never break a heal */ }
+}
+
+/**
+ * Would writing `proposed` to `path` put this file back into a state this build has already left it in?
+ *
+ * That is an OSCILLATION, not a repair: two fixers disagreeing about the same code, each undoing the
+ * other. Every further pass costs a write, a narration and a step of the build's budget, and converges
+ * on nothing. Returns false on the first sight of any content, so an ordinary heal — and an ordinary
+ * SECOND heal that genuinely moves the file forward — is untouched.
+ *
+ * Deliberately compares against contents ALREADY WRITTEN, not against the current one: writing the
+ * same thing twice is a harmless no-op that other code already skips. What has to stop is going BACK.
+ *
+ * Never throws; on any doubt it returns false, because wrongly refusing a real repair is worse than
+ * one extra oscillation. PURE apart from the read.
+ */
+export function healWouldOscillate(workspaceId: string, path: string, proposed: string): boolean {
+  try {
+    const rec = LEDGER.get(workspaceId)?.get(path);
+    if (!rec || !rec.seen || rec.seen.size === 0) return false;
+    const h = hashOf(proposed ?? '');
+    // The content we are ABOUT to write is one we have written before, and it is not what is there now
+    // — so the file is being moved back to an earlier state.
+    return rec.seen.has(h) && h !== rec.hash;
+  } catch {
+    return false;
+  }
 }
 
 export interface HealRepeat {

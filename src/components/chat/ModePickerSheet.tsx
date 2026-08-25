@@ -4,7 +4,7 @@
 // disclaimers, same gating.
 
 import { useMemo, useState } from 'react';
-import { X, Search, MessageSquare, Plus, Check, Briefcase, Stethoscope } from 'lucide-react';
+import { X, Search, Check } from 'lucide-react';
 import { modePickerEntries, filterModeEntries, activeModeId, type ModeEntry } from './modePicker';
 
 export function ModePickerSheet({
@@ -26,12 +26,14 @@ export function ModePickerSheet({
   const visible = useMemo(() => filterModeEntries(entries, query), [entries, query]);
   const current = activeModeId(activeView);
 
-  const rowIcon = (e: ModeEntry) => {
-    if (e.kind === 'free') return <MessageSquare className="w-4 h-4 text-amber-400 shrink-0" />;
-    if (e.kind === 'free_new') return <Plus className="w-4 h-4 text-amber-400 shrink-0" />;
-    if (e.id === 'sda_chat') return <Stethoscope className="w-4 h-4 text-rose-400 shrink-0" />;
-    return <Briefcase className="w-4 h-4 text-teal-400 shrink-0" />;
-  };
+  // Emoji logos (admin 2026-08-25: "emoji logo bhi sath me hon, maja aa jayega") — every expert
+  // carries its own, from the completeness-tested map in modePicker.ts. Rendered in a fixed-width
+  // rounded chip so 70+ rows line up whatever each emoji's natural width is.
+  const rowIcon = (e: ModeEntry) => (
+    <span aria-hidden className="w-8 h-8 rounded-lg bg-white/5 border border-white/8 flex items-center justify-center text-[16px] leading-none shrink-0">
+      {e.emoji}
+    </span>
+  );
 
   // The admin's exact spec for row 1: 'navbharatai "free" — free bold me alag style me dikhe'.
   const rowLabel = (e: ModeEntry) => {

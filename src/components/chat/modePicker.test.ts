@@ -91,3 +91,31 @@ describe('the App wiring this feature depends on (source-pinned)', () => {
     expect(app).toContain("{ id: 'professionals', label: 'Professionals',");
   });
 });
+
+/**
+ * EMOJI LOGOS (admin 2026-08-25: "emoji logo bhi sath me hon, maja aa jayega"). The completeness
+ * check is the real rule: a professional added without its own emoji fails HERE, instead of shipping
+ * with the generic briefcase and nobody noticing.
+ */
+describe('every mode entry carries its own emoji logo', () => {
+  it('EVERY configured professional has an explicit emoji — no silent fallback', async () => {
+    const { MODE_EMOJI, FALLBACK_EMOJI } = await import('./modePicker');
+    for (const id of Object.keys(PROFESSIONAL_CHATS)) {
+      expect(MODE_EMOJI[id], `professional "${id}" has no emoji in MODE_EMOJI`).toBeTruthy();
+      expect(MODE_EMOJI[id]).not.toBe(FALLBACK_EMOJI);
+    }
+    expect(MODE_EMOJI.sda_chat).toBe('🩺');
+  });
+
+  it('the built entries all carry one — FREE rows included', () => {
+    for (const e of modePickerEntries({ hideMedical: false })) {
+      expect(e.emoji, `${e.id} lost its emoji`).toBeTruthy();
+    }
+  });
+
+  it('no two neighbouring domains share one emoji by accident (the map is all distinct)', async () => {
+    const { MODE_EMOJI } = await import('./modePicker');
+    const all = Object.values(MODE_EMOJI);
+    expect(new Set(all).size).toBe(all.length);
+  });
+});

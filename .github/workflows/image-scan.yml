@@ -67,7 +67,7 @@ jobs:
       # any failure prints Trivy's own error instead of an action wrapper's. The DB cache is persisted so
       # a rate-limited download does not turn into a mystery failure. Tag verified to exist (2026-08-04).
       - name: Cache Trivy vulnerability DB
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/trivy
           key: trivy-db-${{ github.run_id }}

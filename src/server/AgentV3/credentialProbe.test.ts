@@ -1,8 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   probeCredentials, probesFor, verdictFromStatus, probeSummary,
-  isSafeSlug, supabaseProbeUrl, MAX_PROBES, type ProbeFetch,
+  isSafeSlug, supabaseProbeUrl, MAX_PROBES, relevantToApp, type ProbeFetch,
 } from './credentialProbe';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** A fetch that always answers with one status, and records every request it saw. */
 const stub = (status: number) => {
@@ -259,5 +261,66 @@ describe('the batch is bounded in time', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('relevantToApp — a verdict is about THIS app, not about the vault (admin 2026-08-25)', () => {
+  const razorpay = { names: ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET'], provider: 'Razorpay' };
+  const stripe = { names: ['STRIPE_SECRET_KEY'], provider: 'Stripe' };
+
+  it("THE REPORT: a racing game no longer gets a payment error on every build", () => {
+    // The vault holds a Razorpay key. The app being built reads none of it.
+    const kept = relevantToApp([razorpay], ['VITE_API_URL', 'SESSION_SECRET']);
+    expect(kept).toEqual([]);
+  });
+
+  it('an app that DOES read the key is still told', () => {
+    expect(relevantToApp([razorpay], ['RAZORPAY_KEY_ID'])).toEqual([razorpay]);
+    expect(relevantToApp([razorpay], ['RAZORPAY_KEY_SECRET'])).toEqual([razorpay]);
+  });
+
+  it('prefixed and bare names are ONE variable, in both directions', () => {
+    expect(relevantToApp([stripe], ['VITE_STRIPE_SECRET_KEY'])).toEqual([stripe]);
+    expect(relevantToApp([{ names: ['VITE_MAPBOX_ACCESS_TOKEN'] }], ['MAPBOX_ACCESS_TOKEN'])).toHaveLength(1);
+    expect(relevantToApp([{ names: ['NEXT_PUBLIC_X'] }], ['REACT_APP_X'])).toHaveLength(1);
+  });
+
+  it('IGNORANCE KEEPS EVERYTHING — a scan we could not run never deletes a warning', () => {
+    // null is "we could not look", which must behave exactly as the code did before this filter.
+    expect(relevantToApp([razorpay, stripe], null)).toEqual([razorpay, stripe]);
+  });
+
+  it('an app that reads NOTHING is a real answer, not an unknown one', () => {
+    // [] means the scan ran and found no env reads at all — nothing here is this build's business.
+    expect(relevantToApp([razorpay, stripe], [])).toEqual([]);
+  });
+
+  it('filters each verdict independently — one relevant key does not carry the others in', () => {
+    expect(relevantToApp([razorpay, stripe], ['STRIPE_SECRET_KEY'])).toEqual([stripe]);
+  });
+
+  it('survives malformed input rather than throwing inside a build', () => {
+    expect(relevantToApp([{ names: [] }], ['A'])).toEqual([]);
+    expect(relevantToApp([], ['A'])).toEqual([]);
+  });
+});
+
+describe('WIRING — the relevance filter is on the real build path', () => {
+  const dispatcher = readFileSync(join(process.cwd(), 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
+
+  it('both notices are filtered, and by ONE scan rather than two', () => {
+    expect(dispatcher).toContain('relevantToApp(probed, referencedEnvNames)');
+    expect(dispatcher).toContain("relevantToApp([{ names: [w.name] }], referencedEnvNames)");
+    expect((dispatcher.match(/ENV_SCAN_COMMAND/g) || []).length).toBe(2); // the import + one use
+  });
+
+  it('a LEAKED secret is never suppressed by relevance — it must be rotated regardless', () => {
+    expect(dispatcher).toContain("w.kind !== 'exposed-secret'");
+  });
+
+  it('a scan failure falls back to saying everything', () => {
+    const at = dispatcher.indexOf("'probe-relevance'");
+    expect(at).toBeGreaterThan(-1);
+    expect(dispatcher.slice(at, at + 300)).toContain('referencedEnvNames = null');
   });
 });

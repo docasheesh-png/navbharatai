@@ -2879,6 +2879,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
   };
 
+  /**
+   * THE REPO WE MAY OFFER TO DEPLOY FROM — and the one we must not.
+   *
+   * `ownRepo` covers own-repo working-branch storage only. Most apps that reach GitHub do so as a
+   * MIRROR in the user's own account, which is just as deployable — so it counts too. The invisible
+   * platform-org repo does NOT: it is not the user's, their own host cannot see it, and offering a
+   * deploy from it would be a button that could only ever fail, which is the exact dead end the
+   * backend-deploy offer exists to remove.
+   */
+  const deployRepo = (() => {
+    if (state.ownRepo) return { owner: state.ownRepo.owner, repo: state.ownRepo.repo };
+    if (!state.repoOwnedByUser) return null;
+    const [owner, repo] = String(state.repoFullName ?? '').split('/');
+    return owner && repo ? { owner, repo } : null;
+  })();
+
   const deployLive = (providerOverride?: string): string | null => {
     const prov0 = providerOverride || deployProvider;
     const blocked = deployBlockedReason({
@@ -3439,6 +3455,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           busy={running || publishing}
           publishStatus={publishMsg}
           publishRefusalCode={publishRefusal.code}
+          deployRepo={deployRepo}
           backendKeySource={publishRefusal.keySource}
           workspaceId={state.workspaceId}
           // Gates the Unpublish control: null unless this app is genuinely live (the server returns a

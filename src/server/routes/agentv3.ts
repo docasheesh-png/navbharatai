@@ -9727,7 +9727,7 @@ async function noteBuildOutcome(
                 ownRepoTarget = target;
                 repoSync = new GitRepoSync(actuator, workspaceId);
                 const h = await repoSync.hydrateFromRepo(repoAuthedUrl, { branch: target.workBranch, fallbackBranch: target.baseBranch, overlayAnyContent: true });
-                events.emit({ type: 'repo', url: `https://github.com/${target.owner}/${target.repo}`, fullName: `${target.owner}/${target.repo}`, ts: Date.now() });
+                events.emit({ type: 'repo', url: `https://github.com/${target.owner}/${target.repo}`, fullName: `${target.owner}/${target.repo}`, ownedByUser: true, ts: Date.now() });
                 // Tell the client own-repo mode is active so it can offer the "Ship to main" / "Revert"
                 // controls scoped to this exact repo + branches (see /api/agentv3/ship, /revert).
                 events.emit({ type: 'own_repo', owner: target.owner, repo: target.repo, workBranch: target.workBranch, baseBranch: target.baseBranch, ts: Date.now() });
@@ -9748,7 +9748,7 @@ async function noteBuildOutcome(
                 repoSync = new GitRepoSync(actuator, workspaceId);
                 const h = await repoSync.hydrateFromRepo(repoAuthedUrl);
                 // Surface the repo so the UI can offer a "View on GitHub" link (full app control).
-                if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || `${login}/${repoName}`, ts: Date.now() });
+                if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || `${login}/${repoName}`, ownedByUser: true, ts: Date.now() });
                 events.emit({
                   type: 'narration', agent: 'architect',
                   text: h.hydrated
@@ -9774,7 +9774,7 @@ async function noteBuildOutcome(
                 repoNameRef = repoName;
                 repoSync = new GitRepoSync(actuator, workspaceId);
                 const h = await repoSync.hydrateFromRepo(repoAuthedUrl);
-                if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || repoName, ts: Date.now() });
+                if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || repoName, ownedByUser: false, ts: Date.now() });
                 if (h.hydrated) {
                   events.emit({ type: 'narration', agent: 'architect', text: 'Loaded your project from its GitHub repo.', ts: Date.now() });
                 }

@@ -119,6 +119,15 @@ export interface HostingChooserProps {
   publishRefusalCode?: string;
   /** Whose backend-hosting key the server resolved, so the offer can name the account honestly. */
   backendKeySource?: BackendKeySource;
+  /**
+   * A repo IN THE USER'S OWN GITHUB ACCOUNT that this app's code lives in, when there is one.
+   *
+   * Wider than `ownRepo` on purpose: `ownRepo` is set only for own-repo working-branch storage, while
+   * most apps that reach GitHub at all do so as a MIRROR in the user's account — equally deployable.
+   * The platform-org repo (Email/Phone users, no GitHub connected) is deliberately NOT included: it is
+   * not theirs, their host cannot see it, and a deploy offered from it could only ever fail.
+   */
+  deployRepo?: { owner: string; repo: string } | null;
 }
 
 /** What the server knows about this app's data needs — see GET /api/agentv3/database-readiness. */
@@ -136,7 +145,7 @@ export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr,
   liveUrl, onUnpublish, onLoadMyApps, onUnpublishApp,
   ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
-  onMakeIcon, publishRefusalCode, backendKeySource,
+  onMakeIcon, publishRefusalCode, backendKeySource, deployRepo,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost' | 'myapps'>('choose');
   // MY PUBLISHED APPS (admin 2026-08-21). Loaded on demand, because most people opening Publish are
@@ -279,7 +288,7 @@ export function HostingChooser({
   // IDE's Git panel. So the refusal sent people to a button that, from here, did not exist.
   const backendOffer = backendDeployOffer({
     code: publishRefusalCode,
-    ownRepo: ownRepo ?? null,
+    ownRepo: deployRepo ?? ownRepo ?? null,
     githubConnected,
     keySource: backendKeySource ?? null,
   });

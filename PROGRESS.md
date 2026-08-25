@@ -41886,3 +41886,11 @@ to a server (`analyzeApiWiring` returning anything other than `'none'`).
 
 **Verification:** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · `npx vitest run` — 1374 files
 / 17909 tests passed.
+
+**Follow-up in the same PR — a MIRROR repo is still the user's repo.** The first cut keyed the offer on
+`state.ownRepo`, which is set only for own-repo working-branch storage — so for most users the button would
+never have appeared. Most apps that reach GitHub at all land as a MIRROR in the user's own account
+(`routes/agentv3.ts` ~9751), which is equally deployable. The `repo` wire event now carries `ownedByUser`,
+set `true` for the own-repo target and the user-account mirror and **`false` for the invisible platform-org
+repo** — that one is not theirs, their own Render account cannot see it, and a deploy offered from it could
+only ever fail. An older server that sends no flag is treated as NOT theirs (the safe answer).

@@ -328,3 +328,35 @@ describe('HostingChooser — the backend-deploy offer', () => {
     expect(html).toContain('RENDER_API_KEY');
   });
 });
+
+/**
+ * A MIRROR REPO IS STILL THE USER'S REPO. `ownRepo` is set only for own-repo working-branch storage,
+ * but most apps that reach GitHub at all land as a mirror in the user's own account — equally
+ * deployable, and previously invisible to this offer. The platform-org repo stays excluded on
+ * purpose: it is not theirs, so a deploy from it could only fail.
+ */
+describe('HostingChooser — the backend-deploy offer accepts a mirror repo', () => {
+  it('offers the button for a repo in the user own account even without own-repo storage', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)], {
+      publishRefusalCode: 'backend-deploy-available',
+      ownRepo: null,
+      deployRepo: { owner: 'asheesh', repo: 'mirror-app' },
+      workspaceId: 'ws-1',
+    });
+    expect(html).toContain('Deploy backend');
+    expect(html).toContain('asheesh/mirror-app');
+  });
+
+  it('falls back to the prerequisites when there is no repo of their own at all', () => {
+    const html = render([P('firebase', 'Firebase Hosting', true)], {
+      publishRefusalCode: 'backend-deploy-available',
+      ownRepo: null,
+      deployRepo: null,
+      githubConnected: false,
+      onConnectGitHub: () => {},
+      workspaceId: 'ws-1',
+    });
+    expect(html).not.toContain('>Deploy backend<');
+    expect(html).toContain('Connect GitHub');
+  });
+});

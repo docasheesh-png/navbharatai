@@ -354,3 +354,23 @@ describe('context_usage', () => {
     expect(after.checkpoints).toEqual(before.checkpoints);
   });
 });
+
+describe('repo ownership decides whether we may offer a deploy from it', () => {
+  const base = () => initialAgentV3State();
+
+  it('a repo in the user own account is marked as theirs', () => {
+    const s = agentV3Reducer(base(), { type: 'repo', url: 'https://github.com/asheesh/app', fullName: 'asheesh/app', ownedByUser: true, ts: 2 });
+    expect(s.repoFullName).toBe('asheesh/app');
+    expect(s.repoOwnedByUser).toBe(true);
+  });
+
+  it('the invisible platform-org repo is NOT theirs — their own host cannot see it', () => {
+    const s = agentV3Reducer(base(), { type: 'repo', url: 'https://github.com/navbharatai/proj', fullName: 'navbharatai/proj', ownedByUser: false, ts: 2 });
+    expect(s.repoOwnedByUser).toBe(false);
+  });
+
+  it('an older server that sends no flag is treated as NOT theirs — the safe answer', () => {
+    const s = agentV3Reducer(base(), { type: 'repo', url: 'https://github.com/x/y', fullName: 'x/y', ts: 2 });
+    expect(s.repoOwnedByUser).toBe(false);
+  });
+});

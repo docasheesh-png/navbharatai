@@ -213,7 +213,7 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       return { ...state, framework: event.framework };
 
     case 'repo':
-      return { ...state, repoUrl: event.url, repoFullName: event.fullName };
+      return { ...state, repoUrl: event.url, repoFullName: event.fullName, repoOwnedByUser: event.ownedByUser === true };
 
     case 'own_repo':
       return { ...state, ownRepo: { owner: event.owner, repo: event.repo, workBranch: event.workBranch, baseBranch: event.baseBranch } };

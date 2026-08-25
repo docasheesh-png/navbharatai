@@ -5,6 +5,10 @@ import { motion } from 'motion/react';
 import { MessageSquare, Clock, ShieldCheck, LogIn, MoreVertical, Trash2, Search, X, Layers, Code2, Zap, Cpu, Stethoscope } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Skeleton, SkeletonList } from './ui/Skeleton';
+import { Briefcase } from 'lucide-react';
+import { readProfessionalHistory } from './professionals/ProfessionalHistoryView';
+import { browserStore, resumeArchived, deleteArchived } from '../lib/professionalChatStore';
+import { professionalRows, sortMergedRows, type ProfessionalPseudoSession } from '../lib/freeHistoryMerge';
 
 type FilterMode = 'all' | 'chat' | 'apps' | 'free' | 'pro' | 'sda';
 
@@ -31,6 +35,8 @@ export const HistoryView = ({
   onDeleteSession,
   initialFilter,
   lockFilter,
+  includeProfessionals,
+  onOpenProfessional,
 }: {
   user: any;
   onRestoreSession?: (uci: string) => void;
@@ -42,6 +48,14 @@ export const HistoryView = ({
    *  "NavBharatAI Free → History" shows ONLY Free sessions and cannot be switched to the whole app
    *  (admin 2026-08-11: "Free ki history sirf Free ki dikhaye, puri NavBharatAI ki nahi"). */
   lockFilter?: boolean;
+  /**
+   * The FREE surface's unified history (admin 2026-08-25, amending the 2026-08-11 scoping): show
+   * Free + Doctor + every professional conversation in ONE list, each row tagged with its mode.
+   * Professional conversations live in localStorage, not Firestore — see freeHistoryMerge.ts.
+   */
+  includeProfessionals?: boolean;
+  /** Open a professional's chat (the row's conversation was already resumed if it was archived). */
+  onOpenProfessional?: (viewId: string) => void;
 }) => {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +63,12 @@ export const HistoryView = ({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [filterMode, setFilterMode] = useState<FilterMode>(initialFilter ?? 'all');
   const [searchQuery, setSearchQuery] = useState('');
+  // Professional conversations for the unified FREE history — localStorage, refreshed on demand
+  // (a delete refreshes it; there is no snapshot listener to lean on for localStorage).
+  const [profItems, setProfItems] = useState<ReturnType<typeof readProfessionalHistory>>([]);
+  useEffect(() => {
+    if (includeProfessionals) setProfItems(readProfessionalHistory());
+  }, [includeProfessionals]);
 
   // Re-apply the scoped filter whenever the caller changes it (e.g. opened from the Free footer).
   // When locked, the filter is fixed to the scoped value and the tabs are not rendered at all.
@@ -94,7 +114,13 @@ export const HistoryView = ({
   const filteredSessions = useMemo(() => {
     let result = sessions;
 
-    if (effectiveFilter === 'apps') result = result.filter(isAppSession);
+    if (includeProfessionals && effectiveFilter === 'free') {
+      // The unified FREE scope (admin 2026-08-25): Free + Doctor sessions from Firestore, plus every
+      // professional conversation from localStorage — one list, tagged per row, live chats on top.
+      result = result.filter(s => isFreeSession(s) || isSdaSession(s));
+      result = sortMergedRows([...result, ...professionalRows(profItems, Date.now())], Date.now());
+    }
+    else if (effectiveFilter === 'apps') result = result.filter(isAppSession);
     else if (effectiveFilter === 'chat') result = result.filter(s => !isAppSession(s));
     else if (effectiveFilter === 'free') result = result.filter(isFreeSession);
     else if (effectiveFilter === 'pro')  result = result.filter(isProSession);
@@ -104,6 +130,7 @@ export const HistoryView = ({
       const q = searchQuery.trim().toLowerCase();
       result = result.filter(s =>
         (s.title && s.title.toLowerCase().includes(q)) ||
+        (s.profName && s.profName.toLowerCase().includes(q)) ||
         (s.uci && s.uci.toLowerCase().includes(q)) ||
         (s.id && s.id.toLowerCase().includes(q)) ||
         (s.messages && Array.isArray(s.messages) &&
@@ -112,7 +139,7 @@ export const HistoryView = ({
     }
 
     return result;
-  }, [sessions, filterMode, searchQuery]);
+  }, [sessions, filterMode, searchQuery, includeProfessionals, effectiveFilter, profItems]);
 
   if (loading) {
     return (
@@ -236,6 +263,29 @@ export const HistoryView = ({
           filteredSessions.map((session) => {
             const isConfirming = confirmDeleteId === session.id;
             const sessionIsApp = isAppSession(session);
+            // A professional pseudo-row (unified FREE history) — lives in localStorage, not Firestore.
+            const prof = (session as Partial<ProfessionalPseudoSession>).profViewId ? (session as ProfessionalPseudoSession) : null;
+            // The per-row MODE tag of the unified list — the "tag ke sath" half of the request.
+            const modeTag = !includeProfessionals ? null
+              : prof ? { label: prof.profName, cls: 'bg-teal-500/10 text-teal-300 border-teal-500/25', Icon: Briefcase }
+              : isSdaSession(session) ? { label: 'Doctor AI', cls: 'bg-rose-500/10 text-rose-300 border-rose-500/25', Icon: Stethoscope }
+              : { label: 'Free', cls: 'bg-amber-500/10 text-amber-300 border-amber-500/25', Icon: Zap };
+            const openRow = () => {
+              if (!prof) { onRestoreSession && onRestoreSession(session.uci || session.id); return; }
+              // An archived conversation is genuinely RESUMED (same rule as Professional History) so
+              // opening it continues that exact conversation rather than starting a fresh one.
+              const store = browserStore();
+              if (store && prof.profEndedAt) resumeArchived(store, prof.profViewId, prof.profEndedAt);
+              onOpenProfessional?.(prof.profViewId);
+            };
+            const deleteRow = () => {
+              if (!prof) { onDeleteSession && onDeleteSession(session.id); return; }
+              const store = browserStore();
+              if (store && prof.profEndedAt) {
+                deleteArchived(store, prof.profViewId, prof.profEndedAt);
+                setProfItems(readProfessionalHistory());
+              }
+            };
             return (
               <motion.div
                 key={session.id}
@@ -258,13 +308,13 @@ export const HistoryView = ({
                         Delete this session permanently?
                       </h4>
                       <p className="text-xs text-[#8b949e]">
-                        All messages and context for <span className="font-mono text-red-300">CUI: {session.uci || session.id}</span> will be deleted. This cannot be undone.
+                        All messages and context for <span className="font-mono text-red-300">{(session as Partial<ProfessionalPseudoSession>).profName ?? `CUI: ${session.uci || session.id}`}</span> will be deleted. This cannot be undone.
                       </p>
                     </div>
                     <div className="flex items-center gap-3 shrink-0 self-start sm:self-auto">
                       <button
                         onClick={() => {
-                          onDeleteSession && onDeleteSession(session.id);
+                          deleteRow();
                           setConfirmDeleteId(null);
                         }}
                         className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer shadow-md hover:shadow-red-500/20"
@@ -289,9 +339,16 @@ export const HistoryView = ({
                             ? session.title
                             : session.messages?.find((m: any) => m.sender === 'user')?.text?.slice(0, 50) || 'New Conversation'}
                         </h3>
+                        {!prof && (
                         <span className="inline-flex items-center px-2 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/25 rounded-md font-mono text-[10px] tracking-normal lowercase">
                           CUI: {session.uci || session.id}
                         </span>
+                        )}
+                        {modeTag && (
+                          <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border', modeTag.cls)}>
+                            <modeTag.Icon className="w-2.5 h-2.5" /> {modeTag.label}
+                          </span>
+                        )}
                         {/* App / Chat badge */}
                         <span className={cn(
                           "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border",
@@ -303,20 +360,21 @@ export const HistoryView = ({
                         </span>
                       </div>
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10px] text-[#8b949e] font-bold uppercase tracking-widest">
-                        <span className="flex items-center gap-1.5"><Clock className="w-3 h-3 animate-pulse" /> {new Date(session.lastUpdated).toLocaleString()}</span>
-                        <span className="flex items-center gap-1.5"><ShieldCheck className="w-3 h-3 text-emerald-500" /> {session.current_agent || 'navbharatai'}</span>
+                        <span className="flex items-center gap-1.5"><Clock className="w-3 h-3 animate-pulse" /> {prof?.profLive ? 'Ongoing' : new Date(session.lastUpdated).toLocaleString()}</span>
+                        <span className="flex items-center gap-1.5"><ShieldCheck className="w-3 h-3 text-emerald-500" /> {prof ? prof.profName : (session.current_agent || 'navbharatai')}</span>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0 self-start sm:self-auto z-10">
                       <button
-                        onClick={() => onRestoreSession && onRestoreSession(session.uci || session.id)}
+                        onClick={openRow}
                         className="flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg hover:shadow-indigo-500/20 shrink-0 cursor-pointer"
                       >
                         Open Chat
                         <LogIn className="w-3.5 h-3.5" />
                       </button>
 
+                      {!(prof && prof.profLive) && (
                       <div className="relative">
                         <button
                           onClick={() => setOpenDropdownId(openDropdownId === session.id ? null : session.id)}
@@ -352,6 +410,7 @@ export const HistoryView = ({
                           </>
                         )}
                       </div>
+                      )}
                     </div>
                   </>
                 )}

@@ -3,53 +3,65 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 /**
- * PART 1 — the dynamic bottom footer (admin 2026-07-28): NavBharatAI Free (nbi_chat) and Professional
- * (professionals) get a focused nav — History / AI / Mode (coming soon) / Settings — instead of the
- * default Home / AI / Preview / Studio / More. Source-level lock (the footer lives inline in App.tsx).
+ * PART 1 — the dynamic bottom footer (admin 2026-07-28; Mode made REAL 2026-08-25): every chat surface
+ * (NavBharatAI Free, the Professionals hub, Doctor AI, each professional) gets a focused nav —
+ * History / AI / Mode / Settings — instead of the default Home / AI / Preview / Studio / More.
+ * Source-level lock (the footer lives inline in App.tsx).
  */
 const src = readFileSync(join(__dirname, '../src/App.tsx'), 'utf8');
 
 describe('dynamic per-AI footer', () => {
-  it('renders the focused footer for NavBharatAI Free + Professional', () => {
-    expect(src).toContain("(activeView === 'nbi_chat' || activeView === 'professionals') ?");
+  const branch = () => {
+    const branchStart = src.indexOf(') : isModeSurface(activeView) ? (');
+    expect(branchStart).toBeGreaterThan(-1);
+    return src.slice(branchStart, branchStart + 3200);
+  };
+
+  it('renders the focused footer for EVERY chat surface — Free, the hub, Doctor and each professional', () => {
+    // Was `nbi_chat || professionals` only; Mode going live (2026-08-25) widened it so an expert's own
+    // chat can switch modes too — isModeSurface is the one shared rule (modePicker.ts, test-pinned).
+    expect(src).toContain(') : isModeSurface(activeView) ? (');
   });
 
   it('the focused footer is exactly History / AI / Mode / Settings', () => {
-    const branchStart = src.indexOf("(activeView === 'nbi_chat' || activeView === 'professionals') ?");
-    const branch = src.slice(branchStart, branchStart + 2600);
-    expect(branch).toContain("label: 'History'");
-    expect(branch).toContain("label: 'AI'");
-    expect(branch).toContain("label: 'Mode'");
-    expect(branch).toContain("label: 'Settings'");
+    const b = branch();
+    expect(b).toContain("label: 'History'");
+    expect(b).toContain("label: 'AI'");
+    expect(b).toContain("label: 'Mode'");
+    expect(b).toContain("label: 'Settings'");
   });
 
-  it("Mode is a disabled 'coming soon' item, not a real view", () => {
-    const branchStart = src.indexOf("(activeView === 'nbi_chat' || activeView === 'professionals') ?");
-    const branch = src.slice(branchStart, branchStart + 2600);
-    expect(branch).toMatch(/label: 'Mode',\s*comingSoon: true/);
-    expect(branch).toContain('disabled={comingSoon}');
-    expect(branch).toContain("addToast('Mode switching — coming soon'");
+  it('Mode is LIVE — it opens the picker, and no coming-soon remnant survives', () => {
+    // The 2026-07-28 footer shipped Mode as a disabled "coming soon" tag; the admin asked for the real
+    // thing on 2026-08-25. A leftover disabled state or toast would be a dead button wearing a label.
+    const b = branch();
+    expect(b).toContain("if (key === 'mode') { setShowModePicker(true); return; }");
+    expect(src).not.toContain('Mode switching — coming soon');
+    expect(b).not.toContain('comingSoon');
   });
 
-  it('the AI item points at the active AI (professional vs free) and History/Settings navigate', () => {
-    const branchStart = src.indexOf("(activeView === 'nbi_chat' || activeView === 'professionals') ?");
-    const branch = src.slice(branchStart, branchStart + 2600);
-    expect(branch).toContain("activeView === 'professionals' ? 'professionals' : 'nbi_chat'");
-    expect(branch).toContain("id: 'history' as ViewType");
-    expect(branch).toContain("id: 'settings' as ViewType");
-    expect(branch).toContain('toggleTab(id)');
+  it('the AI item marks the surface you are on, and History/Settings navigate', () => {
+    const b = branch();
+    expect(b).toContain('id: activeView');
+    expect(b).toContain("id: 'history' as ViewType");
+    expect(b).toContain("id: 'settings' as ViewType");
+    expect(b).toContain('toggleTab(id)');
   });
 
-  it('History is scoped to where it was opened from — Free → free (locked), Professionals → professional', () => {
-    const branchStart = src.indexOf("(activeView === 'nbi_chat' || activeView === 'professionals') ?");
-    const branch = src.slice(branchStart, branchStart + 2600);
-    expect(branch).toContain("setHistoryInitialFilter(activeView === 'nbi_chat' ? 'free' : activeView === 'professionals' ? 'professional' : 'all')");
+  it('History scoping: FREE opens the unified tagged list; the hub keeps its professional-only view', () => {
+    const b = branch();
+    // Amended 2026-08-25: the FREE surface's history is Free + Doctor + every professional, tagged —
+    // so every chat surface EXCEPT the hub routes to the 'free' (unified) scope.
+    expect(b).toContain("setHistoryInitialFilter(activeView === 'professionals' ? 'professional' : 'free')");
     // the scoped filter resets to 'all' when leaving History
     expect(src).toContain("if (activeView !== 'history') setHistoryInitialFilter('all')");
-    // Free is LOCKED to its own sessions (the filter tabs are hidden so it can't be switched to the whole app)
+    // FREE stays LOCKED (no filter tabs) and carries the professionals merged in, with navigation out.
     expect(src).toContain("lockFilter={historyInitialFilter === 'free'}");
-    // Professionals gets the dedicated professional-only history, never the generic session list.
+    expect(src).toContain("includeProfessionals={historyInitialFilter === 'free'}");
+    expect(src).toContain('onOpenProfessional={(viewId) => toggleTab(viewId as ViewType)}');
+    // Professionals hub keeps the dedicated professional-only history.
     expect(src).toContain("historyInitialFilter === 'professional'");
     expect(src).toContain('<ProfessionalHistoryView');
   });
 });
+

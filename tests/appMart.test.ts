@@ -53,11 +53,12 @@ describe('App Mart is a Home tile, and the ONLY doorway', () => {
     expect(read('src/App.tsx')).toContain("onOpenAppMart={() => toggleTab('appstore')}");
   });
 
-  it('the Home grid actually fits five cards', () => {
-    // The grid was `lg:grid-cols-4`. Left alone, the fifth card would have dropped onto its own row
-    // and read as an afterthought — the opposite of promoting it.
+  it('the Home grid fits every card in one desktop row', () => {
+    // Five cards needed xl:grid-cols-5; the Professionals card then moved into the Free chat's Mode
+    // picker (admin 2026-08-25), so four cards get four columns — one row, no orphan.
     const home = read('src/components/home/HomeView.tsx');
-    expect(home).toContain('xl:grid-cols-5');
+    expect(home).toContain('xl:grid-cols-4');
+    expect(home).not.toContain("id: 'professionals'");
   });
 
   it('it is NOT also a tile inside Other — one room, one door', () => {
@@ -101,8 +102,13 @@ describe('the phone layout the admin drew: 2-up squares, App Mart 2x1 across the
     expect(home).not.toContain('grid-cols-1 sm:grid-cols-2');
   });
 
-  it('the four are 1x1 squares and App Mart is 2x1', () => {
-    expect(home).toContain("card.id === 'appmart' ? 'col-span-2 aspect-[2/1] xl:col-span-1' : 'aspect-square'");
+  it('every card is a 1x1 square — a clean 2x2 on a phone', () => {
+    // With five cards, App Mart lay 2x1 across the bottom of a 2x2 of squares (the admin's drawing).
+    // With the Professionals card moved into the Mode picker (2026-08-25) there are four cards, and a
+    // 2-wide App Mart would leave a one-square HOLE where the fifth card used to be — so it becomes
+    // the fourth square and the phone grid closes back into a clean 2x2.
+    expect(home).toContain("'aspect-square'");
+    expect(home).not.toContain("aspect-[2/1]");
   });
 
   it('squares only work because the content shrinks with them', () => {
@@ -118,9 +124,8 @@ describe('the phone layout the admin drew: 2-up squares, App Mart 2x1 across the
   });
 
   it('button labels are SHORT on a phone, because a truncated label reads as a broken screen', () => {
-    // "Explore Professionals" rendered as "EXPLORE PROF…" in a 1x1 tile. Verified zero truncation
-    // after this change by measuring scrollWidth vs clientWidth in a real browser.
-    expect(home).toContain("btnLabelShort: 'Experts'");
+    // "Explore Professionals" rendered as "EXPLORE PROF…" in a 1x1 tile — the finding that created
+    // btnLabelShort. That card now lives in the Mode picker, but the rule stays for the cards left.
     expect(home).toContain("btnLabelShort: 'Free Chat'");
     expect(home).toContain('btnLabelShort ?? card.btnLabel');
   });

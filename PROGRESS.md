@@ -42177,3 +42177,48 @@ SHOWTIMES (no public API) stay on the search path with an honest note; gold/petr
 NON-COMMERCIAL. Fine at launch scale; before heavy traffic the admin buys its commercial plan or the
 one builder function per source is swapped to a keyed provider. Recorded here rather than left silent.
 15 new tests in `liveDataSources.test.ts` (every source: real data ⇒ block, bad/empty/dead ⇒ '').
+
+## 2026-08-25 — the Mode button is REAL: professionals move into the Free chat, Home tile removed
+
+**Admin request (with screenshots + a follow-up spec):** the Free chat footer's MODE button (shipped
+2026-07-28 as a disabled "SOON" tag) must open the professionals list; the separate Professionals tile
+on the Home page goes away; the Mode list is "NavBharatAI FREE" (default, FREE styled bold) →
+"NavBharatAI FREE +" (starts a NEW free chat) → Doctor AI → every professional; Pro v5 stays OUT (own
+tile); and the Free chat's History shows EVERYTHING (free + professionals) with a tag per row.
+
+**Shipped:**
+- `modePicker.ts` (pure) + `ModePickerSheet.tsx`: FREE / FREE+ rows on top (FREE in bold gradient, per
+  the admin's styling instruction), then Doctor AI and all 74 configured professionals with a search
+  box. The two FREE rows survive every search — a search that hides the exit strands the user.
+  Selection navigates through the SAME `toggleTab` paths the Professionals hub uses, so every expert
+  opens its REAL chat — engine, disclaimers, pass-gate and billing untouched (a new door, never a
+  side-door). Play compliance rides along: the native shell filters the medical-class experts with the
+  same `MEDICAL_PROFESSIONAL_IDS` rule as the hub, and `toggleTab`'s own guard backstops it.
+- Footer: the per-AI nav (History/AI/Mode/Settings) now covers EVERY chat surface via `isModeSurface`
+  — Free, the hub, Doctor AI and each professional's own chat — so you can switch modes from inside
+  any expert. The "coming soon" toast and disabled state are gone.
+- "FREE +" calls the existing `startNewChat()` (same mint-new-session path as the chat's + button) and
+  lands on the Free surface; the old conversation stays in History.
+- **Unified FREE history** (`freeHistoryMerge.ts`, pure + tested): the FREE surface's History now
+  lists Firestore Free + Doctor sessions AND every professional conversation from localStorage in one
+  list — each row tagged (Free / Doctor AI / the professional's name), live professional chats pinned
+  on top as "Ongoing" (their buffer stores no timestamp, and inventing a date would be a lie), and an
+  archived conversation is genuinely RESUMED on open (same rule as Professional History). Deleting an
+  archived professional row deletes that archive; the LIVE row deliberately has no delete — ending the
+  open conversation belongs to the chat's own ✕. The hub's own History keeps its professional-only
+  view; the 2026-08-11 "Free shows only Free" scoping is superseded for the FREE surface by the
+  admin's 2026-08-25 instruction, and the lock (no filter tabs) stays.
+- Home: the Professionals tile is REMOVED; the grid closes from `xl:grid-cols-5` to 4 and App Mart
+  becomes the fourth square, so the phone layout is a clean 2x2 again instead of a one-square hole.
+  The ☰ sidebar → Professionals entry and every professional deep link keep working — the tile was a
+  door, not the room. The now-dead `professionalsCardCopy`/`PROFESSIONALS_CARD_COPY` helpers were
+  removed with their test.
+- AppKnowledgeBase: hub entry re-pathed to the Mode button, new global bullet for mode switching +
+  unified history, and the team-room entry's stale "Mode (coming soon)" corrected.
+- Tests: `modePicker.test.ts` (composition, Pro-v5 exclusion by exact id, compliance filter, search
+  keeps the FREE rows, App wiring pins), `freeHistoryMerge.test.ts` (tagged-merge rules), and
+  `dynamicFooter.test.ts` REWRITTEN to pin the new intent — including that no coming-soon remnant
+  survives. appMart layout tests updated for the 4-card grid (5-card assertions were the old intent).
+
+**Verification:** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · `npm run build` ✅ ·
+`npx vitest run` — 1389 files / 18127 passed.

@@ -1,13 +1,10 @@
 import { motion } from 'motion/react';
 import {
-  Sparkles, Shield, MessageSquare, Bot, Stethoscope,
-  Scale, GraduationCap, Activity, Zap, Code2, Rocket,
-  CheckCircle2, ArrowRight, ChevronRight, LayoutGrid, Store, Play
+  Sparkles, Shield, MessageSquare, Bot, Zap, Rocket,
+  CheckCircle2, ArrowRight, LayoutGrid, Store, Play
 } from 'lucide-react';
 import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
-import { isNativeApp } from '../../lib/mobileNative';
-import { medicalFeaturesHidden, professionalsCardCopy } from '../../lib/playCompliance';
 
 interface HomeData {
   heroTitle: string;
@@ -27,7 +24,6 @@ interface HomeData {
 interface HomeViewProps {
   onStartChat: () => void;
   onStartProChat?: () => void;
-  onStartProfessionals?: () => void;
   /** Open the "Other AI" page — the builder-tools hub (admin 2026-07-23: a full view, like the other 3). */
   onOpenOtherAI?: () => void;
   /**
@@ -89,27 +85,6 @@ const PRODUCT_CARDS = [
     btnIcon: Rocket,
   },
   {
-    id: 'professionals',
-    badge: '50+ Expert AIs',
-    badgeColor: 'bg-teal-500/20 text-teal-300 border border-teal-500/30',
-    gradient: 'from-teal-600/20 via-cyan-500/10 to-transparent',
-    border: 'border-teal-500/20 hover:border-teal-400/50',
-    glow: 'shadow-teal-500/10',
-    iconBg: 'bg-teal-500/15',
-    iconColor: 'text-teal-400',
-    Icon: Shield,
-    title: 'Professionals',
-    subtitle: 'Expert AI Assistants',
-    description: 'Dedicated AI experts for every life domain — Doctor, Lawyer, Teacher, Financial Advisor, Kisan Advisor, and 45+ more.',
-    features: ['Doctor AI, Lawyer AI, Teacher AI', 'Kisan, Finance, Career & Wellness', 'Answers in Hindi + regional languages'],
-    featureIcon: CheckCircle2,
-    featureColor: 'text-teal-400',
-    btnClass: 'bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 text-white',
-    btnLabel: 'Explore Professionals',
-    btnLabelShort: 'Experts',
-    btnIcon: ChevronRight,
-  },
-  {
     id: 'tools',
     badge: '20+ Tools',
     badgeColor: 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30',
@@ -157,15 +132,10 @@ const PRODUCT_CARDS = [
   },
 ];
 
-const PROF_ICONS = [Stethoscope, Scale, GraduationCap, Activity, Code2];
-// Play compliance (admin 2026-08-04): inside the native shell the Professionals card must not
-// advertise medical features — no "Doctor AI" copy, no stethoscope icon (playCompliance.ts).
-const PROF_ICONS_NATIVE = [Scale, GraduationCap, Activity, Code2];
 
 export const HomeView = ({
   onStartChat,
   onStartProChat,
-  onStartProfessionals,
   onOpenOtherAI,
   onOpenAppMart,
   isAdmin,
@@ -180,7 +150,6 @@ export const HomeView = ({
   const handlers: Record<string, (() => void) | undefined> = {
     free: onStartChat,
     pro: onStartProChat,
-    professionals: onStartProfessionals,
     // "Other AI" navigates to its OWN full page (like the other 3 cards) — the tools live INSIDE it.
     tools: onOpenOtherAI,
     appmart: onOpenAppMart,
@@ -253,14 +222,9 @@ export const HomeView = ({
         </motion.div>
 
         {/* ── Product Cards (4: Free / Pro / Professionals / Other AI) ── */}
-        <div className="w-full grid grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-5">
+        <div className="w-full grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-5">
           {PRODUCT_CARDS.map((rawCard, i) => {
-            // Play compliance: the Professionals card's copy must not name medical assistants in the
-            // native shell (the shipped app declares no medical features — copy and app must match).
-            const hideMedical = medicalFeaturesHidden(isNativeApp());
-            const card = rawCard.id === 'professionals' && hideMedical
-              ? { ...rawCard, ...professionalsCardCopy(true), features: [...professionalsCardCopy(true).features] }
-              : rawCard;
+            const card = rawCard;
             const CardIcon = card.Icon;
             const BtnIcon = card.btnIcon;
             const FeatIcon = card.featureIcon;
@@ -287,7 +251,7 @@ export const HomeView = ({
                   // meant four scrolls before App Mart was even on screen — the opposite of promoting
                   // it. Squares only work if the content inside them shrinks too, which is what the
                   // `hidden sm:…` rules below do; from `sm` up the full cards return untouched.
-                  card.id === 'appmart' ? 'col-span-2 aspect-[2/1] xl:col-span-1' : 'aspect-square',
+                  'aspect-square',
                   'sm:aspect-auto',
                   card.border, card.glow
                 )}
@@ -332,17 +296,6 @@ export const HomeView = ({
                     ))}
                   </ul>
 
-                  {/* Professionals mini-icon row */}
-                  {card.id === 'professionals' && (
-                    <div className="hidden sm:flex items-center gap-2">
-                      {(hideMedical ? PROF_ICONS_NATIVE : PROF_ICONS).map((PIcon, idx) => (
-                        <div key={idx} className="w-7 h-7 rounded-lg bg-teal-500/10 border border-teal-500/20 flex items-center justify-center">
-                          <PIcon className="w-3.5 h-3.5 text-teal-400" />
-                        </div>
-                      ))}
-                      <span className="text-[10px] text-[#8b949e] font-bold">+45 more</span>
-                    </div>
-                  )}
 
                   {/* CTA — a LOOK, not a second click target: the whole card is the button. */}
                   <span

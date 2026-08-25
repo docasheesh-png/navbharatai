@@ -10,7 +10,12 @@ describe('browser_action screenshot is read from a FILE, not stdout (64KB trunca
     expect(src).not.toContain("screenshot:buf.toString('base64')");
     // It writes the PNG to a file instead, and the JSON carries only small metadata.
     expect(src).toContain("writeFileSync('${TOOLS_DIR}/last-action.png', buf)");
-    expect(src).toContain("JSON.stringify({result,url,cursorX,cursorY})");
+    // REPOINTED (2026-08-25). This pinned the literal stdout line, and the METADATA has since moved to
+    // a file as well — because that half was still on capped stdout, and a Playwright error on a
+    // complex page passed 64KB and broke the same way this test was written about. The guarantee here
+    // is unchanged and now stronger: the payload is small, and it is built once and written twice.
+    expect(src).toContain('String(result).slice(0,4000)');
+    expect(src).toContain("writeFileSync('${TOOLS_DIR}/last-action.json', meta)");
   });
 
   it('the TS side reads the screenshot bytes from the file (no 64KB stdout cap)', () => {

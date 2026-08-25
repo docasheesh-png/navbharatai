@@ -219,6 +219,7 @@ import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } 
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
 import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormancy';
 import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
+import { repeatedReadSummary } from '../AgentV3/repeatedReads';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
 import { withE2eExcluded, e2eExcludeNote } from '../AgentV3/e2eTypecheck';
@@ -13314,6 +13315,19 @@ async function noteBuildOutcome(
             for (const [fp, content] of entries) {
               if (/(^|\/)package\.json$/i.test(String(fp))) pkgTexts.push(String(content ?? ''));
             }
+            // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
+            // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
+            // worked: a behavioural fix nobody measures is a hope.
+            try {
+              const line = repeatedReadSummary(dispatcher.readLedgerCounts());
+              if (line) {
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'REPEATED_READS',
+                  message: line, autoResolved: false,
+                });
+              }
+            } catch { /* an advisory finding must never affect a build */ }
+
             const stranded = uiWithoutBuildVerdict({ paths: [...entries.keys()].map(String), packageJsonFiles: pkgTexts });
             if (stranded.stranded) {
               buildDiag.record({

@@ -51,6 +51,12 @@ function getDb(): admin.firestore.Firestore | null {
   }
 }
 
+/** The paths this store could NOT hold, from a metadata snapshot. Never throws. */
+function metaOversized(meta: admin.firestore.DocumentSnapshot): string[] {
+  const raw = meta.exists ? meta.data()?.oversized : undefined;
+  return Array.isArray(raw) ? raw.filter((p): p is string => typeof p === 'string') : [];
+}
+
 /** Deterministic, '/'-free Firestore doc id for an asset's workspace-relative path. */
 function assetDocId(path: string): string {
   return Buffer.from(path, 'utf8').toString('base64url').slice(0, 1500);
@@ -64,8 +70,22 @@ function assetDocId(path: string): string {
 export async function saveWorkspaceAssets(workspaceId: string, assets: Record<string, string>): Promise<void> {
   const db = getDb();
   if (!db) return;
-  const entries = Object.entries(assets || {}).filter(([, c]) => typeof c === 'string' && Buffer.byteLength(c, 'utf8') <= MAX_ASSET_BYTES);
-  if (entries.length === 0) return;
+  const all = Object.entries(assets || {}).filter(([, c]) => typeof c === 'string');
+  const entries = all.filter(([, c]) => Buffer.byteLength(c, 'utf8') <= MAX_ASSET_BYTES);
+  /**
+   * WHAT WOULD NOT FIT — recorded, not swallowed (admin report 2026-08-25).
+   *
+   * This filter used to drop oversized assets in silence, and nothing anywhere knew it had happened.
+   * A user's app-store build then failed on the runner with "Could not load …/772B17C5-….png": the
+   * app imported a phone screenshot, the screenshot was past this cap, and the pushed repo simply did
+   * not contain it. Every layer reported success — the store said `complete: true`, because it had
+   * successfully read everything it HELD.
+   *
+   * Keeping the names costs one array and makes the store able to say what it is missing, which is
+   * what turns a confusing red CI run into a sentence the user can act on.
+   */
+  const oversized = all.filter(([, c]) => Buffer.byteLength(c, 'utf8') > MAX_ASSET_BYTES).map(([p]) => p);
+  if (entries.length === 0 && oversized.length === 0) return;
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);
     const assetsCol = root.collection('assets');
@@ -79,7 +99,11 @@ export async function saveWorkspaceAssets(workspaceId: string, assets: Record<st
     const meta = await root.get();
     const existing: string[] = meta.exists && Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
     const union = Array.from(new Set([...existing, ...entries.map(([p]) => p)]));
-    await root.set({ paths: union, count: union.length, savedAt: Date.now() }, { merge: true });
+    const priorOversized: string[] = meta.exists && Array.isArray(meta.data()?.oversized) ? meta.data()!.oversized : [];
+    // An asset that fits on a LATER save leaves the oversized list — the user resized it, and a stale
+    // warning about a file we now hold would send them hunting for a problem that no longer exists.
+    const oversizedUnion = Array.from(new Set([...priorOversized, ...oversized])).filter((p) => !union.includes(p));
+    await root.set({ paths: union, count: union.length, oversized: oversizedUnion, savedAt: Date.now() }, { merge: true });
   } catch (e) {
     notePersistenceFailure('workspace_assets', 'write', e);
   }
@@ -107,17 +131,17 @@ export async function loadWorkspaceAssets(workspaceId: string): Promise<Record<s
  */
 export async function loadWorkspaceAssetsWithCompleteness(
   workspaceId: string,
-): Promise<{ assets: Record<string, string>; complete: boolean }> {
+): Promise<{ assets: Record<string, string>; complete: boolean; oversized: string[] }> {
   const db = getDb();
   // No database is not "no assets" — it is no answer.
-  if (!db) return { assets: {}, complete: false };
+  if (!db) return { assets: {}, complete: false, oversized: [] };
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);
     const meta = await root.get();
     // A workspace with no asset record genuinely has no assets — that IS a complete answer.
-    if (!meta.exists) return { assets: {}, complete: true };
+    if (!meta.exists) return { assets: {}, complete: true, oversized: [] };
     const paths: string[] = Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
-    if (paths.length === 0) return { assets: {}, complete: true };
+    if (paths.length === 0) return { assets: {}, complete: true, oversized: metaOversized(meta) };
     const allowed = new Set(paths);
     const docs = await root.collection('assets').get();
     const out: Record<string, string> = {};
@@ -127,9 +151,9 @@ export async function loadWorkspaceAssetsWithCompleteness(
         out[data.path] = data.dataUri;
       }
     }
-    return { assets: out, complete: true };
+    return { assets: out, complete: true, oversized: metaOversized(meta) };
   } catch {
-    return { assets: {}, complete: false };
+    return { assets: {}, complete: false, oversized: [] };
   }
 }
 

@@ -136,3 +136,36 @@ describe('the check is wired into the ship (locked)', () => {
     expect(route.indexOf('appFiles = preflight.files;')).toBeLessThan(route.indexOf('findMissingImportedAssets(appFiles'));
   });
 });
+
+describe('the big-asset spill-over (locked)', () => {
+  const store = require('node:fs').readFileSync(
+    require('node:path').resolve(__dirname, 'WorkspaceAssetStore.ts'), 'utf8');
+
+  it('an asset too big for Firestore goes to the BUCKET, not the bin', () => {
+    // The reported failure was a phone screenshot past Firestore's 1MB-per-document limit being
+    // dropped. Telling the user about it is not a fix — the picture is part of their app.
+    expect(store).toContain('spillAssetToBucket');
+    expect(store).toContain('storageObject');
+  });
+
+  it('only assets we genuinely could not store stay on the oversized list', () => {
+    // Otherwise the list means "it was large" instead of "we do not have this", and the ship's
+    // missing-asset check would refuse apps whose pictures are safely in the bucket.
+    expect(store).toContain('oversized.push(path)');
+    expect(store).toContain('spilled.push(path)');
+    expect(store).toContain('...spilled]');
+  });
+
+  it('uses the PRIVATE bucket, and says why that differs from published apps', () => {
+    // Workspace assets are the user's unpublished files. bucketPublish refuses this same fallback
+    // because a published app must be public — the difference is access, not size.
+    expect(store).toContain('WORKSPACE_ASSETS_BUCKET');
+    expect(store).toContain('NAV_STORE_BUCKET');
+    expect(store).toContain("cacheControl: 'private, max-age=0'");
+  });
+
+  it('leaves an unreadable pointer OUT rather than filling it with a placeholder', () => {
+    // A caller that ships the app must find it missing and say so, not push a broken image.
+    expect(store).toContain('if (uri) out[data.path as string] = uri;');
+  });
+});

@@ -15,6 +15,7 @@
  *
  * Pure + dependency-free (string in → string out) → unit-testable.
  */
+import { jsxDevRuntimeUrl } from '../../lib/jsxDevRuntimeFacade';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { VirtualFileSystem } from '../project/ProjectModel';
@@ -344,7 +345,7 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, works
   const depBase = origin && process.env.AGENTV3_PREVIEW_DEP_PROXY !== 'off'
     ? `${origin.replace(/\/$/, '')}/api/esm/`
     : ESM;
-  const imports = buildImportmap(vfs, depBase, entry);
+  const imports = buildImportmap(vfs, depBase, entry, origin);
   const importmap = JSON.stringify({ imports }).replace(/<\//g, '<\\/');
   // START THE DOWNLOADS NOW, not after the compiler finishes (admin 2026-08-05: "kitne bhi din baad
   // open karo, preview pehle jaisa hi chalega").
@@ -1394,7 +1395,10 @@ export function nearestPackageJson(vfs: VirtualFileSystem, entry: string | null)
   return 'package.json';
 }
 
-function buildImportmap(vfs: VirtualFileSystem, depBase: string = ESM, entry: string | null = null): Record<string, string> {
+// `origin` is threaded in only for the jsx-dev-runtime facade, which must be served from OUR origin
+// rather than the dependency mirror — see jsxDevRuntimeFacade.ts. Optional, so every existing
+// caller and test keeps working and simply gets the root-relative path.
+function buildImportmap(vfs: VirtualFileSystem, depBase: string = ESM, entry: string | null = null, origin?: string): Record<string, string> {
   const deps: Record<string, string> = {};
   try {
     const pkg = JSON.parse(vfs.readText(nearestPackageJson(vfs, entry)) || '{}');
@@ -1411,7 +1415,8 @@ function buildImportmap(vfs: VirtualFileSystem, depBase: string = ESM, entry: st
     'react-dom': depBase + 'react-dom' + rdVer,
     'react-dom/client': depBase + 'react-dom' + rdVer + '/client',
     'react/jsx-runtime': depBase + 'react' + reactVer + '/jsx-runtime',
-    'react/jsx-dev-runtime': depBase + 'react' + reactVer + '/jsx-dev-runtime',
+    // OUR OWN FACADE, never the CDN — see jsxDevRuntimeFacade.ts.
+    'react/jsx-dev-runtime': jsxDevRuntimeUrl(origin),
   };
   // CRITICAL for any React library (react-router-dom, @mui, framer-motion, …): externalize
   // react + react-dom (`?external=react,react-dom`) so those bare `import "react"` specifiers

@@ -114,3 +114,33 @@ describe('and the builder is warned BEFORE it writes them (the prevention half)'
     expect(route).not.toContain('throw new Error(stranded.message)');
   });
 });
+
+/**
+ * HUNTING THE SIBLINGS (rule 3). The warning first went on `node-express` alone, because that is the
+ * template the two reports came from. But EVERY backend-only scaffold has the same shape — no
+ * index.html, no frontend build — so a user who asks a Fastify or Django project for a screen hits the
+ * identical dead end.
+ *
+ * The DETECTOR was always framework-agnostic and caught them all. Only the prevention half was
+ * one-template-deep, which is the more expensive half to miss: detection tells the user afterwards,
+ * prevention stops the wasted build.
+ */
+describe('every API-only scaffold warns, not just the one that was reported', () => {
+  const BACKEND_ONLY = ['node-express', 'nestjs', 'fastify', 'python-fastapi', 'django', 'flask', 'spring-boot', 'go'];
+
+  it.each(BACKEND_ONLY)('%s says it cannot serve a page, and what to do instead', (fw) => {
+    const p = architectSystemPrompt(fw);
+    expect(p).toContain('THIS TEMPLATE IS API-ONLY');
+    expect(p).toContain('NEVER compiled and NEVER served');
+    expect(p).toContain('ask the user to start it as a web app instead');
+  });
+
+  it.each(['vite-react', 'nextjs', 'vue', 'svelte', 'astro', 'vanilla', 'static'])(
+    '%s does NOT carry the warning — it can serve a page',
+    (fw) => {
+      // The warning must never appear on a web framework: it would tell a builder to refuse the very
+      // thing that template exists for.
+      expect(architectSystemPrompt(fw)).not.toContain('THIS TEMPLATE IS API-ONLY');
+    },
+  );
+});

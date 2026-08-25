@@ -2642,7 +2642,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
   // The first-ever-publish celebration. Null until the server says this user has never published
   // before AND we have looked at the link (see deployLive).
-  const [celebration, setCelebration] = useState<{ kind: CelebrationKind; url: string } | null>(null);
+  const [celebration, setCelebration] = useState<{ kind: CelebrationKind; url: string; firstPublish: boolean } | null>(null);
   // Hosting Phase 1 — the "Publish" chooser (host on NavBharatAI vs bring-your-own), opened from Deploy.
   const [showHostingChooser, setShowHostingChooser] = useState(false);
   // The verify-number sheet, opened by an import the server refused for a missing verified number.
@@ -2864,21 +2864,31 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           return;
         }
         if (typeof data?.url === 'string' && data.url) setLiveUrl(data.url);
-        // THE FIRST-EVER LIVE LINK (admin 2026-08-21). The server decides whether this is the user's
-        // first — see the publish route for why that answer cannot live in the browser. We only decide
-        // what the moment LOOKS like, and we refuse to celebrate a link that does not answer.
-        if (data?.firstPublish === true && typeof data?.url === 'string' && data.url) {
+        // THE LIVE LINK, EVERY TIME (admin 2026-08-21, widened 2026-08-25). The server still decides
+        // whether this is the user's FIRST publish — that answer cannot live in the browser, where a
+        // cleared localStorage would erase the moment and a new phone would repeat it — but it now
+        // only chooses the WORDING. Whether the screen appears at all depends on one thing: is there
+        // a live link to hand over?
+        //
+        // The old gate meant a republish after a fix returned the user to a crowded sheet with their
+        // address as one line of grey text. See celebrationFor.
+        //
+        // AND THE SHEET GOES. The card is a full-screen surface; leaving the publish sheet open
+        // underneath is exactly the crowding the admin objected to ("aisi page par jyada bheed theek
+        // nahi lag rahe"). Closed only once we actually have something to replace it with — never
+        // before, or a failed publish would dismiss the sheet and its own error message with it.
+        if (typeof data?.url === 'string' && data.url) {
           void (async () => {
             const linkLive = await probeLive(data.url);
-            setCelebration({
-              kind: celebrationFor({
-                firstPublish: true,
-                url: data.url,
-                linkLive,
-                reducedMotion: resolveReduceMotion(getStoredMotionMode(), systemPrefersReducedMotion()),
-              }),
+            const kind = celebrationFor({
+              firstPublish: data?.firstPublish === true,
               url: data.url,
+              linkLive,
+              reducedMotion: resolveReduceMotion(getStoredMotionMode(), systemPrefersReducedMotion()),
             });
+            if (kind === 'none') return;
+            setShowHostingChooser(false);
+            setCelebration({ kind, url: data.url, firstPublish: data?.firstPublish === true });
           })();
         }
         // `warning` is the server's honest note when the publish succeeded via the preview-equivalent
@@ -3419,6 +3429,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         <PublishCelebration
           kind={celebration.kind}
           url={celebration.url}
+          firstPublish={celebration.firstPublish}
           onClose={() => setCelebration(null)}
         />
       )}

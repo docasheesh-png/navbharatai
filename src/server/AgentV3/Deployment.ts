@@ -56,12 +56,34 @@ export function publishedAppUrl(channelUrl: string, site = FIREBASE_PROJECT, bra
   // `<sub>.<domain>` → `<site>--<sub>.web.app`, so `<sub>` is exactly what follows `<site>--` in the
   // real host — hash, truncation and all. Anything we could not parse stays on the Firebase URL,
   // because a working unbranded link beats a pretty broken one.
-  const host = real.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  const prefix = `${site}--`;
-  if (!host.endsWith('.web.app') || !host.startsWith(prefix)) return real;
-  const sub = host.slice(prefix.length, -'.web.app'.length);
-  if (!/^[a-z0-9-]+$/.test(sub)) return real; // the Worker refuses anything else — don't hand it one
+  const sub = channelSubdomain(real, site);
+  if (!sub) return real;
   return `https://${sub}.${domain}`;
+}
+
+/**
+ * The `<sub>` in Firebase's own channel host `<site>--<sub>.web.app`. Pure. Returns '' if unparseable.
+ *
+ * ⚠️ THIS IS THE APP'S REAL PUBLIC NAME, AND IT IS NOT THE CHANNEL ID (found 2026-08-25, on the first
+ * live publish after the mirror shipped). Firebase appends a random hash and TRUNCATES the channel id
+ * past the 63-character DNS limit, so for one real publish:
+ *
+ *     channel id : v3-agentv3-ryn1xjbfr-c8f1cc9220dd
+ *     <sub>      : v3-agentv3-ryn1xjbfr-c8f1c-ic0rtytl
+ *
+ * Different strings for the same app. The mirror keyed its objects by the CHANNEL ID while the
+ * Cloudflare Worker asks for `<sub>` — the only name it can know, since it reads the hostname. Every
+ * lookup would have missed, and because the Worker falls back to Firebase it would have missed
+ * SILENTLY: bucket full, Worker never using it, apps still loading fine, nothing to notice.
+ *
+ * One name, taken from Firebase's own answer, used by the mirror and the takedown alike.
+ */
+export function channelSubdomain(channelUrl: string, site = FIREBASE_PROJECT): string {
+  const host = String(channelUrl || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const prefix = `${site}--`;
+  if (!host.endsWith('.web.app') || !host.startsWith(prefix)) return '';
+  const sub = host.slice(prefix.length, -'.web.app'.length);
+  return /^[a-z0-9-]+$/.test(sub) ? sub : ''; // the Worker refuses anything else — don't hand it one
 }
 
 /** The injected deploy function the dispatcher calls: dist files → permanent public URL. */
@@ -107,10 +129,18 @@ export class FirebaseHostingDeployer {
     // nobody browses to — the check is on the id rather than a parameter so a future caller cannot
     // forget to pass it.
     if (channelId === makeChannelId(workspaceId)) {
-      const mirror = await mirrorPublishToBucket(channelId, files);
-      if (mirror.attempted && (mirror.failed > 0 || mirror.error)) {
-        // Admin-only signal. The user's app is live either way; this says the bucket copy is not.
-        console.warn(`[PUBLISH-MIRROR] ${channelId}: ${mirror.uploaded} uploaded, ${mirror.failed} failed${mirror.error ? ` — ${mirror.error}` : ''}`);
+      // KEYED BY THE SUBDOMAIN, NOT THE CHANNEL ID — see channelSubdomain for why they differ and why
+      // the wrong one fails silently. No sub means Firebase's host was unparseable, and a mirror under
+      // a key nobody will ever ask for is pure storage cost, so we skip it and say so.
+      const key = channelSubdomain(channelUrl, site);
+      if (!key) {
+        console.warn(`[PUBLISH-MIRROR] ${channelId}: skipped — could not derive the public subdomain from ${channelUrl}`);
+      } else {
+        const mirror = await mirrorPublishToBucket(key, files);
+        if (mirror.attempted && (mirror.failed > 0 || mirror.error)) {
+          // Admin-only signal. The user's app is live either way; this says the bucket copy is not.
+          console.warn(`[PUBLISH-MIRROR] ${key}: ${mirror.uploaded} uploaded, ${mirror.failed} failed${mirror.error ? ` — ${mirror.error}` : ''}`);
+        }
       }
     }
     return publishedAppUrl(channelUrl, site);
@@ -279,6 +309,17 @@ export class FirebaseHostingDeployer {
     const site = FIREBASE_PROJECT;
     if (!channelId) throw new Error('A channel id is required to delete a channel.');
     try {
+      // READ THE CHANNEL'S PUBLIC HOST BEFORE DELETING IT — it is the only place the bucket key exists.
+      //
+      // The mirror stores objects under `<sub>`, which Firebase derives from the channel id by
+      // truncating it and appending a hash (see channelSubdomain). Nothing can reconstruct that from
+      // the id, and after the channel is gone there is nothing left to ask. Best-effort: a takedown
+      // must never fail because a lookup did, so an unreadable URL just means no bucket key.
+      const subForBucket = await axios
+        .get(`${HOSTING_API}/sites/${site}/channels/${channelId}`, { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => channelSubdomain(String((r.data as { url?: string })?.url ?? ''), site))
+        .catch(() => '');
+
       await axios.delete(`${HOSTING_API}/sites/${site}/channels/${channelId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -286,9 +327,15 @@ export class FirebaseHostingDeployer {
       // the channel would leave the mirror serving the app the moment the Worker prefers the bucket —
       // a takedown that looks complete and is not. Guarded: the channel is already gone, and failing
       // the whole takedown over the mirror would be worse than an orphaned object we can sweep later.
-      const removed = await removePublishFromBucket(channelId);
-      if (removed.attempted && !removed.deleted) {
-        console.warn(`[PUBLISH-MIRROR] takedown left bucket objects for ${channelId}: ${removed.error ?? 'unknown'}`);
+      if (!subForBucket) {
+        // Said out loud rather than passed over: this is the one case where the app is down on
+        // Firebase and its bucket copy may still exist, and silence here is what would hide it.
+        console.warn(`[PUBLISH-MIRROR] takedown could not resolve a bucket key for ${channelId} — any mirrored copy is untouched`);
+      } else {
+        const removed = await removePublishFromBucket(subForBucket);
+        if (removed.attempted && !removed.deleted) {
+          console.warn(`[PUBLISH-MIRROR] takedown left bucket objects for ${subForBucket}: ${removed.error ?? 'unknown'}`);
+        }
       }
       return true;
     } catch (err) {

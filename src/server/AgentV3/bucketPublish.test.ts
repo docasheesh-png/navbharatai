@@ -137,7 +137,14 @@ describe('the publish path stays safe (locked)', () => {
   });
 
   it('removes the bucket copy on takedown, so "remove my app" is true in both places', () => {
-    expect(deployment).toContain('removePublishFromBucket(channelId)');
+    // REPOINTED (2026-08-25). This pinned `removePublishFromBucket(channelId)` — and the channel id
+    // turned out to be the WRONG key: the mirror stores objects under the public `<sub>`, which
+    // Firebase derives by truncating that id and appending a hash. Removing by channel id would have
+    // deleted nothing, so this test was asserting a takedown that could not work.
+    //
+    // The guarantee it names is unchanged and now true — and see publishMirrorKey.test.ts for the
+    // ORDERING that makes it possible at all: the host must be read BEFORE the channel is deleted.
+    expect(deployment).toContain('removePublishFromBucket(subForBucket)');
   });
 });
 

@@ -2742,6 +2742,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [publishing, setPublishing] = useState(false);
   const [publishMsg, setPublishMsg] = useState('');
   /**
+   * THE REFUSAL, IN A FORM THE SCREEN CAN ACT ON (admin 2026-08-25).
+   *
+   * `publishMsg` carries the server's sentence, which for a full-stack app ends "Use 'Deploy backend'
+   * to put the whole app somewhere it can run" — an instruction that pointed at a control existing on
+   * no screen. The 422 has always carried a machine `code` for exactly this, and nothing read it. Held
+   * beside the message and handed to the chooser, which turns it into the real button.
+   */
+  const [publishRefusal, setPublishRefusal] = useState<{ code: string; keySource: 'user' | 'server' | null }>({ code: '', keySource: null });
+  /**
    * Sibling of the live-URL leak above, found by asking what ELSE on this panel describes ONE app
    * while living for the whole session. `publishMsg` holds the last publish's own words — "Your app
    * is live at <app #1's URL>" — and the Publish sheet renders it verbatim. Switching apps and
@@ -2884,6 +2893,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
     setPublishing(true);
     setPublishMsg('Building your app…');
+    setPublishRefusal({ code: '', keySource: null });
     void (async () => {
       try {
         let githubToken: string | undefined;
@@ -2898,6 +2908,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           // The server's own reason, verbatim — a generic "publish failed" is what made this button
           // feel dead. A build error carries the compiler's real output.
           setPublishMsg(data?.detail ? `${data.error}\n\n${data.detail}` : (data?.error || 'Could not publish your app.'));
+          // …and the machine code beside it, so a refusal that names an action can OFFER that action.
+          if (typeof data?.code === 'string' && data.code) {
+            setPublishRefusal({ code: data.code, keySource: data?.keySource === 'user' || data?.keySource === 'server' ? data.keySource : null });
+          }
           return;
         }
         if (typeof data?.url === 'string' && data.url) setLiveUrl(data.url);
@@ -3424,6 +3438,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           // starts real work and shows nothing is the dead button this whole change exists to kill.
           busy={running || publishing}
           publishStatus={publishMsg}
+          publishRefusalCode={publishRefusal.code}
+          backendKeySource={publishRefusal.keySource}
           workspaceId={state.workspaceId}
           // Gates the Unpublish control: null unless this app is genuinely live (the server returns a
           // URL only for an ACTIVE deployment), so it never offers to remove something that is not there.

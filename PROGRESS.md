@@ -41840,3 +41840,49 @@ step): a guard for the CLASS.** Concretely: every per-workspace durable/in-memor
 the identity (buildId or app fingerprint) of the app it describes, and every reader should discard a
 record whose identity is not the current one — one shared helper, not per-site vigilance. Recorded
 here so the next session builds the tap-washer instead of continuing to mop.
+
+## 2026-08-25 — "Publish on NavBharatAI" refused a full-stack app and pointed at a button that did not exist
+
+**Admin report (screenshot):** *"yeh publish to navbharat ai ho hi nahi raha."*
+
+**What was actually happening — the button was NOT dead, it was refusing with a reason.** The banner in
+the screenshot was the publish route's own 422: `POST /api/agentv3/publish` runs `planDeployment`, sees a
+full-stack app (a website plus an Express/Node server), and refuses rather than uploading a server to a
+static CDN — which would produce a site that loads while every button silently fails. That refusal is
+CORRECT and stays.
+
+**The real bug is the sentence after it.** The refusal ends `Use "Deploy backend" to put the whole app
+somewhere it can run`. A repo-wide search for "Deploy backend" across `src/**/*.tsx` returned **nothing**.
+The capability is real — `POST /api/agentv3/deploy-backend` → `renderDeploy.ts` is a wired Render deploy —
+but its only caller was `GitPanel.tsx`, buried in the IDE's Git panel. From the Publish sheet the
+instruction was unreachable: the user was told to press a control that did not exist on their screen.
+
+**The 50/50 half — why it could arise at all.** `deployDecision` returns a machine `code` whose own comment
+reads *"a machine code the client can branch on to show the right button"*, and **no client ever read it**
+(`grep 'backend-deploy-available'` found only the server and its own test). The decision was designed for a
+branch nobody wrote, so a message promising a button and the absence of that button could never contradict
+each other anywhere.
+
+**Fix (root cause, both halves):**
+- `src/lib/backendDeployOffer.ts` (new, PURE) — the missing branch. Turns the refusal code + what the client
+  knows (own repo, GitHub connected, whose Render key) into an honest offer.
+- `HostingChooser` renders it: a REAL **Deploy backend** button when the app has a repo behind it (wired to
+  the existing route via `managedDeployRequest` / `managedDeployOutcome` / `renderConnectSteps`), and — when
+  it genuinely cannot run yet — numbered prerequisites instead of a press that could only fail.
+- The publish 422 now carries `keySource`, so the panel can say that a deploy running on NavBharatAI's own
+  Render key cannot see a service in the user's own Render account, rather than sending them to do a
+  one-time step that could never close the loop.
+- `AgentV3Panel` captures `data.code` / `data.keySource` and passes them down.
+- `DEPLOY_BACKEND_LABEL` is shared, and `tests/backendDeployOffer.test.ts` asserts (a) the server's refusal
+  names exactly that label, and (b) **every** code `deployDecision` can emit has an offer branch that leaves
+  the user with something to do — so a new refusal code cannot ship into a dead end again.
+
+**Open root cause, recorded honestly (rule 6), NOT silently patched.** `planDeployment`'s `depNames()` reads
+**devDependencies** as well as dependencies, so a pure-frontend app that merely carries `express` as a dev
+dependency is classified `fullstack` and refused. Widening the gate is the one change that could re-open the
+original bug (an Express app published to a CDN as a broken site), so it was not made on my own judgement.
+The safe narrowing, if the admin wants it, is: refuse only when the frontend also shows evidence of talking
+to a server (`analyzeApiWiring` returning anything other than `'none'`).
+
+**Verification:** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · `npx vitest run` — 1374 files
+/ 17909 tests passed.

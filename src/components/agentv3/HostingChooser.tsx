@@ -27,6 +27,8 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
 import { usePublishState } from '../../hooks/usePublishState';
 import { needsPublishDot } from '../../lib/publishFreshness';
+import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type BackendKeySource } from '../../lib/backendDeployOffer';
+import { managedDeployRequest, managedDeployOutcome, renderConnectSteps } from '../../lib/backendDeployWiring';
 
 export interface HostingProvider {
   id: string;
@@ -107,6 +109,16 @@ export interface HostingChooserProps {
    * away the name and screenshots they already entered, which is the opposite of helping.
    */
   onMakeIcon?: () => void;
+  /**
+   * The machine code from the last publish REFUSAL (see `backendDeployOffer`).
+   *
+   * The refusal for a full-stack app ends "Use “Deploy backend” to put the whole app somewhere it can
+   * run" — and until this prop existed, that control was on no screen a user could reach from here.
+   * The server has always sent the code; this is the branch that finally reads it.
+   */
+  publishRefusalCode?: string;
+  /** Whose backend-hosting key the server resolved, so the offer can name the account honestly. */
+  backendKeySource?: BackendKeySource;
 }
 
 /** What the server knows about this app's data needs — see GET /api/agentv3/database-readiness. */
@@ -124,7 +136,7 @@ export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr,
   liveUrl, onUnpublish, onLoadMyApps, onUnpublishApp,
   ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
-  onMakeIcon,
+  onMakeIcon, publishRefusalCode, backendKeySource,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost' | 'myapps'>('choose');
   // MY PUBLISHED APPS (admin 2026-08-21). Loaded on demand, because most people opening Publish are
@@ -259,6 +271,49 @@ export function HostingChooser({
       setStoreBusy(false);
     }
   };
+  // ── THE BACKEND-DEPLOY OFFER — the control the publish refusal names (admin 2026-08-25).
+  //
+  // A full-stack app cannot go on a static host; the refusal says so and tells the user to use
+  // "Deploy backend". That instruction was true about the CAPABILITY (POST /api/agentv3/deploy-backend
+  // is a real, wired Render deploy) and false about the SCREEN — its only caller was buried in the
+  // IDE's Git panel. So the refusal sent people to a button that, from here, did not exist.
+  const backendOffer = backendDeployOffer({
+    code: publishRefusalCode,
+    ownRepo: ownRepo ?? null,
+    githubConnected,
+    keySource: backendKeySource ?? null,
+  });
+  const [backendBusy, setBackendBusy] = useState(false);
+  const [backendLines, setBackendLines] = useState<string[]>([]);
+
+  const deployBackend = async () => {
+    if (backendBusy || !authedFetch) return;
+    const body = managedDeployRequest('render', { repoPath: backendOffer.repoPath, workspaceId });
+    // Cannot happen while the button is only rendered for `canDeploy` — kept because a request we
+    // cannot build must never leave as a call whose failure the user cannot act on.
+    if (!body) { setBackendLines(['This app has no repository behind it yet, so there is nothing to deploy from.']); return; }
+    setBackendBusy(true);
+    setBackendLines([]);
+    try {
+      const res = await authedFetch('/api/agentv3/deploy-backend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => null);
+      const outcome = managedDeployOutcome(res.status, data);
+      // `needs-connect` is the one outcome whose next action is a walkthrough on somebody else's site,
+      // so the numbered steps (with THIS repo named in them) travel with it.
+      setBackendLines(outcome.kind === 'needs-connect'
+        ? [...outcome.lines, ...renderConnectSteps(body.repoUrl)]
+        : outcome.lines);
+    } catch {
+      setBackendLines(['Could not reach NavBharatAI — nothing was deployed.']);
+    } finally {
+      setBackendBusy(false);
+    }
+  };
+
   // The honest reason the LAST publish attempt didn't start. Shown inline; cleared on the next try.
   // A publish that cannot run must SAY SO here — never a button that silently does nothing.
   const [blocked, setBlocked] = useState<string | null>(null);
@@ -550,6 +605,64 @@ export function HostingChooser({
               {busy ? <TirangaLoader className="w-3.5 h-3.5 mt-0.5 shrink-0" /> : <Rocket className="w-3.5 h-3.5 mt-0.5 shrink-0" />}
               <span className="whitespace-pre-wrap break-words max-h-48 overflow-auto">{publishStatus}</span>
             </div>
+          </div>
+        )}
+
+        {/* The backend-deploy offer. Appears ONLY after a publish was refused for needing a server —
+            which is the one moment the words "Deploy backend" are on the screen. */}
+        {backendOffer.show && (
+          <div className="mx-4 mt-4 rounded-xl border border-indigo-800/50 bg-indigo-950/20 p-3.5 flex flex-col gap-2.5">
+            <div className="flex items-center gap-2">
+              <Server className="w-4 h-4 text-indigo-300" />
+              <span className="text-[13px] font-bold text-white">{backendOffer.title}</span>
+            </div>
+            <p className="text-[11.5px] text-zinc-300 leading-relaxed">
+              NavBharatAI hosting serves files, so it cannot keep your server running. Putting it there anyway
+              would give you a site that loads while every button quietly fails — so nothing was published.
+            </p>
+            {backendOffer.canDeploy ? (
+              <>
+                <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+                  Deploying from <span className="text-zinc-200 font-semibold">{backendOffer.repoPath}</span>.
+                </p>
+                {backendOffer.note && (
+                  <p className="text-[11.5px] text-amber-200 leading-relaxed">{backendOffer.note}</p>
+                )}
+                <button
+                  onClick={() => void deployBackend()}
+                  disabled={backendBusy || busy}
+                  className="py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-[11.5px] font-bold flex items-center justify-center gap-2 transition-colors self-start"
+                >
+                  {backendBusy ? <TirangaLoader size={14} /> : <Server className="w-3.5 h-3.5" />}
+                  {backendBusy ? 'Deploying…' : DEPLOY_BACKEND_LABEL}
+                </button>
+              </>
+            ) : (
+              <>
+                {/* No dead button: when the deploy genuinely cannot run yet, the panel says what has to
+                    happen first instead of offering a press that could only fail. */}
+                <ol className="flex flex-col gap-1.5 pl-4 list-decimal">
+                  {backendOffer.steps.map((step) => (
+                    <li key={step} className="text-[11.5px] text-zinc-300 leading-relaxed">{step}</li>
+                  ))}
+                </ol>
+                {backendOffer.cta === 'connect-github' && onConnectGitHub && (
+                  <button
+                    onClick={() => onConnectGitHub()}
+                    className="py-2 px-3 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 text-zinc-200 text-[11.5px] font-semibold transition-colors self-start"
+                  >
+                    Connect GitHub
+                  </button>
+                )}
+              </>
+            )}
+            {backendLines.length > 0 && (
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 flex flex-col gap-1">
+                {backendLines.map((line) => (
+                  <span key={line} className="text-[11.5px] text-zinc-200 leading-relaxed whitespace-pre-wrap break-words">{line}</span>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

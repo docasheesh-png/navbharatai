@@ -6335,7 +6335,11 @@ async function noteBuildOutcome(
             splitAdvised: wiring ? wiring.strategy === 'split' : undefined,
             wholeAppNote: wiring?.summary ?? '',
           });
-          res.status(422).json({ error: decision.message, code: decision.code, shape: plan.shape });
+          // `keySource` travels with the refusal because the CLIENT's offer depends on it: a deploy
+          // that would run on NavBharatAI's own hosting key cannot see a service the user created in
+          // their own Render account, and the panel has to say so rather than send them to do a
+          // one-time step that could never close the loop. Null when nothing can deploy at all.
+          res.status(422).json({ error: decision.message, code: decision.code, shape: plan.shape, keySource: key?.source ?? null });
           return;
           }
         }

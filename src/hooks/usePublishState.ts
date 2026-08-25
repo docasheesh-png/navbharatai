@@ -31,6 +31,20 @@ export interface PublishStateView {
 export function usePublishState(workspaceId: string | undefined | null, refreshKey: unknown = 0): PublishStateView | null {
   const [state, setState] = useState<PublishStateView | null>(null);
 
+  /**
+   * 🔒 FORGET THE PREVIOUS APP BEFORE ASKING ABOUT THIS ONE (admin 2026-08-25).
+   *
+   * Sibling of the live-URL leak in AgentV3Panel, and the same shape: this state was per-HOOK while
+   * the thing it describes is per-WORKSPACE. The old code cleared only when `workspaceId` went EMPTY,
+   * so switching from a published app to a different one kept the first app's answer on screen through
+   * every path that returns early — a non-ok response, an unparseable body, or an offline fetch. The
+   * user then sees "published 2 minutes ago" and a green state against an app that was never published.
+   *
+   * Its own effect, keyed on the id alone, so it does NOT re-fire on `refreshKey` (a build finishing),
+   * which would blink the dot off and on mid-build for no reason.
+   */
+  useEffect(() => { setState(null); }, [workspaceId]);
+
   useEffect(() => {
     if (!workspaceId) { setState(null); return; }
     let cancelled = false;

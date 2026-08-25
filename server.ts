@@ -14,6 +14,7 @@ import { registerShareRoutes } from './src/server/routes/share';
 import { audit } from './src/server/lib/audit';
 import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
 import { securityHeadersConfig } from './src/server/lib/securityHeaders';
+import { responseCompression } from './src/server/lib/responseCompression';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
@@ -293,6 +294,10 @@ setInterval(() => {
   // directive is shaped the way it is (Firebase Auth popups, live-preview iframes, OAuth opener).
   app.use(helmet(securityHeadersConfig));
   app.use(traceMiddleware);
+  // gzip for JSON/HTML/JS/CSS — an ALLOWLIST so it can never buffer a live stream (the v5 build's
+  // text/plain NDJSON progress, chat's event-stream). See responseCompression.ts for the reasoning
+  // and the measured numbers; mounted early so it wraps routes AND the static bundle below.
+  app.use(responseCompression());
 
   // Bundled native shell CORS + OPTIONS preflight (Capacitor): for native shells (Android/iOS app)
   // whose WebView runs locally (https://localhost, capacitor://localhost), every API call is cross-origin.

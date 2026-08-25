@@ -161,7 +161,7 @@ import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
-import { decideGreenGuard, restorePlan, greenGuardMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
+import { decideGreenGuard, restorePlan, greenGuardMessage, greenGuardUnverifiedMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -15273,6 +15273,10 @@ async function noteBuildOutcome(
               const broken = regressedRoutes(previous, routeChecks);
               if (broken.length > 0) {
                 previewGreen = false; // veto: Green Guard now restores instead of protecting the damage
+                // …and this IS an observation, not ignorance: the page was opened and did not render.
+                // Without this the provenBroken rule below would downgrade a real regression to
+                // "could not check" and the veto would stop undoing anything.
+                previewProvenBroken = true;
                 buildDiag.record({
                   phase: 'preview', severity: 'warning', code: 'ROUTE_REGRESSION',
                   message: regressionMessage(broken), autoResolved: false,
@@ -15307,6 +15311,11 @@ async function noteBuildOutcome(
                 before: { green: hasSnapshot },
                 after: { green: previewGreen },
                 hasSnapshot,
+                // ONLY AN OBSERVED BREAKAGE MAY UNDO THE USER'S WORK (admin report 2026-08-25).
+                // `previewGreen: false` also covers "we never managed to look" — a paused sandbox, a
+                // dev server that stopped, a snapshot taken before the app painted. Restoring on that
+                // is what silently threw away every speed edit on a workspace whose preview was down.
+                provenBroken: previewProvenBroken,
                 // Carried so the recorded reason cannot claim more than the build itself reported.
                 ready: !buildDiag.hasUnresolvedReadinessBlocker(),
               });
@@ -15346,6 +15355,16 @@ async function noteBuildOutcome(
                 // delivered. See greenGuardHonesty.ts: from their chair, they asked for more speed,
                 // were told it was done, and nothing changed — twice.
                 greenGuardRestoreFacts = { restored: Object.keys(plan.write).length, removed: plan.remove.length };
+              } else if (hasSnapshot && !previewGreen) {
+                // KEPT, BUT UNCHECKED — and the user hears so. This is the branch that used to be a
+                // silent rollback. Saying nothing here would replace one dishonest outcome with a
+                // quieter one; the change is theirs, it stayed, and we could not confirm it.
+                events.emit({ type: 'narration', agent: 'architect', text: greenGuardUnverifiedMessage(), ts: Date.now() });
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'GREEN_GUARD_UNVERIFIED',
+                  message: 'The app could not be opened to check this turn, so the user\u2019s changes were KEPT rather than rolled back. The last known good snapshot is unchanged and still available.',
+                  autoResolved: false,
+                });
               }
             } catch { /* the guard must never cost a user their save — fall through to the plain save */ }
           }

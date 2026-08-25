@@ -147,7 +147,7 @@ function pickBestEntry(paths: string[]): string | null {
  * restore — without it the preview died with "No React entry module found" even though an entry
  * clearly exists (e.g. src/main.tsx referenced by index.html).
  */
-function findEntry(vfs: VirtualFileSystem): string | null {
+export function findReactEntry(vfs: VirtualFileSystem): string | null {
   const html = vfs.readText('index.html');
   if (html) {
     const m = html.match(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/i);
@@ -269,7 +269,7 @@ function baseStyles(vfs: VirtualFileSystem): string {
  * Returns an HTML string; if no entry module is found, falls back to a clear notice.
  */
 export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, workspaceId?: string): string {
-  const entry = findEntry(vfs);
+  const entry = findReactEntry(vfs);
 
   // Gather every source + css module so the in-browser loader can resolve imports.
   const modules: Record<string, string> = {};

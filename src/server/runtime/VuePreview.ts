@@ -38,7 +38,7 @@ export function isVueProject(vfs: VirtualFileSystem): boolean {
 }
 
 /** Find the module entry: the <script type=module src> in index.html, else common defaults. */
-function findEntry(vfs: VirtualFileSystem): string | null {
+export function findVueEntry(vfs: VirtualFileSystem): string | null {
   const html = vfs.readText('index.html');
   if (html) {
     const m = html.match(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/i);
@@ -93,7 +93,7 @@ function buildDepUrls(vfs: VirtualFileSystem): Record<string, string> {
  * Returns an HTML string; if no entry module is found, falls back to a clear notice.
  */
 export function buildVuePreview(vfs: VirtualFileSystem, _origin?: string): string {
-  const entry = findEntry(vfs);
+  const entry = findVueEntry(vfs);
 
   const modules: Record<string, string> = {};
   for (const path of vfs.paths()) {

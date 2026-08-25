@@ -41746,3 +41746,61 @@ sets it. That empty string is the revert.
 
 `npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json --noEmit` clean · `npx vitest run` —
 **1425 files, 18,080 passed, 4 skipped, 0 failed**.
+
+---
+
+## 2026-08-25 — App Mart: broken for strangers, and slow for everyone. Three PRs (#2657, #2659, #2660).
+
+**Admin report 1 (screenshot):** an app published to the store worked for its creator and showed
+*"No React entry module found"* on a third device. **Admin report 2:** *"app mart me app jaldi
+open ho, kya kuch kar sakte ho?"*
+
+### #2657 — a published app must not be judged React by its package.json
+
+`isReactProject()` decided from `package.json` dependencies — and OUR OWN builder scaffolds `react`
+into package.json even for a vanilla HTML/canvas game. The game was routed to the React renderer,
+which found no module entry and served the error to every viewer. The creator never saw it because
+their preview runs on the live sandbox dev server, not this renderer — broken only for strangers,
+which is exactly the report's shape. The publish gate (`hasRenderableEntry`) makes the SAME
+inference, so it vouched for an app the player could not render.
+
+Fix: `choosePreviewKind` picks a framework renderer only when that framework's entry actually
+RESOLVES (the entry finders are now exported and are the single source of that decision). One case
+deliberately kept as an error: an index.html pointing at a local script the tree does not contain —
+static fallback there would be a blank page instead of a message. **Method note recorded on
+purpose:** the first hypothesis (publish filter dropping the entry) was DISPROVEN by reproducing
+with the real code before fixing — an external `<script src>` resolves fine; only the inline-script
+and stray-`.jsx` shapes broke. Locked by `tests/storeAppPreviewDispatch.test.ts` (7 cases).
+
+### #2659 — gzip the serving path (app-wide, and the biggest single number of the day)
+
+Nothing compressed anything: no middleware, and Cloud Run does not compress for you. The main app
+bundle travelled at **~1.28 MB raw** where **355 KB gzipped** would do — meaning the whole
+2026-08-24 bundle-split campaign was not reaching phones — and a store page at 75–190 KB where
+21–23 KB would do (measured). The filter is an **ALLOWLIST** (json/html/js/css/svg/manifest),
+because gzip buffers output and would silently break every live stream in the product — above all
+the v5 build's NDJSON progress under `text/plain`, which would have shown a builder a dead screen
+for the whole build. Tested over a real socket, including the untouched-stream case.
+
+### #2660 — bake the store page at publish; stop queueing the client's two requests
+
+Every Cloud Run instance's first serve of an app did a whole-subcollection file read plus a
+**200–500 ms server-side compile** (measured at 5/20/40 components). The page is fully determined
+at publish time, so publish now bakes it (gzipped, one doc, version-checked) and open is one small
+doc read. Best-effort in both directions: a failed/oversize bake falls back to the compile path —
+slower, never broken — and a stale-version bake is refused. The NavData id tag is injected at serve
+time on BOTH branches so a baked app still talks to the real shared rows. Client-side,
+`WebAppPlayer` fired meta → then open sequentially; they now fire together (trade recorded: one tiny
+guaranteed-401 for private apps).
+
+### Honest corrections in the same thread
+
+- Mid-investigation I claimed viewers download the 2.9 MB Babel compiler — **wrong**; my detection
+  string was bad, precompile works, and the claim was withdrawn in the moment it was checked.
+- Apps published BEFORE #2660 have no bake; they open via the (now gzipped) compile path until
+  their next re-publish bakes them. Recorded so nobody hunts a "bake miss" bug for old listings.
+
+### Verification
+
+Each PR through the full gate: both tsc projects clean, full suite green at its head
+(#2660: **1366 files, 17,810 passed, 0 failed**), boot-check PASS on the server-touching PRs.

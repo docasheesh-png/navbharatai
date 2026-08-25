@@ -42155,3 +42155,25 @@ live-feed path is ~5s max and skips the search entirely.
 
 **Verification:** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · `npx vitest run` —
 1386 files / 18099 passed (33 new tests).
+
+**Follow-up in the same PR (admin: "sirf live train hi nahi — bus, flights, movie, show, jo jo hote
+hai sab; jo kar sakte ho karo, jo mere liye bache last me batana").** Surveyed what has a REAL, free,
+no-key data source and built `liveDataSources.ts` — live sources that work for every user from the
+moment this merges, with zero admin setup:
+- **Weather + rain** ("kanpur me barish hogi kya") — real forecast via Open-Meteo + its geocoder.
+  No place named ⇒ '' with NO network; the directive makes the model ask the city, never guess one.
+- **Air quality** ("delhi ki air quality") — real current PM2.5/PM10/US-AQI.
+- **Currency** ("dollar ka rate kitna hai") — real daily INR rates (open.er-api.com), with the honest
+  note that banks quote different buy/sell.
+- **PIN codes** ("208001 kaha ka hai") — real India Post data (api.postalpincode.in).
+- **Movies now playing in India** — real TMDB listing, env-gated by `TMDB_API_KEY` (no free no-key
+  source exists; without the key it stays on web search, a listing is never invented).
+One dispatcher (`liveDataContext`) tries transit (most specific shape) then each source; first match
+answers and the web search is skipped; '' falls through to search. Fixed hosts only (no SSRF surface),
+per-source 5s timeouts, White-Label (no supplier named in any model-facing block; test-pinned).
+**Stated plainly, not faked:** live BUS position (no reliable pan-India feed) and cinema-hall
+SHOWTIMES (no public API) stay on the search path with an honest note; gold/petrol rates likewise.
+⚠️ **Open licensing item (same class as the VirusTotal note):** Open-Meteo's no-key tier is licensed
+NON-COMMERCIAL. Fine at launch scale; before heavy traffic the admin buys its commercial plan or the
+one builder function per source is swapped to a keyed provider. Recorded here rather than left silent.
+15 new tests in `liveDataSources.test.ts` (every source: real data ⇒ block, bad/empty/dead ⇒ '').

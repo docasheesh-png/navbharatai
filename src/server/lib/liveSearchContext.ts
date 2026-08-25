@@ -15,7 +15,7 @@
 
 import { WebSearch, formatSearchResults } from '../AgentV3/WebSearch';
 import { webFetchUrl, capText } from '../AgentV3/webFetch';
-import { liveTransitContext } from './transitLive';
+import { liveDataContext } from './liveDataSources';
 
 /** Fresh-fact signals in English + Hindi/Hinglish. Kept deliberately specific to avoid over-searching. */
 const FRESH_SIGNAL =
@@ -46,6 +46,9 @@ const DAILY_LIFE_SIGNAL: RegExp[] = [
   /\b(?:bank|school|market|mandi|office)\s+(?:khul|band|open|closed|holiday|chutti|chhutti)/i,
   /\b(?:holiday|chutti|chhutti)\b.{0,20}\b(?:kab|hai|list|aaj|kal)/i,
   /\b(?:movie|film|show)\s*(?:time|timing|kab|ticket|kaun\s*si\s+lagi)/i,
+  /kaun\s*si\s+(?:movie|film|picture)|(?:nayi|naya|new|latest)\s+(?:movie|film)\b/i,
+  /\bpin\s*code\b/i,
+  /\b(?:dollar|usd|euro|pound|dirham|riyal|yen|yuan)\b.{0,24}\b(?:rate|bhav|price|kitn|inr|rupee|rupay)/i,
   /\b(?:board|exam|result|admit\s*card|merit)\b.{0,24}\b(?:kab|date|aa\s*gaya|declared|niklega|nikla)/i,
   // "Near me": the answer depends on WHERE the user is — search still helps once a place is named,
   // and the recency directive tells the model to ask for the city when none is given.
@@ -125,8 +128,8 @@ export interface LiveSearchOptions {
   readTopResult?: boolean;
   pageTimeoutMs?: number;
   fetchPage?: (url: string) => Promise<{ ok: boolean; text: string }>;
-  /** Injectable live-transit source (tests). Defaults to the real env-gated liveTransitContext. */
-  transit?: (message: string) => Promise<string>;
+  /** Injectable live-data source (tests). Defaults to the real liveDataContext dispatcher. */
+  liveData?: (message: string) => Promise<string>;
 }
 
 /** How much of the top result's page is folded into the chat context. A chat turn is not a build. */
@@ -140,12 +143,12 @@ export async function liveSearchContext(message: string, opts: LiveSearchOptions
   if (!needsLiveSearch(message)) return '';
 
   // REAL LIVE DATA FIRST (admin 2026-08-25: "train ki live location bhi bata de"). When the message
-  // names a train/PNR/flight and a live feed is configured, its data outranks anything a search
+  // matches a live source (train/PNR/flight, weather, AQI, currency, PIN code, movies), its data outranks anything a search
   // snippet can say about "right now" — and when it answers, the search is skipped entirely, so the
   // live path is FASTER than the fallback, not slower. No key / no match / feed down ⇒ '' and the
   // ordinary search below runs, exactly as before.
-  const transit = opts.transit ?? ((m: string) => liveTransitContext(m, { now: opts.now }));
-  const liveBlock = await transit(message).catch(() => '');
+  const live = opts.liveData ?? ((m: string) => liveDataContext(m, { now: opts.now }));
+  const liveBlock = await live(message).catch(() => '');
   if (liveBlock) return liveBlock;
 
   const limit = Math.max(1, Math.min(opts.limit ?? 5, 10));

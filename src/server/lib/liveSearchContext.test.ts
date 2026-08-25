@@ -127,7 +127,7 @@ describe('liveSearchContext — live transit data outranks search', () => {
     let searched = false;
     const out = await liveSearchContext('train 12301 kaha hai', {
       client: { search: async () => { searched = true; return []; } },
-      transit: async () => 'LIVE TRANSIT DATA (fetched just now, x):\n{"pos":"Kanpur"}',
+      liveData: async () => 'LIVE TRANSIT DATA (fetched just now, x):\n{"pos":"Kanpur"}',
     });
     expect(out).toContain('LIVE TRANSIT DATA');
     expect(searched).toBe(false);
@@ -136,7 +136,7 @@ describe('liveSearchContext — live transit data outranks search', () => {
   it('falls through to the ordinary search when the feed has nothing', async () => {
     const out = await liveSearchContext('train 12301 kaha hai', {
       client: stubClient([{ title: 't', url: 'https://x.test', snippet: 'status' }]),
-      transit: async () => '',
+      liveData: async () => '',
       fetchPage: async () => ({ ok: false, text: '' }),
     });
     expect(out).toContain('LIVE WEB RESULTS');
@@ -149,7 +149,7 @@ describe('liveSearchContext — reads the top result page, and degrades without 
   it('folds the page text in under TOP RESULT PAGE', async () => {
     const out = await liveSearchContext('flight AI 101 kitni late hai', {
       client: stubClient(RESULTS),
-      transit: async () => '',
+      liveData: async () => '',
       fetchPage: async (url) => ({ ok: true, text: `Flight AI101 is delayed by 40 minutes (${url})` }),
     });
     expect(out).toContain('TOP RESULT PAGE (https://status.test/x)');
@@ -159,7 +159,7 @@ describe('liveSearchContext — reads the top result page, and degrades without 
   it('a failed or slow page read still returns the snippets — never nothing', async () => {
     const out = await liveSearchContext('flight AI 101 kitni late hai', {
       client: stubClient(RESULTS),
-      transit: async () => '',
+      liveData: async () => '',
       fetchPage: async () => { throw new Error('down'); },
     });
     expect(out).toContain('LIVE WEB RESULTS');
@@ -170,7 +170,7 @@ describe('liveSearchContext — reads the top result page, and degrades without 
     let fetched = false;
     const out = await liveSearchContext('flight AI 101 kitni late hai', {
       client: stubClient(RESULTS),
-      transit: async () => '',
+      liveData: async () => '',
       readTopResult: false,
       fetchPage: async () => { fetched = true; return { ok: true, text: 'x' }; },
     });

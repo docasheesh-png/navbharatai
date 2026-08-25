@@ -41804,3 +41804,39 @@ guaranteed-401 for private apps).
 
 Each PR through the full gate: both tsc projects clean, full suite green at its head
 (#2660: **1366 files, 17,810 passed, 0 failed**), boot-check PASS on the server-touching PRs.
+
+---
+
+## 2026-08-25 — "apke prompt se ye piano banaya hai": the previous app never left (#2662)
+
+**The report disproved the complaint's premise while confirming its pain.** The admin built a UPI
+Payment API (Express, port 3000) from a dictated prompt and the preview showed their PREVIOUS app — a
+piano, at 5173 — under a React+Vite badge. The attached build report proves the API was built
+correctly: framework `node-express`, all endpoints curl-tested, `PREVIEW_PUBLISHED` at `3000-…`. The
+piano's dev server was simply STILL RUNNING in the resumed sandbox, the stored revival recipe still
+said 5173 (only a browser-verified render rewrites it — a JSON API never earns one), and a live
+listener wins every honest probe the preview door makes. **The verification worked perfectly; it
+verified the wrong app's liveness.**
+
+Fixed at the moment of proof: when `update_preview` verifies the new port UP, record-named prior
+ports are freed (never swept/guessed ones, never database ports), the stale recipe is retired
+(`supersedeRecipe` — better no recipe than a proven recipe for a dead app), the new `declaredPort` is
+recorded, and the user is told in one honest line. `previewSupersede.ts`, pure, 16 tests.
+
+**Two more roots from the same report, both OUR false alarms:**
+- `server/routes/upi.js` "missing — the app crashes at runtime": under `module: nodenext`,
+  `import './x.js'` is the REQUIRED way to import `x.ts`. The scanner never substituted extensions,
+  so a correct import was flagged and the repair CREATED a literal `.js` stub — which Node resolves in
+  preference to the real `.ts`. **The false alarm actively broke a working app.** Scanner now mirrors
+  tsc's mapping; the tail-match sees through it for JS-ish extensions only (stripping `.css` would let
+  a missing stylesheet "match" an unrelated `.ts`).
+- "1 hardcoded localhost URL": it was `console.log('http://localhost:'+PORT)` — a URL being PRINTED,
+  not called. Log lines are now skipped; a `fetch('http://localhost…')` is still flagged.
+
+**Pattern count: instances six and seven in two days** of one class — state that lives longer than
+the thing it describes (live URL, publish message, publish state, celebration, preview recipe, the
+old dev server itself; plus the trigger-mismatch family before it). 🔴 **OPEN (the standing next
+step): a guard for the CLASS.** Concretely: every per-workspace durable/in-memory record should carry
+the identity (buildId or app fingerprint) of the app it describes, and every reader should discard a
+record whose identity is not the current one — one shared helper, not per-site vigilance. Recorded
+here so the next session builds the tap-washer instead of continuing to mop.

@@ -5,8 +5,6 @@ import {
   medicalFeaturesHidden,
   visibleProfessionals,
   medicalViewBlocked,
-  professionalsCardCopy,
-  PROFESSIONALS_CARD_COPY,
 } from './playCompliance';
 
 // Google Play rejected the app update (2026-08-02, "Developer Account" — organization required for
@@ -53,15 +51,7 @@ describe('playCompliance — the native shell ships no medical features (admin 2
     expect(medicalViewBlocked('sda_chat', false)).toBe(false);
   });
 
-  it('native home-card copy never mentions a medical assistant', () => {
-    const native = professionalsCardCopy(true);
-    const all = [native.description, ...native.features].join(' ').toLowerCase();
-    expect(all).not.toContain('doctor');
-    expect(all).not.toContain('medical');
-    expect(all).not.toContain('pharma');
-  });
-
-  it('web home-card copy is today\'s copy, unchanged', () => {
-    expect(professionalsCardCopy(false)).toEqual(PROFESSIONALS_CARD_COPY.web);
-  });
+  // The Professionals HOME CARD was removed on 2026-08-25 (it moved into the Free chat's Mode
+  // picker), and its copy helpers went with it — the picker filters by MEDICAL_PROFESSIONAL_IDS
+  // directly, which the tests above already pin.
 });

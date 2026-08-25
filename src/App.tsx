@@ -28,10 +28,12 @@ import { cn } from './lib/utils';
 // Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
 // native shell so the Play Console health declarations stay truthful. Web is untouched.
 import { isNativeApp } from './lib/mobileNative';
-import { medicalViewBlocked } from './lib/playCompliance';
+import { medicalViewBlocked, medicalFeaturesHidden } from './lib/playCompliance';
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
+import { ModePickerSheet } from './components/chat/ModePickerSheet';
+import { isModeSurface, FREE_MODE_ID, NEW_FREE_MODE_ID } from './components/chat/modePicker';
 import { ReportSheet } from './components/ReportSheet';
 import { useShakeToReport } from './hooks/useShakeToReport';
 // EngineerAIChat retired — replaced by NavBharatAI Pro v5.0 (ProV3Surface).
@@ -463,6 +465,8 @@ export default function App() {
     codeReview?: import('./services/buildService').CodeReviewResult;
   }>({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
   const [sdaResetKey, setSdaResetKey] = useState(0);
+  // The Mode sheet (admin 2026-08-25): footer Mode button → pick FREE / a new FREE chat / any expert.
+  const [showModePicker, setShowModePicker] = useState(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isProLoading, setIsProLoading] = useState<boolean>(false);
   const [activeIntent, setActiveIntent] = useState<string>('social');
@@ -2814,7 +2818,6 @@ export default function App() {
                  setActiveAgent('navbharatai-pro');
                  toggleTab('nbi_pro_chat');
                }}
-               onStartProfessionals={() => toggleTab('professionals')}
                onOpenOtherAI={() => toggleTab('other_ai')}
                onOpenAppMart={() => toggleTab('appstore')}
                isAdmin={isAdmin}
@@ -3650,10 +3653,29 @@ export default function App() {
           )}
 
 
+          {/* The Mode sheet (admin 2026-08-25). Selecting navigates through the SAME toggleTab paths
+              the Professionals hub uses, so every expert opens its real chat — engine, disclaimers and
+              pass-gate untouched. "FREE +" mints a new free session; the old one stays in History. */}
+          {showModePicker && (
+            <ModePickerSheet
+              activeView={activeView}
+              hideMedical={medicalFeaturesHidden(isNativeApp())}
+              onClose={() => setShowModePicker(false)}
+              onPick={(id) => {
+                setShowModePicker(false);
+                if (id === FREE_MODE_ID) { toggleTab('nbi_chat'); return; }
+                if (id === NEW_FREE_MODE_ID) { startNewChat(); toggleTab('nbi_chat'); return; }
+                if (medicalViewBlocked(id, isNativeApp())) return; // defense in depth behind the filter
+                toggleTab(id as ViewType);
+              }}
+            />
+          )}
           {activeView === 'report' && <ReportsListView user={user} />}
           {activeView === 'history' && (historyInitialFilter === 'professional'
             ? <ProfessionalHistoryView onOpen={(id) => toggleTab(id as ViewType)} onBack={() => toggleTab('professionals')} />
-            : <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} lockFilter={historyInitialFilter === 'free'} />)}
+            : <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} lockFilter={historyInitialFilter === 'free'}
+                includeProfessionals={historyInitialFilter === 'free'}
+                onOpenProfessional={(viewId) => toggleTab(viewId as ViewType)} />)}
 
           {activeView === 'deploy' && (
             <DeploySuccessPanel
@@ -3872,35 +3894,36 @@ export default function App() {
                 {active && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
               </button>
             ))
-          ) : (activeView === 'nbi_chat' || activeView === 'professionals') ? (
-            // Per-AI footer (admin 2026-07-28): NavBharatAI Free and Professional get a focused, dynamic
-            // nav — History / AI / Mode (coming soon) / Settings. Home stays reachable from the ☰ / logo above.
+          ) : isModeSurface(activeView) ? (
+            // Per-AI footer (admin 2026-07-28; Mode made REAL 2026-08-25): NavBharatAI Free, the
+            // Professionals hub, Doctor AI and every professional chat share a focused nav —
+            // History / AI / Mode / Settings. Mode opens the picker (FREE / new FREE chat / any
+            // expert); it is the professionals' new front door now that the Home tile is gone.
             [
-              { key: 'history',  id: 'history' as ViewType,  icon: History,   label: 'History',  comingSoon: false },
-              { key: 'ai',       id: (activeView === 'professionals' ? 'professionals' : 'nbi_chat') as ViewType, icon: activeView === 'professionals' ? Briefcase : MessageSquare, label: 'AI', comingSoon: false },
-              { key: 'mode',     id: null,                    icon: Layers,    label: 'Mode',     comingSoon: true },
-              { key: 'settings', id: 'settings' as ViewType, icon: Settings,  label: 'Settings', comingSoon: false },
-            ].map(({ key, id, icon: Icon, label, comingSoon }) => {
-              const isActive = !comingSoon && id != null && activeView === id;
+              { key: 'history',  id: 'history' as ViewType,  icon: History,   label: 'History' },
+              { key: 'ai',       id: activeView,              icon: activeView === 'nbi_chat' ? MessageSquare : Briefcase, label: 'AI' },
+              { key: 'mode',     id: null,                    icon: Layers,    label: 'Mode' },
+              { key: 'settings', id: 'settings' as ViewType, icon: Settings,  label: 'Settings' },
+            ].map(({ key, id, icon: Icon, label }) => {
+              const isActive = key === 'ai' ? true : (id != null && activeView === id);
               return (
                 <button
                   key={key}
-                  disabled={comingSoon}
                   onClick={() => {
-                    if (comingSoon) { addToast('Mode switching — coming soon', 'info'); return; }
-                    // History is SCOPED to where it was opened from (admin 2026-08-11): NavBharatAI Free
-                    // shows ONLY Free sessions; Professionals shows ONLY professional conversations — never
-                    // the whole app's history.
-                    if (id === 'history') setHistoryInitialFilter(activeView === 'nbi_chat' ? 'free' : activeView === 'professionals' ? 'professional' : 'all');
+                    if (key === 'mode') { setShowModePicker(true); return; }
+                    // History scoping (admin 2026-08-11, amended 2026-08-25): the FREE surface now shows
+                    // Free + Doctor + every professional conversation, each with its mode tag — one
+                    // unified list ("free ki history me sabhi ayegi tag ke sath"). The Professionals
+                    // hub keeps its professional-only view.
+                    if (id === 'history') setHistoryInitialFilter(activeView === 'professionals' ? 'professional' : 'free');
                     if (id) toggleTab(id);
                   }}
                   aria-label={label}
                   aria-current={isActive ? 'page' : undefined}
-                  className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${isActive ? 'text-indigo-400' : comingSoon ? 'text-white/20' : 'text-[#484f58]'}`}
+                  className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${isActive ? 'text-indigo-400' : 'text-[#484f58]'}`}
                 >
                   <span className="relative inline-flex">
                     <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />
-                    {comingSoon && <span className="absolute -top-2 -right-3 text-[6px] font-black text-amber-400/80 uppercase tracking-tight">soon</span>}
                   </span>
                   <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${isActive ? 'text-indigo-400' : ''}`}>{label}</span>
                   {isActive && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}

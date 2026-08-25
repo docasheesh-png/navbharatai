@@ -46,23 +46,3 @@ export function medicalViewBlocked(view: string, hideMedical: boolean): boolean 
   return hideMedical && MEDICAL_PROFESSIONAL_IDS.has(view);
 }
 
-/**
- * Home-screen copy for the Professionals card. The default copy advertises "Doctor AI" by name —
- * inside the Play app that would advertise a medical feature the declarations say does not exist,
- * so the native shell gets equivalent copy with no medical mention.
- */
-export const PROFESSIONALS_CARD_COPY = {
-  web: {
-    description: 'Dedicated AI experts for every life domain — Doctor, Lawyer, Teacher, Financial Advisor, Kisan Advisor, and 45+ more.',
-    features: ['Doctor AI, Lawyer AI, Teacher AI', 'Kisan, Finance, Career & Wellness', 'Answers in Hindi + regional languages'],
-  },
-  native: {
-    description: 'Dedicated AI experts for every life domain — Lawyer, Teacher, Financial Advisor, Kisan Advisor, and 40+ more.',
-    features: ['Lawyer AI, Teacher AI, Career AI', 'Kisan, Finance, Travel & Wellness', 'Answers in Hindi + regional languages'],
-  },
-} as const;
-
-/** Pick the Professionals card copy for the current surface. */
-export function professionalsCardCopy(hideMedical: boolean): { description: string; features: readonly string[] } {
-  return hideMedical ? PROFESSIONALS_CARD_COPY.native : PROFESSIONALS_CARD_COPY.web;
-}

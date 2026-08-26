@@ -32,6 +32,7 @@ import { medicalViewBlocked, medicalFeaturesHidden } from './lib/playCompliance'
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
+import { MOBILE_NAV_TOTAL_HEIGHT } from './lib/mobileNav';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
 import { isModeSurface, FREE_MODE_ID, NEW_FREE_MODE_ID } from './components/chat/modePicker';
 import { ReportSheet } from './components/ReportSheet';
@@ -2806,8 +2807,12 @@ export default function App() {
           // (fixed below), and Code Studio again on 2026-08-04 — the global nav was hidden inside the
           // IDE without dropping its 56px reservation, so Code Studio's own footer floated 56px above
           // the screen edge with a dead strip beneath it. A shared boolean makes that drift impossible.
-          showsGlobalMobileNav ? "pb-14" : ""
-        )}>
+          // Height comes from the SHARED constant, never a hand-typed pb-14: the bar is 3.5rem PLUS the
+          // device's home-indicator inset, and reserving only the 3.5rem hid the composer by exactly
+          // the inset on every iPhone. See lib/mobileNav.ts.
+          ""
+        )}
+        style={showsGlobalMobileNav ? { paddingBottom: MOBILE_NAV_TOTAL_HEIGHT } : undefined}>
           {activeView === 'home' && (
              <HomeView
                onStartChat={() => {
@@ -3855,7 +3860,7 @@ export default function App() {
             // Adding the safe-area to the height (instead of the old fixed h-14 with padding eating INTO it
             // under box-sizing:border-box) stops the icons/labels from being squeezed and poking above the
             // top border — so it reads as a clean native tab bar (admin 2026-07-15).
-            height: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))',
+            height: MOBILE_NAV_TOTAL_HEIGHT,
             paddingBottom: 'env(safe-area-inset-bottom, 0px)',
           }}
         >

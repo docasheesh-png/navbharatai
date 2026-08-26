@@ -132,7 +132,19 @@ describe('Phone bottom-tab IDE', () => {
     // floating the IDE's own footer off the screen edge with a dead strip beneath it.
     const app = readFileSync(join(__dirname, '../src/App.tsx'), 'utf8');
     expect(app).toContain('const showsGlobalMobileNav');
-    expect(app).toContain('showsGlobalMobileNav ? "pb-14" : ""');
+    expect(app).toContain('showsGlobalMobileNav ? { paddingBottom: MOBILE_NAV_TOTAL_HEIGHT } : undefined');
     expect(app).toContain('{showsGlobalMobileNav && (');
+  });
+
+  it('…and ONE height, which is the half that was still drifting', () => {
+    // The flag fixed WHETHER the bar exists. It said nothing about HOW TALL it is, and the two
+    // disagreed: the bar is `3.5rem + env(safe-area-inset-bottom)`, the reservation was a bare
+    // `pb-14` — so on every iPhone the page's bottom row (the Professionals composer) was hidden by
+    // exactly the home-indicator inset. Admin screenshot, TestFlight, 2026-08-25.
+    const app = readFileSync(join(__dirname, '../src/App.tsx'), 'utf8');
+    expect(app).not.toContain('showsGlobalMobileNav ? "pb-14"');
+    // Import + the bar's own height + the page reservation.
+    expect(app.split('MOBILE_NAV_TOTAL_HEIGHT').length - 1).toBeGreaterThanOrEqual(3);
+    expect(app).not.toContain("height: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))'");
   });
 });

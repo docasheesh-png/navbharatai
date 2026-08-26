@@ -6,7 +6,7 @@
 // build never writes — so the preview looked permanently "disconnected" from the v5.0 engine.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RotateCcw, ExternalLink, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles } from 'lucide-react';
+import { RotateCcw, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles } from 'lucide-react';
 import { canOfferRestart, restartStatusLine } from './previewRestart';
 import { nextDoorUrl } from './previewDoorClient';
 import { resolveApiHref } from '../../lib/apiBase';
@@ -377,12 +377,6 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // render is exactly the contradiction the Mitrify report ended in.
   const refusal = inBrowserRefusal({ framework, browserRunnable, browserBlockedReason, hasBackend, backendReason });
   const effectiveUrl = foundUrl || url;
-  /**
-   * Where "open in new tab" points. The door when the server has offered one, the raw url otherwise —
-   * the same precedence the iframe already uses, so the two can never disagree about which host the
-   * user is looking at.
-   */
-  const popoutHref = doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl;
   /**
    * Would framing right now mean pointing at a RAW machine address nobody has checked?
    *
@@ -1176,18 +1170,23 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             </button>
           )}
           {/*
-            THE POPOUT GOES THROUGH THE DOOR, exactly like the iframe beside it.
-            Root cause (admin report 2026-08-23, a finished app breaking under its user after ~5 min):
-            this link handed out the RAW sandbox url, so a popped-out tab bypassed both of the door's
-            guarantees. It got the vendor's "Sandbox not found" instead of our branded retry page when
-            the machine was asleep — the screenshot this codebase has been chasing all week — and it
-            carried none of our JavaScript, so while the user sat there using their app, every one of
-            the six conditions gating the keep-alive watchdog was false and the idle sweep paused the
-            machine underneath them. Through the door, a top-level navigation is served the keep-alive
-            shell (see server/AgentV3/previewKeepAlive.ts) and the sandbox stays up while it is watched.
-            `effectiveUrl` remains the fallback for the case the door is off or has not been offered.
+            THERE IS NO "OPEN IN NEW TAB" HERE ANY MORE, AND THAT IS THE POINT (admin 2026-08-25:
+            "ham, band karo! share link hi hata do!!").
+
+            A preview runs on a development machine billed BY THE MINUTE, while a PUBLISHED app is
+            static files that cost nothing per visitor. So this button was the one place NavBharatAI
+            handed the user a url that, if forwarded to an audience, put other people's traffic on our
+            bill — and it was never what the sharer actually wanted, because Publish gives them
+            something faster and permanent instead.
+
+            The button is gone, but the button was never the lock: the same url is visible to anyone
+            who opens developer tools. The real rule lives in the door route, which refuses a
+            top-level navigation BEFORE it touches a machine, so an outside open costs zero. Removing
+            this is what stops us OFFERING the link; that check is what makes it not work.
+
+            To share an app: Publish. To view your own app large: the preview panel widens, and the
+            split divider drags.
           */}
-          <a href={popoutHref} target="_blank" rel="noreferrer" className="shrink-0 flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
         </div>
         {paidNote}
         {/* A restart is a 30–90s sandbox reboot. A spinner alone for that long is indistinguishable

@@ -50,6 +50,18 @@ export function previewDoorEnabled(env: NodeJS.ProcessEnv = process.env): boolea
   return String(env.AGENTV3_PREVIEW_DOOR ?? '').trim().toLowerCase() !== 'off';
 }
 
+/**
+ * Is a preview link refused when opened OUTSIDE NavBharatAI? Default ON — this IS the fix.
+ *
+ * `off` restores the old behaviour without a deploy, exactly like every other switch in this project.
+ * It exists because this rule locks a door, and a rule that locks a door must have a key: if a real
+ * user turns out to depend on opening their own preview in a tab, the admin can hand it back in
+ * seconds rather than wait for a release.
+ */
+export function previewInAppOnly(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_PREVIEW_IN_APP_ONLY ?? '').trim().toLowerCase() !== 'off';
+}
+
 /** Dev-only fallback secret. Random per process ON PURPOSE: it must never be a guessable constant. */
 const processSecret = randomBytes(32).toString('hex');
 
@@ -108,7 +120,21 @@ export type DoorPageKind =
   /** A machine exists but nothing is serving yet — the watchdog/wake is bringing it up. */
   | 'starting'
   /** The link is invalid or expired — reopen the preview from inside NavBharatAI. */
-  | 'refused';
+  | 'refused'
+  /**
+   * The link was opened OUTSIDE NavBharatAI — a copied or forwarded preview url.
+   *
+   * ADMIN 2026-08-25, on being told a shared preview link is the one way an end user can spend our
+   * money: "ham, band karo! share link hi hata do!!"
+   *
+   * A preview is a DEVELOPMENT machine that bills by the minute while it runs. A published app is
+   * static files that cost nothing per player. So a preview url handed to an audience is the one
+   * shape where somebody else's traffic lands on NavBharatAI's bill — and it is never what the
+   * sharer actually wanted, because Publish gives them something faster and permanent.
+   *
+   * This page is served BEFORE any machine is touched, so an outside open costs exactly nothing.
+   */
+  | 'in-app-only';
 
 /** Self-refresh attempts before the waiting pages STOP retrying on their own. See doorPage. */
 export const DOOR_RETRY_CAP = 20;
@@ -133,7 +159,7 @@ export const DOOR_RETRY_SECONDS = 6;
  * The counter lives in sessionStorage, which is per-tab and survives the page replacing itself.
  */
 export function doorPage(kind: DoorPageKind): string {
-  const retryScript = kind === 'refused' ? '' : `<script>(function(){
+  const retryScript = (kind === 'refused' || kind === 'in-app-only') ? '' : `<script>(function(){
   try {
     var k='nbai:door-tries:'+location.search;
     var n=Number(sessionStorage.getItem(k)||'0')+1;
@@ -151,12 +177,16 @@ export function doorPage(kind: DoorPageKind): string {
     ? 'Your preview is waking up'
     : kind === 'starting'
       ? 'Your app is starting'
-      : 'Open the preview from NavBharatAI';
+      : kind === 'in-app-only'
+        ? 'Previews open inside NavBharatAI'
+        : 'Open the preview from NavBharatAI';
   const body = kind === 'asleep'
     ? 'It went to sleep while nobody was looking — that keeps it free when idle. Reconnecting now; this page retries by itself. Your app and its files are safe.'
     : kind === 'starting'
       ? 'The server is coming up. This page retries by itself and will show your app the moment it answers. If it takes more than a minute, go back to NavBharatAI and press Wake up.'
-      : 'This preview link has expired. Open your app in NavBharatAI and the preview will reconnect with a fresh one.';
+      : kind === 'in-app-only'
+        ? 'A preview is a private workbench for the person building the app, so it only opens inside NavBharatAI. To share your app with other people, open it in NavBharatAI and press Publish — a published app is faster, has its own permanent link, and stays up on its own.'
+        : 'This preview link has expired. Open your app in NavBharatAI and the preview will reconnect with a fresh one.';
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NavBharatAI Preview</title><style>
   html,body{height:100%;margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e6edf3}
   .wrap{height:100%;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center}
@@ -167,5 +197,5 @@ export function doorPage(kind: DoorPageKind): string {
   p{font-size:13px;line-height:1.6;color:#8b949e;margin:0}
   @media (prefers-color-scheme: light){html,body{background:#f6f8fa;color:#1f2328}.spin{border-color:#d0d7de;border-top-color:#4f6ef7}p{color:#57606a}}
   a.retry{display:none;margin-top:14px;font-size:13px;color:#4f6ef7;text-decoration:underline;cursor:pointer}
-  </style></head><body><div class="wrap"><div class="card">${kind === 'refused' ? '' : '<div class="spin" id="s"></div>'}<h1 id="h">${heading}</h1><p id="p">${body}</p><a class="retry" id="r" href="#">Try again</a></div></div>${retryScript}</body></html>`;
+  </style></head><body><div class="wrap"><div class="card">${(kind === 'refused' || kind === 'in-app-only') ? '' : '<div class="spin" id="s"></div>'}<h1 id="h">${heading}</h1><p id="p">${body}</p><a class="retry" id="r" href="#">Try again</a></div></div>${retryScript}</body></html>`;
 }

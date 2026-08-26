@@ -313,8 +313,8 @@ import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
 import { buildRecipe, revivalConfirmedMessage, revivalUnconfirmedMessage } from '../AgentV3/previewRevival';
 import { comparePreviewUrl, measurementDescribesUserView, stalePreviewMessage } from '../AgentV3/previewUrlFreshness';
-import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage } from '../AgentV3/previewDoor';
-import { previewKeepAliveEnabled, isTopLevelNavigation, shouldServeKeepAliveShell, keepAliveShellPage } from '../AgentV3/previewKeepAlive';
+import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage, previewInAppOnly } from '../AgentV3/previewDoor';
+import { previewKeepAliveEnabled, isTopLevelNavigation } from '../AgentV3/previewKeepAlive';
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
 import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE } from '../AgentV3/previewSnapshot';
@@ -4174,7 +4174,7 @@ async function noteBuildOutcome(
   app.get('/api/agentv3/preview-door', previewPollRateLimiter(), async (req: Request, res: Response) => {
     // The 302 target changes whenever the machine does — a cached redirect would BE the stale-url bug.
     res.setHeader('Cache-Control', 'no-store');
-    const page = (status: number, kind: 'asleep' | 'starting' | 'refused') =>
+    const page = (status: number, kind: 'asleep' | 'starting' | 'refused' | 'in-app-only') =>
       res.status(status).type('html').send(doorPage(kind));
     try {
       if (!previewDoorEnabled()) return page(404, 'refused');
@@ -4182,6 +4182,27 @@ async function noteBuildOutcome(
       if (!verifyDoorToken(ws, typeof req.query?.exp === 'string' ? req.query.exp : null,
         typeof req.query?.sig === 'string' ? req.query.sig : null, doorSecret(), Date.now())) {
         return page(403, 'refused');
+      }
+      // ── A PREVIEW LINK IS NOT SHAREABLE, AND THAT IS ENFORCED HERE, NOT BY HIDING A BUTTON ───────
+      // ADMIN 2026-08-25: "ham, band karo! share link hi hata do!!" — after establishing that a
+      // published game costs us no compute at all, while a FORWARDED PREVIEW url is the one path by
+      // which other people's traffic reaches a machine NavBharatAI is billed for by the minute.
+      //
+      // Removing the popout button alone would have been a surface patch: the url is also visible to
+      // anyone who opens developer tools or long-presses the frame, so the capability would have
+      // survived the button by minutes. The door itself has to refuse.
+      //
+      // The signal is the browser's own `sec-fetch-dest`, which our in-app iframe sends as `iframe`
+      // and an address-bar open sends as `document`. `isTopLevelNavigation` returns FALSE when the
+      // header is ABSENT — deliberately lenient, because a browser too old to send it must keep its
+      // preview working (rule 1) rather than be locked out to close a cost leak. That is an honest
+      // limit, not an oversight: on such a browser a forwarded link still opens.
+      //
+      // 🔒 PLACED BEFORE `buildActuator()` ON PURPOSE. Everything below this line touches the machine —
+      // connecting RESUMES a paused one and the port sweep is itself billed activity — so refusing
+      // here is what makes an outside open cost exactly zero rather than merely end in a refusal.
+      if (previewInAppOnly() && isTopLevelNavigation(req.headers['sec-fetch-dest'] as string | undefined)) {
+        return page(403, 'in-app-only');
       }
       const actuator = buildActuator();
       // ONE record read for the whole request: the snapshot fallback and the declared-port hint both
@@ -4247,25 +4268,13 @@ async function noteBuildOutcome(
       const live = await raceTimeout(actuator.getPortUrl(ws, found), 5_000, 'doorPortUrl').catch(() => '');
       if (!live) return page(200, 'starting');
       const target = applyPreviewDomain(String(live));
-      // A POPPED-OUT tab gets the keep-alive shell instead of a bare redirect; our own iframe keeps the
-      // 302 byte-for-byte. See previewKeepAlive.ts: the tab a user actually watches their app in is the
-      // only place that can honestly say "someone is using this", and until now it was the one place
-      // with none of our JavaScript in it — which is how the idle sweep paused a machine mid-use.
-      if (shouldServeKeepAliveShell({
-        enabled: previewKeepAliveEnabled(),
-        topLevel: isTopLevelNavigation(req.headers['sec-fetch-dest'] as string | undefined),
-        targetUrl: target,
-      })) {
-        const q = new URLSearchParams({
-          ws,
-          exp: String(req.query?.exp ?? ''),
-          sig: String(req.query?.sig ?? ''),
-        }).toString();
-        return res.status(200).type('html').send(keepAliveShellPage({
-          targetUrl: target,
-          keepAlivePath: `/api/agentv3/preview-keepalive?${q}`,
-        }));
-      }
+      // THE KEEP-ALIVE SHELL USED TO BE SERVED HERE, and it is deliberately gone (admin 2026-08-25).
+      // Its only consumer was a popped-out tab, which the in-app-only rule above now refuses before
+      // this point is ever reached — so serving it would be dead code pretending to be live. It was
+      // also the UNBOUNDED half of the cost: a shared link left open in a tab did not merely resume a
+      // machine once, it held it awake indefinitely, on our bill, for as long as that tab lived.
+      // `previewKeepAlive.ts` and its endpoint are kept intact so the popout can be restored in one
+      // change if it is ever wanted for the app's OWNER; nothing here calls them today.
       return res.redirect(302, target);
     } catch {
       // Whatever went wrong, the answer is still OUR page — the vendor's edge is never the fallback.

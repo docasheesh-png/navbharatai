@@ -38,7 +38,11 @@ describe('1. NavBharatAI no longer hands out a shareable preview link', () => {
   });
 
   it('the iframe — the one legitimate consumer — still goes through the door', () => {
-    expect(surface).toContain('src={doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl}');
+    // Asserts the door PRECEDENCE, not the whole src expression: another session has since added an
+    // idle-snapshot fallback in front of it, and pinning the full string made this fail on a change
+    // that had nothing to do with the rule being protected here.
+    expect(surface).toContain('doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl');
+    expect(surface).toContain('<iframe key={liveReloadKey}');
   });
 });
 

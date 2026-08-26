@@ -60,6 +60,26 @@ export const INDIA_TERRITORIAL_INTEGRITY =
  * This is an honesty directive: it does not fetch live data, but it stops the AI from stating old
  * information as if it were the latest, and makes it flag its own recency limits.
  */
+/**
+ * REAL, WORKING LINKS — AND NEVER AN INVENTED ONE (admin 2026-08-25: "navbharatai website ke link
+ * provide nahi karwati hai … real/realtime working links provide karne layak banao, har ek ai ko").
+ *
+ * 🔒 THE ONE RULE THAT MAKES THIS SAFE. A link is a CLAIM: tap it and either the page is there or the
+ * user has been sent nowhere. A model asked for links without this constraint will happily compose a
+ * plausible-looking URL from a real domain and an invented path — which is a fabricated fact wearing
+ * a blue underline, and worse than giving no link at all, because the user cannot tell. So a URL may
+ * be given ONLY when it was in the live results this conversation was handed, or when it is a
+ * well-known site's HOME page. Everything else is named in words, not linked.
+ *
+ * Shared by every chat surface, so a new AI cannot ship with a different link policy.
+ */
+export const LINK_POLICY = `LINKS (MANDATORY):
+- When your answer uses live web results or names a website/portal/service, GIVE THE REAL LINK, using markdown: [Site name](https://exact-url).
+- 🔒 ONLY link a URL that (a) appears verbatim in the live results provided in this conversation, or (b) is a well-known site's HOME page you are certain of (e.g. https://www.irctc.co.in, https://enquiry.indianrail.gov.in, https://www.indiapost.gov.in). NEVER build a URL by guessing a path, an id, a date or a query — a link that 404s is worse than no link.
+- If you are not certain a link is correct, NAME the site and tell the user what to search there instead of linking. Say nothing you cannot stand behind.
+- When live results informed a time-sensitive answer, end with a short "Sources:" line listing those links, so the user can verify today's facts themselves.
+- Never link to a login, payment or password page, and never wrap a link in urgent wording ("act now") — that is the shape of a scam, whatever the source.`;
+
 export function recencyDirective(now: Date = new Date()): string {
   let today: string;
   try {

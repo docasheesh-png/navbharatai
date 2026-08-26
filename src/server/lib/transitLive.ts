@@ -87,9 +87,9 @@ export function buildTransitRequest(q: TransitQuery, rapidApiKey: string, now: D
 /** The one line the model needs about where the OFFICIAL truth lives, per query kind. PURE. */
 export function officialSourceNote(kind: TransitQuery['kind']): string {
   switch (kind) {
-    case 'train': return 'Official source for Indian train running status: enquiry.indianrail.gov.in (NTES).';
-    case 'pnr': return 'Official source for PNR status: the IRCTC website/app.';
-    case 'flight': return "Official source for flight status: the airline's own site/app or the airport's live board.";
+    case 'train': return 'Official source for Indian train running status: [NTES](https://enquiry.indianrail.gov.in). Give the user this link.';
+    case 'pnr': return 'Official source for PNR status: [IRCTC](https://www.irctc.co.in). Give the user this link.';
+    case 'flight': return "Official source for flight status: the airline's own site/app or the airport's live board — name the airline and link its home page only if you are certain of it.";
   }
 }
 

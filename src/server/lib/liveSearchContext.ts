@@ -184,5 +184,7 @@ export async function liveSearchContext(message: string, opts: LiveSearchOptions
   return `LIVE WEB RESULTS (fetched just now, ${when}):
 ${formatSearchResults(query, results)}${pageBlock}
 
-Use these CURRENT results as your PRIMARY source for anything time-sensitive in your answer — they are more up to date than your training data and override it on facts they cover. If they don't answer the question, say what you reliably know and that it may be dated. Do not mention that you searched the web unless the user asks.`;
+Use these CURRENT results as your PRIMARY source for anything time-sensitive in your answer — they are more up to date than your training data and override it on facts they cover. If they don't answer the question, say what you reliably know and that it may be dated.
+
+CITE THEM: give the real links you actually used, as markdown ([Site name](url)), and end with a short \"Sources:\" line carrying those links so the user can check today's facts themselves. Copy each URL EXACTLY as it appears above — never edit, shorten or invent one. Do not name any AI model or provider; naming the WEBSITE a fact came from is expected and required.`;
 }

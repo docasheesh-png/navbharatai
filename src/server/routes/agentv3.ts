@@ -363,7 +363,7 @@ import { wakePublicState, sanitizeWakeError, type TerminalWakeState } from '../A
 import { checkPreviewCompiles, previewCompileRepairInstruction, previewDivergenceBlocksDelivery, previewCompileUnresolvedSummary } from '../runtime/PreviewCompileCheck';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
-import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
+import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
@@ -7714,7 +7714,7 @@ async function noteBuildOutcome(
               LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' +
                 "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
                 "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
-                "mention which model you are.\n\n" + CREATOR_IDENTITY + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + recencyDirective() + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +
+                "mention which model you are.\n\n" + CREATOR_IDENTITY + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + recencyDirective() + '\n\n' + LINK_POLICY + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +
                 (ambiguousBuildAsk
                   ? "\n\nThis message was ambiguous — it might be a request to build or change something "
                     + "in the user's app, phrased in an unusual way, OR it might just be a genuine "

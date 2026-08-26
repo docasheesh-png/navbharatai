@@ -42222,3 +42222,43 @@ tile); and the Free chat's History shows EVERYTHING (free + professionals) with 
 
 **Verification:** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · `npm run build` ✅ ·
 `npx vitest run` — 1389 files / 18127 passed.
+
+## 2026-08-25 — every AI gives REAL, tappable links (admin: "link provide nahi karwati hai … har ek ai ko")
+
+**Root cause was TWO independent halves, and either one alone made the other useless.**
+
+**Half 1 — the prompt actively SUPPRESSED citations.** `liveSearchContext`'s grounding block ended
+with *"Do not mention that you searched the web unless the user asks."* Written to protect provider
+anonymity, it also silenced the SOURCE LINKS — but the White-Label Law is about WHICH AI ran, never
+about where a fact came from. Naming the website is expected; naming the model is not. Nothing
+anywhere asked for links at all.
+
+**Half 2 — three of the four surfaces could not RENDER a link.** Free chat renders markdown (fine).
+But **Professionals** (74 experts) and the **v5 chat** render `whitespace-pre-wrap` PLAIN TEXT, so any
+URL was dead text nobody could tap; **Doctor AI** rendered markdown with the DEFAULT anchor, which on
+a phone navigates the app's own webview away from NavBharatAI.
+
+**Shipped:**
+- `src/lib/linkify.tsx` (pure + tested): `splitLinks` understands bare URLs, bare `www.` hosts
+  (upgraded to https rather than left dead) and markdown `[label](url)` — the last matters because the
+  models are told to cite in markdown and these surfaces do not render it, so a correct citation would
+  otherwise show as literal brackets. `trimUrlTail` gives trailing punctuation back to the sentence
+  while keeping balanced brackets (Wikipedia titles). **Only http/https ever becomes an anchor** —
+  `javascript:`/`data:`/`vbscript:` stay readable plain text, which is a real XSS path closed once
+  rather than per-surface. Every link: new tab + `rel="noopener noreferrer"`.
+- Wired into `ProfessionalChat` (all 74 experts), `FoldableMessage` (the v5 chat's one shared message
+  body) and `SDAChat`'s markdown anchor.
+- `LINK_POLICY` in `prompts.ts`, added to ALL FOUR surfaces (chat.ts, professionals/engine.ts,
+  sda.ts, agentv3.ts). **Its load-bearing rule: a URL may be given only when it appeared verbatim in
+  the live results, or is a well-known site's HOME page — never composed by guessing a path, id, date
+  or query.** A model asked for links without that constraint invents plausible URLs, and a fabricated
+  fact wearing a blue underline is worse than no link because the user cannot tell. Not certain ⇒ name
+  the site in words. Never link a login/payment/password page.
+- The live-search block now says CITE THEM (markdown + a short "Sources:" line, URLs copied exactly),
+  and states both halves of the anonymity rule so they cannot be confused again.
+- The live-data blocks link their official sources: NTES, IRCTC, IMD, CPCB.
+- AppKnowledgeBase: new bullet describing the capability AND its honest limit, so every AI explains it
+  the same way.
+
+**Verification:** `tsc` both projects ✅ · `npm run build` ✅ · unused-import gate ✅ ·
+`npx vitest run` — 1391 files / 18161 passed (21 new tests: `linkify.test.ts`, `linkPolicy.test.ts`).

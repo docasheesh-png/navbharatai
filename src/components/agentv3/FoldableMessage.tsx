@@ -3,6 +3,7 @@
 // The fold DECISION is a pure, unit-tested helper; the component is a thin wrapper around it.
 
 import { useState } from 'react';
+import { LinkedText } from '../../lib/linkify';
 
 const FOLD_CHARS = 700;
 const FOLD_LINES = 12;
@@ -22,11 +23,13 @@ export function shouldFoldMessage(text: string, maxChars = FOLD_CHARS, maxLines 
  */
 export function FoldableMessage({ text, className }: { text: string; className?: string }) {
   const [expanded, setExpanded] = useState(false);
-  if (!shouldFoldMessage(text)) return <div className={className}>{text}</div>;
+  // Links are REAL here (admin 2026-08-25): the v5 chat renders plain text, so a URL the builder
+  // wrote used to be untappable. LinkedText emits only strings and anchors — wrapping is unchanged.
+  if (!shouldFoldMessage(text)) return <div className={className}><LinkedText text={text} /></div>;
   return (
     <div>
       <div className={className} style={expanded ? undefined : { maxHeight: '15rem', overflow: 'hidden' }}>
-        {text}
+        <LinkedText text={text} />
       </div>
       <button
         type="button"

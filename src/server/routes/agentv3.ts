@@ -214,6 +214,10 @@ import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
 import { publishedAppCap } from '../lib/HostingQuota';
 import { hostingPlansEnabled, hostingPlanPriceInr } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
+import {
+  buildOutputCandidates, buildOutputCensusCommand, readBuildOutputCensus, builtSiteRefusal,
+  configDumpCommand, parseConfigDump,
+} from '../AgentV3/builtSiteCheck';
 import { pickerItems } from '../../lib/reportPicker';
 import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } from '../AgentV3/SpaFallbackAnalysis';
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
@@ -6446,16 +6450,27 @@ async function noteBuildOutcome(
       // replays SOURCE files, never dist/). This does not guess between them — it states the fact and
       // hands over the build's own words, which is what makes the next report diagnosable instead of
       // another round of hypotheses.
-      const outDirs = await actuator.runCommand(workspaceId, 'ls -d dist out build .output .next 2>/dev/null | head -5');
-      if (!outDirs.stdout.trim()) {
-        const buildSaid = (build.stdout || build.stderr || '').trim().split('\n').slice(-20).join('\n');
-        res.status(422).json({
-          error: 'Your app compiled without errors but produced no website files, so there is nothing to publish yet.',
-          detail: [
-            'Checked for: dist/, out/, build/, .output/, .next/ — none exist.',
-            buildSaid ? `\nWhat the build printed:\n${buildSaid}` : '',
-          ].join('\n').slice(0, 4000),
-        });
+      // ⚠️ THIS GATE USED TO BE AN `ls -d` OVER FIVE FIXED FOLDER NAMES, AND IT WAS WRONG TWICE OVER
+      // (admin 2026-08-25, publishing an app: the deploy died on the vendor's raw "No build output
+      // found in dist/ or out/ … dist/ and out/ are empty or do not exist" — i.e. the gate whose whole
+      // job is to catch that earlier had waved it through).
+      //
+      //   1. `ls -d` proves a directory EXISTS, not that it CONTAINS a site. A workspace reused for a
+      //      second app keeps the first one's `dist/`, and a build that creates its output folder then
+      //      fails to fill it leaves the same trace. Both satisfied the old check.
+      //   2. The list disagreed with what the upload actually reads. See builtSiteCheck.ts.
+      //
+      // Both halves now come from ONE shared module, and the census counts FILES.
+      const cfgDump = await actuator.runCommand(workspaceId, configDumpCommand())
+        .catch(() => ({ stdout: '', stderr: '', exitCode: 1 }));
+      const publishFiles = parseConfigDump(cfgDump.stdout);
+      const outCandidates = buildOutputCandidates(publishFiles);
+      const census = await actuator.runCommand(workspaceId, buildOutputCensusCommand(outCandidates));
+      const siteVerdict = readBuildOutputCensus(census.stdout);
+      const buildSaid = (build.stdout || build.stderr || '').trim().split('\n').slice(-20).join('\n');
+      const refusal = builtSiteRefusal(siteVerdict, buildSaid, { checked: outCandidates, files: publishFiles });
+      if (refusal) {
+        res.status(422).json({ error: refusal.error, detail: refusal.detail.slice(0, 4000) });
         return;
       }
 

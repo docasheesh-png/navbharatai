@@ -62,17 +62,24 @@ describe('Publish seeds the sandbox before it builds', () => {
     // "Could not read the built site: exit status 1". Between those two facts the route knew nothing,
     // because a SUCCESSFUL build's output was discarded — so the one piece of evidence that explains
     // this class did not exist by the time anyone needed it.
+    //
+    // ⚠️ RE-ANCHORED 2026-08-25. This used to pin the literal `ls -d dist out build …`, which is the
+    // check that was REPLACED: `ls -d` proves a folder exists, not that it holds a site, so a leftover
+    // `dist/` from an earlier app in the same workspace sailed through it. The invariant being pinned
+    // here was never the shell command — it is that a build claiming success is checked for real output
+    // before anything is deployed, and that the build's own words travel with the refusal. Both still
+    // hold; the wording now lives in builtSiteCheck.ts (see tests/builtSiteCheck.test.ts).
     const seg = publishRoute();
-    expect(seg).toContain("ls -d dist out build");
-    expect(seg).toContain('produced no website files');
+    expect(seg).toContain('buildOutputCensusCommand(outCandidates)');
+    expect(seg).toContain('builtSiteRefusal(');
     // The build's own output must reach the user — discarding it is what made this undiagnosable.
-    expect(seg).toContain('What the build printed');
+    expect(seg).toContain('buildSaid');
   });
 
   it('the output check runs BETWEEN the build and the deploy', () => {
     const seg = publishRoute();
     const build = seg.indexOf("runCommand(workspaceId, 'npm run build')");
-    const check = seg.indexOf("ls -d dist out build");
+    const check = seg.indexOf('buildOutputCensusCommand(outCandidates)');
     const deploy = seg.indexOf('new ToolDispatcher');
     expect(build).toBeLessThan(check);
     expect(check).toBeLessThan(deploy);

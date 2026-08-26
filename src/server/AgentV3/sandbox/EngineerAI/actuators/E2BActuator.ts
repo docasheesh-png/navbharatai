@@ -45,6 +45,7 @@ import {
 import { assertWriteAllowed } from '../../../greenFreeze';
 import { shellQuote } from '../../../../lib/shellQuote';
 import { needsLegacyPeerDeps } from '../../../npmInstallFallback';
+import { buildOutputCandidates, configDumpCommand, parseConfigDump } from '../../../builtSiteCheck';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -2185,9 +2186,22 @@ ${paintWaitJs('p')}
 
   async downloadDistFiles(workspaceId: string): Promise<Map<string, Buffer>> {
     const sandbox = await this.getSandbox(workspaceId);
-    // Phase 16 — try dist/ first (Vite, esbuild), then out/ (Next.js static export).
-    const distPath = `${WORKSPACE_ROOT}/dist`;
-    const outPath = `${WORKSPACE_ROOT}/out`;
+    // WHERE THE SITE ACTUALLY IS — asked of the project, not assumed (admin 2026-08-25).
+    //
+    // This used to be exactly two paths, `dist` then `out`. Every framework that writes anywhere else
+    // — Create React App and SvelteKit (`build/`), Nuxt (`.output/public`), Remix (`build/client`),
+    // Angular (`dist/<app>/browser`, nested BELOW a dist/ full of server bundles) — reached this line
+    // with a perfectly good built site and was told "No build output found in dist/ or out/". The
+    // publish route's gate had already passed it, because the two sides were reading different lists.
+    //
+    // Now both read buildOutputCandidates(). A failure to identify the framework falls back to exactly
+    // the old order (dist, out, …), so this can only ever find MORE than before, never less.
+    let projectFiles: Record<string, string> = {};
+    try {
+      const dump = await sandbox.commands.run(`cd ${WORKSPACE_ROOT} && ${configDumpCommand()}`, { timeoutMs: 15_000 });
+      projectFiles = parseConfigDump(String(dump.stdout ?? ''));
+    } catch { /* unreadable ⇒ the defaults below stand */ }
+    const searchPaths = buildOutputCandidates(projectFiles).map((d) => `${WORKSPACE_ROOT}/${d}`);
 
     // ── WHY THIS RUNS FROM A FILE AND NOT `node -e "…"` ─────────────────────────────────────────
     //
@@ -2222,7 +2236,7 @@ ${paintWaitJs('p')}
       "  return o;",
       "}",
       "let out={};",
-      `const dirs=${JSON.stringify([distPath, outPath])};`,
+      `const dirs=${JSON.stringify(searchPaths)};`,
       "for(const d of dirs){const r=walk(d,'',{});if(Object.keys(r).length){out=r;break;}}",
       "if(!Object.keys(out).length){console.error('dist/ and out/ are empty or do not exist');process.exit(2);}",
       `fs.writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify(out));`,
@@ -2244,7 +2258,8 @@ ${paintWaitJs('p')}
       }));
     if (result.exitCode !== 0) {
       throw new Error(
-        `No build output found in dist/ or out/. Run "npm run build" first (for Next.js static export add output:'export' to next.config.js).\n` +
+        `No build output found. Looked in: ${searchPaths.map((p) => `${p.slice(WORKSPACE_ROOT.length + 1)}/`).join(', ')}. `
+        + `Run "npm run build" first (for Next.js static export add output:'export' to next.config.js).\n` +
         (result.stderr || result.stdout).slice(0, 300),
       );
     }

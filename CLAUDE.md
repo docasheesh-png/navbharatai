@@ -909,6 +909,12 @@ same way a green Cloud Run deploy is — it is not optional cleanup.
 
 **Honest boundaries (rule 6 — what Claude CAN and CANNOT do here):**
 - Claude CAN trigger the workflow and confirm it goes green.
+- ⛔ **ORGANIZATION DEVELOPER ACCOUNT (D-U-N-S) — DEFERRED, do NOT start it (admin 2026-08-26: "yeh baad
+  me karenge jab user badhenge").** The full, verified conversion guide lives in `MOBILE_PUBLISHING.md` §10
+  — including the finding that the EXISTING account converts in place (no new account, no app transfer),
+  the four easy-to-miss traps, and the fact that this is the ONLY thing that brings Doctor AI, Pharmacist,
+  First Aid and Maternity back to the Play app. §10.6 records the separate (also deferred) HPR/ABDM
+  doctor-verification plan. A session must not begin either without the admin asking.
 - Claude CANNOT set/rotate the signing keystore secrets (`ANDROID_KEYSTORE_BASE64`,
   `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`) — that is a one-time
   admin setup (documented in the workflow header); the keystore is the app's permanent identity

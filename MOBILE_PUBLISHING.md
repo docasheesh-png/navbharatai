@@ -317,3 +317,156 @@ npm run build && npx cap add ios && npx cap sync ios && npx cap open ios
 supply signing secrets once (Android keystore; Apple App Store Connect API key), plus *your* paid store
 accounts + the store-review submission — the account/signing/submission actions only you can perform, listed
 above step by step. A local Mac (§4.1) remains an optional alternative for iOS, not a requirement.
+
+---
+
+# 10. 🕓 ORGANIZATION DEVELOPER ACCOUNT (D-U-N-S) — the full guide. ⛔ **DEFERRED — do NOT start this now**
+
+**Admin decision, 2026-08-26 (verbatim): _"yeh baad me karenge jab user badhenge — pura organization
+account (D-U-N-S number) me registration guide bas save kar do, baad ke liye."_**
+
+This whole section is a **map for later**, written while the research was fresh. Every step below was
+verified against the live Play Console (the admin's own screenshots) and Google's official help page
+*"Update developer identity details managed by a Google payments profile"*, so a future session does
+not have to rediscover any of it.
+
+**The rule for any future session: do not begin this on your own initiative.** The trigger is the
+admin saying users have grown enough to need it. Until then, the correct action is to leave it alone.
+
+---
+
+## 10.1 Why this exists at all — the ONE thing it unlocks
+
+`src/lib/playCompliance.ts` hides four medical-class AIs inside the Play-distributed app:
+`sda_chat` (Doctor AI), `pharmacist_ai`, `firstaid_ai`, `maternity_ai`. Google rejected the update in
+Aug 2024 because an app that DECLARES medical features may only be published by an **organization**
+account, and the admin's is **personal**.
+
+**An organization account is the ONLY thing that brings those four back to the mobile app.** Nothing
+else does — not restricting who uses them, not changing their wording. (See §10.6: a doctor-only gate
+is a separate, worthwhile idea that does NOT solve this.)
+
+Everything else an org account buys — a business identity on both stores, the admin's HOME ADDRESS
+coming off the public listing, team access, investor-readiness — is real but secondary.
+
+## 10.2 The finding that makes this cheap: NO new account is needed
+
+The obvious fear was "personal accounts cannot convert, so we need a new account and an app
+transfer" — weeks of work and risk to the existing install base. **That fear is dead.** The live
+console shows a **"Change account type"** control on `Developer account → About you`, greyed out with
+the tooltip:
+
+> *"To change your account type, provide and verify a website for your organisation below."*
+
+So the existing account converts in place. App, users, reviews, ratings and install base all stay
+exactly where they are. (`Settings → App transfers` exists as a fallback and is NOT needed.)
+
+## 10.3 🚨 Four things that are easy to get wrong
+
+1. **"Send verification request" is a SEPARATE button.** Entering the website and pressing Save does
+   nothing on its own. Google's page says it outright: *"After entering and saving your website,
+   remember to click Send verification request."* This is where people stall for days believing
+   Google is broken.
+2. **A NEW payments profile is mandatory.** Country, account type and D-U-N-S **cannot be edited on an
+   existing payments profile**. The flow creates a new one, verifies it, then links it.
+3. **This is a ONE-WAY DOOR.** *"You can't change the account type from an organization to an
+   individual account."* Going back means a brand-new account plus an app transfer. Decide once.
+4. **Wait 72 hours after the conversion before submitting ANY new app.** Google's own note: it avoids
+   "redundant app rejections" while their systems finish processing the change. Do not schedule a
+   release right after.
+
+## 10.4 The two tracks — run them in parallel
+
+Track A is free and can be done in an afternoon. Track B is the long pole. **Both must be finished
+before the conversion can complete**, so start B first even though A is the one that unlocks the
+button.
+
+### 🅰️ Track A — verify the organization website (free, same day)
+
+1. Play Console → **Developer account → About you** → the **Website** field → `https://navbharatai.com`
+2. **Save**, then press **Send verification request** (see §10.3 #1).
+3. Google will ask for one of the usual proofs. Either is easy here:
+   - **HTML file or meta tag** → **a Claude session can do this end to end.** `server.ts` serves
+     `dist/` via `express.static`, and Vite copies `public/` → `dist/`, so a file dropped in
+     `public/` is live at `https://navbharatai.com/<name>` on the next merge. No admin work at all.
+   - **DNS TXT record** → the admin pastes it into Cloudflare; a session can write the exact record.
+4. Once verified, **Change account type** becomes clickable.
+
+### 🅱️ Track B — business entity, then D-U-N-S (start FIRST; 3-5 weeks)
+
+**Step 1 — a registered business entity.** D-U-N-S is issued to a business, not a person.
+
+| Type | Cost | Time | Note |
+|---|---|---|---|
+| Sole Proprietorship | ~₹1-2k | 2-7 days | Cheapest; weakest for stores/investors |
+| **Private Limited** | ~₹8-15k | 7-15 days | **Recommended** — also unlocks payment gateways, hiring, funding |
+| LLP / OPC | ~₹6-10k | 7-15 days | Middle ground |
+
+Registered through the MCA (https://www.mca.gov.in), or a CA does it in 2-3 days.
+
+**Step 2 — D-U-N-S number (FREE).** A 9-digit business id from Dun & Bradstreet
+(https://www.dnb.com; D&B India has its own site). Either request it inside Google's own org signup
+flow, or apply to D&B directly.
+
+🔑 **The single most common failure: the business NAME and ADDRESS must match EXACTLY** between the
+D-U-N-S record and the Play payments profile. One extra comma fails verification.
+
+**Time: 5-30 business days.** This is why Track B starts first.
+
+## 10.5 The conversion itself (once A and B are both done)
+
+Play Console → **Developer account → About you**:
+
+1. **Change account type**
+2. **Create or Select payments profile** → **Create new payments profile** → enter the **D-U-N-S**
+3. **Organization details:** type (*Company/business*), size (*1-10*), organization phone
+4. **Contact details** — two separate pairs, each verified by OTP:
+   - one Google uses to reach you (private)
+   - ⚠️ one **displayed publicly on every store listing**. Do NOT use a personal mobile number here;
+     use a business email and a number that is fine to publish.
+5. **Identity verification** — upload the incorporation certificate etc. when asked. Progress and any
+   required action appear on the Account details page; the outcome arrives by email.
+6. **Link your payments profile to your developer account** → **Confirm and save**
+7. **Wait 72 hours.**
+8. Play Console → **App content → Health apps declaration** → declare the clinical-decision-support
+   features honestly, now that the account type finally permits it.
+9. **Only then** may a session remove the ids from `MEDICAL_PROFESSIONAL_IDS` in
+   `src/lib/playCompliance.ts`, bringing Doctor AI, Pharmacist, First Aid and Maternity back to the
+   mobile app. Its header comment states the same order and must be honoured:
+   **organization account FIRST, declarations updated, THEN the code change.** Doing it in the other
+   order is a deceptive-behaviour violation that can ban the whole developer account, not merely
+   reject one update.
+
+## 10.6 Related but SEPARATE: gating Doctor AI to real doctors (HPR / ABDM)
+
+Raised by the admin the same day and **also deferred**. Recorded here so the two ideas are never
+confused again:
+
+- **It does NOT unlock the mobile app.** The Play restriction is about the DEVELOPER ACCOUNT TYPE,
+  not about who uses the feature. Only §10.5 fixes that.
+- **It is still worth doing on its own merits.** Doctor AI ships weight-based dosing, emergency
+  resuscitation doses, antibiotic stewardship and pregnancy drug categories — an unambiguous
+  professional tool — and today **there is no verification of any kind**: anyone signed in can use it.
+- **ABHA ≠ HPR.** Both sit under ABDM/NHA, but ABHA is the PATIENT registry and HPR the PROVIDER
+  registry, with separate onboarding and approval. Getting one does not grant the other.
+- **Recommended design — two modes, not a hard gate.** A hard gate loses every non-doctor user
+  overnight. Instead: a **Public** mode (symptom explanation, red flags, "see a doctor" — no dosing,
+  no protocols) and a **Verified Doctor** mode (today's full engine). Safety and the funnel both survive.
+- **Phase 1 needs no ABDM at all and can ship any time:** NMC/state-council registration number plus a
+  certificate upload, approved by the admin — the exact pattern App Mart review already uses. HPR
+  later replaces only the manual approval step; the user-facing flow does not change.
+- **Do NOT write HPR API code from memory.** The exact endpoints and auth flow must come from live NHA
+  sandbox documentation. A verification gate built on a guessed endpoint either fails shut (nobody
+  gets in) or fails open (everybody does) — and the second is worse than having no gate at all.
+
+## 10.7 What it actually costs
+
+| | Cost | Time |
+|---|---|---|
+| Private Limited registration | ~₹8-15k | 7-15 days |
+| D-U-N-S number | **₹0** | 5-30 days |
+| Play Console fee | already paid (existing account converts) | — |
+| **Total** | **~₹8-15k** | **3-5 weeks**, mostly waiting |
+
+One D-U-N-S serves **both stores**: Apple also requires it for an organization account, which would
+move the App Store listing from the admin's personal name to the company's.

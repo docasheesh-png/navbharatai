@@ -42262,3 +42262,46 @@ a phone navigates the app's own webview away from NavBharatAI.
 
 **Verification:** `tsc` both projects ✅ · `npm run build` ✅ · unused-import gate ✅ ·
 `npx vitest run` — 1391 files / 18161 passed (21 new tests: `linkify.test.ts`, `linkPolicy.test.ts`).
+
+## 2026-08-26 — App Mart → Publish can actually publish (a dropdown of your own NavBharatAI apps)
+
+**Admin (with screenshot):** *"navbharatai me app mart me publish button me yeh aa raha hai … isi page
+me sabse upar ek dropdown selector chahiye, jisme user apni woh app upload kar sake jo navbharatai me
+bani hai (only make in navbharatai). isko professionally banao."*
+
+**What was wrong.** The Publish tab contained nothing but DIRECTIONS to another screen — "open the app
+you built, build its APK, then press a button over there." A page whose only content is *go somewhere
+else* is a dead end wearing a tab label: the user opened Publish and left with homework.
+
+**Shipped:**
+- `publishablePicker.ts` (pure + tested): turns `GET /api/agentv3/conversations` — the SAME list v5
+  history reads, so there is no second source of truth to drift — into offerable rows. Newest first,
+  one row per WORKSPACE (several history entries pointing at one app collapse to the most recent),
+  a human "when" in each label so identical titles are distinguishable, and an untitled app still gets
+  a name a person can pick out of a list. A conversation with **no workspaceId is deliberately NOT
+  offered**: it could only ever come back refused, and offering something that can only fail is the
+  dead-button pattern in a different costume.
+- The Publish tab now opens with **"Publish an app you built"**: the dropdown, an editable name
+  (pre-filled from the app's title), an optional description, and an optional icon through the SAME
+  shared `appIcon.ts` pipeline the other two icon surfaces use — so a 1024px AI-generated PNG is
+  fitted rather than refused (the bug that produced "app mart me sirf naam aata hai, logo nahi").
+- `publishBlockedReason` (pure) means **no dead button**: signed out, still loading, no apps, nothing
+  chosen, no name, already publishing — each disables Publish AND writes its reason underneath.
+- Publishing goes through the existing `POST /api/nav-store/web/publish`, which re-verifies ownership
+  from the token and re-runs the whole publish gate. **The picker decides what to OFFER; the server
+  decides what is ALLOWED**, so this cannot widen what the store accepts. Its refusals are specific
+  (a hardcoded key with its file and line, "this app needs a server", a size cap) and are shown
+  **verbatim** — that one sentence is the only thing that tells the user what to fix.
+- The list loads when the tab is OPENED, not on mount: most people arriving at App Mart want to play
+  an app, and a request nobody needed is latency for everyone.
+- **The APK steps survive, retitled** "Want a real Android app (.apk) instead?" — an instant app and an
+  installable Android app are different products, and deleting the second would have been a silent
+  feature loss disguised as tidying.
+- The store's founding rule is untouched: still only apps NavBharatAI built, still no app-file upload.
+
+**Verification:** `tsc` both projects ✅ · `npm run build` ✅ · unused-import gate ✅ ·
+`npx vitest run` — 1392 files / 18179 passed (11 new pure tests + 7 wiring tests).
+
+⚠️ **One self-inflicted scare worth recording:** the AppKnowledgeBase entry is a SINGLE-quoted TS
+string, and the first draft of the new text contained a bare apostrophe ("your app's build screen"),
+which closed the string and broke 45 test files at once. Caught by the gate before push, not after.

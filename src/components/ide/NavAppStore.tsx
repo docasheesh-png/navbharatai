@@ -2,12 +2,15 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Store, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
   CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package,
+  Rocket, ImagePlus, Clipboard, Copy,
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../lib/authHeaders';
 import { resolveApiHref } from '../../lib/apiBase';
 import { isNativeApp } from '../../lib/mobileNative';
 import { mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsFor } from './storeReviewQueue';
+import { publishableApps, publishBlockedReason, type PublishableApp } from './publishablePicker';
+import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
 
 // Nav App Store — publish your Android app, and install other people's.
 //
@@ -88,6 +91,19 @@ export interface NavAppStoreProps {
 export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => {
   const [tab, setTab] = useState<Tab>('browse');
   const [status, setStatus] = useState<StoreStatus | null>(null);
+
+  // ── PUBLISH FROM THIS PAGE (admin 2026-08-26) ────────────────────────────────────────────────
+  // The Publish tab used to be directions to another screen. These hold the picker that makes it a
+  // place you can publish from: your own NavBharatAI apps, the listing details, and the result.
+  const [myApps, setMyApps] = useState<PublishableApp[] | null>(null);   // null = not loaded yet
+  const [pickWs, setPickWs] = useState('');
+  const [pickName, setPickName] = useState('');
+  const [pickDesc, setPickDesc] = useState('');
+  const [pickIcon, setPickIcon] = useState('');
+  const [pickIconErr, setPickIconErr] = useState('');
+  const [pickIconBusy, setPickIconBusy] = useState(false);
+  const [pubBusy, setPubBusy] = useState(false);
+  const [pubResult, setPubResult] = useState<{ ok: boolean; message: string; shareUrl?: string } | null>(null);
   const [apps, setApps] = useState<PublicApp[]>([]);
   const [mine, setMine] = useState<MineApp[]>([]);
   const [queue, setQueue] = useState<QueueApp[]>([]);
@@ -214,6 +230,89 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
     } catch { /* shown as an empty list */ }
   }, []);
 
+  // The apps THIS user built with NavBharatAI, for the publish picker. `conversations` is the same
+  // list the v5 history reads, so an app appears here the moment it exists — no second source of
+  // truth to drift. A failure yields an empty list (and the picker says so), never a crash.
+  const loadMyApps = useCallback(async () => {
+    try {
+      const res = await fetch('/api/agentv3/conversations', { headers: await authedHeaders() });
+      const data = await res.json().catch(() => null);
+      if (!liveRef.current) return;
+      setMyApps(publishableApps(Array.isArray(data?.conversations) ? data.conversations : [], Date.now()));
+    } catch {
+      if (liveRef.current) setMyApps([]);
+    }
+  }, []);
+
+  // Choosing an app pre-fills its name — the user can edit it, and a previous result must not linger
+  // over a different app's form.
+  const choosePublishApp = useCallback((workspaceId: string) => {
+    setPickWs(workspaceId);
+    setPubResult(null);
+    const hit = (myApps ?? []).find((a) => a.workspaceId === workspaceId);
+    setPickName(hit ? hit.suggestedName : '');
+  }, [myApps]);
+
+  const acceptPickIcon = useCallback(async (run: () => Promise<IconCheck>) => {
+    setPickIconBusy(true);
+    setPickIconErr('');
+    try {
+      const r = await run();
+      if (!r.ok || !r.dataUrl) { setPickIconErr(r.error || 'That image could not be used.'); return; }
+      setPickIcon(r.dataUrl);
+    } finally {
+      setPickIconBusy(false);
+    }
+  }, []);
+
+  /**
+   * Publish the CHOSEN app as an instant App Mart app.
+   *
+   * 🔒 The server re-verifies ownership from the token and re-runs the whole publish gate, so this
+   * button cannot widen what the store accepts. Its refusals are specific and useful (a hardcoded key
+   * with its file and line, "this app needs a server", a size cap) — so they are shown VERBATIM. A
+   * generic "publishing failed" here would throw away the one sentence that tells the user what to fix.
+   */
+  const publishChosenApp = useCallback(async () => {
+    if (pubBusy || !pickWs) return;
+    const name = pickName.trim();
+    if (!name) { setPubResult({ ok: false, message: 'Give your app a name.' }); return; }
+    setPubBusy(true);
+    setPubResult(null);
+    try {
+      const res = await fetch('/api/nav-store/web/publish', {
+        method: 'POST',
+        headers: { ...(await authedHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: pickWs,
+          name,
+          visibility: 'public',
+          ...(pickDesc.trim() ? { description: pickDesc.trim() } : {}),
+          ...(pickIcon ? { iconDataUrl: pickIcon } : {}),
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setPubResult({ ok: false, message: data?.error || 'Publishing failed — nothing was published.' });
+        return;
+      }
+      const shareUrl = `${window.location.origin}${data.shareUrl}`;
+      try { await navigator.clipboard?.writeText(shareUrl); } catch { /* the link is shown anyway */ }
+      setPubResult({
+        ok: true,
+        shareUrl,
+        message: data.status === 'listed'
+          ? 'Published! Your app is live on App Mart.'
+          : 'Published! Your link works right now (copied) — the store listing goes live after a quick human review.',
+      });
+      void loadWebMine();
+    } catch {
+      setPubResult({ ok: false, message: 'Could not reach NavBharatAI — nothing was published.' });
+    } finally {
+      setPubBusy(false);
+    }
+  }, [pubBusy, pickWs, pickName, pickDesc, pickIcon, loadWebMine]);
+
   const loadOwned = useCallback(async () => {
     try {
       const res = await fetch('/api/nav-store/web/purchases', { headers: await authedHeaders() });
@@ -262,6 +361,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
   }, [loadWebQueue, loadWebApps]);
 
   useEffect(() => { void loadStatus(); void loadApps(); void loadWebApps(); }, [loadStatus, loadApps, loadWebApps]);
+  // Loaded when the Publish tab is actually opened, not on mount: most people arriving at App Mart
+  // want to play an app, and a list nobody asked for is a request nobody needed.
+  useEffect(() => { if (tab === 'publish' && myApps === null) void loadMyApps(); }, [tab, myApps, loadMyApps]);
   useEffect(() => {
     if (tab === 'mine') { void loadMine(); void loadWebMine(); void loadOwned(); }
     if (tab === 'review') { void loadQueue(); void loadWebQueue(); }
@@ -447,6 +549,142 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
             // (the "Publish to App Mart" button beside Download), which sends the app NavBharatAI
             // made — including one saved to your own GitHub — with no file to upload. See navStore.ts.
             <div className="space-y-4">
+              {/* ── PUBLISH ONE OF YOUR OWN APPS (admin 2026-08-26) ────────────────────────────
+                  First on the page on purpose: this is what someone opening "Publish" came to do.
+                  The steps below stay, demoted, because a real installable Android app is a
+                  different product from an instant app — not a worse way to do the same thing. */}
+              <div className="rounded-xl border border-emerald-500/25 bg-[#0d1117] p-4">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-white mb-1">
+                  <Rocket size={15} className="text-emerald-400" /> Publish an app you built
+                </p>
+                <p className="text-xs text-white/55 leading-relaxed mb-3">
+                  Pick one of your NavBharatAI apps and it goes on App Mart as an instant app — people
+                  open it and it runs in their browser. Nothing to build, nothing to upload.
+                </p>
+
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-white/40 mb-1.5">Your app</label>
+                <select
+                  value={pickWs}
+                  onChange={(e) => choosePublishApp(e.target.value)}
+                  disabled={myApps === null || myApps.length === 0}
+                  aria-label="Choose which of your apps to publish"
+                  className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500/50 disabled:opacity-60"
+                >
+                  <option value="">
+                    {myApps === null ? 'Loading your apps…' : myApps.length === 0 ? 'No apps yet' : 'Choose an app…'}
+                  </option>
+                  {(myApps ?? []).map((a) => (
+                    <option key={a.workspaceId} value={a.workspaceId}>{a.label}{a.live ? ' · live' : ''}</option>
+                  ))}
+                </select>
+
+                {myApps !== null && myApps.length === 0 && (
+                  <p className="flex items-start gap-1.5 text-[11px] text-white/45 leading-snug mt-2">
+                    <Info size={12} className="shrink-0 mt-px" />
+                    You have not built an app yet. Build one in NavBharatAI Pro v5.0, then come back —
+                    it will appear in this list by itself.
+                  </p>
+                )}
+
+                {pickWs && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-white/40 mb-1.5">App name</label>
+                      <input
+                        value={pickName}
+                        onChange={(e) => setPickName(e.target.value.slice(0, 60))}
+                        placeholder="What should people see it called?"
+                        className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-emerald-500/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-white/40 mb-1.5">
+                        Short description <span className="text-white/25 normal-case font-medium">(optional)</span>
+                      </label>
+                      <textarea
+                        value={pickDesc}
+                        onChange={(e) => setPickDesc(e.target.value.slice(0, 600))}
+                        rows={2}
+                        placeholder="One or two lines about what it does."
+                        className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-emerald-500/50 resize-none"
+                      />
+                    </div>
+
+                    {/* An icon is what a listing is recognised by — the store already had a real bug
+                        where apps showed a name and no logo. Same shared pipeline as the other two
+                        icon surfaces, so a 1024px AI-generated PNG is fitted rather than refused. */}
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-white/40 mb-1.5">
+                        App icon <span className="text-white/25 normal-case font-medium">(optional)</span>
+                      </label>
+                      <div className="flex items-center gap-2.5">
+                        {pickIcon
+                          ? <img src={pickIcon} alt="" className="w-11 h-11 rounded-xl object-cover border border-white/10 shrink-0" />
+                          : <div className="w-11 h-11 rounded-xl bg-[#161b22] border border-white/10 flex items-center justify-center shrink-0"><Package size={16} className="text-white/25" /></div>}
+                        <label className="px-3 py-2 rounded-lg border border-white/10 bg-[#161b22] hover:border-white/25 text-white/80 text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 transition-colors">
+                          <ImagePlus size={13} /> Upload
+                          <input type="file" accept="image/*" className="hidden"
+                            onChange={(e) => { const f = e.target.files?.[0]; if (f) void acceptPickIcon(() => readStoreIcon(f)); }} />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => void acceptPickIcon(() => readStoreIconFromClipboard())}
+                          className="px-3 py-2 rounded-lg border border-white/10 bg-[#161b22] hover:border-white/25 text-white/80 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+                        ><Clipboard size={13} /> Paste</button>
+                        {pickIcon && (
+                          <button type="button" onClick={() => setPickIcon('')} className="text-[11px] text-white/40 hover:text-white/70 underline underline-offset-2">Remove</button>
+                        )}
+                      </div>
+                      {pickIconBusy && <p className="text-[11px] text-white/40 mt-1.5">Fitting your picture…</p>}
+                      {pickIconErr && <p className="text-[11px] text-amber-300 mt-1.5">{pickIconErr}</p>}
+                    </div>
+                  </div>
+                )}
+
+                {/* NO DEAD BUTTON: whenever Publish cannot run, the reason sits right under it. */}
+                {(() => {
+                  const blocked = publishBlockedReason({
+                    signedIn: true, loading: myApps === null, appCount: (myApps ?? []).length,
+                    workspaceId: pickWs, name: pickName, busy: pubBusy,
+                  });
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void publishChosenApp()}
+                        disabled={blocked !== ''}
+                        className="mt-3 w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:hover:bg-emerald-600 text-white text-sm font-bold inline-flex items-center justify-center gap-2 transition-colors"
+                      >
+                        {pubBusy ? <Loader2 size={15} className="animate-spin" /> : <Store size={15} />}
+                        {pubBusy ? 'Publishing…' : 'Publish to App Mart'}
+                      </button>
+                      {blocked && !pubBusy && (
+                        <p className="text-[11px] text-white/45 leading-snug mt-1.5 text-center">{blocked}</p>
+                      )}
+                    </>
+                  );
+                })()}
+
+                {/* The gate's refusals name the exact file and line, or the exact cap — shown verbatim,
+                    because that one sentence is what tells the user what to fix. */}
+                {pubResult && (
+                  <div className={`mt-3 rounded-xl border px-3 py-2.5 text-xs leading-relaxed ${pubResult.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-200'}`}>
+                    <p className="flex items-start gap-1.5">
+                      {pubResult.ok ? <CheckCircle2 size={13} className="shrink-0 mt-0.5" /> : <AlertTriangle size={13} className="shrink-0 mt-0.5" />}
+                      <span className="whitespace-pre-wrap break-words">{pubResult.message}</span>
+                    </p>
+                    {pubResult.shareUrl && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <a href={pubResult.shareUrl} target="_blank" rel="noopener noreferrer"
+                          className="flex-1 min-w-0 truncate underline underline-offset-2 hover:text-white">{pubResult.shareUrl}</a>
+                        <button type="button" onClick={() => void navigator.clipboard?.writeText(pubResult.shareUrl!)}
+                          className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-emerald-500/30 hover:bg-emerald-500/15 text-[11px] font-semibold"><Copy size={11} /> Copy</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs leading-relaxed text-white/60">
                 <p className="flex items-center gap-1.5 text-emerald-300 font-semibold mb-1">
                   <ShieldCheck size={13} /> Publishing is free{status ? ` (₹${status.uploadFeeInr})` : ''}
@@ -468,7 +706,11 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
               </div>
 
               <div className="rounded-xl border border-white/10 bg-[#0d1117] p-4">
-                <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-3">How to publish your app</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-1">Want a real Android app (.apk) instead?</p>
+                <p className="text-[11px] text-white/45 leading-relaxed mb-3">
+                  An instant app runs in the browser (the picker above). An Android app installs on a
+                  phone — that one is built from your app's build screen:
+                </p>
                 <ol className="space-y-2.5 text-sm text-white/75">
                   <li className="flex gap-2.5">
                     <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-300 text-[11px] font-bold flex items-center justify-center">1</span>

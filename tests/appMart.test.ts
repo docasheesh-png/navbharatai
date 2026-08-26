@@ -176,3 +176,55 @@ describe('the WHOLE card is the button (admin 2026-08-16: "pure card me kahi bhi
     expect(home).toContain('disabled={comingSoon}');
   });
 });
+
+/**
+ * PUBLISH FROM THE APP MART PAGE ITSELF (admin 2026-08-26: "isi page me sabse upar ek dropdown
+ * selector chahiye, jisme user apni woh app upload kar sake jo navbharatai me bani hai").
+ *
+ * The tab used to contain nothing but directions to another screen — a page whose only content is
+ * "go somewhere else" is a dead end wearing a tab label. These pin the picker that fixes it, and the
+ * properties that keep it honest.
+ */
+describe('the Publish tab can actually publish', () => {
+  const store = read('src/components/ide/NavAppStore.tsx');
+
+  it('a dropdown of YOUR OWN NavBharatAI apps sits at the top of the tab', () => {
+    expect(store).toContain('Publish an app you built');
+    expect(store).toContain('Choose which of your apps to publish');
+    // Sourced from the same list v5 history reads — one source of truth, no drift.
+    expect(store).toContain("fetch('/api/agentv3/conversations'");
+    expect(store).toContain('publishableApps(');
+  });
+
+  it('it publishes through the SAME server route, which re-checks ownership and the publish gate', () => {
+    expect(store).toContain("fetch('/api/nav-store/web/publish'");
+    // The picker decides what to OFFER; the server decides what is ALLOWED.
+    expect(read('src/server/routes/navStore.ts')).toContain('This workspace does not belong to you.');
+  });
+
+  it('the gate\'s refusal is shown VERBATIM — that sentence is what tells the user what to fix', () => {
+    expect(store).toContain("data?.error || 'Publishing failed — nothing was published.'");
+  });
+
+  it('NO DEAD BUTTON: every state that blocks Publish carries its reason on screen', () => {
+    expect(store).toContain('publishBlockedReason(');
+    expect(store).toContain("disabled={blocked !== ''}");
+    expect(store).toContain('{blocked}');
+  });
+
+  it('the list loads when the tab OPENS, not on mount — most arrivals want Browse', () => {
+    expect(store).toContain("if (tab === 'publish' && myApps === null) void loadMyApps()");
+  });
+
+  it('the APK steps SURVIVE, retitled as the other product rather than deleted', () => {
+    // An instant app and an installable Android app are different things; removing the second would
+    // have been a silent feature loss disguised as a cleanup.
+    expect(store).toContain('Want a real Android app (.apk) instead?');
+    expect(store).toContain('Publish to App Mart');
+  });
+
+  it('the no-app-file rule is untouched — this is still only apps NavBharatAI built', () => {
+    expect(store).toContain('Only apps you built with NavBharatAI');
+    expect(store).toContain('there is no app-file upload');
+  });
+});

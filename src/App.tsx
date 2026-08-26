@@ -7,6 +7,7 @@ import { useToast, ToastContainer } from './components/Toast';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
 import { sanitizeFileMap } from './lib/fileMapSanitize';
 import { computeTabClose } from './lib/tabClose';
+import { shouldRecordOpener } from './lib/tabParenting';
 // AgentV3Panel is rendered via ProV3Surface (the gated v5.0 surface), not directly here.
 // FilesPanel → moved to ViewPanels.tsx
 import { v3MobileFooterActive, type V3FooterApi } from './components/agentv3/v3FooterApi';
@@ -1260,7 +1261,11 @@ export default function App() {
       // Remember which tab OPENED this one when it is launched from inside Settings or Professionals,
       // so ✕-closing that parent also closes the option it spawned (admin bug 2026-07-11). Opened from
       // anywhere else → no parent link (it's an independent tab).
-      if ((activeView === 'settings' || activeView === 'professionals' || activeView === 'other_ai') && view !== activeView) {
+      // The rule asks about the CHILD as well as the parent — see lib/tabParenting.ts. Asking only
+      // "who opened this?" left a professional opened from NavBharatAI Free with no parent, so ✕-ing
+      // Free orphaned it (admin 2026-08-25); asking only "was it opened from Free?" would have made
+      // Settings a child of Free and closed it too.
+      if (shouldRecordOpener(view as string, activeView as string)) {
         setTabOpeners(prev => ({ ...prev, [view]: activeView }));
       }
     }

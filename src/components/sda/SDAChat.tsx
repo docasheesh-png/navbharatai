@@ -4,6 +4,7 @@ import { cn } from '../../lib/utils';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import ReactMarkdown from 'react-markdown';
+import { isSafeHttpUrl } from '../../lib/linkify';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { sanitizeFirestoreData } from '../../lib/firestoreUtils';
@@ -956,7 +957,18 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                   </div>
                 )}
                 <div className="prose prose-invert prose-xs max-w-none prose-p:leading-relaxed prose-p:my-1 prose-headings:text-emerald-300 prose-strong:text-white prose-li:my-0.5">
-                  <ReactMarkdown>{msg.text}</ReactMarkdown>
+                  {/* The DEFAULT anchor navigates the app's own webview away from NavBharatAI on a
+                      phone (admin 2026-08-25). Every source link opens in a new tab instead, and only
+                      http/https is ever clickable — this text is model-authored. */}
+                  <ReactMarkdown
+                    components={{
+                      a: ({ node, href, children, ...props }: any) => (
+                        isSafeHttpUrl(String(href ?? ''))
+                          ? <a {...props} href={href} target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline underline-offset-2 break-all">{children}</a>
+                          : <>{children}</>
+                      ),
+                    }}
+                  >{msg.text}</ReactMarkdown>
                 </div>
                 <p className="text-[8px] text-[#484f58] mt-2 text-right">
                   {msg.timestamp instanceof Date ? msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}

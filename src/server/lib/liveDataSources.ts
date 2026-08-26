@@ -115,7 +115,7 @@ async function weatherBlock(message: string, fetchImpl: typeof fetch, now: Date)
     `Tomorrow: max ${daily.temperature_2m_max?.[1] ?? '?'}°C / min ${daily.temperature_2m_min?.[1] ?? '?'}°C, rain chance ${daily.precipitation_probability_max?.[1] ?? '?'}%`,
   ];
   return liveBlock('LIVE WEATHER DATA', lines.join('\n'), now,
-    'For official Indian forecasts and warnings: mausam.imd.gov.in (IMD).');
+    'For official Indian forecasts and warnings link [IMD](https://mausam.imd.gov.in).');
 }
 
 async function aqiBlock(message: string, fetchImpl: typeof fetch, now: Date): Promise<string> {
@@ -137,7 +137,7 @@ async function aqiBlock(message: string, fetchImpl: typeof fetch, now: Date): Pr
     `PM2.5: ${cur.pm2_5 ?? '?'} µg/m³, PM10: ${cur.pm10 ?? '?'} µg/m³`,
   ];
   return liveBlock('LIVE AIR QUALITY DATA', lines.join('\n'), now,
-    'For official Indian AQI: the CPCB app/site (app.cpcbccr.com).');
+    'For official Indian AQI link [CPCB](https://app.cpcbccr.com).');
 }
 
 // ── Currency ───────────────────────────────────────────────────────────────────────────────────────

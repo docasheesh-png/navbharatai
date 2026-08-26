@@ -13,6 +13,7 @@ import { MessageEditActions } from '../chat/MessageEditActions';
 import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage, editedLabel } from '../../lib/chatMessageActions';
 import { activeKey } from '../../lib/professionalChatStore';
+import { LinkedText } from '../../lib/linkify';
 
 /**
  * Generic, config-driven chat UI for the "Professional AI" framework. One
@@ -237,7 +238,9 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
         {filterMessages(messages as any, chatSearchQuery).map((m: any, i: number) => (
           <div key={i} className={`group/msg ${m.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'}`}>
             <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-[#161b22] border border-white/10 text-[#c9d1d9]'}`}>
-              {m.content}
+              {/* Real, tappable source links (admin 2026-08-25). The bubble stays plain text —
+                  LinkedText emits only strings and anchors, so wrapping is unchanged. */}
+              <LinkedText text={String(m.content ?? '')} />
               {m.edited && <span className="ml-2 text-[10px] opacity-60 align-middle">{editedLabel()}</span>}
             </div>
             {/* DELETE + EDIT on a sent message (admin 2026-08-10). Only the user's own, and only while

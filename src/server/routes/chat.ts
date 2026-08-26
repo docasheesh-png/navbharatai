@@ -7,7 +7,7 @@ import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
-import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
+import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { songcraftFor } from '../AI/songcraft';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { detectImageIntent, imageGenGuidance, imageGenToolPointer } from '../lib/imageIntent';
@@ -290,7 +290,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     systemPrompt = `${systemPrompt}\n\n${INDIA_TERRITORIAL_INTEGRITY}`;
     // Anchor every reply to TODAY so the AI never presents stale training-cutoff facts as current
     // (admin 2026-07-12: "cricket squad ka 2025 data current bata diya"). Honesty directive, all tiers.
-    systemPrompt = `${systemPrompt}\n\n${recencyDirective()}`;
+    systemPrompt = `${systemPrompt}\n\n${recencyDirective()}\n\n${LINK_POLICY}`;
 
     // Build contextual message with canvas app prepended (Pro/VIP only)
     let contextualMessage = message;

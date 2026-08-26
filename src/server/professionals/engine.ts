@@ -1,7 +1,7 @@
 import { callProfessionalAIWithUsage, type ProfessionalAnswer } from '../lib/professionalRouting';
 import type { ChatTurnUsage } from '../lib/chatSpend';
 import { retrieveKnowledge, formatKnowledge } from './knowledge';
-import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
+import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import {
   extractMemory,
@@ -64,7 +64,7 @@ export function buildProfessionalSystemPrompt(config: ProfessionalConfig, kbBloc
   // config.method (the field's signature method) sits right after the persona so its domain rigor
   // is prominent; EXPERT_METHOD_LAYER gives every professional expert depth even without a bespoke method.
   const methodBlock = config.method ? `YOUR SIGNATURE METHOD (${config.name}) — follow it whenever you do your core work:\n${config.method}` : '';
-  return [config.systemPrompt, methodBlock, PROFESSIONAL_PERSONA_LAYER, EXPERT_METHOD_LAYER, config.disclaimer, memoryBlock, kbBlock, recencyDirective(), INDIA_TERRITORIAL_INTEGRITY, CREATOR_IDENTITY]
+  return [config.systemPrompt, methodBlock, PROFESSIONAL_PERSONA_LAYER, EXPERT_METHOD_LAYER, config.disclaimer, memoryBlock, kbBlock, recencyDirective(), LINK_POLICY, INDIA_TERRITORIAL_INTEGRITY, CREATOR_IDENTITY]
     .filter(Boolean)
     .join('\n\n');
 }

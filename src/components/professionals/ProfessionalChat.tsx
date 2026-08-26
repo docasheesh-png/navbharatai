@@ -217,9 +217,12 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
 
   return (
     <div className="relative flex flex-col h-full min-h-0 bg-[#0d1117] text-white">
-      <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2 shrink-0">
-        <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center"><Sparkles className="w-4 h-4" /></div>
-        <span className="font-bold text-sm">{config.name}</span>
+      {/* HEADER — deliberately compact (admin 2026-08-25). On a phone this bar, the toolbar and the
+          composer all compete with the keyboard for a small screen, and the header is the only one of
+          the three the user never interacts with. Every row it gives back is a row of conversation. */}
+      <div className="px-4 py-2 border-b border-white/5 flex items-center gap-2 shrink-0">
+        <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center shrink-0"><Sparkles className="w-3.5 h-3.5" /></div>
+        <span className="font-bold text-sm truncate min-w-0">{config.name}</span>
         {/* Free-allowance chip — only when the daily gate is on for a signed-in user. It is a COUNTER
             now, not an upsell: it used to be a button that opened a Pass paywall, and there is nothing
             left to sell. Unlimited accounts show nothing at all rather than a crown they cannot act on. */}
@@ -295,7 +298,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           no way to start over without clearing site data. Clear also drops the SAVED transcript, not
           just the on-screen one: this chat restores itself from localStorage on mount, so wiping only
           the array would resurrect the whole conversation on the next visit. */}
-      <div className="px-3 pt-2 shrink-0">
+      <div className="px-3 pt-1.5 shrink-0">
         <ChatToolbar
           messageCount={messages.length}
           sendOnEnter={sendOnEnter}
@@ -313,7 +316,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
         />
       </div>
 
-      <div className="p-3 border-t border-white/5 flex items-end gap-2 shrink-0">
+      <div className="px-3 py-2 border-t border-white/5 flex items-end gap-2 shrink-0">
         <AttachMenu
           onFiles={(fl) => addFiles(fl)}
           fileAccept={ACCEPTED_TYPES}

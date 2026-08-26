@@ -741,6 +741,100 @@ Those have no record at all, and the channel id is a one-way hash — nothing co
 Publish Capacity panel (step 1 above) finds them by reconciling against Firebase's own list, and
 reclaims them. **That closes this root cause.**
 
+## 💰 THE COST PLAN — spend nothing that a user does not pay for (admin-mandated 2026-08-25)
+
+The admin asked to cut every cost "na ke barabar" (to almost nothing), after seeing ₹2,078 of Cloud
+Run spend while being the platform's only user.
+
+### ⚠️ FIRST, THE HONEST REFRAME — "zero cost" is the wrong target, and chasing it would hurt
+
+Some spend IS the product. A build must run on a machine; an AI must be called. Driving those to zero
+means a worse builder, and this file's own AIM makes that trade a loss: a user who leaves because
+their first app was slow or broken costs more than every rupee this section can save.
+
+**The right target is ZERO LOSS, not zero cost.** Every rupee should be one of:
+1. **Recovered** from the user who caused it (a paid build), or
+2. A **deliberate, capped** acquisition cost (the free gift), or
+3. **Waste** — and waste is what this plan kills.
+
+Measured against that bar, most of the current bill is already correct. What follows is ordered by
+₹ saved per unit of risk, and the first four cost nothing and change no behaviour.
+
+### The bill, as measured (not estimated)
+
+| What | ₹/month | How we know | Recovered from users? |
+|---|---|---|---|
+| **E2B sandboxes** | **~15,000** | E2B dashboard, 30-day window (`CLAUDE.md`) | ✅ for paid builds, since `AGENTV3_BILL_SANDBOX=on` |
+| **Cloud Run** | **~2,078** | admin's console, period unconfirmed | ❌ platform overhead |
+| **Artifact Registry** | was ~32% of the bill | `cloudbuild.yaml` Step 5 — pruning already added | ❌ pure waste, now bounded |
+| **Firestore** | unmeasured | — | ❌ mostly platform |
+| **Free gift** | ₹163 real per new account | `payments.ts` + `giftPlan.ts` | ❌ by design (acquisition) |
+
+**The single most important line: E2B is 7× Cloud Run.** Attention belongs there, not on the number
+that happened to be on screen.
+
+### Tier 0 — FREE, no behaviour change, do these first
+
+| # | Action | Saves | Where |
+|---|---|---|---|
+| 0.1 | **Measure CPU before changing it.** Monitor → Server load → CPU. If it stays under 100% of one core, drop Cloud Run from 2 vCPU to 1 | **~₹1,000/mo** (half the CPU half) | `cloudbuild.yaml` |
+| 0.2 | Turn on `DATA_RETENTION_PURGE_ENABLED=true` — 90-day-old `build_jobs` are deleted. **Opt-in and currently OFF**, so this data has never been purged | Firestore storage, grows monthly | Cloud Run env |
+| 0.3 | Lower Cloud Logging retention from the 30-day default to 7 | log storage | GCP console |
+| 0.4 | Delete the unused Cloud Run services (`navbharat-ai`, `navbharat-cloud-run` — both 0 req/s) **after confirming nothing calls them** | small, plus their stored revisions | GCP console |
+
+⚠️ **0.1 IS A MEASUREMENT, NOT A CHANGE.** The server is I/O-bound — it waits on model APIs while the
+real work happens in E2B — so 1 vCPU is *probably* enough. "Probably" is not a reason to halve the
+production server's CPU. The Server load panel exists precisely to turn that into a fact.
+
+### Tier 1 — small code work, real saving
+
+| # | Action | Why it is not already done |
+|---|---|---|
+| 1.1 | Widen `RETENTION_POLICIES` beyond `build_jobs` | Each collection's timestamp FIELD and TYPE must be verified first — the module says so, because a wrong `< cutoff` bound on a string field deletes recent records |
+| 1.2 | Audit what writes to Firestore per build and drop anything nobody reads | Needs a real read of the write paths, not a guess |
+
+### Tier 2 — E2B, the ₹15,000 line
+
+Already taken: 5-minute idle reaper (≈₹4,500/mo saved vs the old 45), build-aware sweep, orphan
+reclaim across instances, and **billing the user for real VM seconds**.
+
+**What remains is the FREE tier's sandbox time — the only E2B spend nobody pays for.** Options, in
+order of how much they cost the product:
+
+1. **Cap free-build wall-clock** below the paid cap. Cheapest to build, and it bites exactly the
+   runaway free builds rather than the good ones.
+2. **A smaller sandbox template for free builds** (fewer vCPU). Needs an E2B template rebuild — admin
+   infra, not a session's work.
+3. ⛔ **Do NOT shorten the idle window further** without re-reading `CLAUDE.md`'s warning: idle is
+   measured from the last SANDBOX operation, and a long model call is not one. The sweep is
+   build-aware, which is the only reason 5 minutes is safe at all.
+
+### Tier 3 — the free gift, which is the ONLY line that becomes crores
+
+₹163 of real spend per new account. At a million free accounts that is **₹16 crore** — and it is the
+one number in this file that scales linearly with signups while returning nothing.
+
+It is already capped by construction (one gift per normalized email, one per phone, phone-bound so
+both doors cannot be used twice). `giftPlan.ts` v2 would halve the unverified rung (₹650 → ₹250) and
+is fully built behind `WALLET_GIFT_V2`.
+
+**The admin decided on 2026-08-25 to leave the gift as it is.** Recorded here as a decision, not an
+oversight — do not re-propose it without new evidence.
+
+### What NOT to do, and why
+
+- **Do not add caching/queues/Redis to save money.** They cost a standing monthly bill to save a
+  variable one. See the SCALE PLAN in `CLAUDE.md` — every item there has a trigger, and none has fired.
+- **Do not reduce build quality to cut tokens.** Paid builds bill at ~4× real cost; a cheaper build
+  that fails is a refund AND a lost customer.
+- **Do not chase Cloud Run before E2B.** It is one seventh the size.
+
+### The measurement that makes this plan real
+
+`Monitor → Server load` (CPU, memory, waiting time) and the **VM cost** tiles answer Tier 0 and Tier 2
+directly. Both shipped 2026-08-23. **Every action above should be preceded by a look at that screen
+and followed by another** — a saving nobody measured is a story, not a saving.
+
 ## How to use this file
 
 1. **Re-grep before you start.** Every line here is a hint. Nine were wrong on 2026-08-07.

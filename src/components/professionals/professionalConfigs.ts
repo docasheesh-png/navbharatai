@@ -5,6 +5,17 @@ import type { ProfessionalChatConfig } from './ProfessionalChat';
  * Backend persona/knowledge lives in src/server/professionals/. Add a professional
  * here + activate its card in ProfessionalsView + add its ViewType render block.
  */
+/**
+ * Professionals that do NOT live in the map below, because they have their own component rather than
+ * a ProfessionalChat config. They are still professionals to the user — they sit on the same screen —
+ * so anything reasoning about "is this a professional?" has to include them.
+ *
+ * Today that is Doctor AI alone (`SDAChat`). Kept HERE, beside the map, so the answer to that question
+ * has one address; `tabParenting.test.ts` fails if a card on the Professionals screen is in neither
+ * place, which is what stops this list going stale the next time one is added.
+ */
+export const PROFESSIONALS_IMPLEMENTED_ELSEWHERE = ['sda_chat'] as const;
+
 export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
   teacher_ai: {
     id: 'teacher_ai',

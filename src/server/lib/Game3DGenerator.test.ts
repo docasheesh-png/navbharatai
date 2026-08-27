@@ -334,3 +334,101 @@ describe('the builder is told what "realistic" actually requires', () => {
     expect(prompt).toMatch(/rather than promising photorealism/);
   });
 });
+
+/**
+ * REAL OBJECTS, AND ONLY WHEN ASKED FOR (admin 2026-08-27: "sabhi objects asli chahiye — car, tree,
+ * river, pahad, sky, registan, animal, road … agar user sirf 3d bol raha hai to lite se kaam chalega").
+ *
+ * Two tiers, not one build with a slider — the REAL tier costs real device budget, so these tests pin
+ * that the light tier stays light AND that the real tier actually contains the things that make an
+ * object read as that object.
+ */
+describe('generateGame3D — the objects a world is made of', () => {
+  const all = generateGame3D();
+  const objects = all.files['src/game/three/objects.ts'];
+
+  it('emits every object the admin named', () => {
+    expect(objects).toBeTruthy();
+    for (const fn of ['createCar', 'createTree', 'createMountain', 'createRiver', 'createDesert', 'createRoad', 'createAnimal']) {
+      expect(objects, fn).toContain('export function ' + fn);
+    }
+    expect(GAME_3D_MODULES).toContain('objects');
+  });
+
+  it('every builder honours a REAL / LITE tier set once at start-up', () => {
+    expect(objects).toContain("export function setDetailLevel");
+    expect(objects).toContain("let DEFAULT_DETAIL: Detail = 'lite'");
+    // Default is LITE on purpose: a plain "3d game" must not be taxed for detail nobody asked for.
+    expect(objects).toMatch(/const tier = \(o\?: BaseOpts\): Detail => o\?\.detail \?\? DEFAULT_DETAIL/);
+  });
+
+  it('the CAR is a silhouette, not a box — bonnet, cabin, boot, arches, glass, emitting lights', () => {
+    for (const part of ['bonnet', 'cabin', 'boot', 'wheelbase', 'arch', 'glassMat']) {
+      expect(objects, part).toContain(part);
+    }
+    // A light that does not emit is a coloured sticker.
+    expect(objects).toContain('MeshBasicMaterial({ color: 0xfff3d0 })');
+    expect(objects).toContain('export function rollWheels');
+  });
+
+  it('the TREE tapers, flares and puts leaves at the BRANCH ENDS', () => {
+    // The classic AI tree is a cylinder with a green sphere on top; these three lines are the fix.
+    expect(objects).toContain('flare');
+    expect(objects).toMatch(/Leaves at the END of the branch/);
+    expect(objects).toMatch(/CylinderGeometry\(H \* 0\.026, H \* 0\.075/); // top radius < base radius
+  });
+
+  it('the MOUNTAIN has ridges and a blended snow line, not a painted cone', () => {
+    expect(objects).toMatch(/RIDGES/);
+    expect(objects).toContain('snow line');
+    // A hard snow edge is what makes it look painted on.
+    expect(objects).toMatch(/Blend across the snow line/);
+  });
+
+  it('the RIVER moves and MEANDERS — still, straight water is a canal in a screenshot', () => {
+    expect(objects).toMatch(/MEANDERS/);
+    expect(objects).toContain('update: (t: number) => void');
+    expect(objects).toMatch(/two waves|Two waves/);
+  });
+
+  it('the DESERT dune is ASYMMETRIC — sand collapses at ~34 degrees', () => {
+    expect(objects).toContain('slip face');
+    expect(objects).toMatch(/Skew the wave/);
+  });
+
+  it('the ROAD carries the markings that make it a road', () => {
+    expect(objects).toContain('Dashed centre line');
+    expect(objects).toContain('kerb');
+    expect(objects).toContain('Worn wheel tracks');
+  });
+
+  it('the ANIMAL walks on DIAGONAL PAIRS — the thing generated quadrupeds get wrong', () => {
+    expect(objects).toContain('DIAGONAL PAIRS');
+    expect(objects).toContain('const pair = [0, 1, 1, 0]');
+    // A knee only bends one way, same rule as the humanoid.
+    expect(objects).toContain('Math.max(0, -s * swing * 1.3)');
+  });
+
+  it('the LITE tier really is lighter — no texture generation, fewer segments', () => {
+    // The light tier skips surfaceMaterial entirely: on a phone the texture memory IS the budget.
+    expect(objects).toMatch(/The light tier deliberately skips the texture maps/);
+    expect(objects).toMatch(/d === 'real' \? 24 : 10/);   // wheel segments
+    expect(objects).toMatch(/d === 'real' \? 96 : 32/);   // mountain resolution
+  });
+
+  it('asking for objects pulls in surfaces AND environment — it imports one and needs the other', () => {
+    const only = generateGame3D(['objects']);
+    expect(only.files['src/game/three/objects.ts']).toBeTruthy();
+    expect(only.files['src/game/three/surfaces.ts']).toBeTruthy();
+    expect(only.files['src/game/three/environment.ts']).toBeTruthy();
+  });
+
+  it('materials are SHARED — a hundred trees must not build a hundred bark materials', () => {
+    expect(objects).toContain('const matCache = new Map');
+    expect(objects).toContain('export function disposeObjectMaterials');
+  });
+
+  it('still zero new dependencies — every object is generated in code', () => {
+    expect(all.dependencies).toEqual([{ name: 'three', version: '^0.180.0' }]);
+  });
+});

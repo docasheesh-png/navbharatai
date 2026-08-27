@@ -42371,3 +42371,96 @@ passed (10 new).
 generators write into a user app, and it rejected the first draft — `.join('\n')` inside the generator's
 template literal became a REAL newline in the generated file and broke a string literal. That guard is
 the reason a broken 3D module could not reach a user.
+
+---
+
+## 2026-08-27 — Real objects in 3D games: car, tree, mountain, river, desert, road, animal — with a two-tier, intent-driven quality decision
+
+**Admin, verbatim:** *"sabhi objects asli (real) chahiye — car, tree, river, pahad 🏔️, sky, registan,
+animal, road… agar user bole real/realistic/asli/100% aisa kuch bhi bole (wording par nahi jana,
+intension samjhna hai) to ek dam hu-ba-hu 100% real object banane hai. agar user sirf 3d bol raha hai, to
+hubahu asli real object na bana kar lite se kam chal jayega."*
+
+The 2026-08-26 work gave a 3D scene a real sky, real surface materials and a properly-proportioned human
+figure — the *setting*. What stood **in** that setting was still boxes and cylinders, which is exactly the
+gap the admin's "Wild by Navarrete AI is not so realistic" report was pointing at. This closes that half.
+
+### What shipped
+
+**`src/server/lib/Game3DGenerator.ts` → new module `src/game/three/objects.ts`** (the ninth; pulls in
+`surfaces` + `environment` automatically, so asking for objects can never produce a file that imports
+something the build did not write). Every object is generated from code — **still exactly one dependency,
+`three@^0.180.0`** — so a published app can never break because a model file went missing.
+
+- **`createCar`** — real proportions (4.3 m long, 2.6 m wheelbase, 0.32 m wheels), a bonnet/cabin/boot
+  silhouette instead of one box, a raked windscreen, glass, wheel arches, tyres with rims, emissive
+  lights, grille, mirrors, bumpers. `rollWheels()` turns them by distance travelled, so the wheels match
+  the speed rather than spinning at a made-up rate.
+- **`createTree`** — a trunk that TAPERS (top radius a third of the base) and flares into roots, recursive
+  branches at 30–50°, and leaves at the **ends of the branches**. The one-green-ball-on-a-cylinder tree is
+  what makes an AI-built forest read as fake, and it is the specific thing this replaces.
+- **`createMountain`** — ridges from `1 - abs(sin(theta * k))` displacement, and a snow line that BLENDS
+  over an altitude band rather than a painted stripe.
+- **`createRiver`** — a meandering course, two counter-scrolling wave layers, a transmissive material you
+  can see into, and an `update(t)` so it actually moves.
+- **`createDesert`** — dunes skewed by `Math.pow(wave, 0.55)` to give a gentle windward side and a steep
+  slip face. That asymmetry is the single thing that makes sand read as sand; symmetric dunes look like
+  fabric.
+- **`createRoad`** — asphalt, a dashed centre line at real 3 m/6 m spacing, edge lines, kerbs, and worn
+  wheel tracks where tyres actually sit.
+- **`createAnimal`** — a quadruped that walks on **diagonal pairs** (`const pair = [0, 1, 1, 0]`), which is
+  how four-legged animals genuinely move, with a knee that clamps to one direction and a tail that follows.
+
+Shared `matCache` + `disposeObjectMaterials()`, so a scene with two hundred trees builds three materials,
+not six hundred — and leaving the game screen releases them (skip that and the browser eventually refuses
+to show any 3D at all).
+
+### The tier decision — `src/server/lib/realismIntent.ts` (new, pure, 11 tests)
+
+The admin's instruction has two halves, and the second one is the one that costs money: *"agar user sirf
+3d bol raha hai, to lite se kam chal jayega."* So the tier is a **decision, not a regex at a call site**.
+
+- **DEFAULT IS `lite`.** A plain "make a 3D game" gets the fast, phone-friendly build. The heavy tier is
+  opt-in by saying so — defaulting the other way would tax every casual request for detail nobody asked
+  for, on a mid-range Android.
+- **`real` is triggered by intent, not by one word** — English, Hinglish and Devanagari together:
+  realistic / photorealistic / lifelike / cinematic / AAA / high-quality, asli / hu-ba-hu / bilkul sacchi /
+  yatharth / 100%, असली / हूबहू / यथार्थ, and naming a photoreal AAA title (GTA, PUBG, Forza, Cyberpunk…),
+  because "GTA jaisa" **is** the realism ask.
+- **A stylised ask WINS over a realism word.** "Realistic low-poly", "cartoon with realistic lighting" are
+  describing a *look*, not asking for a scanned world — building the heavy tier for them spends the device
+  budget on the wrong thing entirely.
+- 🔒 **The false positive that mattered most: `real-time`.** "Real-time multiplayer" is about latency, and a
+  naive `/real/` would have turned every multiplayer game into a heavyweight render. Excluded by
+  construction (negative lookahead), along with `real money`, `real user`, `real data`, `real estate`.
+
+**`setDetailLevel('real' | 'lite')`** in `objects.ts` is what the tier actually moves: segment counts,
+branch recursion depth, dune resolution, whether wheel arches and mirrors exist at all.
+
+### Wiring, and the half that rots silently
+
+`src/server/routes/agentv3.ts` now calls `realismIntent(prompt)` and prepends an `OBJECT DETAIL TIER:` line
+to `buildPrompt` — **gated to prompts that actually mention 3D/game**, because that block is billed tokens
+on every build and a to-do app must not pay for a paragraph about dune slip faces. The system prompt tells
+the model to judge the same thing; two independent readings agreeing is what stops one careless prompt
+turning a casual "3d game" into a heavyweight render.
+
+⚠️ **`tests/realismTierWiring.test.ts` (new) exists because if that call is ever deleted, NOTHING FAILS** —
+no error, no red build. The model simply stops being told which tier was asked for and picks for itself,
+and the only symptom is that someone who typed "bilkul asli" gets the flat scene they were complaining
+about. Same class of silent bug as the cache-prefix preamble, pinned the same way (source-level, for the
+same honest reason: the code lives inside a ~12,000-line route closure that cannot be imported).
+
+### The honest limit — unchanged, and deliberately NOT softened because the admin said "100%"
+
+At the `real` tier these read unmistakably as a car, a tree, a mountain: right proportions, PBR materials,
+real reflections and shadows. **They are not photographs.** Scanned, film-quality assets come from a 3D
+scanner and an artist, not from a text prompt, and no AI app builder can produce them today. That ceiling
+is written into `systemPrompt.ts` ("STYLISED-REALISTIC", "rather than promising photorealism"), into the
+route's REAL-tier instruction (*say "real-looking", never "photorealistic"*), and into
+`AppKnowledgeBase.ts` so every AI explains it the same way — and it is test-pinned, so a later edit cannot
+quietly start promising a photo.
+
+**Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `npm run build` ✅ ·
+`npx vitest run` — **1396 files / 18262 passed, 1 skipped** (24 new: 11 realismIntent, 13 objects, plus 7
+wiring).

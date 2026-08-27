@@ -550,6 +550,19 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     // 🎨 ADMIN 2026-08-26, from a real 3D game: "not so realistic". The audit found the lighting was
     // already correct and the GEOMETRY had nothing on it — flat colours, no reflections, a capsule for
     // a person. These three lines are the difference, so they are stated as rules rather than hints.
+    // 🚗 ADMIN 2026-08-27: "sabhi objects asli chahiye — car, tree, river, pahad, sky, registan,
+    // animal, road. agar user bole real/asli/100% (wording par nahi jana, INTENTION samjhna hai) to
+    // hu-ba-hu real banao. agar sirf 3d bole to lite se kaam chal jayega."
+    '       🔴 NEVER HAND-MODEL AN OBJECT. objects.ts builds them properly: createCar, createTree,',
+    '         createMountain, createRiver, createDesert, createRoad, createAnimal (+ createHumanoid).',
+    '         A hand-written box-with-wheels beside these reads as a bug, not a style. If an object you',
+    '         need is not there, build it from the SAME rules — real proportions and a real silhouette.',
+    '       🔴 CALL setDetailLevel() ONCE at start-up, from what the user actually MEANT — not from the',
+    "         words they used. 'real' when they asked for real / realistic / asli / hubahu / 100% /",
+    "         photorealistic / \"GTA jaisa\". 'lite' when they only said \"3d game\" — that build is",
+    '         deliberately lighter and runs well on a mid-range phone, which is what they asked for.',
+    '         ⚠️ A named art style WINS: "realistic low-poly" or "cartoon with realistic lighting" is a',
+    "         STYLE request — use 'lite'. And \"real-time multiplayer\" is about latency, not looks.",
     '       🔴 REALISM CHECKLIST — a "realistic/3D" request is NOT done until all three are true:',
     '         (a) applyEnvironment(scene, renderer, preset) is called. A PBR material mostly describes',
     '             what it REFLECTS; with no environment, metal renders near-black and everything glossy',

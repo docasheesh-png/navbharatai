@@ -250,8 +250,45 @@ describe('wiring — the buttons genuinely use these helpers', () => {
   });
 
   it('the submit route gathers the WHOLE session before building the record', () => {
-    expect(route).toContain('listDiagnosticsHistory(wsForSession');
+    // Reads through the FAILURE-AWARE listing (2026-08-27). The plain `listDiagnosticsHistory` returns
+    // [] for both "no earlier builds" and "the read failed", so a stitch built on it silently files a
+    // one-build session — the exact "shuru ke 9 gayab" the admin reported.
+    expect(route).toContain('listDiagnosticsHistoryResult(wsForSession');
     expect(route).toContain('buildAdminReportRecord(report,');
     expect(route).toContain('sessionBuilds');
+  });
+
+  it('…and a history it could not READ is reported, not silently rendered as one build', () => {
+    expect(route).toContain('manualHistoryUnreadable');
+    expect(route).toContain('}, sessionBuilds, manualHistoryUnreadable);');
+    // The automatic (auto-report) path carries the same guarantee — one fix, both entry points.
+    expect(route).toContain('}, sessionBuilds, historyUnreadable);');
+  });
+});
+
+describe('partsSummary tells the truth when the history could not be READ (admin 2026-08-27)', () => {
+  it('a one-build record with an unreadable history no longer claims "Single build"', () => {
+    const rec = { meta: { id: 'r' }, report: {}, session: { builds: [], count: 1, omittedBuilds: 0, historyUnreadable: true } };
+    const line = partsSummary(rec);
+    expect(line).not.toBe('Single build');
+    expect(line).toMatch(/could not be read/i);
+    expect(line).toMatch(/there may be more/i);
+  });
+
+  it('a genuine single build still reads exactly as it did — no false alarm', () => {
+    expect(partsSummary({ meta: { id: 'r' }, report: {} })).toBe('Single build');
+    expect(partsSummary({ meta: { id: 'r' }, report: {}, session: { builds: [], count: 1, omittedBuilds: 0 } })).toBe('Single build');
+  });
+
+  it('a multi-part record with an unreadable history keeps its count AND the caveat', () => {
+    const rec = { meta: { id: 'r' }, report: {}, session: { builds: [{}, {}], count: 2, omittedBuilds: 0, historyUnreadable: true } };
+    expect(partsSummary(rec)).toMatch(/^2 parts/);
+    expect(partsSummary(rec)).toMatch(/could not be fully read/i);
+  });
+
+  it('the size-cap wording is untouched — two different truths must not collapse into one', () => {
+    const rec = { meta: { id: 'r' }, report: {}, session: { builds: [], count: 4, omittedBuilds: 3 } };
+    expect(partsSummary(rec)).toMatch(/3 earlier build\(s\) omitted/);
+    expect(partsSummary(rec)).not.toMatch(/could not be read/i);
   });
 });

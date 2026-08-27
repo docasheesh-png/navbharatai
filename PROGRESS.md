@@ -42485,3 +42485,20 @@ and says plainly what narrowing costs ("leave out environment and every metal re
 `tests/game3dToolModules.test.ts` pins the description against `GAME_3D_MODULES` itself, and separately
 EXECUTES the default build to prove "Default = all" is true rather than prose — so a tenth module cannot
 be added without the test failing.
+
+⚠️ **AND THE FIRST VERSION OF THAT GUARD WAS VACUOUS — recorded because it nearly shipped as coverage.**
+It searched the description PROSE for each module name. Deleting `objects` from the list still PASSED,
+because the word appeared later in a warning sentence. Short names make it far worse: `ai`, `game`,
+`state`, `pool`, `feel` and `input` match almost any English sentence, so five of the six tools were
+being "guarded" by a check that could not fail. **A guard that cannot fail is worse than no guard,
+because it reads as coverage in every future audit.**
+
+The fix: the descriptions carry a machine-checkable `Optional subset: a, b, c.` sentence — a convention
+five of the six tools already used — parsed and compared as an EXACT SET against what the generator
+really writes, so a missing name and an invented one both fail. A separate test asserts the sentence
+still parses, because a reword would otherwise make the whole file inert again. Proven by deliberately
+breaking it three ways (drop a module → fail; declare one that does not exist → fail; reword the
+sentence → fail) before it was trusted.
+
+**The general lesson, worth more than this fix:** a new test passing on the first run is not evidence it
+works. Break it on purpose and watch it fail, or it is decoration.

@@ -2241,16 +2241,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             type: 'array',
             items: { type: 'string' },
             description:
-              'Optional subset of MODULES. Default = ALL, and all is almost always right — omit this. '
-              + 'renderer, lighting, materials, camera, world, environment (sky + image-based '
-              + 'reflections), surfaces (brick/wood/bark/stone/road/soil/grass/metal/cloth/tile/sand '
-              + 'with real bump + roughness), humanoid (a correctly-proportioned figure with joints), '
-              + 'objects (createCar / createTree / createMountain / createRiver / createDesert / '
-              + 'createRoad / createAnimal, with setDetailLevel for real-vs-lite). '
-              + '⚠️ A SUBSET IS HOW A 3D GAME ENDS UP LOOKING FLAT: leave out environment and every '
-              + 'metal renders near-black; leave out objects and there is nothing to put in the world '
-              + 'except hand-modelled boxes. Only narrow this when re-running the tool to add one '
-              + 'module to a project that already has the rest.',
+              'Optional subset: renderer, lighting, materials, camera, world, environment, surfaces, '
+              + 'humanoid, objects. Default = all; imports are pulled in automatically. '
+              + 'environment = sky + image-based reflections; surfaces = brick/wood/bark/stone/road/soil/'
+              + 'grass/metal/cloth/tile/sand with real bump + roughness; humanoid = a correctly '
+              + 'proportioned figure with joints; objects = createCar / createTree / createMountain / '
+              + 'createRiver / createDesert / createRoad / createAnimal, with setDetailLevel() choosing '
+              + 'full detail or the lighter phone-friendly build. '
+              + '⚠️ NARROWING THIS IS HOW A 3D GAME ENDS UP LOOKING FLAT: without environment every '
+              + 'metal renders near-black, and without objects there is nothing to put in the world but '
+              + 'hand-modelled boxes. Only narrow it to add one module to a project that has the rest.',
           },
         },
       },

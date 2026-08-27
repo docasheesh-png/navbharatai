@@ -104,6 +104,8 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
   const [reporting, setReporting] = useState(false);
   const [reportText, setReportText] = useState('');
   const [reportDone, setReportDone] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const liveRef = useRef(true);
   useEffect(() => () => { liveRef.current = false; }, []);
 
@@ -246,20 +248,52 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
     }
   }, [appId, password, remixing, meta]);
 
+  /**
+   * 🔒 A REPORT THAT FAILS MUST SAY SO. It used to be `if (res.ok) { … }` with no else, and a catch
+   * whose entire body was a comment saying the user could retry.
+   *
+   * So every refusal the server can produce — 401 not signed in, 400 too short, 404 app gone, 502
+   * write failed — arrived as ABSOLUTELY NOTHING. The admin's report (2026-08-27) is the exact
+   * symptom: "button se popup to khul gaya, text type bhi ho gaya, par send button kam nahi kar
+   * raha". The button was working perfectly; it was the answer that was being thrown away.
+   *
+   * This is the same defect the store's own publish path had, and it is worse here: a person
+   * reporting a scam and getting silence concludes that reporting does nothing, and never tries
+   * again. The store's safety depends on them trying.
+   */
   const sendReport = useCallback(async () => {
     if (reportText.trim().length < 5) return;
+    if (reportBusy) return;
+    setReportBusy(true);
+    setReportError(null);
+    // No stall may outlive the user's patience — see the publish button for the same reasoning.
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 30_000);
     try {
       const res = await fetch(`/api/nav-store/web/app/${encodeURIComponent(appId)}/report`, {
         method: 'POST',
         headers: await authedHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ reason: reportText.trim() }),
+        signal: ac.signal,
       });
       if (res.ok) {
         setReportDone(true);
         setTimeout(() => { if (liveRef.current) { setReporting(false); setReportDone(false); setReportText(''); } }, 1400);
+        return;
       }
-    } catch { /* the dialog stays open; the user can retry */ }
-  }, [appId, reportText]);
+      // The server's own sentence, verbatim — it is specific and it is the thing the user needs.
+      const data = await res.json().catch(() => null);
+      if (liveRef.current) setReportError(data?.error || `The report could not be sent (error ${res.status}).`);
+    } catch (e) {
+      const timedOut = (e as { name?: string })?.name === 'AbortError';
+      if (liveRef.current) {
+        setReportError(timedOut ? 'That took too long. Check your connection and try again.' : 'Could not reach the server. Check your connection and try again.');
+      }
+    } finally {
+      clearTimeout(timer);
+      if (liveRef.current) setReportBusy(false);
+    }
+  }, [appId, reportText, reportBusy]);
 
   return createPortal(
     <div
@@ -416,9 +450,13 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
                     rows={3}
                     className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-indigo-500 resize-none mb-3"
                   />
+                  {/* The refusal the server actually gave. Without this the button looked broken. */}
+                  {reportError && (
+                    <p className="text-xs text-rose-400 mb-3" role="alert">{reportError}</p>
+                  )}
                   <div className="flex gap-2 justify-end">
                     <button onClick={() => setReporting(false)} className="px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white transition-colors">Cancel</button>
-                    <button onClick={() => void sendReport()} disabled={reportText.trim().length < 5} className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-xs text-white font-semibold transition-colors">Send report</button>
+                    <button onClick={() => void sendReport()} disabled={reportText.trim().length < 5 || reportBusy} className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-xs text-white font-semibold transition-colors">{reportBusy ? 'Sending…' : 'Send report'}</button>
                   </div>
                 </>
               )}

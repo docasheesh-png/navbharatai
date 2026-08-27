@@ -547,6 +547,53 @@ export async function reportWebApp(id: string, reporterUid: string, reason: stri
   });
 }
 
+export interface WebAppReport {
+  appId: string;
+  appName: string;
+  /** The app's current status, so a reviewer sees at a glance whether it is still reachable. */
+  appStatus: WebStoreApp['status'];
+  reporterUid: string;
+  reason: string;
+  at: number;
+}
+
+/**
+ * Every report, newest first — the queue a human works through.
+ *
+ * 🔒 WITHOUT THIS, REPORTING WAS DECORATION. reportWebApp has written to this subcollection since the
+ * store shipped and nothing ever read it, so "Report sent — a person will look at it" was a promise
+ * the code could not keep (admin 2026-08-27).
+ *
+ * A collection-group query would be one call instead of N+1, but it needs a composite index created
+ * out-of-band, and an admin screen that 500s until someone notices a console link is how this feature
+ * would quietly stop working a second time. Reports are rare and the app list is small; correctness
+ * without a deployment step wins here. Revisit if the store ever carries thousands.
+ */
+export async function listWebAppReports(limit = 200): Promise<WebAppReport[]> {
+  const d = db();
+  if (!d) return [];
+  const apps = await d.collection(COLLECTION).get();
+  const out: WebAppReport[] = [];
+  for (const appDoc of apps.docs) {
+    const app = appDoc.data() as WebStoreApp;
+    // Best-effort per app: one unreadable subcollection must not hide every other app's reports.
+    const snap = await appDoc.ref.collection(REPORTS_SUB).get().catch(() => null);
+    if (!snap) continue;
+    for (const r of snap.docs) {
+      const data = r.data() as { reporterUid?: string; reason?: string; at?: number };
+      out.push({
+        appId: appDoc.id,
+        appName: app?.name || '(unnamed)',
+        appStatus: app?.status ?? 'unlisted',
+        reporterUid: data.reporterUid || 'anon',
+        reason: String(data.reason || ''),
+        at: typeof data.at === 'number' ? data.at : 0,
+      });
+    }
+  }
+  return out.sort((a, b) => b.at - a.at).slice(0, limit);
+}
+
 export function newWebAppId(): string {
   return `web_${randomBytes(9).toString('hex')}`;
 }

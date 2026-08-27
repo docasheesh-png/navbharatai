@@ -47,7 +47,7 @@ import {
   saveWebApp, getWebApp, getWebAppFiles, listListedWebApps, listMyWebApps, listUnlistedWebApps,
   saveWebAppBakedPage, getWebAppBakedPage,
   updateWebApp, makeWebAppPublic, bumpWebAppCounter, removeWebApp, reportWebApp,
-  recordRemixOrigin, getRemixOrigin, keyShapedEnvVars,
+  recordRemixOrigin, getRemixOrigin, keyShapedEnvVars, listWebAppReports,
   sanitizeScreenshots, saveWebAppScreenshots, getWebAppScreenshots,
   type WebStoreApp,
 } from '../lib/navStoreWeb';
@@ -974,19 +974,55 @@ export function registerNavStoreRoutes(app: Express): void {
   });
 
   /** Viewer report — the store's immune system. Requires sign-in so reports carry accountability. */
-  app.post('/api/nav-store/web/app/:id/report', async (req: Request, res: Response) => {
+  //
+  // 🔒 A SIGNED-OUT VIEWER MAY REPORT. This required sign-in, and that was backwards for this store.
+  //
+  // App Mart's whole promise is "one click — others run your app instantly in their browser. No APK,
+  // no hosting, no install." The person who opens a shared link and finds a scam, a stolen app or a
+  // broken game is therefore, in the ordinary case, NOT signed in — so the requirement excluded
+  // precisely the people the reporting exists for, and did it silently (the player showed nothing at
+  // all on a 401, which is how the admin met this on 2026-08-27).
+  //
+  // It did not buy safety in exchange. A report triggers nothing automatic — it queues for a human —
+  // and anyone willing to abuse it can make an account in a minute. The requirement stopped honest
+  // viewers and inconvenienced nobody else. The real ceiling on abuse is the rate limit below, and
+  // an anonymous report is recorded honestly as anonymous so a reviewer can weigh it accordingly.
+  const reportLimiter = rateLimiter({ name: 'store-report', authed: 30, anon: 10, noun: 'reports', durable: false });
+  app.post('/api/nav-store/web/app/:id/report', reportLimiter, async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
-    if (!me?.uid) return res.status(401).json({ error: 'Sign in to report an app.' });
     const reason = (typeof req.body?.reason === 'string' ? req.body.reason : '').trim();
     if (reason.length < 5) return res.status(400).json({ error: 'Say briefly what is wrong with this app.' });
     try {
       const found = await getWebApp(String(req.params.id || ''));
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
-      await reportWebApp(found.id, me.uid, reason);
+      await reportWebApp(found.id, me?.uid || 'anon', reason);
       res.json({ ok: true });
     } catch (e) {
       logStoreError('web/report', e);
       res.status(502).json({ error: 'Could not send the report.' });
+    }
+  });
+
+  /**
+   * Admin: WHAT PEOPLE ACTUALLY REPORTED.
+   *
+   * 🔒 THE REASON THIS ROUTE EXISTS AT ALL (admin 2026-08-27). Reports were written to a Firestore
+   * subcollection that NOTHING in the codebase read. Not a route, not a screen, not an alert. A
+   * viewer could report a scam, get "Report sent — a person will look at it", and no person ever
+   * would — because there was no way for one to look.
+   *
+   * That is the second absolute rule exactly: a feature that looks done and does nothing. The button
+   * failing silently was the visible bug; this was the real one, and it would have survived the fix
+   * to the button completely intact.
+   */
+  app.get('/api/nav-store/web/admin/reports', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!isStoreAdmin(me?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
+    try {
+      res.json({ reports: await listWebAppReports() });
+    } catch (e) {
+      logStoreError('web/admin reports', e);
+      res.status(502).json({ error: 'Could not load the reports.' });
     }
   });
 

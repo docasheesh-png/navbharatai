@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Store, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
-  CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package,
+  CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package, Flag,
   Rocket, ImagePlus, Clipboard, Copy,
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
@@ -136,6 +136,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
   const [webApps, setWebApps] = useState<WebApp[]>([]);
   const [webMine, setWebMine] = useState<WebApp[]>([]);
   const [webQueue, setWebQueue] = useState<WebApp[]>([]);
+  /** What viewers actually reported. Written since the store shipped; until now, read by nobody. */
+  const [reports, setReports] = useState<Array<{ appId: string; appName: string; appStatus: string; reporterUid: string; reason: string; at: number }>>([]);
   /**
    * APPS YOU OWN (admin 2026-08-16: "purchase ho jaye to us par kharidne wale ka naam likh jaye, fir
    * jitni baar chahe code copy kare — par bas wahi ek app").
@@ -329,6 +331,14 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
     } catch { /* shown as an empty queue */ }
   }, []);
 
+  const loadReports = useCallback(async () => {
+    try {
+      const res = await fetch('/api/nav-store/web/admin/reports', { headers: await authedHeaders() });
+      const data = await res.json().catch(() => null);
+      if (liveRef.current) setReports(Array.isArray(data?.reports) ? data.reports : []);
+    } catch { /* shown as no reports */ }
+  }, []);
+
   /** Owner action on one of MY web apps; the store reloads so the change is visibly real. */
   const webAppAction = useCallback(async (id: string, body: Record<string, unknown>) => {
     setWebBusy(id);
@@ -354,6 +364,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         body: JSON.stringify({ id, decision }),
       });
       void loadWebQueue();
+      void loadReports();
       void loadWebApps();
     } finally {
       if (liveRef.current) setWebBusy('');
@@ -366,7 +377,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
   useEffect(() => { if (tab === 'publish' && myApps === null) void loadMyApps(); }, [tab, myApps, loadMyApps]);
   useEffect(() => {
     if (tab === 'mine') { void loadMine(); void loadWebMine(); void loadOwned(); }
-    if (tab === 'review') { void loadQueue(); void loadWebQueue(); }
+    if (tab === 'review') { void loadQueue(); void loadWebQueue(); void loadReports(); }
   }, [tab, loadMine, loadQueue, loadWebMine, loadWebQueue, loadOwned]);
 
   const decide = useCallback(async (id: string, decision: 'approved' | 'rejected' | 'removed') => {
@@ -864,6 +875,49 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
               ))}
             </div>
           )
+        )}
+
+        {/* ── Admin: WHAT VIEWERS REPORTED ───────────────────────────────────────────────────────
+            These were written to Firestore from the day the store shipped and READ BY NOTHING, so
+            "Report sent — a person will look at it" was a promise the code could not keep. This is
+            the person. Newest first, with the app it is about and a way to open or remove it. */}
+        {tab === 'review' && status?.isAdmin && reports.length > 0 && (
+          <div className="mb-5">
+            <p className="text-xs font-bold uppercase tracking-wider text-rose-400/70 mb-2 flex items-center gap-1.5">
+              <Flag size={12} /> Reported by viewers ({reports.length})
+            </p>
+            <div className="space-y-2">
+              {reports.map((r, i) => (
+                <div key={`${r.appId}-${r.at}-${i}`} className="p-3 rounded-xl bg-[#161b22] border border-rose-500/20">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold">{r.appName}</p>
+                    <span className="text-[10px] text-white/40 shrink-0">
+                      {r.at ? new Date(r.at).toLocaleDateString() : '—'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-white/70 mt-1 whitespace-pre-wrap break-words">{r.reason}</p>
+                  <p className="text-[10px] text-white/35 mt-1">
+                    {/* Anonymous is recorded honestly rather than dressed up — a reviewer should weigh it. */}
+                    {r.reporterUid === 'anon' ? 'from a signed-out viewer' : 'from a signed-in user'}
+                    {r.appStatus === 'removed' ? ' · this app is already removed' : ` · status: ${r.appStatus}`}
+                  </p>
+                  {r.appStatus !== 'removed' && (
+                    <div className="flex gap-2 mt-2.5">
+                      <button
+                        onClick={() => setPlayingId(r.appId)}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-white/70 transition-colors"
+                      ><Play size={11} /> See it</button>
+                      <button
+                        onClick={() => void decideWeb(r.appId, 'removed')}
+                        disabled={webBusy === r.appId}
+                        className="px-3 py-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-500 disabled:opacity-40 text-[11px] text-white font-semibold transition-colors"
+                      >Remove this app</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* ── Admin review: instant apps waiting for a STORE LISTING (their links already work) ── */}

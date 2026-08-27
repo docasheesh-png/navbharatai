@@ -118,3 +118,35 @@ function safeLocalStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
     return null;
   }
 }
+
+/**
+ * Open a link that leaves NavBharatAI — safely, and in the place the user actually wants it.
+ *
+ * WHY THIS IS A FUNCTION AND NOT `window.open` AT EACH CALL SITE:
+ *
+ *  1. THE NATIVE SHELL. Inside the Capacitor app a plain `window.open(url, '_blank')` opens the link
+ *     in the app's own WebView, so a YouTube video plays in a stripped browser instead of the YouTube
+ *     app — no fullscreen control, no account, no picture-in-picture. `_system` hands the URL to the
+ *     OS, which routes it to the installed app that claims it. Same trick openPlayStoreListing above
+ *     already uses, and the same reasoning.
+ *  2. THE SCHEME CHECK. `window.open` will happily run a `javascript:` URL. Nothing passes one today,
+ *     but a helper that is safe by construction cannot be made unsafe later by a caller who forgets —
+ *     and "the URL is a constant" stops being true the first time one comes from a config or an API.
+ *  3. `noopener,noreferrer` on the web path, so the opened page cannot reach back through
+ *     `window.opener`.
+ *
+ * NOT merged with the notification deep-link opener in pushNotifications.ts, deliberately: that one
+ * wants the IN-APP browser (a notification usually points back at our own content, and keeping the
+ * user inside the app is right there). Same code, opposite intent — merging them would force one of
+ * the two behaviours to be wrong.
+ *
+ * Never throws: a blocked pop-up must not take a page down with it.
+ */
+export function openExternalUrl(url: string): void {
+  try {
+    const parsed = new URL(String(url));
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return;
+    if (isNativeApp()) { window.open(parsed.href, '_system'); return; }
+    window.open(parsed.href, '_blank', 'noopener,noreferrer');
+  } catch { /* malformed URL or a blocked pop-up — never crash the page over a link */ }
+}

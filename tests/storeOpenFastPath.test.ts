@@ -116,10 +116,27 @@ describe('open — the baked fast path', () => {
 describe('publish — bakes without ever risking the publish', () => {
   const FORM = { workspaceId: 'w1', name: 'Racer', description: 'a game' };
 
-  it('bakes the newly published version', async () => {
+  /** Let the deferred bake run: it is scheduled with setImmediate, deliberately after the response. */
+  const afterResponse = (): Promise<void> => new Promise((r) => setImmediate(() => setImmediate(() => r())));
+
+  it('THE PUBLISH ANSWERS FIRST — the bake has not run when the user gets their reply', async () => {
+    // Admin 2026-08-27: "app mart me publish kar rahe hai, to infinity loading hoti ja rahi hai".
+    // renderPreview + gzipSync are synchronous and CPU-bound, so awaiting them inside the request put
+    // seconds of blocked event loop between the user and their answer on a big app — and no timeout
+    // could have rescued it, because you cannot race a promise against work holding the only thread.
     const res = mockRes();
     await publish(mockReq({ body: FORM, headers: { host: 'navbharatai.com' } }), res);
     expect(res.body?.ok).toBe(true);
+    expect(state.bakeSaves.length).toBe(0);   // …the user is not waiting for this
+    // Drain it inside this test: a bake left pending would land in the NEXT test, after beforeEach
+    // has reset the counter, and be counted there. (It did, the first time this was written.)
+    await afterResponse();
+  });
+
+  it('and then bakes the newly published version', async () => {
+    const res = mockRes();
+    await publish(mockReq({ body: FORM, headers: { host: 'navbharatai.com' } }), res);
+    await afterResponse();
     expect(state.bakeSaves.length).toBe(1);
     expect(state.bakeSaves[0].version).toBe(res.body?.version);
   });
@@ -129,5 +146,7 @@ describe('publish — bakes without ever risking the publish', () => {
     const res = mockRes();
     await publish(mockReq({ body: FORM, headers: { host: 'navbharatai.com' } }), res);
     expect(res.body?.ok).toBe(true);   // files saved; open will simply compile live
+    await afterResponse();             // and the deferred failure must not surface as an unhandled one
+    expect(res.body?.ok).toBe(true);
   });
 });

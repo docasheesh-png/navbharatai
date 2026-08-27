@@ -146,9 +146,19 @@ describe('buildReactPreview', () => {
 });
 
 describe('buildReactPreview — Visual Editor (v1) wiring', () => {
-  it('enables JSX source metadata (development:true) so a clicked element maps back to its real source', () => {
+  it('maps a clicked element back to its real source WITHOUT the development JSX runtime', () => {
+    // 🔒 REVERSED 2026-08-27. This used to assert `development: true`, on the reasoning that it
+    // attaches each element's source position for the Visual Editor to read off React's _debugSource.
+    // Two things were wrong with keeping it:
+    //   1. The Visual Editor stopped depending on _debugSource on 2026-07-29 — it is null for library
+    //      and nested elements and gone in React 19 — and reads the data-nbai-src attribute instead.
+    //   2. development:true emits jsxDEV, and React's PRODUCTION jsx-dev-runtime ships
+    //      `exports.jsxDEV = void 0`, so it killed every App Mart app on first render.
+    // The capability this test protects is unchanged and is asserted directly below, on the mechanism
+    // that actually provides it.
     const html = buildReactPreview(reactVfs());
-    expect(html).toContain("development: true");
+    expect(html).toContain("development: false");
+    expect(html).toContain('data-nbai-src');
   });
   it('injects the edit-mode inspector script, toggled by the parent via postMessage', () => {
     const html = buildReactPreview(reactVfs());

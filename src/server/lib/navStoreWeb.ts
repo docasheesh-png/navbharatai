@@ -38,6 +38,7 @@ import { scanTextForSecrets, type EnvTemplateSecretIssue } from '../AgentV3/EnvS
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { unshippableAssetImports } from './assetImports';
 import { PAID_REMIX_ENABLED } from './navStoreRemixPurchase';
+import { previewRuntimeSignature, bakeIsCurrent } from '../runtime/previewRuntimeSignature';
 
 /** Lifecycle: live-via-link → admin lists it → or an admin/owner takes it down. */
 export type WebAppStatus = 'unlisted' | 'listed' | 'removed';
@@ -368,19 +369,28 @@ export async function saveWebAppBakedPage(id: string, version: number, html: str
   const gz = gzipSync(Buffer.from(html, 'utf8'));
   if (gz.length > BAKED_MAX_GZ_BYTES) return false; // honest skip — serve-time compile covers it
   await d.collection(COLLECTION).doc(id).collection(BAKED_SUB).doc('page')
-    .set({ version, gz, bakedAt: Date.now() });
+    // `runtime` is what stops a bug in OUR runtime from being permanent for every app baked while it
+    // existed — see previewRuntimeSignature.ts. Without it, deploying a preview fix leaves the already
+    // published apps serving the broken page forever.
+    .set({ version, gz, bakedAt: Date.now(), runtime: previewRuntimeSignature() });
   return true;
 }
 
-/** The baked page for EXACTLY this version, or null — an old bake must never outlive a re-publish. */
+/**
+ * The baked page for EXACTLY this version AND this runtime, or null.
+ *
+ * Two independent reasons a bake is stale, and both must be checked: the creator re-published (version),
+ * or we changed the runtime that produced it (runtime). The second one was missing, which is how a
+ * fixed preview kept serving broken pages to every viewer of an already-published app.
+ */
 export async function getWebAppBakedPage(id: string, version: number): Promise<string | null> {
   const d = db();
   if (!d) return null;
   try {
     const doc = await d.collection(COLLECTION).doc(id).collection(BAKED_SUB).doc('page').get();
     if (!doc.exists) return null;
-    const data = doc.data() as { version?: number; gz?: unknown };
-    if (data.version !== version) return null;
+    const data = doc.data() as { version?: number; gz?: unknown; runtime?: string };
+    if (!bakeIsCurrent({ version: data.version, runtime: data.runtime }, version)) return null;
     // The admin SDK hands a bytes field back as a Buffer; anything else (a manually edited doc, an
     // emulator quirk) is treated as no bake rather than parsed hopefully.
     const raw = data.gz;
@@ -535,6 +545,63 @@ export async function reportWebApp(id: string, reporterUid: string, reason: stri
   await d.collection(COLLECTION).doc(id).collection(REPORTS_SUB).add({
     reporterUid, reason: reason.slice(0, 500), at: Date.now(),
   });
+}
+
+export interface WebAppReport {
+  appId: string;
+  appName: string;
+  /** The app's current status, so a reviewer sees at a glance whether it is still reachable. */
+  appStatus: WebStoreApp['status'];
+  reporterUid: string;
+  reason: string;
+  at: number;
+}
+
+/**
+ * Every report, newest first — the queue a human works through.
+ *
+ * 🔒 WITHOUT THIS, REPORTING WAS DECORATION. reportWebApp has written to this subcollection since the
+ * store shipped and nothing ever read it, so "Report sent — a person will look at it" was a promise
+ * the code could not keep (admin 2026-08-27).
+ *
+ * A collection-group query would be one call instead of N+1, but it needs a composite index created
+ * out-of-band, and an admin screen that 500s until someone notices a console link is how this feature
+ * would quietly stop working a second time. Reports are rare and the app list is small; correctness
+ * without a deployment step wins here. Revisit if the store ever carries thousands.
+ */
+export async function listWebAppReports(limit = 200): Promise<WebAppReport[]> {
+  const d = db();
+  if (!d) return [];
+  const apps = await d.collection(COLLECTION).get();
+  const out: WebAppReport[] = [];
+  // Bounded CONCURRENCY, not a serial loop: N apps served one-round-trip-at-a-time is a screen that
+  // gets slower every time somebody publishes, and an admin page nobody opens is the state this
+  // feature was already in. Batched so a large store cannot open hundreds of connections at once.
+  const BATCH = 20;
+  for (let i = 0; i < apps.docs.length; i += BATCH) {
+    const slice = apps.docs.slice(i, i + BATCH);
+    const snaps = await Promise.all(slice.map((appDoc) =>
+      // Best-effort per app: one unreadable subcollection must not hide every other app's reports.
+      appDoc.ref.collection(REPORTS_SUB).get().catch(() => null)));
+    for (let j = 0; j < slice.length; j++) {
+      const appDoc = slice[j];
+      const snap = snaps[j];
+      const app = appDoc.data() as WebStoreApp;
+      if (!snap) continue;
+      for (const r of snap.docs) {
+        const data = r.data() as { reporterUid?: string; reason?: string; at?: number };
+        out.push({
+          appId: appDoc.id,
+          appName: app?.name || '(unnamed)',
+          appStatus: app?.status ?? 'unlisted',
+          reporterUid: data.reporterUid || 'anon',
+          reason: String(data.reason || ''),
+          at: typeof data.at === 'number' ? data.at : 0,
+        });
+      }
+    }
+  }
+  return out.sort((a, b) => b.at - a.at).slice(0, limit);
 }
 
 export function newWebAppId(): string {

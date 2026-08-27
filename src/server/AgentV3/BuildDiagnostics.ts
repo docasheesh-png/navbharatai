@@ -1240,6 +1240,32 @@ export class BuildDiagnostics {
   }
 
   /**
+   * The readiness gate has RE-RUN and passed, so the blockers it raised earlier no longer describe
+   * this app. Mark them resolved. Returns how many were cleared (for tests / callers).
+   *
+   * 🔒 THE CALLER MUST HAVE RE-RUN THE GATE — this method takes the caller's word for it, and that is
+   * the only thing that makes it honest. It is not "the repair probably worked": every call site
+   * re-runs `assessBuildReadiness()` and reaches this only on `verdict.ready`. The SAME check that
+   * raised each blocker has looked again and passed.
+   *
+   * ROOT CAUSE (Fight 3D game, buildId 5e2de8c4, 2026-08-27): a duplicate-import blocker was recorded
+   * at T, the deterministic dedupe removed the duplicate at T+1.3s, and the release gate condemned the
+   * build at T+2s by counting the blocker from T. The report then named, as the build's root cause, a
+   * line of code that no longer existed in the file. Leaving a superseded finding unresolved does not
+   * make a report more cautious — it makes it wrong, and it costs the user a working app.
+   */
+  resolveReadinessBlockersOnRejudge(): number {
+    let cleared = 0;
+    for (const issue of this.issues) {
+      if (issue.code !== 'READINESS_BLOCKER' || issue.autoResolved === true) continue;
+      issue.autoResolved = true;
+      cleared++;
+    }
+    if (cleared > 0) this.notify();
+    return cleared;
+  }
+
+  /**
    * How many findings of a severity are about THE APP, for the release gate.
    *
    * The exclusion list is the reason this is a method and not a filter at the call site. Several

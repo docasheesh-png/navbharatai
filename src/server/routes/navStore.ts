@@ -47,7 +47,7 @@ import {
   saveWebApp, getWebApp, getWebAppFiles, listListedWebApps, listMyWebApps, listUnlistedWebApps,
   saveWebAppBakedPage, getWebAppBakedPage,
   updateWebApp, makeWebAppPublic, bumpWebAppCounter, removeWebApp, reportWebApp,
-  recordRemixOrigin, getRemixOrigin, keyShapedEnvVars,
+  recordRemixOrigin, getRemixOrigin, keyShapedEnvVars, listWebAppReports,
   sanitizeScreenshots, saveWebAppScreenshots, getWebAppScreenshots,
   type WebStoreApp,
 } from '../lib/navStoreWeb';
@@ -64,6 +64,17 @@ import { escapeHtml } from '../../lib/escapeHtml';
 
 /** What an upload costs today. One value, so raising it later is a one-line change. */
 export const UPLOAD_FEE_INR = 0;
+
+/**
+ * How big an app may be before publish stops pre-compiling its page.
+ *
+ * The bake is a speed optimisation, and past a certain size it stops being one: a huge app costs the
+ * most CPU to compile and then produces a page too large for the 1 MiB document the bake lives in, so
+ * the work is spent and thrown away. Skipping is not a degradation — the serve-time compile that
+ * every app used before the bake existed is still there and still correct.
+ */
+export const BAKE_MAX_SOURCE_BYTES = 2_000_000;
+export const BAKE_MAX_SOURCE_FILES = 400;
 
 /**
  * The largest listing icon a store record may carry, as data-URL characters.
@@ -652,11 +663,42 @@ export function registerNavStoreRoutes(app: Express): void {
       // subcollection read + a 200–500 ms compile on every cold serve. Best-effort by design: the
       // publish already saved app + files above, and a failed or skipped bake (page too big for a
       // doc) only means opens fall back to today's serve-time compile — slower, never broken.
-      try {
-        const hdrHost = req.get('host');
-        const bakeOrigin = hdrHost ? `${(req.headers['x-forwarded-proto'] as string) || req.protocol || 'https'}://${hdrHost}` : undefined;
-        await saveWebAppBakedPage(id, record.version, renderPreview(VirtualFileSystem.fromRecord(gate.files), bakeOrigin, `store-${id}`));
-      } catch (e) { logStoreError('web/publish bake', e); }
+      //
+      // 🔒 THE BAKE MUST NEVER BE ON THE PUBLISH'S CRITICAL PATH — and it was, which is why publishing
+      // to App Mart stopped working (admin report 2026-08-27: "app mart me publish kar rahe hai, to
+      // infinity loading hoti ja rahi hai … pahle ho rahe the"). This bake landed on 2026-08-25.
+      //
+      // The comment above promises "a failed or skipped bake only means opens fall back to today's
+      // serve-time compile — slower, never broken". That reasoning covered a THROW, and a throw really
+      // is harmless here: the try/catch swallows it and the publish completes.
+      //
+      // It did not cover SLOWNESS, and slowness is the failure this code actually has.
+      // `renderPreview` Babel-compiles every module and `gzipSync` compresses the result — both
+      // SYNCHRONOUS and CPU-bound. On a big app (a 3D game, a car-racing game) that is seconds of
+      // blocked event loop inside the request, with no timeout, and a timeout could not have saved it
+      // anyway: you cannot race a promise against synchronous work that is holding the only thread.
+      // The user watches a spinner that has no end condition, and every other request served by that
+      // Cloud Run instance waits behind it.
+      //
+      // Two changes, and the first is the one that matters:
+      //   1. The bake happens AFTER the response is sent. The publish is already durable — app, files
+      //      and screenshots are saved above — so the bake is pure speed optimisation and belongs
+      //      nowhere near the user's wait. This is what makes an oversized app impossible to hang on.
+      //   2. A size ceiling, so the biggest apps skip the CPU entirely rather than spending it to
+      //      produce a page that saveWebAppBakedPage would refuse for exceeding the doc cap anyway.
+      const hdrHost = req.get('host');
+      const bakeOrigin = hdrHost ? `${(req.headers['x-forwarded-proto'] as string) || req.protocol || 'https'}://${hdrHost}` : undefined;
+      const bakeAfterResponse = (): void => {
+        if (record.sizeBytes > BAKE_MAX_SOURCE_BYTES || record.fileCount > BAKE_MAX_SOURCE_FILES) return;
+        // setImmediate, not a bare call: the response is flushed on this tick, so this runs strictly
+        // after the user already has their answer.
+        setImmediate(() => {
+          try {
+            void saveWebAppBakedPage(id, record.version, renderPreview(VirtualFileSystem.fromRecord(gate.files), bakeOrigin, `store-${id}`))
+              .catch((e) => logStoreError('web/publish bake', e));
+          } catch (e) { logStoreError('web/publish bake', e); }
+        });
+      };
       // Screenshots replace wholesale, in their own subcollection — best-effort so a screenshot write
       // failure never fails a publish whose app + files already saved. screenshotCount above stays
       // honest to what was ACCEPTED; getWebAppScreenshots is what the detail view actually serves.
@@ -669,6 +711,8 @@ export function registerNavStoreRoutes(app: Express): void {
           priceNote: `This is a paid remix, so it lists at ₹${record.priceInr} — the rule is that a remix always costs more than the original. You can raise the price (never lower it below the original) under Nav App Store → My apps.`,
         } : {}),
       });
+      // The user has their answer; the speed optimisation runs on our time, not theirs.
+      bakeAfterResponse();
     } catch (e) {
       logStoreError('web/publish', e);
       res.status(502).json({ error: 'Publishing failed — nothing was published. Try again.' });
@@ -930,19 +974,60 @@ export function registerNavStoreRoutes(app: Express): void {
   });
 
   /** Viewer report — the store's immune system. Requires sign-in so reports carry accountability. */
-  app.post('/api/nav-store/web/app/:id/report', async (req: Request, res: Response) => {
+  //
+  // 🔒 A SIGNED-OUT VIEWER MAY REPORT. This required sign-in, and that was backwards for this store.
+  //
+  // App Mart's whole promise is "one click — others run your app instantly in their browser. No APK,
+  // no hosting, no install." The person who opens a shared link and finds a scam, a stolen app or a
+  // broken game is therefore, in the ordinary case, NOT signed in — so the requirement excluded
+  // precisely the people the reporting exists for, and did it silently (the player showed nothing at
+  // all on a 401, which is how the admin met this on 2026-08-27).
+  //
+  // It did not buy safety in exchange. A report triggers nothing automatic — it queues for a human —
+  // and anyone willing to abuse it can make an account in a minute. The requirement stopped honest
+  // viewers and inconvenienced nobody else. The real ceiling on abuse is the rate limit below, and
+  // an anonymous report is recorded honestly as anonymous so a reviewer can weigh it accordingly.
+  // Per HOUR. DURABLE on purpose (the default) — the shared Firestore bucket, not the per-instance
+  // one: with several Cloud Run instances a per-instance limit multiplies by the instance count, which
+  // is not a limit at all for the one endpoint whose whole protection IS the limit. Reports are rare,
+  // so the write it costs is nothing. anonGlobalPerHour is the ceiling a per-IP limit cannot give —
+  // it caps the whole platform's anonymous reports, so rotating IPs buys nothing.
+  const reportLimiter = rateLimiter({ name: 'store-report', authed: 30, anon: 10, noun: 'reports', anonGlobalPerHour: 2_000 });
+  app.post('/api/nav-store/web/app/:id/report', reportLimiter, async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
-    if (!me?.uid) return res.status(401).json({ error: 'Sign in to report an app.' });
     const reason = (typeof req.body?.reason === 'string' ? req.body.reason : '').trim();
     if (reason.length < 5) return res.status(400).json({ error: 'Say briefly what is wrong with this app.' });
     try {
       const found = await getWebApp(String(req.params.id || ''));
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
-      await reportWebApp(found.id, me.uid, reason);
+      await reportWebApp(found.id, me?.uid || 'anon', reason);
       res.json({ ok: true });
     } catch (e) {
       logStoreError('web/report', e);
       res.status(502).json({ error: 'Could not send the report.' });
+    }
+  });
+
+  /**
+   * Admin: WHAT PEOPLE ACTUALLY REPORTED.
+   *
+   * 🔒 THE REASON THIS ROUTE EXISTS AT ALL (admin 2026-08-27). Reports were written to a Firestore
+   * subcollection that NOTHING in the codebase read. Not a route, not a screen, not an alert. A
+   * viewer could report a scam, get "Report sent — a person will look at it", and no person ever
+   * would — because there was no way for one to look.
+   *
+   * That is the second absolute rule exactly: a feature that looks done and does nothing. The button
+   * failing silently was the visible bug; this was the real one, and it would have survived the fix
+   * to the button completely intact.
+   */
+  app.get('/api/nav-store/web/admin/reports', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!isStoreAdmin(me?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
+    try {
+      res.json({ reports: await listWebAppReports() });
+    } catch (e) {
+      logStoreError('web/admin reports', e);
+      res.status(502).json({ error: 'Could not load the reports.' });
     }
   });
 

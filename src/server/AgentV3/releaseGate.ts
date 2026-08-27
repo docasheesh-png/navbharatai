@@ -52,6 +52,21 @@ export interface RuntimeEvidence {
   typecheck: CheckOutcome;
   /** Did the app's own test suite run, and pass? */
   tests: CheckOutcome;
+  /**
+   * Was a live preview URL ever published for this build?
+   *
+   * ONLY changes how a `preview: 'not-run'` is EXPLAINED — never the verdict. Both states are equally
+   * unproven, and treating "we saw it come up" as partial proof is precisely the substitution this
+   * gate exists to prevent.
+   *
+   * It exists because the sentence was factually false (Fight 3D report, 2026-08-27). The gate said
+   * "no live preview was ever available" about a build whose own log carried PREVIEW_PUBLISHED, a
+   * successful screenshot of that address, and a clean console read. "We never checked whether it
+   * rendered" and "there was never anything to check" are different admissions, and the second one,
+   * said falsely, teaches the reader to distrust the parts of the report that are true. Optional, so
+   * an omitted value keeps the original wording.
+   */
+  previewUrlPublished?: boolean;
 }
 
 export interface StaticFindings {
@@ -96,8 +111,18 @@ export interface GateVerdict {
   failures: string[];
 }
 
+/**
+ * The five checks the gate reasons about — the evidence fields that are a CheckOutcome.
+ *
+ * An alias rather than an inline Omit at each of the five maps below, because the five had to be kept
+ * in step by hand: adding `previewUrlPublished` to RuntimeEvidence broke all of them at once, which was
+ * the good outcome. A sixth non-check field added by someone in a hurry would otherwise be a silent
+ * demand for five new label strings that mean nothing.
+ */
+type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished'>;
+
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
-const RUNTIME_LABEL: Record<keyof Omit<RuntimeEvidence, 'buildOk'>, string> = {
+const RUNTIME_LABEL: Record<CheckKey, string> = {
   preview: 'the app came up and rendered',
   pages: 'every page route rendered in a real browser',
   journeys: 'a real user journey held up (filled a form, submitted, reloaded)',
@@ -113,7 +138,7 @@ const RUNTIME_LABEL: Record<keyof Omit<RuntimeEvidence, 'buildOk'>, string> = {
  * game. Reusing a pass-phrased label for the failure case cannot produce a readable sentence; two
  * sentences can.
  */
-const FAILURE_LABEL: Record<keyof Omit<RuntimeEvidence, 'buildOk'>, string> = {
+const FAILURE_LABEL: Record<CheckKey, string> = {
   preview: 'the app did not come up or did not render',
   pages: 'a page route failed to render in a real browser',
   journeys: 'a real user journey failed — the app did not do what the user asked of it',
@@ -130,10 +155,10 @@ const FAILURE_LABEL: Record<keyof Omit<RuntimeEvidence, 'buildOk'>, string> = {
  * working app is unshippable. The first real build made exactly that mistake about a game the admin was
  * playing at the time.
  */
-const RED_ON_FAILURE: Array<keyof Omit<RuntimeEvidence, 'buildOk'>> = ['preview', 'pages', 'journeys'];
+const RED_ON_FAILURE: Array<CheckKey> = ['preview', 'pages', 'journeys'];
 
 /** Why a missing check is missing — so "not run" reads as a gap rather than as an absence of concern. */
-const WHY_MISSING: Record<keyof Omit<RuntimeEvidence, 'buildOk'>, string> = {
+const WHY_MISSING: Record<CheckKey, string> = {
   preview: 'no live preview was ever available, so nothing here was proven to RUN',
   pages: 'the page-render check needs a running app and was skipped',
   journeys: 'no user journey could be derived or run',
@@ -148,7 +173,7 @@ const WHY_MISSING: Record<keyof Omit<RuntimeEvidence, 'buildOk'>, string> = {
  * paint a blank screen — that is the entire reason the render checks exist, and letting a compiler
  * stand in for a browser is the substitution this gate is built to prevent.
  */
-const RUNTIME_PROOF: Array<keyof Omit<RuntimeEvidence, 'buildOk'>> = ['preview', 'pages', 'journeys'];
+const RUNTIME_PROOF: Array<CheckKey> = ['preview', 'pages', 'journeys'];
 
 /**
  * Decide the release state. Pure.
@@ -187,6 +212,10 @@ export function releaseGate(
       // NOT a gap: the app has no data-entry flow to drive, so there was no journey to prove. Naming it as
       // a missing capability is the category error this branch exists to prevent (a game "saves" nothing).
       unproven.push('this app has no data-entry flow, so there was no user journey to prove (not a defect)');
+    } else if (key === 'preview' && ev.previewUrlPublished) {
+      // A preview DID come up — we simply never confirmed it rendered. Say that, rather than the
+      // stronger and false claim that nothing was ever there. See previewUrlPublished for why.
+      unproven.push('a live preview came up but was never confirmed to render, so nothing here was proven to RUN');
     } else unproven.push(WHY_MISSING[key]);
   }
   // A game / dashboard / landing page with no data-entry surface at all: there is genuinely no "save"

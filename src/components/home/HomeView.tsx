@@ -1,10 +1,32 @@
+import React from 'react';
 import { motion } from 'motion/react';
 import {
   Sparkles, Shield, MessageSquare, Bot, Zap, Rocket,
-  CheckCircle2, ArrowRight, LayoutGrid, Store, Play
+  CheckCircle2, ArrowRight, LayoutGrid, Store, Play, PlayCircle, X
 } from 'lucide-react';
 import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
+// `openExternalUrl` only — the tutorial strip's video link. main removed the Professionals cards from
+// Home, which is what used isNativeApp / playCompliance here; keeping those imports would have left
+// dead imports behind a resolved conflict.
+import { openExternalUrl } from '../../lib/mobileNative';
+
+/**
+ * THE "HOW DO I BUILD AN APP?" VIDEO.
+ *
+ * The share URL the admin gave carried a `?si=` tracking token from their own share session. Dropped:
+ * it identifies where THAT link was shared from, travels to every user, and buys us nothing.
+ */
+const HOW_TO_BUILD_VIDEO_URL = 'https://youtu.be/bUG33GYzeHc';
+
+/** Remembering a dismissal must never be able to break the page. Private mode throws on both. */
+const TUTORIAL_DISMISSED_KEY = 'nbai_home_tutorial_dismissed';
+function readTutorialDismissed(): boolean {
+  try { return localStorage.getItem(TUTORIAL_DISMISSED_KEY) === '1'; } catch { return false; }
+}
+function writeTutorialDismissed(): void {
+  try { localStorage.setItem(TUTORIAL_DISMISSED_KEY, '1'); } catch { /* nothing to remember with */ }
+}
 
 interface HomeData {
   heroTitle: string;
@@ -146,6 +168,9 @@ export const HomeView = ({
   onShowLogin,
 }: HomeViewProps) => {
   const colors = getThemeClasses(theme);
+  // Lazy initial read: touching localStorage during render is fine, but doing it on EVERY render is
+  // a synchronous disk hit for a value that cannot change without us changing it.
+  const [tutorialDismissed, setTutorialDismissed] = React.useState<boolean>(() => readTutorialDismissed());
 
   const handlers: Record<string, (() => void) | undefined> = {
     free: onStartChat,
@@ -220,6 +245,76 @@ export const HomeView = ({
             {data?.heroSubtitle || 'The most advanced AI workspace built for the next billion developers and creators from Bharat.'}
           </p>
         </motion.div>
+
+        {/* ── "I'M STUCK — SHOW ME HOW" ────────────────────────────────────────────────────────────
+            Asked for as a small green "i" above the Pro card, which on tapping shows a button, which
+            on tapping opens the video. Built as ONE tap instead of three, and deliberately:
+
+              • A popup whose entire contents is a single button is a step that asks the user to
+                confirm they meant the thing they just tapped. The video is the whole feature; the
+                strip IS the button.
+              • A small "i" is the wrong target for the exact person this is for. Someone whose first
+                build did not work is not going to hunt a 16px icon — and "i" reads as "terms and
+                conditions", not "watch someone do this". A play symbol and a sentence say it at a
+                glance.
+              • Full width above the grid, not tucked over one card: on a phone the cards are a 2-up
+                grid and the space above a single card is a sliver. This is also honest placement —
+                the help is about building apps, which is what the whole page is for.
+              • ENGLISH, not Hinglish. The first version of this strip read "App banane me dikkat aa
+                rahi hai?" — reasoning that a Bharat-first audience reads Hindi. That reasoning is
+                not mine to apply here: CLAUDE.md's language standard requires every UI label in
+                NavBharatAI to be professional English, and the ONLY exception is AI-generated reply
+                text inside a chat bubble. This is a product label, so it is English. Kept short and
+                plain so it reads easily for a non-native speaker; the VIDEO can be in any language.
+                The Hindi and Hinglish phrasings live where they belong — the AppKnowledgeBase
+                keywords, which that same standard requires to carry the words a user would type.
+
+            DISMISSIBLE, but never gone: the × collapses it to a small green play chip that stays.
+            A user who dismissed it in month one and gets stuck in month three must still be able to
+            find it — a help link that can be permanently deleted is a help link that eventually is. */}
+        {!tutorialDismissed ? (
+          <div className="w-full flex items-stretch gap-2">
+            <button
+              type="button"
+              onClick={() => openExternalUrl(HOW_TO_BUILD_VIDEO_URL)}
+              aria-label="Watch the video: how to build your first app with NavBharatAI Pro"
+              className="group flex-1 flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-600/15 via-emerald-500/10 to-transparent px-4 py-3 text-left transition-colors hover:border-emerald-400/60 hover:from-emerald-600/25"
+            >
+              <span className="shrink-0 rounded-xl bg-emerald-500/20 p-2">
+                <PlayCircle className="w-5 h-5 text-emerald-400" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-bold text-white leading-tight">
+                  Stuck building your app?
+                </span>
+                <span className="block text-[11px] sm:text-xs text-emerald-300/80 leading-snug mt-0.5">
+                  Watch a short video on how to build one
+                </span>
+              </span>
+              <ArrowRight className="w-4 h-4 text-emerald-400/70 ml-auto shrink-0 transition-transform group-hover:translate-x-0.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => { writeTutorialDismissed(); setTutorialDismissed(true); }}
+              aria-label="Hide this tip"
+              title="Hide"
+              className="shrink-0 px-2 rounded-2xl border border-white/10 text-white/40 hover:text-white/80 hover:bg-white/5 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="w-full flex justify-end">
+            <button
+              type="button"
+              onClick={() => openExternalUrl(HOW_TO_BUILD_VIDEO_URL)}
+              aria-label="Watch the video: how to build your first app with NavBharatAI Pro"
+              className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-300 hover:border-emerald-400/50 hover:bg-emerald-500/20 transition-colors"
+            >
+              <PlayCircle className="w-3.5 h-3.5" /> How to build an app
+            </button>
+          </div>
+        )}
 
         {/* ── Product Cards (4: Free / Pro / Professionals / Other AI) ── */}
         <div className="w-full grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-5">

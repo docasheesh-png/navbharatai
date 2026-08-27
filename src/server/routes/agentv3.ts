@@ -214,6 +214,10 @@ import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
 import { publishedAppCap } from '../lib/HostingQuota';
 import { hostingPlansEnabled, hostingPlanPriceInr } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
+import {
+  buildOutputCandidates, buildOutputCensusCommand, readBuildOutputCensus, builtSiteRefusal,
+  configDumpCommand, parseConfigDump,
+} from '../AgentV3/builtSiteCheck';
 import { pickerItems } from '../../lib/reportPicker';
 import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } from '../AgentV3/SpaFallbackAnalysis';
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
@@ -6446,16 +6450,27 @@ async function noteBuildOutcome(
       // replays SOURCE files, never dist/). This does not guess between them — it states the fact and
       // hands over the build's own words, which is what makes the next report diagnosable instead of
       // another round of hypotheses.
-      const outDirs = await actuator.runCommand(workspaceId, 'ls -d dist out build .output .next 2>/dev/null | head -5');
-      if (!outDirs.stdout.trim()) {
-        const buildSaid = (build.stdout || build.stderr || '').trim().split('\n').slice(-20).join('\n');
-        res.status(422).json({
-          error: 'Your app compiled without errors but produced no website files, so there is nothing to publish yet.',
-          detail: [
-            'Checked for: dist/, out/, build/, .output/, .next/ — none exist.',
-            buildSaid ? `\nWhat the build printed:\n${buildSaid}` : '',
-          ].join('\n').slice(0, 4000),
-        });
+      // ⚠️ THIS GATE USED TO BE AN `ls -d` OVER FIVE FIXED FOLDER NAMES, AND IT WAS WRONG TWICE OVER
+      // (admin 2026-08-25, publishing an app: the deploy died on the vendor's raw "No build output
+      // found in dist/ or out/ … dist/ and out/ are empty or do not exist" — i.e. the gate whose whole
+      // job is to catch that earlier had waved it through).
+      //
+      //   1. `ls -d` proves a directory EXISTS, not that it CONTAINS a site. A workspace reused for a
+      //      second app keeps the first one's `dist/`, and a build that creates its output folder then
+      //      fails to fill it leaves the same trace. Both satisfied the old check.
+      //   2. The list disagreed with what the upload actually reads. See builtSiteCheck.ts.
+      //
+      // Both halves now come from ONE shared module, and the census counts FILES.
+      const cfgDump = await actuator.runCommand(workspaceId, configDumpCommand())
+        .catch(() => ({ stdout: '', stderr: '', exitCode: 1 }));
+      const publishFiles = parseConfigDump(cfgDump.stdout);
+      const outCandidates = buildOutputCandidates(publishFiles);
+      const census = await actuator.runCommand(workspaceId, buildOutputCensusCommand(outCandidates));
+      const siteVerdict = readBuildOutputCensus(census.stdout);
+      const buildSaid = (build.stdout || build.stderr || '').trim().split('\n').slice(-20).join('\n');
+      const refusal = builtSiteRefusal(siteVerdict, buildSaid, { checked: outCandidates, files: publishFiles });
+      if (refusal) {
+        res.status(422).json({ error: refusal.error, detail: refusal.detail.slice(0, 4000) });
         return;
       }
 
@@ -13187,12 +13202,14 @@ async function noteBuildOutcome(
       // instead of needing an LLM heal that the weak tier could not deliver. Persisted to disk + writtenFiles so
       // the fix ships. Additive + best-effort. Kill switch AGENTV3_PREGATE_DEDUPE=off.
       if ((process.env.AGENTV3_PREGATE_DEDUPE ?? '').trim().toLowerCase() !== 'off' && expectsArtifacts && writtenFiles.size > 0) {
+        let dedupedFiles = 0;
         try {
           for (const [p, c] of Array.from(writtenFiles)) {
             if (typeof c !== 'string' || !/\.(mjs|cjs|jsx?|tsx?)$/i.test(p) || /\.d\.ts$/i.test(p)) continue;
             const { content: deduped, removed } = dedupeDuplicateImports(c);
             if (removed.length > 0 && deduped !== c) {
               writtenFiles.set(p, deduped);
+              dedupedFiles++;
               try { await actuator.writeFile(workspaceId, p, deduped); } catch { /* best-effort live write */ }
               try { getWorkspaceMemory(workspaceId).indexFile(p, deduped); } catch { /* index best-effort */ }
               await saveWorkspaceFiles(workspaceId, { [p]: deduped }).catch(() => {});
@@ -13200,6 +13217,44 @@ async function noteBuildOutcome(
             }
           }
         } catch { /* pre-verdict dedupe is best-effort — never blocks or fails a build */ }
+
+        // ── THE REPAIR RAN. NOTHING ASKED THE VERDICT TO LOOK AGAIN. ────────────────────────────────
+        //
+        // ADMIN REPORT, Fight 3D game, buildId 5e2de8c4 (2026-08-27). The timeline, to the second:
+        //
+        //   343572  our own import healer adds `import { ErrorBoundary }` — the file already had it
+        //           as a DEFAULT import (that healer's blind spot is fixed in ImportExportReconcile)
+        //   345772  READINESS_BLOCKER: main.tsx Duplicate declaration "ErrorBoundary" → build FAILED
+        //   347061  the dedupe above removes the duplicate — the file compiles again
+        //   347838  RELEASE_GATE: RED, "Not shippable — the build did not succeed"
+        //
+        // The app was repaired at 347061 and condemned at 347838 on evidence from 345772. The user was
+        // told a working 3D fighting game was broken, and the report named as its root cause a line that
+        // no longer existed in the file. Every individual step was right; only the ORDER was wrong.
+        //
+        // The comment above says this dedupe is "UNGATED by result.ok — so the duplicate is gone before
+        // it can fail the build". That was true of the checks that run AFTER it, and false of the
+        // readiness verdict, which had already been cast by the agent run. Fixing the file without
+        // re-asking the question just moves the staleness one step later.
+        //
+        // So: re-judge, exactly as the hooks heal and the incomplete-code heal below already do — and
+        // recover to OK only when the SAME gate genuinely passes, so a build with OTHER real blockers
+        // stays honestly not-ready. This one is the cheapest re-judge of the three: the dedupe is
+        // deterministic, so unlike those two there is no model call and no cost, on any tier.
+        if (dedupedFiles > 0 && result && !result.ok && readinessGateEnabled() && !abort.signal.aborted) {
+          try {
+            const verdict = await dispatcher.assessBuildReadiness();
+            if (verdict.ready) {
+              result = { ...result, ok: true, summary: 'Built your app — a duplicate import was detected and removed automatically, so it now compiles and runs.' };
+              buildDiag.resolveReadinessBlockersOnRejudge();
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'READINESS_RECOVERED_AFTER_DEDUPE',
+                message: `Readiness re-judged after removing the duplicate import(s): now READY (score ${verdict.score}/100). The earlier blocker described code that no longer exists.`,
+                autoResolved: true,
+              });
+            }
+          } catch { /* re-judge is best-effort — the honest NOT-ready verdict stands */ }
+        }
       }
 
       // PREVIEW-COMPILE GUARD (autopsy 2026-07-22, buildId 91694679): the in-browser preview transpiles
@@ -14387,6 +14442,8 @@ async function noteBuildOutcome(
       try {
         gateEvidence.buildOk = result.ok;
         gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewVerifiedFailed ? 'failed' : 'not-run';
+        // Only changes the WORDING of an unproven preview, never the verdict — see previewUrlPublished.
+        gateEvidence.previewUrlPublished = Boolean(lastPreviewUrl);
         const gate = releaseGate(gateEvidence, {
           // Counted from what this build actually recorded, so the gate and the report cannot disagree.
           blockers: buildDiag.shippingIssueCount('error'),

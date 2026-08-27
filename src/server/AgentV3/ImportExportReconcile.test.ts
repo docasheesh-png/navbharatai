@@ -154,6 +154,61 @@ describe('addMissingProjectImports — the jungle-game bug (uses a shared const 
     expect(r.added).toHaveLength(0);
   });
 
+  // ── THE FIGHT-3D REGRESSION (admin report, build 5e2de8c4, 2026-08-27) ──────────────────────────
+  //
+  // A working 3D fighting game was turned into a build that would not compile BY THIS FUNCTION. It
+  // could not see a DEFAULT import, so it added a named import of a symbol that was already bound:
+  //
+  //     import ErrorBoundary from './ErrorBoundary';        ← already there
+  //     import { ErrorBoundary } from "./ErrorBoundary";    ← added by us → Duplicate declaration
+  //
+  // The whole build then failed on `src/main.tsx: Duplicate declaration "ErrorBoundary"`. These tests
+  // encode every import form, because the bug was not "we forgot default" — it was that the guard was
+  // inferred from identifier parents instead of read off the import declarations.
+  it('THE REPORTED BUG: does NOT add when the name is already a DEFAULT import', async () => {
+    const r = await addMissingProjectImports({
+      'src/ErrorBoundary.tsx': `export class ErrorBoundary {}\nexport default ErrorBoundary;`,
+      'src/main.tsx': `import ErrorBoundary from './ErrorBoundary';\nexport const el = ErrorBoundary;`,
+    });
+    expect(r.added).toHaveLength(0);
+    // The precise symptom: two declarations of one name in one file is a PARSE error, not a lint nit.
+    expect(r.files['src/main.tsx']).toBe(`import ErrorBoundary from './ErrorBoundary';\nexport const el = ErrorBoundary;`);
+  });
+
+  it('does NOT add when the name is bound by an ALIAS (the local binding is the alias)', async () => {
+    const r = await addMissingProjectImports({
+      'src/c.ts': `export const helper = 1;\nexport const other = 2;`,
+      'src/use.ts': `import { other as helper } from './c';\nexport const y = helper;`,
+    });
+    // `helper` is bound locally by the alias — adding an import of it would collide.
+    expect(r.added).toHaveLength(0);
+  });
+
+  it('does NOT add when the name is bound by a NAMESPACE import', async () => {
+    const r = await addMissingProjectImports({
+      'src/c.ts': `export const THREE = 1;`,
+      'src/use.ts': `import * as THREE from './c';\nexport const y = THREE;`,
+    });
+    expect(r.added).toHaveLength(0);
+  });
+
+  it('does NOT add when default and named imports are combined on one line', async () => {
+    const r = await addMissingProjectImports({
+      'src/c.tsx': `export const Named = 1;\nconst Def = 2;\nexport default Def;`,
+      'src/use.ts': `import Def, { Named } from './c';\nexport const y = [Def, Named];`,
+    });
+    expect(r.added).toHaveLength(0);
+  });
+
+  it('still DOES add the genuinely missing import — the fix must not make the healer useless', async () => {
+    const r = await addMissingProjectImports({
+      'src/c.ts': `export const SPEED = 5;`,
+      'src/use.tsx': `import React from 'react';\nexport const y = SPEED;`,
+    });
+    expect(r.added).toHaveLength(1);
+    expect(r.added[0].name).toBe('SPEED');
+  });
+
   it('does NOT add for a locally-declared name (never shadow/duplicate)', async () => {
     const r = await addMissingProjectImports({
       'src/c.ts': `export const X = 1;`,

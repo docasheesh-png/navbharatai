@@ -100,11 +100,13 @@ export function precompileModules(modules: Record<string, string>): Record<strin
     if (/\.css$/i.test(path)) { out[path] = code; continue; }
     const isTs = /\.tsx?$/.test(path);
     const isTsx = /\.tsx$/.test(path);
-    // Mirrors the browser loader exactly — development:true for _debugSource (Visual Editor),
-    // allowDeclareFields so a legal `declare` class field never white-screens the preview.
+    // Mirrors the browser loader exactly — see ReactPreview.ts for why `development` is false here.
+    // In one line: development:true emits jsxDEV(), and React's PRODUCTION build of
+    // react/jsx-dev-runtime ships `exports.jsxDEV = void 0`. allowDeclareFields so a legal `declare`
+    // class field never white-screens the preview.
     const presets = isTs
-      ? [['react', { runtime: 'automatic', development: true }], ['typescript', { isTSX: isTsx, allExtensions: true, allowDeclareFields: true }]]
-      : [['react', { runtime: 'automatic', development: true }]];
+      ? [['react', { runtime: 'automatic', development: false }], ['typescript', { isTSX: isTsx, allExtensions: true, allowDeclareFields: true }]]
+      : [['react', { runtime: 'automatic', development: false }]];
     try {
       const res = Babel.transform(code, {
         filename: path,

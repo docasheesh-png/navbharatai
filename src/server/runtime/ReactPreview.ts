@@ -712,12 +712,34 @@ ${babelTag}
     if (/\\.css$/.test(path)) { injectCss(code); cache[path] = { exports: {} }; return cache[path].exports; }
     if (/\\.json$/.test(path)) { cache[path] = { exports: JSON.parse(code) }; return cache[path].exports; }
     var isTs = /\\.tsx?$/.test(path), isTsx = /\\.tsx$/.test(path);
-    // development:true adds @babel/plugin-transform-react-jsx-source, which attaches each JSX
-    // element's real source file/line/column to its React element (readable at runtime via the
-    // fiber's _debugSource) — this is what lets the Visual Editor map a clicked, RENDERED element
-    // back to its exact position in the REAL source file, so an edit lands there instead of on a
-    // disposable compiled copy the next build would overwrite. Same mechanism React DevTools' own
-    // "open in editor" feature uses.
+    // 🔒 development:false, AND IT MUST STAY FALSE. This one boolean killed every React app in the
+    // in-browser preview, including games published 10-12 days earlier that had never been touched
+    // (admin report 2026-08-27, a calculator and a car-racing game on App Mart):
+    //
+    //     Preview error: Run src/main.tsx: (0, _jsxDevRuntime.jsxDEV) is not a function
+    //
+    // development:true makes Babel emit jsxDEV(...) calls against the react/jsx-dev-runtime module.
+    // React's PRODUCTION build of that module -- which is what a CDN serves by default -- contains,
+    // verbatim:
+    //
+    //     exports.Fragment = REACT_FRAGMENT_TYPE
+    //     exports.jsxDEV = void 0            <- react/cjs/react-jsx-dev-runtime.production.js
+    //
+    // So the module resolves, the object exists, and its one function is undefined. Every JSX element
+    // in the app then throws on first render. The plain react/jsx-runtime module (development:false)
+    // exports real jsx and jsxs functions in BOTH builds, so it cannot fail this way at all.
+    //
+    // WHAT WE GIVE UP: nothing that is still used. development:true also attached each element's
+    // source position for the Visual Editor to read off the fiber's _debugSource. The Visual Editor
+    // stopped reading _debugSource on 2026-07-29 -- it was null for library and nested elements and is
+    // gone in React 19 -- and now uses the data-nbai-src attribute stamped by nbaiSrcPlugin below,
+    // which is our own plugin and independent of the JSX runtime. Nothing in the codebase reads
+    // _debugSource at runtime any more. This flag was paying a real cost for a dead consumer.
+    //
+    // NOTE FOR WHOEVER EDITS THIS COMMENT: it lives INSIDE a template literal (this whole function is
+    // built as a string and shipped to the browser). A backtick here ends the literal and breaks the
+    // file, so the module names above are written bare on purpose.
+    //
     // allowDeclareFields:true — Babel's preset-typescript otherwise THROWS on a declare class field
     // ("The 'declare' modifier is only allowed when 'allowDeclareFields' is enabled"), even though tsc
     // and vite/esbuild accept it silently. Without this the in-browser preview white-screens on any app
@@ -725,8 +747,8 @@ ${babelTag}
     // build's own tsc gate and the E2B/vite preview pass — a compiler divergence that shipped a broken
     // preview as "verified". Enabling it erases the type-only fields exactly like tsc does.
     var presets = isTs
-      ? [['react', { runtime: 'automatic', development: true }], ['typescript', { isTSX: isTsx, allExtensions: true, allowDeclareFields: true }]]
-      : [['react', { runtime: 'automatic', development: true }]];
+      ? [['react', { runtime: 'automatic', development: false }], ['typescript', { isTSX: isTsx, allExtensions: true, allowDeclareFields: true }]]
+      : [['react', { runtime: 'automatic', development: false }]];
     var transformed;
     // VISUAL EDITOR mapping (reliable, admin 2026-07-29): stamp data-nbai-src="file:line:col" onto every
     // HOST (lowercase) JSX element of the USER's code so the inspector can map ANY clicked element back to
@@ -917,6 +939,39 @@ ${babelTag}
           nbaiPending--; nbaiPkgsDone++; nbaiProgress();
         }
       }));
+      // SECOND LAYER: nothing may crash for want of a DEBUG-ONLY export.
+      //
+      // The transform above no longer emits jsxDEV, which is the real fix. This is the net under it,
+      // because we do not control every module that reaches this loader: a user's own vendored or
+      // pre-built file, an npm package shipping a dev-runtime build, or a future config drift can all
+      // still call jsxDEV — and React's PRODUCTION jsx-dev-runtime answers with "void 0" rather than a
+      // function, which is not a failure any caller can see coming. (No backticks in this comment: it
+      // is inside a template literal, and one would end the string and break the file.)
+      //
+      // The substitution is exact, not approximate. jsxDEV(type, config, key, isStaticChildren, …)
+      // differs from jsx/jsxs ONLY in the trailing arguments, which exist for development warnings and
+      // for the source position we no longer read. Static children route to jsxs exactly as the real
+      // implementation does. If react/jsx-runtime is itself unavailable we leave the module alone, so
+      // the honest "could not load React" error stands instead of a stub that pretends.
+      (function () {
+        var dev = bareCache['react/jsx-dev-runtime'];
+        if (dev && typeof dev.jsxDEV === 'function') return;
+        var rt = bareCache['react/jsx-runtime'] || {};
+        var jsx = rt.jsx || (rt.default && rt.default.jsx);
+        var jsxs = rt.jsxs || (rt.default && rt.default.jsxs) || jsx;
+        if (typeof jsx !== 'function') return;
+        var patched = {};
+        for (var k in (dev || {})) patched[k] = dev[k];
+        patched.jsxDEV = function (type, config, maybeKey, isStaticChildren) {
+          return (isStaticChildren && typeof jsxs === 'function' ? jsxs : jsx)(type, config, maybeKey);
+        };
+        if (patched.Fragment === undefined) patched.Fragment = rt.Fragment || (rt.default && rt.default.Fragment);
+        patched.__esModule = true;
+        patched.default = patched;
+        bareCache['react/jsx-dev-runtime'] = patched;
+        console.warn('[preview] react/jsx-dev-runtime had no jsxDEV (production build) — substituted the standard JSX runtime.');
+      })();
+
       // THE APP'S OWN SERVER RUNS FIRST. The bridge patches fetch, the server module registers its
       // routes, and only then does the frontend mount — otherwise a component fetching on mount would
       // race the server that is supposed to answer it. A server that throws must NOT take the frontend
@@ -975,11 +1030,18 @@ ${VISUAL_EDITOR_SCRIPT}
 // direct call would also work, but postMessage matches the established pattern this preview already
 // uses for error reporting (__nbaiPreviewError), keeping ONE communication channel.
 //
-// Mechanism: React (with development:true set on the JSX transform above) attaches `_debugSource`
-// (fileName/lineNumber/columnNumber) to the fiber of every JSX element — the same data React DevTools'
-// own "open in editor" feature reads. Walking a clicked DOM node's `__reactFiber$*` property to its
-// fiber (a real, stable React internal API, not a hack specific to this app) gives that exact source
-// location, so an edit can be sent back to EXACTLY the JSX element the user clicked — no guessing.
+// Mechanism: `data-nbai-src="file:line:col"`, stamped onto every host JSX element of the USER's code by
+// nbaiSrcPlugin at transform time, and read back with `el.closest('[data-nbai-src]')`. So a clicked
+// element maps to EXACTLY the JSX that produced it — no guessing, every React version, library and
+// nested elements included.
+//
+// ⚠️ THIS COMMENT USED TO SAY the mechanism was React's `_debugSource`, attached by the JSX transform's
+// development:true. That stopped being true on 2026-07-29 (when the stamp replaced it) and the JSX
+// transform stopped setting development:true on 2026-08-27 — it was emitting jsxDEV, which React's
+// production runtime does not implement. `_debugSource` therefore reads null now. It remains as the
+// last fallback in srcFor below, which costs nothing and covers no case the stamp misses; the editor
+// does not depend on it and has not for a month. Corrected here rather than left to mislead the next
+// person into "restoring" a flag that breaks every published app.
 const VISUAL_EDITOR_SCRIPT = `<script>
 (function () {
   var editMode = false;

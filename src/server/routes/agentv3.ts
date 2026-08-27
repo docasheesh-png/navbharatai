@@ -58,6 +58,7 @@ import {
   editModePrefix,
   dateContextBlock,
   LANGUAGE_RULE,
+  CODE_LITERACY_RULE,
   CREDENTIAL_SILENCE_RULE,
   awaitApproval,
   resolveApproval,
@@ -431,6 +432,7 @@ import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportS
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
 import { ensureViteConfig } from '../AgentV3/ViteConfigGuard';
 import { applyVisualTextEdit, applyVisualStyleEdit, applyVisualStyleEdits } from '../AgentV3/VisualEditPatcher';
+import { runCheckpointDiff } from '../AgentV3/checkpointDiff';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
 import { GrokProvider } from '../AI/Router/providers/GrokProvider';
@@ -5202,6 +5204,36 @@ async function noteBuildOutcome(
     res.json({ ok: result.ok, reason: result.reason, message: restoreMessage(result.reason) });
   });
 
+  // History → COMPARE: what changed between two checkpoints (ROADMAP B6).
+  //
+  // The truthful diff is git's own, between the two commit shas, in the sandbox the user already has
+  // warm — the same no-new-VM cost rule as the version preview below. Read-only: nothing here can
+  // touch the workspace, which is why it shares the preview's guards and none of restore's.
+  app.post('/api/agentv3/checkpoint-diff', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    try {
+      const deps = versionPreviewDeps(buildActuator(), workspaceId);
+      res.json(await runCheckpointDiff(req.body?.from, req.body?.to, deps));
+    } catch {
+      // A comparison is a convenience; it must never surface as a broken History panel.
+      res.json(await runCheckpointDiff('', '', { run: async () => ({ stdout: '' }), sandboxWarm: async () => false }));
+    }
+  });
+
   // History → PREVIEW: see an old checkpoint running, without overwriting the present.
   //
   // The route above is the destructive one. Until now it was the ONLY way to find out what a version
@@ -7168,7 +7200,7 @@ async function noteBuildOutcome(
         const roleRecall = (() => {
           try { return sessionRecallContextLine(getWorkspaceMemory(roleWorkspaceId).snapshot().episodes); } catch { return ''; }
         })();
-        const system = LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' + roleSystemPrompt(chatRole) + '\n\n' + recencyDirective() + roleRecall + formatRoleContext(fileTree, picked);
+        const system = LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' + CODE_LITERACY_RULE + '\n\n' + roleSystemPrompt(chatRole) + '\n\n' + recencyDirective() + roleRecall + formatRoleContext(fileTree, picked);
         const roleRouter = AIRouterManager.getRouter('free');
         const { response } = await raceTimeout(roleRouter.route(prompt, system), 45_000, 'roleChat.route');
         const fullReply = response.content || '';
@@ -7759,7 +7791,7 @@ async function noteBuildOutcome(
           const { response } = await raceTimeout(
             chatRouter.route(
               chatPrompt,
-              LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' +
+              LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' + CODE_LITERACY_RULE + '\n\n' +
                 "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
                 "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
                 "mention which model you are.\n\n" + CREATOR_IDENTITY + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + recencyDirective() + '\n\n' + LINK_POLICY + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +

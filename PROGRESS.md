@@ -42561,3 +42561,64 @@ first; a screen over an empty collection is decoration).
 
 **Verification:** `tsc` both projects ✅ · `npm run build` ✅ · `npx vitest run` — **1399 files /
 18314 passed** (26 new: 13 tailwind, 8 version-repair, 5 doc-pin).
+
+---
+
+## 2026-08-27 — Top-5 competitor comparison, and the first two gap-fills shipped
+
+**Admin:** *"navbharatai pro ko top-5 se compair karo; sabhi gaps find karo; unki acchi bate shortlist
+karo; gaps smartly fill karo. 100% automatic."*
+
+### The comparison — `COMPETITIVE_ANALYSIS_2026.md` (new, repo root)
+
+Competitor side researched FRESH against official pages (Lovable, Bolt v2, v0's Feb-2026 relaunch,
+Replit Agent 4, Cursor 2.0) — never from memory. Our side verified against LIVE CODE, which caught what
+would have been the **eighth false-open**: the "visual click-to-edit" gap the doc was about to declare
+ships already (`VisualEditPatcher.ts` — AST-applied, token-free — plus the full `VisualEditor.tsx`
+controls). Also found **E1 (share links) superseded**: built, then explicitly SHUT by the admin
+2026-08-25 for the forwarded-link sandbox-cost hole — the ROADMAP row still said "Build it" and now
+carries the correction.
+
+The document holds: the capability table (✅/🟰/🔶/❌/🚫), the good-ideas shortlist (Replit's
+browser-driving self-test is the best idea in the field), every gap with an honest verdict, five
+deliberately-NOT-copied items with reasons (own-cloud backend re-bills users for infra — rejected;
+domain reselling; platform API; seat pricing; WebContainers), and the honest deficit: Replit's autonomy
+envelope and Expo-native mobile are ahead of us, the second behind our own recorded infra item.
+
+### Filled now — G11: code literacy in the user's language (ROADMAP 9.1a–c)
+
+The roadmap's own words: highest value-to-effort in the entire audit, and the only genuinely
+un-copyable item — none of the five can explain a user's own error to them in their language.
+`CODE_LITERACY_RULE` (systemPrompt.ts, beside LANGUAGE_RULE/CREDENTIAL_SILENCE_RULE — the same
+user-facing-text class): explanations follow the user's language with ENGLISH technical nouns
+("is function me loop galat chal raha hai", never Devanagari for function/loop — the register risk
+9.1c named, now test-locked), and EVERY error shown is followed by what it means + what to change.
+Carried by: architect prompt, plan prompt, Advise/role chats, plain-chat fallback, and Free chat's own
+rule. `tests/codeLiteracyRule.test.ts` pins the register, the example, and all five surfaces.
+9.1d (per-user language preference) and 9.1e (opt-in Hindi comments) remain open in ROADMAP.
+
+### Filled now — G2: compare two checkpoints (ROADMAP B6)
+
+History → "Compare two versions" → pick two → per-file added/removed with renames shown as renames.
+`checkpointDiff.ts` follows `versionPreview.ts`'s architecture exactly: pure command builders + parser
+(both git rename forms), the route supplies the actuator runner. **Cost rule inherited:** runs only in
+the already-warm sandbox, never boots one — cold sandbox gets an honest "open the app first". NUMSTAT
+not the patch, deliberately: the History screen's question is "which files, how much", and a megabyte
+patch of two distant checkpoints answers a question nobody asked. Selection rules are pure + tested
+(`checkpointCompare.ts`) because the one way this feature can lie is ORDER INVERSION — base and target
+swapped shows the user's own additions as deletions, which reads as "restore will delete my work".
+
+**Deferred with reasons, recorded in the analysis doc:** G1 broader browser-driving self-test (extend
+JourneyCheck — next hardening round, after APK telemetry), G4 "check my pull request" trigger (blocks
+are built; small), G10 live ₹ ticker, G3 DB-inclusive checkpoints (user-project PITR infra), G6
+connectors (first one when a real user names one — WhatsApp Business/Sheets beat Linear for our
+audience), G8 Figma, G9 design variants (N variants = N× spend; palette presets already cover the
+cheap version).
+
+⚠️ **Caught by an existing guard on the first full run, worth recording:** the workspace-state census
+(`appIdentityGuard.test.ts`) rejected the compare feature as first written — `compareResult` was filled
+from a workspace-scoped response and never cleared on workspace change, so app A's diff would have
+rendered under app B's History: the exact cross-app leak class #2658 closed for the live URL. Fixed
+with a reset effect keyed on the workspace id alone, and the census's numbers updated WITH the
+justification its own comment demands. That guard paying for itself is the strongest argument this
+codebase has for census-style tests.

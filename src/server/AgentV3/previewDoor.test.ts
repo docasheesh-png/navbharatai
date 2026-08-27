@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   previewDoorEnabled, doorSecret, signDoorToken, verifyDoorToken, makeDoorPath, doorPage,
-  DOOR_TOKEN_TTL_MS, DOOR_RETRY_CAP,
+  DOOR_TOKEN_TTL_MS, DOOR_RETRY_CAP, previewInAppOnly,
 } from './previewDoor';
 
 const NOW = 1_700_000_000_000;
@@ -120,5 +120,58 @@ describe('🔒 the pages the user sees instead of a vendor error', () => {
     expect(html).toMatch(/^<!doctype html>/i);
     expect(html).toContain('<title>NavBharatAI Preview</title>');
     expect(html).toContain('viewport');
+  });
+});
+
+describe('in-app-only — a forwarded preview link (admin 2026-08-25: "share link hi hata do")', () => {
+  const html = doorPage('in-app-only');
+
+  it('NEVER retries — a self-refreshing refusal would resume a paid machine forever', () => {
+    // The other two pages retry on purpose. This one must not: the whole point is that an outside
+    // open costs nothing, and a page that reloads itself every few seconds is the opposite of that.
+    expect(html).not.toContain('location.reload()');
+    expect(html).not.toContain('setTimeout');
+  });
+
+  it('shows no spinner — nothing is being waited for', () => {
+    expect(html).not.toContain('class="spin"');
+  });
+
+  it('says what to do INSTEAD, in the user’s own terms', () => {
+    expect(html).toContain('Previews open inside NavBharatAI');
+    expect(html.toLowerCase()).toContain('publish');
+  });
+
+  it('names no vendor and no infrastructure (the white-label law)', () => {
+    // Asserted against the VISIBLE text, not the raw html: the page's own `<meta name="viewport">`
+    // contains the substring "port", so a naive whole-document match fails on our own boilerplate.
+    // (It did, on the first run — the test was wrong, not the page.)
+    const visible = html.replace(/<[^>]*>/g, ' ').toLowerCase();
+    expect(visible).not.toMatch(/\be2b\b|\bsandbox\b|\bvercel\b|\bfirebase\b|\brender\b|\bdocker\b|\bport\b/);
+  });
+
+  it('does not blame the person who opened it', () => {
+    expect(html.toLowerCase()).not.toMatch(/denied|forbidden|not allowed|unauthorized|error/);
+  });
+
+  it('the retrying pages are untouched — this must not have disarmed the wake-up', () => {
+    for (const kind of ['asleep', 'starting'] as const) {
+      const page = doorPage(kind);
+      expect(page).toContain('location.reload()');
+      expect(page).toContain('class="spin"');
+    }
+  });
+});
+
+describe('previewInAppOnly — the kill switch', () => {
+  it('is ON by default, because this IS the fix', () => {
+    expect(previewInAppOnly({} as NodeJS.ProcessEnv)).toBe(true);
+  });
+
+  it('only the exact word off turns it off, whatever the casing or spacing', () => {
+    expect(previewInAppOnly({ AGENTV3_PREVIEW_IN_APP_ONLY: 'off' } as never)).toBe(false);
+    expect(previewInAppOnly({ AGENTV3_PREVIEW_IN_APP_ONLY: ' OFF ' } as never)).toBe(false);
+    expect(previewInAppOnly({ AGENTV3_PREVIEW_IN_APP_ONLY: 'on' } as never)).toBe(true);
+    expect(previewInAppOnly({ AGENTV3_PREVIEW_IN_APP_ONLY: 'false' } as never)).toBe(true); // not "off"
   });
 });

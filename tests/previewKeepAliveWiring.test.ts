@@ -3,11 +3,20 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 /**
- * KEEP-ALIVE WIRING — the four connections behind "a finished app must not die under its user".
+ * PREVIEW ACCESS + KEEP-ALIVE WIRING.
  *
- * The pure decisions have their own tests. These pin the parts that live inside the 12,000-line route
- * and a 1,200-line component, where a dropped line produces NO error and NO failing build — just a
- * sandbox quietly paused under somebody's working app five minutes later, reported weeks after.
+ * ⚠️ THIS FILE CHANGED SIDES ON 2026-08-25, and the reason matters more than the assertions.
+ *
+ * It used to pin that a POPPED-OUT preview tab was served a keep-alive shell so the machine stayed up
+ * while somebody watched their app. That was right for the problem it was written for (an app dying
+ * under its own user after five idle minutes) and wrong about who might be watching: a preview url can
+ * be forwarded, and the shell held a per-minute-billed machine awake for as long as ANY tab stayed
+ * open — NavBharatAI's bill, someone else's audience.
+ *
+ * ADMIN 2026-08-25, after asking what a published game costs us: "ham, band karo! share link hi hata
+ * do!!" So the popout is gone and the door refuses top-level navigation. The keep-alive machinery is
+ * deliberately KEPT INTACT and unwired — the sweep-side protections below are still load-bearing for
+ * the in-app preview, and the shell can be restored for an app's OWNER in one change.
  *
  * Source-level, for the same reason `cachePrefixWiring.test.ts` is: a weaker check than execution,
  * chosen honestly over no check at all.
@@ -16,35 +25,74 @@ const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 
 const surface = readFileSync(join(process.cwd(), 'src/components/agentv3/PreviewSurface.tsx'), 'utf8');
 const actuator = readFileSync(join(process.cwd(), 'src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts'), 'utf8');
 
-describe('1. the popout goes through the door', () => {
-  it('no longer hands out the raw sandbox url', () => {
-    // The whole reported failure started here: a popped-out tab bypassed the door, so it got the
-    // vendor's error page instead of ours AND carried none of our keep-alive.
-    expect(surface).not.toContain('<a href={effectiveUrl} target="_blank"');
-    expect(surface).toContain('<a href={popoutHref} target="_blank"');
+describe('1. NavBharatAI no longer hands out a shareable preview link', () => {
+  it('the preview toolbar offers no way to open the app outside the app', () => {
+    expect(surface).not.toContain('target="_blank"');
+    expect(surface).not.toContain('popoutHref');
   });
 
-  it('uses the SAME precedence as the iframe, so the two cannot disagree', () => {
-    expect(surface).toContain('const popoutHref = doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl;');
+  it('the raw machine url was not left behind as a fallback either', () => {
+    // The original bug this file was written for. Re-asserted because deleting the door-based popout
+    // must never be "fixed" later by restoring the RAW-url one that came before it.
+    expect(surface).not.toContain('<a href={effectiveUrl} target="_blank"');
+  });
+
+  it('the iframe — the one legitimate consumer — still goes through the door', () => {
+    // Asserts the door PRECEDENCE, not the whole src expression: another session has since added an
+    // idle-snapshot fallback in front of it, and pinning the full string made this fail on a change
+    // that had nothing to do with the rule being protected here.
+    expect(surface).toContain('doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl');
+    expect(surface).toContain('<iframe key={liveReloadKey}');
   });
 });
 
-describe('2. the door serves the shell only for a popped-out tab', () => {
-  it('decides with the shared pure rule, reading the browser’s own signal', () => {
-    expect(route).toContain('shouldServeKeepAliveShell({');
+describe('1b. …and the door itself refuses an outside open, which is the actual lock', () => {
+  it('refuses a top-level navigation', () => {
     expect(route).toContain("isTopLevelNavigation(req.headers['sec-fetch-dest']");
+    expect(route).toContain("return page(403, 'in-app-only');");
+  });
+
+  it('🔒 refuses BEFORE touching the machine — otherwise the refusal itself costs money', () => {
+    // Connecting RESUMES a paused sandbox and the port sweep is billed activity. A check placed after
+    // either one would still say "no" and still spend, which is the whole point missed.
+    const at = route.indexOf("return page(403, 'in-app-only');");
+    expect(at).toBeGreaterThan(-1);
+    const doorAt = route.indexOf("app.get('/api/agentv3/preview-door'");
+    const actuatorAt = route.indexOf('const actuator = buildActuator();', doorAt);
+    expect(at).toBeLessThan(actuatorAt);
+  });
+
+  it('has a kill switch, because a rule that locks a door needs a key', () => {
+    expect(route).toContain('previewInAppOnly()');
+    const door = readFileSync(join(process.cwd(), 'src/server/AgentV3/previewDoor.ts'), 'utf8');
+    expect(door).toContain('AGENTV3_PREVIEW_IN_APP_ONLY');
+  });
+
+  it('the refusal page never retries — a self-refreshing refusal would resume a machine forever', () => {
+    const door = readFileSync(join(process.cwd(), 'src/server/AgentV3/previewDoor.ts'), 'utf8');
+    expect(door).toContain("(kind === 'refused' || kind === 'in-app-only') ? '' : `<script>");
+  });
+
+  it('tells the user what to do INSTEAD, and names no vendor', () => {
+    const door = readFileSync(join(process.cwd(), 'src/server/AgentV3/previewDoor.ts'), 'utf8');
+    const at = door.indexOf("'Previews open inside NavBharatAI'");
+    expect(at).toBeGreaterThan(-1);
+    const body = door.slice(at, at + 900).toLowerCase();
+    expect(body).toContain('publish');
+    expect(body).not.toMatch(/e2b|sandbox|vercel|firebase/);
+  });
+});
+
+describe('2. the keep-alive shell is no longer served — the unbounded half of the cost', () => {
+  it('the door does not serve it at all', () => {
+    // It held a per-minute-billed machine awake for as long as ANY tab stayed open. Its only consumer
+    // was the popout, which no longer exists, so serving it would be dead code pretending to be live.
+    expect(route).not.toContain('keepAliveShellPage(');
+    expect(route).not.toContain('shouldServeKeepAliveShell(');
   });
 
   it('the in-app iframe still gets the plain 302', () => {
     expect(route).toContain('return res.redirect(302, target);');
-  });
-
-  it('passes the SAME signed token through, so the shell can prove who it is', () => {
-    const i = route.indexOf('keepAliveShellPage({');
-    expect(i).toBeGreaterThan(-1);
-    const block = route.slice(i - 500, i + 300);
-    expect(block).toContain('exp: String(req.query?.exp');
-    expect(block).toContain('sig: String(req.query?.sig');
   });
 });
 

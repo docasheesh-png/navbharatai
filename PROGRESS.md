@@ -42305,3 +42305,69 @@ else* is a dead end wearing a tab label: the user opened Publish and left with h
 ⚠️ **One self-inflicted scare worth recording:** the AppKnowledgeBase entry is a SINGLE-quoted TS
 string, and the first draft of the new text contained a bare apostrophe ("your app's build screen"),
 which closed the string and broke 45 test files at once. Caught by the gate before push, not after.
+
+## 2026-08-26 — why generated 3D games looked flat, and the three things that were missing
+
+**Admin:** *"The game made by NavBharatAI is not so realistic … improve the quality."* Sent with a large
+externally-authored prompt, and explicitly flagged as *"a suggestion only, not blindly trust on this"* —
+so it was treated as raw material under the external-suggestion rule, not transcribed.
+
+**The external prompt's central assumption was WRONG, and checking it first saved the whole effort.**
+It was written as though no game system exists and one must be built from scratch (asset pipelines,
+engine selection, a Game Creator sub-product). The repo already has a six-tool game pipeline —
+`generate_game_runtime / _3d / _controller / _systems / _vfx / _shell` — and `Game3DGenerator.ts`
+already does the craft that prompt lists as missing: sRGB output, ACES tone mapping, a hemisphere+key+
+fill rig, a FITTED shadow camera, capped devicePixelRatio, InstancedMesh scatter.
+
+**So the real root cause is narrower and more interesting: the lighting was already right, and there
+was nothing worth lighting.** Three specific gaps, each confirmed by grep, not guessed:
+
+1. **No environment map at all** (`grep -i "envMap\|PMREM\|gltf"` → nothing). A PBR material is mostly a
+   description of what it REFLECTS. With `metalness: 1` and no environment, metal renders near-black
+   and every glossy surface reads as painted plastic. The materials were physically correct and were
+   being asked to reflect an empty room.
+2. **Every material was ONE FLAT COLOUR.** `makeMaterial` set believable roughness/metalness but no
+   `normalMap`, `roughnessMap` or `aoMap`. A brick wall was a solid brown rectangle; light it perfectly
+   and it is still a solid brown rectangle.
+3. **No character geometry.** Nothing in the 3D layer builds a body, so the model hand-wrote a capsule
+   — the single clearest tell of an AI-generated game, and exactly what the admin saw.
+
+**Shipped — three generated modules, no new dependencies:**
+- `src/game/three/environment.ts` — a real IBL from a procedural sky (gradient + sun disc in a shader,
+  through `PMREMGenerator`). No HDRI download, nothing to 404 in a published app. Cached per preset and
+  `disposeEnvironment()` exists, because regenerating PMREM is the classic stutter leak. **This one call
+  improves every material in every scene**, which is why it is first.
+- `src/game/three/surfaces.ts` — procedural PBR map sets (colour + normal + roughness + AO) for brick,
+  plaster, wood, bark, stone, asphalt, soil, grass, metal, fabric, tile, sand. All four maps derive from
+  ONE seeded height field, so they agree with each other: a mortar groove is dark, dented, rougher and
+  occluded from the same number. 🔒 Only the COLOUR map is tagged sRGB — tagging the others sRGB (the
+  easy mistake) pushes normals the wrong way and turns rough surfaces glossy, which is *worse* than no
+  maps. Cached by kind+seed+size so forty brick walls generate brick once.
+- `src/game/three/humanoid.ts` — a proportioned, jointed figure (head ≈ H/7.5, elbow at the waist) with
+  named joints and procedural locomotion: arms swing OPPOSITE the legs, knees clamp to one direction
+  (no backwards-knee), the body TUCKS when airborne, plus counter-rotation and a двух-per-cycle bob.
+
+**Coupling that prevents a regression:** asking for `surfaces` pulls in `environment`. Detailed
+roughness makes reflections matter, and with nothing to reflect a glossy surface goes *darker and
+deader* than the flat colour it replaced — the fix would have made things worse on its own.
+
+**The builder is now told what "realistic" requires** (systemPrompt): a three-point checklist —
+`applyEnvironment`, `surfaceMaterial`+`enableAO` on anything the player gets close to, `createHumanoid`
+instead of a capsule — **and the honest ceiling**: this is STYLISED-REALISTIC, not a scanned human, and
+the model is told to say so rather than promise photorealism. The same limit is in AppKnowledgeBase so
+every AI explains it the same way.
+
+**Deliberately NOT done from the external prompt, with reasons:** a separate "Game Creator" sub-product
+(the pipeline exists; a parallel one would fork the engine), GLTF/DRACO/KTX2 asset loading (real value,
+but it improves nothing by default and belongs with a decision about where models come from), WebGPU
+(three's WebGL2 path is what these games ship on; a second renderer is a maintenance burden with no
+visible gain here), physics/LOD/occlusion engines (`generate_game_systems` and `world.ts` already cover
+the ground that matters at this scale). Each is a real Phase-2 item, not a silent omission.
+
+**Verification:** `tsc` both projects ✅ · `npm run build` ✅ · `npx vitest run` — 1392 files / 18195
+passed (10 new).
+
+⚠️ **Caught by an existing guard, worth recording:** `generatedGameCode.test.ts` parses every file the
+generators write into a user app, and it rejected the first draft — `.join('\n')` inside the generator's
+template literal became a REAL newline in the generated file and broke a string literal. That guard is
+the reason a broken 3D module could not reach a user.

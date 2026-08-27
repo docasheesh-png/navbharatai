@@ -547,6 +547,21 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       at a different SPEED on every monitor.',
     '    2. generate_game_3d       — only for 3D. Colour management, lighting presets, camera rigs,',
     '       procedural world. Adds `three`.',
+    // 🎨 ADMIN 2026-08-26, from a real 3D game: "not so realistic". The audit found the lighting was
+    // already correct and the GEOMETRY had nothing on it — flat colours, no reflections, a capsule for
+    // a person. These three lines are the difference, so they are stated as rules rather than hints.
+    '       🔴 REALISM CHECKLIST — a "realistic/3D" request is NOT done until all three are true:',
+    '         (a) applyEnvironment(scene, renderer, preset) is called. A PBR material mostly describes',
+    '             what it REFLECTS; with no environment, metal renders near-black and everything glossy',
+    '             looks like painted plastic. This one call improves every material in the scene.',
+    '         (b) Anything the player gets CLOSE to — walls, floor, road, ground, crates, bark, vehicles',
+    '             — uses surfaceMaterial(kind) + enableAO(geometry), NOT a flat colour. Perfect lighting',
+    '             on a flat colour is exactly what "not realistic" looks like.',
+    '         (c) A human/creature is createHumanoid(), driven by hero.update(dt, speed, grounded).',
+    '             NEVER a capsule, a cylinder, or a stack of spheres — that is the clearest possible',
+    '             sign of an AI-generated game, and the admin reported it by name.',
+    '       Be honest about the ceiling: this produces a STYLISED-REALISTIC look, not a scanned human.',
+    '       Say "stylised 3D" in your summary rather than promising photorealism you cannot deliver.',
     '    3. generate_game_controller — a player character. Coyote time, jump buffering, step offset.',
     '    4. generate_game_systems  — enemies, health/damage, shooting, waves. It already handles',
     '       i-frames and fast-bullet collision, which a fresh implementation reliably gets wrong.',

@@ -48,6 +48,18 @@ export const WELL_KNOWN_DEV_DEPS: Record<string, string> = {
   '@testing-library/jest-dom': '^6',
   '@testing-library/user-event': '^14',
   jsdom: '^25',
+  // TAILWIND IS A BUILD TOOL, AND THIS ENTRY MOVED HERE FROM THE PRODUCTION MAP (2026-08-27).
+  // It was the last allowlisted package still written into `dependencies` despite being build-only,
+  // where `detectMisplacedDevTools` then flagged it as the user's mistake — NavBharatAI creating
+  // the very finding it reported, in the same build. Safe to move: every reader of this dependency
+  // (styling detector, preference store, package health, deploy planner) reads BOTH sections or
+  // detects from tailwind.config.*, and this repo's own package.json declares it as a devDependency.
+  //
+  // The v3 pin below is load-bearing and travels with it (LedgerLoop autopsy 2026-07-20): a bare
+  // `npm install tailwindcss` pulls v4, which REMOVED the `tailwindcss init -p` CLI and the
+  // `node_modules/.bin/tailwindcss` binary and switched to CSS-first config — so every v3
+  // convention an LLM emits fails. The builder burned 5 failed commands on this.
+  tailwindcss: '^3',
 };
 
 export const WELL_KNOWN_DEPS: Record<string, string> = {
@@ -60,12 +72,6 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
   clsx: '^2',
   classnames: '^2',
   'tailwind-merge': '^2',
-  // Tailwind pinned to v3 (LedgerLoop autopsy 2026-07-20). A bare `npm install tailwindcss` pulls v4,
-  // which REMOVED the `tailwindcss init -p` CLI and the `node_modules/.bin/tailwindcss` binary, and
-  // switched to CSS-first config (`@import "tailwindcss"`) — so the v3 conventions every LLM emits
-  // (`tailwindcss init -p`, `tailwind.config.js`, `@tailwind base/components/utilities`) all fail. The
-  // builder burned 5 failed commands on this. v3 is the stable major the scaffold + generated code use.
-  tailwindcss: '^3',
   'class-variance-authority': '^0.7.0',
   dayjs: '^1',
   'date-fns': '^3',
@@ -133,6 +139,20 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
   leaflet: '^1',
 };
 
+/**
+ * The pinned version for a package, from EITHER allowlist, or '' when it is not one of ours.
+ *
+ * One lookup, so a package can never be pinned in one place and unpinned in another purely because of
+ * which section of package.json it belongs to. `hasOwnProperty` rather than a bare index, so a name
+ * like `constructor` or `toString` cannot resolve through the prototype chain to something truthy. PURE.
+ */
+export function knownDepVersion(name: string): string {
+  const n = String(name ?? '');
+  if (Object.prototype.hasOwnProperty.call(WELL_KNOWN_DEPS, n)) return WELL_KNOWN_DEPS[n];
+  if (Object.prototype.hasOwnProperty.call(WELL_KNOWN_DEV_DEPS, n)) return WELL_KNOWN_DEV_DEPS[n];
+  return '';
+}
+
 // Matches an npm/pnpm/yarn INSTALL sub-command (not `npx prisma generate`, not `npm run`, not a bare
 // `npm ci`). Only inside such a sub-command do we treat tokens as package specifiers to pin.
 const INSTALL_SUBCOMMAND_RE = /(?:^|\s)(?:npm\s+(?:install|i|add)|pnpm\s+(?:install|i|add)|yarn\s+add)\b/;
@@ -160,7 +180,12 @@ export function pinKnownDepsInInstallCommand(command: string): string {
       // Tokenize on whitespace (keeping it) and pin exact bare known-dep tokens.
       return segment
         .split(/(\s+)/)
-        .map((tok) => (Object.prototype.hasOwnProperty.call(WELL_KNOWN_DEPS, tok) ? `${tok}@${WELL_KNOWN_DEPS[tok]}` : tok))
+        // BOTH allowlists, exactly like planDependencyAutoFix (2026-08-27). A version pin is about WHICH
+        // release is safe, never about which package.json section the package ends up in — and reading
+        // only the production map meant that moving `tailwindcss` to the dev map silently dropped its
+        // v3 pin, which is load-bearing: a bare install pulls v4 and every v3 convention then fails.
+        // Its own test caught that, which is why this reads both rather than the pin being special-cased.
+        .map((tok) => (knownDepVersion(tok) ? `${tok}@${knownDepVersion(tok)}` : tok))
         .join('');
     })
     .join('');

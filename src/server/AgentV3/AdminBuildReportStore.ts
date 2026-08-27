@@ -163,6 +163,15 @@ export interface AdminBuildReportRecord {
     count: number;
     /** Oldest builds dropped to stay inside the document size limit. Honest, never hidden. */
     omittedBuilds: number;
+    /**
+     * TRUE when the workspace's build history COULD NOT BE READ, so `count` is what we managed to see
+     * and not what exists (admin 2026-08-27: "shuru ke 9 gayab, only 10th report hi aati hai").
+     *
+     * Without this the record is indistinguishable from a genuine one-build session, and the admin is
+     * shown a confident wrong number instead of a missing one. `count: 1` plus this flag says the only
+     * honest thing: this is the build in hand, and we could not check whether there were others.
+     */
+    historyUnreadable?: true;
   };
 }
 
@@ -229,6 +238,11 @@ export function buildAdminReportRecord(
    * session can never exceed the document limit, with the omitted count reported honestly.
    */
   sessionBuilds?: readonly BuildDiagnosticsReport[],
+  /**
+   * Set when the history read itself failed. It is recorded even for a ONE-build record, because that
+   * is exactly the case where the missing builds are invisible and the number looks trustworthy.
+   */
+  historyUnreadable?: boolean,
 ): AdminBuildReportRecord {
   const trimmed = trimReportForStorage(report);
   const id = `${ctx.reportedAt}_${(ctx.workspaceId ?? 'nows').replace(/[^A-Za-z0-9_-]/g, '')}`;
@@ -302,8 +316,13 @@ export function buildAdminReportRecord(
     report: trimmed,
     // Kept even when `builds` ends up EMPTY: the omitted count is the only place the admin learns that
     // earlier builds existed and could not be stored. Dropping the block would hide that silently.
+    // A FAILED READ IS RECORDED EVEN WHEN THERE IS NO MULTI-BUILD SESSION TO SHOW. That is the whole
+    // point: the dangerous case is one build plus a silent failure, which reads exactly like a genuine
+    // single-build session. So the flag rides on its own, with the honest count of what we could see.
     ...(fittedSession
-      ? { session: { builds: fittedSession.kept, count: trimmedSession.length, omittedBuilds: fittedSession.omitted } }
+      ? { session: { builds: fittedSession.kept, count: trimmedSession.length, omittedBuilds: fittedSession.omitted, ...(historyUnreadable ? { historyUnreadable: true as const } : {}) } }
+      : historyUnreadable
+        ? { session: { builds: [], count: trimmedSession.length, omittedBuilds: 0, historyUnreadable: true as const } }
       : {}),
   };
 }

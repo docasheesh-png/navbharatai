@@ -100,3 +100,34 @@ describe('delete guards never throw and refuse an empty id', () => {
     await expect(deleteAllAdminBuildReports()).resolves.toBe(0);
   });
 });
+
+describe('a history we could NOT read is never filed as a one-build session (admin 2026-08-27)', () => {
+  const ctx = { userId: 'u1', email: 'a@b.c', name: 'A', workspaceId: 'ws-1', buildId: 'b1', reportedAt: 1000 };
+  const build = (startedAt: number) => ({
+    schema: 'navbharatai.v3.build-diagnostics/1', buildId: `b${startedAt}`, promptHash: 'h',
+    workspaceId: 'ws-1', prompt: 'p', startedAt, endedAt: startedAt + 10, ok: true,
+    counts: { total: 0, errors: 0, warnings: 0, autoResolved: 0, unresolved: 0 }, issues: [], problems: [],
+  } as never);
+
+  it('THE REPORTED BUG: one build + a failed read says so, instead of looking like a real single build', () => {
+    const r = buildAdminReportRecord(build(1), ctx, [build(1)], true);
+    expect(r.session?.historyUnreadable).toBe(true);
+  });
+
+  it('a genuine single-build session carries NO warning — it must not cry wolf', () => {
+    const r = buildAdminReportRecord(build(1), ctx, [build(1)], false);
+    expect(r.session?.historyUnreadable).toBeUndefined();
+  });
+
+  it('omitting the flag entirely behaves exactly as before', () => {
+    const before = buildAdminReportRecord(build(1), ctx, [build(1)]);
+    expect(before.session?.historyUnreadable).toBeUndefined();
+  });
+
+  it('a multi-build session that ALSO failed to read carries both the builds and the warning', () => {
+    const r = buildAdminReportRecord(build(3), ctx, [build(1), build(2), build(3)], true);
+    expect(r.session?.count).toBe(3);
+    expect(r.session?.builds.length).toBeGreaterThan(0);
+    expect(r.session?.historyUnreadable).toBe(true);
+  });
+});

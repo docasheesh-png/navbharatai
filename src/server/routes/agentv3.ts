@@ -413,7 +413,7 @@ import {
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { recentBuildHistoryFor, etaBasisNote } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
-import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
@@ -3218,16 +3218,20 @@ async function noteBuildOutcome(
     // The WHOLE session, exactly as the manual Report button gathers it — the failure a user hits is
     // usually explained by an earlier turn, and a single-build record throws that away.
     let sessionBuilds: BuildDiagnosticsReport[] = [];
+    // A read we could not perform must never be filed as "this session had one build" — see
+    // listDiagnosticsHistoryResult. The admin inbox says so instead of quietly showing a short session.
+    let historyUnreadable = false;
     try {
-      const metaList = await listDiagnosticsHistory(workspaceId, 20).catch(() => []);
+      const histRes = await listDiagnosticsHistoryResult(workspaceId, 20);
+      historyUnreadable = !histRes.ok;
       const full = (await Promise.all(
-        metaList.map((h) => getDiagnosticsHistoryItem(workspaceId, h.id).catch(() => null)),
+        histRes.entries.map((h) => getDiagnosticsHistoryItem(workspaceId, h.id).catch(() => null)),
       )).filter(Boolean) as BuildDiagnosticsReport[];
       const byStart = new Map<number, BuildDiagnosticsReport>();
       for (const r of full) byStart.set(r.startedAt, r);
       byStart.set(report.startedAt, report);
       sessionBuilds = [...byStart.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
-    } catch { sessionBuilds = []; }
+    } catch { sessionBuilds = []; historyUnreadable = true; }
     const record = buildAdminReportRecord(report, {
       userId: identity.userId,
       email: identity.email,
@@ -3235,7 +3239,7 @@ async function noteBuildOutcome(
       workspaceId,
       buildId: rec.buildId,
       reportedAt: now,
-    }, sessionBuilds);
+    }, sessionBuilds, historyUnreadable);
     // SAY IT WAS AUTOMATIC, and why. An admin who cannot tell a machine-sent report from a user-sent
     // one cannot tell whether a real person was upset enough to press a button — which is a different
     // and more urgent fact.
@@ -3322,11 +3326,14 @@ async function noteBuildOutcome(
     // before — one honest build, never a fake or partial "session".
     const wsForSession = workspaceId || report.workspaceId || '';
     let sessionBuilds: BuildDiagnosticsReport[] = [];
+    // Same rule as the automatic path: "could not read" is reported, never rendered as "only one build".
+    let manualHistoryUnreadable = false;
     if (wsForSession) {
       try {
-        const metaList = await listDiagnosticsHistory(wsForSession, 20).catch(() => []);
+        const histRes = await listDiagnosticsHistoryResult(wsForSession, 20);
+        manualHistoryUnreadable = !histRes.ok;
         const full = (await Promise.all(
-          metaList.map((h) => getDiagnosticsHistoryItem(wsForSession, h.id).catch(() => null)),
+          histRes.entries.map((h) => getDiagnosticsHistoryItem(wsForSession, h.id).catch(() => null)),
         )).filter(Boolean) as BuildDiagnosticsReport[];
         const byStart = new Map<number, BuildDiagnosticsReport>();
         for (const r of full) byStart.set(r.startedAt, r);
@@ -3334,7 +3341,7 @@ async function noteBuildOutcome(
         // latest build is not in durable history yet.
         byStart.set(report.startedAt, report);
         sessionBuilds = [...byStart.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
-      } catch { sessionBuilds = []; }
+      } catch { sessionBuilds = []; manualHistoryUnreadable = true; }
     }
     const record = buildAdminReportRecord(report, {
       userId: verifiedUid ?? null,
@@ -3343,7 +3350,7 @@ async function noteBuildOutcome(
       workspaceId: workspaceId || report.workspaceId || null,
       buildId: buildId || report.buildId || null,
       reportedAt: Date.now(),
-    }, sessionBuilds);
+    }, sessionBuilds, manualHistoryUnreadable);
     const saved = await saveAdminBuildReport(record);
     if (!saved) {
       res.status(502).json({ error: 'Could not send the report right now — please try again in a moment.' });
@@ -3569,8 +3576,14 @@ async function noteBuildOutcome(
     // carries the whole "0 → last" record ("pura kaccha chittha"). Read-only — no build path touched.
     if (req.query.scope === 'session') {
       if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-      const meta = await listDiagnosticsHistory(workspaceId, 20).catch(() => []);
-      const full = (await Promise.all(meta.map((h) => getDiagnosticsHistoryItem(workspaceId, h.id).catch(() => null)))).filter(Boolean) as BuildDiagnosticsReport[];
+      // ⚠️ `historyOk: false` means WE COULD NOT READ the history — not that there is none. Reported
+      // below rather than swallowed: a stitch that silently degrades to the single latest build while
+      // claiming `count: 1, omittedBuilds: 0` tells the admin their other builds never existed. That
+      // exact wrong number is what the admin was looking at when they said "shuru ke 9 gayab".
+      const hist = await listDiagnosticsHistoryResult(workspaceId, 20);
+      const meta = hist.entries;
+      const itemFailures = { n: 0 };
+      const full = (await Promise.all(meta.map((h) => getDiagnosticsHistoryItem(workspaceId, h.id).catch(() => { itemFailures.n++; return null; })))).filter(Boolean) as BuildDiagnosticsReport[];
       // Include the current "latest" doc too, in case the newest build hasn't landed in history yet, and
       // dedup by startedAt so a build present in both is not shown twice.
       const latest = await loadDiagnostics(workspaceId).catch(() => null);
@@ -3607,7 +3620,17 @@ async function noteBuildOutcome(
         res.type('text/plain').send(renderSessionDiagnosticsText(sessionOut));
         return;
       }
-      res.json({ session: { builds: sessionOut, count: ordered.length, omittedBuilds: omitted } });
+      // The counts describe what we FOUND. `historyUnavailable` / `buildsUnreadable` describe what we
+      // could not look at — kept as separate fields on purpose, so `count` never has to mean two things.
+      res.json({
+        session: {
+          builds: sessionOut,
+          count: ordered.length,
+          omittedBuilds: omitted,
+          ...(hist.ok ? {} : { historyUnavailable: true }),
+          ...(itemFailures.n > 0 ? { buildsUnreadable: itemFailures.n } : {}),
+        },
+      });
       return;
     }
     // Resolve the report: a SPECIFIC past build (buildId) or the latest one — shared by both the

@@ -279,19 +279,51 @@ export async function addMissingProjectImports(files: Record<string, string>): P
     // Names DECLARED or IMPORTED anywhere in this file — never add an import for any of them (safety:
     // a duplicate/shadowing import would BREAK a working file). Conservative: if a name is declared
     // anywhere (even a nested local), we leave it alone.
+    //
+    // 🔒 THE IMPORT HALF IS READ FROM THE IMPORT DECLARATIONS THEMSELVES, NOT INFERRED FROM IDENTIFIER
+    // PARENTS — and that distinction is this whole function's worst bug (admin report, Fight 3D game,
+    // 2026-08-27). It used to walk every Identifier and treat one as "already imported" when its parent
+    // was an ImportClause / ImportSpecifier / NamespaceImport *and* `parent.getNameNode() === id`. Two
+    // forms slip straight through that test, and they are not exotic:
+    //
+    //   import ErrorBoundary from './ErrorBoundary';   ← DEFAULT import. ImportClause has no
+    //                                                     getNameNode()/getName(), so optional chaining
+    //                                                     returns undefined, both comparisons are false,
+    //                                                     nothing throws, and the name is NOT recorded.
+    //   import { useState as us } from 'react';        ← ALIASED import. It recorded `useState`, which
+    //                                                     is not a binding here, and MISSED `us`, which is.
+    //
+    // What that cost, exactly: main.tsx already had `import ErrorBoundary from './ErrorBoundary'`. This
+    // function could not see it, found ErrorBoundary exported by exactly one module, and helpfully added
+    // `import { ErrorBoundary } from "./ErrorBoundary"` — a Duplicate declaration, which is a PARSE error.
+    // A working 3D fighting game was turned into a build that would not compile, by the healer whose
+    // docblock four lines up promises "it can only turn a broken build into a working one".
+    //
+    // Asking the AST for the import bindings is exact and total: every form (default, namespace, named,
+    // aliased, and combinations) is enumerated by construction, so no future import syntax can be missed
+    // by a heuristic nobody thought to extend.
     const local = new Set<string>();
+    try {
+      for (const decl of sf.getImportDeclarations()) {
+        const def = decl.getDefaultImport?.(); if (def) local.add(def.getText());
+        const ns = decl.getNamespaceImport?.(); if (ns) local.add(ns.getText());
+        for (const named of decl.getNamedImports?.() ?? []) {
+          // The LOCAL binding is the alias when one exists — `{ useState as us }` binds `us`.
+          const bound = named.getAliasNode?.() ?? named.getNameNode?.();
+          if (bound) local.add(bound.getText());
+        }
+      }
+    } catch { continue; }
     try {
       for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
         const parent = id.getParent?.();
         const pk = parent?.getKind?.();
-        // The NAME side of a declaration / binding / import / parameter.
+        // The NAME side of a declaration / binding / parameter. (Imports are handled exactly above.)
         if (
           pk === SyntaxKind.VariableDeclaration || pk === SyntaxKind.FunctionDeclaration ||
           pk === SyntaxKind.ClassDeclaration || pk === SyntaxKind.EnumDeclaration ||
           pk === SyntaxKind.InterfaceDeclaration || pk === SyntaxKind.TypeAliasDeclaration ||
-          pk === SyntaxKind.Parameter || pk === SyntaxKind.BindingElement ||
-          pk === SyntaxKind.ImportSpecifier || pk === SyntaxKind.ImportClause ||
-          pk === SyntaxKind.NamespaceImport
+          pk === SyntaxKind.Parameter || pk === SyntaxKind.BindingElement
         ) {
           try { if (parent.getNameNode?.() === id || parent.getName?.() === id.getText()) local.add(id.getText()); }
           catch { local.add(id.getText()); }
@@ -318,6 +350,15 @@ export async function addMissingProjectImports(files: Record<string, string>): P
           if (pk === SyntaxKind.QualifiedName) continue;
           if (pk === SyntaxKind.PropertyAssignment && parent.getNameNode?.() === id) continue;
           if (pk === SyntaxKind.TypeReference) continue;
+          // AN IDENTIFIER INSIDE AN IMPORT/EXPORT STATEMENT IS NOT A USE OF IT.
+          //
+          // `import { other as helper } from './c'` mentions `other`, but nothing in this file USES
+          // `other` — the binding it creates is `helper`. Reading that mention as a use makes us import
+          // `other` as well, for nobody. The old code hid this by accident: it recorded import SOURCE
+          // names as local bindings, which was wrong in the other direction (it also missed the alias).
+          // Naming both rules explicitly is what stops one from silently covering for the other.
+          try { if (id.getFirstAncestorByKind?.(SyntaxKind.ImportDeclaration)) continue; } catch { /* fall through */ }
+          try { if (id.getFirstAncestorByKind?.(SyntaxKind.ExportDeclaration)) continue; } catch { /* fall through */ }
           usedAsValue = true;
           break;
         }

@@ -1558,3 +1558,49 @@ describe('the preview line must not claim more than was established', () => {
     expect(d.report().issues.some((i) => i.code === 'PREVIEW_PUBLISHED')).toBe(true);
   });
 });
+
+describe('a repaired blocker must stop being a blocker (Fight 3D, buildId 5e2de8c4)', () => {
+  // The report condemned a working 3D fighting game and named as its root cause a duplicate import
+  // that had been deterministically removed 1.3 seconds earlier. The finding outlived the defect.
+  const withBlocker = (): BuildDiagnostics => {
+    const d = new BuildDiagnostics({ workspaceId: 'w', sessionId: 's', prompt: 'p', model: 'kimi-k2.5' });
+    d.record({
+      phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER',
+      message: 'the live preview will not compile — src/main.tsx: Duplicate declaration "ErrorBoundary"',
+      autoResolved: false,
+    });
+    return d;
+  };
+
+  it('the blocker counts against shipping until the gate re-runs', () => {
+    expect(withBlocker().shippingIssueCount('error')).toBe(1);
+  });
+
+  it('re-judging READY clears it, so the release gate stops counting it', () => {
+    const d = withBlocker();
+    expect(d.resolveReadinessBlockersOnRejudge()).toBe(1);
+    expect(d.shippingIssueCount('error')).toBe(0);
+  });
+
+  it('is idempotent and does not touch other findings', () => {
+    const d = withBlocker();
+    d.record({ phase: 'build', severity: 'error', code: 'BUILD_ERROR', message: 'something else broke', autoResolved: false });
+    d.resolveReadinessBlockersOnRejudge();
+    expect(d.resolveReadinessBlockersOnRejudge()).toBe(0);
+    // A real, unrelated error must survive — this clears the re-judged question, not the report.
+    expect(d.shippingIssueCount('error')).toBe(1);
+  });
+
+  it('is only ever called after the SAME gate has re-run and passed', () => {
+    // The method trusts its caller, so the call site is the honesty guarantee and is pinned here.
+    const routes = require('fs').readFileSync(
+      require('path').join(__dirname, '../routes/agentv3.ts'), 'utf8',
+    ) as string;
+    const call = routes.indexOf('buildDiag.resolveReadinessBlockersOnRejudge()');
+    expect(call).toBeGreaterThan(-1);
+    // The nearest preceding lines must be the re-judge and its ready check.
+    const before = routes.slice(Math.max(0, call - 400), call);
+    expect(before).toContain('await dispatcher.assessBuildReadiness()');
+    expect(before).toContain('verdict.ready');
+  });
+});

@@ -378,3 +378,26 @@ describe('the gate, as corrected by the first build that used it', () => {
     expect(routes).toContain("gate.state === 'red' && !result.ok ? 'error'");
   });
 });
+
+describe('a preview that came up but was never verified is not "no preview at all"', () => {
+  // Fight 3D report (buildId 5e2de8c4, 2026-08-27): the gate said "no live preview was ever available"
+  // about a build whose log carried PREVIEW_PUBLISHED, a successful screenshot of that address and a
+  // clean console read. The verdict was defensible; the sentence was false.
+  it('says the preview was never CONFIRMED, not that it never existed', () => {
+    const v = releaseGate(ev({ buildOk: true, preview: 'not-run', previewUrlPublished: true }), clean);
+    expect(v.unproven.join(' ')).toContain('came up but was never confirmed to render');
+    expect(v.unproven.join(' ')).not.toContain('no live preview was ever available');
+  });
+
+  it('keeps the original wording when there really was no preview', () => {
+    const v = releaseGate(ev({ buildOk: true, preview: 'not-run' }), clean);
+    expect(v.unproven.join(' ')).toContain('no live preview was ever available');
+  });
+
+  it('CHANGES NOTHING ABOUT THE VERDICT — an unverified preview proves exactly as little either way', () => {
+    const withUrl = releaseGate(ev({ buildOk: true, preview: 'not-run', previewUrlPublished: true }), clean);
+    const without = releaseGate(ev({ buildOk: true, preview: 'not-run' }), clean);
+    expect(withUrl.state).toBe(without.state);
+    expect(withUrl.proven).toEqual(without.proven);
+  });
+});

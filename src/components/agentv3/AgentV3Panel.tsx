@@ -29,6 +29,7 @@ import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Buil
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { isBuildBusyError, shouldRestoreFinishedBuild } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSessionsByQuery, partitionPinnedSessions } from './agentV3History';
+import { toggleCompareSelection, compareOrder, type CheckpointDiffResponse } from './checkpointCompare';
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import { saveLastReport, readLastReport } from './reportCache';
 import type { ReportPickerItem } from '../../lib/reportPicker';
@@ -397,6 +398,39 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setLabelError('Network error — that name was not saved.');
     }
   }, [labelDraft, state.workspaceId, userId, email, applyCheckpointLabel]);
+  // B6 — compare two checkpoints. Selection rules live in checkpointCompare.ts (pure + tested):
+  // max two picks, and the sha further DOWN the newest-first list is the diff's BASE — inverted, the
+  // user's own additions would render as deletions.
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareSel, setCompareSel] = useState<string[]>([]);
+  const [compareBusy, setCompareBusy] = useState(false);
+  const [compareResult, setCompareResult] = useState<CheckpointDiffResponse | null>(null);
+  // Cleared on workspace change, keyed on the id ALONE — the census rule (appIdentityGuard):
+  // a diff of app A's checkpoints rendered under app B's History would be exactly the cross-app
+  // leak #2658 closed for the live URL.
+  useEffect(() => { setCompareMode(false); setCompareSel([]); setCompareResult(null); }, [state.workspaceId]);
+  const runCompare = useCallback(async (sel: string[], allShas: string[]) => {
+    const order = compareOrder(allShas, sel);
+    const wsId = state.workspaceId;
+    if (!order || !wsId) return;
+    setCompareBusy(true);
+    setCompareResult(null);
+    try {
+      const res = await fetch('/api/agentv3/checkpoint-diff', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ userId, email, workspaceId: wsId, from: order.from, to: order.to }),
+      });
+      const j = await res.json().catch(() => null);
+      setCompareResult(j && typeof j.message === 'string'
+        ? j
+        : { ok: false, reason: 'diff-failed', files: [], added: 0, removed: 0, truncated: false, message: 'Could not compare these two versions this time. Nothing was changed.' });
+    } catch {
+      setCompareResult({ ok: false, reason: 'diff-failed', files: [], added: 0, removed: 0, truncated: false, message: 'Could not reach the server. Nothing was changed.' });
+    } finally {
+      setCompareBusy(false);
+    }
+  }, [state.workspaceId, userId, email]);
   // C3 — the `@` file picker. View state only; every rule lives in lib/fileMentionPicker.ts so it is
   // unit-tested rather than verified by typing into a live build.
   const [mentionCaret, setMentionCaret] = useState(0);
@@ -5165,6 +5199,41 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   {labelError && (
                     <div className="mb-2 text-[11px] text-amber-300 bg-amber-950/30 border border-amber-700/40 rounded px-2 py-1">{labelError}</div>
                   )}
+                  {/* B6 — compare two versions. The toggle is offered only when there is anything
+                      to compare; results render above the list so picking stays one screen. */}
+                  {allCheckpoints.filter((c) => c.sha).length >= 2 && (
+                    <div className="mb-2">
+                      <button
+                        onClick={() => { setCompareMode((v) => !v); setCompareSel([]); setCompareResult(null); }}
+                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] ${compareMode ? 'bg-indigo-600/30 text-indigo-300' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'}`}
+                        title="Pick two versions to see what changed between them — nothing is modified"
+                      >
+                        <FileDiff className="w-3 h-3" /> {compareMode ? 'Comparing — pick two versions' : 'Compare two versions'}
+                      </button>
+                      {compareMode && compareBusy && (
+                        <div className="mt-2 text-[11px] text-zinc-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Comparing…</div>
+                      )}
+                      {compareMode && compareResult && (
+                        <div className="mt-2 text-[11px] bg-zinc-800/60 border border-white/5 rounded px-2 py-1.5">
+                          <div className={compareResult.ok ? 'text-zinc-200' : 'text-amber-300'}>{compareResult.message}</div>
+                          {compareResult.ok && compareResult.files.length > 0 && (
+                            <ul className="mt-1.5 max-h-40 overflow-y-auto space-y-0.5">
+                              {compareResult.files.map((f) => (
+                                <li key={f.path} className="flex items-center gap-2 font-mono text-[10px]">
+                                  <span className="truncate text-zinc-300" title={f.renamedFrom ? `renamed from ${f.renamedFrom}` : f.path}>
+                                    {f.renamedFrom ? `${f.renamedFrom} → ` : ''}{f.path}
+                                  </span>
+                                  {f.added === null
+                                    ? <span className="text-zinc-500 shrink-0">binary</span>
+                                    : <span className="shrink-0"><span className="text-emerald-400">+{f.added}</span> <span className="text-red-400">−{f.removed}</span></span>}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {allCheckpoints.length === 0 ? <Empty>No checkpoints yet.</Empty> : (
                     <ul className="space-y-1">
                       {allCheckpoints.map((c) => (
@@ -5203,6 +5272,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                               title={c.label ? 'Rename this version' : 'Give this version a name you will recognise'}
                             >
                               <Pencil className="w-3 h-3" />
+                            </button>
+                          )}
+                          {c.sha && compareMode && (
+                            <button
+                              onClick={() => {
+                                const next = toggleCompareSelection(compareSel, c.sha);
+                                setCompareSel(next);
+                                setCompareResult(null);
+                                if (next.length === 2) void runCompare(next, allCheckpoints.map((x) => x.sha).filter(Boolean));
+                              }}
+                              className={`flex items-center gap-1 px-1.5 py-0.5 rounded shrink-0 ${compareSel.includes(c.sha) ? 'bg-indigo-600 text-white' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'}`}
+                              title="Pick this version for the comparison"
+                            >
+                              {compareSel.includes(c.sha) ? <Check className="w-3 h-3" /> : <FileDiff className="w-3 h-3" />} Pick
                             </button>
                           )}
                           {c.sha && (

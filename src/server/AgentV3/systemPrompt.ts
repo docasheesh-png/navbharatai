@@ -55,6 +55,36 @@ export const CREDENTIAL_SILENCE_RULE =
   'value genuinely matters to what you are explaining, describe its SHAPE ("a 10-digit numeric ' +
   'password", "a Stripe live key") and say where to look.';
 
+/**
+ * CODE LITERACY IN THE USER'S LANGUAGE (ROADMAP 9.1a-c, shipped 2026-08-27).
+ *
+ * The Indic-language work everywhere else in this codebase is about which language the GENERATED
+ * APP's UI is in. This rule is the other thing, which none of the five competitors do and which
+ * serves the user we already have: when THEIR code breaks, explain it to THEM, in THEIR language.
+ * "Ye error kya keh raha hai?" must get a real answer, not a stack trace in a foreign language.
+ *
+ * 🔒 THE REGISTER IS THE PRODUCT RISK, AND IT IS PINNED BY TEST (9.1c). Developers say "variable",
+ * "function", "deploy" — nobody says the Devanagari equivalents, and a reply that translates
+ * technical nouns reads as patronising and gets the tab closed. The target is Hinglish: English
+ * technical nouns inside the user's own grammar. This is stated IN the rule, because the models
+ * otherwise translate everything once told to answer in Hindi.
+ *
+ * Placed beside LANGUAGE_RULE / CREDENTIAL_SILENCE_RULE because it is the same class: a rule about
+ * user-facing TEXT that must hold on every path that explains code — build summaries, plan
+ * explanations, Advise answers, error reports, chat.
+ */
+export const CODE_LITERACY_RULE =
+  'EXPLAIN CODE IN THE USER\'S LANGUAGE, DEVELOPER REGISTER: when you explain code, an error, a ' +
+  'failed test, a stack trace or a diff to a user who writes in Hindi, Hinglish or another Indian ' +
+  'language, the EXPLANATION follows their language (per the LANGUAGE rule) — but every technical ' +
+  'noun stays in ENGLISH: variable, function, component, array, error, null, import, deploy, API, ' +
+  'state, prop, database, loop. NEVER translate technical terms into Hindi equivalents — write ' +
+  '"is function me loop galat chal raha hai", never a Devanagari word for function or loop. Code ' +
+  'identifiers, file paths and error text stay verbatim, in English, always. ' +
+  'ERRORS ARE EXPLAINED, NEVER JUST SHOWN: whenever you show an error or a failure, follow it ' +
+  'immediately with two plain sentences in the user\'s language — what it MEANS, and what to CHANGE. ' +
+  'A raw error with no explanation is an unfinished answer.';
+
 const FRAMEWORK_HINTS: Record<string, string> = {
   'vite-react': 'SCAFFOLDING — a Vite + React + TypeScript project is ALREADY scaffolded (package.json, vite.config, index.html, src/main.tsx, src/App.tsx). Just EDIT/ADD files at ROOT. Do NOT run `npm create vite`. Run: `npm run dev` → PORT 5173. Call update_preview(5173).',
   'nextjs': 'SCAFFOLDING — a Next.js 14 App Router project is scaffolded (package.json, next.config.js, app/layout.tsx, app/page.tsx). Edit files at ROOT. Use `app/` dir (Server Components default). Do NOT run `npx create-next-app`. Run: `npm run dev` → PORT 3000. Call update_preview(3000).',
@@ -129,6 +159,8 @@ export function planSystemPrompt(): string {
     LANGUAGE_RULE,
     '',
     CREDENTIAL_SILENCE_RULE,
+    '',
+    CODE_LITERACY_RULE,
     '',
     EMOJI_RULE,
     '',
@@ -357,6 +389,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     LANGUAGE_RULE,
     '',
     CREDENTIAL_SILENCE_RULE,
+    '',
+    CODE_LITERACY_RULE,
     '',
     EMOJI_RULE,
     '',

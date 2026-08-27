@@ -145,8 +145,13 @@ describe('workspace-scoped state census — a new one must be justified', () => 
     // workspace changes, in its own effect keyed on the id ALONE — before the fetch (or the old value
     // shows under the new app's name for the length of a round trip) and not on a build-finished dep
     // (or the UI blinks mid-build). Then update these numbers.
-    expect(sole).toBe(2);
-    expect(leading).toBe(2);
+    //
+    // 2026-08-27 (B6 checkpoint compare) — one of each, both audited:
+    //   SOLE +1: the compare reset (compareMode/compareSel/compareResult) — this guard caught the
+    //   leak on the first full-suite run; app A's diff would have rendered under app B's History.
+    //   LEADING +1: runCompare — a fetch wrapper; its result state is cleared by the reset above. ✓
+    expect(sole).toBe(3);
+    expect(leading).toBe(3);
   });
 
   it('🔒 the known leaks stay closed', () => {

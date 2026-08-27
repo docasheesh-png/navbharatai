@@ -42464,3 +42464,24 @@ quietly start promising a photo.
 **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `npm run build` ✅ ·
 `npx vitest run` — **1396 files / 18262 passed, 1 skipped** (24 new: 11 realismIntent, 13 objects, plus 7
 wiring).
+
+
+### Same day — the sibling that made all of the above reachable-in-theory only
+
+**Hunting siblings (rule 3) found the real one, and it was silent.** `generate_game_3d`'s tool
+description — the ONLY thing that tells the model which modules exist — still advertised
+`renderer, lighting, materials, camera, world`. It had said that since 2026-08-09, through the
+2026-08-26 release of `environment` / `surfaces` / `humanoid` and through today's `objects`.
+
+**Why nothing failed.** `include` is optional and the default is all, so most builds were fine. But a
+model that read the description and passed `include: ['renderer','lighting','camera','world']` got a
+build with **no sky, no reflections, no real surfaces and nothing to put in the world** — and then
+followed a system prompt instructing it to call `createCar()` from a file the build never wrote. The
+symptom is a flat-looking 3D game: exactly the complaint this whole line of work exists to answer,
+arriving through a route nobody would think to check.
+
+**Fixed as a class, not an instance.** The description now names all nine modules with what each is for,
+and says plainly what narrowing costs ("leave out environment and every metal renders near-black").
+`tests/game3dToolModules.test.ts` pins the description against `GAME_3D_MODULES` itself, and separately
+EXECUTES the default build to prove "Default = all" is true rather than prose — so a tenth module cannot
+be added without the test failing.

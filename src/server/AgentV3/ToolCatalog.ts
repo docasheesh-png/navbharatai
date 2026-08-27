@@ -2225,6 +2225,13 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'material presets with believable roughness/metalness plus shared PALETTES, camera rigs '
         + '(third-person with wall collision, first-person, top-down, side-scroller) and procedural world '
         + 'building — seeded value-noise terrain and InstancedMesh scatter. '
+        + 'It ALSO emits the three things that decide whether a scene reads as real rather than as '
+        + 'coloured cardboard: environment.ts (a real sky + image-based reflections — without it a '
+        + 'PBR metal has nothing to reflect and renders near-black), surfaces.ts (brick, wood, bark, '
+        + 'stone, road, soil, grass, metal, cloth, tile, sand, each with generated bump/roughness/AO '
+        + 'instead of one flat colour) and humanoid.ts + objects.ts — a properly proportioned figure, '
+        + 'and real cars, trees, mountains, rivers, deserts, roads and animals with setDetailLevel() '
+        + "choosing full detail or the lighter phone-friendly build from what the user MEANT. "
         + 'THE LOOK COMES FROM THESE SETTINGS, NOT FROM ASSET DETAIL: use ONE palette for the whole scene, '
         + 'share materials, scatter with instancing, and keep bloom subtle. Adds the `three` dependency.',
       input_schema: {
@@ -2233,7 +2240,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: renderer, lighting, materials, camera, world. Default = all.',
+            description:
+              'Optional subset of MODULES. Default = ALL, and all is almost always right — omit this. '
+              + 'renderer, lighting, materials, camera, world, environment (sky + image-based '
+              + 'reflections), surfaces (brick/wood/bark/stone/road/soil/grass/metal/cloth/tile/sand '
+              + 'with real bump + roughness), humanoid (a correctly-proportioned figure with joints), '
+              + 'objects (createCar / createTree / createMountain / createRiver / createDesert / '
+              + 'createRoad / createAnimal, with setDetailLevel for real-vs-lite). '
+              + '⚠️ A SUBSET IS HOW A 3D GAME ENDS UP LOOKING FLAT: leave out environment and every '
+              + 'metal renders near-black; leave out objects and there is nothing to put in the world '
+              + 'except hand-modelled boxes. Only narrow this when re-running the tool to add one '
+              + 'module to a project that already has the rest.',
           },
         },
       },

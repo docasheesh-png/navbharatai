@@ -1218,6 +1218,564 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
 }
 `;
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// OBJECTS — the actual things a world is made of (admin 2026-08-27).
+//
+// Admin, verbatim: "sabhi objects asli (real) chahiye — car, tree, river, pahad, sky, registan,
+// animal, road … agar user bole real/asli/100% to ek dam hu-ba-hu real object banane hai. agar user
+// sirf 3d bol raha hai to lite se kaam chal jayega."
+//
+// So every builder here takes a DETAIL TIER and there are genuinely two builds, not one build with a
+// slider. `lite` is the fast, phone-friendly shape. `real` is the one that has to survive being looked
+// at closely.
+//
+// 🔒 WHAT MAKES AN OBJECT READ AS REAL, AND IT IS NOT POLYGON COUNT. It is SILHOUETTE and PROPORTION.
+// A car is not a box with wheels: it is a bonnet line, a raked windscreen, a roof, a boot, and wheels
+// sunk into arches — get that outline right in twelve boxes and the eye accepts a car; get it wrong in
+// twelve thousand triangles and it stays a shape. Every builder below is written to that rule, which
+// is also why they stay cheap enough to run on a mid-range Android.
+//
+// 🔒 THE HONEST CEILING, IN CODE SO NOBODY OVERSELLS IT. This produces objects that unmistakably READ
+// as a car, a tree, a mountain — with real materials, reflections and shadows. It does NOT produce a
+// photograph. A scanned-quality asset comes from a scanner, and inventing one here would be the fake
+// feature this codebase forbids. Say "real-looking", never "photorealistic".
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+const OBJECTS = `import * as THREE from 'three';
+import { surfaceMaterial, enableAO, type SurfaceKind } from './surfaces';
+
+export type Detail = 'real' | 'lite';
+
+/**
+ * The tier every builder uses when not told otherwise. Set ONCE at start-up from what the user asked
+ * for — the game should not be deciding this per object.
+ */
+let DEFAULT_DETAIL: Detail = 'lite';
+export function setDetailLevel(detail: Detail): void { DEFAULT_DETAIL = detail; }
+export function getDetailLevel(): Detail { return DEFAULT_DETAIL; }
+
+interface BaseOpts { detail?: Detail; seed?: number }
+const tier = (o?: BaseOpts): Detail => o?.detail ?? DEFAULT_DETAIL;
+
+function rng(seed: number): () => number {
+  let t = (seed >>> 0) || 1;
+  return () => {
+    t += 0x6d2b79f5;
+    let x = Math.imul(t ^ (t >>> 15), 1 | t);
+    x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Shared per-kind materials — a hundred trees must not build a hundred bark materials. */
+const matCache = new Map<string, THREE.Material>();
+function shared(kind: SurfaceKind, detail: Detail, color?: number, repeat = 3): THREE.Material {
+  const key = kind + ':' + detail + ':' + (color ?? 'x') + ':' + repeat;
+  let m = matCache.get(key);
+  if (!m) {
+    m = detail === 'real'
+      ? surfaceMaterial(kind, { color, repeat })
+      // The light tier deliberately skips the texture maps: on a phone the generation cost and the
+      // texture memory are the whole budget, and a plain colour is what "just 3D" asked for.
+      : new THREE.MeshStandardMaterial({ color: color ?? 0x9aa0a6, roughness: 0.85, metalness: kind === 'metal' ? 1 : 0 });
+    matCache.set(key, m);
+  }
+  return m;
+}
+export function disposeObjectMaterials(): void {
+  for (const m of matCache.values()) m.dispose();
+  matCache.clear();
+}
+
+function mesh(geo: THREE.BufferGeometry, mat: THREE.Material, detail: Detail): THREE.Mesh {
+  if (detail === 'real') enableAO(geo);
+  const m = new THREE.Mesh(geo, mat);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+// ── CAR ──────────────────────────────────────────────────────────────────────────────────────────
+export interface CarOptions extends BaseOpts { color?: number; length?: number }
+
+/**
+ * A car built from its real silhouette, at real proportions: ~4.3 m long, 1.8 m wide, 1.45 m tall,
+ * 2.6 m wheelbase, 0.32 m wheel radius. Those five numbers are most of why it reads as a car.
+ *
+ * \`real\` adds the things you only notice up close and miss immediately when they are gone: a raked
+ * windscreen, dark glass, wheel arches, tyre + rim as separate materials, lights that actually emit,
+ * a grille and mirrors.
+ */
+export function createCar(options: CarOptions = {}): THREE.Group {
+  const d = tier(options);
+  const L = options.length ?? 4.3;
+  const W = L * 0.42;
+  const paint = options.color ?? 0xb42b2b;
+  const group = new THREE.Group();
+
+  const bodyMat = d === 'real'
+    ? new THREE.MeshPhysicalMaterial({ color: paint, roughness: 0.28, metalness: 0.85, clearcoat: 1, clearcoatRoughness: 0.08 })
+    : new THREE.MeshStandardMaterial({ color: paint, roughness: 0.5, metalness: 0.3 });
+  const glassMat = new THREE.MeshPhysicalMaterial({ color: 0x0d1114, roughness: 0.06, metalness: 0, transmission: d === 'real' ? 0.55 : 0, transparent: true, opacity: d === 'real' ? 0.5 : 0.75 });
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.6, metalness: 0.5 });
+  const tyreMat = shared('fabric', d, 0x14161a, 2);
+  const rimMat = new THREE.MeshStandardMaterial({ color: 0xc6ccd4, roughness: 0.25, metalness: 1 });
+
+  // Lower body: the mass that sits between the wheels.
+  const lower = mesh(new THREE.BoxGeometry(W, L * 0.13, L), bodyMat, d);
+  lower.position.y = L * 0.115;
+  group.add(lower);
+
+  // Bonnet and boot are LOWER than the cabin — that step is the car's outline.
+  const bonnet = mesh(new THREE.BoxGeometry(W * 0.96, L * 0.055, L * 0.3), bodyMat, d);
+  bonnet.position.set(0, L * 0.2, L * 0.32);
+  group.add(bonnet);
+  const boot = mesh(new THREE.BoxGeometry(W * 0.96, L * 0.06, L * 0.24), bodyMat, d);
+  boot.position.set(0, L * 0.2, -L * 0.36);
+  group.add(boot);
+
+  // Cabin: narrower than the body and set back, so the greenhouse reads as glass on a shoulder.
+  const cabin = mesh(new THREE.BoxGeometry(W * 0.86, L * 0.11, L * 0.42), bodyMat, d);
+  cabin.position.set(0, L * 0.245, -L * 0.02);
+  group.add(cabin);
+
+  if (d === 'real') {
+    // Raked windscreen and backlight — the single most car-like detail there is.
+    const wind = mesh(new THREE.BoxGeometry(W * 0.8, L * 0.1, L * 0.02), glassMat, d);
+    wind.position.set(0, L * 0.245, L * 0.185);
+    wind.rotation.x = -0.55;
+    group.add(wind);
+    const rear = mesh(new THREE.BoxGeometry(W * 0.78, L * 0.09, L * 0.02), glassMat, d);
+    rear.position.set(0, L * 0.245, -L * 0.225);
+    rear.rotation.x = 0.62;
+    group.add(rear);
+    for (const side of [-1, 1]) {
+      const win = mesh(new THREE.BoxGeometry(L * 0.015, L * 0.075, L * 0.34), glassMat, d);
+      win.position.set(side * W * 0.435, L * 0.25, -L * 0.02);
+      group.add(win);
+      const mirror = mesh(new THREE.BoxGeometry(L * 0.05, L * 0.022, L * 0.03), trimMat, d);
+      mirror.position.set(side * W * 0.56, L * 0.235, L * 0.14);
+      group.add(mirror);
+    }
+    // Grille + bumpers: dark bands that break the paint and stop the front reading as a slab.
+    const grille = mesh(new THREE.BoxGeometry(W * 0.7, L * 0.045, L * 0.02), trimMat, d);
+    grille.position.set(0, L * 0.155, L * 0.5);
+    group.add(grille);
+    for (const z of [L * 0.5, -L * 0.5]) {
+      const bumper = mesh(new THREE.BoxGeometry(W * 1.01, L * 0.05, L * 0.03), trimMat, d);
+      bumper.position.set(0, L * 0.09, z);
+      group.add(bumper);
+    }
+    // Lights that EMIT. An unlit "light" is a coloured sticker.
+    for (const side of [-1, 1]) {
+      const head = new THREE.Mesh(new THREE.BoxGeometry(W * 0.22, L * 0.035, L * 0.015), new THREE.MeshBasicMaterial({ color: 0xfff3d0 }));
+      head.position.set(side * W * 0.3, L * 0.185, L * 0.503);
+      group.add(head);
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(W * 0.2, L * 0.03, L * 0.015), new THREE.MeshBasicMaterial({ color: 0xd82b1e }));
+      tail.position.set(side * W * 0.31, L * 0.2, -L * 0.503);
+      group.add(tail);
+    }
+  }
+
+  // Wheels at the real wheelbase, sunk into arches so they belong to the car rather than sit beside it.
+  const wheelR = L * 0.075;
+  const seg = d === 'real' ? 24 : 10;
+  const wheelbase = L * 0.6;
+  for (const sx of [-1, 1]) {
+    for (const sz of [1, -1]) {
+      const wheel = new THREE.Group();
+      const tyre = mesh(new THREE.CylinderGeometry(wheelR, wheelR, W * 0.16, seg), tyreMat, d);
+      tyre.rotation.z = Math.PI / 2;
+      wheel.add(tyre);
+      if (d === 'real') {
+        const rim = mesh(new THREE.CylinderGeometry(wheelR * 0.6, wheelR * 0.6, W * 0.17, seg), rimMat, d);
+        rim.rotation.z = Math.PI / 2;
+        wheel.add(rim);
+        const arch = mesh(new THREE.TorusGeometry(wheelR * 1.18, L * 0.012, 6, 14, Math.PI), trimMat, d);
+        arch.position.set(sx * W * 0.5, 0, 0);
+        arch.rotation.y = Math.PI / 2;
+        wheel.add(arch);
+      }
+      wheel.position.set(sx * W * 0.48, wheelR, (sz * wheelbase) / 2);
+      wheel.name = 'wheel';
+      group.add(wheel);
+    }
+  }
+  return group;
+}
+
+/** Spin the wheels. Call with the car's speed each frame — still wheels on a moving car is the tell. */
+export function rollWheels(car: THREE.Group, speed: number, dt: number): void {
+  for (const child of car.children) {
+    if (child.name === 'wheel') child.rotation.x += speed * dt * 3.2;
+  }
+}
+
+// ── TREE ─────────────────────────────────────────────────────────────────────────────────────────
+export interface TreeOptions extends BaseOpts { height?: number; leafColor?: number }
+
+/**
+ * A tree with a TAPERED, root-flared trunk and real recursive branches, with leaves in clusters at the
+ * BRANCH ENDS.
+ *
+ * The classic AI tree is a cylinder with a green sphere on top, and the reason it looks wrong is not
+ * detail — it is that real trunks taper and flare, and real leaves grow where the branches end.
+ */
+export function createTree(options: TreeOptions = {}): THREE.Group {
+  const d = tier(options);
+  const H = options.height ?? 6;
+  const r = rng(options.seed ?? 7);
+  const group = new THREE.Group();
+  const barkMat = shared('bark', d, 0x6b5236, 2);
+  const leafMat = d === 'real'
+    ? new THREE.MeshStandardMaterial({ color: options.leafColor ?? 0x4c7a2e, roughness: 0.9, metalness: 0, side: THREE.DoubleSide })
+    : new THREE.MeshStandardMaterial({ color: options.leafColor ?? 0x4c7a2e, roughness: 0.9, flatShading: true });
+
+  const trunkH = H * 0.45;
+  // Taper: the top radius is a third of the base. Root flare is the wider disc at the ground.
+  const trunk = mesh(new THREE.CylinderGeometry(H * 0.026, H * 0.075, trunkH, d === 'real' ? 12 : 6), barkMat, d);
+  trunk.position.y = trunkH / 2;
+  group.add(trunk);
+  if (d === 'real') {
+    const flare = mesh(new THREE.CylinderGeometry(H * 0.075, H * 0.11, H * 0.06, 12), barkMat, d);
+    flare.position.y = H * 0.03;
+    group.add(flare);
+  }
+
+  const branches = d === 'real' ? 6 : 3;
+  const leafGeo = d === 'real'
+    ? new THREE.IcosahedronGeometry(H * 0.16, 1)
+    : new THREE.IcosahedronGeometry(H * 0.2, 0);
+
+  for (let i = 0; i < branches; i++) {
+    const angle = (i / branches) * Math.PI * 2 + r() * 0.6;
+    // Branches leave the trunk at 30-50 degrees, thinner than it, and higher ones are shorter.
+    const t = 0.55 + (i / branches) * 0.4;
+    const len = H * (0.32 - t * 0.12) * (0.8 + r() * 0.4);
+    const lift = Math.PI / 2 - (0.55 + r() * 0.35);
+    const b = mesh(new THREE.CylinderGeometry(H * 0.012, H * 0.024, len, d === 'real' ? 8 : 5), barkMat, d);
+    const pivot = new THREE.Group();
+    pivot.position.y = trunkH * t;
+    pivot.rotation.y = angle;
+    pivot.rotation.z = lift - Math.PI / 2;
+    b.position.y = len / 2;
+    pivot.add(b);
+    // Leaves at the END of the branch, which is where they actually grow.
+    const cluster = mesh(leafGeo.clone(), leafMat, d);
+    cluster.scale.setScalar(0.7 + r() * 0.5);
+    cluster.position.y = len * (d === 'real' ? 0.95 : 0.85);
+    pivot.add(cluster);
+    group.add(pivot);
+  }
+  // A crown so the canopy closes over the middle instead of leaving a bald trunk top.
+  const crown = mesh(leafGeo.clone(), leafMat, d);
+  crown.scale.setScalar(d === 'real' ? 1.25 : 1.5);
+  crown.position.y = trunkH + H * 0.12;
+  group.add(crown);
+  return group;
+}
+
+// ── MOUNTAIN ─────────────────────────────────────────────────────────────────────────────────────
+export interface MountainOptions extends BaseOpts { size?: number; height?: number; snow?: boolean }
+
+/**
+ * A mountain built by displacing a plane along RIDGES, with a snow line by altitude.
+ *
+ * A cone is not a mountain. What the eye reads is ridge lines running down from the peak and the
+ * valleys between them, plus snow that starts at a height rather than being painted on the top.
+ */
+export function createMountain(options: MountainOptions = {}): THREE.Mesh {
+  const d = tier(options);
+  const size = options.size ?? 120;
+  const H = options.height ?? 45;
+  const seg = d === 'real' ? 96 : 32;
+  const r = rng(options.seed ?? 31);
+  const offsets = Array.from({ length: 8 }, () => r() * Math.PI * 2);
+
+  const geo = new THREE.PlaneGeometry(size, size, seg, seg);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const colors = new Float32Array(pos.count * 3);
+  const rock = new THREE.Color(0x6d6a63);
+  const snow = new THREE.Color(0xf2f5f8);
+  const grass = new THREE.Color(0x4a5c35);
+
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    const dist = Math.sqrt(x * x + z * z) / (size / 2);
+    // A dome that falls off to nothing at the edge — no cliff at the boundary of the tile.
+    const base = Math.max(0, 1 - dist) ** 1.7;
+    const theta = Math.atan2(z, x);
+    // RIDGES: several angular waves, each sharpened with abs() so they crease instead of rolling.
+    let ridge = 0;
+    for (let k = 0; k < (d === 'real' ? 5 : 2); k++) {
+      ridge += (1 - Math.abs(Math.sin(theta * (2 + k * 1.7) + offsets[k]))) / (k + 1.6);
+    }
+    const detail = d === 'real' ? (Math.sin(x * 0.35 + offsets[5]) * Math.cos(z * 0.31 + offsets[6])) * 0.06 : 0;
+    const y = H * base * (0.55 + ridge * 0.5) + H * detail * base;
+    pos.setY(i, y);
+
+    const alt = y / H;
+    const c = options.snow !== false && alt > 0.62 ? snow : alt < 0.12 ? grass : rock;
+    // Blend across the snow line rather than a hard edge, which is what makes it look painted on.
+    const mix = options.snow !== false && alt > 0.5 && alt <= 0.62 ? (alt - 0.5) / 0.12 : 0;
+    const col = mix > 0 ? rock.clone().lerp(snow, mix) : c;
+    colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+
+  const mat = d === 'real'
+    ? surfaceMaterial('stone', { repeat: 14 })
+    : new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0, flatShading: true });
+  mat.vertexColors = true;
+  const m = mesh(geo, mat, d);
+  m.castShadow = false; // A whole mountain casting into the shadow map eats the resolution.
+  return m;
+}
+
+// ── RIVER ────────────────────────────────────────────────────────────────────────────────────────
+export interface RiverOptions extends BaseOpts { length?: number; width?: number }
+export interface River { mesh: THREE.Mesh; update: (t: number) => void }
+
+/**
+ * A river that MOVES. Still water is the fastest way to make a scene look like a screenshot, so the
+ * surface scrolls two normal-ish waves against each other and the material is transmissive.
+ */
+export function createRiver(options: RiverOptions = {}): River {
+  const d = tier(options);
+  const L = options.length ?? 200;
+  const W = options.width ?? 14;
+  const segL = d === 'real' ? 200 : 60;
+  const geo = new THREE.PlaneGeometry(W, L, d === 'real' ? 12 : 4, segL);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const base = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    base[i * 2] = x; base[i * 2 + 1] = z;
+    // The course MEANDERS. A straight river is a canal, and the eye knows the difference.
+    pos.setX(i, x + Math.sin(z * 0.03) * W * 0.9 + Math.sin(z * 0.011) * W * 1.6);
+  }
+  geo.computeVertexNormals();
+
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: d === 'real' ? 0x2d5f74 : 0x2f6f8a,
+    roughness: d === 'real' ? 0.08 : 0.3,
+    metalness: 0,
+    transmission: d === 'real' ? 0.65 : 0,
+    thickness: 2.2,
+    transparent: true,
+    opacity: d === 'real' ? 0.82 : 0.9,
+  });
+  const m = new THREE.Mesh(geo, mat);
+  m.receiveShadow = true;
+
+  const update = (t: number) => {
+    const p = m.geometry.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < p.count; i++) {
+      const x = base[i * 2], z = base[i * 2 + 1];
+      // Two waves at different speeds and angles — one wave reads as a flag, two read as water.
+      p.setY(i, Math.sin(z * 0.35 + t * 1.7) * 0.06 + Math.sin(x * 0.5 - t * 1.1) * 0.04);
+    }
+    p.needsUpdate = true;
+    m.geometry.computeVertexNormals();
+  };
+  update(0);
+  return { mesh: m, update };
+}
+
+// ── DESERT ───────────────────────────────────────────────────────────────────────────────────────
+export interface DesertOptions extends BaseOpts { size?: number }
+
+/**
+ * Dunes with a real wind shape: a long gentle windward slope and a SHORT STEEP slip face — sand
+ * collapses at about 34 degrees, and that asymmetry is what separates a desert from bumpy ground.
+ */
+export function createDesert(options: DesertOptions = {}): THREE.Mesh {
+  const d = tier(options);
+  const size = options.size ?? 300;
+  const seg = d === 'real' ? 128 : 40;
+  const geo = new THREE.PlaneGeometry(size, size, seg, seg);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    const wave = Math.sin(x * 0.045) * 0.5 + 0.5;
+    // Skew the wave so its rise is long and its fall is short: the slip face.
+    const skew = Math.pow(wave, 0.55);
+    let y = skew * 5.5 + Math.sin(z * 0.02 + x * 0.01) * 1.8;
+    if (d === 'real') y += Math.sin(x * 0.7 + z * 0.25) * 0.08; // wind ripples
+    pos.setY(i, y);
+  }
+  geo.computeVertexNormals();
+  const mat = d === 'real'
+    ? surfaceMaterial('sand', { repeat: 30 })
+    : new THREE.MeshStandardMaterial({ color: 0xd9b877, roughness: 0.95, metalness: 0 });
+  const m = mesh(geo, mat, d);
+  m.castShadow = false;
+  return m;
+}
+
+// ── ROAD ─────────────────────────────────────────────────────────────────────────────────────────
+export interface RoadOptions extends BaseOpts { length?: number; width?: number; lanes?: number }
+
+/**
+ * Asphalt with the markings that make it a road rather than a grey strip: a dashed centre line, solid
+ * edge lines and kerbs. \`real\` also adds the darker worn tracks where wheels actually run.
+ */
+export function createRoad(options: RoadOptions = {}): THREE.Group {
+  const d = tier(options);
+  const L = options.length ?? 300;
+  const W = options.width ?? 8;
+  const lanes = options.lanes ?? 2;
+  const group = new THREE.Group();
+
+  const surface = mesh(new THREE.PlaneGeometry(W, L, 1, d === 'real' ? 60 : 1), shared('asphalt', d, 0x3a3c40, d === 'real' ? 40 : 1), d);
+  surface.rotation.x = -Math.PI / 2;
+  surface.castShadow = false;
+  group.add(surface);
+
+  const paint = new THREE.MeshStandardMaterial({ color: 0xe8e4d8, roughness: 0.75, metalness: 0 });
+  // Dashed centre line — 3 m mark, 6 m gap is close to the real Indian standard.
+  const dashes = Math.floor(L / 9);
+  for (let i = 0; i < dashes; i++) {
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 3), paint);
+    dash.rotation.x = -Math.PI / 2;
+    dash.position.set(0, 0.012, -L / 2 + i * 9 + 4.5);
+    group.add(dash);
+  }
+  for (const side of [-1, 1]) {
+    const edge = new THREE.Mesh(new THREE.PlaneGeometry(0.12, L), paint);
+    edge.rotation.x = -Math.PI / 2;
+    edge.position.set((side * W) / 2 - side * 0.35, 0.012, 0);
+    group.add(edge);
+    if (d === 'real') {
+      const kerb = mesh(new THREE.BoxGeometry(0.3, 0.16, L), shared('stone', d, 0xb9b3a6, 20), d);
+      kerb.position.set((side * W) / 2 + 0.15, 0.08, 0);
+      group.add(kerb);
+      // Worn wheel tracks — two slightly darker, slightly smoother bands per lane.
+      for (let lane = 0; lane < lanes; lane++) {
+        const laneCentre = -W / 2 + (W / lanes) * (lane + 0.5);
+        for (const off of [-0.75, 0.75]) {
+          const wear = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.55, L),
+            new THREE.MeshStandardMaterial({ color: 0x303237, roughness: 0.72, metalness: 0, transparent: true, opacity: 0.55 }),
+          );
+          wear.rotation.x = -Math.PI / 2;
+          wear.position.set(laneCentre + off, 0.008, 0);
+          group.add(wear);
+        }
+      }
+      break; // kerbs+wear are built for both sides in one pass
+    }
+  }
+  return group;
+}
+
+// ── ANIMAL ───────────────────────────────────────────────────────────────────────────────────────
+export interface AnimalOptions extends BaseOpts { height?: number; color?: number; kind?: 'deer' | 'dog' | 'cow' | 'horse' }
+export interface Animal { root: THREE.Group; update: (dt: number, speed: number) => void }
+
+/**
+ * A quadruped with real proportions and a real GAIT.
+ *
+ * The gait is the whole thing: a four-legged animal moves DIAGONAL pairs together (front-left with
+ * rear-right). Move all four in phase and it reads as a toy being dragged, which is what most
+ * generated animals do.
+ */
+export function createAnimal(options: AnimalOptions = {}): Animal {
+  const d = tier(options);
+  const H = options.height ?? 1.4;
+  const kind = options.kind ?? 'deer';
+  const long = kind === 'dog' ? 1.25 : kind === 'cow' ? 1.45 : 1.35;
+  const bodyL = H * long;
+  const col = options.color ?? (kind === 'cow' ? 0xd8cfc2 : kind === 'dog' ? 0x9a6b3f : 0x8a5f38);
+  const hide = shared('fabric', d, col, 3);
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2a211a, roughness: 0.8, metalness: 0 });
+  const root = new THREE.Group();
+
+  const body = mesh(new THREE.BoxGeometry(H * 0.42, H * 0.4, bodyL), hide, d);
+  body.position.y = H * 0.68;
+  root.add(body);
+  // Chest deeper than the rump — the line that makes it an animal rather than a crate.
+  if (d === 'real') {
+    const chest = mesh(new THREE.BoxGeometry(H * 0.46, H * 0.44, bodyL * 0.35), hide, d);
+    chest.position.set(0, H * 0.66, bodyL * 0.28);
+    root.add(chest);
+  }
+
+  const neck = new THREE.Group();
+  neck.position.set(0, H * 0.8, bodyL * 0.44);
+  root.add(neck);
+  const neckMesh = mesh(new THREE.CylinderGeometry(H * 0.11, H * 0.15, H * 0.36, d === 'real' ? 10 : 5), hide, d);
+  neckMesh.position.y = H * 0.18;
+  neckMesh.rotation.x = kind === 'cow' ? 0.5 : 0.3;
+  neck.add(neckMesh);
+
+  const head = mesh(new THREE.BoxGeometry(H * 0.17, H * 0.19, H * 0.32), hide, d);
+  head.position.set(0, H * 0.34, H * 0.1);
+  neck.add(head);
+  if (d === 'real') {
+    const muzzle = mesh(new THREE.BoxGeometry(H * 0.12, H * 0.12, H * 0.13), dark, d);
+    muzzle.position.set(0, H * 0.3, H * 0.24);
+    neck.add(muzzle);
+    for (const side of [-1, 1]) {
+      const ear = mesh(new THREE.BoxGeometry(H * 0.03, H * 0.09, H * 0.05), hide, d);
+      ear.position.set(side * H * 0.08, H * 0.43, H * 0.02);
+      neck.add(ear);
+    }
+  }
+
+  const legs: Array<{ hip: THREE.Group; knee: THREE.Group }> = [];
+  for (const sz of [1, -1]) {
+    for (const sx of [-1, 1]) {
+      const hip = new THREE.Group();
+      hip.position.set(sx * H * 0.17, H * 0.55, sz * bodyL * 0.34);
+      root.add(hip);
+      const upper = mesh(new THREE.BoxGeometry(H * 0.1, H * 0.3, H * 0.1), hide, d);
+      upper.position.y = -H * 0.15;
+      hip.add(upper);
+      const knee = new THREE.Group();
+      knee.position.y = -H * 0.3;
+      hip.add(knee);
+      const lower = mesh(new THREE.BoxGeometry(H * 0.075, H * 0.25, H * 0.075), hide, d);
+      lower.position.y = -H * 0.125;
+      knee.add(lower);
+      const hoof = mesh(new THREE.BoxGeometry(H * 0.09, H * 0.06, H * 0.11), dark, d);
+      hoof.position.y = -H * 0.27;
+      knee.add(hoof);
+      legs.push({ hip, knee });
+    }
+  }
+
+  const tail = new THREE.Group();
+  tail.position.set(0, H * 0.78, -bodyL * 0.48);
+  root.add(tail);
+  const tailMesh = mesh(new THREE.CylinderGeometry(H * 0.02, H * 0.035, H * 0.3, 6), hide, d);
+  tailMesh.position.y = -H * 0.15;
+  tail.add(tailMesh);
+
+  let phase = 0;
+  const update = (dt: number, speed: number) => {
+    const moving = speed > 0.05;
+    phase += dt * (moving ? Math.min(2.5 + speed * 1.1, 11) : 1.6);
+    const swing = moving ? Math.min(0.3 + speed * 0.05, 0.75) : 0.03;
+    // DIAGONAL PAIRS: legs 0 (front-left) and 3 (rear-right) share a phase.
+    const pair = [0, 1, 1, 0];
+    for (let i = 0; i < legs.length; i++) {
+      const s = Math.sin(phase + pair[i] * Math.PI);
+      legs[i].hip.rotation.x = s * swing;
+      legs[i].knee.rotation.x = Math.max(0, -s * swing * 1.3);
+    }
+    body.position.y = H * 0.68 + (moving ? Math.abs(Math.sin(phase * 2)) * 0.02 : 0);
+    neck.rotation.x = moving ? -0.05 - swing * 0.1 : Math.sin(phase * 0.5) * 0.04;
+    tail.rotation.x = Math.sin(phase * 0.8) * 0.14;
+  };
+  update(0, 0);
+  return { root, update };
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/three/renderer.ts': RENDERER,
   'src/game/three/lighting.ts': LIGHTING,
@@ -1229,10 +1787,13 @@ const FILES: Record<string, string> = {
   'src/game/three/environment.ts': ENVIRONMENT,
   'src/game/three/surfaces.ts': SURFACES,
   'src/game/three/humanoid.ts': HUMANOID,
+  // The things a world is actually made of (admin 2026-08-27): car, tree, mountain, river, desert,
+  // road, animal — each built at a REAL or a LITE tier, because "asli" and "3d" are different asks.
+  'src/game/three/objects.ts': OBJECTS,
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'renderer', 'lighting', 'materials', 'camera', 'world', 'environment', 'surfaces', 'humanoid',
+  'renderer', 'lighting', 'materials', 'camera', 'world', 'environment', 'surfaces', 'humanoid', 'objects',
 ];
 
 /**
@@ -1259,6 +1820,12 @@ export function generateGame3D(include?: string[]): Game3DResult {
     // a material's reflections matter, and with nothing to reflect a glossy surface goes darker and
     // deader than the flat colour it replaced. So asking for one pulls in the other.
     if (files['src/game/three/surfaces.ts']) files['src/game/three/environment.ts'] = FILES['src/game/three/environment.ts'];
+    // objects.ts imports surfaces.ts directly, and surfaces then pulls environment in above — so an
+    // object asked for on its own still arrives with something to be made of and something to reflect.
+    if (files['src/game/three/objects.ts']) {
+      files['src/game/three/surfaces.ts'] = FILES['src/game/three/surfaces.ts'];
+      files['src/game/three/environment.ts'] = FILES['src/game/three/environment.ts'];
+    }
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
 
@@ -1275,6 +1842,11 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "applyEnvironment(scene, renderer, 'sunset');            // reflections — do NOT skip this\n" +
       "const wall = new THREE.Mesh(enableAO(geo), surfaceMaterial('brick', { repeat: 6 }));\n" +
       "const hero = createHumanoid({ height: 1.8 }); scene.add(hero.root);\n" +
+      "setDetailLevel('real');   // 'real' when the user asked for real/asli; 'lite' for plain 3D\n" +
+      "scene.add(createCar({ color: 0xb42b2b }));  scene.add(createTree({ height: 7 }));\n" +
+      "scene.add(createMountain({ size: 140, height: 50 }));  scene.add(createRoad({ length: 400 }));\n" +
+      "const river = createRiver(); scene.add(river.mesh);   // in the loop: river.update(elapsed)\n" +
+      "const deer = createAnimal({ kind: 'deer' }); scene.add(deer.root); // deer.update(dt, speed)\n" +
       "// in the loop: hero.update(dt, speed, grounded)\n" +
       "const rig = new CameraRig({ kind: 'third-person', collidables: [terrain, buildings] });\n" +
       "scene.add(createTerrain({ palette: 'indianVillage' }));\n" +
@@ -1287,6 +1859,10 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '- 🔴 For anything a player gets close to — walls, floors, roads, ground, crates, bark — use\n' +
       '  surfaceMaterial(kind) instead of a flat colour, and enableAO(geometry) on that mesh. A flat\n' +
       '  colour under perfect lighting is exactly what "not realistic" looks like.\n' +
+      '- 🔴 EVERY OBJECT COMES FROM objects.ts, never hand-modelled: createCar, createTree,\n' +
+      '  createMountain, createRiver, createDesert, createRoad, createAnimal. Call setDetailLevel()\n' +
+      "  ONCE at start-up — 'real' when the user asked for real/realistic/asli/100%, 'lite' when they\n" +
+      '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
       '- 🔴 A human character is createHumanoid(), never a capsule or a stack of spheres. Call\n' +
       '  hero.update(dt, speed, grounded) every frame — arms swing opposite the legs, knees only bend\n' +
       '  one way, and the body tucks in the air. A capsule with a hat is the single clearest sign of an\n' +

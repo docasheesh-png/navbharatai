@@ -368,6 +368,7 @@ import { liveSearchContext } from '../lib/liveSearchContext';
 import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
+import { realismIntent } from '../lib/realismIntent';
 import { BuildCheckpoint } from '../AgentV3/BuildCheckpoints';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
@@ -11163,6 +11164,28 @@ async function noteBuildOutcome(
         // app (a plain client/API is already covered by the framework hint). Reads only a handful of files.
         const bootHint = await fullstackBootHint(tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''));
         if (bootHint) buildPrompt = `${bootHint}\n\n${buildPrompt}`;
+        /**
+         * REAL OR JUST 3D (admin 2026-08-27: "wording par nahi jana, intension samjhna hai").
+         *
+         * The system prompt already tells the model to judge this, but the judgement decides how much
+         * geometry, texture memory and material cost a phone is asked to carry — so it is ALSO made
+         * deterministically here and handed over as a fact. Two independent readings agreeing is what
+         * stops one careless prompt turning every casual "3d game" into a heavyweight render.
+         *
+         * Only ever added to a prompt that is actually about 3D: a to-do app must not carry a
+         * paragraph about dune slip faces.
+         */
+        if (/\b(?:3\s*-?\s*d|three\s*-?\s*dimensional|game|khel)\b/i.test(prompt)) {
+          const realism = realismIntent(prompt);
+          buildPrompt = `OBJECT DETAIL TIER: ${realism.tier.toUpperCase()} — ${realism.reason}\n`
+            + `Call setDetailLevel('${realism.tier}') once at start-up, and build every object with `
+            + 'objects.ts (createCar / createTree / createMountain / createRiver / createDesert / '
+            + 'createRoad / createAnimal / createHumanoid) rather than hand-modelling shapes.'
+            + (realism.tier === 'real'
+              ? ' Say "real-looking" in your summary — never "photorealistic", which this cannot deliver.'
+              : ' Keep it light and fast; this is what runs well on a mid-range phone.')
+            + `\n\n${buildPrompt}`;
+        }
         // C1 — the project's OWN rules (NAVBHARATAI.md / AGENTS.md / CLAUDE.md / .cursorrules), so a
         // user does not have to repeat "Hindi labels", "rupees not dollars", "never touch payments" in
         // every single message. Prepended LAST so it lands nearest the top of the prompt, and the user

@@ -239,3 +239,98 @@ describe('the builder can really call this', () => {
     expect(catalog.slice(at, at + 2000)).toContain('generate_game_runtime');
   });
 });
+
+/**
+ * THE REALISM TRIO (admin 2026-08-26: a "realistic 3D game" came back looking flat).
+ *
+ * The audit found the lighting was ALREADY correct — sRGB, ACES, a fitted shadow camera — and that
+ * three things underneath it were missing: nothing to reflect, no surface detail, and a capsule for a
+ * body. These tests pin each one, and pin the honesty boundary that stops the fix being oversold.
+ */
+describe('generateGame3D — environment, surfaces and humanoid', () => {
+  const all = generateGame3D();
+
+  it('emits all three new modules by default', () => {
+    expect(all.files['src/game/three/environment.ts']).toBeTruthy();
+    expect(all.files['src/game/three/surfaces.ts']).toBeTruthy();
+    expect(all.files['src/game/three/humanoid.ts']).toBeTruthy();
+    expect(GAME_3D_MODULES).toEqual(
+      expect.arrayContaining(['environment', 'surfaces', 'humanoid']),
+    );
+  });
+
+  it('ENVIRONMENT builds a real IBL and can free it — PMREM does not GC itself', () => {
+    const env = all.files['src/game/three/environment.ts'];
+    expect(env).toContain('PMREMGenerator');
+    expect(env).toContain('scene.environment');
+    expect(env).toContain('export function disposeEnvironment');
+    // Cached per preset: regenerating PMREM per frame or per material is the classic stutter leak.
+    expect(env).toContain('envCache');
+  });
+
+  it('🔒 SURFACES tags ONLY the colour map as sRGB — the trap that makes maps worse than none', () => {
+    const surf = all.files['src/game/three/surfaces.ts'];
+    // Normal/roughness/AO are raw numbers; gamma-decoding them pushes normals the wrong way.
+    expect(surf).toContain('THREE.NoColorSpace');
+    expect(surf).toContain('THREE.SRGBColorSpace');
+    expect(surf).toContain('srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace');
+  });
+
+  it('SURFACES emits a full PBR map set, cached so forty brick walls generate brick once', () => {
+    const surf = all.files['src/game/three/surfaces.ts'];
+    for (const map of ['map', 'normalMap', 'roughnessMap', 'aoMap']) expect(surf).toContain(map);
+    expect(surf).toContain('surfaceCache');
+    expect(surf).toContain('export function enableAO');
+  });
+
+  it('HUMANOID is a real hierarchy with named joints, not a capsule', () => {
+    const h = all.files['src/game/three/humanoid.ts'];
+    for (const joint of ['hips', 'spine', 'chest', 'neck', 'head', 'leftKnee', 'rightShoulder']) {
+      expect(h).toContain(joint);
+    }
+    expect(h).toContain('export function createHumanoid');
+    expect(h).not.toContain('CapsuleGeometry');
+  });
+
+  it('HUMANOID gets the three things that make a walk read as a walk', () => {
+    const h = all.files['src/game/three/humanoid.ts'];
+    // A knee only bends one way — without the clamp you get the backwards-knee look.
+    expect(h).toContain('Math.max(0, -s * swing * 1.5)');
+    // Arms swing OPPOSITE the legs.
+    expect(h).toMatch(/left\.shoulder\.rotation\.x = c \*/);
+    expect(h).toMatch(/right\.shoulder\.rotation\.x = s \*/);
+    // A body in the air stops walking.
+    expect(h).toContain('if (!grounded)');
+  });
+
+  it('🔒 asking for surfaces PULLS IN environment — detail with nothing to reflect is a downgrade', () => {
+    const only = generateGame3D(['surfaces']);
+    expect(only.files['src/game/three/surfaces.ts']).toBeTruthy();
+    expect(only.files['src/game/three/environment.ts']).toBeTruthy();
+  });
+
+  it('the instructions make the environment call the loudest item, not a footnote', () => {
+    expect(all.instructions).toContain('applyEnvironment');
+    expect(all.instructions).toContain('surfaceMaterial');
+    expect(all.instructions).toContain('createHumanoid');
+    expect(all.instructions).toMatch(/BIGGEST ONE/);
+  });
+
+  it('still takes exactly ONE dependency — the fix adds no packages', () => {
+    // Every map, the sky and the character are generated in code. No asset CDN to 404, no licence.
+    expect(all.dependencies).toEqual([{ name: 'three', version: '^0.180.0' }]);
+  });
+});
+
+describe('the builder is told what "realistic" actually requires', () => {
+  it('the system prompt states the three-point checklist AND the honest ceiling', () => {
+    const prompt = readFileSync(join(__dirname, '..', 'AgentV3', 'systemPrompt.ts'), 'utf8');
+    expect(prompt).toContain('REALISM CHECKLIST');
+    expect(prompt).toContain('applyEnvironment(scene, renderer, preset)');
+    expect(prompt).toContain('surfaceMaterial(kind)');
+    expect(prompt).toContain('createHumanoid()');
+    // No photorealism promise — the ceiling is stated where the model will read it.
+    expect(prompt).toContain('STYLISED-REALISTIC');
+    expect(prompt).toMatch(/rather than promising photorealism/);
+  });
+});

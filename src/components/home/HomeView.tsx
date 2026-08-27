@@ -6,6 +6,9 @@ import {
 } from 'lucide-react';
 import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
+// `openExternalUrl` only — the tutorial strip's video link. main removed the Professionals cards from
+// Home, which is what used isNativeApp / playCompliance here; keeping those imports would have left
+// dead imports behind a resolved conflict.
 import { openExternalUrl } from '../../lib/mobileNative';
 
 /**

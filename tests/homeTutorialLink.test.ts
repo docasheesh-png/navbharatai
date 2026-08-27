@@ -8,6 +8,20 @@ const home = read('src/components/home/HomeView.tsx');
 const native = read('src/lib/mobileNative.ts');
 const kb = read('src/server/AppContext/AppKnowledgeBase.ts');
 
+
+/**
+ * The file's UI TEXT only — comments stripped.
+ *
+ * The language rule is about what a USER reads. A comment may quote the Hinglish phrasing it is
+ * explaining (and this one's does), so a whole-file scan would fail on the explanation instead of on
+ * the label. Deliberately crude: it only has to be right about this one file.
+ */
+function strippedUiText(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .split('\n').filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
+}
+
 describe('the "how to build an app" help on the Home page', () => {
   it('points at the right video, without the share-tracking token', () => {
     // The URL as given carried `?si=…`, which identifies the admin's own share session and would have
@@ -28,14 +42,23 @@ describe('the "how to build an app" help on the Home page', () => {
   });
 
   it('sits ABOVE the card grid, where it is about the whole page rather than one tile', () => {
-    const strip = home.indexOf('App banane me dikkat aa rahi hai?');
+    const strip = home.indexOf('Stuck building your app?');
     const grid = home.indexOf('Product Cards (4:');
     expect(strip).toBeGreaterThan(-1);
     expect(strip).toBeLessThan(grid);
   });
 
-  it('leads in the language the audience actually reads', () => {
-    expect(home).toContain('App banane me dikkat aa rahi hai?');
+  it('THE LABEL IS PROFESSIONAL ENGLISH — this shipped as Hinglish and should not have', () => {
+    // CLAUDE.md's language standard: every UI label, button, message and tooltip in NavBharatAI is
+    // professional English. The single exception is AI-GENERATED reply text inside a chat bubble.
+    // This is a product label, so the exception does not reach it. The first version read
+    // "App banane me dikkat aa rahi hai?" — caught by the admin, not by this file, which is why the
+    // rule is now asserted here rather than remembered.
+    expect(home).toContain('Stuck building your app?');
+    expect(home).toContain('Watch a short video on how to build one');
+    for (const hinglish of ['banane', 'dikkat', 'rahi hai', 'kaise', 'karo', 'nahi']) {
+      expect(strippedUiText(home).toLowerCase()).not.toContain(hinglish);
+    }
   });
 
   it('can be hidden — but NEVER permanently lost', () => {

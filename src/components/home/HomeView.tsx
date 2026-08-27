@@ -257,8 +257,14 @@ export const HomeView = ({
               • Full width above the grid, not tucked over one card: on a phone the cards are a 2-up
                 grid and the space above a single card is a sliver. This is also honest placement —
                 the help is about building apps, which is what the whole page is for.
-              • Hindi first. The audience is Bharat-first and so is the video; an English-only prompt
-                would be read by a fraction of the people who need it.
+              • ENGLISH, not Hinglish. The first version of this strip read "App banane me dikkat aa
+                rahi hai?" — reasoning that a Bharat-first audience reads Hindi. That reasoning is
+                not mine to apply here: CLAUDE.md's language standard requires every UI label in
+                NavBharatAI to be professional English, and the ONLY exception is AI-generated reply
+                text inside a chat bubble. This is a product label, so it is English. Kept short and
+                plain so it reads easily for a non-native speaker; the VIDEO can be in any language.
+                The Hindi and Hinglish phrasings live where they belong — the AppKnowledgeBase
+                keywords, which that same standard requires to carry the words a user would type.
 
             DISMISSIBLE, but never gone: the × collapses it to a small green play chip that stays.
             A user who dismissed it in month one and gets stuck in month three must still be able to
@@ -276,10 +282,10 @@ export const HomeView = ({
               </span>
               <span className="min-w-0">
                 <span className="block text-sm font-bold text-white leading-tight">
-                  App banane me dikkat aa rahi hai?
+                  Stuck building your app?
                 </span>
                 <span className="block text-[11px] sm:text-xs text-emerald-300/80 leading-snug mt-0.5">
-                  Watch how to build an app — 1 short video
+                  Watch a short video on how to build one
                 </span>
               </span>
               <ArrowRight className="w-4 h-4 text-emerald-400/70 ml-auto shrink-0 transition-transform group-hover:translate-x-0.5" />

@@ -255,10 +255,25 @@ export function HostingChooser({
     if (!name) { setStoreResult({ ok: false, message: 'Give your app a name first.' }); return; }
     setStoreBusy(true);
     setStoreResult(null);
+    // 🔒 A BUTTON THAT CAN SPIN FOREVER IS A BUG, WHATEVER THE SERVER IS DOING.
+    //
+    // The admin's report was "app mart me publish kar rahe hai, to infinity loading hoti ja rahi hai"
+    // (2026-08-27). The server cause is fixed separately — a synchronous page bake was blocking the
+    // response — but this handler had no time limit of its own, so ANY stalled request (a lost mobile
+    // connection, a proxy holding the socket, a future slow path nobody has written yet) leaves the
+    // user staring at "Publishing…" with no result, no error and no way back except reloading the page
+    // and wondering whether their app published.
+    //
+    // A publish that has not answered in 90 seconds has not worked. The user is told exactly that, and
+    // told the safe thing to do — checking before republishing, because a re-publish updates the same
+    // listing rather than creating a second one, so the honest advice is "look first".
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 90_000);
     try {
       const res = await authedFetch('/api/nav-store/web/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: ac.signal,
         body: JSON.stringify({ workspaceId, name, visibility: 'public', ...(storeIcon ? { iconDataUrl: storeIcon } : {}), ...(storeShots.length ? { screenshots: storeShots } : {}) }),
       });
       const data = await res.json().catch(() => null);
@@ -274,9 +289,13 @@ export function HostingChooser({
       setStoreResult({ ok: true, shareUrl, message: data.status === 'listed'
         ? 'Published! Your app is live on the store.'
         : 'Published! Your link works right now (copied) — the store listing goes live after a quick human review.' });
-    } catch {
-      setStoreResult({ ok: false, message: 'Could not reach the server — nothing was published.' });
+    } catch (e) {
+      const timedOut = (e as { name?: string })?.name === 'AbortError';
+      setStoreResult({ ok: false, message: timedOut
+        ? 'Publishing is taking longer than expected, so we stopped waiting. Check "Your published apps" — if it is not there, try again.'
+        : 'Could not reach the server — nothing was published.' });
     } finally {
+      clearTimeout(timer);
       setStoreBusy(false);
     }
   };

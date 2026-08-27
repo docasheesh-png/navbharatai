@@ -36,14 +36,14 @@ describe('the dist reader never goes through a shell', () => {
     // Found by this same investigation: both interpolated JSON.stringify(url) into a double-quoted
     // node -e. browseUrl's failure was invisible because it silently fell back to `source: 'curl'` —
     // the platform's own PREVIEW_UNVERIFIED, "fetched without running its JavaScript".
-    expect(src).toContain("const browsePath = '/tmp/nb_browse.cjs'");
+    expect(src).toContain('const browsePath = `/tmp/nb_browse_${Date.now().toString(36)}'); // unique per call
     expect(src).toContain('await sandbox.files.write(browsePath, playwrightBody)');
-    expect(src).toContain("const shotPath = '/tmp/nb_shot.cjs'");
+    expect(src).toContain('const shotPath = `/tmp/nb_shot_${Date.now().toString(36)}'); // unique per call
     expect(src).toContain('await sandbox.files.write(shotPath, shotBody)');
   });
 
   it('writes the script to a file and runs THAT', () => {
-    expect(src).toContain("const readerPath = '/tmp/nb_read_dist.cjs'");
+    expect(src).toContain('const readerPath = `/tmp/nb_read_dist_${runId}.cjs`');
     expect(src).toContain('await sandbox.files.write(readerPath, readerScript)');
     expect(src).toContain('.run(`node ${readerPath}`');
   });
@@ -51,12 +51,21 @@ describe('the dist reader never goes through a shell', () => {
   it('returns its result through a FILE, not captured stdout', () => {
     // A base64'd dist/ is easily megabytes; a truncated stdout would fail JSON.parse with a message
     // that looks nothing like its cause — the same lesson one layer along.
-    expect(src).toContain("const resultPath = '/tmp/nb_dist.json'");
+    expect(src).toContain('const resultPath = `/tmp/nb_dist_${runId}.json`');
     expect(src).toContain('await sandbox.files.read(resultPath)');
     // The browser-daemon path legitimately parses stdout (its payload is small and shellQuote'd), so
     // this is scoped to the dist reader rather than the whole file.
     const at = src.indexOf('async downloadDistFiles');
     expect(src.slice(at, at + 4000)).not.toContain('JSON.parse(result.stdout');
+  });
+
+  it('NO SCRIPT PATH IS SHARED BETWEEN RUNS — the re-publish failure (admin 2026-08-27)', () => {
+    // "open /tmp/nb_read_dist.cjs: permission denied" on the SECOND publish of an app. A sandbox is
+    // resumed across sessions, so a leftover from an earlier run only has to be un-writable once for
+    // every later run to fail. All three helper scripts had fixed names; all three now carry a unique
+    // suffix. A new one added with a fixed name fails here.
+    const fixed = [...src.matchAll(/const \w*Path = '\/tmp\/[^']+'/g)].map((m) => m[0]);
+    expect(fixed).toEqual([]);
   });
 
   it('THE SCRIPT IT WRITES IS VALID JAVASCRIPT — the assertion that would have caught this', () => {

@@ -1676,7 +1676,12 @@ export class E2BActuator implements IEngineerActuator {
       // the `source: 'curl'` fallback below, which is the platform's own documented
       // `PREVIEW_UNVERIFIED` — "fetched without running its JavaScript". The fallback is what kept it
       // invisible. Same bug, same file, found via the deploy failure the admin reported.
-      const browsePath = '/tmp/nb_browse.cjs';
+      // Unique per call, for the same reason downloadDistFiles is (see its comment): a fixed name in
+      // /tmp is shared by every run in a sandbox that lives for days, and it only has to become
+      // un-writable once for every later browse to fail. A browse that fails here falls back to the
+      // curl path, which is PREVIEW_UNVERIFIED — the quiet failure that hid the previous bug in this
+      // exact function for weeks.
+      const browsePath = `/tmp/nb_browse_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}.cjs`;
       const playwrightBody = `
 const {chromium}=require('playwright');
 (async()=>{
@@ -1747,7 +1752,8 @@ ${paintWaitJs('p')}
     // Same shell-quoting root cause as browseUrl above — `${JSON.stringify(url)}` inside a
     // double-quoted `node -e "…"` closed the string, so this screenshot script has never run either.
     // Proven by reproducing the exact shape in a shell, not by reading it. The script goes to a file.
-    const shotPath = '/tmp/nb_shot.cjs';
+    // Unique per call — same reasoning as browseUrl and downloadDistFiles above.
+    const shotPath = `/tmp/nb_shot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}.cjs`;
     const shotBody = `
 const {chromium}=require('playwright');
 (async()=>{
@@ -2223,8 +2229,29 @@ ${paintWaitJs('p')}
     // The RESULT also goes to a file rather than stdout. A dist/ is easily megabytes once base64'd, and
     // a captured stdout has limits we do not control; a truncated JSON would fail `JSON.parse` with a
     // message that looks nothing like its cause. This is the same lesson one layer along.
-    const readerPath = '/tmp/nb_read_dist.cjs';
-    const resultPath = '/tmp/nb_dist.json';
+    // 🔒 A FRESH PATH PER CALL — THE SECOND PUBLISH USED TO FAIL BECAUSE OF THE FIRST.
+    //
+    // These two were fixed names: /tmp/nb_read_dist.cjs and /tmp/nb_dist.json. The admin published an
+    // app, edited it, published again, and the second publish reported (2026-08-27):
+    //
+    //     Error: Could not read the built site: 500: error opening file:
+    //     open /tmp/nb_read_dist.cjs: permission denied.
+    //     Run "npm run build" first so a dist/ directory exists.
+    //
+    // The first publish had left that file behind. A sandbox is long-lived and is resumed across
+    // sessions, so whatever ownership or mode the leftover ended up with is what the next publish
+    // inherits — and it only has to be un-writable ONCE for every later publish of that app to fail.
+    // The advice in the message was wrong too: the build had already succeeded; nothing about running
+    // it again could have helped.
+    //
+    // This is the same shape as the day's other findings — a leftover from a previous run in the same
+    // workspace deciding the fate of the next one — and the same answer applies: do not share mutable
+    // state between runs that have no reason to share it. A unique name per invocation cannot collide
+    // with anything, whoever owns the leftover, and both files are removed afterwards so a long-lived
+    // sandbox does not slowly fill /tmp with them.
+    const runId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    const readerPath = `/tmp/nb_read_dist_${runId}.cjs`;
+    const resultPath = `/tmp/nb_dist_${runId}.json`;
     const readerScript = [
       "const fs=require('fs'),path=require('path');",
       "function walk(d,b,o){",
@@ -2257,14 +2284,27 @@ ${paintWaitJs('p')}
         stderr: String(err?.stderr ?? err?.message ?? err),
       }));
     if (result.exitCode !== 0) {
+      // EXIT 2 IS OUR OWN SCRIPT SAYING "there is nothing here". ANY OTHER EXIT IS OUR TOOLING FAILING,
+      // and telling that user to run a build they already ran successfully is advice that cannot work —
+      // it is what turned the /tmp permission failure above into fifteen minutes of the admin rebuilding
+      // an app that was never the problem. Two situations, two messages.
+      const noise = (result.stderr || result.stdout).slice(0, 300);
+      if (result.exitCode === 2) {
+        throw new Error(
+          `No build output found. Looked in: ${searchPaths.map((p) => `${p.slice(WORKSPACE_ROOT.length + 1)}/`).join(', ')}. `
+          + `Run "npm run build" first (for Next.js static export add output:'export' to next.config.js).\n${noise}`,
+        );
+      }
       throw new Error(
-        `No build output found. Looked in: ${searchPaths.map((p) => `${p.slice(WORKSPACE_ROOT.length + 1)}/`).join(', ')}. `
-        + `Run "npm run build" first (for Next.js static export add output:'export' to next.config.js).\n` +
-        (result.stderr || result.stdout).slice(0, 300),
+        `Your app built fine — the problem is on our side, collecting the files to publish. Please try publishing again.\n${noise}`,
       );
     }
 
     const raw = await sandbox.files.read(resultPath).catch(() => '');
+    // Best-effort tidy-up: a resumed sandbox lives for days, and one of these per publish adds up.
+    // Deliberately AFTER the read and never awaited into the result — a cleanup that could fail the
+    // publish would be a worse bug than the litter it prevents.
+    void sandbox.commands.run(`rm -f ${readerPath} ${resultPath}`, { timeoutMs: 10_000 }).catch(() => {});
     if (!raw.trim()) {
       throw new Error('The build output could not be read back from the sandbox — nothing was written to collect.');
     }

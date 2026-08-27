@@ -38,6 +38,7 @@ import { scanTextForSecrets, type EnvTemplateSecretIssue } from '../AgentV3/EnvS
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { unshippableAssetImports } from './assetImports';
 import { PAID_REMIX_ENABLED } from './navStoreRemixPurchase';
+import { previewRuntimeSignature, bakeIsCurrent } from '../runtime/previewRuntimeSignature';
 
 /** Lifecycle: live-via-link → admin lists it → or an admin/owner takes it down. */
 export type WebAppStatus = 'unlisted' | 'listed' | 'removed';
@@ -368,19 +369,28 @@ export async function saveWebAppBakedPage(id: string, version: number, html: str
   const gz = gzipSync(Buffer.from(html, 'utf8'));
   if (gz.length > BAKED_MAX_GZ_BYTES) return false; // honest skip — serve-time compile covers it
   await d.collection(COLLECTION).doc(id).collection(BAKED_SUB).doc('page')
-    .set({ version, gz, bakedAt: Date.now() });
+    // `runtime` is what stops a bug in OUR runtime from being permanent for every app baked while it
+    // existed — see previewRuntimeSignature.ts. Without it, deploying a preview fix leaves the already
+    // published apps serving the broken page forever.
+    .set({ version, gz, bakedAt: Date.now(), runtime: previewRuntimeSignature() });
   return true;
 }
 
-/** The baked page for EXACTLY this version, or null — an old bake must never outlive a re-publish. */
+/**
+ * The baked page for EXACTLY this version AND this runtime, or null.
+ *
+ * Two independent reasons a bake is stale, and both must be checked: the creator re-published (version),
+ * or we changed the runtime that produced it (runtime). The second one was missing, which is how a
+ * fixed preview kept serving broken pages to every viewer of an already-published app.
+ */
 export async function getWebAppBakedPage(id: string, version: number): Promise<string | null> {
   const d = db();
   if (!d) return null;
   try {
     const doc = await d.collection(COLLECTION).doc(id).collection(BAKED_SUB).doc('page').get();
     if (!doc.exists) return null;
-    const data = doc.data() as { version?: number; gz?: unknown };
-    if (data.version !== version) return null;
+    const data = doc.data() as { version?: number; gz?: unknown; runtime?: string };
+    if (!bakeIsCurrent({ version: data.version, runtime: data.runtime }, version)) return null;
     // The admin SDK hands a bytes field back as a Buffer; anything else (a manually edited doc, an
     // emulator quirk) is treated as no bake rather than parsed hopefully.
     const raw = data.gz;

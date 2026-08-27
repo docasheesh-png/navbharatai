@@ -45,8 +45,15 @@ describe('server-precompiled preview', () => {
     const { modules } = payloadOf(html);
     const app = modules['src/App.tsx'];
     expect(app).not.toContain('<div');                    // JSX compiled away
-    expect(app).toContain('jsxDEV');                      // development runtime (Visual Editor's _debugSource)
-    expect(app).toMatch(/require\(["']react\/jsx-dev-runtime["']\)/); // CJS, resolvable by collectBare + loader
+    // 🔒 REVERSED 2026-08-27, AND THE REVERSAL IS THE POINT. These two lines used to REQUIRE jsxDEV and
+    // react/jsx-dev-runtime — they pinned the defect in place. React's PRODUCTION build of that module
+    // ships `exports.jsxDEV = void 0`, so every App Mart app compiled this way died on first render
+    // with "(0, _jsxDevRuntime.jsxDEV) is not a function", including games published days earlier.
+    // The standard runtime exports real functions in BOTH builds and cannot fail that way.
+    expect(app).toContain('jsx');                         // standard runtime
+    expect(app).not.toContain('jsxDEV');
+    expect(app).toMatch(/require\(["']react\/jsx-runtime["']\)/); // CJS, resolvable by collectBare + loader
+    expect(app).not.toContain('jsx-dev-runtime');
   });
 
   it('the Visual Editor stamp survives server compilation — data-nbai-src on host elements', () => {
@@ -95,7 +102,8 @@ describe('server-precompiled preview', () => {
     expect(precompileModules({ 'a.jsx': 'export default () => <p>ok</p>;', 'b.jsx': 'export ] broken' })).toBeNull();
     const ok = precompileModules({ 'a.jsx': 'export default () => <p>ok</p>;' });
     expect(ok).not.toBeNull();
-    expect(ok!['a.jsx']).toContain('jsxDEV');
+    expect(ok!['a.jsx']).toContain('jsx');
+    expect(ok!['a.jsx']).not.toContain('jsxDEV');
   });
 
   it('the two stamping implementations cannot drift silently', () => {

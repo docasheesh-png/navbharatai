@@ -1030,11 +1030,18 @@ ${VISUAL_EDITOR_SCRIPT}
 // direct call would also work, but postMessage matches the established pattern this preview already
 // uses for error reporting (__nbaiPreviewError), keeping ONE communication channel.
 //
-// Mechanism: React (with development:true set on the JSX transform above) attaches `_debugSource`
-// (fileName/lineNumber/columnNumber) to the fiber of every JSX element — the same data React DevTools'
-// own "open in editor" feature reads. Walking a clicked DOM node's `__reactFiber$*` property to its
-// fiber (a real, stable React internal API, not a hack specific to this app) gives that exact source
-// location, so an edit can be sent back to EXACTLY the JSX element the user clicked — no guessing.
+// Mechanism: `data-nbai-src="file:line:col"`, stamped onto every host JSX element of the USER's code by
+// nbaiSrcPlugin at transform time, and read back with `el.closest('[data-nbai-src]')`. So a clicked
+// element maps to EXACTLY the JSX that produced it — no guessing, every React version, library and
+// nested elements included.
+//
+// ⚠️ THIS COMMENT USED TO SAY the mechanism was React's `_debugSource`, attached by the JSX transform's
+// development:true. That stopped being true on 2026-07-29 (when the stamp replaced it) and the JSX
+// transform stopped setting development:true on 2026-08-27 — it was emitting jsxDEV, which React's
+// production runtime does not implement. `_debugSource` therefore reads null now. It remains as the
+// last fallback in srcFor below, which costs nothing and covers no case the stamp misses; the editor
+// does not depend on it and has not for a month. Corrected here rather than left to mislead the next
+// person into "restoring" a flag that breaks every published app.
 const VISUAL_EDITOR_SCRIPT = `<script>
 (function () {
   var editMode = false;

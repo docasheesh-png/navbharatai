@@ -574,21 +574,31 @@ export async function listWebAppReports(limit = 200): Promise<WebAppReport[]> {
   if (!d) return [];
   const apps = await d.collection(COLLECTION).get();
   const out: WebAppReport[] = [];
-  for (const appDoc of apps.docs) {
-    const app = appDoc.data() as WebStoreApp;
-    // Best-effort per app: one unreadable subcollection must not hide every other app's reports.
-    const snap = await appDoc.ref.collection(REPORTS_SUB).get().catch(() => null);
-    if (!snap) continue;
-    for (const r of snap.docs) {
-      const data = r.data() as { reporterUid?: string; reason?: string; at?: number };
-      out.push({
-        appId: appDoc.id,
-        appName: app?.name || '(unnamed)',
-        appStatus: app?.status ?? 'unlisted',
-        reporterUid: data.reporterUid || 'anon',
-        reason: String(data.reason || ''),
-        at: typeof data.at === 'number' ? data.at : 0,
-      });
+  // Bounded CONCURRENCY, not a serial loop: N apps served one-round-trip-at-a-time is a screen that
+  // gets slower every time somebody publishes, and an admin page nobody opens is the state this
+  // feature was already in. Batched so a large store cannot open hundreds of connections at once.
+  const BATCH = 20;
+  for (let i = 0; i < apps.docs.length; i += BATCH) {
+    const slice = apps.docs.slice(i, i + BATCH);
+    const snaps = await Promise.all(slice.map((appDoc) =>
+      // Best-effort per app: one unreadable subcollection must not hide every other app's reports.
+      appDoc.ref.collection(REPORTS_SUB).get().catch(() => null)));
+    for (let j = 0; j < slice.length; j++) {
+      const appDoc = slice[j];
+      const snap = snaps[j];
+      const app = appDoc.data() as WebStoreApp;
+      if (!snap) continue;
+      for (const r of snap.docs) {
+        const data = r.data() as { reporterUid?: string; reason?: string; at?: number };
+        out.push({
+          appId: appDoc.id,
+          appName: app?.name || '(unnamed)',
+          appStatus: app?.status ?? 'unlisted',
+          reporterUid: data.reporterUid || 'anon',
+          reason: String(data.reason || ''),
+          at: typeof data.at === 'number' ? data.at : 0,
+        });
+      }
     }
   }
   return out.sort((a, b) => b.at - a.at).slice(0, limit);

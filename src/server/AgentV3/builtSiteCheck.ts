@@ -27,6 +27,7 @@
 // any depth is the question actually being asked: is there anything here to upload?
 
 import { detectWebDir, isNextStaticExport } from '../lib/mobileProjectAssembler';
+import { shellQuote } from '../lib/shellQuote';
 
 // 🔒 THE SECOND ROOT CAUSE, FOUND WHILE FIXING THE FIRST — and it produces the SAME sentence.
 //
@@ -99,8 +100,20 @@ export function isNextWithoutStaticExport(files: Record<string, string>): boolea
  * a `.nojekyll` or a dotted asset is still a file that would ship.
  */
 export function buildOutputCensusCommand(dirs: readonly string[] = BUILD_OUTPUT_DIRS): string {
+  // 🔒 shellQuote, NEVER JSON.stringify — and this was a real hole, not a precaution.
+  //
+  // JSON.stringify emits DOUBLE quotes, and a POSIX shell still expands `$(…)` and backticks inside
+  // those. One of these directory names comes from buildOutputCandidates → detectWebDir, which reads
+  // `outDir` straight out of the user's own vite.config.ts. So a config containing
+  // `outDir: '$(any command)'` executed that command inside their sandbox during publish. Written and
+  // caught the same day (2026-08-27), by re-reading this file rather than by any test failing —
+  // which is the argument for the shared primitive: single quotes make every byte literal, and the
+  // only way to be sure of that everywhere is to have one function that does it.
+  //
+  // The `echo` label is quoted too. It is the same untrusted string, and a substitution there would
+  // execute just as happily as one in the `find`.
   return dirs
-    .map((d) => `if [ -d ${JSON.stringify(d)} ]; then echo "NB_OUT=${d}:$(find ${JSON.stringify(d)} -type f 2>/dev/null | wc -l)"; fi`)
+    .map((d) => `if [ -d ${shellQuote(d)} ]; then echo NB_OUT=${shellQuote(`${d}:`)}$(find ${shellQuote(d)} -type f 2>/dev/null | wc -l); fi`)
     .join('; ');
 }
 
@@ -120,7 +133,7 @@ const DUMP_MARK = '@@NBCFG@@';
  */
 export function configDumpCommand(names: readonly string[] = OUTPUT_CONFIG_FILES): string {
   return names
-    .map((n) => `if [ -f ${JSON.stringify(n)} ]; then echo "${DUMP_MARK}${n}"; cat ${JSON.stringify(n)}; echo; fi`)
+    .map((n) => `if [ -f ${shellQuote(n)} ]; then echo ${shellQuote(DUMP_MARK + n)}; cat ${shellQuote(n)}; echo; fi`)
     .join('; ');
 }
 

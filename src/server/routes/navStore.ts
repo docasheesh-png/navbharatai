@@ -987,7 +987,12 @@ export function registerNavStoreRoutes(app: Express): void {
   // and anyone willing to abuse it can make an account in a minute. The requirement stopped honest
   // viewers and inconvenienced nobody else. The real ceiling on abuse is the rate limit below, and
   // an anonymous report is recorded honestly as anonymous so a reviewer can weigh it accordingly.
-  const reportLimiter = rateLimiter({ name: 'store-report', authed: 30, anon: 10, noun: 'reports', durable: false });
+  // Per HOUR. DURABLE on purpose (the default) — the shared Firestore bucket, not the per-instance
+  // one: with several Cloud Run instances a per-instance limit multiplies by the instance count, which
+  // is not a limit at all for the one endpoint whose whole protection IS the limit. Reports are rare,
+  // so the write it costs is nothing. anonGlobalPerHour is the ceiling a per-IP limit cannot give —
+  // it caps the whole platform's anonymous reports, so rotating IPs buys nothing.
+  const reportLimiter = rateLimiter({ name: 'store-report', authed: 30, anon: 10, noun: 'reports', anonGlobalPerHour: 2_000 });
   app.post('/api/nav-store/web/app/:id/report', reportLimiter, async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
     const reason = (typeof req.body?.reason === 'string' ? req.body.reason : '').trim();

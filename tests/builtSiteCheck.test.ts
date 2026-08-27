@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
+import { execFileSync } from 'child_process';
 import {
   BUILD_OUTPUT_DIRS,
   buildOutputCandidates,
@@ -55,13 +57,37 @@ describe('the census answers "is there a site", not "is there a folder"', () => 
     expect(readBuildOutputCensus('   \n ').ok).toBe(false);
   });
 
-  it('counts FILES at any depth, so a nested real build counts and an empty shell does not', () => {
-    const cmd = buildOutputCensusCommand(['dist']);
-    expect(cmd).toContain('-type f');
-    expect(cmd).toContain('wc -l');
-    expect(cmd).toContain('NB_OUT=dist:');
-    // Absent directories print nothing: absent and empty are different facts.
-    expect(cmd).toContain('[ -d "dist" ]');
+  it('END TO END: the command really runs, and the parser really reads what it prints', () => {
+    // String-matching the command proves nothing about what a SHELL does with it — that is exactly how
+    // the quoting hole below survived being written. So this executes the real command in a real
+    // directory and feeds its real stdout to the real parser. A quoting mistake fails here.
+    const dir = mkdtempSync(join(tmpdir(), 'nbcensus-'));
+    try {
+      mkdirSync(join(dir, 'dist', 'assets'), { recursive: true });     // a real build nests
+      writeFileSync(join(dir, 'dist', 'index.html'), '<html></html>');
+      writeFileSync(join(dir, 'dist', 'assets', 'app.js'), 'x');
+      writeFileSync(join(dir, 'dist', 'assets', '.hidden'), 'x');       // hidden files ship too
+      mkdirSync(join(dir, 'out'));                                      // exists, holds nothing
+      const stdout = execFileSync('bash', ['-c', buildOutputCensusCommand(['dist', 'out', 'build'])], { cwd: dir }).toString();
+
+      const v = readBuildOutputCensus(stdout);
+      expect(v).toMatchObject({ ok: true, dir: 'dist', files: 3 });     // nested + hidden counted
+      // 'out' exists and is empty; 'build' does not exist and printed nothing at all.
+      expect(stdout).toContain('NB_OUT=out:0');
+      expect(stdout).not.toContain('NB_OUT=build');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('END TO END: an empty dist/ produces exactly the reported failure', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nbcensus-'));
+    try {
+      mkdirSync(join(dir, 'dist'));   // the leftover from a previous app in a reused workspace
+      const stdout = execFileSync('bash', ['-c', buildOutputCensusCommand(['dist', 'out'])], { cwd: dir }).toString();
+      const v = readBuildOutputCensus(stdout);
+      expect(v.ok).toBe(false);
+      expect(v.emptyDirs).toContain('dist');
+      expect(builtSiteRefusal(v, '')!.error).toMatch(/empty/i);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
 
@@ -93,6 +119,27 @@ describe('both sides of the publish search the SAME list', () => {
     });
     expect(candidates[0]).toBe('dist/app/browser');
     expect(candidates.indexOf('dist/app/browser')).toBeLessThan(candidates.indexOf('dist'));
+  });
+
+  it('SECURITY: a hostile outDir cannot execute a command', () => {
+    // I WROTE THIS HOLE AND FOUND IT BY RE-READING, NOT BY A TEST (2026-08-27). The first version used
+    // JSON.stringify, which emits DOUBLE quotes — and a POSIX shell still expands $(…) and backticks
+    // inside those. outDir comes from the user's own vite.config.ts, so `outDir: '$(cmd)'` ran cmd in
+    // their sandbox during publish. Single quotes make every byte literal; this test is the proof.
+    const evil = "$(id > /tmp/pwned)`whoami`;rm -rf /";
+    const cmd = buildOutputCensusCommand([evil, 'dist']);
+    expect(cmd).not.toContain('"');                 // no double-quoted interpolation anywhere
+    // The dangerous text survives ONLY inside single quotes, where the shell cannot act on it.
+    for (const piece of ['$(id', '`whoami`', 'rm -rf /']) {
+      expect(cmd).toContain(piece);                 // it is passed through…
+      const before = cmd.slice(0, cmd.indexOf(piece));
+      expect((before.match(/'/g) || []).length % 2).toBe(1); // …and always inside an open quote
+    }
+  });
+
+  it('SECURITY: the config dump is quoted the same way', () => {
+    const cmd = configDumpCommand(['$(id)pkg.json']);
+    expect(cmd).not.toContain('"');
   });
 
   it('a hostile outDir cannot escape the workspace', () => {

@@ -19,7 +19,7 @@
 // whatever comes out, which is what makes every branch below unit-testable.
 
 import { toolchainForMajor } from './capacitorToolchain';
-import { WELL_KNOWN_DEPS, WELL_KNOWN_DEV_DEPS } from '../AgentV3/DependencyAutoFix';
+import { knownDepVersion } from '../AgentV3/DependencyAutoFix';
 import { capacitorMajorFromFiles, detectWebDir } from './mobileProjectAssembler';
 
 /** Every failure class NavBharatAI can name from a build log. */
@@ -641,7 +641,7 @@ export function repairBuildScript(pkgJson: string): string | null {
  * Rewrite ONE dependency's range so the install can resolve it — the repair for NPM_VERSION_NOT_FOUND.
  *
  * The choice of range is deliberate, in this order:
- *   1. An allowlisted package gets its CURATED pin (WELL_KNOWN_DEPS / WELL_KNOWN_DEV_DEPS) — the range
+ *   1. An allowlisted package gets its CURATED pin (knownDepVersion over both allowlists) — the range
  *      this codebase already trusts, kept in ONE table so version policy can never fork.
  *   2. Anything else gets the `latest` dist-tag. This is not a guess: the classifier only reaches this
  *      code when the package EXISTS (a missing name is E404) and the requested RANGE matches nothing —
@@ -660,7 +660,9 @@ export function repairDependencyVersion(pkgJson: string, pkg: string): string | 
     return null;
   }
   if (!parsed || typeof parsed !== 'object') return null;
-  const curated = WELL_KNOWN_DEPS[pkg] ?? WELL_KNOWN_DEV_DEPS[pkg] ?? 'latest';
+  // knownDepVersion reads both allowlists AND is prototype-safe — a package literally named
+  // "constructor" must not resolve through Object.prototype to a function and land in JSON.
+  const curated = knownDepVersion(pkg) || 'latest';
   let touched = false;
   for (const section of ['dependencies', 'devDependencies'] as const) {
     const deps = parsed[section];

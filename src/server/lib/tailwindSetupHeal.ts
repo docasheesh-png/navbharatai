@@ -11,7 +11,7 @@
 // at their curated pins, a postcss.config that names tailwindcss + autoprefixer, a tailwind.config with
 // content globs. There is nothing for a model to decide, so nothing here calls one.
 //
-// 🔒 THE VERSION IS v3 ON PURPOSE, AND THIS MODULE MUST AGREE WITH THE ALLOWLIST. WELL_KNOWN_DEPS pins
+// 🔒 THE VERSION IS v3 ON PURPOSE, AND THIS MODULE MUST AGREE WITH THE ALLOWLIST. The allowlist pins
 // `tailwindcss: '^3'` (LedgerLoop autopsy 2026-07-20): v4 removed the CLI and moved to CSS-first config,
 // so the v3 conventions every generated app carries all fail on it. The pin is IMPORTED from that one
 // table, never re-typed — two copies of a version policy is how they drift apart.
@@ -22,7 +22,7 @@
 //
 // PURE: files in, files out. No network, no filesystem.
 
-import { WELL_KNOWN_DEPS } from '../AgentV3/DependencyAutoFix';
+import { knownDepVersion } from '../AgentV3/DependencyAutoFix';
 
 /** The v3 companion pins. tailwindcss itself comes from the shared allowlist. */
 const POSTCSS_PIN = '^8';
@@ -139,7 +139,11 @@ export function applyTailwindSetup(input: Record<string, string>): TailwindHealR
     // is the mistake a careful reviewer would flag next.
     const dev = { ...(pkg.devDependencies ?? {}) };
     const before = JSON.stringify(dev);
-    if (!pkg.dependencies?.tailwindcss && !dev.tailwindcss) dev.tailwindcss = WELL_KNOWN_DEPS.tailwindcss;
+    // knownDepVersion reads BOTH allowlist maps — the pin is about WHICH release is safe, never about
+    // which package.json section holds it. Reading one map is exactly how this broke for real on
+    // 2026-08-27: tailwindcss moved from the production map to the dev map (PR #2696) and a
+    // single-map read came back undefined, so the heal silently wrote NO pin at all.
+    if (!pkg.dependencies?.tailwindcss && !dev.tailwindcss) dev.tailwindcss = knownDepVersion('tailwindcss') || '^3';
     if (!pkg.dependencies?.postcss && !dev.postcss) dev.postcss = POSTCSS_PIN;
     if (!pkg.dependencies?.autoprefixer && !dev.autoprefixer) dev.autoprefixer = AUTOPREFIXER_PIN;
     if (JSON.stringify(dev) !== before || !pkg.devDependencies) {

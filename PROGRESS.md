@@ -42502,3 +42502,62 @@ sentence → fail) before it was trusted.
 
 **The general lesson, worth more than this fix:** a new test passing on the first run is not evidence it
 works. Break it on purpose and watch it fail, or it is decoration.
+
+---
+
+## 2026-08-27 — The Capacitor APK pipeline: the complete step ledger, and three gaps closed
+
+**Admin, verbatim:** *"github kisi app ka capacitor apk banata hai, to woh jo jo step, jo jo green
+tick, jaha jahan check karta hai, sab ki list banao — ek highly detailed list. uske bad har step ko
+pass karne ka skill navbharatai ko sikhao. bada kaam hai, dyan se karna."* Context: the admin reports a
+large share of user APK builds still failing somewhere in the pipeline.
+
+### Deliverable 1 — `MOBILE_APK_PIPELINE.md` (new): the ledger
+
+The complete map, read from the generating code rather than from memory: **Phase A** (13 checks inside
+NavBharatAI before GitHub sees anything — auth, the 4-check compile preflight with its healing tiers,
+the screens gate, the missing-asset gate, assembly, push, dispatch), **Phase B** (every step of the
+generated runner workflow, including the 14 sub-checks inside "Generate and sync the Android project"
+— G17/G17b webDir, wrapper-jar heal, icon/splash/foreground/background/round heals, G1 ampersand, G5
+minSdk, forced heaps, the network-only Gradle retry), **Phase C** (poll → classify → deterministic
+repair → recommit → re-dispatch → v5 hand-off), the full 21-code failure registry, and a coverage
+table whose last rows are the HONEST open gaps (CSS @import chains, non-Tailwind PostCSS plugin
+errors, native plugin version conflicts).
+
+**Pinned so it cannot rot** (`tests/mobileApkPipelineDoc.test.ts`): every classifier code and every
+generated-workflow step name must appear in the doc, and every capability the doc claims must be
+importable and behave as claimed. Applying this morning's lesson, the pin was BROKEN THREE WAYS on
+purpose (remove a code everywhere, rename a step, both fail; restore, green) before being trusted.
+
+### Deliverable 2 — three gaps closed (the "sikhao" half)
+
+1. **`NPM_VERSION_NOT_FOUND`** (`mobileBuildRepair.ts`) — npm's ETARGET, the classic invented-version
+   failure of a generated package.json (`"lib": "^12.99.0"` for a library whose real latest is 11.x).
+   Was UNKNOWN → dead end. Now classified (both npm log formats, scoped names split on the LAST @) and
+   repaired deterministically: an allowlisted package returns to its CURATED pin (imported from the ONE
+   WELL_KNOWN_DEPS table — version policy never forks), any other declared package goes to `latest`,
+   which by construction always resolves for a package that exists (a missing NAME is E404, a different
+   code with a different answer). Undeclared/unparseable → null → the honest v5 hand-off.
+2. **Tailwind wiring preflight** (`tailwindSetupHeal.ts`, new; wired as check A4.4 + heal Tier 0b in
+   `mobileShipPreflight.ts`) — CSS is not an import graph the reconciler walks, so an app styled with
+   `@tailwind` directives but never declaring tailwindcss passed every check and died on the runner
+   inside PostCSS. Now: detection (directives, v4 `@import "tailwindcss"`, or a tailwind.config as
+   evidence) and a deterministic heal — the three packages at pinned ranges (tailwindcss from the
+   shared allowlist), both configs written only when absent, the v4 import line rewritten to v3
+   directives. Guard-rails pinned by tests: a plain-CSS app raises NOTHING, an explicit ^4 declaration
+   is respected (never "corrected"), the heal is idempotent, and the end-to-end heal runs with an
+   EMPTY AI chain — this class must never need a model.
+3. **Outcome telemetry** (`AppBuildStore.setOutcome` + write points in `/runs` and `/autofix`) — the
+   fifth-rule honesty fix: the durable record knew a build STARTED but never how it ENDED, so "80%
+   fail" was a feeling, not a number. Every completed run now records success/failure/cancelled; every
+   classified failure records its RepairCode (written BEFORE any repair attempt, so unfixable failures
+   count like fixable ones; a later success clears the stale code). The next hardening round starts
+   from that distribution instead of intuition.
+
+**Deliberately NOT built:** registry version-checking in the preflight (it is pure by design — no
+network; the classifier owns ETARGET), rewriting a declared Tailwind v4 project (a coherent choice is
+not ours to touch), and an admin analytics screen for the new telemetry (the data must accumulate
+first; a screen over an empty collection is decoration).
+
+**Verification:** `tsc` both projects ✅ · `npm run build` ✅ · `npx vitest run` — **1399 files /
+18314 passed** (26 new: 13 tailwind, 8 version-repair, 5 doc-pin).

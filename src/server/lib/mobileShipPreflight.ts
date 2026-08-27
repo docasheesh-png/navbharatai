@@ -30,6 +30,7 @@ import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { resolveLocalImport } from '../AgentV3/ArchitectureAnalysis';
 import { isBinaryAssetSpecifier } from '../AgentV3/fileClassification';
 import { scaffoldMissingUiPrimitives } from './uiPrimitiveScaffold';
+import { detectTailwindProblems, applyTailwindSetup } from './tailwindSetupHeal';
 import { detectProjectKind } from './mobileProjectAssembler';
 import {
   AI_REPAIR_MAX_FILES, runAiRepair,
@@ -132,6 +133,17 @@ export async function preflightVerify(files: Record<string, string>): Promise<Pr
         message: `the app imports "${pkg}" but package.json does not declare it`,
       });
     }
+
+    // Check 4 — TAILWIND WIRING (2026-08-27). CSS is not an import graph the reconciler walks, so an
+    // app styled with `@tailwind` directives but never declaring tailwindcss passed every check above
+    // and died on the runner inside PostCSS. Named here, healed deterministically in Tier 0b below.
+    for (const t of detectTailwindProblems(files)) {
+      problems.push({
+        kind: t.kind === 'undeclared' ? 'missing-package' : 'syntax',
+        path: t.path,
+        message: t.message,
+      });
+    }
   }
 
   return { ok: problems.length === 0, problems: problems.slice(0, 20) };
@@ -231,6 +243,19 @@ export async function preflightAndHeal(
       files = { ...files, ...fixed.files };
       changed['package.json'] = fixed.files['package.json'];
       notes.push(`Set up ${fixed.added.length} librar${fixed.added.length === 1 ? 'y' : 'ies'} your app uses (${fixed.added.map((a) => a.package).join(', ')}).`);
+      report = await preflightVerify(files);
+      if (report.ok) return { ok: true, files, changed, problems: [], notes, aiRounds };
+    }
+  }
+
+  // Tier 0b — deterministic: complete a broken Tailwind setup (declare the pinned packages, write the
+  // missing configs, rewrite the v4 import line). One correct shape, so no model is involved.
+  if (detectTailwindProblems(files).length > 0) {
+    const tw = applyTailwindSetup(files);
+    if (Object.keys(tw.changed).length > 0) {
+      files = tw.files;
+      Object.assign(changed, tw.changed);
+      notes.push(...tw.notes);
       report = await preflightVerify(files);
       if (report.ok) return { ok: true, files, changed, problems: [], notes, aiRounds };
     }

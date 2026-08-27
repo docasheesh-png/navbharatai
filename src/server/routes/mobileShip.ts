@@ -118,6 +118,19 @@ export function registerMobileShipRoutes(app: Express): void {
         createdAt: w.created_at,
         url: w.html_url,
       }));
+      // HOW DID IT END? (2026-08-27.) The durable record used to know a build STARTED and nothing
+      // more, so the failure rate of this whole pipeline was a guess. The screen polls this endpoint
+      // anyway, so the completed conclusion it just read is written down. Best-effort: telemetry must
+      // never delay or break the status the user is waiting on. The failure CODE is written by the
+      // autofix path, which is the one place the failure is actually classified.
+      try {
+        const done = runs.find((x: { status?: unknown; conclusion?: unknown }) => x.status === 'completed');
+        const concl = done?.conclusion;
+        if (concl === 'success' || concl === 'failure' || concl === 'cancelled') {
+          const identity = await verifyFirebaseIdentity(req);
+          if (identity?.uid) void appBuildStore.setOutcome(identity.uid, String(owner), String(repo), concl);
+        }
+      } catch { /* the run list is the job; the record is a convenience */ }
       res.json({ runs });
     } catch (err) {
       const status = (err as { response?: { status?: number } })?.response?.status || 502;
@@ -534,6 +547,13 @@ export function registerMobileShipRoutes(app: Express): void {
     }
 
     const diag = classifyBuildFailure(log, wfPath);
+    // The classified code is the highest-signal telemetry this pipeline produces: it names WHICH class
+    // actually fired on a real user build. Written before any repair is attempted, so an unfixable
+    // failure is counted exactly like a fixable one.
+    try {
+      const identity = await verifyFirebaseIdentity(req);
+      if (identity?.uid) void appBuildStore.setOutcome(identity.uid, String(owner), String(repo), 'failure', diag.code);
+    } catch { /* best-effort */ }
 
     // The ONE failure that is genuinely the user's to resolve. Their signing key is their permanent
     // Play Store identity — neither tier may create or work around it.

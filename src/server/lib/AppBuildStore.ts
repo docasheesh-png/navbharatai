@@ -48,6 +48,17 @@ export interface AppBuildRecord {
   /** What the user calls this app, for a list they can recognise. */
   appName: string;
   createdAt: number;
+  /**
+   * HOW THE LAST BUILD ENDED (2026-08-27, the APK-pipeline hardening). Until this field existed the
+   * store knew a build was STARTED but never how it finished — so "most builds fail" was a feeling,
+   * not a number, and every hardening round aimed by intuition. Recorded when a completed run is seen
+   * (Phase C poll) and when the auto-fix classifies a failure. Absent = no completed run observed yet.
+   */
+  outcome?: 'success' | 'failure' | 'cancelled' | null;
+  /** The classifier's RepairCode for the last failure — which named class actually fired. */
+  failureCode?: string | null;
+  /** When the outcome above was observed (server clock). */
+  finishedAt?: number | null;
 }
 
 /** How many builds a listing returns. A user with hundreds does not need them all on one screen. */
@@ -115,6 +126,32 @@ class AppBuildStore {
     try {
       const id = buildRecordId(userId, owner, repo);
       await db.collection('app_builds').doc(id).set({ runId: String(runId) }, { merge: true });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Record how a build ENDED — the other half of the honesty this store exists for. Partial update for
+   * the same reason setLatestRun is: this caller knows the outcome and nothing else. `failureCode`
+   * is only meaningful for a failure; a success explicitly CLEARS the previous failure's code so a
+   * fixed app never keeps wearing its old diagnosis.
+   */
+  async setOutcome(
+    userId: string, owner: string, repo: string,
+    outcome: 'success' | 'failure' | 'cancelled',
+    failureCode?: string,
+  ): Promise<boolean> {
+    const db = this.getDb();
+    if (!db || !userId || !owner || !repo) return false;
+    try {
+      const id = buildRecordId(userId, owner, repo);
+      await db.collection('app_builds').doc(id).set({
+        outcome,
+        failureCode: outcome === 'failure' ? (failureCode ?? null) : null,
+        finishedAt: Date.now(),
+      }, { merge: true });
       return true;
     } catch {
       return false;

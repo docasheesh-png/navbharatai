@@ -462,3 +462,67 @@ describe('the mitrify run: app compiled, wrapper looked in the wrong folder', ()
     expect(r.autoFixable).toBe(false);
   });
 });
+
+// ── NPM_VERSION_NOT_FOUND — the invented-version failure (2026-08-27 pipeline hardening) ──
+//
+// The classic generated-package.json death: the builder writes `"lib": "^9.9.9"` for a package whose
+// real latest is 2.x. npm says ETARGET / "No matching version found" — a DIFFERENT failure from E404
+// (name does not exist), and the only npm-resolution class with a repair that is always right.
+import { classifyBuildFailure as classifyV, packageFromNpmNoMatchingVersion, repairDependencyVersion, repairFiles as repairV } from './mobileBuildRepair';
+
+describe('NPM_VERSION_NOT_FOUND', () => {
+  const LOG = [
+    'npm error code ETARGET',
+    'npm error notarget No matching version found for framer-motion@^12.99.0.',
+    "npm error notarget In most cases you or one of your dependencies are requesting",
+    "npm error notarget a package version that doesn't exist.",
+  ].join('\n');
+
+  it('is classified, with the package and range extracted', () => {
+    const diag = classifyV(LOG, '.github/workflows/android-apk.yml');
+    expect(diag.code).toBe('NPM_VERSION_NOT_FOUND');
+    expect(diag.autoFixable).toBe(true);
+    expect(diag.detail?.package).toBe('framer-motion');
+    expect(diag.detail?.version).toBe('^12.99.0');
+  });
+
+  it('the older npm ERR! log format classifies too', () => {
+    const old = 'npm ERR! code ETARGET\nnpm ERR! notarget No matching version found for react-scripts@^6.0.0.';
+    expect(classifyV(old, 'wf.yml').code).toBe('NPM_VERSION_NOT_FOUND');
+  });
+
+  it('a scoped package splits on the LAST @, keeping its scope', () => {
+    const hit = packageFromNpmNoMatchingVersion('No matching version found for @tanstack/react-query@^99.0.0.');
+    expect(hit).toEqual({ pkg: '@tanstack/react-query', range: '^99.0.0' });
+  });
+
+  it('does NOT swallow an E404 — a missing NAME is a different failure with a different answer', () => {
+    const e404 = 'npm ERR! code E404\nnpm ERR! 404 Not Found - GET https://registry.npmjs.org/react-quantum - Not found';
+    expect(classifyV(e404, 'wf.yml').code).toBe('NPM_PACKAGE_NOT_FOUND');
+  });
+
+  it('repairs an allowlisted package to its CURATED pin — version policy stays in one table', () => {
+    const pkgJson = JSON.stringify({ dependencies: { 'framer-motion': '^12.99.0' } });
+    const next = repairDependencyVersion(pkgJson, 'framer-motion');
+    expect(next).not.toBeNull();
+    expect(JSON.parse(next as string).dependencies['framer-motion']).toBe('^11');
+  });
+
+  it('repairs an unknown-but-real package to the latest dist-tag, which always resolves', () => {
+    const pkgJson = JSON.stringify({ dependencies: { 'some-real-lib': '^99.0.0' } });
+    const next = repairDependencyVersion(pkgJson, 'some-real-lib');
+    expect(JSON.parse(next as string).dependencies['some-real-lib']).toBe('latest');
+  });
+
+  it('a package not declared anywhere yields null — the honest v5 hand-off, never an invented entry', () => {
+    expect(repairDependencyVersion(JSON.stringify({ dependencies: {} }), 'ghost-lib')).toBeNull();
+    expect(repairDependencyVersion('{ not json', 'x')).toBeNull();
+  });
+
+  it('repairFiles routes the diagnosis to package.json end to end', () => {
+    const diag = classifyV(LOG, '.github/workflows/android-apk.yml');
+    const result = repairV(diag, { 'package.json': JSON.stringify({ dependencies: { 'framer-motion': '^12.99.0' } }) }, '.github/workflows/android-apk.yml');
+    expect(result).not.toBeNull();
+    expect(JSON.parse(result!.files['package.json']).dependencies['framer-motion']).toBe('^11');
+  });
+});

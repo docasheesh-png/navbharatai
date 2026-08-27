@@ -19,6 +19,7 @@
 // whatever comes out, which is what makes every branch below unit-testable.
 
 import { toolchainForMajor } from './capacitorToolchain';
+import { knownDepVersion } from '../AgentV3/DependencyAutoFix';
 import { capacitorMajorFromFiles, detectWebDir } from './mobileProjectAssembler';
 
 /** Every failure class NavBharatAI can name from a build log. */
@@ -27,6 +28,7 @@ export type RepairCode =
   | 'NPM_CI_NO_LOCK'
   | 'NPM_PEER_CONFLICT'
   | 'NPM_PACKAGE_NOT_FOUND'
+  | 'NPM_VERSION_NOT_FOUND'
   | 'STALE_WORKFLOW'
   | 'BUILD_SCRIPT_MISSING'
   | 'WEB_DIR_MISSING'
@@ -170,6 +172,24 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
       detail: missingPkg ? { package: missingPkg } : undefined,
     };
   }
+  // The package EXISTS but the requested VERSION does not — npm's ETARGET ("No matching version
+  // found for pkg@range"). The classic invented-version failure of a generated package.json: the
+  // builder writes `"some-lib": "^9.9.9"` for a library whose real latest is 2.x. Distinct from E404
+  // (name does not exist) because this one HAS a repair that is always right: the name is real, so a
+  // range that actually matches published versions fixes the install.
+  const versionMiss = packageFromNpmNoMatchingVersion(log);
+  if (versionMiss || /npm (?:ERR!|error)\s*code\s*ETARGET|\bnotarget\b/i.test(log)) {
+    return {
+      code: 'NPM_VERSION_NOT_FOUND',
+      summary: versionMiss
+        ? `Your app asks for a version of ${versionMiss.pkg} that does not exist.`
+        : 'Your app asks for a library version that does not exist.',
+      autoFixable: Boolean(versionMiss),
+      needs: ['package.json'],
+      detail: versionMiss ? { package: versionMiss.pkg, version: versionMiss.range } : undefined,
+    };
+  }
+
   if (/npm ERR!\s*code\s*ERESOLVE|unable to resolve dependency tree|ERESOLVE could not resolve/i.test(log)) {
     return {
       code: 'NPM_PEER_CONFLICT',
@@ -410,6 +430,22 @@ export function failedStepSection(log: string): string {
  * trailing version range is stripped without breaking a scoped package, whose name legitimately starts
  * with '@'.
  */
+/**
+ * The package and range out of npm's ETARGET line: `No matching version found for pkg@range.`
+ * Scoped names (@scope/name) keep their leading @ — the split is on the LAST @.
+ */
+export function packageFromNpmNoMatchingVersion(log: string): { pkg: string; range: string } | null {
+  const m = /No matching version found for\s+(\S+?)\.?(?:\s|$)/i.exec(log);
+  if (!m) return null;
+  const token = m[1].replace(/[.,]$/, '');
+  const at = token.lastIndexOf('@');
+  if (at <= 0) return null; // "@" at 0 is a scope, not a separator; no "@" at all is not this failure
+  const pkg = token.slice(0, at);
+  const range = token.slice(at + 1);
+  if (!pkg || !range) return null;
+  return { pkg, range };
+}
+
 export function packageNameFromNpm404(log: string): string | null {
   const quoted = log.match(/404\s+'([^']{1,120})'\s+is not in this registry/);
   const url = log.match(/registry\.npmjs\.org\/((?:@[\w.-]+\/)?[\w.-]+)/);
@@ -601,6 +637,44 @@ export function repairBuildScript(pkgJson: string): string | null {
  * Returns null when nothing changed — the caller MUST treat that as "cannot fix" and stop, or the
  * self-healing loop would push an empty commit and re-run a build that fails identically.
  */
+/**
+ * Rewrite ONE dependency's range so the install can resolve it — the repair for NPM_VERSION_NOT_FOUND.
+ *
+ * The choice of range is deliberate, in this order:
+ *   1. An allowlisted package gets its CURATED pin (knownDepVersion over both allowlists) — the range
+ *      this codebase already trusts, kept in ONE table so version policy can never fork.
+ *   2. Anything else gets the `latest` dist-tag. This is not a guess: the classifier only reaches this
+ *      code when the package EXISTS (a missing name is E404) and the requested RANGE matches nothing —
+ *      and `latest` resolves for every published package, by construction. The invented range matched
+ *      NOTHING, so any resolvable range strictly improves on it; and the generated code was written
+ *      against an imagined version anyway, so "the newest real one" is also the most likely to carry
+ *      the API the model assumed.
+ * Returns null when package.json is unparseable or does not declare the package at all — then there is
+ * nothing here to repair and the honest path is the v5 hand-off.
+ */
+export function repairDependencyVersion(pkgJson: string, pkg: string): string | null {
+  let parsed: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  try {
+    parsed = JSON.parse(pkgJson);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  // knownDepVersion reads both allowlists AND is prototype-safe — a package literally named
+  // "constructor" must not resolve through Object.prototype to a function and land in JSON.
+  const curated = knownDepVersion(pkg) || 'latest';
+  let touched = false;
+  for (const section of ['dependencies', 'devDependencies'] as const) {
+    const deps = parsed[section];
+    if (deps && typeof deps[pkg] === 'string' && deps[pkg] !== curated) {
+      deps[pkg] = curated;
+      touched = true;
+    }
+  }
+  if (!touched) return null;
+  return JSON.stringify(parsed, null, 2) + '\n';
+}
+
 export function repairFiles(
   diag: BuildFailureDiagnosis,
   current: Record<string, string>,
@@ -695,6 +769,12 @@ export function repairFiles(
     case 'BUILD_SCRIPT_MISSING':
       return one('package.json', repairBuildScript(current['package.json'] || ''),
         'NavBharatAI: define the build step the packager needs');
+    case 'NPM_VERSION_NOT_FOUND': {
+      const pkg = diag.detail?.package;
+      if (!pkg) return null;
+      return one('package.json', repairDependencyVersion(current['package.json'] || '', pkg),
+        `NavBharatAI: use a version of ${pkg} that actually exists`);
+    }
     default:
       return null;
   }

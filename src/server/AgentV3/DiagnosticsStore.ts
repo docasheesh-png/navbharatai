@@ -500,15 +500,65 @@ export async function upsertDiagnosticsHistoryProgress(workspaceId: string, repo
 }
 
 /**
+ * The same listing, but it says whether the READ ITSELF worked.
+ *
+ * 🔒 THE DEFECT THIS EXISTS FOR (admin 2026-08-27, verbatim: "user ne 1,2,3…10 edit kiye aur 10th par
+ * report kiya to shuru ke 9 gayab, only 10th report hi aati hai").
+ *
+ * `listDiagnosticsHistory` returned `[]` for BOTH "this workspace has no earlier builds" and "the read
+ * failed" — a missing index, a permission error, an unavailable Firestore. The whole-session stitch
+ * then found nothing, fell back to the single `latest` doc, and reported `count: 1, omittedBuilds: 0`.
+ * That last part is the real damage: the report does not merely lose the other builds, it ASSERTS to
+ * the admin that there was only ever one, and that omitted nothing. A silent failure that produces a
+ * confident wrong number is worse than an error, because nobody goes looking.
+ *
+ * `ok: false` means we could not look. `ok: true` with an empty list means there is genuinely nothing —
+ * and only then may a caller say "one build" and be believed. Same class as every other artifact-for-
+ * evidence bug this codebase has been removing: an empty result standing in for a checked absence.
+ *
+ * Never throws.
+ */
+export async function listDiagnosticsHistoryResult(
+  workspaceId: string,
+  limit = MAX_HISTORY_ITEMS,
+): Promise<{ entries: DiagnosticsHistoryEntry[]; ok: boolean }> {
+  const db = getDb();
+  // No workspace id is a caller error, not a read failure — there is nothing to look up, honestly.
+  if (!workspaceId) return { entries: [], ok: true };
+  if (!db) {
+    console.error(`[DIAGNOSTICS] HISTORY READ FAILED (workspace=${workspaceId}) — Firestore unavailable (init failed).`);
+    return { entries: [], ok: false };
+  }
+  try {
+    return { entries: await listDiagnosticsHistoryInner(db, workspaceId, limit), ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[DIAGNOSTICS] HISTORY READ FAILED (workspace=${workspaceId}): ${message}`);
+    try { audit('DIAGNOSTICS_READ_FAILED', { kind: 'history', key: workspaceId, error: message.slice(0, 300) }); } catch { /* never throws */ }
+    return { entries: [], ok: false };
+  }
+}
+
+/**
  * List a workspace's past builds, most-recent-first, metadata only (cheap for a picker/list UI).
  * Ordered by document id (the stringified `startedAt` epoch-ms — lexicographic order matches numeric
  * order for same-length epoch-ms strings) so no composite index on a nested field is ever needed.
  * Never throws — returns [] on any failure or when nothing has been recorded yet.
+ *
+ * ⚠️ THIS SHAPE CANNOT TELL YOU WHICH OF THOSE TWO HAPPENED. For anything that reports a COUNT to a
+ * human, use `listDiagnosticsHistoryResult` instead — see the note there. Kept for the picker UIs,
+ * where an empty list and a failed read both correctly render as "no past builds to choose from".
  */
 export async function listDiagnosticsHistory(workspaceId: string, limit = MAX_HISTORY_ITEMS): Promise<DiagnosticsHistoryEntry[]> {
-  const db = getDb();
-  if (!db || !workspaceId) return [];
-  try {
+  return (await listDiagnosticsHistoryResult(workspaceId, limit)).entries;
+}
+
+async function listDiagnosticsHistoryInner(
+  db: NonNullable<ReturnType<typeof getDb>>,
+  workspaceId: string,
+  limit: number,
+): Promise<DiagnosticsHistoryEntry[]> {
+  {
     const snap = await db
       .collection(COLLECTION)
       .doc(workspaceId)
@@ -528,8 +578,6 @@ export async function listDiagnosticsHistory(workspaceId: string, limit = MAX_HI
         prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, HISTORY_PROMPT_MAX) : undefined,
       };
     });
-  } catch {
-    return [];
   }
 }
 

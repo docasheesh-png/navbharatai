@@ -14,7 +14,13 @@
 export interface ReportLike {
   meta?: { id?: string; appLabel?: string | null; sessionParts?: number } | null;
   report?: unknown;
-  session?: { builds?: unknown[]; count?: number; omittedBuilds?: number } | null;
+  session?: {
+    builds?: unknown[];
+    count?: number;
+    omittedBuilds?: number;
+    /** The workspace's history could not be READ — the counts here are what we saw, not what exists. */
+    historyUnreadable?: boolean;
+  } | null;
 }
 
 export interface ReportPart {
@@ -96,6 +102,16 @@ export function partJson(rec: ReportLike | null | undefined, key: string): strin
 export function partsSummary(rec: ReportLike | null | undefined): string {
   const total = partCount(rec);
   const omitted = rec?.session?.omittedBuilds ?? 0;
+  // …AND THE CASE WHERE WE NEVER MANAGED TO LOOK (admin 2026-08-27: "shuru ke 9 gayab"). A failed
+  // history read used to reach here indistinguishable from a real single build, so this line said
+  // "Single build" — the same confident wrong claim as `count: 1`, just in smaller type. It is the
+  // FIRST thing checked, because it invalidates every other number on the line.
+  const unreadable = rec?.session?.historyUnreadable === true;
+  if (unreadable) {
+    return total <= 1
+      ? 'Only the reported build — this session’s earlier builds could not be read, so there may be more'
+      : `${total} parts — but this session’s history could not be fully read, so there may be more`;
+  }
   // A session too large to store keeps ONE part (the focused build) but is not a single-build session —
   // saying "Single build" there would hide the fact that earlier builds existed and were dropped.
   if (total <= 1) {

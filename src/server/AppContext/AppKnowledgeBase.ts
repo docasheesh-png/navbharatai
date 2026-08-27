@@ -1647,6 +1647,22 @@ What happens if it is NOT renewed (honest answer): you get in-app reminders 5 da
     keywords: ['github', 'repo', 'repository', 'analyse', 'analyze', 'code review', 'open source', 'improve repo', 'audit', 'codebase', 'project review', 'github url', 'license', 'repo analyst'],
   },
 
+  // ─── HELP / TUTORIAL ──────────────────────────────────────────────────────
+  {
+    id: 'how_to_build_video',
+    name: 'How to build an app — the tutorial video',
+    path: 'Home page → the green strip just above the four big cards ("App banane me dikkat aa rahi hai?"). If it was hidden earlier, it is the small green "How to build an app" chip in the same place.',
+    description: 'A short video that shows, start to finish, how to build an app with NavBharatAI Pro — for anyone whose first attempt did not work or who is not sure what to type. ONE TAP opens it; there is no menu or popup in between. It opens in YouTube (in the YouTube app on a phone, in a new tab on the web), so NavBharatAI itself is not closed. The strip can be hidden with the × if the user does not need it, and it then stays available as a small green chip in the same place — it never disappears completely, so it can always be found again later.',
+    howToUse: 'Open the Home page (the home icon in the bottom bar). Directly above the four coloured cards there is a green bar reading "App banane me dikkat aa rahi hai? — Watch how to build an app". Tap anywhere on it and the video opens. To hide it, tap the × on its right; after that it becomes a small green "How to build an app" chip in the same spot, which still opens the same video. IF A USER SAYS "app nahi ban rahi", "samajh nahi aa raha kaise banau", "koi video hai?", "sikhao", or "how do I start" — point them at this strip on the Home page by name and colour, and tell them it is one tap.',
+    relatedFeatures: ['pro_chat', 'nav_app_store'],
+    keywords: [
+      'video', 'tutorial', 'how to build', 'kaise banaye', 'kaise banau', 'app kaise banti hai',
+      'sikhao', 'sikhna hai', 'guide', 'help', 'madad', 'demo', 'dikkat', 'samajh nahi aa raha',
+      'app nahi ban rahi', 'youtube', 'training', 'seekhna', 'shuruaat', 'getting started',
+      'first app', 'pehli app', 'stuck', 'struggle',
+    ],
+  },
+
   // ─── PRO CHAT ─────────────────────────────────────────────────────────────
   {
     id: 'pro_chat',

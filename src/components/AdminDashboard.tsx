@@ -171,7 +171,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     meta: AdminBuildReportRow;
     report: any;
     /** Every build/edit of that session (admin 2026-08-09) — absent for a single-build report. */
-    session?: { builds?: any[]; count?: number; omittedBuilds?: number } | null;
+    session?: { builds?: any[]; count?: number; omittedBuilds?: number; historyUnreadable?: boolean } | null;
   } | null>(null);
   const [selectedReportLoading, setSelectedReportLoading] = useState(false);
   /** Which part of the open report the admin is looking at / will copy or download ('all' | index). */
@@ -2710,6 +2710,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         {selectedReport && <p className="text-[10px] text-[#8b949e] truncate">{selectedReport.meta.email || selectedReport.meta.userId || 'unknown'} · {new Date(selectedReport.meta.reportedAt).toLocaleString()} · {partsSummary(selectedReport)}</p>}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
+                        {/* ⚠️ WE COULD NOT READ THIS SESSION'S HISTORY (admin 2026-08-27, on "shuru ke
+                            9 gayab, only 10th report hi aati hai"). A read failure used to return an
+                            empty list, which the record then rendered as a genuine one-build session —
+                            a confident wrong number that nobody would ever question. Said out loud
+                            here, because a missing report is only findable if it announces itself. */}
+                        {selectedReport?.session?.historyUnreadable && (
+                          <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-2 rounded-xl border border-amber-500/50 text-amber-300 bg-amber-500/10">
+                            ⚠ Earlier builds could not be read — this may not be the whole session
+                          </span>
+                        )}
                         {/* PART PICKER (admin 2026-08-09) — the record holds the whole 0→100% session,
                             so the admin chooses how much to take: All, or the 1st / 2nd / 3rd … build.
                             Only shown when there is genuinely more than one part to choose between. */}

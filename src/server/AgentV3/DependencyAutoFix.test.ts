@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { planDependencyAutoFix, applyWellKnownMissingDeps, WELL_KNOWN_DEPS, WELL_KNOWN_DEV_DEPS, pinKnownDepsInPackageJson, pinKnownDepsInInstallCommand, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { planDependencyAutoFix, applyWellKnownMissingDeps, WELL_KNOWN_DEPS, WELL_KNOWN_DEV_DEPS, pinKnownDepsInPackageJson, pinKnownDepsInInstallCommand, ensureFrameworkCoreDeps, npmInstallMaskedFailure, knownDepVersion } from './DependencyAutoFix';
+import { detectMisplacedDevTools, isDevOnlyTool } from './DependencyAnalysis';
 
 const pkg = (deps: Record<string, string> = {}, extra: Record<string, unknown> = {}) =>
   JSON.stringify({ name: 'app', version: '0.1.0', dependencies: deps, ...extra }, null, 2);
@@ -301,5 +302,57 @@ describe('a test suite the app cannot run is worse than no test suite', () => {
     for (const name of Object.keys(WELL_KNOWN_DEV_DEPS)) {
       expect(WELL_KNOWN_DEPS, `${name} is in both allowlists`).not.toHaveProperty(name);
     }
+  });
+});
+
+describe('tailwindcss was the LAST build tool still routed to dependencies (autopsy 2026-08-27)', () => {
+  const parse = (t: string) => JSON.parse(t) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+
+  it('THE PROOF: we no longer create the finding we then report', () => {
+    // Before this, three steps in a row: we ADD tailwindcss to `dependencies`, package.json now has it
+    // there, and detectMisplacedDevTools flags it — "move it to devDependencies" — in the SAME build.
+    // The user is handed cleanup for a change NavBharatAI just made.
+    const r = applyWellKnownMissingDeps({
+      'package.json': pkg({ react: '^18' }),
+      'src/main.ts': "import 'tailwindcss';\n",
+    });
+    const p = parse(r.files['package.json']);
+    expect(p.devDependencies?.tailwindcss).toBe('^3');
+    expect(p.dependencies?.tailwindcss).toBeUndefined();
+    expect(detectMisplacedDevTools(r.files['package.json'])).toEqual([]);
+  });
+
+  it('EVERY build-only package in either allowlist is classified as one — the class, not the instance', () => {
+    // The root cause was duplicated knowledge: the analyzer knew the dev-only set, the writer did not.
+    // This fails the moment a build tool is added to the production map, which is exactly how
+    // tailwindcss survived the first pass of this fix.
+    const misplaced = Object.keys(WELL_KNOWN_DEPS).filter((name) => isDevOnlyTool(name));
+    expect(misplaced).toEqual([]);
+  });
+
+  it('the v3 pin SURVIVED the move — a bare install must never pull v4', () => {
+    // The pin is load-bearing (LedgerLoop autopsy): v4 removed the `tailwindcss init -p` CLI and the
+    // binary, so every v3 convention an LLM emits fails. Moving the entry between maps must not lose it.
+    expect(knownDepVersion('tailwindcss')).toBe('^3');
+    expect(pinKnownDepsInInstallCommand('npm install tailwindcss')).toContain('tailwindcss@^3');
+  });
+
+  it('a RUNTIME library is still placed in dependencies — the rule must not overcorrect', () => {
+    const r = applyWellKnownMissingDeps({
+      'package.json': pkg(),
+      'src/main.ts': "import axios from 'axios';\nimport { z } from 'zod';\n",
+    });
+    const p = parse(r.files['package.json']);
+    expect(p.dependencies?.axios).toBe('^1');
+    expect(p.dependencies?.zod).toBe('^3');
+  });
+
+  it('a tool the USER deliberately put in dependencies is left where they put it', () => {
+    // This function ADDS what is missing. Relocating a declaration the user made is a different, riskier
+    // act, and detectMisplacedDevTools already advises them honestly.
+    const before = pkg({ tailwindcss: '^3' });
+    const r = applyWellKnownMissingDeps({ 'package.json': before, 'src/main.ts': "import 'tailwindcss';\n" });
+    expect(r.added).toEqual([]);
+    expect(r.files['package.json']).toBe(before);
   });
 });

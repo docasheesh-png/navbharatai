@@ -587,12 +587,31 @@ export function detectUnpinnedGitDeps(packageJsonContent: string | null): Depend
  * no legitimate runtime import — plus every `@types/*` (type-only, stripped at build). This is distinct
  * from the `unused` check, which deliberately SKIPS these implicit-toolchain names entirely.
  */
-const DEV_ONLY_TOOLS = new Set<string>([
+export const DEV_ONLY_TOOLS = new Set<string>([
   'vite', 'eslint', 'prettier', 'typescript', 'webpack', 'webpack-cli', 'rollup', 'esbuild', 'parcel',
   'vitest', 'jest', 'mocha', 'karma', '@playwright/test', 'cypress', 'ts-node', 'tsx', 'nodemon',
   'rimraf', 'cross-env', 'concurrently', 'npm-run-all', '@biomejs/biome', 'tailwindcss', 'postcss',
   'autoprefixer', 'storybook', 'turbo',
 ]);
+
+/**
+ * Is this package a build-only tool that belongs in `devDependencies`?
+ *
+ * EXPORTED so the two halves of this idea can never drift apart again (autopsy 2026-08-27). The
+ * knowledge lived only HERE, in the module that REPORTS the defect, while `applyWellKnownMissingDeps`
+ * in DependencyAutoFix.ts — the module that WRITES dependencies — had never heard of it and put
+ * everything into `dependencies`. So NavBharatAI added `tailwindcss` to a user's `dependencies` and
+ * then, in the same build, flagged it: "'tailwindcss' is a build-only tool declared in dependencies —
+ * move it to devDependencies." We manufactured the finding we reported, and handed the user the
+ * cleanup. Proven end-to-end before the fix, in three steps, against real code.
+ *
+ * One predicate, two callers: the writer places, the analyzer judges, and both consult this. PURE.
+ */
+export function isDevOnlyTool(name: string): boolean {
+  const n = String(name ?? '').trim();
+  if (!n) return false;
+  return DEV_ONLY_TOOLS.has(n) || n.startsWith('@types/');
+}
 
 /**
  * GA-3 (Tier-2 dependency intelligence) — flag a build-only tool declared in `dependencies` instead of

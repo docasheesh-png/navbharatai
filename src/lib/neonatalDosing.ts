@@ -660,6 +660,30 @@ export function formatDoseAnswer(r: DoseResult): string {
 }
 
 /**
+ * Sanitise a vial map that arrived over the wire.
+ *
+ * 🔒 THIS IS UNTRUSTED INPUT AND IT FEEDS A DOSE CALCULATION. A client can send anything, and anything
+ * that survives here becomes the divisor in a millilitre figure somebody draws up. So: only ids that
+ * are really in this chart, only a finite POSITIVE mg/mL (a zero or negative would produce Infinity or
+ * a negative volume), and only a real string label — the label is what the user checks the number
+ * against, so an entry without one is dropped rather than shown as an unlabelled concentration. PURE.
+ */
+export function sanitizeVials(input: unknown): ConcentrationMemory {
+  const out: ConcentrationMemory = {};
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return out;
+  const ids = new Set(NEONATAL_DRUGS.map((d) => d.id as string));
+  for (const [id, value] of Object.entries(input as Record<string, unknown>)) {
+    if (!ids.has(id)) continue;
+    const c = value as Partial<Concentration> | null;
+    if (!c || typeof c !== 'object') continue;
+    if (typeof c.mgPerMl !== 'number' || !Number.isFinite(c.mgPerMl) || c.mgPerMl <= 0) continue;
+    if (typeof c.label !== 'string' || !c.label.trim()) continue;
+    out[id as DrugId] = { mgPerMl: c.mgPerMl, label: c.label.slice(0, 80) };
+  }
+  return out;
+}
+
+/**
  * The reply to send WITHOUT calling a model, or null when the model should handle the turn.
  *
  * Returns text ONLY for a question the chart can answer completely. A question still missing the

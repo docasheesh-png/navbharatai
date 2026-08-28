@@ -3,7 +3,7 @@ import {
   calculateNeonatalDose, answerDoseQuestion, parseWeightKg, parseAgeDays, findDrug, findIndication,
   isDoseQuestion, formatMg, NEONATAL_DRUGS, MIN_WEIGHT_KG, MAX_WEIGHT_KG,
   parseConcentration, parseVialTeaching, vialRememberedMessage,
-  editDistance, FUZZY_MIN_LENGTH, FUZZY_MAX_DISTANCE, directDoseReply,
+  editDistance, FUZZY_MIN_LENGTH, FUZZY_MAX_DISTANCE, directDoseReply, sanitizeVials,
 } from './neonatalDosing';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -583,17 +583,79 @@ describe('THE MODEL IS TAKEN OUT OF THE LOOP for a complete dose question', () =
 
   it('WIRING — the chat route uses it, before any model call, with a kill switch', () => {
     const route = readFileSync(join(process.cwd(), 'src/server/routes/chat.ts'), 'utf8');
-    expect(route).toContain('directDoseReply(message)');
+    // The call now carries the device's vials; the invariant being protected is the ORDERING, so this
+    // asserts the call and its position rather than one exact argument list.
+    expect(route).toContain('directDoseReply(message, vials)');
     expect(route).toContain('DOSE_DIRECT_ANSWER');
     // It must sit BEFORE the app-context injection, which is itself before the model call.
-    expect(route.indexOf('directDoseReply(message)')).toBeLessThan(route.indexOf('AppContextInjector.getRelevantContext(message, chatSurface)'));
+    expect(route.indexOf('directDoseReply(message, vials)')).toBeLessThan(route.indexOf('AppContextInjector.getRelevantContext(message, chatSurface)'));
   });
 
   it('WIRING — it answers a streaming request too, not just a plain one', () => {
     const route = readFileSync(join(process.cwd(), 'src/server/routes/chat.ts'), 'utf8');
-    const at = route.indexOf('const direct = directDoseReply(message)');
+    const at = route.indexOf('const direct = taught ?');
+    expect(at).toBeGreaterThan(-1);
     const block = route.slice(at, at + 1200);
     expect(block).toContain('text/event-stream');
     expect(block).toContain('res.json({ reply: direct })');
+  });
+});
+
+describe('ONLINE CHAT REMEMBERS THE VIAL TOO (admin 2026-08-28)', () => {
+  it('THE REPORTED FRICTION: online could only ever answer in mg', () => {
+    // The admin asked online, got mg, said "ml me batao" and was asked for the vial - every time.
+    // The server cannot read localStorage, so the device now sends what it knows.
+    const wire = { amikacin: { mgPerMl: 50, label: '100 mg in 2 mL' } };
+    const reply = directDoseReply('amikacin 2 kg 3 days', sanitizeVials(wire));
+    expect(reply).toMatch(/30 mg/);
+    expect(reply).toMatch(/0.6 mL/);
+  });
+
+  it('🔒 a mgPerMl of ZERO is dropped — it would divide to Infinity', () => {
+    expect(sanitizeVials({ amikacin: { mgPerMl: 0, label: 'x' } })).toEqual({});
+  });
+
+  it('🔒 a NEGATIVE mgPerMl is dropped — it would produce a negative volume', () => {
+    expect(sanitizeVials({ amikacin: { mgPerMl: -50, label: 'x' } })).toEqual({});
+  });
+
+  it('🔒 non-finite values are dropped', () => {
+    expect(sanitizeVials({ amikacin: { mgPerMl: Number.POSITIVE_INFINITY, label: 'x' } })).toEqual({});
+    expect(sanitizeVials({ amikacin: { mgPerMl: Number.NaN, label: 'x' } })).toEqual({});
+  });
+
+  it('🔒 an entry with NO LABEL is dropped — the label is what the user checks the number against', () => {
+    expect(sanitizeVials({ amikacin: { mgPerMl: 50 } })).toEqual({});
+    expect(sanitizeVials({ amikacin: { mgPerMl: 50, label: '   ' } })).toEqual({});
+  });
+
+  it('🔒 a drug id that is not in this chart is dropped', () => {
+    expect(sanitizeVials({ vancomycin: { mgPerMl: 50, label: '500 mg in 10 mL' } })).toEqual({});
+    expect(sanitizeVials({ __proto__: { mgPerMl: 1, label: 'x' } })).toEqual({});
+  });
+
+  it('junk of every shape yields an empty map rather than throwing', () => {
+    for (const junk of [null, undefined, 'string', 42, [], [{ mgPerMl: 50 }]]) {
+      expect(sanitizeVials(junk)).toEqual({});
+    }
+  });
+
+  it('a GOOD entry survives, with its label bounded', () => {
+    const out = sanitizeVials({ amikacin: { mgPerMl: 50, label: 'x'.repeat(500) } });
+    expect(out.amikacin?.mgPerMl).toBe(50);
+    expect(out.amikacin?.label.length).toBe(80);
+  });
+
+  it('WIRING — the chat route sanitises, handles a taught vial, and passes the rest through', () => {
+    const route = readFileSync(join(process.cwd(), 'src/server/routes/chat.ts'), 'utf8');
+    expect(route).toContain('sanitizeVials(req.body?.vials)');
+    expect(route).toContain('directDoseReply(message, vials)');
+    expect(route).toContain('vialRememberedMessage(taught.drug, taught.concentration)');
+  });
+
+  it('WIRING — the client sends its vials and stores a taught one before sending', () => {
+    const hook = readFileSync(join(process.cwd(), 'src/hooks/useChatEngine.ts'), 'utf8');
+    expect(hook).toContain('vials: loadVials()');
+    expect(hook).toContain('saveVial(taught.drug.id, taught.concentration)');
   });
 });

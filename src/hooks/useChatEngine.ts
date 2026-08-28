@@ -17,6 +17,8 @@ import { previewAttachment } from '../lib/attachmentPreview';
 import { trackEvent } from '../lib/analytics';
 import { auth } from '../lib/firebase';
 import { rememberGithubOwner } from '../lib/githubTokenStore';
+import { parseVialTeaching } from '../lib/neonatalDosing';
+import { loadVials, saveVial } from '../lib/vialMemory';
 export interface ChatEngineDeps {
   // values read
   input: string;
@@ -459,6 +461,14 @@ export function useChatEngine(deps: ChatEngineDeps) {
           endpoint = '/api/chat/vip';
         }
 
+        // TELLING IT A VIAL is stored HERE, on the device, before the message goes anywhere — the vial
+        // is a fact about this cot side and belongs on this phone, not on a server. The server sends
+        // back the confirmation, so the user still sees the number echoed and can check it.
+        try {
+          const taught = parseVialTeaching(messageToSend);
+          if (taught) saveVial(taught.drug.id, taught.concentration);
+        } catch { /* a storage failure must never cost the user their message */ }
+
         // A fresh controller per attempt, exposed via abortRef so the Stop button can cancel this fetch.
         const userAbort = new AbortController();
         abortRef.current = userAbort;
@@ -481,6 +491,12 @@ export function useChatEngine(deps: ChatEngineDeps) {
               : undefined,
             // Apnapan Engine — user profile for personalized responses (free tier only)
             userProfile: isNbi ? apnapanProfile : undefined,
+            // THE VIALS THIS DEVICE KNOWS (admin 2026-08-28). The server cannot read localStorage, so a
+            // newborn dose asked in ONLINE chat could only ever come back in mg — the user had to retype
+            // the vial every single time, which is the friction this whole feature exists to remove.
+            // Sending them makes online behave exactly like the offline assistant. Concentrations only:
+            // no patient data, nothing identifying, and an empty object when nothing has been taught.
+            vials: loadVials(),
             stream: true,
           }),
           // The user can Stop this (abortRef) OR it self-cancels after 90s — whichever fires first.

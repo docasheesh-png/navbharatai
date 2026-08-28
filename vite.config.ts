@@ -53,6 +53,15 @@ export default defineConfig(({mode}) => {
             if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom)[\\/]/.test(id)) {
               return 'react-vendor';
             }
+            // FIREBASE IN ITS OWN CHUNK (2026-08-28). It was landing in the first-paint `index`
+            // chunk, so a routine firebase MINOR bump (12.14 -> 12.18) grew that chunk by ~57 KB
+            // gzipped and broke the bundle budget on `main` — the SDK is ~109 import sites and had
+            // no chunk of its own. Splitting it keeps the critical path small AND stops every future
+            // firebase release from being a budget event. Still statically imported (auth runs at
+            // boot), so this is one more parallel request, never a lazy-load that could delay login.
+            if (/[\\/]node_modules[\\/](firebase|@firebase)[\\/]/.test(id)) {
+              return 'firebase-vendor';
+            }
           },
         },
       },

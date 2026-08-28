@@ -42622,3 +42622,78 @@ rendered under app B's History: the exact cross-app leak class #2658 closed for 
 with a reset effect keyed on the workspace id alone, and the census's numbers updated WITH the
 justification its own comment demands. That guard paying for itself is the strongest argument this
 codebase has for census-style tests.
+
+---
+
+## 2026-08-27 — Dependabot triage: two merged, one refused with a reason
+
+Admin: *"dependabot PRs check kar lo, safe wale merge kar do."* Each bump was VERIFIED locally
+(install → tsc both projects → real build → full suite) rather than judged by its version number.
+
+- ✅ **#2608 firebase 12.14 → 12.18** (minor). Clean everywhere. Merged.
+- ✅ **#2610 motion 12.40 → 13.1.1** (MAJOR, and still safe). Motion 13's only React breaking change
+  is dropping `@emotion/is-prop-valid` as an optional dependency, which affects styled-components /
+  Emotion users — this project uses neither. (The three `styled-components` hits in `src/` are
+  server-side DETECTORS that inspect a *user's* app: `DesignCoverage.ts`, `architectureInvariants.ts`
+  — reading a grep count as our own usage would have blocked a safe upgrade.) Our 26 files import
+  exactly two APIs, `motion` and `AnimatePresence`, both verified present at runtime. Merged.
+- ❌ **#2611 lucide-react 0.546 → 1.33 — NOT merged. It breaks the build.** v1 REMOVED the brand
+  icons; `Github` and `Figma` are gone, and `Github` alone is imported by 10+ components
+  (AuthComponent, SettingsPanel, GitPanel, AgentV3Panel, CICDPipeline, FileExplorer, AICodeReview…).
+
+⚠️ **THE FINDING WORTH KEEPING, because it inverts the usual assumption: `tsc --noEmit` PASSED on the
+broken upgrade.** Only the real `npm run build` (rollup) caught it —
+`"Github" is not exported by node_modules/lucide-react/dist/esm/lucide-react.mjs`. A session that
+typechecked a dependency bump and merged on green would have shipped a frontend that cannot build,
+i.e. a red `main` and a blocked deploy for everyone. **For a dependency bump, the build is the gate,
+not the typecheck** — and a runtime export check (import the package, assert every name the source
+imports actually exists) is cheaper than either and catches exactly this class.
+
+**To take #2611 later** it is a real, small piece of work, not a merge: replace the `Github` and
+`Figma` icons across those files — either with an inline brand SVG kept in one shared component
+(preferred: brand marks are a licensing question, and one copy is one decision) or with a neutral
+lucide icon. Until someone does that, the PR must stay open; merging it is a broken build.
+
+---
+
+## 2026-08-28 — `main` went over the bundle budget, and the fix was a chunk, not a revert
+
+**How it was found:** CI failed on the docs branch (#2699) at the **Bundle size budget** step — every
+other step green. Since that branch carries merged `main`, the failure was on `main` itself, not on the
+docs commit.
+
+**Root cause, bisected commit by commit rather than guessed** (each measured with a clean `npm ci` +
+real build, because an `npm install` over a dirty lock does NOT fully revert transitive resolutions —
+my first two "reverts" measured 415 KB and wrongly cleared both dependencies):
+
+| Commit | Largest chunk |
+|---|---|
+| `dd93caa` (#2692) | 358.1 KB ✅ |
+| `b43125e` (#2698, my feature work) | 358.0 KB ✅ |
+| **`62de047` (firebase 12.14 → 12.18)** | **415.0 KB ❌** |
+| `83cd8ab` (motion 13.1.1) | 415.2 KB ❌ (motion added nothing) |
+
+So a routine firebase **minor** bump grew the first-paint chunk by ~57 KB gzipped.
+
+**MY MISS, stated plainly:** before merging those two dependency PRs I ran `tsc` (both projects), the
+real build and the full suite — but NOT `scripts/bundleBudget.mjs`. I had just written up "for a
+dependency bump the BUILD is the gate, not the typecheck" and then stopped one step short of the gate
+that actually mattered. **The rule is now: a dependency bump runs the same gate CI runs — typecheck,
+build, tests AND the bundle budget.** A dep that compiles can still cost the user a second of load.
+
+**The fix is a code-split, not a revert** — and it is strictly better than either option:
+`vite.config.ts` had `manualChunks` for web-llm and react-vendor only, so all of firebase (~109 import
+sites) landed in the first-paint `index` chunk. Giving it `firebase-vendor` its own chunk:
+
+- largest chunk **415.2 KB → 238.0 KB**; the `index` chunk itself **415 KB → 232 KB**
+- total JS **unchanged** (1561.6 KB) — nothing removed, only moved off the critical path
+- firebase 12.18 is KEPT, and every future firebase release stops being a budget event
+
+Still a static import (auth runs at boot), so it is one more parallel request — never a lazy-load that
+could delay login. That distinction is why this is safe: the browser fetches both chunks together, but
+the parser no longer has to get through firebase before the app's own code.
+
+**Why this matters for this product specifically:** 57 KB gzipped on the critical path is roughly a
+second on a slow Indian mobile connection, which is exactly the user the budget exists to protect.
+`main` had been red since 03:07 UTC and the `.aab`/`.ipa` built at 03:07 carry the un-split bundle —
+they WORK (the budget is a CI gate, not a runtime error) and are simply heavier than they should be.

@@ -13,6 +13,7 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import type { Message, ErrorContext, ViewType, FileSystem } from '../types';
 import { classifyError } from '../lib/appUtils';
 import { asMessageArray } from '../lib/chatUtils';
+import { previewAttachment } from '../lib/attachmentPreview';
 import { trackEvent } from '../lib/analytics';
 import { auth } from '../lib/firebase';
 import { rememberGithubOwner } from '../lib/githubTokenStore';
@@ -330,15 +331,19 @@ export function useChatEngine(deps: ChatEngineDeps) {
     const greetings = /^(ram ram|namaste|hello|hi|namaskar|sat sri akal|salam|radhe radhe|jai shri ram|kya haal hai|kaise ho)$/i;
     const isBasicGreeting = greetings.test(messageToSend.trim());
 
-    // Build attachment previews (data URLs) so the image shows in chat
-    const attachmentPreviews: import('../types').MessageAttachment[] = await Promise.all(
-      files.map(f => new Promise<import('../types').MessageAttachment>(resolve => {
-        const reader = new FileReader();
-        reader.onload = () => resolve({ name: f.name, type: f.type, dataUrl: reader.result as string });
-        reader.onerror = () => resolve({ name: f.name, type: f.type });
-        reader.readAsDataURL(f);
-      }))
-    );
+    // Attachment previews for the chat bubble — DOWNSCALED, and that word is the whole fix.
+    //
+    // This used to `readAsDataURL` the FULL file and keep the result in the message object, which is
+    // never trimmed. Base64 inflates ~1.37x and a data URL is an ordinary JS string, so ten phone
+    // photos retained ~55 MB for the session — a rising P90 against a flat P50, which is exactly the
+    // leak signal Google's Feb-2027 memory metric looks for.
+    //
+    // Shrinking it loses nothing, and that is verified rather than assumed: the attachment is sent to
+    // the backend SEPARATELY a few lines below (`fileAttachments: await filesToBase64(files)`), so
+    // this value only ever reached a 64x64 bubble and a lightbox. The model sees exactly what it saw
+    // before. See lib/attachmentPreview.ts for why one shared helper replaced two hand-rolled copies.
+    const attachmentPreviews: import('../types').MessageAttachment[] =
+      await Promise.all(files.map(previewAttachment));
 
     const userMessage: Message = {
       id: Date.now().toString(),

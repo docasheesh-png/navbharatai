@@ -1,8 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- BACKUP IS DELIBERATE NOW, NOT ACCIDENTAL (2026-08-28). `allowBackup="true"` with no rules
+         meant Android backed up the whole data directory — including the WebView caches. The per-app
+         cloud limit is 25 MB and past it Android backs up NOTHING, silently, so a ~39 MB asset bundle
+         plus a service-worker cache could mean backup was failing outright and users were quietly
+         signing in again on every new phone.
+
+         Both attributes are required: minSdkVersion is 24, and each is ignored by the API levels the
+         other covers. `fullBackupContent` serves API 24-30, `dataExtractionRules` serves API 31+.
+         The rules exclude WebView CACHES ONLY — never `Local Storage` or `IndexedDB`, which hold the
+         Firebase Auth session. See the comments in both files for the line not to cross. -->
     <application
         android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"

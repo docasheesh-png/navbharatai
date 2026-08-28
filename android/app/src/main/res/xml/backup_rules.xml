@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup rules for Android 11 and below (API 24-30), via `android:fullBackupContent`.
+  The API 31+ counterpart is data_extraction_rules.xml. BOTH are needed: minSdkVersion is 24, and
+  each attribute is ignored by the API levels the other one covers.
+
+  ── WHY THIS FILE EXISTS AT ALL ────────────────────────────────────────────────────────────────
+
+  The per-app cloud backup limit is 25 MB. Past it, Android calls onQuotaExceeded() and backs up
+  NOTHING — silently. NavBharatAI ships ~39 MB of web assets and registers a service worker that
+  caches the app shell, so the WebView's own caches alone can carry the data directory past that
+  limit. The likely state before this file: cloud backup failing entirely, and users quietly having
+  to sign in again on a new phone with no explanation.
+
+  So this is not a security tightening. It is what makes backup WORK — and the thing users actually
+  want (arrive on a new phone still signed in) depends on it working. It is also a prerequisite for
+  the April-2027 Zero-Tap requirement, whose restore key travels by this same mechanism.
+
+  ── WHAT IS EXCLUDED, AND WHAT MUST NEVER BE ──────────────────────────────────────────────────
+
+  EXCLUDED: WebView cache directories ONLY. A cache is by definition regenerable — dropping it costs
+  one re-fetch and nothing else. Restoring a stale service-worker cache onto a new device is in fact
+  actively harmful; it is a known source of "the app came back on an old version".
+
+  ⚠️ NOT EXCLUDED, and this is the line to be careful with: `app_webview/Local Storage` and
+  `app_webview/.../IndexedDB` hold the Firebase Auth session. Excluding `app_webview/` wholesale —
+  the obvious-looking one-liner — would sign out every user who restores a backup. The excludes below
+  are therefore narrow and named, never a parent directory.
+
+  Chromium has used two profile layouts over the years (`app_webview/<dir>` and
+  `app_webview/Default/<dir>`), so both spellings are listed. An exclude path that matches nothing is
+  harmless; a missing one is not.
+
+  Android already excludes getCacheDir(), getCodeCacheDir() and getNoBackupFilesDir() by default —
+  none of which is where WebView keeps its caches, which is exactly why these entries are needed.
+-->
+<full-backup-content>
+  <!-- Chromium profile at the app_webview root (older WebView layout). -->
+  <exclude domain="root" path="app_webview/Cache" />
+  <exclude domain="root" path="app_webview/Code Cache" />
+  <exclude domain="root" path="app_webview/GPUCache" />
+  <exclude domain="root" path="app_webview/Service Worker/CacheStorage" />
+  <exclude domain="root" path="app_webview/Service Worker/ScriptCache" />
+
+  <!-- Chromium profile under Default/ (current WebView layout). -->
+  <exclude domain="root" path="app_webview/Default/Cache" />
+  <exclude domain="root" path="app_webview/Default/Code Cache" />
+  <exclude domain="root" path="app_webview/Default/GPUCache" />
+  <exclude domain="root" path="app_webview/Default/Service Worker/CacheStorage" />
+  <exclude domain="root" path="app_webview/Default/Service Worker/ScriptCache" />
+
+  <!-- Capacitor's own HTTP cache, when the WebView writes one outside the profile. -->
+  <exclude domain="root" path="app_webview/Default/blob_storage" />
+</full-backup-content>

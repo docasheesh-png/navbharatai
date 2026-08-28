@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backup / transfer rules for Android 12+ (API 31+), via `android:dataExtractionRules`.
+  backup_rules.xml is the API 24-30 counterpart; both are needed because minSdkVersion is 24.
+
+  See backup_rules.xml for the full reasoning. In short: the per-app cloud backup limit is 25 MB, and
+  past it Android backs up NOTHING, silently. Our WebView caches can carry the data directory past
+  that on their own, so excluding them is what makes backup work at all — which is what the user
+  actually wants (a new phone that arrives already signed in) and what the April-2027 Zero-Tap
+  restore key will depend on.
+
+  ── WHY THE TWO SECTIONS ARE NOT IDENTICAL ─────────────────────────────────────────────────────
+
+  API 31+ splits the two cases, and they genuinely differ:
+
+    • <cloud-backup>    — restored later, possibly much later, from Google's servers. This is the one
+                          bound by the 25 MB quota, so the excludes matter most here.
+    • <device-transfer> — a cable, both phones in the owner's hands, no quota. Caches are still
+                          pointless to copy (slower transfer, and a stale service-worker cache is a
+                          known cause of "the app came back on an old version"), so they are excluded
+                          here too — but for speed and correctness, not for a limit.
+
+  Each section, when present, replaces the default for that mode. A section left out means "everything
+  except the platform's own defaults", which is why both are written out explicitly rather than
+  relying on one to cover the other.
+
+  ⚠️ THE LINE TO BE CAREFUL WITH, repeated here because this file will be read on its own:
+  `app_webview/Local Storage` and `app_webview/.../IndexedDB` hold the Firebase Auth session.
+  Excluding `app_webview/` wholesale — the obvious-looking one-liner — signs out every user who
+  restores a backup. Every exclude below is a named cache directory, never a parent.
+
+  NOT SET: disableIfNoEncryptionCapabilities. Turning it on would refuse to back up at all on devices
+  without end-to-end encryption capability, which in this user base means the cheapest phones lose
+  their session on every device change. The data here is a regenerable web session, not secrets worth
+  that trade.
+-->
+<data-extraction-rules>
+  <cloud-backup>
+    <!-- Chromium profile at the app_webview root (older WebView layout). -->
+    <exclude domain="root" path="app_webview/Cache" />
+    <exclude domain="root" path="app_webview/Code Cache" />
+    <exclude domain="root" path="app_webview/GPUCache" />
+    <exclude domain="root" path="app_webview/Service Worker/CacheStorage" />
+    <exclude domain="root" path="app_webview/Service Worker/ScriptCache" />
+
+    <!-- Chromium profile under Default/ (current WebView layout). -->
+    <exclude domain="root" path="app_webview/Default/Cache" />
+    <exclude domain="root" path="app_webview/Default/Code Cache" />
+    <exclude domain="root" path="app_webview/Default/GPUCache" />
+    <exclude domain="root" path="app_webview/Default/Service Worker/CacheStorage" />
+    <exclude domain="root" path="app_webview/Default/Service Worker/ScriptCache" />
+    <exclude domain="root" path="app_webview/Default/blob_storage" />
+  </cloud-backup>
+
+  <device-transfer>
+    <exclude domain="root" path="app_webview/Cache" />
+    <exclude domain="root" path="app_webview/Code Cache" />
+    <exclude domain="root" path="app_webview/GPUCache" />
+    <exclude domain="root" path="app_webview/Service Worker/CacheStorage" />
+    <exclude domain="root" path="app_webview/Service Worker/ScriptCache" />
+
+    <exclude domain="root" path="app_webview/Default/Cache" />
+    <exclude domain="root" path="app_webview/Default/Code Cache" />
+    <exclude domain="root" path="app_webview/Default/GPUCache" />
+    <exclude domain="root" path="app_webview/Default/Service Worker/CacheStorage" />
+    <exclude domain="root" path="app_webview/Default/Service Worker/ScriptCache" />
+    <exclude domain="root" path="app_webview/Default/blob_storage" />
+  </device-transfer>
+</data-extraction-rules>

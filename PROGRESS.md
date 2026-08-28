@@ -42622,3 +42622,34 @@ rendered under app B's History: the exact cross-app leak class #2658 closed for 
 with a reset effect keyed on the workspace id alone, and the census's numbers updated WITH the
 justification its own comment demands. That guard paying for itself is the strongest argument this
 codebase has for census-style tests.
+
+---
+
+## 2026-08-27 — Dependabot triage: two merged, one refused with a reason
+
+Admin: *"dependabot PRs check kar lo, safe wale merge kar do."* Each bump was VERIFIED locally
+(install → tsc both projects → real build → full suite) rather than judged by its version number.
+
+- ✅ **#2608 firebase 12.14 → 12.18** (minor). Clean everywhere. Merged.
+- ✅ **#2610 motion 12.40 → 13.1.1** (MAJOR, and still safe). Motion 13's only React breaking change
+  is dropping `@emotion/is-prop-valid` as an optional dependency, which affects styled-components /
+  Emotion users — this project uses neither. (The three `styled-components` hits in `src/` are
+  server-side DETECTORS that inspect a *user's* app: `DesignCoverage.ts`, `architectureInvariants.ts`
+  — reading a grep count as our own usage would have blocked a safe upgrade.) Our 26 files import
+  exactly two APIs, `motion` and `AnimatePresence`, both verified present at runtime. Merged.
+- ❌ **#2611 lucide-react 0.546 → 1.33 — NOT merged. It breaks the build.** v1 REMOVED the brand
+  icons; `Github` and `Figma` are gone, and `Github` alone is imported by 10+ components
+  (AuthComponent, SettingsPanel, GitPanel, AgentV3Panel, CICDPipeline, FileExplorer, AICodeReview…).
+
+⚠️ **THE FINDING WORTH KEEPING, because it inverts the usual assumption: `tsc --noEmit` PASSED on the
+broken upgrade.** Only the real `npm run build` (rollup) caught it —
+`"Github" is not exported by node_modules/lucide-react/dist/esm/lucide-react.mjs`. A session that
+typechecked a dependency bump and merged on green would have shipped a frontend that cannot build,
+i.e. a red `main` and a blocked deploy for everyone. **For a dependency bump, the build is the gate,
+not the typecheck** — and a runtime export check (import the package, assert every name the source
+imports actually exists) is cheaper than either and catches exactly this class.
+
+**To take #2611 later** it is a real, small piece of work, not a merge: replace the `Github` and
+`Figma` icons across those files — either with an inline brand SVG kept in one shared component
+(preferred: brand marks are a licensing question, and one copy is one decision) or with a neutral
+lucide icon. Until someone does that, the PR must stay open; merging it is a broken build.

@@ -1,7 +1,7 @@
 import UpdateBanner from './components/UpdateBanner';
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
-import { tokenFromDeepLink, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
+import { tokenFromDeepLink, ticketFromDeepLink, redeemGithubTicket, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
@@ -2387,8 +2387,28 @@ export default function App() {
         if (Capacitor.isNativePlatform?.() !== true) return;
         const { App: CapApp } = await import('@capacitor/app');
         const handle = await CapApp.addListener('appUrlOpen', (data: { url?: string }) => {
-          const token = tokenFromDeepLink(data?.url);
-          if (!token) return; // not our GitHub deep link — ignore
+          // A TICKET, when the server had a verified identity to bind one to; the raw token otherwise.
+          // Both are handled because the server chooses, not the client — see githubOauthReturn.ts.
+          // The ticket path exists because a custom URI scheme is claimable by any installed app, and
+          // this token carries `repo workflow` on all of the user's private repositories.
+          const ticket = ticketFromDeepLink(data?.url);
+          const directToken = tokenFromDeepLink(data?.url);
+          if (!ticket && !directToken) return; // not our GitHub deep link — ignore
+
+          void (async () => {
+            let token = directToken;
+            if (ticket) {
+              token = await redeemGithubTicket(ticket);
+              if (!token) {
+                // The ticket is single-purpose and short-lived; a failure here is a dead end, not
+                // something to retry silently. Say so and clear the overlay rather than spinning.
+                addLog('GitHub sign-in could not be completed. Please try connecting again.', 'error');
+                setGithubRedirectingMessage(null);
+                void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
+                return;
+              }
+            }
+            if (!token) return;
           setGithubToken(token);
           localStorage.setItem('gh_token', token);
           rememberGithubOwner(auth.currentUser?.uid);
@@ -2401,6 +2421,7 @@ export default function App() {
           // over a login that had already finished. The success path now has something to say.
           setGithubRedirectingMessage(null);
           void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
+          })();
         });
         removeGithubUrlOpen = () => { try { handle.remove(); } catch { /* already removed */ } };
 

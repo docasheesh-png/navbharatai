@@ -38,6 +38,37 @@ export function tokenFromDeepLink(url: string | null | undefined): string | null
   return token && token.trim() ? token : null;
 }
 
+/**
+ * The HANDOFF TICKET carried by a deep link, or null when there is none.
+ *
+ * WHY A TICKET AND NOT THE TOKEN (security audit finding 1, HIGH). A custom URI scheme is not exclusive
+ * on Android: any installed app may declare `com.navbharat.ai` and receive this link. Our GitHub scope
+ * is `repo workflow` — full read/write on every private repository the user has — so the token itself
+ * must never travel this way. The ticket is encrypted with the server key and bound to the uid that
+ * started the flow, so an app that intercepts it holds something it can neither read nor redeem.
+ *
+ * ⚠️ `tokenFromDeepLink` STAYS, and must. The server only sends a ticket to an app that asked for one
+ * AND was authenticated at the time; if either was missing it sends the legacy token, so the client has
+ * to understand both. Removing the token path would break the flow precisely when authentication was
+ * unavailable — the moment it is least helpful to fail.
+ */
+export function ticketFromDeepLink(url: string | null | undefined): string | null {
+  const raw = String(url ?? '');
+  if (!raw.includes('gh_ticket=')) return null;
+  const frag = raw.split('#')[1] ?? raw.split('?')[1] ?? '';
+  const ticket = new URLSearchParams(frag).get('gh_ticket');
+  return ticket && ticket.trim() ? ticket : null;
+}
+
+/**
+ * The query NavBharatAI adds when it wants a ticket rather than a raw token.
+ *
+ * Sent only by an app that understands `gh_ticket`. An older build omits it and keeps the exact flow it
+ * shipped with — which is the whole reason this is opt-in: the app runs from assets baked into its APK,
+ * so a server-side switch alone would break GitHub sign-in for everyone who has not updated.
+ */
+export const TICKET_HANDOFF_QUERY = 'handoff=ticket';
+
 /** What the app should do when it comes back to the foreground mid-sign-in. */
 export type ResumeOutcome =
   /** Still waiting with nothing to show for it — the user backed out. Say so and stop spinning. */
@@ -66,3 +97,38 @@ export const RESUME_GRACE_MS = 1_500;
 
 /** What the user is told when they come back without finishing. Never blames them, never spins on. */
 export const GITHUB_CANCELLED_MESSAGE = 'GitHub sign-in was not completed. You can try again.';
+
+/**
+ * Exchange a handoff ticket for the real GitHub token.
+ *
+ * The redemption is what makes an intercepted deep link worthless: it is authenticated with the user's
+ * Firebase ID token, which an app that merely grabbed the URI does not have. The ticket alone proves
+ * nothing.
+ *
+ * Returns null on any failure rather than throwing. The caller is a deep-link listener with no
+ * try/catch around it, and an unhandled rejection there would take down the handler for every future
+ * link, not just this one.
+ */
+export async function redeemGithubTicket(
+  ticket: string,
+  deps?: {
+    headers: () => Promise<Record<string, string>>;
+    post: (url: string, init: RequestInit) => Promise<Response>;
+  },
+): Promise<string | null> {
+  try {
+    const headers = deps ? await deps.headers() : await (await import('./authHeaders')).authJsonHeaders();
+    const post = deps?.post ?? ((url: string, init: RequestInit) => fetch(url, init));
+    const res = await post('/api/github/native-exchange', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ticket }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const token = typeof data?.token === 'string' ? data.token.trim() : '';
+    return token || null;
+  } catch {
+    return null;
+  }
+}

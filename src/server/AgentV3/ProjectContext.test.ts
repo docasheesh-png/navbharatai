@@ -72,11 +72,14 @@ describe('buildProjectContext — Claude-level memory for a follow-up build', ()
       projectMap: 'Project memory: 9 files, 30 symbols.\nComponents: Calculator, Display',
       recentRequests: ['ek calculator banao'],
     });
-    expect(ctx).toContain('CONTINUING an existing project');
+    // Reworded 2026-08-28 (the Dino-hijack autopsy): memory now SUBMITS to the current request
+    // instead of shouting "CONTINUING" unconditionally. The invariant kept: memory exists and leads.
+    expect(ctx).toContain('PROJECT MEMORY');
+    expect(ctx).toContain('CURRENT REQUEST below is your only task');
     expect(ctx).toContain('src/components/Calculator.tsx');
     expect(ctx).toContain('Components: Calculator, Display');
     expect(ctx).toContain('ek calculator banao');
-    expect(ctx).toContain('Do NOT ask "what would you like me to continue with"');
+    expect(ctx).toContain('Never ask "what would you like me to continue with"');
     // heavy dirs excluded
     expect(ctx).not.toContain('node_modules');
   });
@@ -88,7 +91,7 @@ describe('buildProjectContext — Claude-level memory for a follow-up build', ()
   it('works with only a file list (no map / requests)', () => {
     const ctx = buildProjectContext({ files: ['index.html'] });
     expect(ctx).toContain('index.html');
-    expect(ctx).toContain('CONTINUING');
+    expect(ctx).toContain('PROJECT MEMORY');
   });
 
   it('caps files and requests so the context stays compact', () => {
@@ -104,9 +107,11 @@ describe('buildProjectContext — Claude-level memory for a follow-up build', ()
       { title: 'Wire localStorage', status: 'pending' },
     ]);
     const ctx = buildProjectContext({ files: ['src/App.tsx'], lastPlan });
-    expect(ctx).toContain('plan you were working through');
+    expect(ctx).toContain('PREVIOUS build’s plan');
+    // …and the guard that ends the hijack class: a different request must drop the old plan.
+    expect(ctx).toContain('IGNORE it completely');
     expect(ctx).toContain('Build the timer UI');
-    expect(ctx).toContain('CONTINUE the unfinished items');
+    expect(ctx).toContain('resume its unfinished items without resetting to 0');
     expect(ctx).toContain('✓'); // done marker rendered
     expect(ctx).toContain('⋯'); // in-progress marker rendered
   });

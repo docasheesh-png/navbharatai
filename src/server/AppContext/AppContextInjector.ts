@@ -107,6 +107,12 @@ function dosingContext(userMessage: string): string {
       'NEWBORN DRUG DOSE — ALREADY CALCULATED FOR YOU. Give this to the user as it stands.',
       'Do NOT recalculate it, do NOT round it, and do NOT add a dose for any drug that is not in it.',
       'If it asks for the weight, the age in days or the indication, ASK THAT — never assume one.',
+      // MILLILITRES NEED THE VIAL, AND THE SERVER CANNOT KNOW IT. The offline assistant remembers the
+      // vial on the device; here it can only come from the message, so the model must ask rather than
+      // reach for a "usual" strength — vials differ, and a guessed concentration turns a correct dose
+      // into a confident wrong volume.
+      'NEVER work out millilitres yourself. mL needs the vial strength, which is not in the chart —',
+      'if the user wants mL and has not said the vial, ask for it (e.g. “ampicillin 500 mg in 5 ml”).',
       'You may translate it into the user\u2019s language and lay it out nicely; the numbers must not change.',
       '',
       answer,

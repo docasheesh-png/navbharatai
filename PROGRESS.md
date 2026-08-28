@@ -42929,3 +42929,41 @@ panel + the doctor's own 30-second entry is the design answer.
 redesign left two unused imports and CI caught them. The local gate now includes that step.
 
 **Store builds re-triggered after the merge** so the admin's Play upload carries the redesign, not V1.
+
+---
+
+## 2026-08-28 (night) — AUTOPSY: the Dino-hijack — the engine's own memory rebuilt the previous app (#2717)
+
+**The report:** Hospital Emergency Management (kimi-k2.5, 19.9 min, ok:true) whose final summary read
+"Aapka **Dino Run** game taiyaar hai! 🎮". **Ledger:** ✅ 5 self-heals (3 were retries around our own
+TDZ crash) · 🔀 2 workarounds (simple-build fallback; the model's own mid-build recovery) · ⏭️ 1 skip
+(5 routes never render-verified) · ❌ 4 shipped imperfect (the wrong-app summary; typecheck-failed on
+an ok build — honestly YELLOW-gated; vuln advisory; design D) · 🥵 3 struggles (~14 min spent building
+the WRONG app; 35% repeated reads; 3× TDZ).
+
+**Root cause, proven from the report (zero live user messages checked):** the workspace's previous
+build was a Dino Runner; `buildProjectContext` said unconditionally "you are CONTINUING… CONTINUE the
+unfinished items — do NOT reset the plan" with the dino plan attached. The builder obeyed: it called
+the user's just-written medical files "previous files", built the game, published it, and celebrated
+it. **The engine's own memory block out-shouted the user's request.**
+
+**Fixes (#2717, all test-pinned):**
+1. `ProjectContext.ts` — memory is SUBORDINATE to the current request: the old plan resumes only when
+   the request is itself a continuation; a different request must "IGNORE it completely". Priority
+   lives in the prompt where the model decides — a heuristic outside it would just recreate the bug
+   in the other direction (a genuine "continue" losing its plan).
+2. `offTopicSummary.ts` — deterministic net: a quoted app name in the prompt whose words never appear
+   in the final summary puts an honest warning ABOVE the celebration + `SUMMARY_OFF_TOPIC` in the
+   report. Pinned on the exact report pair. Narrow by design: ≥2-word quoted names only; one mention
+   anywhere silences it.
+3. `E2BActuator.ts` — the devCommand TDZ: `armKeepalive` closed over a `let` declared BELOW the
+   already-up fast path, so on exactly the adopted-server path the keepalive was built for, it threw
+   "Cannot access 'devCommand' before initialization" (3× in this build) and never armed. Declaration
+   hoisted (with its .env wrap); ordering source-pinned in `tests/devCommandOrdering.test.ts` because
+   tsc cannot check a closure's body against execution order.
+
+**Ops (recorded because it happened TWICE today):** the session container reverted to a stale snapshot
+again; the fixes were first built on it, caught via the commit's parent (20d18436), transplanted onto
+real `main` by cherry-pick (one conflict — kept BOTH honesty blocks: #2679's Green-Guard correction
+and the new off-topic net), fully re-verified (1420 files / 18,701 tests). **Standing rule: `git fetch
+origin main` + base check before every claim — including MID-session, not just at the start.**

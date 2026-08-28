@@ -20,10 +20,11 @@ import { X, Pill, Trash2, Plus, Pencil, ChevronDown, ChevronRight } from 'lucide
 import { cn } from '../../lib/utils';
 import {
   NEONATAL_DRUGS, calculateNeonatalDose, parseConcentration, needsIndication,
-  MIN_WEIGHT_KG, MAX_WEIGHT_KG, DOSING_SOURCE, DOSING_CAUTION,
+  DOSING_SOURCE, DOSING_CAUTION,
   type DrugEntry, type Indication, type DoseResult,
 } from '../../lib/neonatalDosing';
 import { loadVials, saveVial, forgetVial } from '../../lib/vialMemory';
+import { QuickCalcs, CalcTabs } from './QuickCalcs';
 import {
   loadCustomMedicines, saveCustomMedicine, deleteCustomMedicine, validateCustomMedicine,
   computeCustomDose, searchMedicines, type CustomMedicine, type CustomDoseUnit,
@@ -48,6 +49,8 @@ interface MedForm { name: string; unit: CustomDoseUnit; dosePerKg: string; doseP
 const emptyForm = (): MedForm => ({ name: '', unit: 'mg/kg', dosePerKg: '', dosePerKgMax: '', maxDoseMg: '', route: 'IV', mgPerMl: '', notes: '' });
 
 export function DoseCalculator({ onClose }: { onClose: () => void }) {
+  // Medicines vs the pure unit converters (pump mL/h, drip rate, dilution) — two jobs, one sheet.
+  const [tab, setTab] = useState<'meds' | 'calcs'>('meds');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Selected>(null);
   const [weight, setWeight] = useState('');
@@ -141,6 +144,9 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="p-4 space-y-4">
+          <CalcTabs tab={tab} onTab={setTab} />
+          {tab === 'calcs' && <QuickCalcs />}
+          {tab === 'meds' && <>
           {/* 1 — TYPE BOX. Typing proposes; the tap decides. Never computes from free text alone. */}
           <div>
             <input
@@ -422,6 +428,7 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
           <p className="text-[9px] text-[#484f58] leading-relaxed pb-2">
             {DOSING_SOURCE}. {DOSING_CAUTION}
           </p>
+          </>}
         </div>
       </div>
     </div>

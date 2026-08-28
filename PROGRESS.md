@@ -42794,3 +42794,43 @@ a UI, because it had shipped with none and curl-with-a-token is indistinguishabl
 🔴 **OPEN:** none of it FIXES Apple login. The four values live in Firebase Console → Authentication →
 Sign-in method → Apple (Services ID `com.navbharatai.web`, Team ID, Key ID, .p8), which no session can
 read. What changed is that the next attempt reports WHY.
+
+---
+
+## 2026-08-28 — ADMIN MANDATE (future, production): Doctor AI = verified doctors only + referenced answers
+
+**The admin's note, recorded verbatim in intent (Hinglish original):** when the app reaches full
+production, (1) Doctor AI is to be enabled ONLY for real doctors, verified via **ABDM HPR** (Ayushman
+Bharat Digital Mission — Healthcare Professional Registry); (2) every Doctor AI answer must be
+verified against trusted sources — WHO, Government of India, Government of Uttar Pradesh, and a
+curated list of top trusted medical sites ("top 50") — and (3) **every answer must end with its
+references.**
+
+**Honest technical shaping (rule 3 — recorded so a future session builds the RIGHT thing):**
+
+- **The references half is the real, buildable half — and its foundation already exists.**
+  `src/server/lib/clinical/knowledgeBase.ts` already carries curated clinical cards, EVERY one with a
+  `source:` field (WHO IMCI, Surviving Sepsis, …), retrieved per message and injected with a "use and
+  cite these" instruction. The neonatal dosing calculator is the same pattern made absolute: numbers
+  from a government chart, source printed on every answer, model unable to alter them. The production
+  path is to GROW this: more curated, source-carrying cards (the admin's "top 50" list becomes the
+  list of approved SOURCES for cards, reviewed by a human), plus a hard output contract that an
+  answer's final section lists the sources of the cards actually used — and says plainly when an
+  answer rests on general reasoning with NO grounded card, rather than inventing a citation. A cited
+  card is verifiable; a scraped webpage judged by a model at answer time is not.
+
+- **"Verify in background against 50 websites per answer" as literally stated would make every answer
+  slower and NOT safer** (live scraping breaks silently; and the verifier would itself be a model
+  judgment — a second opinion, not a proof). The curated-cards route delivers the admin's actual goal
+  — answers a doctor can check against a named trusted source — deterministically and instantly. If
+  live retrieval is ever added, it should be limited to the approved domain list and clearly labelled
+  as retrieval, never as verification.
+
+- **ABDM HPR gating is real and feasible but is ADMIN INFRA** (rule 6): it needs NavBharatAI's ABDM
+  registration and HPR API credentials, which only the admin can obtain. Until those exist, this
+  stays an open item — the gate must not ship as a fake "verified" badge. The existing
+  Professional-Pass gate (`passGate.ts`) is the natural place the HPR check slots into.
+
+**State: NOT BUILT — recorded mandate.** Nothing of this is claimed to exist yet (rule 2). Next
+session picking this up: start with the output-contract + card-growth half (no external dependency),
+leave the HPR gate until the admin has ABDM credentials in hand.

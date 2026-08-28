@@ -193,6 +193,7 @@ describe('the answer a person reads', () => {
     expect(text).toMatch(/125 mg/);
     expect(text).toMatch(/50 mg\/kg × 2.5 kg = 125 mg/);
     expect(text).toMatch(/every 12 hours/);
+    expect(text).toMatch(/Uttar Pradesh/);
     expect(text).toMatch(/Facility Based Newborn Care/);
   });
 

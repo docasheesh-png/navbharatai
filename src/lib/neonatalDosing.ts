@@ -38,7 +38,7 @@
 
 /** The exact source, carried into every answer so a nurse can check the number against the page. */
 export const DOSING_SOURCE =
-  'Facility Based Newborn Care operational guide — Chart 13 (commonly used drugs) and the neonatal sepsis antibiotic tables';
+  'Government of Uttar Pradesh — Facility Based Newborn Care operational guide: Chart 13 (commonly used drugs) and the neonatal sepsis antibiotic tables';
 
 /** What the calculator will not do silently, said once and shown with every answer. */
 export const DOSING_CAUTION =

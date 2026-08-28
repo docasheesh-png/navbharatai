@@ -714,20 +714,38 @@ describe('THE 💊 DOSE CALCULATOR — the form the chat failures cannot reach',
     expect(calc).not.toMatch(/mgPerKg\s*\*\s*weight/);
   });
 
-  it('the drug is a BUTTON, not a text field — the spelling failure cannot exist here', () => {
+  it('SELECTION IS A TAP, even with the search box — typing only ever proposes', () => {
+    // The ER redesign (admin 2026-08-28) added a "Google jaisa" type box. The invariant that survives
+    // it: the input's onChange does nothing but update the query — a medicine is selected ONLY by
+    // tapping a suggestion or a chip, so free text alone can never compute a dose.
+    expect(calc).toContain('onChange={(e) => setQuery(e.target.value)}');
     expect(calc).toContain('NEONATAL_DRUGS.map((d) =>');
-    expect(calc).not.toMatch(/input[^>]*placeholder[^>]*drug/i);
+    expect(calc).toContain('searchMedicines(query, customList)');
+  });
+
+  it("the doctor's OWN medicines: add/edit/delete, validated, computed by the lib — never by JSX", () => {
+    for (const fn of ['loadCustomMedicines', 'saveCustomMedicine', 'deleteCustomMedicine', 'validateCustomMedicine', 'computeCustomDose']) {
+      expect(calc).toContain(fn);
+    }
+    // The custom result renders the lib's line — amount, workings, the doctor-as-source label.
+    expect(calc).toContain('customResult.line.sourceLine');
+  });
+
+  it('a medicine NOT found gets the honest panel + add-it-yourself — never a number from memory', () => {
+    expect(calc).toContain('never gives a');
+    expect(calc).toContain('dose from memory');
+    expect(calc).toContain('Add it yourself from your unit protocol');
   });
 
   it('indication is chips with NO default — nothing may quietly choose 50 vs 100 mg/kg', () => {
     expect(calc).toContain("useState<Indication | null>(null)");
-    expect(calc).toContain('needsIndication(drug)');
+    expect(calc).toContain('needsIndication(selected.drug)');
   });
 
   it('vials are the SAME device memory the chats use — told once, known everywhere', () => {
     expect(calc).toContain('loadVials()');
-    expect(calc).toContain('saveVial(drug.id, typedVial)');
-    expect(calc).toContain('forgetVial(drug.id)');
+    expect(calc).toContain('saveVial(selected.drug.id, typedVial)');
+    expect(calc).toContain('forgetVial(selected.drug.id)');
     // …and Doctor AI's chat sends them with each turn, so chat answers carry mL too.
     expect(surface).toContain('vials: loadVials()');
   });

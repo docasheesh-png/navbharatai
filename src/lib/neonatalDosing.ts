@@ -235,6 +235,8 @@ export interface DosePart {
   duration?: string;
   /** The arithmetic, written out, so anyone can check it: "20 mg/kg × 3 kg = 60 mg". */
   workings: string;
+  /** The same dose in millilitres, when a concentration is known. Absent is normal, never an error. */
+  volume?: string;
 }
 
 export interface DoseResult {
@@ -255,6 +257,10 @@ export interface DoseQuery {
   weightKg?: number | null;
   ageDays?: number | null;
   indication?: Indication | null;
+  /** The vial as it was made up, when the user said it in this message. */
+  concentration?: Concentration | null;
+  /** What this device already knows about each drug's vial — see ConcentrationMemory. */
+  known?: ConcentrationMemory;
 }
 
 /** Trim float noise without hiding a real decimal: 67.5 stays, 0.30000000000000004 becomes 0.3. */
@@ -263,7 +269,61 @@ export function formatMg(value: number): string {
   return String(Number(rounded.toFixed(3)));
 }
 
-/** Match what the user typed to a drug in the chart. Never fuzzy — a near-miss returns null. PURE. */
+/** Levenshtein distance, abandoned once it exceeds `max` (cheap, and `max` is always tiny). PURE. */
+export function editDistance(a: string, b: string, max = 2): number {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + cost);
+      if (row[j] < best) best = row[j];
+    }
+    if (best > max) return max + 1; // whole row already too far — nothing below can recover
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+/**
+ * Only long names are spell-corrected. A short token is too easy to turn into a different word, and the
+ * abbreviations users type ("genta", "vit k") are already explicit aliases, so they need no guessing.
+ *
+ * SET TO 8 BY A TEST, NOT BY TASTE. At 7 the ordinary English word "vitamin" came within one edit of
+ * "vitamink" and resolved to Vitamin K — so "vitamin dose for baby", from someone meaning vitamin D,
+ * would have produced a specific drug. The bar is therefore "long enough not to be an everyday word",
+ * and 8 clears it while still catching every real misspelling this is for: aminophyline (12),
+ * gentamicine (11), phenobarbitol (13), cefotaxim (9).
+ */
+export const FUZZY_MIN_LENGTH = 8;
+/** How wrong a spelling may be and still resolve. Two edits covers the real misspellings; see the test. */
+export const FUZZY_MAX_DISTANCE = 2;
+
+/**
+ * Match what the user typed to a drug in the chart.
+ *
+ * EXACT FIRST, then a tightly-bounded spelling tolerance.
+ *
+ * 🔒 WHY THE TOLERANCE EXISTS (admin's live test, 2026-08-27). They typed "aminophyline" — one L — and
+ * NOTHING matched, so no dose was injected, and the online model fell back to its own instinct and
+ * refused outright: "मैं आपको किसी भी दवा का dose नहीं बता सकता." The chart was right there and the user
+ * got nothing. In an emergency nobody spells "aminophylline" correctly, and a dosing aid that requires
+ * perfect spelling is a dosing aid that fails when it matters.
+ *
+ * 🔒 AND WHY IT IS SO NARROW. A fuzzy match on a DRUG NAME that lands on the wrong drug is worse than
+ * no match at all. So: long words only, at most two edits, and — the real safeguard — the candidate
+ * must be unambiguous. If a misspelling sits within range of TWO different drugs, this returns null
+ * and the user is asked, because guessing between two drugs is not a guess anyone should make for them.
+ *
+ * MEASURED, NOT ASSUMED: the closest two drug names in this chart are 4 edits apart ("ampicilin" vs
+ * "amikacin"), pinned by test. At a threshold of 2 that separation does NOT make a collision
+ * impossible — a word sitting exactly midway would be within range of both — which is precisely why
+ * the ambiguity branch exists. The guarantee this gives is the one that matters: a collision can never
+ * yield the WRONG DRUG, only an honest "I could not tell". PURE.
+ */
 export function findDrug(input: string): DrugEntry | null {
   const q = String(input ?? '').toLowerCase().trim().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!q) return null;
@@ -273,6 +333,20 @@ export function findDrug(input: string): DrugEntry | null {
       // by accident from the other direction — an abbreviation must be an alias to count.
       if (q === a || q.includes(` ${a} `) || q.startsWith(`${a} `) || q.endsWith(` ${a}`)) return d;
     }
+  }
+  // Spelling tolerance, word by word. A hit must be unique across the whole chart.
+  for (const word of q.split(' ')) {
+    if (word.length < FUZZY_MIN_LENGTH) continue;
+    let hit: DrugEntry | null = null;
+    let ambiguous = false;
+    for (const d of NEONATAL_DRUGS) {
+      const near = d.aliases.some((a) => a.length >= FUZZY_MIN_LENGTH && editDistance(word, a, FUZZY_MAX_DISTANCE) <= FUZZY_MAX_DISTANCE);
+      if (!near) continue;
+      if (hit && hit.id !== d.id) { ambiguous = true; break; }
+      hit = d;
+    }
+    if (ambiguous) return null; // two candidates — ask, never pick
+    if (hit) return hit;
   }
   return null;
 }
@@ -412,12 +486,19 @@ export function calculateNeonatalDose(query: DoseQuery): DoseResult {
     warnings.push('The chart writes “<7 days” and “>7 days”, so day 7 exactly is not spelled out. I have used the 7-days-and-over schedule — confirm which your unit follows.');
   }
 
+  // THE VIAL: what the user just said, else what this device already knows for THIS drug. Never a
+  // default — see the milligrams-to-millilitres note above for why a plausible concentration is the
+  // most dangerous thing that could be hardcoded here.
+  const conc = query.concentration ?? query.known?.[drug.id] ?? null;
+
   const parts: DosePart[] = list.map((r) => {
     const frequency = r.freqAnyAge ?? (olderSchedule ? r.freq7dPlus : r.freqUnder7d);
     if (typeof r.fixedMg === 'number') {
+      const v = conc ? volumeLine(r.fixedMg, conc) : null;
+      if (v?.warning) warnings.push(v.warning);
       return {
         label: r.label, amount: `${formatMg(r.fixedMg)} mg`, perKg: `${formatMg(r.fixedMg)} mg (fixed dose)`,
-        frequency, route: r.route, over: r.over, duration: r.duration,
+        frequency, route: r.route, over: r.over, duration: r.duration, volume: v?.text,
         workings: `${formatMg(r.fixedMg)} mg — a fixed dose, not multiplied by weight`,
       };
     }
@@ -428,8 +509,30 @@ export function calculateNeonatalDose(query: DoseQuery): DoseResult {
     const workings = hi === null
       ? `${r.mgPerKg} mg/kg × ${formatMg(weight ?? 0)} kg = ${formatMg(lo)} mg`
       : `${r.mgPerKg}–${r.mgPerKgMax} mg/kg × ${formatMg(weight ?? 0)} kg = ${formatMg(lo)}–${formatMg(hi)} mg`;
-    return { label: r.label, amount, perKg, frequency, route: r.route, over: r.over, duration: r.duration, workings };
+    let volume: string | undefined;
+    if (conc) {
+      if (hi === null) {
+        const v = volumeLine(lo, conc);
+        volume = v.text;
+        if (v.warning) warnings.push(v.warning);
+      } else {
+        // A dose RANGE stays a range in millilitres too. Collapsing "30–40 mg" to one volume would
+        // silently choose the dose for the prescriber, which is not this calculator's decision to make.
+        const vLo = volumeLine(lo, conc);
+        const vHi = volumeLine(hi, conc);
+        volume = `${formatMg(mgToMl(lo, conc))}–${formatMg(mgToMl(hi, conc))} mL at ${conc.label}`;
+        for (const w of [vLo.warning, vHi.warning]) if (w) warnings.push(w);
+      }
+    }
+    return { label: r.label, amount, perKg, frequency, route: r.route, over: r.over, duration: r.duration, workings, volume };
   });
+
+  // NO VIAL YET — the milligrams still stand. This is an OFFER, never a refusal: the mg figure is
+  // correct regardless, and withholding it until a concentration arrives would make the tool useless
+  // at exactly the moment it is needed.
+  if (!conc && parts.some((p) => p.amount)) {
+    warnings.push('Tell me the vial once — e.g. “ampicillin 500 mg in 5 ml” — and I will give every dose in mL as well, and remember it for next time.');
+  }
 
   return { ok: true, drugLabel: drug.label, parts, warnings, needs: [], source: DOSING_SOURCE };
 }
@@ -478,13 +581,37 @@ export function parseAgeDays(input: string): number | null {
 }
 
 /** Everything the calculator needs, read out of one free-text message. PURE. */
-export function parseDoseQuestion(message: string): DoseQuery {
+export function parseDoseQuestion(message: string, known: ConcentrationMemory = {}): DoseQuery {
   return {
     drug: String(message ?? ''),
     weightKg: parseWeightKg(message),
     ageDays: parseAgeDays(message),
     indication: findIndication(message),
+    concentration: parseConcentration(message),
+    known,
   };
+}
+
+/**
+ * Did this message TEACH a vial rather than ask a dose? ("ampicillin 500 mg in 5 ml")
+ *
+ * Kept separate from the dose path so telling the tool about a vial can never be mistaken for asking
+ * for a dose, and so the answer can confirm what was stored — a remembered concentration that the user
+ * never saw confirmed is a number they cannot check. PURE.
+ */
+export function parseVialTeaching(message: string): { drug: DrugEntry; concentration: Concentration } | null {
+  const drug = findDrug(message);
+  const concentration = parseConcentration(message);
+  if (!drug || !concentration) return null;
+  // A message that also carries a weight is a dose QUESTION that happens to name the vial, not a
+  // teaching — answer it, and let the caller store the vial alongside.
+  if (parseWeightKg(message) !== null) return null;
+  return { drug, concentration };
+}
+
+/** What the user is told when a vial is remembered — always echoing the number back to be checked. */
+export function vialRememberedMessage(drug: DrugEntry, c: Concentration): string {
+  return `Saved: ${drug.label} ${c.label} (${formatMg(c.mgPerMl)} mg per mL). From now on I will give ${drug.label} doses in mg and mL — just tell me the weight. Say it again any time the vial changes.`;
 }
 
 /**
@@ -520,6 +647,7 @@ export function formatDoseAnswer(r: DoseResult): string {
     if (p.over) bits.push(p.over);
     bits.push(p.route);
     lines.push(bits.join(' · '));
+    if (p.volume) lines.push(`   = ${p.volume}`);
     lines.push(`   ${p.workings}   (chart: ${p.perKg})`);
     if (p.duration) lines.push(`   Duration: ${p.duration}`);
   }
@@ -531,7 +659,114 @@ export function formatDoseAnswer(r: DoseResult): string {
   return lines.join('\n');
 }
 
+/**
+ * The reply to send WITHOUT calling a model, or null when the model should handle the turn.
+ *
+ * Returns text ONLY for a question the chart can answer completely. A question still missing the
+ * weight, the age or the indication returns null on purpose: that is a conversation, and the model can
+ * have it in the user's own language. This function exists for the case where there is nothing left to
+ * discuss and everything to lose by discussing it. PURE.
+ */
+export function directDoseReply(message: string, known: ConcentrationMemory = {}): string | null {
+  if (!isDoseQuestion(message)) return null;
+  const result = calculateNeonatalDose(parseDoseQuestion(message, known));
+  if (!result.ok) return null;
+  return formatDoseAnswer(result);
+}
+
 /** One-call convenience for a chat surface: message in, answer out. PURE. */
-export function answerDoseQuestion(message: string): string {
-  return formatDoseAnswer(calculateNeonatalDose(parseDoseQuestion(message)));
+export function answerDoseQuestion(message: string, known: ConcentrationMemory = {}): string {
+  return formatDoseAnswer(calculateNeonatalDose(parseDoseQuestion(message, known)));
+}
+
+// ── MILLILITRES ─────────────────────────────────────────────────────────────────────────────────────
+//
+// ADMIN 2026-08-27: "dose mujhe ml me chahiye … mg aur ml dono me aaye."
+//
+// 🔒 THE ONE THING THAT MAKES THIS SAFE: mg → mL NEEDS A CONCENTRATION, AND THE CHART HAS NONE.
+//
+// A vial's strength and the volume it is reconstituted in are decisions made at the cot side, and they
+// vary — ampicillin comes as 250 mg, 500 mg and 1 g, and how much water goes in is unit protocol. So
+// there is no "standard" concentration to hardcode, and hardcoding a plausible one would be the exact
+// failure this whole module was written to prevent: a number that looks measured and is guessed. A
+// wrong concentration does not produce an obviously wrong answer — it produces a confident, tidy mL
+// figure that is two or four times the intended dose.
+//
+// So: the concentration comes FROM THE USER, once. It is then remembered per drug, which is what makes
+// this fast in the emergency it is for — the second time you ask, you only give the weight.
+//
+// AND THE mg ANSWER IS NEVER BLOCKED BY A MISSING CONCENTRATION. The milligrams are correct whether or
+// not we can express them in millilitres, so they are always given, with the mL offered on top.
+
+/** How much drug is in one millilitre, and where that number came from. */
+export interface Concentration {
+  mgPerMl: number;
+  /** Exactly what the user said, echoed back so they can check we read the vial right. */
+  label: string;
+}
+
+/** Remembered per drug, so an emergency question is just the weight. Keyed by DrugId. */
+export type ConcentrationMemory = Partial<Record<DrugId, Concentration>>;
+
+/** A dose small enough that an ordinary syringe cannot measure it honestly. */
+export const TINY_VOLUME_ML = 0.1;
+/** A single IV push volume large enough for a newborn that it is worth a second look. */
+export const LARGE_VOLUME_ML = 5;
+
+/**
+ * Read a concentration out of the way a nurse actually writes one.
+ *
+ * Accepts "100 mg/ml", "500 mg in 5 ml", "500mg/5ml", "1 g in 10 ml", "250 mg vial in 2.5 ml".
+ * Returns null for anything it cannot read with certainty — a half-understood concentration is worse
+ * than none, because the mg answer alone is still safe while a wrong mL is not. PURE.
+ */
+export function parseConcentration(input: string): Concentration | null {
+  const q = String(input ?? '').toLowerCase().replace(/\s+/g, ' ');
+
+  // "500 mg in 5 ml" / "500 mg / 5 ml" / "1 g in 10 ml" — a strength and the volume it sits in.
+  const pair = /(\d+(?:\.\d+)?)\s*(mg|g|gm|gram|grams)\b[^0-9]{0,20}?(\d+(?:\.\d+)?)\s*(ml|cc)\b/.exec(q);
+  if (pair) {
+    const amount = Number(pair[1]);
+    const mg = /^m/.test(pair[2]) ? amount : amount * 1000; // g → mg
+    const ml = Number(pair[3]);
+    if (Number.isFinite(mg) && Number.isFinite(ml) && mg > 0 && ml > 0) {
+      return { mgPerMl: mg / ml, label: `${formatMg(mg)} mg in ${formatMg(ml)} mL` };
+    }
+  }
+
+  // "100 mg/ml" — already per millilitre.
+  const perMl = /(\d+(?:\.\d+)?)\s*(mg|g|gm)\s*(?:\/|per\s*)\s*(?:1\s*)?(?:ml|cc)\b/.exec(q);
+  if (perMl) {
+    const amount = Number(perMl[1]);
+    const mg = /^m/.test(perMl[2]) ? amount : amount * 1000;
+    if (Number.isFinite(mg) && mg > 0) return { mgPerMl: mg, label: `${formatMg(mg)} mg/mL` };
+  }
+  return null;
+}
+
+/** Millilitres for a milligram amount, rounded to what a syringe can actually show. PURE. */
+export function mgToMl(mg: number, c: Concentration): number {
+  return Math.round((mg / c.mgPerMl) * 100) / 100;
+}
+
+/**
+ * The volume line for one dose, plus any warning the volume itself deserves.
+ *
+ * ⚠️ NEVER ROUNDS TO ZERO. A 0.04 mL dose displayed as "0 mL" is a dose not given; it is shown as
+ * "less than 0.1 mL" with an instruction to dilute, because that is the truth and it is actionable.
+ * PURE.
+ */
+export function volumeLine(mg: number, c: Concentration): { text: string; warning?: string } {
+  const ml = mgToMl(mg, c);
+  if (ml < TINY_VOLUME_ML) {
+    return {
+      text: `less than ${TINY_VOLUME_ML} mL (${formatMg(ml)} mL) at ${c.label}`,
+      warning: `That volume is too small to draw up accurately — dilute it further, or use a syringe that can measure ${formatMg(ml)} mL.`,
+    };
+  }
+  const line = `${formatMg(ml)} mL at ${c.label}`;
+  if (ml > LARGE_VOLUME_ML) {
+    return { text: line, warning: `${formatMg(ml)} mL is a large volume for one newborn dose — check the vial strength you entered.` };
+  }
+  return { text: line };
 }

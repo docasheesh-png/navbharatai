@@ -17,7 +17,8 @@
 
 import { APP_KNOWLEDGE_BASE, type AppFeature } from '../server/AppContext/AppKnowledgeBase';
 import { DEVICE_KNOWLEDGE_BASE, type DeviceHelp } from './deviceKnowledgeBase';
-import { isDoseQuestion, answerDoseQuestion } from './neonatalDosing';
+import { isDoseQuestion, answerDoseQuestion, parseVialTeaching, vialRememberedMessage } from './neonatalDosing';
+import { loadVials, saveVial } from './vialMemory';
 export type { DeviceHelp } from './deviceKnowledgeBase';
 
 export interface OfflineMatch {
@@ -516,12 +517,24 @@ export function answerOffline(query: string, now: Date = new Date(), memories: U
   // bata de" requires. Placed BEFORE quickAnswer deliberately — "ampicillin dose for 2.5 kg" is full of
   // digits, and the arithmetic evaluator would otherwise try to make a sum out of it. Strictly gated
   // (`isDoseQuestion` needs a drug FROM THE CHART plus a dosing cue), so ordinary talk never lands here.
+  // TELLING IT THE VIAL ("ampicillin 500 mg in 5 ml") is handled FIRST and separately, so it can never
+  // be mistaken for asking a dose — and the reply echoes the number back, because a remembered value
+  // the user never saw confirmed is a value they cannot check.
+  const vial = parseVialTeaching(query);
+  if (vial) {
+    saveVial(vial.drug.id, vial.concentration);
+    return {
+      kind: 'answer', answerKind: 'dose', lead: 'Vial saved on this device',
+      answerText: vialRememberedMessage(vial.drug, vial.concentration), matches: [],
+    };
+  }
   if (isDoseQuestion(query)) {
     return {
       kind: 'answer',
       answerKind: 'dose',
       lead: 'From the newborn dosing chart',
-      answerText: answerDoseQuestion(query),
+      // The vials this device already knows, so an emergency question is only ever the weight.
+      answerText: answerDoseQuestion(query, loadVials()),
       matches: [],
     };
   }

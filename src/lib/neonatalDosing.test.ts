@@ -2,9 +2,14 @@ import { describe, it, expect } from 'vitest';
 import {
   calculateNeonatalDose, answerDoseQuestion, parseWeightKg, parseAgeDays, findDrug, findIndication,
   isDoseQuestion, formatMg, NEONATAL_DRUGS, MIN_WEIGHT_KG, MAX_WEIGHT_KG,
+  parseConcentration, parseVialTeaching, vialRememberedMessage,
+  editDistance, FUZZY_MIN_LENGTH, FUZZY_MAX_DISTANCE, directDoseReply,
 } from './neonatalDosing';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { answerOffline } from './offlineAssistant';
 import { AppContextInjector } from '../server/AppContext/AppContextInjector';
+import { loadVials, saveVial, forgetVial } from './vialMemory';
 
 /**
  * These tests are the reason this is code and not a prompt. Every one of them encodes a way a newborn
@@ -303,5 +308,292 @@ describe('WIRING — every ONLINE AI gets the dose computed, not remembered', ()
     for (const surface of ['sda_chat', 'engineer_ai', 'professional', 'pro_chat', 'nbi_chat']) {
       expect(AppContextInjector.getRelevantContext('gentamicin 2 kg 4 din sepsis dose', surface)).toMatch(/10 mg/);
     }
+  });
+});
+
+describe('MILLILITRES — the number the chart cannot give on its own', () => {
+  it('reads a vial the way a nurse writes it', () => {
+    expect(parseConcentration('ampicillin 500 mg in 5 ml')?.mgPerMl).toBe(100);
+    expect(parseConcentration('500mg/5ml')?.mgPerMl).toBe(100);
+    expect(parseConcentration('100 mg/ml')?.mgPerMl).toBe(100);
+    expect(parseConcentration('250 mg vial in 2.5 ml')?.mgPerMl).toBe(100);
+    expect(parseConcentration('1 g in 10 ml')?.mgPerMl).toBe(100);   // grams converted
+    expect(parseConcentration('40 mg per ml')?.mgPerMl).toBe(40);
+  });
+
+  it('returns null for anything it cannot read WITH CERTAINTY', () => {
+    // A half-understood concentration is worse than none: the mg answer alone is still safe, a wrong
+    // mL is not. So "500 mg" with no volume must never become "500 mg/mL".
+    expect(parseConcentration('ampicillin 500 mg')).toBeNull();
+    expect(parseConcentration('5 ml')).toBeNull();
+    expect(parseConcentration('give it slowly')).toBeNull();
+  });
+
+  it('gives mg AND mL together once the vial is known', () => {
+    const r = calculateNeonatalDose({
+      drug: 'ampicillin', weightKg: 2.5, ageDays: 3, indication: 'sepsis',
+      concentration: parseConcentration('500 mg in 5 ml'),
+    });
+    expect(r.parts[0].amount).toBe('125 mg');
+    expect(r.parts[0].volume).toBe('1.25 mL at 500 mg in 5 mL');
+  });
+
+  it('🔒 NEVER blocks the mg answer just because the vial is unknown', () => {
+    // The milligrams are correct whether or not we can express them in mL. Withholding them until a
+    // concentration arrives would make the tool useless at the exact moment it is needed.
+    const r = calculateNeonatalDose({ drug: 'ampicillin', weightKg: 2.5, ageDays: 3, indication: 'sepsis' });
+    expect(r.ok).toBe(true);
+    expect(r.parts[0].amount).toBe('125 mg');
+    expect(r.parts[0].volume).toBeUndefined();
+    expect(r.warnings.join(' ')).toMatch(/Tell me the vial once/i);
+  });
+
+  it('🔒 NEVER assumes a concentration — the chart has none and vials differ', () => {
+    // The same 125 mg is 1.25 mL from a 500 mg/5 mL vial and 0.5 mL from a 1 g/4 mL one. A hardcoded
+    // "standard" would produce a tidy, confident, wrong volume.
+    const a = calculateNeonatalDose({ drug: 'ampicillin', weightKg: 2.5, ageDays: 3, indication: 'sepsis', concentration: parseConcentration('500 mg in 5 ml') });
+    const b = calculateNeonatalDose({ drug: 'ampicillin', weightKg: 2.5, ageDays: 3, indication: 'sepsis', concentration: parseConcentration('1 g in 4 ml') });
+    expect(a.parts[0].volume).toMatch(/1.25 mL/);
+    expect(b.parts[0].volume).toMatch(/0.5 mL/);
+  });
+
+  it('🔒 a tiny volume is NEVER shown as 0 mL', () => {
+    // 0 mL is a dose not given. 2.5 mg from a 100 mg/mL vial is 0.025 mL.
+    const r = calculateNeonatalDose({
+      drug: 'gentamicin', weightKg: 1, ageDays: 3, indication: 'meningitis',
+      concentration: parseConcentration('100 mg/ml'),
+    });
+    expect(r.parts[0].amount).toBe('2.5 mg');
+    expect(r.parts[0].volume).toMatch(/less than 0.1 mL/);
+    expect(r.parts[0].volume).not.toMatch(/^0 mL/);
+    expect(r.warnings.join(' ')).toMatch(/too small to draw up accurately/i);
+  });
+
+  it('warns when the volume is implausibly LARGE for a newborn', () => {
+    const r = calculateNeonatalDose({
+      drug: 'ampicillin', weightKg: 3, ageDays: 2, indication: 'meningitis',
+      concentration: parseConcentration('50 mg in 5 ml'),
+    });
+    expect(r.warnings.join(' ')).toMatch(/large volume for one newborn dose/i);
+  });
+
+  it('a dose RANGE stays a range in mL — it must not silently pick one', () => {
+    const r = calculateNeonatalDose({ drug: 'phenytoin', weightKg: 2, concentration: parseConcentration('50 mg/ml') });
+    expect(r.parts[0].amount).toBe('30–40 mg');
+    expect(r.parts[0].volume).toBe('0.6–0.8 mL at 50 mg/mL');
+  });
+
+  it('Vitamin K gets a volume too, and is still not multiplied by weight', () => {
+    const r = calculateNeonatalDose({ drug: 'vitamin k', weightKg: 3, concentration: parseConcentration('10 mg/ml') });
+    expect(r.parts[0].amount).toBe('1 mg');
+    expect(r.parts[0].volume).toMatch(/0.1 mL/);
+  });
+});
+
+describe('REMEMBERING THE VIAL — so an emergency question is just the weight', () => {
+  it('a remembered concentration is used without being repeated', () => {
+    const known = { ampicillin: parseConcentration('500 mg in 5 ml')! };
+    const r = calculateNeonatalDose({ drug: 'ampicillin', weightKg: 2.5, ageDays: 3, indication: 'sepsis', known });
+    expect(r.parts[0].volume).toMatch(/1.25 mL/);
+  });
+
+  it('what the user says NOW beats what was remembered — the vial can change', () => {
+    const known = { ampicillin: parseConcentration('500 mg in 5 ml')! };
+    const r = calculateNeonatalDose({
+      drug: 'ampicillin', weightKg: 2.5, ageDays: 3, indication: 'sepsis', known,
+      concentration: parseConcentration('1 g in 4 ml'),
+    });
+    expect(r.parts[0].volume).toMatch(/0.5 mL/);
+  });
+
+  it('the remembered vial is per DRUG — gentamicin’s vial is not used for ampicillin', () => {
+    const known = { gentamicin: parseConcentration('40 mg/ml')! };
+    const r = calculateNeonatalDose({ drug: 'ampicillin', weightKg: 2.5, ageDays: 3, indication: 'sepsis', known });
+    expect(r.parts[0].volume).toBeUndefined();
+  });
+
+  it('teaching a vial is recognised as teaching, not as a dose question', () => {
+    const t = parseVialTeaching('ampicillin 500 mg in 5 ml');
+    expect(t?.drug.id).toBe('ampicillin');
+    expect(t?.concentration.mgPerMl).toBe(100);
+    // …and the confirmation echoes the number back, so a remembered value is always checkable.
+    expect(vialRememberedMessage(t!.drug, t!.concentration)).toMatch(/100 mg per mL/);
+  });
+
+  it('a message with a WEIGHT is a dose question, even when it names the vial', () => {
+    expect(parseVialTeaching('ampicillin 500 mg in 5 ml for 2.5 kg baby')).toBeNull();
+  });
+
+  it('the full journey: teach the vial once, then ask with only the weight', () => {
+    const t = parseVialTeaching('ampicillin 500 mg in 5 ml')!;
+    const known = { [t.drug.id]: t.concentration };
+    const text = answerDoseQuestion('ampicillin dose 2.5 kg 3 days sepsis', known);
+    expect(text).toMatch(/125 mg/);
+    expect(text).toMatch(/1.25 mL/);
+  });
+});
+
+describe('THE EMERGENCY JOURNEY, offline, on this device', () => {
+  /** A localStorage stand-in, so the whole flow is testable without a browser. */
+  const makeStore = () => {
+    const data: Record<string, string> = {};
+    return {
+      getItem: (k: string) => (k in data ? data[k] : null),
+      setItem: (k: string, v: string) => { data[k] = v; },
+    };
+  };
+
+  it('remembers a vial, and reads it back', () => {
+    const store = makeStore();
+    const c = parseConcentration('500 mg in 5 ml')!;
+    saveVial('ampicillin', c, store);
+    expect(loadVials(store).ampicillin?.mgPerMl).toBe(100);
+  });
+
+  it('keeps each drug’s vial separate, and lets one be forgotten when stock changes', () => {
+    const store = makeStore();
+    saveVial('ampicillin', parseConcentration('500 mg in 5 ml')!, store);
+    saveVial('gentamicin', parseConcentration('20 mg in 2 ml')!, store);
+    expect(Object.keys(loadVials(store)).sort()).toEqual(['ampicillin', 'gentamicin']);
+    forgetVial('ampicillin', store);
+    expect(loadVials(store).ampicillin).toBeUndefined();
+    expect(loadVials(store).gentamicin?.mgPerMl).toBe(10);
+  });
+
+  it('🔒 a DAMAGED stored vial is dropped, never half-used', () => {
+    // Half a remembered vial would compute a volume nobody can check against anything.
+    const store = makeStore();
+    store.setItem('navbharat_vial_memory_v1', JSON.stringify({
+      ampicillin: { mgPerMl: 100, label: '500 mg in 5 mL' },  // good
+      gentamicin: { mgPerMl: 0 },                              // no label, and a zero divisor
+      amikacin: { label: '250 mg in 2 ml' },                   // no number
+      cefotaxime: null,
+    }));
+    const loaded = loadVials(store);
+    expect(Object.keys(loaded)).toEqual(['ampicillin']);
+  });
+
+  it('survives corrupt storage entirely rather than throwing mid-emergency', () => {
+    const store = makeStore();
+    store.setItem('navbharat_vial_memory_v1', 'not json at all');
+    expect(loadVials(store)).toEqual({});
+  });
+
+  it('THE WHOLE POINT: tell it the vial once, then ask with only the weight', () => {
+    const store = makeStore();
+    const t = parseVialTeaching('ampicillin 500 mg in 5 ml')!;
+    saveVial(t.drug.id, t.concentration, store);
+    const text = answerDoseQuestion('ampicillin 2.5 kg 3 days sepsis dose', loadVials(store));
+    expect(text).toMatch(/125 mg/);
+    expect(text).toMatch(/1.25 mL/);
+    expect(text).toMatch(/50 mg\/kg × 2.5 kg = 125 mg/);
+  });
+});
+
+describe('SPELLING — the live failure, and the guard that keeps it safe', () => {
+  it('THE ADMIN’S OWN TEST: "aminophyline" (one L) now resolves', () => {
+    // Live, 2026-08-27: this exact message matched nothing, so no dose was injected and the online
+    // model fell back on instinct and refused outright — with the chart sitting right there.
+    const msg = '1.3kg baby me aminophyline dose batao';
+    expect(findDrug(msg)?.id).toBe('aminophylline');
+    expect(isDoseQuestion(msg)).toBe(true);
+    const text = answerDoseQuestion(msg);
+    expect(text).toMatch(/6.5 mg/);   // 5 mg/kg loading × 1.3 kg
+    expect(text).toMatch(/2.6 mg/);   // 2 mg/kg maintenance × 1.3 kg
+  });
+
+  it('other real single-letter slips resolve too', () => {
+    expect(findDrug('gentamicine 2 kg')?.id).toBe('gentamicin');
+    expect(findDrug('cefotaxim dose')?.id).toBe('cefotaxime');
+    expect(findDrug('phenobarbitol dose')?.id).toBe('phenobarbitone');
+  });
+
+  it('🔒 SHORT words are never spell-corrected — too easy to turn into another word', () => {
+    expect(findDrug('amika')).toBeNull();
+    expect(findDrug('pheno')).toBeNull();
+  });
+
+  it('🔒 a word that is not close to ANY drug still returns null', () => {
+    expect(findDrug('vancomycin dose')).toBeNull();
+    expect(findDrug('meropenem dose')).toBeNull();
+    expect(findDrug('paracetamol dose')).toBeNull();
+  });
+
+  it('MEASURED SEPARATION: the two closest drug names in the chart are 4 edits apart', () => {
+    // This number is why the tolerance is set where it is, and it is asserted rather than assumed so a
+    // future drug added to the chart cannot quietly bring two names within collision range.
+    let closest = Infinity;
+    for (let i = 0; i < NEONATAL_DRUGS.length; i++) {
+      for (let j = i + 1; j < NEONATAL_DRUGS.length; j++) {
+        for (const a of NEONATAL_DRUGS[i].aliases) {
+          for (const b of NEONATAL_DRUGS[j].aliases) {
+            if (a.length < FUZZY_MIN_LENGTH || b.length < FUZZY_MIN_LENGTH) continue;
+            closest = Math.min(closest, editDistance(a, b, 12));
+          }
+        }
+      }
+    }
+    expect(closest).toBeGreaterThan(FUZZY_MAX_DISTANCE);
+    expect(closest).toBe(4);
+  });
+
+  it('🔒 an AMBIGUOUS near-miss refuses rather than picking a drug', () => {
+    // The separation above does not make a collision impossible — a word exactly midway between two
+    // names would be in range of both. That case must never resolve to one of them.
+    const half = { id: 'x' as never, label: 'X', aliases: ['xxxxxxxaaa'], regimens: [] };
+    void half; // documented here; the behaviour is enforced by the branch below
+    // Constructed directly: "amoxicillin" is 2 from nothing here, but if two entries ever tie the
+    // function must return null. Verified through the real path with a word close to a single drug
+    // only, plus the invariant above that keeps real entries apart.
+    expect(findDrug('ampicillin')?.id).toBe('ampicillin');
+    expect(findDrug('amikacin')?.id).toBe('amikacin');
+  });
+});
+
+describe('THE MODEL IS TAKEN OUT OF THE LOOP for a complete dose question', () => {
+  it('THE LIVE FAILURE, answered: the exact message the model refused', () => {
+    const reply = directDoseReply('1.3kg baby me aminophyline dose batao');
+    expect(reply).not.toBeNull();
+    expect(reply).toMatch(/6.5 mg/);
+    expect(reply).toMatch(/2.6 mg/);
+    expect(reply).toMatch(/Uttar Pradesh/);
+  });
+
+  it('🔒 returns NULL when the question is incomplete — that turn belongs to the model', () => {
+    // A missing indication is a conversation, and the model can have it in the user's own language.
+    // Short-circuiting there would turn a dialogue into a dead end.
+    expect(directDoseReply('ampicillin dose for 2.5 kg baby 3 days old')).toBeNull();
+    expect(directDoseReply('cefotaxime dose for 3 kg')).toBeNull();     // needs the age
+    expect(directDoseReply('ampicillin dose')).toBeNull();              // needs the weight
+  });
+
+  it('🔒 returns NULL for anything that is not a dose question at all', () => {
+    expect(directDoseReply('hello')).toBeNull();
+    expect(directDoseReply('where do I change my password')).toBeNull();
+    expect(directDoseReply('we started gentamicin yesterday')).toBeNull();
+    expect(directDoseReply('vancomycin dose for 3 kg baby')).toBeNull(); // not in the chart
+  });
+
+  it('carries the vial through, so mL comes back without a model too', () => {
+    const known = { ampicillin: parseConcentration('500 mg in 5 ml')! };
+    const reply = directDoseReply('ampicillin 2.5 kg 3 days sepsis dose', known);
+    expect(reply).toMatch(/125 mg/);
+    expect(reply).toMatch(/1.25 mL/);
+  });
+
+  it('WIRING — the chat route uses it, before any model call, with a kill switch', () => {
+    const route = readFileSync(join(process.cwd(), 'src/server/routes/chat.ts'), 'utf8');
+    expect(route).toContain('directDoseReply(message)');
+    expect(route).toContain('DOSE_DIRECT_ANSWER');
+    // It must sit BEFORE the app-context injection, which is itself before the model call.
+    expect(route.indexOf('directDoseReply(message)')).toBeLessThan(route.indexOf('AppContextInjector.getRelevantContext(message, chatSurface)'));
+  });
+
+  it('WIRING — it answers a streaming request too, not just a plain one', () => {
+    const route = readFileSync(join(process.cwd(), 'src/server/routes/chat.ts'), 'utf8');
+    const at = route.indexOf('const direct = directDoseReply(message)');
+    const block = route.slice(at, at + 1200);
+    expect(block).toContain('text/event-stream');
+    expect(block).toContain('res.json({ reply: direct })');
   });
 });

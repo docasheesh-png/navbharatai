@@ -3,6 +3,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes ai_usage_logs (server-only).
 import { collection, addDoc, getServerDb as getDb } from '../lib/serverDb';
 import { aiRouter } from '../lib/aiRouter';
+import { directDoseReply } from '../../lib/neonatalDosing';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { toSafeClientMessage } from '../lib/httpError';
@@ -268,6 +269,43 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       systemPrompt = buildDynamicPrompt(message); // Phase 9: template-aware dynamic prompt
     } else {
       systemPrompt = SYSTEM_PROMPT_CHAT;
+    }
+
+    // ── NEWBORN DOSE: ANSWERED WITHOUT THE MODEL AT ALL ─────────────────────────────────────────
+    //
+    // 🔒 THE LIVE FAILURE THIS CLOSES (admin's own test, 2026-08-27). They asked "1.3kg baby me
+    // aminophyline dose batao" and the model REFUSED outright — "मैं आपको किसी भी दवा का dose नहीं बता
+    // सकता" — while the government chart's answer sat right there in its context. Grounding a model
+    // and asking it nicely cannot fix that: a refusal reflex is not something a prompt reliably
+    // overrules, and a dosing aid that refuses at the cot side is worse than no dosing aid.
+    //
+    // So for a question the calculator can answer COMPLETELY, the model is taken out of the loop. The
+    // reply is the tested calculator's own text: it cannot refuse, cannot re-do the arithmetic, cannot
+    // round, and cannot drift. It is also instant and costs nothing, which is what the admin asked for
+    // ("fraction of second me bata de").
+    //
+    // ⚠️ ONLY WHEN IT IS COMPLETE. If the calculator still needs the weight, the age or the indication,
+    // this does NOT fire — that conversation belongs to the model, which can ask in the user's own
+    // language. So the short-circuit never turns a dialogue into a dead end.
+    // Kill switch: DOSE_DIRECT_ANSWER=off restores the model path exactly as it was.
+    if (!hasCanvas && !isBuildIntent && (process.env.DOSE_DIRECT_ANSWER ?? '').trim().toLowerCase() !== 'off') {
+      const direct = directDoseReply(message);
+      if (direct) {
+        if (req.body.stream === true) {
+          if (!res.headersSent) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+            res.flushHeaders();
+          }
+          if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: direct })}\n\n`);
+          if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+        } else {
+          res.json({ reply: direct });
+        }
+        return;
+      }
     }
 
     // App awareness injection — inject only for conversation mode (not canvas/build).

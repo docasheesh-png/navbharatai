@@ -698,6 +698,38 @@ export function directDoseReply(message: string, known: ConcentrationMemory = {}
   return formatDoseAnswer(result);
 }
 
+/**
+ * The honest reply when someone asks a NEWBORN dose for a drug this chart does not carry — or null.
+ *
+ * 🔒 THE LIVE FAILURE THIS CLOSES (admin's third live test, 2026-08-28). "1.7kg baby. dose of
+ * hydrocortisone" — hydrocortisone is not in the chart, so the calculator stayed silent, the model got
+ * the turn, and it delivered a frightened lecture: "I cannot and must not… This is extremely
+ * dangerous." A clinician at a cot side asked a professional question and was scolded. The honest
+ * answer is neither a guessed dose NOR a lecture — it is "this chart does not carry that drug", said
+ * plainly, with what the chart DOES carry and where the calculator lives.
+ *
+ * DELIBERATELY NARROW. It fires only when the message carries BOTH a dosing cue and a weight in the
+ * newborn range — that combination is unmistakably a newborn dosing question. A general question like
+ * "dose of paracetamol" (no weight) still goes to the model, because hijacking every medicine question
+ * in ordinary chat is scope this feature was never asked for. PURE.
+ */
+export function unknownNewbornDoseReply(message: string): string | null {
+  if (findDrug(message)) return null; // a chart drug → the real calculator path owns this turn
+  const weight = parseWeightKg(message);
+  if (weight === null || weight < MIN_WEIGHT_KG || weight > MAX_WEIGHT_KG) return null;
+  const q = String(message ?? '').toLowerCase();
+  if (!/\b(?:dose|dosage|dosing|how much|kitna|kitni|khurak|matra)\b/.test(q)) return null;
+  return [
+    'That drug is not in the newborn dosing chart I calculate from, so I will not give a number for it — a dose recalled from memory is exactly what this tool exists to prevent.',
+    '',
+    `The chart covers: ${NEONATAL_DRUGS.map((d) => d.label).join(', ')}.`,
+    '',
+    'For these, tell me the drug and the weight — or use the 💊 Dose Calculator in Doctor AI (no typing needed). For anything else, please use your unit protocol or formulary.',
+    '',
+    `Source: ${DOSING_SOURCE}`,
+  ].join('\n');
+}
+
 /** One-call convenience for a chat surface: message in, answer out. PURE. */
 export function answerDoseQuestion(message: string, known: ConcentrationMemory = {}): string {
   return formatDoseAnswer(calculateNeonatalDose(parseDoseQuestion(message, known)));

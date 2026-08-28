@@ -28,7 +28,8 @@
     "bakeoff": "tsx scripts/agentv3-bakeoff.ts",
     "mobile:sync": "npm run build && npx cap sync",
     "mobile:android": "npm run build && npx cap sync android && npx cap open android",
-    "mobile:ios": "npm run build && npx cap add ios && npx cap sync ios && npx cap open ios"
+    "mobile:ios": "npm run build && npx cap add ios && npx cap sync ios && npx cap open ios",
+    "capacitor:copy:after": "node scripts/stripServerFromNativeBundle.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",

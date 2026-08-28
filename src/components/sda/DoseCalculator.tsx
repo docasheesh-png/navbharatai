@@ -75,7 +75,7 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center" onClick={onClose}>
       <div
-        className="w-full sm:max-w-lg max-h-[92vh] overflow-y-auto bg-[#0d1520] border border-emerald-900/40 rounded-t-2xl sm:rounded-2xl shadow-2xl"
+        className="w-full sm:max-w-lg max-h-[92vh] supports-[height:100dvh]:max-h-[92dvh] overflow-y-auto bg-[#0d1520] border border-emerald-900/40 rounded-t-2xl sm:rounded-2xl shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

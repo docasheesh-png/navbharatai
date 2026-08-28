@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, AlertTriangle, BookOpen, FileText, User, Stethoscope, ClipboardList, X, RefreshCw, Paperclip, FileSearch, Mic, MicOff, Download, BarChart2, Pill, TestTube, Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2 } from 'lucide-react';
+import { Send, AlertTriangle, BookOpen, FileText, User, Stethoscope, ClipboardList, X, Plus, Paperclip, FileSearch, Mic, MicOff, Download, BarChart2, Pill, TestTube, Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DoseCalculator } from './DoseCalculator';
 import { loadVials } from '../../lib/vialMemory';
@@ -897,10 +897,14 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               <BookOpen className="w-3 h-3" />
               <span className="hidden sm:inline">Teaching {teachingMode ? 'ON' : 'OFF'}</span>
             </button>
+            {/* + not ♻ (admin 2026-08-28, from the phone header): on a narrow screen only the ICON
+                survives, and a recycle glyph reads as "refresh this conversation" — nobody presses it
+                expecting a fresh case. A plus is the universal new-chat glyph. Same action, honest icon. */}
             <button onClick={startNewCase}
+              title="New chat — start a fresh case"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white/5 border border-white/10 text-[#484f58] hover:text-white hover:bg-white/10 transition-all">
-              <RefreshCw className="w-3 h-3" />
-              <span className="hidden sm:inline">New Case</span>
+              <Plus className="w-3 h-3" />
+              <span className="hidden sm:inline">New Chat</span>
             </button>
           </div>
         </div>

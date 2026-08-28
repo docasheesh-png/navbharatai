@@ -44,4 +44,24 @@ export interface ProfessionalConfig {
    * The declared `fields` define exactly what it remembers. See clientMemory.ts.
    */
   memory?: ProfessionalMemory;
+  /**
+   * Optional instruction used to READ an image the user attaches to THIS professional.
+   *
+   * ROOT CAUSE this exists for (found 2026-08-27): every professional's photo was described by
+   * `DESCRIBE_INSTRUCTION` in visionDescribe.ts, which opens "You are reading an uploaded file for a
+   * SOFTWARE ENGINEER" and asks for UI layout, tables and charts. That is exactly right for a v5.0
+   * build screenshot and wrong for every other professional — a palm sent to the Astrologer, a
+   * diseased leaf sent to Kisan AI, a rash sent to a health professional all came back described as
+   * if they were app screenshots, so the expert never received the details its own field needs.
+   *
+   * The professional that will INTERPRET the picture is the only thing that knows what to look at, so
+   * the instruction belongs beside its persona rather than inside the shared describer.
+   *
+   * 🔒 IT MAY ONLY DIRECT ATTENTION — NEVER INTERPRETATION. An instruction that asked the vision
+   * model to *interpret* ("read this palm", "diagnose this rash") would move the expert's judgement
+   * into a cheap describer and produce a confident answer nobody checked. Every instruction here
+   * must ask for OBSERVABLE FACTS only and must say what to do when the picture does not show them,
+   * so "could not see it" survives all the way to the user instead of being filled in.
+   */
+  visionInstruction?: string;
 }

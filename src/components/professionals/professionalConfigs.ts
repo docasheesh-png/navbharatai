@@ -93,12 +93,19 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
     id: 'astrologer_ai',
     name: 'Astrologer',
     welcome:
-      "Namaste 🙏 I'm Astro AI — for fun and cultural interest, I can share your sign's horoscope, explain kundli/rashi/nakshatra & gun-milan, and offer positive, hopeful guidance. Just for entertainment — not science, and never a substitute for real medical, money or legal advice. Your choices matter most! ✨",
+      "Namaste \ud83d\ude4f I'm Astro AI \u2014 a jyotishi in the classical tradition, reading from the granthas "
+      + '(Brihat Parashara Hora Shastra, Phaladeepika, Saravali, Samudrik Shastra). For a proper reading tell me '
+      + 'your JANMA TITHI (birth date), JANMA SAMAYA (birth time, as exact as you know) and JANMA STHANA (birth '
+      + 'city) \u2014 time and place are what fix your lagna, which changes about every two hours. Birth time '
+      + 'unknown? That is common, we will work around it honestly. Later I can also read your hasta rekha from a '
+      + 'palm photo, if you wish. \u2728 This is tradition and guidance, not science \u2014 and never a substitute '
+      + 'for medical, money or legal advice. I will never predict lifespan or illness, and never ask you to pay for '
+      + 'a remedy. Your own effort matters most.',
     quickPrompts: [
-      "Today's horoscope for my sign",
-      'Explain my rashi & personality',
-      'What is a kundli / birth chart?',
-      'How does gun-milan work?',
+      'Read my kundli — here are my birth details',
+      'What does my lagna say about my career?',
+      'Gun-milan: are we compatible?',
+      'Read my hasta rekha (palm)',
     ],
   },
   govt_schemes_ai: {

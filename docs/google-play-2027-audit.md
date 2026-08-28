@@ -150,10 +150,21 @@ and fails one third of the requirement. The correct file is **`proguard-android-
 enforces this *"only where you have non-negligible DEX sizes"*, and as a Capacitor app most of
 NavBharatAI is JavaScript in `assets/`. That would exempt us from the requirement, not the benefit.
 
-⚠️ **R8 on a Capacitor app is not a flag flip.** Capacitor discovers plugins by reflection and the
-bridge exposes `@JavascriptInterface` methods by name — both are exactly what obfuscation breaks, and
-the failure is a runtime crash in the release build only, which no test catches. Keep rules must be
-added deliberately, minimally, and each with a comment saying why.
+⚠️ **CORRECTED 2026-08-28.** This paragraph used to say *"R8 on a Capacitor app is not a flag flip —
+Capacitor discovers plugins by reflection and the bridge exposes `@JavascriptInterface` methods by
+name, both of which obfuscation breaks."* That was reasoned from how Capacitor works rather than
+checked against what it ships, and checking showed it is largely wrong.
+
+`@capacitor/android` declares `consumerProguardFiles 'proguard-rules.pro'`, so its keep rules are
+applied **automatically** to every consuming app — including
+`-keep public class * extends com.getcapacitor.Plugin { *; }`, which is exactly the case I warned
+about. Our plugins all extend that class, Firebase's AARs ship consumer rules the same way, and
+`MainActivity` is empty, so we add no reflection of our own.
+
+R8 is therefore a much smaller risk than stated, and worth doing for size and startup even if the DEX
+requirement does not reach us. A device smoke test before a Play upload is still wanted — a runtime
+failure in a release build is invisible to CI — but this is not the delicate operation described here.
+See the remediation plan for the evidence in full.
 
 ---
 

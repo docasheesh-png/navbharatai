@@ -1,29 +1,31 @@
 import axios from 'axios';
 import type { Express, Request, Response } from 'express';
 import { sendSafeError } from '../lib/httpError';
+import { encrypt, decrypt } from '../lib/secrets';
+import { verifyFirebaseIdentity } from '../lib/authMiddleware';
+import {
+  NATIVE_STATE_LEGACY,
+  STATE_TTL_MS,
+  signNativeState,
+  parseNativeState,
+  makeTicket,
+  readTicket,
+  nativeReturnUrl,
+} from '../lib/githubNativeHandoff';
+
+/**
+ * Key for signing the OAuth `state`. Reuses the secret the platform already requires rather than adding
+ * another env var for the admin to set — one more key is one more thing to be unset in production.
+ * The dev fallback keeps local runs and tests working; `encrypt` is what refuses a missing key in
+ * production, and it refuses it on the path that actually matters (the ticket itself).
+ */
+function handoffSecret(): string {
+  return process.env.SECRET_ENCRYPTION_KEY || process.env.SECRET_KEY_V1 || 'navbharatai-dev-state-secret';
+}
 
 // Production redirect URI is hardcoded per the original code's explicit directive.
 const GITHUB_REDIRECT_URI = 'https://navbharatai.com/api/github/callback';
 
-// NATIVE (Capacitor) OAuth return. The app starts the handshake with state === NATIVE_OAUTH_STATE and
-// opens GitHub in an in-app browser; on success the token is redirected back INTO the app via its own
-// fixed custom URL scheme (server-owned constant — NEVER derived from `state`, so it can't become an
-// open redirect). The app's appUrlOpen listener catches it, stores the token, and closes the browser.
-// GitHub OAuth only allows https redirect URIs, so the https callback above stays the registered one and
-// this scheme hop happens entirely on our own callback page.
-const NATIVE_OAUTH_STATE = 'nbai-native';
-const NATIVE_OAUTH_REDIRECT = 'com.navbharat.ai://github-callback';
-
-/**
- * The native-app OAuth return URL, or null when this is NOT a native flow. Pure + exported so the
- * open-redirect-safety invariant is unit-tested: the scheme target is a FIXED server-owned constant
- * (`NATIVE_OAUTH_REDIRECT`), NEVER derived from the caller-controlled `state`, so a crafted state can
- * never redirect the token anywhere but the app's own scheme.
- */
-export function nativeOauthReturn(state: string | undefined | null, accessToken: string): string | null {
-  if (state !== NATIVE_OAUTH_STATE) return null;
-  return `${NATIVE_OAUTH_REDIRECT}#gh_token=${encodeURIComponent(accessToken)}`;
-}
 const GITHUB_SCOPE = 'repo workflow read:user user:email';
 
 // Origins the OAuth flow may hand the (repo+workflow scope) token back to. The token must
@@ -78,11 +80,31 @@ export function oauthTargetOrigin(returnUrl: string | null | undefined): string 
  * uses only env (GITHUB_CLIENT_ID/SECRET) and axios. Behavior unchanged.
  */
 export function registerGithubAuthRoutes(app: Express): void {
-  app.get('/api/auth/github/url', (req: Request, res: Response) => {
+  app.get('/api/auth/github/url', async (req: Request, res: Response) => {
     const clientId = process.env.GITHUB_CLIENT_ID;
     if (!clientId) return res.status(500).json({ error: 'GitHub Client ID not configured' });
 
-    const state = (req.query.state as string) || '';
+    let state = (req.query.state as string) || '';
+
+    // A v2 app asks for the ticket flow by sending the legacy state PLUS its Firebase ID token. We
+    // upgrade the state to a signed one carrying the verified uid, so the callback knows who to bind
+    // the ticket to. Both halves are required, and neither is assumed:
+    //
+    //   • the app must ASK (`?handoff=ticket`), because an old app must keep getting the old state;
+    //   • the caller must be AUTHENTICATED, because binding a ticket to a uid we did not verify would
+    //     let anyone name whichever user they liked.
+    //
+    // If either is missing we fall through to today's behaviour exactly. That is not a security
+    // downgrade — an unauthenticated caller could not have been protected by a uid binding anyway, and
+    // the flow is no worse than it was yesterday.
+    if (state === NATIVE_STATE_LEGACY && String(req.query.handoff || '') === 'ticket') {
+      const identity = await verifyFirebaseIdentity(req);
+      if (identity?.uid) {
+        state = signNativeState(handoffSecret(), identity.uid, Date.now() + STATE_TTL_MS);
+      } else {
+        console.warn('[GITHUB_AUTH_URL] ticket handoff requested without a verified identity — using the legacy state');
+      }
+    }
     const redirectUri = GITHUB_REDIRECT_URI;
     const scope = GITHUB_SCOPE;
 
@@ -146,10 +168,33 @@ export function registerGithubAuthRoutes(app: Express): void {
       const { access_token, error, error_description } = response.data;
       if (error) throw new Error(error_description || error);
 
-      // NATIVE app: hand the token back through the app's own custom scheme so the user returns to the
-      // installed app instead of being stranded on the website in a browser.
-      const nativeReturn = nativeOauthReturn(state as string, access_token);
-      if (nativeReturn) return res.redirect(nativeReturn);
+      // NATIVE app: hand the credential back through the app's own custom scheme so the user returns to
+      // the installed app instead of being stranded on the website in a browser.
+      //
+      // A v2 app gets a TICKET, not the token — a custom scheme is claimable by any installed app, and
+      // our scope is `repo workflow`. A pre-v2 app still gets the raw token, unchanged, because it runs
+      // from assets baked into its APK and cannot be updated by a server deploy. See
+      // lib/githubNativeHandoff.ts for the whole argument.
+      const nativeState = parseNativeState(handoffSecret(), state, Date.now());
+      if (nativeState.kind === 'v2-invalid') {
+        // NEVER degrade to the legacy token path here. Doing so would hand an attacker the entire fix:
+        // send a deliberately broken v2 state and the server helpfully reverts to putting a
+        // repo-scoped token in a hijackable deep link.
+        console.warn(`[GITHUB_AUTH_CALLBACK] refusing native return: v2 state ${nativeState.reason}`);
+        return sendSafeError(res, 400, 'This sign-in link is no longer valid. Please try connecting GitHub again.');
+      }
+      if (nativeState.kind === 'legacy' || nativeState.kind === 'v2') {
+        let ticket: string | null = null;
+        if (nativeState.kind === 'v2') {
+          // A failure here means encryption is unavailable, which in production means
+          // SECRET_ENCRYPTION_KEY is unset — `encrypt` refuses the dev fallback there on purpose.
+          try { ticket = makeTicket(access_token, nativeState.uid, Date.now(), encrypt); }
+          catch (e: any) { console.error('[GITHUB_AUTH_CALLBACK] ticket encryption failed:', e?.message || e); }
+        }
+        const nativeReturn = nativeReturnUrl(nativeState, access_token, ticket);
+        if (nativeReturn) return res.redirect(nativeReturn);
+        return sendSafeError(res, 500, 'GitHub sign-in could not be completed securely. Please try again.');
+      }
 
       // Only honour an allow-listed return URL — a crafted `state=https://evil.com` must not
       // be able to exfiltrate the token via redirect.
@@ -273,6 +318,34 @@ export function registerGithubAuthRoutes(app: Express): void {
         </html>
       `);
     }
+  });
+
+  /**
+   * REDEEM A NATIVE HANDOFF TICKET.
+   *
+   * This is the half that makes an intercepted deep link worthless. The ticket is encrypted with the
+   * server key AND bound to the uid that started the flow, so an app that grabbed it off the scheme
+   * holds ciphertext it cannot read, for a user it cannot authenticate as.
+   *
+   * The uid comes from `verifyFirebaseIdentity` — a real signature check against Firebase — and NEVER
+   * from the request body. Trusting a body-supplied uid would reduce this to "tell me whose ticket
+   * this is and I will open it".
+   *
+   * Failures are deliberately indistinguishable to the caller: an expired ticket, someone else's
+   * ticket and an unreadable one all return the same 400. The real reason is logged server-side, where
+   * `wrong-user` is the one worth alerting on.
+   */
+  app.post('/api/github/native-exchange', async (req: Request, res: Response) => {
+    const identity = await verifyFirebaseIdentity(req);
+    if (!identity?.uid) {
+      return sendSafeError(res, 401, 'Sign in to NavBharatAI before connecting GitHub.');
+    }
+    const result = readTicket(req.body?.ticket, identity.uid, Date.now(), decrypt);
+    if (!result.ok) {
+      console.warn(`[GITHUB_NATIVE_EXCHANGE] refused (${result.reason}) for uid ${identity.uid.slice(0, 8)}…`);
+      return sendSafeError(res, 400, 'This GitHub sign-in link is no longer valid. Please connect GitHub again.');
+    }
+    return res.json({ token: result.token });
   });
 
   app.get('/api/github/user', async (req: Request, res: Response) => {

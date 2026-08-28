@@ -16,6 +16,7 @@ import type { ChatTurnUsage } from '../lib/chatSpend';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { getServerDb } from '../lib/serverDb';
 import { detectImageIntent, imageGenGuidance } from '../lib/imageIntent';
+import { directDoseReply, sanitizeVials, parseVialTeaching, vialRememberedMessage, unknownNewbornDoseReply } from '../../lib/neonatalDosing';
 import { SessionReportStore, isVisionReportType, referencesAttachedReport, asksForComparison, type StoredReportFile } from '../lib/clinical/reportMemory';
 import { buildAuditPrompt, buildAuditContents, type AuditReportFile } from '../lib/clinical/reportAudit';
 
@@ -127,6 +128,25 @@ export function registerSdaRoutes(app: Express): void {
       // ANALYSIS request, which SDA does handle). No free message is burned.
       if (!fileData && typeof message === 'string' && detectImageIntent(message).wants) {
         return res.json({ reply: imageGenGuidance(), sessionId: sessionId || userId || null });
+      }
+
+      // ── NEWBORN DOSE: ANSWERED WITHOUT THE MODEL (admin 2026-08-28) ─────────────────────────────
+      // Doctor AI is exactly where a clinician asks this, and exactly where a model lecture ("I cannot
+      // and must not…") is most insulting. Same three-step rule as ordinary chat: a taught vial is
+      // confirmed, a complete chart question is answered by the tested calculator (instant, cannot
+      // refuse, mg + mL), and an unknown drug asked with a newborn weight gets the honest "not in my
+      // chart" instead of a scolding. Anything else — including every clinical conversation — goes to
+      // the model untouched. No free message is burned: a deterministic answer costs nothing.
+      // Kill switch: DOSE_DIRECT_ANSWER=off (shared with the chat route).
+      if (!fileData && typeof message === 'string' && (process.env.DOSE_DIRECT_ANSWER ?? '').trim().toLowerCase() !== 'off') {
+        const sdaVials = sanitizeVials(req.body?.vials);
+        const sdaTaught = parseVialTeaching(message);
+        const sdaDirect = sdaTaught
+          ? vialRememberedMessage(sdaTaught.drug, sdaTaught.concentration)
+          : (directDoseReply(message, sdaVials) ?? unknownNewbornDoseReply(message));
+        if (sdaDirect) {
+          return res.json({ reply: sdaDirect, sessionId: sessionId || userId || null });
+        }
       }
 
       // ── Session / clinical-store resolution ──────────────────────────────────

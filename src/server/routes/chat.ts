@@ -3,7 +3,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes ai_usage_logs (server-only).
 import { collection, addDoc, getServerDb as getDb } from '../lib/serverDb';
 import { aiRouter } from '../lib/aiRouter';
-import { directDoseReply, sanitizeVials, parseVialTeaching, vialRememberedMessage } from '../../lib/neonatalDosing';
+import { directDoseReply, sanitizeVials, parseVialTeaching, vialRememberedMessage, unknownNewbornDoseReply } from '../../lib/neonatalDosing';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { toSafeClientMessage } from '../lib/httpError';
@@ -296,7 +296,12 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       // Telling it a vial is answered here too, so the confirmation is instant and the user sees the
       // number echoed back. The device already stored it before sending.
       const taught = parseVialTeaching(message);
-      const direct = taught ? vialRememberedMessage(taught.drug, taught.concentration) : directDoseReply(message, vials);
+      // Order: a taught vial → a complete chart answer → the honest "not in my chart" for an unknown
+      // drug asked with a newborn weight. The last one exists because the model's own instinct for that
+      // question is a lecture, and a clinician asking a professional question deserves an answer.
+      const direct = taught
+        ? vialRememberedMessage(taught.drug, taught.concentration)
+        : (directDoseReply(message, vials) ?? unknownNewbornDoseReply(message));
       if (direct) {
         if (req.body.stream === true) {
           if (!res.headersSent) {

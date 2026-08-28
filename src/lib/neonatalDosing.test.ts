@@ -3,7 +3,7 @@ import {
   calculateNeonatalDose, answerDoseQuestion, parseWeightKg, parseAgeDays, findDrug, findIndication,
   isDoseQuestion, formatMg, NEONATAL_DRUGS, MIN_WEIGHT_KG, MAX_WEIGHT_KG,
   parseConcentration, parseVialTeaching, vialRememberedMessage,
-  editDistance, FUZZY_MIN_LENGTH, FUZZY_MAX_DISTANCE, directDoseReply, sanitizeVials,
+  editDistance, FUZZY_MIN_LENGTH, FUZZY_MAX_DISTANCE, directDoseReply, sanitizeVials, unknownNewbornDoseReply,
 } from './neonatalDosing';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -593,7 +593,7 @@ describe('THE MODEL IS TAKEN OUT OF THE LOOP for a complete dose question', () =
 
   it('WIRING — it answers a streaming request too, not just a plain one', () => {
     const route = readFileSync(join(process.cwd(), 'src/server/routes/chat.ts'), 'utf8');
-    const at = route.indexOf('const direct = taught ?');
+    const at = route.indexOf('const direct = taught');
     expect(at).toBeGreaterThan(-1);
     const block = route.slice(at, at + 1200);
     expect(block).toContain('text/event-stream');
@@ -657,5 +657,83 @@ describe('ONLINE CHAT REMEMBERS THE VIAL TOO (admin 2026-08-28)', () => {
     const hook = readFileSync(join(process.cwd(), 'src/hooks/useChatEngine.ts'), 'utf8');
     expect(hook).toContain('vials: loadVials()');
     expect(hook).toContain('saveVial(taught.drug.id, taught.concentration)');
+  });
+});
+
+describe('AN UNKNOWN DRUG WITH A NEWBORN WEIGHT gets an answer, not a lecture (admin 2026-08-28)', () => {
+  it("THE THIRD LIVE FAILURE: '1.7kg baby. dose of hydrocortisone'", () => {
+    // The model's reply to this was a scolding — "I cannot and must not… extremely dangerous" — to a
+    // clinician at a cot side. The honest reply is neither a guessed dose nor a lecture.
+    const reply = unknownNewbornDoseReply('1.7kg baby. dose of hydrocortisone');
+    expect(reply).not.toBeNull();
+    expect(reply).toMatch(/not in the newborn dosing chart/i);
+    expect(reply).toMatch(/Ampicillin/);           // says what it CAN do
+    expect(reply).toMatch(/Dose Calculator/);      // and where the form lives
+    expect(reply).not.toMatch(/dangerous/i);       // never a scolding
+    expect(reply).not.toMatch(/\d+\s*mg\/kg/);     // and NEVER a number for the unknown drug
+  });
+
+  it('🔒 stays OUT of general medicine questions — no weight, no hijack', () => {
+    // "dose of paracetamol" with no weight is ordinary chat; taking it over would be scope grab.
+    expect(unknownNewbornDoseReply('what is the dose of paracetamol')).toBeNull();
+    expect(unknownNewbornDoseReply('hydrocortisone kya hota hai')).toBeNull();
+  });
+
+  it('🔒 stays out when the weight is not a newborn weight', () => {
+    expect(unknownNewbornDoseReply('60 kg patient, dose of hydrocortisone')).toBeNull();
+  });
+
+  it('🔒 never fires for a drug the chart DOES carry — the real calculator owns that turn', () => {
+    expect(unknownNewbornDoseReply('1.7 kg baby dose of ampicillin')).toBeNull();
+    expect(unknownNewbornDoseReply('aminophyline dose 1.3 kg')).toBeNull(); // even misspelt
+  });
+
+  it('WIRING — both chat routes fall through to it after the calculator', () => {
+    const chat = readFileSync(join(process.cwd(), 'src/server/routes/chat.ts'), 'utf8');
+    const sda = readFileSync(join(process.cwd(), 'src/server/routes/sda.ts'), 'utf8');
+    for (const route of [chat, sda]) {
+      expect(route).toContain('?? unknownNewbornDoseReply(message)');
+    }
+    // Doctor AI answers it deterministically too, and never burns a free message on it.
+    expect(sda).toContain('directDoseReply(message, sdaVials)');
+  });
+});
+
+describe('THE 💊 DOSE CALCULATOR — the form the chat failures cannot reach', () => {
+  const surface = readFileSync(join(process.cwd(), 'src/components/sda/SDAChat.tsx'), 'utf8');
+  const calc = readFileSync(join(process.cwd(), 'src/components/sda/DoseCalculator.tsx'), 'utf8');
+
+  it('Doctor AI has the button, and it opens the calculator', () => {
+    expect(surface).toContain('setShowDoseCalc(true)');
+    expect(surface).toContain('<DoseCalculator onClose=');
+  });
+
+  it('the form computes with the SAME tested engine as every AI — never its own arithmetic', () => {
+    expect(calc).toContain('calculateNeonatalDose({');
+    // The one place a duplicate formula could creep in and drift from the chart.
+    expect(calc).not.toMatch(/mgPerKg\s*\*\s*weight/);
+  });
+
+  it('the drug is a BUTTON, not a text field — the spelling failure cannot exist here', () => {
+    expect(calc).toContain('NEONATAL_DRUGS.map((d) =>');
+    expect(calc).not.toMatch(/input[^>]*placeholder[^>]*drug/i);
+  });
+
+  it('indication is chips with NO default — nothing may quietly choose 50 vs 100 mg/kg', () => {
+    expect(calc).toContain("useState<Indication | null>(null)");
+    expect(calc).toContain('needsIndication(drug)');
+  });
+
+  it('vials are the SAME device memory the chats use — told once, known everywhere', () => {
+    expect(calc).toContain('loadVials()');
+    expect(calc).toContain('saveVial(drug.id, typedVial)');
+    expect(calc).toContain('forgetVial(drug.id)');
+    // …and Doctor AI's chat sends them with each turn, so chat answers carry mL too.
+    expect(surface).toContain('vials: loadVials()');
+  });
+
+  it('the source and the caution are rendered, not implied', () => {
+    expect(calc).toContain('DOSING_SOURCE');
+    expect(calc).toContain('DOSING_CAUTION');
   });
 });

@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, AlertTriangle, BookOpen, FileText, User, Stethoscope, ClipboardList, X, RefreshCw, Paperclip, FileSearch, Mic, MicOff, Download, BarChart2, Pill, TestTube, Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { DoseCalculator } from './DoseCalculator';
+import { loadVials } from '../../lib/vialMemory';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import ReactMarkdown from 'react-markdown';
@@ -256,6 +258,8 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [showChatSearch, setShowChatSearch] = useState(false);
   const [teachingMode, setTeachingMode] = useState(false);
+  // 💊 The newborn dose calculator (admin 2026-08-28) — a form, so the chat's failure modes cannot reach it.
+  const [showDoseCalc, setShowDoseCalc] = useState(false);
   const [showPatientPanel, setShowPatientPanel] = useState(true);
   // Quick Tools: the doctor's hide/show choice is REMEMBERED (it used to reset open on every mount,
   // so "hide" had to be re-done every visit — see sdaChrome.ts). Default: closed on a phone, open on
@@ -638,6 +642,9 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           fileData: file?.base64 || null,
           fileType: file?.type || null,
           fileName: file?.name || null,
+          // The vials this device knows (💊 calculator / taught in chat), so a dose asked in THIS chat
+          // comes back with mL too. Concentrations only — nothing about any patient.
+          vials: loadVials(),
         }),
       });
 
@@ -869,6 +876,15 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* 💊 DOSE (admin 2026-08-28): "doctor ko pata hota hai KAB deni hai — bas calculation me
+                time lagta hai". One tap → drug buttons, weight, instant mg + mL. No model, no network,
+                no spelling — the three ways the chat path failed this exact user in two days. */}
+            <button onClick={() => setShowDoseCalc(true)}
+              title="Newborn dose calculator — instant mg and mL from the FBNC chart"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-900/30 border border-emerald-700/40 text-emerald-300 hover:text-white hover:bg-emerald-800/40 transition-all">
+              <Pill className="w-3 h-3" />
+              <span className="hidden sm:inline">Dose</span>
+            </button>
             <button onClick={generatePDF} disabled={messages.length < 2}
               title="Download case as PDF"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white/5 border border-white/10 text-[#484f58] hover:text-white hover:bg-white/10 transition-all disabled:opacity-40">
@@ -1250,6 +1266,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               text is absent from this file, and a comment reproducing it would defeat the test.) */}
         </div>
       </div>
+    {showDoseCalc && <DoseCalculator onClose={() => setShowDoseCalc(false)} />}
     </div>
   );
 };

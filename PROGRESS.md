@@ -42860,3 +42860,40 @@ the session. **Not done, deliberately — do not "complete" this from the screen
   as the source of a number.
 - Gestational age: when an official chart splits a dose by gestation, the engine's ask-what-it-needs
   pattern extends to it (same as indication/age today).
+
+---
+
+## 2026-08-28 — MILESTONE: the neonatal dose engine + 💊 Dose Calculator (#2705 → #2712, store builds shipped)
+
+**What exists now, end to end (all live on web; in the signed store builds below for installed apps):**
+one pure, tested engine (`src/lib/neonatalDosing.ts`) computes newborn doses from the **Government of
+Uttar Pradesh FBNC chart** (Chart 13 + sepsis tables) — 11 drugs, mg always, mL once the vial is known —
+and EVERY surface reads from it: the offline assistant (no network, no model), both chat routes
+(deterministic short-circuit, model cannot refuse), and the **💊 Dose Calculator** form in Doctor AI's
+header (drug = button, weight/age fields, indication chips with no default, per-drug vial memory,
+recomputes per keystroke). ♻ became ➕ (New Chat) in the same header.
+
+**How it got its shape — three of the admin's live tests, each a class fixed:**
+1. `aminophyline` (misspelt) matched nothing → model refused. → bounded spelling tolerance (8+ chars,
+   ≤2 edits, ambiguous → ask; collision can never yield the wrong drug). #2707
+2. `ml me batao` online → server can't read localStorage. → device sends its vials (sanitised:
+   `sanitizeVials` drops zero/negative/unlabelled/unknown-id — the value divides into a syringe volume). #2709
+3. `hydrocortisone` (not in chart) → frightening lecture. → honest "not in my chart" in BOTH routes,
+   only when dosing cue + newborn-range weight; the 💊 form has no free-text drug at all. #2710
+Plus: the repo's own mobileScrollGeometry guard caught the calculator sheet's bare `vh` cap (result
+would hide under the phone's URL bar) — fixed with the `dvh` companion before merge.
+
+**The safety architecture, stated once for future sessions:** numbers live in CODE transcribed verbatim
+from a named official chart; the model only relays; indication is REQUIRED where the chart branches
+(ampicillin 50 vs 100); Vitamin K is `fixedMg` (never × weight); infusions refuse to invent mL/h;
+weight outside 0.4–8 kg is refused; a vial is never assumed — told once, remembered per drug, echoed
+back. Every answer prints the arithmetic and the source. Expansion path: official printed pages only
+(see the Scribd-refusal entry above).
+
+**Store builds (milestone mandate):** Android `.aab` run **33163950870** ✅ (admin uploads to Play
+Console); iOS `.ipa` run **33163957971** ✅ reached TestFlight (upload:true, processing-waited).
+
+**Resume point for the next session:** nothing in-flight. Open admin decisions: official chart photos
+for more drugs · the Android-security HIGH finding (#2702, another session's) · Dependabot majors
+(lucide-react, motion) · the Green-Guard "was that build free?" question · ABDM HPR mandate (recorded
+2026-08-28, needs admin credentials).

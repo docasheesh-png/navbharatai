@@ -9,6 +9,7 @@ import { Briefcase } from 'lucide-react';
 import { readProfessionalHistory } from './professionals/ProfessionalHistoryView';
 import { browserStore, resumeArchived, deleteArchived } from '../lib/professionalChatStore';
 import { professionalRows, sortMergedRows, type ProfessionalPseudoSession } from '../lib/freeHistoryMerge';
+import { shapeSessions, messagesOf } from '../lib/sessionShape';
 
 type FilterMode = 'all' | 'chat' | 'apps' | 'free' | 'pro' | 'sda';
 
@@ -82,8 +83,10 @@ export const HistoryView = ({
       where('userId', '==', user.uid)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }))
+      // shapeSessions at the DOOR: every reader below — the search filter, the title fallback, and any
+      // added later — can then treat `messages` as an array without knowing that a stored session might
+      // not have one. See sessionShape.ts for the crash this closes.
+      const data = shapeSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
         .sort((a: any, b: any) => {
           const ta = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
           const tb = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
@@ -93,8 +96,10 @@ export const HistoryView = ({
       setLoading(false);
     }, () => {
       try {
-        const local = JSON.parse(localStorage.getItem('navbharat_sessions') || '[]');
-        setSessions(local.sort((a: any, b: any) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime()));
+        // Same treatment, and here it also covers the LIST: JSON.parse returns whatever is on this
+        // device, and `.sort` on a non-array throws before a single component renders.
+        const local = shapeSessions(JSON.parse(localStorage.getItem('navbharat_sessions') || '[]'));
+        setSessions(local.sort((a: any, b: any) => new Date(b.lastUpdated as string).getTime() - new Date(a.lastUpdated as string).getTime()));
       } catch { /* empty */ }
       setLoading(false);
     });
@@ -133,8 +138,10 @@ export const HistoryView = ({
         (s.profName && s.profName.toLowerCase().includes(q)) ||
         (s.uci && s.uci.toLowerCase().includes(q)) ||
         (s.id && s.id.toLowerCase().includes(q)) ||
-        (s.messages && Array.isArray(s.messages) &&
-          s.messages.some((m: any) => m.text && m.text.toLowerCase().includes(q)))
+        // No Array.isArray here any more: shapeSessions guarantees it upstream. Leaving the old guard
+        // would keep implying the field is untrustworthy at THIS reader and safe at the others, which
+        // is the exact asymmetry that hid the crash.
+        (messagesOf(s).some((m) => typeof m.text === 'string' && m.text.toLowerCase().includes(q)))
       );
     }
 
@@ -337,7 +344,7 @@ export const HistoryView = ({
                         <h3 className="font-bold text-white text-base leading-snug">
                           {session.title && session.title !== 'New Conversation'
                             ? session.title
-                            : session.messages?.find((m: any) => m.sender === 'user')?.text?.slice(0, 50) || 'New Conversation'}
+                            : messagesOf(session).find((m) => m.sender === 'user')?.text?.slice(0, 50) || 'New Conversation'}
                         </h3>
                         {!prof && (
                         <span className="inline-flex items-center px-2 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/25 rounded-md font-mono text-[10px] tracking-normal lowercase">

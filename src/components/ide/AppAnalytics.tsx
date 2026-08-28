@@ -10,6 +10,7 @@ import {
   Clock,
   ChevronRight,
 } from 'lucide-react';
+import { shapeSessions } from '../../lib/sessionShape';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -298,10 +299,16 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
   // ── Read localStorage ──
   const readLocalData = useCallback(() => {
     // Sessions from dedicated key
+    // SIBLING of the HistoryView crash (admin 2026-08-27), found by grepping this storage key.
+    // `JSON.parse(raw) as ChatSession[]` is a CAST, not a check — TypeScript is satisfied and the
+    // runtime is not, so a non-array on this device reached `sessions.reduce(...)` below and threw
+    // "reduce is not a function" on a screen the footer can open. Note the asymmetry twelve lines
+    // down: the OTHER key parsed here is guarded with Array.isArray. Same file, same hazard, one
+    // reader defended — exactly the shape of the bug this is a sibling of.
     let sessions: ChatSession[] = [];
     try {
       const raw = localStorage.getItem('navbharat_sessions');
-      if (raw) sessions = JSON.parse(raw) as ChatSession[];
+      if (raw) sessions = shapeSessions(JSON.parse(raw)) as unknown as ChatSession[];
     } catch {
       sessions = [];
     }

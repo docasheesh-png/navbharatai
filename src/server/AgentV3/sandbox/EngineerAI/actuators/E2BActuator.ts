@@ -1259,6 +1259,30 @@ export class E2BActuator implements IEngineerActuator {
       } catch { /* no package.json / parse error — keep the raw command (unchanged behaviour) */ }
       const framework: DevFramework = detectDevFramework(resolvedCommand);
       const port = extractDevPort(resolvedCommand);
+      // ⚠️ COMPUTED HERE — ABOVE `armKeepalive` AND THE FAST PATH — ON PURPOSE (admin build report
+      // 2026-08-28, Hospital Emergency Management: three TOOL_ERRORs "Cannot access 'devCommand'
+      // before initialization"). This block used to sit ~60 lines further down, below the already-up
+      // fast path — but `armKeepalive` closes over `devCommand`, and the fast path calls it first. So
+      // on exactly the path the keepalive fix was written for (a server we ADOPTED rather than
+      // started), the closure hit the temporal dead zone and threw: the fast path died, the adopted
+      // server AGAIN ran without a watchdog, and the tool burned retries until the full path ran. The
+      // whole computation is pure string work on the values above, so hoisting is order-safe; the .env
+      // wrap comes along so the watchdog's restart command is byte-identical on both paths.
+      let devCommand = redirectDevServerOutput(
+        // `resolvedCommand` is passed so the pin decision can see THROUGH `npm run dev` to the script it
+        // actually runs (report 26a8e81c): a Node server behind a pm script used to get Vite's
+        // `--port … --strictPort`, which it ignores, and the health check then watched the wrong port.
+        disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(strippedForResolve, framework, resolvedCommand), port, framework, resolvedCommand)),
+      );
+      // LOAD .env INTO THE DEV-SERVER ENV (Mitrify autopsy 2026-08-02): a Drizzle/Express app that reads
+      // process.env.DATABASE_URL directly (no dotenv) crashes on boot even though .env holds the value —
+      // the launch never loaded it. Auto-export every KEY=value from .env into the process env before
+      // starting, so ANY app (dotenv or not) sees its env. `set -a` auto-exports; sourcing is guarded with
+      // `2>/dev/null || true` so a malformed user line can never abort the launch (worst case = today's
+      // behaviour). Kill switch: AGENTV3_DEVSERVER_LOAD_DOTENV=off.
+      if ((process.env.AGENTV3_DEVSERVER_LOAD_DOTENV ?? '').trim().toLowerCase() !== 'off') {
+        devCommand = `set -a; if [ -f .env ]; then . ./.env 2>/dev/null || true; fi; set +a; ${devCommand}`;
+      }
       // E6 — FAST PATH: if a healthy dev server is ALREADY bound on this port and package.json hasn't
       // changed, skip the whole config-patch → pre-kill → launch → 25s port-wait → recovery sequence.
       // A managed preview re-runs `npm run dev` on every update_preview; a running Vite/Next server
@@ -1337,21 +1361,6 @@ export class E2BActuator implements IEngineerActuator {
             break; // only one vite config is loaded by Vite — stop at the first that exists
           } catch { /* best-effort — never block the dev server on a config patch */ }
         }
-      }
-      let devCommand = redirectDevServerOutput(
-        // `resolvedCommand` is passed so the pin decision can see THROUGH `npm run dev` to the script it
-        // actually runs (report 26a8e81c): a Node server behind a pm script used to get Vite's
-        // `--port … --strictPort`, which it ignores, and the health check then watched the wrong port.
-        disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(strippedForResolve, framework, resolvedCommand), port, framework, resolvedCommand)),
-      );
-      // LOAD .env INTO THE DEV-SERVER ENV (Mitrify autopsy 2026-08-02): a Drizzle/Express app that reads
-      // process.env.DATABASE_URL directly (no dotenv) crashes on boot even though .env holds the value —
-      // the launch never loaded it. Auto-export every KEY=value from .env into the process env before
-      // starting, so ANY app (dotenv or not) sees its env. `set -a` auto-exports; sourcing is guarded with
-      // `2>/dev/null || true` so a malformed user line can never abort the launch (worst case = today's
-      // behaviour). Kill switch: AGENTV3_DEVSERVER_LOAD_DOTENV=off.
-      if ((process.env.AGENTV3_DEVSERVER_LOAD_DOTENV ?? '').trim().toLowerCase() !== 'off') {
-        devCommand = `set -a; if [ -f .env ]; then . ./.env 2>/dev/null || true; fi; set +a; ${devCommand}`;
       }
 
       // Ensure dependencies are installed BEFORE starting the dev server. If the

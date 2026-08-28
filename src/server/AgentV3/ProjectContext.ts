@@ -37,10 +37,26 @@ export function buildProjectContext(input: ProjectContextInput): string {
   if (files.length === 0 && requests.length === 0 && !map && !plan) return '';
 
   const lines: string[] = [];
-  lines.push('[PROJECT MEMORY — you are CONTINUING an existing project in this session, NOT starting from scratch.]');
+  // ── 🔒 MEMORY IS SUBORDINATE TO THE CURRENT REQUEST — the hijack this wording caused, 2026-08-28 ──
+  //
+  // A real build (Hospital Emergency Management, kimi-k2.5): the user asked for a NEW medical app in a
+  // workspace whose PREVIOUS build was a Dino Runner game. This block then told the model, with no
+  // condition attached: "you are CONTINUING an existing project… CONTINUE the unfinished items — do
+  // NOT reset the plan" — with the DINO game's plan pasted underneath. Three model calls in, the
+  // builder announced "I'll build you a Chrome Dino-style endless runner game", called the user's
+  // just-written medical files "previous files", shipped the game, and the user's final summary read
+  // "Aapka Dino Run game taiyaar hai 🎮". No live message asked for a game (verified in the report:
+  // zero mid-build user messages). The engine's own memory block out-shouted the user's request.
+  //
+  // The class fix is PRIORITY, not deletion: the memory must describe what exists and then SUBMIT to
+  // the current request — continuation-strength instructions may fire only when the request is itself
+  // a continuation, and that condition is stated IN the prompt where the model decides, not guessed by
+  // a heuristic out here (a wrong guess would just recreate the bug in the other direction: a genuine
+  // "continue" that loses its plan).
+  lines.push('[PROJECT MEMORY — what already exists in this workspace. Context, not instructions: the CURRENT REQUEST below is your only task and always outranks everything in this block.]');
   if (files.length) {
     lines.push('');
-    lines.push(`The workspace already contains these ${files.length} file(s) — edit/extend them, do not recreate the project:`);
+    lines.push(`The workspace already contains these ${files.length} file(s). If the current request continues this project, edit/extend them; if it asks for something NEW, replace or clear what conflicts — do not weave two different apps together:`);
     lines.push(files.map((f) => `  - ${f}`).join('\n'));
   }
   if (map) {
@@ -49,16 +65,16 @@ export function buildProjectContext(input: ProjectContextInput): string {
   }
   if (requests.length) {
     lines.push('');
-    lines.push('What the user asked for earlier in this session (most recent last):');
+    lines.push('Requests the user made EARLIER (most recent last). Already handled — background only, NEVER tasks to redo or resume:');
     lines.push(requests.slice(-6).map((r) => `  - ${r.slice(0, 200)}`).join('\n'));
   }
   if (plan) {
     lines.push('');
-    lines.push('The build plan you were working through last time (statuses ✓ done · ⋯ in progress · ✗ blocked · ○ pending). CONTINUE the unfinished items — do NOT reset the plan to 0 or re-scaffold what is already done:');
+    lines.push('The PREVIOUS build\u2019s plan (statuses ✓ done · ⋯ in progress · ✗ blocked · ○ pending). ONLY IF the current request continues that same work ("continue", "fix it", "aage badhao"), resume its unfinished items without resetting to 0. If the current request asks for a DIFFERENT app or feature, this plan is history — IGNORE it completely:');
     lines.push(plan);
   }
   lines.push('');
-  lines.push('Use this context as your memory. Do NOT ask "what would you like me to continue with" — read the files above and CONTINUE the same project. If the user just said "continue", resume building/fixing exactly this project from where it was left.');
+  lines.push('Decision rule, in order: (1) read the CURRENT REQUEST below — it is the task; (2) use this memory to avoid re-asking or re-scaffolding what exists; (3) when the current request just says "continue", and only then, resume the previous plan. Never ask "what would you like me to continue with" — the answer is always the current request.');
   return lines.join('\n');
 }
 

@@ -136,6 +136,7 @@ import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../Agent
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver } from '../AgentV3/greenFreeze';
+import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote } from '../AgentV3/verifyAfterFix';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
@@ -16081,6 +16082,24 @@ async function noteBuildOutcome(
       if (greenGuardUndidWork(greenGuardRestoreFacts) && typeof result.summary === 'string') {
         result = { ...result, summary: withGreenGuardCorrection(result.summary, greenGuardRestoreFacts!) };
       }
+      // ── THE SUMMARY MUST BE ABOUT THE APP THE USER NAMED (admin report 2026-08-28) ────────────
+      // A stale-memory hijack once ended a "Hospital Emergency Management" build with "Aapka Dino Run
+      // game taiyaar hai 🎮". The upstream cause is fixed in ProjectContext.ts; this is the
+      // deterministic net: when the prompt names the app in quotes and the summary never mentions any
+      // word of that name, the user is warned BEFORE the celebration, and the report records it.
+      try {
+        if (typeof result.summary === 'string' && result.summary) {
+          const offTopic = offTopicSummaryNotice(prompt, result.summary);
+          if (offTopic) {
+            result = { ...result, summary: `${offTopic}\n\n---\n\n${result.summary}` };
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'SUMMARY_OFF_TOPIC',
+              message: 'The final summary never mentions the app name the user quoted in their request — flagged to the user above the summary.',
+              autoResolved: false,
+            });
+          }
+        }
+      } catch { /* the net must never break a settle */ }
       const livePreviewLine = costBreakdown && result.ok ? livePreviewChargeLine(costBreakdown) : '';
       if (livePreviewLine && typeof result.summary === 'string') {
         result = { ...result, summary: `${result.summary}\n\n${livePreviewLine}` };

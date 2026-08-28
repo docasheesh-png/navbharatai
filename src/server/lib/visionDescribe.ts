@@ -122,13 +122,38 @@ export function visionProviderChain(opts: { useClaude?: boolean; noClaude?: bool
 }
 
 /**
+ * WHICH EXPERT IS LOOKING AT THIS PICTURE? (pure, so it is testable without a network call.)
+ *
+ * `DESCRIBE_INSTRUCTION` opens "You are reading an uploaded file for a software engineer" and asks for
+ * UI layout, tables and charts. That is exactly right for a v5.0 build screenshot and wrong for every
+ * other caller — before this existed, a palm sent to the Astrologer and a diseased leaf sent to Kisan
+ * AI were both described as if they were app screenshots, so the expert never received the details its
+ * own field needs and any answer it gave was invented.
+ *
+ * A caller that knows what its field must see passes `instruction` (see
+ * ProfessionalConfig.visionInstruction). Everything else keeps today's engineering description
+ * byte-for-byte, which is what makes this safe for the build path.
+ *
+ * `designContract` is a BUILD concern and composes only with the engineering instruction: pairing a
+ * palm-reading instruction with a request for a UI design contract would be incoherent, so a custom
+ * instruction wins outright rather than being concatenated.
+ */
+export function resolveVisionInstruction(
+  opts: { designContract?: boolean; instruction?: string } = {},
+): string {
+  const custom = opts.instruction?.trim();
+  if (custom) return custom;
+  return opts.designContract ? `${DESCRIBE_INSTRUCTION}\n${DESIGN_CONTRACT_INSTRUCTION}` : DESCRIBE_INSTRUCTION;
+}
+
+/**
  * Describe all image/PDF attachments as text. The provider order comes from
  * visionProviderChain() (see its doc for the per-tier rules). Never throws;
  * returns '' when nothing could be described.
  */
 export async function describeVisionAttachments(
   atts: RawAttachment[],
-  opts: { useClaude?: boolean; noClaude?: boolean; designContract?: boolean } = {},
+  opts: { useClaude?: boolean; noClaude?: boolean; designContract?: boolean; instruction?: string } = {},
 ): Promise<string> {
   const vision = (atts || []).filter((a) => a && a.base64 && isVisionAttachment(a.type, a.name));
   if (vision.length === 0) return '';
@@ -146,9 +171,7 @@ export async function describeVisionAttachments(
   // design contract (see AgentV3/designContract.ts). Requesting it here rather than in a second pass
   // is the whole reason the contract is free — a separate structured call would double the vision
   // cost of every screenshot upload to buy the same information twice.
-  const instruction = opts.designContract
-    ? `${DESCRIBE_INSTRUCTION}\n${DESIGN_CONTRACT_INSTRUCTION}`
-    : DESCRIBE_INSTRUCTION;
+  const instruction = resolveVisionInstruction(opts);
   // Each attachment is described INDEPENDENTLY, so fan them out concurrently instead of N sequential
   // round-trips (perf audit 2026-07-18: multi-image/PDF prompts paid N× latency). The inner provider
   // FALLBACK stays sequential PER attachment (try gemini → grok → …, stop at the first that succeeds),

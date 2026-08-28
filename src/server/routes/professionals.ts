@@ -103,7 +103,14 @@ export function registerProfessionalsRoutes(app: Express): void {
       } catch { /* best-effort — a bad document never blocks the turn */ }
       try {
         if (rawAttachments.some((a) => isVisionAttachment(a.type, a.name))) {
-          const visionBlock = await describeVisionAttachments(rawAttachments);
+          // Read the picture FOR THIS EXPERT. Without config.visionInstruction the describer's default
+          // opens "You are reading an uploaded file for a software engineer" — so a palm sent to the
+          // Astrologer, or a diseased leaf sent to Kisan AI, came back described as an app screenshot
+          // and the expert never received what its own field needs. A professional that declares an
+          // instruction gets its own; every other professional is unchanged.
+          const visionBlock = await describeVisionAttachments(rawAttachments, {
+            ...(config.visionInstruction ? { instruction: config.visionInstruction } : {}),
+          });
           if (visionBlock) parts.push(visionBlock);
         }
       } catch { /* best-effort — a bad image never blocks the turn */ }

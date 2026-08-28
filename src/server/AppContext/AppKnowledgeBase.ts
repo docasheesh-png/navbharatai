@@ -3143,6 +3143,15 @@ BIDIRECTIONAL SELECTION: (1) pick a framework in the picker (⚙ → Framework o
     aiSurface: 'nbi_chat',
     keywords: ['push notification', 'notifications', 'notification', 'build finished notification', 'balance alert', 'wallet notification', 'notify', 'alert', 'notification on', 'notification off', 'notification band karo', 'suchna', 'build complete alert', 'app notification'],
   },
+  {
+    id: 'newborn_drug_dosing',
+    name: 'Newborn drug dose calculator',
+    path: 'Ask any NavBharatAI AI \u2014 including the Offline AI \u2014 e.g. "ampicillin dose for 2.5 kg baby, 3 days old, sepsis"',
+    description: 'Tell any NavBharatAI AI the baby\u2019s weight (and age in days, and what is being treated) and it works out the newborn dose from the Facility Based Newborn Care chart \u2014 Ampicillin, Cloxacillin, Gentamicin, Amikacin, Cefotaxime, Chloramphenicol, Aminophylline, Vitamin K, Phenobarbitone, Phenytoin and Dopamine/Dobutamine. It shows the arithmetic every time ("50 mg/kg \u00d7 2.5 kg = 125 mg"), the frequency for that age, the route and, where the chart gives one, the duration. WHY IT CAN BE TRUSTED: the numbers are not remembered by the AI \u2014 they are computed by one tested calculator that every AI reads from, so the same question gives the same answer online and offline. WHAT IT REFUSES TO DO, ON PURPOSE: it will not give a dose for a drug outside the chart; it will not guess the indication for Ampicillin or Gentamicin, because meningitis needs a different dose (Ampicillin 100 mg/kg instead of 50); it will not multiply Vitamin K by weight (it is a fixed 1 mg); it will not turn a Dopamine/Dobutamine infusion into a millilitres-per-hour pump rate, because the chart gives no dilution; and it refuses a weight outside 0.4\u20138 kg, since a decimal slip would otherwise become a tenfold overdose. It always names its source and reminds you to check against your unit protocol.',
+    howToUse: 'Type the drug with the weight in one message \u2014 for example "gentamicin dose for 2 kg baby, 4 days old, sepsis" or "2.4 kg bacche ko ampicillin ki dose". Say the weight with its unit (kg or grams); a bare number is deliberately not read as a weight. If the age or the indication is needed, the AI will ask for it rather than assume. Works with no internet in the Offline AI.',
+    relatedFeatures: ['sda_chat', 'offline_ai'],
+    keywords: ['dose', 'dosage', 'dosing', 'khurak', 'matra', 'kitni dose', 'kitna dose', 'mg/kg', 'newborn dose', 'neonatal dose', 'baby dose', 'navjat', 'ampicillin', 'gentamicin', 'gentamycin', 'amikacin', 'cefotaxime', 'cloxacillin', 'chloramphenicol', 'aminophylline', 'vitamin k', 'phenobarbitone', 'phenytoin', 'dopamine', 'dobutamine', 'sepsis', 'meningitis', 'pneumonia'],
+  },
 ];
 
 /** Quick lookup by id. */

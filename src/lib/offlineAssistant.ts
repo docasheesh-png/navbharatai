@@ -17,6 +17,7 @@
 
 import { APP_KNOWLEDGE_BASE, type AppFeature } from '../server/AppContext/AppKnowledgeBase';
 import { DEVICE_KNOWLEDGE_BASE, type DeviceHelp } from './deviceKnowledgeBase';
+import { isDoseQuestion, answerDoseQuestion } from './neonatalDosing';
 export type { DeviceHelp } from './deviceKnowledgeBase';
 
 export interface OfflineMatch {
@@ -254,7 +255,7 @@ function overviewFeatures(): AppFeature[] {
 // break the "real features only / be honest" rules. All pure and unit-tested.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-export type QuickAnswerKind = 'math' | 'datetime' | 'greeting' | 'thanks' | 'identity';
+export type QuickAnswerKind = 'math' | 'datetime' | 'greeting' | 'thanks' | 'identity' | 'dose';
 
 export interface QuickAnswer {
   kind: QuickAnswerKind;
@@ -508,6 +509,20 @@ export function answerOffline(query: string, now: Date = new Date(), memories: U
       kind: 'overview',
       lead: 'Here\'s what NavBharatAI can do — tap any card to open it, or ask me "where is X / how do I Y".',
       matches: overviewFeatures(),
+    };
+  }
+  // NEWBORN DRUG DOSING (admin 2026-08-27) — answered from the chart's own numbers by a pure,
+  // unit-tested calculator, so it works with NO network and NO model: exactly what "offline AI bhi dose
+  // bata de" requires. Placed BEFORE quickAnswer deliberately — "ampicillin dose for 2.5 kg" is full of
+  // digits, and the arithmetic evaluator would otherwise try to make a sum out of it. Strictly gated
+  // (`isDoseQuestion` needs a drug FROM THE CHART plus a dosing cue), so ordinary talk never lands here.
+  if (isDoseQuestion(query)) {
+    return {
+      kind: 'answer',
+      answerKind: 'dose',
+      lead: 'From the newborn dosing chart',
+      answerText: answerDoseQuestion(query),
+      matches: [],
     };
   }
   // Deterministic on-device answer (calculation, date/time, greeting, identity) — real, never faked.

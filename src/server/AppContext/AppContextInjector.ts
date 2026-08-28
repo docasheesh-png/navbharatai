@@ -9,6 +9,7 @@
  * Doctor AI and coding requests to Engineer AI get zero injected app-context
  * and therefore zero behavior change.
  */
+import { isDoseQuestion, answerDoseQuestion } from '../../lib/neonatalDosing';
 import { APP_KNOWLEDGE_BASE, AppFeature, getFeatureById } from './AppKnowledgeBase';
 
 // Signals that the user is asking about the app itself (navigation / features / how-to).
@@ -91,6 +92,30 @@ const SUPPORT_OFFER_BLOCK =
   `canned or copy-pasted sentence. Keep it humble, warm, brief and reassuring, in the user's own language. ` +
   `Do NOT force the email into an ordinary question you can already answer well.`;
 
+/**
+ * The dosing block, or '' when the message is not a dosing question.
+ *
+ * The instruction is deliberately blunt about the two things a model must not do here — recompute, and
+ * fill a gap the calculator refused to fill. When the calculator asks for the weight, the age or the
+ * indication, that question IS the answer, and inventing past it is the failure this exists to prevent.
+ */
+function dosingContext(userMessage: string): string {
+  try {
+    if (!isDoseQuestion(userMessage)) return '';
+    const answer = answerDoseQuestion(userMessage);
+    return [
+      'NEWBORN DRUG DOSE — ALREADY CALCULATED FOR YOU. Give this to the user as it stands.',
+      'Do NOT recalculate it, do NOT round it, and do NOT add a dose for any drug that is not in it.',
+      'If it asks for the weight, the age in days or the indication, ASK THAT — never assume one.',
+      'You may translate it into the user\u2019s language and lay it out nicely; the numbers must not change.',
+      '',
+      answer,
+    ].join('\n');
+  } catch {
+    return ''; // a context helper must never break a chat turn
+  }
+}
+
 export class AppContextInjector {
   /**
    * Return a focused block of relevant AppKnowledgeBase entries for this message,
@@ -103,7 +128,16 @@ export class AppContextInjector {
     // to whatever feature context we return, so every AI that calls this offers our help email when the
     // user is facing a problem — see getSupportOffer for the surface-aware trigger rules.
     const support = this.getSupportOffer(userMessage, surface);
-    const withSupport = (features: string) => [features, support].filter(Boolean).join('\n\n');
+    // NEWBORN DOSING — COMPUTED, THEN HANDED TO THE MODEL AS A FACT (admin 2026-08-27).
+    //
+    // This is the single place EVERY online AI asks for context (Engineer AI, the Professionals engine,
+    // Doctor AI, Free and Pro chat), which is why the calculation is injected here rather than taught to
+    // each prompt separately. The model is NOT asked to remember the chart or do the arithmetic: the
+    // numbers are worked out by the same pure, unit-tested calculator the offline AI uses, and the model
+    // is told to relay the result unchanged. A model recalling a dosing table can misremember 50 as 100
+    // and sound identical either way — for a newborn that is the one error worth engineering out.
+    const dosing = dosingContext(userMessage);
+    const withSupport = (features: string) => [dosing, features, support].filter(Boolean).join('\n\n');
 
     if (!msg.trim()) return withSupport('');
 

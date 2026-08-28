@@ -42834,3 +42834,29 @@ references.**
 **State: NOT BUILT — recorded mandate.** Nothing of this is claimed to exist yet (rule 2). Next
 session picking this up: start with the output-contract + card-growth half (no external dependency),
 leave the HPR gate until the admin has ABDM credentials in hand.
+
+---
+
+## 2026-08-28 — REFUSED: transcribing a Scribd dose table into the calculator (and why, so no future session does it)
+
+The admin sent a screenshot of a **Scribd upload** ("Paediatric Emergency Drug Dose", ~35 drugs —
+adenosine, adrenaline, amiodarone, dopamine, noradrenaline, prostaglandin E1, …) and asked for them to
+be added to the 💊 Dose Calculator, with "cross match with trusted/government websites" delegated to
+the session. **Not done, deliberately — do not "complete" this from the screenshot later.**
+
+- **Scribd is an anonymous upload site** — the one property the calculator's whole safety model rests
+  on (every number traceable to a named official chart the admin can hold) is absent. The screenshot's
+  cells are also visibly truncated/garbled in places.
+- **Live cross-verification is impossible from this environment, proven not assumed:** WebSearch finds
+  the right WHO documents, but the egress proxy BLOCKS fetching who.int (`EGRESS_BLOCKED`, tested
+  2026-08-28). "Cross-matching" would therefore mean dosing from the model's memory — the exact failure
+  the calculator exists to prevent, and these are the highest-lethality drugs in the hospital
+  (adrenaline dilutions, per-minute infusions, age-banded doses).
+- **The open path (told to the admin):** photograph OFFICIAL printed pages — the WHO Pocket Book of
+  Hospital Care for Children (2nd ed) drug-dose annex, Govt-of-India F-IMNCI / ETAT wall charts, or the
+  unit's own printed emergency chart — and each drug gets the Chart 13 discipline: verbatim
+  transcription, per-drug trap analysis (dilutions, bands, max doses), tests, source printed on every
+  answer. The Scribd list may serve as a CHECKLIST of which drugs to look for in official pages, never
+  as the source of a number.
+- Gestational age: when an official chart splits a dose by gestation, the engine's ask-what-it-needs
+  pattern extends to it (same as indication/age today).

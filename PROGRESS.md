@@ -42697,3 +42697,100 @@ the parser no longer has to get through firebase before the app's own code.
 second on a slow Indian mobile connection, which is exactly the user the budget exists to protect.
 `main` had been red since 03:07 UTC and the `.aab`/`.ipa` built at 03:07 carry the un-split bundle —
 they WORK (the budget is a CI gate, not a runtime error) and are simply heavier than they should be.
+
+---
+
+## 2026-08-28 — Google Play 2027 quality requirements: audit, and the fixes it justified
+
+Trigger: the Play Console notice *"Introducing new quality requirements to optimize app memory and
+secure device migration"* (27 Aug 2026). Seven PRs merged — #2700, #2701, #2702, #2703, #2706, plus
+the Apple work below.
+
+### The headline, because it is the thing most likely to be misremembered
+
+**Failing a threshold costs VISIBILITY and PUBLISHING CAPABILITY — not removal from Google Play.**
+Existing installs keep working. Memory/bitmap/DEX land **Feb 2027**, Zero-Tap Sign-In **Apr 2027**.
+
+### What was found and fixed
+
+**🔴 P0 — the Node server was shipping inside the Android app (#2700).** Measured with a real
+`cap copy android`: 62 MB of web assets, of which `server.cjs` (7.5 MB) can never execute in a WebView
+and `server.cjs.map` (16 MB) put our **readable server source on every user's device**. Nobody added
+it: `npm run build` emits the server into `dist/`, and `webDir: 'dist'` makes Capacitor copy that
+directory whole — two correct decisions whose intersection was wrong, which is why it survived every
+review of both. Fixed by a `capacitor:copy:after` hook (verified against the CLI source: `sync` calls
+`copy`, and `copy` runs the hook every time), so it cannot be forgotten. **62 MB → 39 MB**, with
+`dist/server.cjs` byte-identical and still booting.
+
+**🔴 P1 — full-size attachments retained in chat state (#2701).** `useChatEngine` kept the whole
+base64 data URL in the message object, and messages are never trimmed: ~55 MB retained after ten phone
+photos, released only on reload — a rising P90 against a flat P50, which is exactly the 3.5× ratio
+Google names as a leak signal. Root cause was **one value doing two jobs**: the same string displayed a
+64×64 bubble AND was the retained record. Safe to shrink because the attachment is sent to the backend
+separately, so the model sees exactly what it saw before. Centralised into `lib/attachmentPreview.ts`
+rather than rewritten — `AgentV3Panel` already had a correct downscaler (and keeps no attachment in
+message state at all, which is why the builder chat never leaked).
+
+**🔴 HIGH — a repo-scoped GitHub token rode in a hijackable deep link (#2702 found, #2706 fixed).**
+`com.navbharat.ai://github-callback#gh_token=…`, and a custom URI scheme is not exclusive on Android.
+Scope is `repo workflow` — full read/write on all of the user's private repositories. **The existing
+defences were real and defended something else**: origin allowlist, open-redirect guard, fixed scheme
+constant — all protecting against a crafted `state`, none touching an app claiming the scheme. Fixed
+with an encrypted, uid-bound, 2-minute **ticket** redeemed over HTTPS with the user's Firebase ID
+token. Rollout is two-path because the app runs from assets baked into its APK: `nbai-native` still
+gets the raw token byte-identically, `nbai-native-v2` gets a ticket.
+
+**🟡 Android backup was probably failing entirely (#2703).** `allowBackup="true"` with no rules, and
+the per-app cloud limit is **25 MB** — past it Android backs up NOTHING, silently. We ship ~39 MB of
+assets plus a service-worker cache. **I had to correct my own framing here**: I first called the
+backed-up session a security exposure, but cloud backup restores only to the SAME Google account, and
+for this user base the alternative is another OTP SMS. So the fix is to exclude WebView **caches only**
+— never `Local Storage`/`IndexedDB`, which hold the session — so backup gets under the limit and
+actually works. Both `fullBackupContent` (API 24-30) and `dataExtractionRules` (API 31+) are wired,
+because minSdk is 24 and each is ignored by the other's range.
+
+### A correction worth keeping: my own Phase 0 numbers were wrong
+
+Phase 0 reported **"79 unbalanced `addEventListener` calls"** as the strongest leak signal. The number
+and the method were both wrong: `grep -c` cannot separate our client code from (a) listeners we WRITE
+INTO other applications inside template literals — preview iframes and generated apps — and (b)
+listeners sitting in plain string data. **NavBharatAI is an app builder, so writing JavaScript into
+other apps is its main job**, and a raw grep is structurally misleading here in a way it would not be
+elsewhere. Re-measured with template literals stripped: **3 files, 10 listeners, zero genuine leaks**.
+Timers likewise clean.
+
+**The generalisable lesson: in this repository, any text-search metric must strip template literals
+before it means anything.** `tests/deadEndpointSweep.test.ts` already had a `stripMultilineTemplates`
+helper for exactly this reason — the precedent existed and Phase 0 missed it.
+
+### 🔴 OPEN — blocked, and on what (rule 6)
+
+| Item | Blocked on |
+|---|---|
+| **Zero-Tap Sign-In** (Apr 2027) | An architecture decision (server-minted restore token vs Firebase refresh token vs Google-only) AND native Android code this session cannot compile or run |
+| **R8 / DEX optimization** | Our real DEX size — Play Console → App Bundle Explorer. Google enforces it *"only where you have non-negligible DEX sizes"*, and as a Capacitor app most of NavBharatAI is JavaScript |
+| Memory / bitmap P90 | Production telemetry — Play Console → Android vitals |
+| Device verification of #2703 and #2706 | A real handset: one backup-restore cycle, one GitHub connect |
+
+⚠️ **R8 is not a flag flip on a Capacitor app**: plugins are discovered by reflection and the bridge
+exposes `@JavascriptInterface` methods by name — both are what obfuscation breaks, in the release
+build only, where no test looks. And `proguard-android.txt` (which we reference) explicitly DISABLES
+optimization, so flipping `minifyEnabled` alone would leave one of the three required rates at zero.
+
+Docs: `docs/google-play-2027-requirements.md`, `-audit.md`, `-remediation-plan.md`,
+`-security-audit.md`.
+
+---
+
+## 2026-08-22 — Apple login: the reason was in our hands and we were deleting it
+
+`@firebase/auth` splits the identity-toolkit error on `' : '` and throws the server's own explanation
+as the error's `.message`. Every caller wrote `err.code || err.message` — which LOOKS like a fallback
+and is not one: the code is always truthy, so the explanation was discarded at the moment it arrived.
+That is why a real, reproducible Apple failure showed a bare `auth/invalid-credential` and nothing
+else. Fixed in #2579; the sibling in the server-side Apple report in #2580; and #2581 gave that report
+a UI, because it had shipped with none and curl-with-a-token is indistinguishable from unbuilt.
+
+🔴 **OPEN:** none of it FIXES Apple login. The four values live in Firebase Console → Authentication →
+Sign-in method → Apple (Services ID `com.navbharatai.web`, Team ID, Key ID, .p8), which no session can
+read. What changed is that the next attempt reports WHY.

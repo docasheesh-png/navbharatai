@@ -177,14 +177,51 @@ and the answer changes whether this is compliance work or optional quality work.
 fix that looks complete and satisfies two of three. The correct file is
 **`proguard-android-optimize.txt`**.
 
-**And R8 on a Capacitor app is not a flag flip.** Capacitor discovers plugins by **reflection**, and
-the bridge exposes methods to JavaScript by **name** via `@JavascriptInterface`. Obfuscation renames
-exactly those. The failure mode is a crash **in the release build only** — not in debug, not in CI,
-not in any test — which is the worst possible place for it.
+### ⚠️ CORRECTED 2026-08-28 — I overstated the risk, and the correction changes the priority
 
-**Therefore this ships as its own PR, behind a real device check**, with minimal keep rules each
-carrying a comment explaining why it exists. No blanket `-keep class ** { *; }`, which would satisfy
-the flag and defeat the requirement.
+This section previously said *"R8 on a Capacitor app is not a flag flip — Capacitor discovers plugins
+by reflection and the bridge exposes methods by name, and obfuscation renames exactly those."* That
+was asserted from how Capacitor works, not checked against what Capacitor ships. **Checked now, and it
+is largely wrong.**
+
+`node_modules/@capacitor/android/capacitor/build.gradle:50`:
+
+```gradle
+consumerProguardFiles 'proguard-rules.pro'
+```
+
+`consumerProguardFiles` means those rules are applied **automatically to every app that consumes the
+library** — we do not write them, and we cannot forget them. And they cover precisely the thing I
+warned about:
+
+```proguard
+-keep public class * extends com.getcapacitor.Plugin { *; }
+-keep @com.getcapacitor.annotation.CapacitorPlugin public class * {
+    @com.getcapacitor.annotation.PermissionCallback <methods>;
+    @com.getcapacitor.annotation.ActivityCallback <methods>;
+    @com.getcapacitor.PluginMethod public <methods>;
+}
+-keep public class * extends org.apache.cordova.* { public <methods>; public <fields>; }
+```
+
+Verified that our plugins are actually covered: `FirebaseMessagingPlugin`, `MediaPlugin`,
+`AppUpdatePlugin` and the rest all extend `com.getcapacitor.Plugin`, so the first rule takes them.
+Firebase's own AARs ship consumer rules the same way. And `MainActivity.java` is empty —
+`class MainActivity extends BridgeActivity {}` — so we contribute no reflection of our own.
+
+Capacitor's own module also builds with **`proguard-android-optimize.txt`**, which independently
+confirms the file-choice point above.
+
+**What this changes.** R8 is a much smaller risk than this document claimed, and worth doing for size
+and startup **even if the DEX requirement turns out not to apply to us**. It still ships as its own PR
+and still wants a real device smoke test before a Play upload — a runtime failure in a release build
+is invisible to CI either way — but it is no longer the delicate operation described here.
+
+**Deliberately NOT bundled with the current fixes.** If one `.aab` carried both R8 and this week's
+memory/security changes and something misbehaved on the device, we would not know which caused it.
+One variable at a time.
+
+No blanket `-keep class ** { *; }` regardless: it would satisfy the flag and defeat the requirement.
 
 ---
 

@@ -42897,3 +42897,35 @@ Console); iOS `.ipa` run **33163957971** ✅ reached TestFlight (upload:true, pr
 for more drugs · the Android-security HIGH finding (#2702, another session's) · Dependabot majors
 (lucide-react, motion) · the Green-Guard "was that build free?" question · ABDM HPR mandate (recorded
 2026-08-28, needs admin credentials).
+
+---
+
+## 2026-08-28 (later) — MILESTONE: the ER redesign — the doctor's own formulary + Quick calcs (#2714)
+
+**The admin's verdict on the V1 calculator, and the redesign it forced:** "aapne badhiya nahi banaya —
+emergency room me doctor ko dose calculation me help karni hai." Four asks; three built, one refused.
+
+**What the 💊 sheet is now (two tabs, all offline, all recompute-per-keystroke):**
+- **Medicines** — a Google-like search box (misspellings rank via the same bounded editDistance as
+  chat; typing only PROPOSES, the tap decides — pinned by test); **the doctor's own emergency
+  formulary leads** (`src/lib/customMedicines.ts`: name, dose/kg in mg/kg | mcg/kg | mcg/kg/min,
+  optional range + max-dose ceiling that is applied AND announced, route, mg/mL, notes; add/✏️/🗑️;
+  device-only storage with the vialMemory hardening). Every answer prints *"your own entry (added
+  <date>) — verify against your unit protocol"* — **the doctor is the named source**, which is what
+  ends the emergency-drug source problem without the AI ever supplying a number. An infusion entered
+  with its concentration computes **mL/HOUR** (pinned: 0.1 mcg/kg/min × 10 kg at 0.08 mg/mL = 0.75).
+  The FBNC chart sits one fold down — kept, no longer leading. A not-found medicine gets the honest
+  add-it-yourself panel, never a number from memory.
+- **Quick calcs** (`src/lib/erCalcs.ts` — unit arithmetic ONLY; a test forbids any drug name with a
+  number attached): infusion→pump mL/h, the REVERSE pump→dose (the handover question), drip rate
+  (drops/min + seconds-per-drop, the countable form), dilution prep (refuses a target stronger than
+  stock). Checked-by-hand test values throughout.
+
+**REFUSED (recorded so it stays refused):** crafting the backend prompt so the model "answer de hi de"
+for a drug outside the chart — that is a from-memory dose with the refusal stripped. The not-found
+panel + the doctor's own 30-second entry is the design answer.
+
+**A gate lesson that cost one red CI:** the local gate did not run CI's `noUnusedImports` step; the
+redesign left two unused imports and CI caught them. The local gate now includes that step.
+
+**Store builds re-triggered after the merge** so the admin's Play upload carries the redesign, not V1.

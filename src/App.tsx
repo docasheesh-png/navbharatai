@@ -8,6 +8,8 @@ import { resolveGithubConnectionForUser } from './lib/githubConnection';
 import { sanitizeFileMap } from './lib/fileMapSanitize';
 import { computeTabClose } from './lib/tabClose';
 import { shouldRecordOpener } from './lib/tabParenting';
+import { historySurfaceFor, historyFilterFor } from './lib/historySurface';
+import { HistoryPopup } from './components/history/HistoryPopup';
 // AgentV3Panel is rendered via ProV3Surface (the gated v5.0 surface), not directly here.
 // FilesPanel → moved to ViewPanels.tsx
 import { v3MobileFooterActive, type V3FooterApi } from './components/agentv3/v3FooterApi';
@@ -358,7 +360,14 @@ export default function App() {
   // Scoped History: the NavBharatAI Free footer opens History filtered to Free only. It resets to
   // 'all' whenever we leave the History view, so opening History from anywhere else shows everything.
   const [historyInitialFilter, setHistoryInitialFilter] = useState<'all' | 'free' | 'professional'>('all');
+  // The Free chat's History opens OVER the conversation (admin 2026-08-28, matching Pro v5.0)
+  // instead of switching to the History tab. Which surfaces get it lives in lib/historySurface.ts.
+  const [historyPopupOpen, setHistoryPopupOpen] = useState(false);
   useEffect(() => { if (activeView !== 'history') setHistoryInitialFilter('all'); }, [activeView]);
+  // A popup belongs to the screen it was opened over. Leaving the Free chat with it still open would
+  // leave the list hanging over whatever came next, so changing view always dismisses it. Opening the
+  // popup does NOT change activeView, so this can never close it the moment it opens.
+  useEffect(() => { setHistoryPopupOpen(false); }, [activeView]);
   // Keep the address bar honest about the admin view: reflect /admin while it's open (so a refresh or
   // bookmark reopens it) and restore / on leaving. replaceState (not push) so it never pollutes history.
   useEffect(() => {
@@ -3701,6 +3710,19 @@ export default function App() {
               }}
             />
           )}
+          {/* The Free chat's History, laid OVER the conversation rather than replacing it (admin
+              2026-08-28, matching Pro v5.0). It renders the SAME HistoryView the tab does — the
+              merged Free + Doctor AI + professionals list with a mode tag on every row, which
+              shipped 2026-08-25 (#2687) — so the two can never drift apart. */}
+          {historyPopupOpen && (
+            <HistoryPopup
+              user={user}
+              onClose={() => setHistoryPopupOpen(false)}
+              onRestoreSession={handleRestoreUci}
+              onDeleteSession={deleteSession}
+              onOpenProfessional={(viewId) => toggleTab(viewId as ViewType)}
+            />
+          )}
           {activeView === 'report' && <ReportsListView user={user} />}
           {activeView === 'history' && (historyInitialFilter === 'professional'
             ? <ProfessionalHistoryView onOpen={(id) => toggleTab(id as ViewType)} onBack={() => toggleTab('professionals')} />
@@ -3946,7 +3968,26 @@ export default function App() {
                     // Free + Doctor + every professional conversation, each with its mode tag — one
                     // unified list ("free ki history me sabhi ayegi tag ke sath"). The Professionals
                     // hub keeps its professional-only view.
-                    if (id === 'history') setHistoryInitialFilter(activeView === 'professionals' ? 'professional' : 'free');
+                    if (id === 'history') {
+                      setHistoryInitialFilter(historyFilterFor(activeView as string));
+                      // POPUP OVER THE CHAT on the Free surface — you glance at the list and you are
+                      // back in the same conversation, exactly as Pro v5.0 behaves. Every other
+                      // surface keeps the History tab byte-for-byte.
+                      if (historySurfaceFor(activeView as string) === 'popup') {
+                        // The SAME auth gate the tab uses, called rather than re-implemented: history
+                        // is sign-in-only, and a second copy of that rule would drift. authGateDecision
+                        // opens optimistically while Firebase is still restoring, so a returning user
+                        // is never shown the login screen by mistake.
+                        if (authGateDecision('history', !!user, loadingUser) === 'login') {
+                          pendingViewAfterLoginRef.current = 'history';
+                          setShowAuth(true);
+                          addLog('Chat history requires an active session. Please login.', 'warn');
+                          return;
+                        }
+                        setHistoryPopupOpen(true);
+                        return;
+                      }
+                    }
                     if (id) toggleTab(id);
                   }}
                   aria-label={label}

@@ -350,6 +350,29 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       if (data?.ok && typeof data?.previewUrl === 'string' && data.previewUrl) {
         setFoundUrl(data.previewUrl);
         setMode('live');
+        // ── 🔒 A SUCCESSFUL WAKE MUST ERASE WHAT IT JUST DISPROVED (admin screenshot 2026-08-28:
+        // "live preview wakeup hi nahi ho raha") ────────────────────────────────────────────────
+        //
+        // The screenshot showed THREE banners at once: green "Your preview is awake and your app is
+        // responding", blue "Preview is in sleep mode · [Wake up]", and grey "showing your finished
+        // app from its saved copy, so no server is left running". None was a lie when it was written;
+        // two were ARTEFACTS OF AN EARLIER PROBE still standing for the present, and the health poll
+        // that refreshes them runs every 150s. So for up to two and a half minutes after a wake that
+        // WORKED, the screen insisted it had not.
+        //
+        // The diagnose result is a stronger, fresher measurement than the poll it supersedes — the
+        // server booted the sandbox and saw the port answer — so it publishes that instead of leaving
+        // stale contradictions up until a timer catches up.
+        setHealth('live');
+        setSnapshotNote('');
+        setPortDown(false);
+        setUnreachable(false);
+        // …AND THE FRAME ITSELF MUST RE-FETCH. This is the half that made a working wake look like
+        // nothing at all: the iframe's src is the DOOR url, which is byte-identical before and after
+        // the machine behind it changes — so React saw the same string and kept the snapshot it had
+        // already painted. Bumping the key remounts the frame, the door re-resolves, and it lands on
+        // the machine we just woke.
+        setLiveReloadKey((k) => k + 1);
         // A genuinely successful boot resets the watchdog's failure STREAK (the total backstop and
         // the cooldown still apply) — so the next sandbox death hours later can heal again.
         healRef.current.streak = 0;
@@ -601,6 +624,16 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         setIdleSnapshotUrl(idleUrl);
         setIdleSnapshotNote(idleUrl && typeof health?.idleSnapshotNote === 'string' ? health.idleSnapshotNote : '');
         setHealth(status);
+        // ── AND THE MIRROR: A SUCCESS MESSAGE MUST NOT OUTLIVE THE STATE IT DESCRIBED ─────────────
+        // The other half of the same screenshot. "Your preview is awake and your app is responding" is
+        // written by the diagnose RESULT, which persists — so when the sandbox paused again a few idle
+        // minutes later, that green line still sat above a fresh blue "sleep mode" banner. Both were
+        // once true; only one still was. A probe that finds the preview asleep or stopped therefore
+        // retires a stale SUCCESS note. A FAILURE note is deliberately KEPT: the reason a wake did not
+        // work stays useful long after the attempt.
+        if (status === 'sleeping' || status === 'crashed') {
+          setDiagResult((prev) => (prev && prev.ok ? null : prev));
+        }
         // NOT-SERVING (admin report 2026-08-06): the port answers but the page is a 404 / "Cannot GET".
         // We used to render that page inside the iframe AS the user's app. Record it so the UI can say
         // the truth instead — see the banner in the live view below.

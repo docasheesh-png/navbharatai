@@ -71,8 +71,19 @@ describe('Report picker — choose the build, still never see the report', () =>
     expect(agentv3).toContain("please pick another build");
   });
 
-  it('one build in the chat stays one click — the picker never blocks reporting', () => {
-    expect(panel).toContain('if (builds.length < 2) { void sendReportToAdmin(); return; }');
+  it('one build in the chat still skips the PICKER — it never blocks reporting', () => {
+    // RE-ANCHORED 2026-08-28, and the change is worth stating plainly rather than hiding: this used
+    // to be titled "stays one click", and that is no longer true. The admin asked for a box that
+    // asks what went wrong, so a single-build report is now: tap Report → describe it (or skip) →
+    // Send. That is a deliberate extra step, not a regression, and it buys the one thing the
+    // automatic diagnostics can never contain — the user's own account of the problem.
+    //
+    // The invariant this test actually protects is untouched: a chat with ONE build is never made to
+    // choose from a list of one. The picker must never become a wall between a user and reporting a
+    // broken build, and it still is not.
+    expect(panel).toContain('if (builds.length < 2) { askForReportNote(); return; }');
+    // …and the note step is skippable, so reporting is never gated on writing something.
+    expect(panel).not.toContain('disabled={!note');
   });
 
   it('the send count follows the build that was REPORTED, not the one on screen', () => {

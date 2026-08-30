@@ -66,6 +66,12 @@ interface AdminBuildReportRow extends ReportTriage {
   unresolvedCount?: number;
   /** How many builds/edits of the session the record carries (1 when only the focused build exists). */
   sessionParts?: number;
+  /**
+   * WHAT THE USER SAID WAS WRONG, in their own words (admin 2026-08-28). Absent when they sent the
+   * report without typing anything, and on every report written before the box existed — neither is
+   * an error, and neither should read as one.
+   */
+  userNote?: string | null;
 }
 
 type ReportSortKey = 'time' | 'name' | 'app' | 'tier' | 'charged';
@@ -212,7 +218,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       if (reportStatusFilter === 'ok' && r.ok !== true) return false;
       if (reportStatusFilter === 'failed' && r.ok !== false) return false;
       if (q) {
-        const hay = `${r.name ?? ''} ${r.email ?? ''} ${r.appLabel ?? ''} ${r.userId ?? ''}`.toLowerCase();
+        // The user's own complaint is searchable too (admin 2026-08-28) — "show me every report that
+        // mentions the Save button" is the question this inbox exists to answer, and it is answerable
+        // only over the words the user wrote. Costs nothing: userNote is already in the listed meta.
+        const hay = `${r.name ?? ''} ${r.email ?? ''} ${r.appLabel ?? ''} ${r.userId ?? ''} ${r.userNote ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -2656,6 +2665,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                         );
                                       })()}
                                     </span>
+                                    {/* THE USER'S OWN WORDS COME FIRST (admin 2026-08-28). `rootCause`
+                                        below is the ENGINE's verdict on itself; this is the only line
+                                        that can say the button does nothing or it built the wrong app.
+                                        When triaging fifty rows, that is the one worth reading first,
+                                        which is also why it lives in meta and needs no extra fetch. */}
+                                    {r.userNote && (
+                                      <span title={r.userNote} className="block text-[10px] text-sky-300/90 mt-0.5 truncate max-w-[240px]">“{r.userNote}”</span>
+                                    )}
                                     {r.rootCause && <span className="block text-[10px] text-amber-400/80 mt-0.5 truncate max-w-[240px]">{r.rootCause}</span>}
                                   </td>
                                   <td className="px-3 py-2.5 text-[12px] text-white/90 truncate max-w-[140px]">{r.name || <span className="text-[#8b949e]">—</span>}</td>
@@ -2784,6 +2801,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <button onClick={() => setSelectedReport(null)} className="text-[#8b949e] hover:text-white px-2 py-2 rounded-xl hover:bg-white/5">Close</button>
                       </div>
                     </div>
+                    {/* THE COMPLAINT, IN FULL, ABOVE THE JSON (admin 2026-08-28).
+                        The list row truncates it to one line; here it is shown whole and FIRST,
+                        because it is the only part of this document the user wrote. Everything
+                        below is the engine describing itself, which is exactly the evidence that
+                        cannot notice "it built the wrong app". Rendered as plain text in a
+                        pre-wrap block — never as markup — since it is untrusted user input. */}
+                    {selectedReport?.meta.userNote && (
+                      <div className="mx-4 mt-4 rounded-2xl border border-sky-500/30 bg-sky-500/[0.06] px-4 py-3">
+                        <div className="text-[10px] font-black uppercase tracking-wider text-sky-300/80 mb-1">What the user said</div>
+                        <p className="text-[12px] leading-relaxed text-sky-100 whitespace-pre-wrap break-words">{selectedReport.meta.userNote}</p>
+                      </div>
+                    )}
                     <div className="flex-1 overflow-auto p-4">
                       {selectedReportLoading ? (
                         <div className="flex items-center justify-center py-12 text-[#8b949e] text-sm"><TirangaLoader className="w-5 h-5 mr-2" /> Loading report…</div>

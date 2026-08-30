@@ -420,7 +420,7 @@ import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { recentBuildHistoryFor, etaBasisNote } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
-import { buildAdminReportRecord, saveAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
+import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
@@ -3271,7 +3271,7 @@ async function noteBuildOutcome(
   // the request body, so a user can only report their OWN build (no IDOR). Honest: if there is no
   // report yet, or the save genuinely fails, we say so — never a fake "sent".
   app.post('/api/agentv3/report-to-admin', async (req: Request, res: Response) => {
-    const body = (req.body ?? {}) as { workspaceId?: string; buildId?: string; activeBuildId?: string; promptHash?: string };
+    const body = (req.body ?? {}) as { workspaceId?: string; buildId?: string; activeBuildId?: string; promptHash?: string; note?: string };
     const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : '';
     const buildId = typeof body.buildId === 'string' && body.buildId ? body.buildId : '';
     const verifiedUid = await verifyFirebaseToken(req);
@@ -3357,6 +3357,10 @@ async function noteBuildOutcome(
       workspaceId: workspaceId || report.workspaceId || null,
       buildId: buildId || report.buildId || null,
       reportedAt: Date.now(),
+      // WHAT THE USER SAID WAS WRONG (admin 2026-08-28). Sanitised at the boundary — the words are
+      // never edited, only made safe to store and render. Optional by design: a blank note is honest
+      // evidence, a compulsory box produces "." to get past it.
+      userNote: sanitizeUserNote(body.note),
     }, sessionBuilds, manualHistoryUnreadable);
     const saved = await saveAdminBuildReport(record);
     if (!saved) {

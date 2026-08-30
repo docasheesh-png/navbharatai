@@ -42,6 +42,41 @@ export interface AdminBuildReportContext {
   workspaceId: string | null;
   buildId?: string | null;
   reportedAt: number;
+  /** What the user typed when they pressed Report — their own description of the problem. */
+  userNote?: string | null;
+}
+
+/**
+ * THE USER'S OWN WORDS, made safe to store and to render — nothing more.
+ *
+ * WHY IT EXISTS (admin 2026-08-28): "Report" used to submit the diagnostics alone, so the admin
+ * received a complete technical record of a build and no statement of what the person thought was
+ * wrong with it. Those are different facts. The engine's own verdict says whether the build met the
+ * engine's expectations; only the user can say the button did nothing, the colours were wrong, or it
+ * built the wrong app entirely — the failures every automated check passes straight over.
+ *
+ * 🔒 IT SANITISES, IT NEVER REWRITES. Control characters are stripped because they corrupt the admin
+ * table, runs of blank lines are collapsed, and the text is capped. The WORDS are never edited,
+ * summarised, spell-corrected or interpreted — an admin acting on a complaint must be reading the
+ * complaint, not our paraphrase of it.
+ *
+ * The cap is generous and matched EXACTLY by the input's own maxLength, so the user can see the limit
+ * while typing rather than discovering afterwards that half their sentence never arrived. Truncation
+ * here is the defence against a crafted body, not the normal path.
+ */
+export const USER_NOTE_MAX = 2000;
+
+export function sanitizeUserNote(raw: unknown, max = USER_NOTE_MAX): string | null {
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw
+    // Strip control characters, but KEEP newlines and tabs — a user describing several problems
+    // writes a list, and flattening it would destroy the structure of their own report.
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  if (!cleaned) return null;
+  return cleaned.length <= max ? cleaned : `${cleaned.slice(0, max)}…`;
 }
 
 /** A simplified paid/free classification of the build's billing tier, for admin filtering. */
@@ -122,6 +157,21 @@ export interface AdminBuildReportMeta {
   downloadedAt?: number | null;
   fixedAt?: number | null;
   fixedNote?: string | null;
+  /**
+   * WHAT THE USER SAID WAS WRONG, in their own words (admin 2026-08-28). Null when they sent the
+   * report without typing anything — which is allowed on purpose: making the box compulsory would
+   * produce reports that say "." to get past it, and a forced full stop is worse evidence than an
+   * honest blank.
+   *
+   * IN META, not only in the record, because triage starts at the LIST. A one-line complaint is the
+   * single most useful thing for deciding which of fifty reports to open first, and burying it inside
+   * the document would mean loading every report to find that out.
+   *
+   * ⚠️ NOT the same field as `fixedNote`, which is the ADMIN's note about the fix. One is the
+   * problem, the other is the response; storing either in the other's field would silently rewrite
+   * history.
+   */
+  userNote?: string | null;
 }
 
 /**
@@ -299,6 +349,9 @@ export function buildAdminReportRecord(
       billedUsd: typeof trimmed.billing?.billedUsd === 'number' ? trimmed.billing.billedUsd : null,
       buildMs,
       rootCause: cap(trimmed.rootCause, 400),
+      // Already sanitised at the route boundary; sanitised again here so a direct caller (a test, a
+      // future path) cannot write raw control characters into the admin table.
+      userNote: sanitizeUserNote(ctx.userNote),
       // SAY THE OBVIOUS THING. A null summary on an unfinished build reads as "the build produced
       // nothing"; the truth is "the build had not got there yet". One sentence is the whole difference
       // between a report that looks fabricated and one that is simply an early snapshot.

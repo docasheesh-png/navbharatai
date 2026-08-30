@@ -2,6 +2,7 @@ import UpdateBanner from './components/UpdateBanner';
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
 import { tokenFromDeepLink, ticketFromDeepLink, redeemGithubTicket, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
+import { readTapFeedbackPrefs, shouldOpenMenuOnSwipe } from './lib/tapFeedbackPrefs';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
@@ -680,7 +681,22 @@ export default function App() {
   const v3ResumeInFlightRef = useRef(false);
 
   // Touch swipe → sidebar control (replaces the accidental browser back/forward).
-  // Left→right swipe opens the sidebar; right→left closes it (no-op if already closed).
+  //
+  // 🔒 TWO FIXES FROM ONE REPORT (admin 2026-08-28: "left se right finger swipe ho jaye GALTI SE BHI to
+  // slidebar menu open ho jata hai"):
+  //
+  //   1. OPENING IS OFF BY DEFAULT. It is opt-in under Settings → Touch feedback, and the preference is
+  //      read PER TOUCH (not captured at mount), so flipping the switch takes effect on the very next
+  //      swipe — the same discipline `installTapHaptics` follows, and the reason this effect still has
+  //      no dependency on the preference.
+  //   2. WHEN ON, IT MUST START AT THE LEFT EDGE. The real cause of the accidental opens was that this
+  //      listened on `document` for ANY mostly-horizontal 70px swipe ANYWHERE: scrolling the preview's
+  //      horizontal toolbar, flicking a code block or nudging a carousel all read as "open the menu".
+  //      An edge-anchored start is what every OS back-gesture uses, and it cannot collide with content
+  //      that scrolls sideways in the middle of the screen.
+  //
+  // CLOSING is deliberately NOT gated or edge-anchored: it only does anything while the menu is already
+  // open and covering the screen, so it can neither surprise the user nor fight page content.
   useEffect(() => {
     let startX = 0, startY = 0, tracking = false;
     const onStart = (e: TouchEvent) => {
@@ -695,8 +711,12 @@ export default function App() {
       const dx = t.clientX - startX, dy = t.clientY - startY;
       // Mostly-horizontal, decisive swipe only.
       if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-      if (dx > 0) setIsMenuOpen(true);                 // left→right: open
-      else setIsMenuOpen(prev => (prev ? false : prev)); // right→left: close if open, else nothing
+      if (dx > 0) {
+        if (!shouldOpenMenuOnSwipe(startX, readTapFeedbackPrefs())) return;
+        setIsMenuOpen(true);                           // left EDGE → right: open (opt-in)
+      } else {
+        setIsMenuOpen(prev => (prev ? false : prev));  // right→left: close if open, else nothing
+      }
     };
     document.addEventListener('touchstart', onStart, { passive: true });
     document.addEventListener('touchend', onEnd, { passive: true });

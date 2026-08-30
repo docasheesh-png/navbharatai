@@ -34,6 +34,7 @@ import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview 
 import { saveLastReport, readLastReport } from './reportCache';
 import type { ReportPickerItem } from '../../lib/reportPicker';
 import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
+import { ReportNoteDialog } from './ReportNoteDialog';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { SplitDivider } from './SplitDivider';
 import { loadSplit, saveSplit, clampSplit, paneSplitVars } from './splitPane';
@@ -2580,12 +2581,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // the header button keeps telling the truth about the current build.
   const countKeyFor = (picked?: ReportPickerItem): string =>
     reportKey(state.workspaceId, picked ? (picked.buildId || picked.id) : state.buildId);
-  const sendReportToAdmin = useCallback(async (picked?: ReportPickerItem) => {
+  const sendReportToAdmin = useCallback(async (picked?: ReportPickerItem, note?: string) => {
     if (reportSending) return;
     setReportSending(true);
     try {
       const body: Record<string, string> = {};
       if (state.workspaceId) body.workspaceId = state.workspaceId;
+      // The user's own description of the problem (admin 2026-08-28). Optional — an empty box sends
+      // exactly what Report always sent. The server sanitises and caps it; we send it as typed.
+      if (note && note.trim()) body.note = note;
       // A picked past build resolves to exactly that report; without one the server falls back to the
       // latest, guarded by the active build's identity so it can't be a different app's report.
       if (picked) body.buildId = picked.id;
@@ -2599,6 +2603,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       const data = await res.json().catch(() => ({}));
       if (res.ok && data?.ok) {
         setReportPickerOpen(false);
+        setNoteDialogOpen(false);
         // Count ONLY a genuinely accepted submission — a failed send must never inflate the tally
         // (the whole point of the number is that the user can trust it).
         const bumped = bumpReportSendCount(countKeyFor(picked));
@@ -2615,6 +2620,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setReportSending(false);
     }
   }, [reportSending, state.workspaceId, state.buildId, state.promptHash]);
+
+  // ── ASK "WHAT WENT WRONG?" BEFORE SENDING (admin 2026-08-28) ────────────────────────────────────
+  //
+  // 🔒 ONE FUNNEL, ON PURPOSE. Report can be reached three ways: straight through (a chat with a
+  // single build), the desktop popover, and the mobile sheet. Adding the prompt at each call site
+  // would mean three places to keep in step, and the one that got missed would silently send reports
+  // with no description while looking completely fine. Every path now stages its pick here and the
+  // POST happens in exactly one place.
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const [notePick, setNotePick] = useState<ReportPickerItem | undefined>(undefined);
+  const askForReportNote = useCallback((picked?: ReportPickerItem) => {
+    setNotePick(picked);
+    setReportPickerOpen(false);
+    setNoteDialogOpen(true);
+  }, []);
 
   // Open the picker. One build in this chat means there is nothing to choose — sending straight away
   // keeps the common case a single click, which is what it has always been.
@@ -2638,10 +2658,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // Fewer than two choices (including a history that hasn't landed yet, or a failed fetch) → send
     // the current build, exactly as the button did before. The picker must never become a wall
     // between the user and reporting a problem.
-    if (builds.length < 2) { void sendReportToAdmin(); return; }
+    if (builds.length < 2) { askForReportNote(); return; }
     if (surface === 'sheet') setMobileSheet('report');
     else setReportPickerOpen(true);
-  }, [reportSending, reportPickerLoading, state.workspaceId, userId, email, sendReportToAdmin]);
+  }, [reportSending, reportPickerLoading, state.workspaceId, userId, email, askForReportNote]);
 
   // One list, rendered by both surfaces — so the desktop popover and the mobile sheet can never drift
   // into showing different things (the drift that lets a field leak on one surface only).
@@ -3689,6 +3709,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               {reportSending || reportPickerLoading ? <TirangaLoader className="w-3.5 h-3.5" /> : reportSent || reportCount > 0 ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
               {reportButtonLabel({ sending: reportSending, justSent: reportSent, count: reportCount })}
             </button>
+            {/* "What went wrong?" — asked on EVERY path to Report (see askForReportNote). The build
+                details are already attached; this is the half only the user can supply. */}
+            {noteDialogOpen && (
+              <ReportNoteDialog
+                buildLabel={notePick?.label || undefined}
+                sending={reportSending}
+                onCancel={() => { setNoteDialogOpen(false); setNotePick(undefined); }}
+                onSend={(note) => { void sendReportToAdmin(notePick, note); }}
+              />
+            )}
             {reportPickerOpen && (
               <>
                 {/* Click-away layer, so the list closes the way every other popover here does. */}
@@ -3697,7 +3727,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <div className="px-3 py-2 text-[11px] text-zinc-400 border-b border-zinc-800">
                     Which build had the problem?
                   </div>
-                  {reportPickerRows((b) => void sendReportToAdmin(b), false)}
+                  {reportPickerRows((b) => askForReportNote(b), false)}
                 </div>
               </>
             )}
@@ -5341,7 +5371,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {mobileSheet === 'history' ? (
               <div className="py-1.5">{historyListBody}</div>
             ) : mobileSheet === 'report' ? (
-              <div>{reportPickerRows((b) => { setMobileSheet(null); void sendReportToAdmin(b); }, true)}</div>
+              <div>{reportPickerRows((b) => { setMobileSheet(null); askForReportNote(b); }, true)}</div>
             ) : mobileSheet === 'secrets' ? (
               // The SAME vault component the Settings screen renders — not a copy of it. Lazy, so a
               // user who never opens this door never downloads it.

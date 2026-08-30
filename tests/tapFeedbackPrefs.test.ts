@@ -18,7 +18,12 @@ import {
   TAP_FEEDBACK_DEFAULTS,
   TAP_FEEDBACK_STORAGE_KEY,
   TAP_FEEDBACK_EVENT,
+  shouldOpenMenuOnSwipe,
+  MENU_SWIPE_EDGE_PX,
+  type TapFeedbackPrefs,
 } from '../src/lib/tapFeedbackPrefs';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { installTapHaptics } from '../src/lib/nativeShell';
 
 /** An in-memory store, so these tests never depend on a real localStorage. */
@@ -34,21 +39,21 @@ const store = (seed?: string) => {
 
 describe('🔒 the defaults the admin specified', () => {
   it('sound ON, vibration OFF', () => {
-    expect(TAP_FEEDBACK_DEFAULTS).toEqual({ sound: true, vibration: false });
+    expect(TAP_FEEDBACK_DEFAULTS).toEqual({ sound: true, vibration: false, swipeMenu: false });
   });
 
   it('a user who has never opened Settings gets exactly those', () => {
-    expect(readTapFeedbackPrefs(store())).toEqual({ sound: true, vibration: false });
+    expect(readTapFeedbackPrefs(store())).toEqual({ sound: true, vibration: false, swipeMenu: false });
   });
 });
 
 describe('saving and reading back', () => {
   it('round-trips every combination — all four must be reachable', () => {
     for (const p of [
-      { sound: true, vibration: false },
-      { sound: false, vibration: true },
-      { sound: true, vibration: true },
-      { sound: false, vibration: false },
+      { sound: true, vibration: false, swipeMenu: false },
+      { sound: false, vibration: true, swipeMenu: false },
+      { sound: true, vibration: true, swipeMenu: true },
+      { sound: false, vibration: false, swipeMenu: false },
     ]) {
       const s = store();
       writeTapFeedbackPrefs(p, s, null);
@@ -58,13 +63,13 @@ describe('saving and reading back', () => {
 
   it('🔒 announces the change, or the live listener would never learn about it', () => {
     const emit = vi.fn();
-    writeTapFeedbackPrefs({ sound: false, vibration: false }, store(), emit);
+    writeTapFeedbackPrefs({ sound: false, vibration: false, swipeMenu: false }, store(), emit);
     expect(emit).toHaveBeenCalledWith(TAP_FEEDBACK_EVENT);
   });
 
   it('returns what it saved, so a caller never disagrees with storage', () => {
-    expect(writeTapFeedbackPrefs({ sound: false, vibration: true }, store(), null))
-      .toEqual({ sound: false, vibration: true });
+    expect(writeTapFeedbackPrefs({ sound: false, vibration: true, swipeMenu: false }, store(), null))
+      .toEqual({ sound: false, vibration: true, swipeMenu: false });
   });
 });
 
@@ -76,8 +81,8 @@ describe('🔒 a broken value never silences the app', () => {
   });
 
   it('a HALF-written value keeps the other field sane', () => {
-    expect(readTapFeedbackPrefs(store('{"vibration":true}'))).toEqual({ sound: true, vibration: true });
-    expect(readTapFeedbackPrefs(store('{"sound":false}'))).toEqual({ sound: false, vibration: false });
+    expect(readTapFeedbackPrefs(store('{"vibration":true}'))).toEqual({ sound: true, vibration: true, swipeMenu: false });
+    expect(readTapFeedbackPrefs(store('{"sound":false}'))).toEqual({ sound: false, vibration: false, swipeMenu: false });
   });
 
   it('a non-boolean field is ignored rather than coerced', () => {
@@ -87,13 +92,70 @@ describe('🔒 a broken value never silences the app', () => {
   it('storage that THROWS on access is survived — Safari private mode does this', () => {
     const throwing = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
     expect(readTapFeedbackPrefs(throwing)).toEqual(TAP_FEEDBACK_DEFAULTS);
-    expect(() => writeTapFeedbackPrefs({ sound: false, vibration: false }, throwing, null)).not.toThrow();
+    expect(() => writeTapFeedbackPrefs({ sound: false, vibration: false, swipeMenu: false }, throwing, null)).not.toThrow();
   });
 
-  it('vibration is opt-IN: only an explicit true turns it on', () => {
+  it('vibration and swipe-to-open are opt-IN: only an explicit true turns them on', () => {
+    // The dangerous direction for BOTH: a stored `undefined` must never come back as enabled. Sound is
+    // the opposite — anything not explicitly false stays on, because silence is the surprising state.
     const s = store();
-    writeTapFeedbackPrefs({ vibration: undefined as never, sound: undefined as never }, s, null);
-    expect(readTapFeedbackPrefs(s)).toEqual({ sound: true, vibration: false });
+    writeTapFeedbackPrefs({ vibration: undefined as never, sound: undefined as never, swipeMenu: undefined as never }, s, null);
+    expect(readTapFeedbackPrefs(s)).toEqual({ sound: true, vibration: false, swipeMenu: false });
+  });
+});
+
+describe('🔒 swipe-to-open the menu — the accidental gesture (admin 2026-08-28)', () => {
+  const prefs = (over: Partial<TapFeedbackPrefs> = {}): TapFeedbackPrefs => ({ ...TAP_FEEDBACK_DEFAULTS, ...over });
+
+  it('is OFF by default — the whole point of the report', () => {
+    expect(TAP_FEEDBACK_DEFAULTS.swipeMenu).toBe(false);
+    expect(shouldOpenMenuOnSwipe(0, TAP_FEEDBACK_DEFAULTS)).toBe(false);
+    expect(shouldOpenMenuOnSwipe(5, TAP_FEEDBACK_DEFAULTS)).toBe(false);
+  });
+
+  it('when ON, opens only from the LEFT EDGE — not from the middle of the screen', () => {
+    const on = prefs({ swipeMenu: true });
+    expect(shouldOpenMenuOnSwipe(0, on)).toBe(true);
+    expect(shouldOpenMenuOnSwipe(MENU_SWIPE_EDGE_PX, on)).toBe(true);
+    // THE ACCIDENT: a sideways swipe that starts mid-screen — scrolling the preview toolbar, a code
+    // block, a carousel — used to open the menu. It must not, even with the gesture enabled.
+    expect(shouldOpenMenuOnSwipe(MENU_SWIPE_EDGE_PX + 1, on)).toBe(false);
+    expect(shouldOpenMenuOnSwipe(200, on)).toBe(false);
+  });
+
+  it('a nonsense coordinate never opens it', () => {
+    const on = prefs({ swipeMenu: true });
+    expect(shouldOpenMenuOnSwipe(Number.NaN, on)).toBe(false);
+    expect(shouldOpenMenuOnSwipe(Number.POSITIVE_INFINITY, on)).toBe(false);
+  });
+
+  it('the edge zone is thumb-reachable but cannot overlap mid-screen content', () => {
+    expect(MENU_SWIPE_EDGE_PX).toBeGreaterThanOrEqual(24);
+    expect(MENU_SWIPE_EDGE_PX).toBeLessThanOrEqual(48);
+  });
+});
+
+describe('WIRING — the gesture reads the preference per touch, and Settings can flip it', () => {
+  const app = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8');
+  const panel = readFileSync(join(process.cwd(), 'src/components/panels/SettingsPanel.tsx'), 'utf8');
+
+  it('the open branch is gated; the CLOSE branch deliberately is not', () => {
+    expect(app).toContain('shouldOpenMenuOnSwipe(startX, readTapFeedbackPrefs())');
+    // Closing only does anything while the menu already covers the screen — gating it would strand a
+    // user who opened the menu by tapping and then swiped to dismiss it.
+    expect(app).toContain('setIsMenuOpen(prev => (prev ? false : prev))');
+  });
+
+  it('the preference is read PER TOUCH, so the switch works without a restart', () => {
+    // Reading it at mount would freeze the choice at boot — the "setting that does nothing" defect.
+    const at = app.indexOf('shouldOpenMenuOnSwipe(startX, readTapFeedbackPrefs())');
+    expect(at).toBeGreaterThan(-1);
+    expect(app.slice(0, at)).toContain('const onEnd = (e: TouchEvent) => {');
+  });
+
+  it('Settings → Touch feedback carries the switch', () => {
+    expect(panel).toContain("key: 'swipeMenu'");
+    expect(panel).toContain('Swipe to open menu');
   });
 });
 

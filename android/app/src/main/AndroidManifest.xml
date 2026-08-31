@@ -48,6 +48,25 @@
 
         </activity>
 
+        <!-- META (Facebook / Instagram) APP EVENTS — the values are supplied by build.gradle from the
+             CI environment (repo secrets), never hard-coded here.
+
+             INERT UNLESS CONFIGURED: with no FACEBOOK_APP_ID / FACEBOOK_CLIENT_TOKEN set, the
+             ${facebookEnabled} placeholder resolves to "false", both string resources are empty, and
+             the SDK is not even a dependency — so these four entries are strings nothing reads. That
+             is what lets this change ship ahead of the credentials without altering the app at all.
+
+             AutoLogAppEvents is what actually reports an install and an app-open to Meta, which is
+             the entire point: it is what makes an "App Install" campaign possible instead of a
+             clicks-only Traffic campaign. AdvertiserIDCollection is what lets Meta match that install
+             back to the ad that caused it — it rides the same flag deliberately, so there is one
+             switch, and no state where events are collected but attribution silently is not. -->
+        <meta-data android:name="com.facebook.sdk.ApplicationId" android:value="@string/facebook_app_id" />
+        <meta-data android:name="com.facebook.sdk.ClientToken" android:value="@string/facebook_client_token" />
+        <meta-data android:name="com.facebook.sdk.AutoInitEnabled" android:value="${facebookEnabled}" />
+        <meta-data android:name="com.facebook.sdk.AutoLogAppEventsEnabled" android:value="${facebookEnabled}" />
+        <meta-data android:name="com.facebook.sdk.AdvertiserIDCollectionEnabled" android:value="${facebookEnabled}" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

@@ -11,6 +11,8 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { triggerCashfreeCheckout } from '../services/paymentService';
 import { safeLocalJson } from '../lib/safeLocalJson';
 import { authedHeaders } from '../lib/authHeaders';
+import { trackEvent } from '../lib/analytics';
+import { decideReportOnce } from '../lib/conversionOnce';
 /** Free-tier daily message ceiling for anonymous (not-signed-in) users. */
 export const FREE_DAILY_MESSAGES = 10;
 
@@ -226,6 +228,33 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     }
   };
 
+  /**
+   * Report a CONFIRMED purchase to analytics (and onward to the Meta advertising pixel) exactly once
+   * per order.
+   *
+   * WHY ONE FUNCTION FOR BOTH PATHS: a payment can be confirmed through the in-app checkout modal
+   * (verifyBillingPayment) or through the external Cashfree redirect return (verifyOrderAndReport),
+   * and a user can genuinely pass through both for the SAME order. Two separate report sites would
+   * count that sale twice; deduping by orderId here makes the double count structurally impossible
+   * rather than unlikely.
+   *
+   * ONLY EVER CALLED WHERE THE SERVER CONFIRMED THE MONEY. A `?payment=success` URL parameter is not
+   * proof of anything (see the redirect handler below), so this is never called from one.
+   *
+   * `valueInr` may be undefined — the Professional Pass branch resolves with a duration, not a rupee
+   * amount. That reports the conversion with NO value rather than a guessed one; see pixelEventFor().
+   */
+  const reportPurchaseOnce = useCallback((orderRef: string, valueInr?: number) => {
+    try {
+      const KEY = 'navbharat_purchase_reported';
+      const decision = decideReportOnce(localStorage.getItem(KEY), String(orderRef), true);
+      if (!decision.report) return;
+      if (decision.nextStored) localStorage.setItem(KEY, decision.nextStored);
+      const value = Number(valueInr);
+      trackEvent('purchase', Number.isFinite(value) && value > 0 ? { value, currency: 'INR' } : {});
+    } catch { /* measurement must never affect a payment */ }
+  }, []);
+
   const verifyBillingPayment = async (status: 'SUCCESS' | 'FAILED') => {
     if (!paymentSession || !user) return;
     setRechargeStatus('Validating secure transaction hash with backend...');
@@ -237,6 +266,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
       });
       if (res.data.success) {
         addLog(`Payment for ORDER #${paymentSession.orderId} verified successfully! credited ₹${paymentSession.orderAmount}.`, 'success');
+        reportPurchaseOnce(paymentSession.orderId, Number(paymentSession.orderAmount));
         fetchWallet();
         setShowCheckoutModal(false);
         setPaymentSession(null);
@@ -290,12 +320,18 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
       const data = res.data || {};
       if (data.professionalPass) {
         addLog(`Professional Pass activated for Order #${orderRef} (${data.days} days).`, 'success');
+        // A pass resolves with a duration, not an amount — reported with no value, never a guess.
+        reportPurchaseOnce(orderRef);
         alert(`🎉 Your Professional Pass is active${data.expiresAt ? ` until ${new Date(data.expiresAt).toLocaleDateString()}` : ''}. Every professional is now unlimited.`);
       } else if (data.balanceAdded) {
         addLog(`Payment for Order #${orderRef} verified successfully! Credited ₹${data.balanceAdded}.`, 'success');
+        reportPurchaseOnce(orderRef, Number(data.balanceAdded));
         fetchWallet();
         alert(`🎉 Payment of Order #${orderRef} verified! Wallet credited.`);
       } else if (data.alreadyProcessed) {
+        // Deliberately NOT reported: this branch means the order was settled on an earlier pass, so
+        // its conversion has already been counted. (reportPurchaseOnce would refuse it anyway — this
+        // is the belt to that guard's braces, and says why for the next reader.)
         addLog(`Payment for Order #${orderRef} was already processed.`, 'info');
         fetchWallet();
       } else {
@@ -309,7 +345,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     } finally {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, [addLog, fetchWallet]);
+  }, [addLog, fetchWallet, reportPurchaseOnce]);
 
   /**
    * On sign-in, ask the server to settle any payment of this user's that never reached their wallet.

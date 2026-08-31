@@ -121,6 +121,15 @@ jobs:
           # build is uploadable without editing build.gradle. versionName stays human-readable.
           ANDROID_VERSION_CODE: ${{ github.run_number }}
           ANDROID_VERSION_NAME: 1.0.${{ github.run_number }}
+          # META (Facebook / Instagram) APP EVENTS — optional, and deliberately NOT pre-flighted like
+          # the signing secrets are. A missing keystore must fail the build (Play rejects an unsigned
+          # bundle), but a missing Facebook credential must NOT: the app is perfectly shippable
+          # without ad measurement, and build.gradle simply omits the SDK. Set both repo secrets to
+          # turn it on; the NEXT bundle then reports installs to Meta.
+          # ⚠️ Before rolling out a bundle built WITH these set, update Play Console → App content →
+          # Data safety — that build collects the advertising ID and app events.
+          FACEBOOK_APP_ID: ${{ secrets.FACEBOOK_APP_ID }}
+          FACEBOOK_CLIENT_TOKEN: ${{ secrets.FACEBOOK_CLIENT_TOKEN }}
         # bundleRelease → the .aab for Play. assembleRelease → a SIGNED universal .apk for the website's
         # "Download app" button (a direct sideload — Play only accepts the .aab). Both use the same
         # release signingConfig, so the APK is genuinely installable.
@@ -172,6 +181,11 @@ jobs:
       - name: Summary
         run: |
           echo "## NavBharatAI signed .aab built ✅" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${{ secrets.FACEBOOK_APP_ID }}" ] && [ -n "${{ secrets.FACEBOOK_CLIENT_TOKEN }}" ]; then
+            echo "- Meta app events: **ON** — this bundle reports installs/app-opens to Meta. Confirm Play Console → App content → Data safety is up to date before rolling it out." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Meta app events: **off** (FACEBOOK_APP_ID / FACEBOOK_CLIENT_TOKEN not set) — no Facebook SDK is in this bundle." >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ inputs.upload_to_play }}" = "true" ]; then
             echo "🚀 **Auto-uploaded to Google Play** (internal testing track) via the service account. Open Play Console → Testing → Internal testing to see the new release, then promote it when ready." >> "$GITHUB_STEP_SUMMARY"

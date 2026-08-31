@@ -29,7 +29,8 @@ import { SharePortal } from './components/SharePortal';
 import { MobileEngagementGate } from './components/MobileEngagementGate';
 import { hasAnalyticsConsent, CONSENT_EVENT } from './lib/consent';
 import { isChunkLoadError, shouldReloadForStaleChunk } from './lib/chunkReload';
-import { installNativeApiRewrite } from './lib/apiBase';
+import { installNativeApiRewrite, isNativeShell } from './lib/apiBase';
+import { initMetaPixel, fetchPixelIdFromServer } from './lib/metaPixel';
 import { installNativeShellPolish, loadNativeShellContext } from './lib/nativeShell';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
@@ -228,6 +229,23 @@ function initWebVitals() {
 // via the banner this session (the consent module dispatches CONSENT_EVENT on change).
 initWebVitals();
 window.addEventListener(CONSENT_EVENT, () => initWebVitals());
+
+// META ADVERTISING PIXEL — the WEB half of Facebook/Instagram conversion measurement, started on
+// exactly the same consent gate as web-vitals above and, like it, re-attempted when the user accepts
+// mid-session. It is inert unless the server reports a configured META_PIXEL_ID, and it deliberately
+// never runs inside the installed native app (the Facebook Android SDK reports the app's own events;
+// running both would count one person twice). All of those conditions are decided inside
+// initMetaPixel — see src/lib/metaPixel.ts for why each one exists.
+const startMetaPixel = () => {
+  void initMetaPixel({
+    hasConsent: hasAnalyticsConsent,
+    isNative: () => isNativeShell(window as never),
+    isProd: import.meta.env.PROD,
+    fetchPixelId: fetchPixelIdFromServer,
+  });
+};
+startMetaPixel();
+window.addEventListener(CONSENT_EVENT, startMetaPixel);
 
 // NOTE: the public /sonic experiment route was removed (admin 2026-07-15) to close a misuse vector —
 // an unauthenticated, discoverable voice page. The voice capability itself is NOT deleted: it lives on

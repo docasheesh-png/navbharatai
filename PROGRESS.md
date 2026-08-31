@@ -42967,3 +42967,69 @@ again; the fixes were first built on it, caught via the commit's parent (20d1843
 real `main` by cherry-pick (one conflict — kept BOTH honesty blocks: #2679's Green-Guard correction
 and the new off-topic net), fully re-verified (1420 files / 18,701 tests). **Standing rule: `git fetch
 origin main` + base check before every claim — including MID-session, not just at the start.**
+
+---
+
+## 2026-08-31 — Ad conversion measurement: the app can now be advertised on Facebook/Instagram (#TBD)
+
+**The ask (admin):** "mujhe facebook instagram par ads chalwana hai, download navbharatai" — then,
+after the honest blocker was reported, "yeh fix karo".
+
+**The blocker, verified against the repo rather than assumed:** no Facebook SDK, no AppsFlyer, no
+Adjust anywhere in the tree, and no Meta Pixel on the website. That is not a configuration gap, it is
+a capability gap: Meta can only optimise a campaign for an outcome it can OBSERVE, so with neither
+present the ONLY campaign that could run was Traffic — optimised for link clicks. Budget goes to
+people who tap, not to people who install, sign up or pay. Meta Ads Manager will not even let an App
+Promotion campaign be created for an app it has no signal from.
+
+**What shipped — both halves, each inert until the admin supplies its credential:**
+
+1. **Web pixel** (`src/lib/metaPixel.ts`, 26 tests). Loads only on: production + analytics consent +
+   NOT the native app + a valid configured id. Wired at ONE choke point — `trackEvent()` in
+   `analytics.ts` — rather than by sprinkling `fbq()` beside each event, the same single-choke-point
+   discipline as the provider anonymiser. An **allowlist**, not a firehose: only signup, purchase,
+   checkout and app-built forward; ordinary product telemetry forwards NOTHING, because handing an ad
+   network the whole event stream is a privacy problem, not a measurement upgrade.
+2. **Android app events** (`android/app/build.gradle` + manifest). `facebook-core` only — measurement,
+   not a login provider. With the secrets absent the dependency is not added at all, so today's app is
+   behaviourally unchanged and gains no advertising-ID permission and no new Data Safety obligation.
+
+**Root-cause decisions worth not re-deriving:**
+
+- **The pixel id is a RUNTIME route (`GET /api/public-config`), deliberately not a `VITE_` variable.**
+  The web bundle is built inside Docker, so `import.meta.env.VITE_*` freezes at image-build time. A
+  `VITE_META_PIXEL_ID` set in Cloud Run would have done **nothing, silently** — the same class of
+  drift as the `AGENTV3_SANDBOX_IDLE_MINUTES` doc/code split. One Cloud Run key now takes effect on
+  the next page load.
+- **The signup conversion is derived at `onAuthStateChanged`, not at the sign-up button.** There are
+  EIGHT paths to a signed-in user (email create/sign-in, phone web/native, Google popup/redirect/
+  native, GitHub). Eight call sites is the duplicated-code-that-drifts pattern the fourth rule
+  targets: the ninth path added later would silently not report, and nothing would fail to show it.
+  "New account" comes from Firebase's own creationTime/lastSignInTime, which every provider supplies.
+- **Both conversions are deduped through ONE shared helper** (`conversionOnce.ts`). Both signals are
+  re-derivable from state that outlives the event — `onAuthStateChanged` fires on every page load
+  while Firebase keeps reporting the same creationTime, and a payment can be verified twice (the
+  in-app checkout modal AND the Cashfree redirect return, for the SAME order). Without the guard one
+  registration or one sale is re-reported on every reload, silently inflating the exact numbers ad
+  spend is optimised against. Nobody is harmed and the measurement is still a lie, so it got a
+  structural fix, shared, rather than two copies of a comment asking callers to be careful.
+- **A Purchase of unknown value is reported with NO value, never a guessed one.** The Professional
+  Pass branch resolves with a duration, not a rupee amount. Silence would lose a real sale; a
+  fabricated amount would misstate revenue in Meta's own reporting AND train the campaign on a lie.
+  Meta accepts a valueless Purchase, so the honest degrade keeps the conversion and drops the number.
+- **The consent banner now names Meta.** Loading a third-party ad pixel under copy that said only
+  "privacy-friendly analytics" would be consent obtained on a false description. The white-label law
+  forbids naming the AI PROVIDERS behind a build; it does not licence hiding who receives user data.
+- **No jsdom was added.** The pixel module takes an injectable installer, so the DOM lives in ONE
+  default function and everything testable is tested without a browser.
+
+**Verification:** `npx tsc --noEmit` clean · `npx tsc -p tsconfig.server.json` clean · `npx vitest
+run` **1424 files / 18,760 passed, 0 failed** · `npm run build` green.
+
+**OPEN — not blocked by code, blocked on the admin (rule 6, stated rather than pretended away):**
+- `META_PIXEL_ID` is not set in Cloud Run, so the web pixel is dormant.
+- `FACEBOOK_APP_ID` / `FACEBOOK_CLIENT_TOKEN` are not set as repo secrets, so the Android SDK is not
+  in any bundle. Both need a Meta App created by the admin at developers.facebook.com.
+- Enabling the Android half requires a FRESH signed `.aab` (bundled mode — a frontend change never
+  reaches installed users) **and** an updated Play Data Safety declaration before rollout.
+- iOS remains TestFlight-only, so ads must target Android; the iOS half of app events is not built.

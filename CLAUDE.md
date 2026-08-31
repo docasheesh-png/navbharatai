@@ -630,6 +630,43 @@ the code (it is actually read somewhere) on 2026-07-11.
   traffic this needs either a VirusTotal paid plan or another scanner (e.g. MetaDefender). Recorded
   here as an open item rather than left silent.
 
+- **Ad conversion measurement — Meta / Facebook + Instagram (added 2026-08-31, admin asked to run
+  "Download NavBharatAI" ads):** `META_PIXEL_ID` — the WEB pixel id, **NOT set yet**. Served to the
+  browser at runtime by `GET /api/public-config` (`routes/health.ts`) and consumed by
+  `src/lib/metaPixel.ts`. UNSET ⇒ the route answers `null` and the pixel never loads; a MALFORMED
+  value is treated exactly like unset, so a typo disables measurement honestly instead of injecting
+  junk into every page.
+  ⚠️ **DO NOT make this a `VITE_` variable, and do not "fix" it into one.** `import.meta.env.VITE_*`
+  is frozen when the Docker image is built (cloudbuild.yaml passes such values as `--build-arg` from
+  a trigger substitution), so a `VITE_META_PIXEL_ID` set in Cloud Run would change **nothing, with no
+  error to reveal it** — the same silent doc-vs-reality drift this file records for
+  `AGENTV3_SANDBOX_IDLE_MINUTES`. It is a runtime route precisely so the admin can set one Cloud Run
+  key and have it live on the next page load.
+  A pixel id is public by construction (it is visible in the page source of every site running one),
+  so serving it unauthenticated discloses nothing — but **no secret may ever be added to that route's
+  response**.
+  🔒 **CONSENT GATES IT.** The pixel is third-party advertising measurement, so it loads only after
+  the user accepts the consent banner (GDPR / India DPDP) — the same gate `trackEvent()` and the
+  web-vitals observers already pass. The banner copy now NAMES Meta, because consent obtained under
+  the old "privacy-friendly analytics" wording would have been consent on a false description. The
+  white-label law forbids naming the AI PROVIDERS behind a build; it does not licence hiding who
+  receives a user's data.
+- **`FACEBOOK_APP_ID` + `FACEBOOK_CLIENT_TOKEN` — GitHub REPO SECRETS, *not* Cloud Run keys.** Recorded
+  here anyway so nobody searches Cloud Run for them and concludes they are missing. They are read at
+  **build** time by `android/app/build.gradle` (via `.github/workflows/android-aab.yml`) and are what
+  make a Meta **App Install** campaign possible at all — Meta can only optimise for an Android install
+  it can observe, through this SDK or a paid MMP.
+  **Neither set ⇒ the `facebook-core` dependency is not added at all**, the manifest's
+  `com.facebook.sdk.*` meta-data are inert strings, no advertising-ID permission is merged, and the
+  app behaves exactly as it does today. BOTH are required together — an app id with no client token
+  cannot initialise, and "half-configured" is the built-but-not-working state that must not exist.
+  ⚠️ **SETTING THEM CHANGES A PLAY OBLIGATION, not just a build.** A bundle built with them collects
+  the advertising ID and app events, which MUST be declared in Play Console → App content → **Data
+  safety** before that build is rolled out. The workflow's run summary states which of the two states
+  a given `.aab` is in, so a downloaded bundle is never ambiguous.
+  Reaching installed users needs a **fresh `.aab`** — the app is BUNDLED mode, so a frontend change
+  never reaches them on its own.
+
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 
 The admin sent the complete list of env-var NAMES from the live Cloud Run service, and every one was

@@ -43072,3 +43072,47 @@ Gate: both `tsc` clean; FULL suite **1387 files / 17463 tests green**.
 being enabled for this project in the console, and the live Firestore accepting these writes under its
 security rules. Those need one real sign-up on the deployed site — the admin's to run, and worth doing
 on a spare number before the first real user meets it.
+
+## 2026-08-31 — The chat composer's buttons, from a phone screenshot
+
+Admin: *"send, mic aur attachment ke buttons unaligned hai"*. Two real defects behind it, plus a
+third the screenshot could not show.
+
+**1. THE CONTROL ROW DID NOT FIT ITS BOX.** The row is absolutely positioned at `bottom-2` inside a
+container sized by the textarea. That textarea renders **46px** — `py-2.5` (20px) plus one 16px line
+at `leading-relaxed` (26px) — so the old `min-h-[40px]` never bound at all. With the send button at
+`p-3` + a `3.5` icon (**38px**), the row's top edge landed at `46 − 8 − 38 = 0`: flush against the
+container's rounded border. That is why the filled red button read as breaking out of the box.
+
+**2. THE SEND BUTTON WAS THE ODD ONE OUT.** 38px against 36px for attach and mic, and the only filled
+one, so the row's height was set by the control that looked least like its neighbours.
+
+**3. THE EXPAND BUTTON SAT ON TOP OF THE MIC** — not visible in the screenshot because it only appears
+past 300 characters. It was placed separately at `right-20` (80px) while the row spans 8px→~126px
+(three buttons) or ~166px (four). **The magic number was correct when written and was silently
+invalidated when the voice button was added beside it on 2026-08-10.** That is the root cause worth
+naming: controls in this corner were positioned by hand-tuned absolute offsets, so a sibling change
+broke a number nobody re-derived.
+
+**Fixed as a class, not three patches:** every control is now one uniform 36px box (`p-2.5` + a
+`w-4 h-4` icon) in ONE flex row — the expand button included, so a sixth control cannot reintroduce
+the overlap. `min-h-[48px]` carries that row with a symmetric 6px above and below.
+
+⚠️ **`min-h-[48px]` does NOT undo the 2026-07-12 slimming**, and the code says so where a future
+session will read it: the box was already rendering at 46px, so this is **+2px** of real height, and
+the padding stays `py-2.5` rather than the `py-3.5` that was trimmed away.
+
+`pr-24` → `pr-44`: 96px did not even cover the three-button row (124px), so typed text slid under the
+paperclip. 176px covers the common four-button case (164px). With all five present the expand button
+can still overlap long text — an accepted edge, stated rather than hidden, since expand only appears
+once the text has wrapped anyway.
+
+**The fix was NOT "make the buttons smaller until they fit"** — that trades one real problem for a
+worse one on a touch screen. A test asserts the send button did not shrink.
+
+Guards in `chatComposerAlignment.test.ts` (8 tests) assert the GEOMETRY — a jsdom render has no layout
+engine and would report every one of these boxes as 0×0, i.e. pass while the phone stayed broken.
+Both verified to bite: restoring the oversized send button fails two cases, and putting `min-h` back
+to 40 fails the fit case.
+
+Gate: both `tsc` clean; FULL suite **1423 files / 18736 tests green**.

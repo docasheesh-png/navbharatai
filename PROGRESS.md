@@ -43116,3 +43116,72 @@ Both verified to bite: restoring the oversized send button fails two cases, and 
 to 40 fails the fit case.
 
 Gate: both `tsc` clean; FULL suite **1423 files / 18736 tests green**.
+
+## 2026-08-31 — History opened slowly because it downloaded every message and every app file
+
+Admin: *"history load hone me bahut time lagta hai … agar user ke app me bhi store ho jaye to chalega"*.
+
+**The measured cause, not a guess.** `HistoryView` subscribed with `where('userId','==',uid)` and **no
+limit**, then waited for that first snapshot before rendering anything. And a `chat_sessions` document
+is not small — `App.tsx` writes into every one of them:
+
+- `messages` — the full transcript
+- `restoredMessages` — a **second** full transcript
+- `files` — the built app's **entire file contents**
+
+So opening a list of TITLES downloaded every message and every source file the account had ever
+produced. For someone who has built a few apps that is megabytes, and they watch a skeleton for all
+of it.
+
+**The sting:** the sessions were already on the device in `navbharat_sessions` the whole time. That
+copy was read **only inside the Firestore error handler** — so it helped when the network FAILED and
+never when the network was merely slow, which is the case the user actually hits.
+
+### The fix — local-first, exactly what the admin authorised
+
+`historyIndex.ts` keeps a compact row per session (title, date, mode flags, and **counts** — never
+content). `HistoryView` seeds its state from that index in a **lazy initialiser**, so the list is on
+screen in the FIRST frame; the Firestore snapshot then corrects it and refreshes the index, which is
+also what makes sessions created on ANOTHER device appear instantly next time.
+
+`loading` is now true only for someone with nothing cached. The network became a refresh instead of a
+gate.
+
+⚠️ **Deliberately NOT a cache of the sessions themselves.** Storing transcripts and app files in
+localStorage would refill the same ~5MB budget this exists to stay out of, and `navbharat_sessions`
+already holds the full copies. A row is under 400 bytes even for a 500-message session with 80 files —
+test-locked.
+
+### The honesty half, which is the part worth remembering
+
+An index row carries **no message text** — that is exactly why it is small enough to be instant. So
+before the real list lands, a search can only match titles, and reporting fewer results without
+saying so would be **a wrong answer dressed as a fast one**. A one-line notice appears *only* while
+searching and *only* until hydration: "Searching titles only — still loading your messages, so
+results may grow in a moment." `setHydrated(true)` fires on BOTH the live and the offline path,
+because the offline path loads the full local sessions and leaving the caveat up there would be its
+own small lie.
+
+Other decisions: a session with no timestamp is **kept** and sorted last rather than dropped (a real
+session vanishing from history is far worse than a bad sort); a storage failure is swallowed because
+this is a head start, never the source of truth; and the offline fallback no longer replaces an
+already-painted cached list with an empty one.
+
+18 tests, and the central guard **verified to bite**: removing the lazy initialisers fails the
+first-frame case.
+
+Gate: both `tsc` clean; FULL suite **1424 files / 18754 tests green**.
+
+### ⚠️ OPEN — the real fix is upstream, and it is NOT done
+
+This makes the screen *feel* instant. It does not stop the download: Firestore still streams every
+transcript and every app file in the background, which costs the user's data and our read quota. The
+honest fix is that `chat_sessions` should not carry `messages`, `restoredMessages` and `files` at all
+for listing purposes — v5.0 sessions already write a metadata-only row (`AgentV3Panel`, 2026-08-13),
+and the generic writer in `App.tsx` should follow. That is a data-shape migration with a back-compat
+read path, so it is recorded here rather than bolted onto a UI fix.
+
+A `limit()` was considered and **rejected for now**: without `orderBy` Firestore returns documents in
+ID order, so a cap would silently hide the newest sessions, and adding `orderBy('lastUpdated')` drops
+every document missing that field — which would look exactly like data loss to a user with older
+sessions. Neither is acceptable without first confirming the field is present on every row.

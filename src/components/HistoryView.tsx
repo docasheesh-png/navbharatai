@@ -10,8 +10,17 @@ import { readProfessionalHistory } from './professionals/ProfessionalHistoryView
 import { browserStore, resumeArchived, deleteArchived } from '../lib/professionalChatStore';
 import { professionalRows, sortMergedRows, type ProfessionalPseudoSession } from '../lib/freeHistoryMerge';
 import { shapeSessions, messagesOf } from '../lib/sessionShape';
+import { readHistoryIndex, buildHistoryIndex, writeHistoryIndex } from '../lib/historyIndex';
 
 type FilterMode = 'all' | 'chat' | 'apps' | 'free' | 'pro' | 'sda';
+
+/** Read the on-disk index ONCE per mount. Both lazy initialisers below need it, and two reads would
+ *  mean two localStorage hits and two JSON.parses on the very frame this is trying to make fast. */
+let cachedRowsMemo: ReturnType<typeof readHistoryIndex> | null = null;
+function cachedRowsOnce() {
+  if (cachedRowsMemo === null) cachedRowsMemo = readHistoryIndex();
+  return cachedRowsMemo;
+}
 
 // NavBharatAI Pro v5.0 (AgentV3) sessions are saved with agent 'agentv3', tab
 // 'engine_builder', and a doc id prefixed 'v3_'. They are Pro-tier builds and
@@ -58,8 +67,24 @@ export const HistoryView = ({
   /** Open a professional's chat (the row's conversation was already resumed if it was archived). */
   onOpenProfessional?: (viewId: string) => void;
 }) => {
-  const [sessions, setSessions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  // LOCAL-FIRST (admin 2026-08-31: "history load hone me bahut time lagta hai"). The list used to
+  // wait for Firestore's first snapshot before rendering anything — and that snapshot is expensive
+  // for a reason worth stating: a `chat_sessions` document carries the full `messages` transcript, a
+  // SECOND copy in `restoredMessages`, and the built app's entire `files` contents. Opening a list of
+  // titles downloaded all of it, and the query has no limit.
+  //
+  // The index on disk holds the handful of fields this screen actually renders, so the first frame
+  // comes from localStorage and Firestore's snapshot corrects it a moment later. Read with the lazy
+  // initialiser (not an effect) so it is present on the FIRST render — an effect would still show one
+  // frame of skeleton, which is the flash this exists to remove.
+  const [sessions, setSessions] = useState<any[]>(() => cachedRowsOnce());
+  // Only a user with NOTHING cached waits. Everyone else sees their history immediately, and the
+  // network becomes a refresh rather than a gate.
+  const [loading, setLoading] = useState(() => cachedRowsOnce().length === 0);
+  // Has the real (Firestore) list arrived yet? Drives one honest notice below: an index row carries
+  // no message TEXT, so until this flips, a search matches titles only. Reporting fewer results
+  // without saying so would be a confidently wrong answer, which is worse than a slow one.
+  const [hydrated, setHydrated] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [filterMode, setFilterMode] = useState<FilterMode>(initialFilter ?? 'all');
@@ -94,14 +119,31 @@ export const HistoryView = ({
         });
       setSessions(data);
       setLoading(false);
+      setHydrated(true);
+      // The next mount must not reuse this mount's stale snapshot.
+      cachedRowsMemo = null;
+      // Refresh the head start for next time — including sessions created on another device, which
+      // `navbharat_sessions` on THIS device would never have seen.
+      writeHistoryIndex(buildHistoryIndex(data));
     }, () => {
       try {
         // Same treatment, and here it also covers the LIST: JSON.parse returns whatever is on this
         // device, and `.sort` on a non-array throws before a single component renders.
+        //
+        // This is the OFFLINE path and it still reads the full local sessions, because when Firestore
+        // is unreachable the richer local copy is the best we have — the index is only a head start
+        // for the online case. A cached index already on screen is left alone rather than replaced by
+        // a shorter list.
         const local = shapeSessions(JSON.parse(localStorage.getItem('navbharat_sessions') || '[]'));
-        setSessions(local.sort((a: any, b: any) => new Date(b.lastUpdated as string).getTime() - new Date(a.lastUpdated as string).getTime()));
+        if (local.length > 0) {
+          setSessions(local.sort((a: any, b: any) => new Date(b.lastUpdated as string).getTime() - new Date(a.lastUpdated as string).getTime()));
+        }
       } catch { /* empty */ }
       setLoading(false);
+      // The offline list IS the full local copy, so message-text search works against it — the
+      // title-only caveat below does not apply once this path has run.
+      setHydrated(true);
+      cachedRowsMemo = null;
     });
     return () => unsubscribe();
   }, [user]);
@@ -238,6 +280,21 @@ export const HistoryView = ({
         {filteredSessions.length} session{filteredSessions.length !== 1 ? 's' : ''}
         {searchQuery ? ` matching "${searchQuery}"` : ''}
       </div>
+
+      {/* HONEST CAVEAT WHILE THE LIST IS STILL THE CACHED ONE (admin 2026-08-31).
+          The instant first paint comes from a local index that holds titles and dates but NO message
+          text — that is exactly why it is small enough to be instant. So for the moment before the
+          real list lands, a search can only match titles. Saying nothing would mean quietly reporting
+          fewer results than exist, which is a wrong answer dressed as a fast one. It appears only
+          while searching, and disappears by itself the instant the full list arrives. */}
+      {!hydrated && searchQuery.trim() !== '' && (
+        <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2">
+          <Clock className="h-3 w-3 shrink-0 text-amber-400" />
+          <p className="text-[10px] leading-relaxed text-amber-200/90">
+            Searching titles only — still loading your messages, so results may grow in a moment.
+          </p>
+        </div>
+      )}
 
       {/* Session list */}
       <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar" role="list" aria-label="Session history">

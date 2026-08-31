@@ -43033,3 +43033,42 @@ run` **1424 files / 18,760 passed, 0 failed** · `npm run build` green.
 - Enabling the Android half requires a FRESH signed `.aab` (bundled mode — a frontend change never
   reaches installed users) **and** an updated Play Data Safety declaration before rollout.
 - iOS remains TestFlight-only, so ads must target Android; the iOS half of app events is not built.
+## 2026-08-22 — WALLET_GIFT_V2 is ON in production; the verification gap it exposed, closed
+
+The admin set `WALLET_GIFT_V2=on` in Cloud Run and asked for a test. Two honest findings.
+
+**1. The flag value the admin typed does mean yes.** Checked first, because this is exactly the class
+of thing that fails silently: `parseEnvFlag` accepts `on` (and `ON`, ` on `, `true`, `1`, `yes`), and a
+typo like `ture` takes the documented default rather than quietly meaning something else. Had the
+module used one of the six older strict readers this codebase used to contain, `on` would have left
+the feature OFF with nothing in any log to say so.
+
+**2. The real gap: the tests proved SHAPE, not BEHAVIOUR.** `giftPlan.test.ts` proved the arithmetic
+and `giftPlanWallet.test.ts` proved the route was wired correctly — but both are pure functions and
+source-level regex. Neither had ever proved that a grant of the right size LANDS in a wallet, that the
+marker blocking a second one is really WRITTEN, or that the ₹750 route really pays zero when the code
+actually runs. While the flag was off that was acceptable. With real money moving through it, it was
+not — so `giftPlanV2Behavior.test.ts` now drives the REAL route handlers against a fake Firestore and
+asserts on what was written. 15 cases:
+
+- Email sign-up credits ₹250 and spends the mailbox; **a Gmail alias (`amit+1@`, `a.m.i.t@`,
+  `AMIT@googlemail.com`) is gifted NOTHING the second time** — the actual leak, closed and proven.
+- Phone sign-up credits ₹500 at once and spends BOTH identities; the same handset in another spelling
+  (`+919876543210` vs `09876543210`) is not a second person.
+- The claim adds exactly the missing ₹250; a second claim pays zero; no phone on the token is an
+  honest 400, not a crash.
+- **THE ₹750 HOLE, end to end**: phone sign-up (₹500) → second account on a genuinely new mailbox
+  (₹250, legitimate) → verify it with the same number → **zero**. Total ₹750 never occurs.
+- An old ladder account at ₹650 claims zero and is **not reduced**; a pre-switch wallet keeps its
+  weekly ladder and its next-credit date; a v2 wallet is shown what it can claim, never a date.
+- The kill switch really reverts: flag off ⇒ legacy grant, no `giftPlan` stamp, **no marker written**.
+
+**Both critical guards verified to BITE, not merely pass:** breaking email normalization fails the
+alias case, and removing the per-number marker check on the claim path fails the ₹750 case.
+
+Gate: both `tsc` clean; FULL suite **1387 files / 17463 tests green**.
+
+**What is NOT proven, and cannot be from here:** a real SMS actually arriving, Firebase Phone Auth
+being enabled for this project in the console, and the live Firestore accepting these writes under its
+security rules. Those need one real sign-up on the deployed site — the admin's to run, and worth doing
+on a spare number before the first real user meets it.

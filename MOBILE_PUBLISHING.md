@@ -283,6 +283,73 @@ done would break the build's provisioning-profile step):
 
 ---
 
+## 7.6 Ad conversion measurement — running Facebook / Instagram ads for installs
+
+**Why this section exists:** Meta can only optimise an ad campaign for an outcome it can OBSERVE.
+With nothing reporting back, the only campaign type available is **Traffic**, which optimises for
+link clicks — the budget goes to people who tap the ad, not to people who install, sign up or pay.
+An **App Promotion / App Install** campaign cannot even be created for an app Meta has no signal
+from. The code for both halves is already in the repo; each stays completely inert until you supply
+its credential, so nothing below changes the app until you decide.
+
+### Step 1 — create the Meta app (only you can do this)
+1. developers.facebook.com → **My Apps → Create App** → choose a **Business** app.
+2. Add the **Facebook Login for Business**-free product you need: under **App settings → Basic**,
+   scroll to **Add platform → Android**. Enter package name `com.navbharat.ai` and the default
+   activity class `com.navbharatai.app.MainActivity`.
+   ⚠️ The package (`com.navbharat.ai`) and the internal namespace (`com.navbharatai.app`) genuinely
+   differ in this project — that is deliberate and correct, see `android/app/build.gradle`.
+3. From **App settings → Basic**, copy the **App ID** and the **Client Token**.
+
+### Step 2 — turn on the ANDROID half (app installs)
+Repo → Settings → Secrets and variables → Actions → add **both**:
+
+| Secret | Value |
+|---|---|
+| `FACEBOOK_APP_ID` | the App ID from step 1 |
+| `FACEBOOK_CLIENT_TOKEN` | the Client Token from step 1 |
+
+Both are required together — an app id without a client token cannot initialise, and a
+half-configured SDK is exactly the "built but not really working" state that must not ship.
+
+Then run **Actions → Build Android App Bundle (.aab, signed)** on `main`. The run summary states, in
+words, whether Meta app events are ON or off in that bundle, so a downloaded `.aab` is never
+ambiguous. Upload it to Play as usual.
+
+> 🚨 **Before you roll that bundle out, update Play Console → App content → Data safety.** A build
+> with these secrets set collects the **advertising ID** and app events. Shipping that collection
+> without declaring it is a policy violation, not a detail. With the secrets unset, the Facebook SDK
+> is not in the bundle at all and nothing about your Data safety answers changes.
+
+> The app runs in **bundled mode**, so this only reaches users through a **new `.aab`** — there is no
+> way to enable it for already-installed copies from the server.
+
+### Step 3 — turn on the WEB half (signups and purchases)
+1. Meta **Events Manager → Connect data sources → Web → Pixel**, and copy the **Pixel ID**.
+2. Cloud Run → the `navbharat-ai-prod` service → **Edit & deploy new revision → Variables** → add
+   `META_PIXEL_ID` = that id. It takes effect on the next page load; no rebuild is needed.
+   ⚠️ It must be `META_PIXEL_ID`, **not** `VITE_META_PIXEL_ID`. A `VITE_` variable is frozen when the
+   Docker image is built, so setting that name in Cloud Run would silently do nothing.
+3. Verify: open navbharatai.com, **accept** the consent banner, and check that a request to
+   `connect.facebook.net` appears in the browser's Network tab. Meta's *Events Manager → Test events*
+   then shows `PageView`, and `CompleteRegistration` when you create an account.
+
+The pixel is gated on consent (GDPR / India DPDP) and never runs inside the native app — the Android
+SDK reports the app's own events, and running both would count one person twice.
+
+### What Meta will then be able to optimise for
+| Signal | Fires when | Where from |
+|---|---|---|
+| App install / app open | a user installs or opens the Android app | Android SDK |
+| `CompleteRegistration` | a NavBharatAI account is created (any sign-in method) | web pixel |
+| `Purchase` | the SERVER confirms a wallet recharge or a Pass | web pixel |
+| `AppBuilt` | a user's app is generated | web pixel |
+
+A recharge reports the real rupee amount. A Professional Pass resolves with a duration rather than an
+amount, so it is reported as a Purchase with **no value** — never an invented one.
+
+---
+
 ## 8. Git-ignore these secrets (never commit)
 Add to `.gitignore` (some may already be present):
 ```

@@ -16,6 +16,35 @@ android {
         versionCode System.getenv("ANDROID_VERSION_CODE") ? System.getenv("ANDROID_VERSION_CODE").toInteger() : 1
         versionName System.getenv("ANDROID_VERSION_NAME") ?: "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // ── META (Facebook / Instagram) APP EVENTS ────────────────────────────────────────────
+        // WHY THIS EXISTS: Meta can only optimise an ad campaign for an outcome it can observe, and
+        // for an Android INSTALL the only things that can report that outcome are this SDK or a paid
+        // attribution partner (AppsFlyer / Adjust). Without one, a campaign can be optimised for link
+        // CLICKS and nothing else, so budget goes to people who tap rather than people who install.
+        //
+        // Credentials come from the CI environment, which reads them from GitHub repo SECRETS — they
+        // are never committed. Same discipline as the signing config below.
+        //
+        // 🔒 ABSENT (today's state) ⇒ THE APP IS BYTE-FOR-BYTE UNCHANGED IN BEHAVIOUR. The dependency
+        // is not added at all (see `dependencies` below), so no Facebook code ships, nothing is
+        // collected, no advertising-ID permission is merged in, and the Play Data Safety declaration
+        // does not change. The meta-data entries in AndroidManifest.xml are then inert strings that
+        // nothing reads. This is the same purely-additive pattern the release signingConfig uses.
+        //
+        // ⚠️ WHEN YOU DO SET THEM: the SDK collects the advertising ID and app events, which MUST be
+        // declared in Play Console → App content → Data safety before that build is rolled out.
+        // Shipping the collection without the declaration is a policy violation, not a detail.
+        def fbAppId = (System.getenv("FACEBOOK_APP_ID") ?: "").trim()
+        def fbClientToken = (System.getenv("FACEBOOK_CLIENT_TOKEN") ?: "").trim()
+        // BOTH are required: an app id with no client token cannot initialise, and half-configured is
+        // exactly the "built but not really working" state that is not allowed to exist.
+        def fbEnabled = !fbAppId.isEmpty() && !fbClientToken.isEmpty()
+        resValue "string", "facebook_app_id", fbAppId
+        resValue "string", "facebook_client_token", fbClientToken
+        // `+=` rather than `=`: Capacitor's generated capacitor.build.gradle may contribute its own
+        // placeholders, and replacing the map would silently drop them.
+        manifestPlaceholders += [facebookEnabled: fbEnabled ? "true" : "false"]
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -65,6 +94,15 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+
+    // Meta app events — added ONLY when both credentials are configured (see defaultConfig above).
+    // `facebook-core` is the minimal artifact: install + app-event reporting, WITHOUT Facebook Login,
+    // sharing or the rest of the SDK surface. We need measurement, not a login provider, and every
+    // extra artifact is extra size, extra permissions and extra Data Safety surface for nothing.
+    if (!(System.getenv("FACEBOOK_APP_ID") ?: "").trim().isEmpty()
+            && !(System.getenv("FACEBOOK_CLIENT_TOKEN") ?: "").trim().isEmpty()) {
+        implementation 'com.facebook.android:facebook-core:17.0.2'
+    }
 }
 
 apply from: 'capacitor.build.gradle'

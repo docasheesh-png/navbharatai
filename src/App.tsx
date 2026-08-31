@@ -56,6 +56,7 @@ import { Capacitor } from '@capacitor/core';
 import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib/firebase';
 import { readRedirectMarker, clearRedirectMarker, redirectReturnVerdict, redirectLostMessage } from './lib/redirectSignInMarker';
 import { readRoster, writeRoster, rememberAccount } from './lib/accountRoster';
+import { isNewAccount, decideSignupReport, SIGNUP_REPORTED_KEY } from './lib/signupSignal';
 import { authedHeaders } from './lib/authHeaders';
 import { LS_EVICTABLE, safeLS } from './lib/localStorageSafe';
 import { rememberGithubOwner, clearGithubConnection, readGithubOwner } from './lib/githubTokenStore';
@@ -1169,6 +1170,27 @@ export default function App() {
             lastUsed: Date.now(),
           }));
         } catch { /* the roster is a convenience — it must never affect signing in */ }
+        // REGISTRATION CONVERSION — reported HERE for the same reason the roster above is: this is
+        // the ONE place every successful sign-in passes through, so all eight paths (email, phone
+        // web/native, Google popup/redirect/native, GitHub) are covered without each growing its own
+        // wiring, and a ninth added later is covered for free.
+        //
+        // "New account" is derived from Firebase's own stamps rather than from which button was
+        // pressed, and it is deduped per uid — onAuthStateChanged also fires on every page load and
+        // token refresh, and Firebase keeps reporting the same creationTime forever, so without the
+        // guard one signup would re-report on every reload and inflate the number ad spend is
+        // optimised against. See signupSignal.ts.
+        try {
+          const decision = decideSignupReport(
+            localStorage.getItem(SIGNUP_REPORTED_KEY),
+            currentUser.uid,
+            isNewAccount(currentUser.metadata?.creationTime, currentUser.metadata?.lastSignInTime),
+          );
+          if (decision.report) {
+            if (decision.nextStored) localStorage.setItem(SIGNUP_REPORTED_KEY, decision.nextStored);
+            trackEvent('signup', { provider: currentUser.providerData?.[0]?.providerId || 'unknown' });
+          }
+        } catch { /* measurement must never affect signing in */ }
         // GITHUB CONNECTION IS PER-USER: pick up this user's OWN GitHub token, but NEVER inherit a
         // token authorized by a different NavBharatAI user on this browser (the "every user sees my
         // account" bug). resolveGithubConnectionForUser decides keep / claim / clear.

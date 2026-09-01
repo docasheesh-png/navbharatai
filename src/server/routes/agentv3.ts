@@ -12997,7 +12997,19 @@ async function noteBuildOutcome(
           // which is exactly what this record measures. Building the runner first would be the same
           // mistake as scoring a benchmark nobody ran.
           try {
-            const sgFiles = Object.fromEntries(writtenFiles);
+            // THE WHOLE PROJECT, NOT JUST THIS TURN'S WRITES (admin autopsy 2026-09-01).
+            //
+            // This used to read `Object.fromEntries(writtenFiles)`. On a real build — an ad-blocker
+            // browser with an Express proxy in `server.ts` and a Vite frontend — that turn edited only
+            // frontend files, so the graph never saw `server.ts` and reported "Single service:
+            // frontend on port 5173". The platform had just STARTED that backend, health-checked it on
+            // :3001 and tested its API, and still described the project as single-service. A backend
+            // written in an earlier turn and untouched by this one is invisible to a turn-scoped view,
+            // which is exactly the normal case for the second service.
+            //
+            // `integrityFiles` is the durable project ∪ this build's writes and is already loaded a
+            // few hundred lines above, so this costs no extra I/O.
+            const sgFiles = integrityFiles;
             const sgPaths = Object.keys(sgFiles);
             const mono = detectMonorepo(sgPaths, sgFiles);
             const graph = buildServiceGraph({ contents: sgFiles, packageDirs: mono.packageDirs });

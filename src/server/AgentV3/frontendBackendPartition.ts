@@ -76,7 +76,15 @@ export function partitionFrontendBackend(paths: readonly string[]): FbPartition 
 
 /** A concise, honest advisory line for the admin build report. Pure. */
 export function partitionSummary(p: FbPartition): string {
-  const base = `Frontend/backend partition: ${p.frontend.length} frontend, ${p.backend.length} backend, ${p.shared.length} shared, ${p.other.length} other.`;
+  // "OF THE FILES THIS TURN WROTE" IS LOAD-BEARING (admin autopsy 2026-09-01). The caller partitions
+  // `writtenFiles` on purpose — the question it answers is whether THIS build's work could have been
+  // split across two agents, which is about what we wrote, not about what the app contains. But the
+  // line used to open "Frontend/backend partition: 5 frontend, 0 backend", which reads as a statement
+  // about the APP. On a real build it said "0 backend" for a project whose Express proxy the platform
+  // had just started and health-checked — the backend simply belonged to an earlier turn. Every number
+  // was true about the files measured and false about the app, which is the worst kind of wrong in a
+  // diagnostic: confident, specific and misleading. The scope is now in the sentence.
+  const base = `Of the ${p.frontend.length + p.backend.length + p.shared.length + p.other.length} file(s) THIS TURN wrote: ${p.frontend.length} frontend, ${p.backend.length} backend, ${p.shared.length} shared, ${p.other.length} other (not a survey of the whole project).`;
   return p.partitionable
     ? `${base} A clean full-stack split exists — this build is a candidate for parallel frontend/backend building (a future capability).`
     : `${base} No clean full-stack split (single-side or shared-heavy) — parallel FE/BE building would not help here.`;

@@ -317,6 +317,7 @@ import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { lintDesign, designSummary } from '../AppMakerLab/intelligence/DesignLinter';
 import { publishableVerdict, entryPagesOf } from './publishablePayload';
+import { detectServerNeed } from './staticPublishGuard';
 import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
@@ -7820,7 +7821,41 @@ export class ToolDispatcher {
         // failure, so it degrades to an honest line telling the user their app is live but cannot yet
         // save data.
         const migrationLine = await this.migrateProductionDatabase().catch(() => '');
-        return `Deployed to a permanent public URL: ${url} (${files.size} files).${bundleLine ? ` ${bundleLine}` : ''}${liveLine}${migrationLine} This stays live after the sandbox stops.`;
+        // THE SERVER HALF THAT DOES NOT COME WITH IT (admin autopsy 2026-09-01).
+        //
+        // A user's ad-blocker browser was built as TWO processes: `server.ts`, an Express proxy that
+        // fetched pages and stripped the ads — the entire product — and a Vite frontend whose
+        // dev-server proxy forwarded `/api` to it. Both ran in the sandbox and the platform PROVED it
+        // (`curl :3001/health` ok, `curl :3001/api/fetch` returned a real page). Then this tool
+        // published the static build, and the summary told the user their browser was ready and would
+        // block ads. It could not: a Vite `server.proxy` does not exist after `vite build`, and static
+        // hosting cannot run a Node process, so the ad-blocking half was live nowhere. The user saw a
+        // site that worked while it was being built and stopped working once it was "finished", and
+        // reasonably concluded we had broken it. Nothing broke — the working half was never published.
+        //
+        // Every existing gate asked "did files come out?" — dist was non-empty and was not the starter
+        // page, so `publishableVerdict` passed, correctly. Nobody asked "can what we are publishing
+        // actually RUN where we are putting it?"
+        //
+        // This never blocks the publish: the frontend really is live and taking that away would remove
+        // something that works. It removes the false CLAIM instead, by putting the truth in the tool
+        // result the agent writes its summary from. Best-effort throughout — a guard that could fail a
+        // working publish would be a worse bug than the one it closes.
+        let serverNeedLine = '';
+        try {
+          const [pkg, cfg] = await Promise.all([
+            this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined),
+            (async () => {
+              for (const c of ['vite.config.ts', 'vite.config.js', 'webpack.config.js']) {
+                try { return await this.actuator.readFile(this.workspaceId, c); } catch { /* next */ }
+              }
+              return undefined;
+            })(),
+          ]);
+          const verdict = detectServerNeed({ sourcePaths, packageJson: pkg, buildConfig: cfg });
+          if (verdict.needsServer) serverNeedLine = ` ${verdict.note}`;
+        } catch { /* the guard is advisory — it can never affect a publish */ }
+        return `Deployed to a permanent public URL: ${url} (${files.size} files).${bundleLine ? ` ${bundleLine}` : ''}${liveLine}${migrationLine}${serverNeedLine} This stays live after the sandbox stops.`;
       }
 
       case 'console_errors': {

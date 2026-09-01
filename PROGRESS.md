@@ -43033,3 +43033,243 @@ run` **1424 files / 18,760 passed, 0 failed** · `npm run build` green.
 - Enabling the Android half requires a FRESH signed `.aab` (bundled mode — a frontend change never
   reaches installed users) **and** an updated Play Data Safety declaration before rollout.
 - iOS remains TestFlight-only, so ads must target Android; the iOS half of app events is not built.
+## 2026-08-22 — WALLET_GIFT_V2 is ON in production; the verification gap it exposed, closed
+
+The admin set `WALLET_GIFT_V2=on` in Cloud Run and asked for a test. Two honest findings.
+
+**1. The flag value the admin typed does mean yes.** Checked first, because this is exactly the class
+of thing that fails silently: `parseEnvFlag` accepts `on` (and `ON`, ` on `, `true`, `1`, `yes`), and a
+typo like `ture` takes the documented default rather than quietly meaning something else. Had the
+module used one of the six older strict readers this codebase used to contain, `on` would have left
+the feature OFF with nothing in any log to say so.
+
+**2. The real gap: the tests proved SHAPE, not BEHAVIOUR.** `giftPlan.test.ts` proved the arithmetic
+and `giftPlanWallet.test.ts` proved the route was wired correctly — but both are pure functions and
+source-level regex. Neither had ever proved that a grant of the right size LANDS in a wallet, that the
+marker blocking a second one is really WRITTEN, or that the ₹750 route really pays zero when the code
+actually runs. While the flag was off that was acceptable. With real money moving through it, it was
+not — so `giftPlanV2Behavior.test.ts` now drives the REAL route handlers against a fake Firestore and
+asserts on what was written. 15 cases:
+
+- Email sign-up credits ₹250 and spends the mailbox; **a Gmail alias (`amit+1@`, `a.m.i.t@`,
+  `AMIT@googlemail.com`) is gifted NOTHING the second time** — the actual leak, closed and proven.
+- Phone sign-up credits ₹500 at once and spends BOTH identities; the same handset in another spelling
+  (`+919876543210` vs `09876543210`) is not a second person.
+- The claim adds exactly the missing ₹250; a second claim pays zero; no phone on the token is an
+  honest 400, not a crash.
+- **THE ₹750 HOLE, end to end**: phone sign-up (₹500) → second account on a genuinely new mailbox
+  (₹250, legitimate) → verify it with the same number → **zero**. Total ₹750 never occurs.
+- An old ladder account at ₹650 claims zero and is **not reduced**; a pre-switch wallet keeps its
+  weekly ladder and its next-credit date; a v2 wallet is shown what it can claim, never a date.
+- The kill switch really reverts: flag off ⇒ legacy grant, no `giftPlan` stamp, **no marker written**.
+
+**Both critical guards verified to BITE, not merely pass:** breaking email normalization fails the
+alias case, and removing the per-number marker check on the claim path fails the ₹750 case.
+
+Gate: both `tsc` clean; FULL suite **1387 files / 17463 tests green**.
+
+**What is NOT proven, and cannot be from here:** a real SMS actually arriving, Firebase Phone Auth
+being enabled for this project in the console, and the live Firestore accepting these writes under its
+security rules. Those need one real sign-up on the deployed site — the admin's to run, and worth doing
+on a spare number before the first real user meets it.
+
+## 2026-08-31 — The chat composer's buttons, from a phone screenshot
+
+Admin: *"send, mic aur attachment ke buttons unaligned hai"*. Two real defects behind it, plus a
+third the screenshot could not show.
+
+**1. THE CONTROL ROW DID NOT FIT ITS BOX.** The row is absolutely positioned at `bottom-2` inside a
+container sized by the textarea. That textarea renders **46px** — `py-2.5` (20px) plus one 16px line
+at `leading-relaxed` (26px) — so the old `min-h-[40px]` never bound at all. With the send button at
+`p-3` + a `3.5` icon (**38px**), the row's top edge landed at `46 − 8 − 38 = 0`: flush against the
+container's rounded border. That is why the filled red button read as breaking out of the box.
+
+**2. THE SEND BUTTON WAS THE ODD ONE OUT.** 38px against 36px for attach and mic, and the only filled
+one, so the row's height was set by the control that looked least like its neighbours.
+
+**3. THE EXPAND BUTTON SAT ON TOP OF THE MIC** — not visible in the screenshot because it only appears
+past 300 characters. It was placed separately at `right-20` (80px) while the row spans 8px→~126px
+(three buttons) or ~166px (four). **The magic number was correct when written and was silently
+invalidated when the voice button was added beside it on 2026-08-10.** That is the root cause worth
+naming: controls in this corner were positioned by hand-tuned absolute offsets, so a sibling change
+broke a number nobody re-derived.
+
+**Fixed as a class, not three patches:** every control is now one uniform 36px box (`p-2.5` + a
+`w-4 h-4` icon) in ONE flex row — the expand button included, so a sixth control cannot reintroduce
+the overlap. `min-h-[48px]` carries that row with a symmetric 6px above and below.
+
+⚠️ **`min-h-[48px]` does NOT undo the 2026-07-12 slimming**, and the code says so where a future
+session will read it: the box was already rendering at 46px, so this is **+2px** of real height, and
+the padding stays `py-2.5` rather than the `py-3.5` that was trimmed away.
+
+`pr-24` → `pr-44`: 96px did not even cover the three-button row (124px), so typed text slid under the
+paperclip. 176px covers the common four-button case (164px). With all five present the expand button
+can still overlap long text — an accepted edge, stated rather than hidden, since expand only appears
+once the text has wrapped anyway.
+
+**The fix was NOT "make the buttons smaller until they fit"** — that trades one real problem for a
+worse one on a touch screen. A test asserts the send button did not shrink.
+
+Guards in `chatComposerAlignment.test.ts` (8 tests) assert the GEOMETRY — a jsdom render has no layout
+engine and would report every one of these boxes as 0×0, i.e. pass while the phone stayed broken.
+Both verified to bite: restoring the oversized send button fails two cases, and putting `min-h` back
+to 40 fails the fit case.
+
+Gate: both `tsc` clean; FULL suite **1423 files / 18736 tests green**.
+
+## 2026-08-31 — History opened slowly because it downloaded every message and every app file
+
+Admin: *"history load hone me bahut time lagta hai … agar user ke app me bhi store ho jaye to chalega"*.
+
+**The measured cause, not a guess.** `HistoryView` subscribed with `where('userId','==',uid)` and **no
+limit**, then waited for that first snapshot before rendering anything. And a `chat_sessions` document
+is not small — `App.tsx` writes into every one of them:
+
+- `messages` — the full transcript
+- `restoredMessages` — a **second** full transcript
+- `files` — the built app's **entire file contents**
+
+So opening a list of TITLES downloaded every message and every source file the account had ever
+produced. For someone who has built a few apps that is megabytes, and they watch a skeleton for all
+of it.
+
+**The sting:** the sessions were already on the device in `navbharat_sessions` the whole time. That
+copy was read **only inside the Firestore error handler** — so it helped when the network FAILED and
+never when the network was merely slow, which is the case the user actually hits.
+
+### The fix — local-first, exactly what the admin authorised
+
+`historyIndex.ts` keeps a compact row per session (title, date, mode flags, and **counts** — never
+content). `HistoryView` seeds its state from that index in a **lazy initialiser**, so the list is on
+screen in the FIRST frame; the Firestore snapshot then corrects it and refreshes the index, which is
+also what makes sessions created on ANOTHER device appear instantly next time.
+
+`loading` is now true only for someone with nothing cached. The network became a refresh instead of a
+gate.
+
+⚠️ **Deliberately NOT a cache of the sessions themselves.** Storing transcripts and app files in
+localStorage would refill the same ~5MB budget this exists to stay out of, and `navbharat_sessions`
+already holds the full copies. A row is under 400 bytes even for a 500-message session with 80 files —
+test-locked.
+
+### The honesty half, which is the part worth remembering
+
+An index row carries **no message text** — that is exactly why it is small enough to be instant. So
+before the real list lands, a search can only match titles, and reporting fewer results without
+saying so would be **a wrong answer dressed as a fast one**. A one-line notice appears *only* while
+searching and *only* until hydration: "Searching titles only — still loading your messages, so
+results may grow in a moment." `setHydrated(true)` fires on BOTH the live and the offline path,
+because the offline path loads the full local sessions and leaving the caveat up there would be its
+own small lie.
+
+Other decisions: a session with no timestamp is **kept** and sorted last rather than dropped (a real
+session vanishing from history is far worse than a bad sort); a storage failure is swallowed because
+this is a head start, never the source of truth; and the offline fallback no longer replaces an
+already-painted cached list with an empty one.
+
+18 tests, and the central guard **verified to bite**: removing the lazy initialisers fails the
+first-frame case.
+
+Gate: both `tsc` clean; FULL suite **1424 files / 18754 tests green**.
+
+### ⚠️ OPEN — the real fix is upstream, and it is NOT done
+
+This makes the screen *feel* instant. It does not stop the download: Firestore still streams every
+transcript and every app file in the background, which costs the user's data and our read quota. The
+honest fix is that `chat_sessions` should not carry `messages`, `restoredMessages` and `files` at all
+for listing purposes — v5.0 sessions already write a metadata-only row (`AgentV3Panel`, 2026-08-13),
+and the generic writer in `App.tsx` should follow. That is a data-shape migration with a back-compat
+read path, so it is recorded here rather than bolted onto a UI fix.
+
+A `limit()` was considered and **rejected for now**: without `orderBy` Firestore returns documents in
+ID order, so a cap would silently hide the newest sessions, and adding `orderBy('lastUpdated')` drops
+every document missing that field — which would look exactly like data loss to a user with older
+sessions. Neither is acceptable without first confirming the field is present on every row.
+
+## 2026-09-01 — Autopsy: the ad-blocker browser that "stopped working after it was finished"
+
+Admin's build report (`330a80df`), and their question: *the site opened while the app was being built,
+then stopped once the app was 100% done — what needed breaking afterwards?*
+
+**Nothing broke. The working half was never published.**
+
+### What the app actually was
+
+Two processes: **`server.ts`**, an Express proxy on :3001 that fetched pages and stripped the ads —
+*the entire product* — and a Vite frontend on :5173 whose **dev-server proxy** forwarded `/api` to it.
+Inside the sandbox both ran and the platform PROVED it: `curl :3001/health` → ok, and
+`curl :3001/api/fetch?url=…` → a real fetched page.
+
+Then it published. `npm run build` → static files → Firebase Hosting → and the summary said:
+*"Aapka browser ab ready hai — koi bhi website open karein aur ads/trackers automatically block ho
+jayenge!"*
+
+Both halves of that were impossible on the published link:
+- a Vite `server.proxy` is a **dev-server** feature and does not exist after `vite build`;
+- static hosting cannot run a Node process, so the ad-blocking backend was live **nowhere**.
+
+Every publish gate asked *"did files come out?"* — dist was non-empty and was not the starter page, so
+`publishableVerdict` passed, correctly. **Nobody asked whether what we were publishing could RUN where
+we were putting it.** `RENDER_API_KEY` is set and `renderDeploy.ts` exists precisely to deploy a user's
+Node backend; it was never invoked.
+
+### The five buckets
+
+| | |
+|---|---|
+| ✅ Self-healed | **59 — and 56 of them are ONE bug** (below). Three are real. |
+| 🔀 Worked around | **56** × `kimi-k2.5` 404 |
+| ⏭️ Skipped | 3 — no user journey (app has no form: an honest skip), Playwright written but not run, console not captured |
+| ❌ Still open | 6 — design 74/100, a11y 70/100, repeated reads, RELEASE_GATE yellow, OUTCOME_STOPPED, REVIEW_INCOMPLETE |
+| 🥵 Struggle | the dead rung, and **291s (38% of the build) after the last model call** on a review that timed out at 194s and whose findings were **discarded** |
+
+Cost: **₹152.27 charged to a FREE user** whose lifetime gift is ₹250 — one `continue` took 61% of it.
+Sandbox held 1069s against a 763s build.
+
+### Fixed here
+
+**1 · A static publish no longer claims a server-backed app works** (`staticPublishGuard.ts`). Detects
+a server entry, a dev-only proxy, a server script and same-origin `/api` calls; **two independent
+signals** are required so a stray `api.ts` cannot nag a healthy app, and SSR frameworks (Next/Nuxt/
+Remix/Astro/SvelteKit — **scoped names included**) are exempt because they deploy their own server. It
+**never blocks the publish** — the frontend really is live, and taking that away would remove something
+that works. It removes the false CLAIM instead, via the tool result the agent writes its summary from.
+
+**2 · The service graph now reads the whole project** (`sgFiles = integrityFiles`). It read
+`Object.fromEntries(writtenFiles)`, so a backend written in an EARLIER turn — the normal case for a
+second service — was invisible: the report said *"Single service: frontend on port 5173"* about a
+project whose Express proxy the platform had just health-checked. `integrityFiles` was already loaded,
+so this costs no extra I/O. `FE_BE_PARTITION`'s turn-scope is correct for its purpose, but its wording
+("0 backend") read as a fact about the APP — it now says *"of the files THIS TURN wrote"*.
+
+**3 · A model that can never answer is now its own bucket.** `classifyProviderFailure` gained
+`model-unavailable`, checked FIRST because it is the only bucket where retrying cannot help.
+`MODEL_LADDER_DEAD_RUNG` fires **once per provider** on the second occurrence — 55 identical warnings is
+what buried this — and is `autoResolved: false`, because the fallback rescuing the call is exactly what
+made 56 "self-heals" one misconfiguration wearing a green checkmark.
+
+⚠️ **The dead rung itself is `kimi-k2.5`, the FIRST rung of the free Kimi ladder**
+(`routes/agentv3.ts:2130`). The provider says *"404 Not found the model kimi-k2.5 **or Permission
+denied**"* — so it is either retired or not on this key's plan. **Honest limit: I cannot tell which
+from here**, and the fix differs (drop the rung vs. enable it on the Moonshot account). The detector now
+makes it impossible to miss; the id itself is the admin's call.
+
+### Two tests that were RIGHT to fail, and were not weakened
+- `reportHonesty` pinned "a new failure mode must not vanish into other" using *'model glm-9 has been
+  retired'* — which my change now correctly recognises. The assertion stayed; the example moved to one
+  that genuinely has no bucket, and a new case pins the improvement.
+- `serviceGraph` used the old line as an ANCHOR for its advisory assertion. Anchor updated, assertion
+  untouched, plus a new case pinning the whole-project read.
+
+My own detector had a real bug the tests caught: `^remix$` missed `@remix-run/node`, so every Remix app
+would have been warned about a server its framework deploys.
+
+Gate: both `tsc` clean; FULL suite **1425 files / 18768 tests green**. Both key guards verified to bite.
+
+### ⚠️ STILL OPEN from this autopsy
+- **291s of post-build work that produced nothing** — the review timed out on 46 files and its
+  findings were discarded. The user paid for it in time and money. Not touched here.
+- **The free tier's arithmetic**: `payments.ts` says ₹250 "funds a complete first app"; this one
+  `continue` cost ₹152. The gift funds ~1.6 builds, not a whole app. A business decision, not a bug —
+  but the documented figure is not the real one.
+- **`CLAIM_UNSUPPORTED` did not fire** on a summary the platform's own evidence contradicted.

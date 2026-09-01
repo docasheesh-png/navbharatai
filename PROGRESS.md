@@ -43525,3 +43525,50 @@ tests assert the gate itself, including that an ungranted dispatcher never calls
 and never leaks a URL.
 
 Gate: both `tsc` clean; FULL suite **1429 files / 18833 tests green**. Deny-by-default verified to bite.
+
+## 2026-09-01 — App Mart offered where it is earned; and the half of the ask that was refused
+
+Admin: *"koi user apni app publish on navbharatai kare, tabhi usko ek tick ✅ dikhe — post in app mart.
+Aur app mart me wahi app dikhe jo navbharatai par publish hai, ham host kar rahe hai. Isse loading
+jaldi ho?"*
+
+**Checked before building anything (safeguard #6) — most of this already exists.** `navStoreWeb.ts` is
+a complete, well-designed web-app store: publish = immutable snapshot, a key-scan gate that refuses a
+snapshot carrying a real-format secret with its file:line, a prover whose default answer is "no", and
+private apps gated server-side. The publish sheet already has a "Put it on App Mart" card.
+
+### Built — the tick
+
+The sheet's four paths (hosting, own domain, APK Builder, App Mart) are **siblings**, so App Mart sat
+beside the hosting card as one more option a user had to notice by themselves. The moment someone HAS
+just published is the moment showing it to people makes sense to them, so the prompt now appears then.
+
+Gated on **`liveUrl`** — the durable deployment record, the same signal the Unpublish control trusts,
+set only for a genuinely live app. It is a **prompt, not an automatic listing**: publishing your app
+and showing it to strangers are two different decisions, and the second stays the user's — the same
+principle as the publish-consent gate shipped the same day. The card still works **without** a live
+URL, because App Mart never required hosting and must not start to.
+
+### ⚠️ REFUSED, with reasons — "App Mart me sirf hosted apps dikhein"
+
+It would not be faster, and it would cost real capacity.
+
+**The store does not serve the hosted copy at all.** It runs an immutable snapshot in each viewer's
+OWN browser — `navStoreWeb.ts`: *"the viewer brings their own CPU, so 1 viewer or 10,000 cost us the
+same"*. So requiring a NavBharatAI publish first would make **every** store app consume a Firebase
+Hosting channel — and channels are finite per site (CLAUDE.md scale plan §3, tracked by the Publish
+Capacity panel, with ROADMAP §10.3 as the eventual fix) — **for a copy nobody ever reads.**
+
+The speed the admin wanted is already how it works. The honest framing given back: the store's LISTING
+was never the slow part (`listApps('approved', 100)` is metadata); the slow part in the **APK** store is
+getting to USE an app — a 5–50 MB download, an "unknown sources" warning and an install, Android-only.
+The web path is a tap. That is the win, and it is already built.
+
+### Recommended instead (not built — admin's call)
+
+Keep APKs, but as an **action on a listed web app** ("Download as Android app", via the existing APK
+Builder) rather than as an upload path. One pipeline, and the APK is built from code we hosted instead
+of a stranger's binary — which also removes the open licensing item in CLAUDE.md, where the FREE
+VirusTotal API is used to scan uploads in what is a commercial product.
+
+Gate: both `tsc` clean; FULL suite **1430 files / 18840 tests green**.

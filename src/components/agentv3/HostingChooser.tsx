@@ -21,7 +21,7 @@
 // (static = Free); it is the single place to change when the admin sets real numbers.
 
 import { useEffect, useState } from 'react';
-import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, Store, Clipboard, Sparkles, Loader2 } from 'lucide-react';
+import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, Store, Clipboard, Sparkles, Loader2, Check } from 'lucide-react';
 import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
@@ -940,11 +940,32 @@ export function HostingChooser({
           </div>
 
           {/* Path 4 — Nav App Store (instant web app). One click; runs in every viewer's browser. */}
-          <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4 flex flex-col gap-2.5">
+          <div className={`rounded-xl border p-4 flex flex-col gap-2.5 ${liveUrl ? 'border-emerald-600 bg-emerald-950/30 ring-1 ring-emerald-600/30' : 'border-emerald-800/50 bg-emerald-950/20'}`}>
             <div className="flex items-center justify-between">
               <span className="text-[13px] font-bold text-white">Put it on App Mart</span>
               <span className="text-[9px] font-black uppercase tracking-widest text-emerald-300 bg-emerald-900/50 px-2 py-0.5 rounded-full">Instant</span>
             </div>
+
+            {/* THE NEXT STEP, OFFERED WHERE IT IS EARNED (admin 2026-09-01: "koi user apni app publish
+                on navbharatai kare, tabhi usko ek tick dikhe — post in app mart").
+ 
+                These four paths are siblings, so App Mart sat beside the hosting card as one more
+                option a user had to notice on their own. The moment someone HAS just published is the
+                moment putting it in front of people makes sense to them, so that is when this appears.
+                `liveUrl` is the honest gate — it comes from the durable deployment record and is set
+                only for a genuinely live app, the same signal the Unpublish control trusts.
+
+                ⚠️ It is a PROMPT, not an automatic listing. Publishing your app and showing it to
+                strangers are two different decisions, and the second one stays the user's — the same
+                reason the agent may no longer publish on its own (publishConsent.ts). */}
+            {liveUrl && (
+              <div className="rounded-lg border border-emerald-600/40 bg-emerald-900/30 px-2.5 py-2 flex items-start gap-2">
+                <Check className="w-3.5 h-3.5 text-emerald-300 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-emerald-100 leading-relaxed">
+                  Your app is live on NavBharatAI. Put it on App Mart too so people can actually find it — it stays free, and you can take it off any time.
+                </p>
+              </div>
+            )}
             <p className="text-[11.5px] text-zinc-400 leading-relaxed">
               One click — others run your app instantly in their browser. No APK, no hosting, no install.
             </p>

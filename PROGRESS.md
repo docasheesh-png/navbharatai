@@ -43482,3 +43482,46 @@ passed** · build green · bundle within budget · boot:check PASS.
 automated erase. The public page and the in-app copy both describe what IS removed rather than
 promising a total wipe, so nothing overstates — but closing this properly means extending
 `USER_SCOPED_COLLECTIONS`, and the page's drift test will then require the wording to grow with it.
+## 2026-09-01 — Apps were publishing themselves; publishing is now the user's decision
+
+Admin: *"jab ham koi app banwate hai, to bina kuch kiye automatic woh app publish on navbharatai ho
+jata hai — jab user publish kare tab hi ho."*
+
+**Confirmed from the build report they sent.** The user typed **"continue"**. The agent finished, then
+decided by itself — *"Build successful! Ab deploy karta hoon."* — `TOOL_CALL ▶ deploy` →
+`TOOL_DONE ✓ deploy (14s)` → the app went onto a permanent public URL. Nobody asked.
+
+**Root cause: consent was enforced by asking the model nicely.** The only thing between a private app
+and the open internet was a SENTENCE in the tool's own description — *"use when the user asks to
+deploy/publish/go live"* — and the model did not follow it. A prompt is guidance, not a gate. Same
+lesson as every other guard here that had to become structural after a comment failed to hold it.
+
+**Now it is a gate, and it DENIES by default** (`publishConsent.ts` + `ToolDispatcher._publishConsent`):
+- the **Publish button** grants it explicitly, immediately above its own dispatch so the two cannot drift;
+- a **build turn** grants it only when the user asked *in that message*;
+- a call site that forgets grants nothing, because the default is false;
+- a failure while deciding leaves it DENIED.
+
+**Why deny-by-default:** refusing someone who wanted their app live costs one sentence and the Publish
+button is right there. Allowing it wrongly puts unfinished work in public. Those are not comparable.
+
+**Consent is read from the CURRENT message only** — consent that carries forward is precisely how one
+"publish it" becomes an app that republishes on every later "continue".
+
+**Refused as a normal tool result, never a throw.** An error would read to the model as *this app
+cannot be published*, which is false and would reach the user as a failure. The truth is that nobody
+asked yet, so the message tells it to say the app is ready and point at the Publish button.
+
+⚠️ **A real bug my own test caught, worth remembering for every Hinglish pattern in this repo:** the
+first version ended the verb patterns with `\b` after `kar`, which matched "publish kar do" and
+**missed "publish karo"** — the most common way an Indian user asks — because "karo" is one word with
+no boundary inside it. Negations win over the ask (`abhi publish mat karna`, `deploy later`,
+`build it without deploying`), since publishing on a sentence that said *not* to would be worse than
+having no guard at all.
+
+`Deployment.test.ts`'s five deploy tests began failing and were RIGHT to: they exercise what deploy
+DOES once allowed, so the harness now grants consent exactly as the Publish route does — and three new
+tests assert the gate itself, including that an ungranted dispatcher never calls the deploy function
+and never leaks a URL.
+
+Gate: both `tsc` clean; FULL suite **1429 files / 18833 tests green**. Deny-by-default verified to bite.

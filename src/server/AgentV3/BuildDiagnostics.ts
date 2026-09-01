@@ -1136,6 +1136,9 @@ export class BuildDiagnostics {
    * Reasons are bucketed (rate-limit / timeout / auth / …) so 21 failures collapse into "18 rate-limit,
    * 2 timeout, 1 bad-request" instead of 21 near-identical strings, and the set is hard-capped.
    */
+  /** Providers already flagged for a dead ladder rung — one warning each, never 55. */
+  private readonly deadRungFlagged = new Set<string>();
+
   recordProviderFailure(name: string, reason?: unknown): void {
     if (!name) return;
     this.providerFailures.set(name, (this.providerFailures.get(name) ?? 0) + 1);
@@ -1144,6 +1147,33 @@ export class BuildDiagnostics {
       const byBucket = this.providerFailureReasons.get(name) ?? new Map<string, number>();
       byBucket.set(bucket, (byBucket.get(bucket) ?? 0) + 1);
       this.providerFailureReasons.set(name, byBucket);
+
+      // A DEAD LADDER RUNG ANNOUNCES ITSELF (admin autopsy 2026-09-01).
+      //
+      // `model-unavailable` cannot come right on a retry — the id is wrong, retired, or off this key's
+      // plan — so the SECOND one proves the rung is systematically unreachable rather than unlucky.
+      // Raised here, at the moment the evidence exists, because the alternative (deriving it at settle
+      // time) needs a call site in the route and would go missing on any path that settles early — and
+      // this finding matters most precisely on the builds that end badly.
+      //
+      // Once per provider: 55 identical warnings is what buried this in the first place. It is a
+      // WARNING and `autoResolved: false`, because the fallback rescuing the call is exactly what made
+      // 56 of one build's 59 "self-heals" a single misconfiguration wearing a green checkmark.
+      if (bucket === 'model-unavailable'
+        && (byBucket.get(bucket) ?? 0) === 2
+        && !this.deadRungFlagged.has(name)) {
+        this.deadRungFlagged.add(name);
+        const detail = (reason instanceof Error ? reason.message : String(reason ?? '')).split('\n')[0].slice(0, 120);
+        this.record({
+          phase: 'provider',
+          severity: 'warning',
+          code: 'MODEL_LADDER_DEAD_RUNG',
+          message: `A model in the ${name} fallback ladder is UNREACHABLE on this account and fails every time it is tried — "${detail}". `
+            + 'This is a configuration defect, not a provider outage: every call burns a wasted request on it before falling through '
+            + 'to the next rung, on every build, until the model id is corrected against the provider\'s live model list.',
+          autoResolved: false,
+        });
+      }
     }
     this.notify();
   }
@@ -1610,6 +1640,24 @@ export function classifyProviderFailure(reason: unknown): string {
   const text = (reason instanceof Error ? reason.message : String(reason ?? '')).trim();
   if (!text) return 'unknown';
   const t = text.toLowerCase();
+  // PERMANENT vs TRANSIENT — checked FIRST because it is the only bucket that means "retrying this
+  // will never help" (admin autopsy 2026-09-01).
+  //
+  // A real free build made 40 model calls and logged 57 KIMI failures: "404 Not found the model
+  // kimi-k2.5 or Permission denied". `kimi-k2.5` is the FIRST rung of the free Kimi ladder, so EVERY
+  // call tried a model this account cannot reach, ate the round-trip, and fell through to kimi-k2.6 —
+  // 1.4 wasted requests per call, on every free build, for as long as the id stays there.
+  //
+  // Nothing acted on it because nothing could SEE it: a model-not-found landed in the `other:` bucket,
+  // indistinguishable from a passing blip, and the fallback that rescued it was counted as a
+  // self-heal. 56 of that build's 59 "auto-resolved" items were this one misconfiguration. A heal that
+  // fires on every single call is not resilience — it is a config defect wearing a green checkmark.
+  //
+  // Separating it is what lets a caller do the only correct thing with a permanent failure: stop
+  // retrying that rung and tell the admin the LADDER is wrong, rather than the provider being flaky.
+  if (/\bmodel[_ ]?not[_ ]?found\b|not found the model|\bno such model\b|does not exist|unknown model|model.{0,20}(?:unavailable|deprecated|retired)|permission denied/.test(t)) {
+    return 'model-unavailable';
+  }
   if (/\b429\b|rate.?limit|too many requests|quota/.test(t)) return 'rate-limit';
   if (/timeout|timed out|etimedout|deadline/.test(t)) return 'timeout';
   if (/\b401\b|\b403\b|unauthor|forbidden|invalid api key|authentication/.test(t)) return 'auth';
@@ -1618,6 +1666,36 @@ export function classifyProviderFailure(reason: unknown): string {
   if (/econnreset|enotfound|econnrefused|socket hang up|network/.test(t)) return 'network';
   if (/context length|too long|max tokens|token limit/.test(t)) return 'context-length';
   return `other: ${text.split('\n')[0].slice(0, 60)}`;
+}
+
+/**
+ * A ladder rung that CANNOT work on this account, spotted from the failure buckets.
+ *
+ * `model-unavailable` is different in kind from every other bucket: a rate-limit passes, a timeout
+ * passes, a server error passes — this one never will, because the id is wrong, retired, or not on the
+ * plan the key belongs to. So it is not a provider problem to ride out; it is OUR configuration
+ * naming a model that does not answer, and every call pays a wasted round-trip for it until someone
+ * changes the ladder.
+ *
+ * Returns the admin-facing line, or '' when there is nothing to say. PURE.
+ *
+ * ⚠️ Reports the MODEL ID from the provider's own message when it can be recovered, because "KIMI is
+ * failing" sends someone to look at the provider's status page, and the truth is that one rung of our
+ * own list is wrong. The distinction is the entire value of the finding.
+ */
+export function deadLadderRung(breakdown: Record<string, string>): string {
+  const dead: string[] = [];
+  for (const [provider, line] of Object.entries(breakdown ?? {})) {
+    const m = /(\d+)\s+model-unavailable/.exec(String(line));
+    if (!m) continue;
+    const n = Number(m[1]);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    dead.push(`${provider} × ${n}`);
+  }
+  if (dead.length === 0) return '';
+  return `A model in the fallback ladder is UNREACHABLE on this account and failed every time it was tried (${dead.join(', ')}). `
+    + 'This is not a provider outage — it is a configuration defect: each attempt burns a wasted request before falling through '
+    + 'to the next rung, on every build, until the ladder is corrected. Check the model ids against the provider\'s live model list.';
 }
 
 /** True when a finding is advisory-only and must never become the build's rootCause. Pure. */

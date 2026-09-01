@@ -43185,3 +43185,91 @@ A `limit()` was considered and **rejected for now**: without `orderBy` Firestore
 ID order, so a cap would silently hide the newest sessions, and adding `orderBy('lastUpdated')` drops
 every document missing that field — which would look exactly like data loss to a user with older
 sessions. Neither is acceptable without first confirming the field is present on every row.
+
+## 2026-09-01 — Autopsy: the ad-blocker browser that "stopped working after it was finished"
+
+Admin's build report (`330a80df`), and their question: *the site opened while the app was being built,
+then stopped once the app was 100% done — what needed breaking afterwards?*
+
+**Nothing broke. The working half was never published.**
+
+### What the app actually was
+
+Two processes: **`server.ts`**, an Express proxy on :3001 that fetched pages and stripped the ads —
+*the entire product* — and a Vite frontend on :5173 whose **dev-server proxy** forwarded `/api` to it.
+Inside the sandbox both ran and the platform PROVED it: `curl :3001/health` → ok, and
+`curl :3001/api/fetch?url=…` → a real fetched page.
+
+Then it published. `npm run build` → static files → Firebase Hosting → and the summary said:
+*"Aapka browser ab ready hai — koi bhi website open karein aur ads/trackers automatically block ho
+jayenge!"*
+
+Both halves of that were impossible on the published link:
+- a Vite `server.proxy` is a **dev-server** feature and does not exist after `vite build`;
+- static hosting cannot run a Node process, so the ad-blocking backend was live **nowhere**.
+
+Every publish gate asked *"did files come out?"* — dist was non-empty and was not the starter page, so
+`publishableVerdict` passed, correctly. **Nobody asked whether what we were publishing could RUN where
+we were putting it.** `RENDER_API_KEY` is set and `renderDeploy.ts` exists precisely to deploy a user's
+Node backend; it was never invoked.
+
+### The five buckets
+
+| | |
+|---|---|
+| ✅ Self-healed | **59 — and 56 of them are ONE bug** (below). Three are real. |
+| 🔀 Worked around | **56** × `kimi-k2.5` 404 |
+| ⏭️ Skipped | 3 — no user journey (app has no form: an honest skip), Playwright written but not run, console not captured |
+| ❌ Still open | 6 — design 74/100, a11y 70/100, repeated reads, RELEASE_GATE yellow, OUTCOME_STOPPED, REVIEW_INCOMPLETE |
+| 🥵 Struggle | the dead rung, and **291s (38% of the build) after the last model call** on a review that timed out at 194s and whose findings were **discarded** |
+
+Cost: **₹152.27 charged to a FREE user** whose lifetime gift is ₹250 — one `continue` took 61% of it.
+Sandbox held 1069s against a 763s build.
+
+### Fixed here
+
+**1 · A static publish no longer claims a server-backed app works** (`staticPublishGuard.ts`). Detects
+a server entry, a dev-only proxy, a server script and same-origin `/api` calls; **two independent
+signals** are required so a stray `api.ts` cannot nag a healthy app, and SSR frameworks (Next/Nuxt/
+Remix/Astro/SvelteKit — **scoped names included**) are exempt because they deploy their own server. It
+**never blocks the publish** — the frontend really is live, and taking that away would remove something
+that works. It removes the false CLAIM instead, via the tool result the agent writes its summary from.
+
+**2 · The service graph now reads the whole project** (`sgFiles = integrityFiles`). It read
+`Object.fromEntries(writtenFiles)`, so a backend written in an EARLIER turn — the normal case for a
+second service — was invisible: the report said *"Single service: frontend on port 5173"* about a
+project whose Express proxy the platform had just health-checked. `integrityFiles` was already loaded,
+so this costs no extra I/O. `FE_BE_PARTITION`'s turn-scope is correct for its purpose, but its wording
+("0 backend") read as a fact about the APP — it now says *"of the files THIS TURN wrote"*.
+
+**3 · A model that can never answer is now its own bucket.** `classifyProviderFailure` gained
+`model-unavailable`, checked FIRST because it is the only bucket where retrying cannot help.
+`MODEL_LADDER_DEAD_RUNG` fires **once per provider** on the second occurrence — 55 identical warnings is
+what buried this — and is `autoResolved: false`, because the fallback rescuing the call is exactly what
+made 56 "self-heals" one misconfiguration wearing a green checkmark.
+
+⚠️ **The dead rung itself is `kimi-k2.5`, the FIRST rung of the free Kimi ladder**
+(`routes/agentv3.ts:2130`). The provider says *"404 Not found the model kimi-k2.5 **or Permission
+denied**"* — so it is either retired or not on this key's plan. **Honest limit: I cannot tell which
+from here**, and the fix differs (drop the rung vs. enable it on the Moonshot account). The detector now
+makes it impossible to miss; the id itself is the admin's call.
+
+### Two tests that were RIGHT to fail, and were not weakened
+- `reportHonesty` pinned "a new failure mode must not vanish into other" using *'model glm-9 has been
+  retired'* — which my change now correctly recognises. The assertion stayed; the example moved to one
+  that genuinely has no bucket, and a new case pins the improvement.
+- `serviceGraph` used the old line as an ANCHOR for its advisory assertion. Anchor updated, assertion
+  untouched, plus a new case pinning the whole-project read.
+
+My own detector had a real bug the tests caught: `^remix$` missed `@remix-run/node`, so every Remix app
+would have been warned about a server its framework deploys.
+
+Gate: both `tsc` clean; FULL suite **1425 files / 18768 tests green**. Both key guards verified to bite.
+
+### ⚠️ STILL OPEN from this autopsy
+- **291s of post-build work that produced nothing** — the review timed out on 46 files and its
+  findings were discarded. The user paid for it in time and money. Not touched here.
+- **The free tier's arithmetic**: `payments.ts` says ₹250 "funds a complete first app"; this one
+  `continue` cost ₹152. The gift funds ~1.6 builds, not a whole app. A business decision, not a bug —
+  but the documented figure is not the real one.
+- **`CLAIM_UNSUPPORTED` did not fire** on a summary the platform's own evidence contradicted.

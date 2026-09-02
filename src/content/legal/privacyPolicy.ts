@@ -7,10 +7,23 @@
 // CATEGORIES, never named — the admin's standing rule applies to legal pages too (the safe default
 // chosen 2026-08-08; the admin can widen disclosure after legal review).
 //
+// ⚠️ UPDATED 2026-09-02 — ADVERTISING MEASUREMENT. NavBharatAI now advertises ITSELF on Meta
+// (Facebook/Instagram) and measures whether those ads work: a Meta pixel on the website and, in
+// builds that enable it, Meta's app-events SDK in the Android app. Three statements in the previous
+// version became FALSE the moment that shipped ("we do not show third-party advertising", "We never
+// share your data with advertisers or data brokers", "We do not use third-party advertising
+// cookies"), so they are corrected here and Section 3.1 states exactly what is shared. Caught before
+// either was switched on in production — nothing was ever collected under the old wording.
+//
+// The one thing that did NOT change: chat content, uploaded files and clinical data are still never
+// sent to an ad platform. Section 3.1 says so because the code enforces it — the pixel forwards a
+// hard-coded ALLOWLIST of four conversion events (src/lib/metaPixel.ts) and nothing else, which is a
+// promise a reader can hold us to rather than a claim of good intentions.
+//
 // ⚠️ NOT LEGAL ADVICE: drafted to be reviewed by a lawyer before being relied on in a dispute.
 
 export const PRIVACY_POLICY_TITLE = 'Privacy Policy';
-export const PRIVACY_POLICY_UPDATED = '8 August 2026';
+export const PRIVACY_POLICY_UPDATED = '2 September 2026';
 
 export const PRIVACY_POLICY = `# Privacy Policy
 
@@ -77,7 +90,34 @@ We do not buy data about you from data brokers.
 - **Communication** — service messages (build finished, payment received, plan expiring), support replies. *(Basis: performance of the service.)*
 - **Legal compliance** — tax records, responding to lawful orders. *(Basis: legal obligation.)*
 
-**What we do NOT do:** we do not sell your personal data; we do not show third-party advertising; we do not use the private content of your chats, your uploaded documents or your built apps to train any AI model of our own or of any third party; and we do not read your projects out of curiosity — access by our team is restricted to what is needed to run the service, fix a defect you reported, or meet a legal duty.
+**What we do NOT do:** we do not sell your personal data; we do not show third-party advertising **inside** NavBharatAI (we do advertise NavBharatAI itself on other platforms and measure whether those ads work — Section 3.1 sets out exactly what that shares); we do not use the private content of your chats, your uploaded documents or your built apps to train any AI model of our own or of any third party; and we do not read your projects out of curiosity — access by our team is restricted to what is needed to run the service, fix a defect you reported, or meet a legal duty.
+
+### 3.1 Advertising measurement (Meta / Facebook and Instagram)
+
+We advertise NavBharatAI on Facebook and Instagram so people can find it. To know which of those ads actually bring people — rather than guessing and wasting money — we share a **small, fixed set of events** with Meta.
+
+**On the website**, if and only if you accept the consent banner, a Meta pixel loads and reports:
+
+- that a page was viewed;
+- that an account was created;
+- that a purchase completed, with the **real amount in rupees**;
+- that an app was built.
+
+**In our Android app**, builds that enable Meta's measurement SDK report that the app was **installed** or **opened**, together with your device's **advertising ID** — the resettable identifier Android provides for exactly this purpose.
+
+**What is NEVER shared with Meta or any advertising platform:**
+
+- the content of your chats or prompts;
+- files or documents you upload;
+- anything from the Doctor AI / clinical surface;
+- your built apps, their code, or their data;
+- your name, email address or phone number.
+
+This is enforced in our code, not just promised: the pixel can only send the four events listed above, because that list is written into the software as a fixed allowlist.
+
+**Your control.** On the web, choose **Decline** on the consent banner and no advertising measurement runs at all — nothing loads, nothing is sent. In the Android app, your phone's *Settings → Privacy → Ads* lets you reset or delete your advertising ID.
+
+*(Basis: your consent, which you can withdraw at any time.)*
 
 ---
 
@@ -124,10 +164,11 @@ We share personal data only with the parties below, and only for the purposes de
 - **AI infrastructure providers** — process prompts/context to generate output, as described in Section 4, with no training rights.
 - **GitHub** — only if you connect it, and only with the access you granted.
 - **Malware scanning** — files uploaded to the Nav App Store are submitted to an anti-malware scanning service before any listing can be approved.
+- **Meta (Facebook / Instagram)** — the advertising-measurement events listed in Section 3.1, and only with your consent. Never your chats, files, clinical data or built apps.
 - **Authorities** — if required by a valid legal order. We check every demand and share the minimum required.
 - **A future business transfer** — if NavBharatAI is ever acquired or merged, data transfers with the business; this policy (or one no less protective) continues to apply, and we will notify you.
 
-We never share your data with advertisers or data brokers.
+We do not sell your personal data and we never share it with data brokers. The only advertising-related sharing we do is the conversion measurement described in Section 3.1 — a fixed list of events, only after you consent, and never the content of anything you write, upload or build.
 
 ---
 
@@ -167,7 +208,7 @@ The Platform is **not intended for children under 18**. We do not knowingly coll
 
 ## 11. Cookies and similar technologies
 
-We use a small set of cookies and local-storage keys that are **necessary** for the Platform to work (your session, your theme, your text-size choice, your consent decision). Optional, privacy-friendly analytics run only as described in the consent banner, which is where you control them. We do not use third-party advertising cookies.
+We use a small set of cookies and local-storage keys that are **necessary** for the Platform to work (your session, your theme, your text-size choice, your consent decision). Optional analytics and the Meta advertising-measurement pixel (Section 3.1) run **only** if you accept the consent banner, which is where you control them. Decline, and no third-party advertising or measurement cookie is set at all — the pixel is not even downloaded.
 
 ---
 

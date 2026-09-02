@@ -56,6 +56,12 @@ describe('pixelEventFor — allowlist, and never an invented value', () => {
     expect(pixelEventFor('signup')).toEqual({ name: 'CompleteRegistration', standard: true });
   });
 
+  it('forwards nothing for an event no code fires — the allowlist carries no dead entries', () => {
+    // A mapping for an event nothing emits would let the code send something the published Privacy
+    // Policy does not list. See tests/privacyPolicyTruth.test.ts.
+    expect(pixelEventFor('checkout_started')).toBeNull();
+  });
+
   it('maps a purchase with a REAL amount to Purchase carrying that amount in INR', () => {
     expect(pixelEventFor('purchase', { value: 499 })).toEqual({
       name: 'Purchase',

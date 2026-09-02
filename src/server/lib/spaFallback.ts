@@ -36,6 +36,11 @@ export const SERVER_ROUTE_PREFIXES: readonly string[] = [
 export const SERVER_ROUTE_EXACT: readonly string[] = [
   '/guide',   // U-9 auto-generated docs site (routes/KnowledgeDocs.ts)
   '/status',  // U-15 public status page (routes/health.ts)
+  // PUBLIC LEGAL PAGES (routes/legal.ts). These MUST be server-rendered rather than falling through
+  // to the SPA: Meta and Google Play require a Privacy Policy URL and check it with tools that may
+  // not run JavaScript, so an index.html shell would look like a working link and fail review.
+  '/privacy', // Privacy Policy
+  '/terms',   // Terms of Service
 ];
 
 /**

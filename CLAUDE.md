@@ -675,11 +675,28 @@ the code (it is actually read somewhere) on 2026-07-11.
   **Development** as of this date — it must be switched to **Live** before App Install ads can run.
   Android platform values to enter in App settings → Basic: package `com.navbharat.ai`, class
   `com.navbharatai.app.MainActivity`, Google Play package `com.navbharat.ai`.
-  🔴 **BLOCKED ON A MISSING PRIVACY POLICY.** NavBharatAI has no privacy-policy page of its own —
-  verified by grep, the only hits are the AI builder checking USER apps for one. Meta requires the
-  URL to take the app Live, and Play requires it for the Data-safety declaration an advertising-ID
-  build needs. So the privacy policy is a genuine prerequisite for the Android half, not paperwork
-  to do afterwards.
+  ⚠️ **CORRECTION 2026-09-02, SAME DAY: the line that stood here was WRONG.** It read "NavBharatAI
+  has no privacy-policy page of its own — verified by grep". There has been a full one since
+  2026-08-08 (`src/content/legal/privacyPolicy.ts`, 186 lines, plus Terms, DPA, Security and NDA),
+  reachable in Settings → Legal & Trust. The claim came from a grep whose output was TRUNCATED at
+  20 lines; the legal files sat below the cut, and "no hits shown" was read as "does not exist".
+  **The lesson is the one this file already teaches about `main` drifting, applied to a search: a
+  conclusion drawn from a capped result set is not a verified fact.** Cap the noise, not the answer —
+  and for an existence question, search by FILENAME as well as content.
+  🔴 **WHAT WAS ACTUALLY WRONG — and it was worse.** The policy said, in three places, that we do
+  NOT do the thing PR #2729 had just built: "we do not show third-party advertising", "We never
+  share your data with advertisers or data brokers", "We do not use third-party advertising
+  cookies". Shipping the pixel with `META_PIXEL_ID` set, or that `.aab`, would have put the live
+  site in breach of its own published policy — and a Play Data-safety declaration that contradicts
+  the policy is a violation, not a mismatch. Caught before either was switched on; nothing was ever
+  collected under the old wording. Fixed in PR #2732: the three statements corrected, a new
+  **Section 3.1** stating exactly which events reach Meta, and public **`/privacy`** and
+  **`/terms`** URLs (server-rendered HTML, no JS, no auth — Meta and Play check those links with
+  tools that may not run JavaScript).
+  🔒 **THE GUARD THAT MATTERS MORE THAN THE WORDING:** `tests/privacyPolicyTruth.test.ts` asserts
+  the pixel's allowlist against what Section 3.1 discloses, so **adding an event to
+  `pixelEventFor` fails CI until the policy is updated too** (verified to bite). Do not weaken it;
+  it exists because the first drift produced no failure of any kind.
 
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 

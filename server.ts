@@ -20,6 +20,7 @@ import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
 import { registerPushRoutes } from './src/server/routes/push';
 import { registerSbomRoutes } from './src/server/routes/sbom';
+import { registerLegalRoutes } from './src/server/routes/legal';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
 import { registerSupabaseIntegrationRoutes } from './src/server/routes/supabaseIntegration';
 import { verifyFirebaseToken as verifyFirebaseTokenForIntegrations } from './src/server/lib/authMiddleware';
@@ -655,6 +656,11 @@ setInterval(() => {
   registerSecretsRoutes(app);
   registerPushRoutes(app); // Push-notification device-token registration (native mobile app)
   registerSbomRoutes(app);
+  // PUBLIC legal pages (/privacy, /terms) — server-rendered HTML, no auth, no JavaScript required.
+  // Meta needs the Privacy Policy URL to take the app Live and Play needs it for Data safety, and
+  // both are checked by tools that may not run JS. Both paths are declared in spaFallback.ts, so the
+  // SPA catch-all defers to these handlers instead of returning index.html.
+  registerLegalRoutes(app);
   registerBuildAnalyticsRoutes(app);
   // ROADMAP #1 Phase 1 — one-click database (connect the user's OWN Supabase account).
   registerSupabaseIntegrationRoutes(app, verifyFirebaseTokenForIntegrations);

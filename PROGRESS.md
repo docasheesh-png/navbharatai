@@ -43273,3 +43273,66 @@ Gate: both `tsc` clean; FULL suite **1425 files / 18768 tests green**. Both key 
   `continue` cost ₹152. The gift funds ~1.6 builds, not a whole app. A business decision, not a bug —
   but the documented figure is not the real one.
 - **`CLAIM_UNSUPPORTED` did not fire** on a summary the platform's own evidence contradicted.
+
+---
+
+## 2026-09-02 — The Privacy Policy said we do NOT do what we had just built (#2732)
+
+**How it surfaced.** While setting up the Meta app the admin asked whether the privacy policy should be
+updated or written fresh — "sayad bani huyi hai". I had told them, and written into `CLAUDE.md` in a
+merged PR, that NavBharatAI had **no** privacy policy. They were right and I was wrong.
+
+**My error, recorded because the lesson generalises.** The claim came from a grep piped through
+`head -20`. The legal files sat below the cut, so "no hits shown" was read as "does not exist" — and
+that non-fact was then written into a durable doc as "verified by grep". **A conclusion drawn from a
+capped result set is not a verified fact.** For an existence question, search by FILENAME as well as
+content, and never cap the output you intend to conclude from.
+
+**What the mistake was hiding — considerably worse than a missing page.** A full policy has existed
+since 2026-08-08 (186 lines, grounded in real data flows), and it stated in THREE places that we do
+not do what PR #2729 had just shipped:
+
+- "we do not show third-party advertising"
+- "We never share your data with advertisers or data brokers."
+- "We do not use third-party advertising cookies."
+
+Setting `META_PIXEL_ID`, or rolling out the SDK `.aab`, would have put the live product in breach of
+its own published policy — and a Play **Data safety** declaration that contradicts the policy is a
+violation, not a mismatch. **Nothing was ever collected under the old wording**: the pixel id is still
+unset and the bundle is not uploaded. Caught with hours to spare, by the admin's question rather than
+by anything we built.
+
+**Fixed — content, reach, and the recurrence:**
+
+1. **The policy is UPDATED, not replaced.** The existing document is good; rewriting it would have
+   thrown away work and lost the parts that are still exactly right. The three false statements are
+   corrected and a new **Section 3.1** states precisely what reaches Meta: four web events, the
+   Android advertising ID, and an explicit list of what is NEVER shared (chats, files, clinical data,
+   built apps, name/email/phone).
+2. **The policy now has a PUBLIC URL** — `/privacy` and `/terms`, **server-rendered HTML**
+   (`routes/legal.ts` + `lib/legalMarkdown.ts`). It already existed in Settings, but Meta requires a
+   Privacy Policy URL to take an app Live and Play requires one for Data safety, and both are checked
+   by tools that may not run JavaScript — an in-app screen behind a menu and a sign-in is not a URL
+   anyone can check. Content is NOT duplicated: the routes read the same `src/content/legal` registry
+   the in-app pages use, so the two can never diverge. Both paths added to `spaFallback.ts`, without
+   which the catch-all returns index.html with a 200 — the exact silent failure this repo has had
+   twice before (live preview, deployed PWA).
+3. **A dead allowlist entry removed.** `pixelEventFor` mapped `checkout_started`, which nothing in the
+   app emits. Harmless-looking, but it meant the code *could* send an event the policy does not list.
+4. **The recurrence is what actually got fixed.** `tests/privacyPolicyTruth.test.ts` asserts the
+   pixel's real allowlist against what Section 3.1 discloses, so **adding an event to `pixelEventFor`
+   fails CI until the policy is updated too**. Verified to bite: injecting an undisclosed event failed
+   two assertions; removing it went green. The first drift produced no failure of any kind, which is
+   precisely why a guard was needed rather than a more careful reading.
+
+**Also in this change:** a small server-side Markdown renderer (no new dependency — react-markdown is
+a React component and cannot run in an Express response) that HTML-escapes first and refuses
+`javascript:` / `data:` hrefs, since these pages are served to reviewers.
+
+**Verified:** `tsc` frontend + server clean · `vitest run` **1430 files / 18,856 passed** · build green
+· bundle within budget · unused-imports clean · boot:check PASS · and the routes exercised against a
+REAL booted server: `/privacy` and `/terms` return 200 with the policy text in the first response and
+no SPA shell, while `/store` still returns the app.
+
+**Open (rule 6):** the policy is drafted to be reviewed by a lawyer before being relied on in a
+dispute — that has still not happened, and this change does not alter it.

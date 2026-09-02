@@ -43620,3 +43620,44 @@ The proxy can be turned back on later, but only once HTTPS works, and then SSL/T
 (`e2b-custom-domain-proxy`) was **deleted for cost on 2026-08-02**. If any A record still points at
 that VM's old address, it must be removed as well — a record aimed at a released IP is its own failure
 and would survive fixing the orange cloud.
+
+## 2026-09-02 — Account switching: nothing was broken, the PROMISE was
+
+Admin: *"2 account login theek se nahi chal rahe — 2nd account add karo, wapas 1st par jao to login
+manta hai. Ya to fix kar do, ya hata do, ek single login hi rahne do."*
+
+**Investigated before changing anything, and the re-auth is correct, deliberate and documented:**
+
+- `accountRoster.ts` stores metadata and **never a token** — a refresh token in localStorage is a
+  permanent account takeover for anyone who reaches that storage (an XSS, a shared machine, an
+  extension). Not tradeable for one saved tap.
+- The **Firebase SDK holds ONE live session per app instance**, so a switch must re-authenticate. The
+  roster's own header says exactly this, and even warns *"the UI must not overstate it"*.
+- The Google path deliberately keeps `prompt: 'select_account'` because *"a login_hint alone can
+  silently sign them straight back into the WRONG account when only one session is live"* — in an app
+  with wallets, that is not a trade worth making for one tap.
+
+**Then the menu said "Switch account" and "Add account" — Gmail's exact words for a mechanism that DOES
+hold sessions live at once.** The user was promised Gmail and handed a re-auth, so a correct design
+read as a bug. The mechanism is right; **the promise was wrong**, and the header had predicted it.
+
+**Fix: one honest line in the menu** — *"Switching signs you in again — one tap with Google, your
+password for email accounts."* The two cases are stated separately because they genuinely differ: with
+Google the provider session is usually live, so it is a tap; an email/password account has no provider
+session to lean on and the password is genuinely required. Saying "one tap" for both would be the same
+overstatement in smaller print. Same tap as before — no longer a surprise.
+
+7 tests pin the promise AND the three security decisions behind it, including a real check that
+nothing token-shaped ever reaches the stored roster.
+
+### What was deliberately NOT done
+**True simultaneous sessions** are possible in principle (a separate named Firebase app per account),
+but every authenticated call in the codebase resolves ONE `auth` from `lib/firebase` — including the
+wallet, billing and build paths. Rewiring them all to a switchable instance risks one missed call site
+using the **wrong account's token on a money path**, which is far worse than an extra tap. Not
+attempted, and not recommended without a specific reason to take that risk.
+
+**Removal remains a small, safe option** if the admin prefers it: the roster is metadata-only, so
+deleting the menu loses nothing but the menu. Offered rather than assumed.
+
+Gate: both `tsc` clean; FULL suite **1432 files / 18859 tests green**.

@@ -666,6 +666,20 @@ the code (it is actually read somewhere) on 2026-07-11.
   a given `.aab` is in, so a downloaded bundle is never ambiguous.
   Reaching installed users needs a **fresh `.aab`** — the app is BUNDLED mode, so a frontend change
   never reaches them on its own.
+  📌 **THE LIVE Meta app is App ID `860811063666554`** (admin, 2026-09-02). Recorded because three
+  identically-named `NavBharatAI` apps were created during setup and the other two were DELETED — a
+  later session reading only "create a Meta app" would otherwise make a fourth, or configure a dead
+  one. An App ID is public by construction (it ships inside the app binary and appears in ad code),
+  so it is safe here; the **Client Token is not** and must only ever go into the repo secret.
+  App name `NavBharatAI`, use case *Create & manage app ads with Meta Ads Manager*, mode
+  **Development** as of this date — it must be switched to **Live** before App Install ads can run.
+  Android platform values to enter in App settings → Basic: package `com.navbharat.ai`, class
+  `com.navbharatai.app.MainActivity`, Google Play package `com.navbharat.ai`.
+  🔴 **BLOCKED ON A MISSING PRIVACY POLICY.** NavBharatAI has no privacy-policy page of its own —
+  verified by grep, the only hits are the AI builder checking USER apps for one. Meta requires the
+  URL to take the app Live, and Play requires it for the Data-safety declaration an advertising-ID
+  build needs. So the privacy policy is a genuine prerequisite for the Android half, not paperwork
+  to do afterwards.
 
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 

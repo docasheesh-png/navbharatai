@@ -106,7 +106,7 @@
     "@types/pg": "^8.20.4",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.2.0",
-    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/coverage-v8": "^4.1.11",
     "autoprefixer": "^10.4.21",
     "firebase-tools": "^15.18.0",
     "postcss": "^8.5.23",

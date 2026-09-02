@@ -43572,3 +43572,51 @@ of a stranger's binary — which also removes the open licensing item in CLAUDE.
 VirusTotal API is used to scan uploads in what is a commercial product.
 
 Gate: both `tsc` clean; FULL suite **1430 files / 18840 tests green**.
+
+## 2026-09-02 — Cloudflare 525 on a connected domain: we knew the answer and did not say it
+
+Admin connected their own domain, deployed, and got Cloudflare's **error 525 "SSL handshake failed"**
+— browser ✅, Cloudflare ✅, host ❌.
+
+**The cause is documented in our own code.** `cloudflareManagedDns.ts` header: *"Records are written
+PROXIED OFF (grey cloud). Firebase must see its own A records directly to validate ownership and issue
+the certificate; proxying through Cloudflare would break the attach. **This is a correctness
+constraint, not a style choice.**"* A 525 is only ever emitted by Cloudflare's EDGE, so seeing one
+proves the record is on the **orange cloud** — and while it is, the certificate can never be issued,
+so the connection can never succeed.
+
+**Why the user was stranded:** `checkDomainServing` recognises Firebase's empty-site page as its own
+state (`nothing_published`) but had nothing for Cloudflare. A 525 fell into the generic bucket and
+reported *"answered with an error (HTTP 525)"* — true, useless, and it left the user on Cloudflare's
+page being told to check *"the SSL configuration used"*, which means nothing to someone who did not
+know they had one. **The system knew the answer and did not say it** — the honesty half of the fifth
+rule.
+
+### Fixed
+- New serving state **`proxy_blocked`**, from `isCloudflareOriginError` (521–526). Cloudflare-only
+  codes, so matching the status alone cannot mislabel a user's own error page.
+- An actionable note instead of a status: names the **orange cloud**, the exact path
+  (Cloudflare → DNS → Records), what to click, and that the certificate then arrives by itself within
+  a few hours. It ends with **"Nothing about your app is broken"** — because it is not, and a message
+  implying otherwise sends someone rebuilding a working app.
+- It deliberately does **not** repeat Cloudflare's own advice about cipher suites and SSL
+  configuration; a test asserts that wording never appears.
+- ⚠️ **`canClaimLive` now excludes it.** Without that, adding the state would have made a 525 domain
+  claim **"Live"** — the exact fake success that function exists to prevent, with the user staring at
+  an error page while we said it was fine. `unknown` still does not withdraw the claim, because that
+  means OUR check failed and downgrading a working domain for that is the same dishonesty reversed.
+
+12 tests, including the admin's exact 525 and every neighbouring status that must NOT match.
+
+Gate: both `tsc` clean; FULL suite **1431 files / 18852 tests green**.
+
+### For the admin — the 30-second fix on the live domain
+Cloudflare → DNS → Records → click the **orange cloud** next to the domain so it turns **grey (DNS
+only)**. The certificate is normally issued within a few hours and the site starts working by itself.
+The proxy can be turned back on later, but only once HTTPS works, and then SSL/TLS mode must be
+**Full (strict)**.
+
+⚠️ Note for this domain specifically: CLAUDE.md records that `mitrify.xyz`'s branded-preview proxy VM
+(`e2b-custom-domain-proxy`) was **deleted for cost on 2026-08-02**. If any A record still points at
+that VM's old address, it must be removed as well — a record aimed at a released IP is its own failure
+and would survive fixing the orange cloud.

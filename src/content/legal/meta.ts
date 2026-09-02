@@ -19,7 +19,7 @@ export const LEGAL_META: LegalMeta[] = [
     id: 'legal_privacy',
     title: 'Privacy Policy',
     subtitle: 'What data we collect, why, where it lives, and your rights (DPDP Act)',
-    updated: '8 August 2026',
+    updated: '2 September 2026',
   },
   {
     id: 'legal_terms',

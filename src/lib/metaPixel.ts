@@ -20,6 +20,11 @@
 //     Forwarding every internal product event would hand an ad network our whole telemetry stream —
 //     that is a privacy problem, not a measurement upgrade.
 //
+//     🔒 THIS LIST IS A PUBLISHED PROMISE, NOT AN IMPLEMENTATION DETAIL. Section 3.1 of the Privacy
+//     Policy tells users exactly which events reach Meta, so ADDING A CASE HERE MAKES THAT POLICY
+//     UNTRUE until the policy is updated too. tests/privacyPolicyTruth.test.ts fails when the two
+//     drift apart — deliberately, because nothing else would notice.
+//
 //  4. NEVER INVENT A VALUE. A Purchase carries the REAL rupee amount the SERVER confirmed, or it is
 //     reported with no value at all. A made-up amount would both misstate revenue in Meta's reporting
 //     and train the campaign to chase the wrong customers.
@@ -82,9 +87,6 @@ export function pixelEventFor(event: string, props?: Record<string, unknown>): P
     case 'signup':
       // Exact semantic match: a NavBharatAI account was created.
       return { name: 'CompleteRegistration', standard: true };
-
-    case 'checkout_started':
-      return { name: 'InitiateCheckout', standard: true };
 
     case 'purchase': {
       const value = Number(props?.value);

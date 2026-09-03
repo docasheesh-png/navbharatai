@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PRIVACY_POLICY } from '../src/content/legal/privacyPolicy';
-import { pixelEventFor } from '../src/lib/metaPixel';
+import { pixelEventFor, pixelBootSequence } from '../src/lib/metaPixel';
 import { spaFallbackShouldDefer } from '../src/server/lib/spaFallback';
 import { PUBLIC_LEGAL_ROUTES } from '../src/server/routes/legal';
 
@@ -106,5 +106,37 @@ describe('The policy has a PUBLIC URL — the thing Meta and Play actually requi
   it('still serves the SPA for ordinary app paths', () => {
     expect(spaFallbackShouldDefer('/')).toBe(false);
     expect(spaFallbackShouldDefer('/store')).toBe(false);
+  });
+});
+
+describe('THE "NEVER SHARED" PROMISE — enforced by code, not by a Meta dashboard', () => {
+  // Section 3.1 promises that a user's name, email address and phone number never reach Meta. The
+  // allowlist alone does NOT deliver that: Meta's Automatic Advanced Matching reads form fields on
+  // the page and attaches hashed email/phone to every event, and it is a toggle in Events Manager —
+  // frequently on by default — that needs no code from us to start working. A promise resting on a
+  // switch we do not control is not a promise, so the pixel refuses it from the page side.
+  const seq = pixelBootSequence('1234567890123456');
+
+  it('the policy makes the promise', () => {
+    expect(PRIVACY_POLICY).toMatch(/your name, email address or phone number/i);
+  });
+
+  it('and the boot sequence disables automatic matching BEFORE init, which is what keeps it', () => {
+    const setIndex = seq.findIndex((c) => c[0] === 'set' && c[1] === 'autoConfig' && c[2] === false);
+    const initIndex = seq.findIndex((c) => c[0] === 'init');
+    expect(setIndex).toBeGreaterThanOrEqual(0);
+    expect(initIndex).toBeGreaterThanOrEqual(0);
+    expect(setIndex).toBeLessThan(initIndex);
+    expect(seq[initIndex]).toContainEqual({ withAutoMatching: false });
+  });
+});
+
+describe('No claim about which jurisdictions a government has restricted', () => {
+  it('does not assert that Singapore is unrestricted — a fact that can change without us noticing', () => {
+    expect(PRIVACY_POLICY).not.toMatch(/not a jurisdiction restricted by the Indian government/i);
+  });
+
+  it('states what we actually control instead', () => {
+    expect(PRIVACY_POLICY).toMatch(/we transfer it only where permitted by applicable law/i);
   });
 });

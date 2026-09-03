@@ -367,9 +367,33 @@ export function lastCheckedLabel(checkedAt: number | null | undefined, now: numb
  * genuinely not in the zone. `null` means we could not look, and that is said plainly rather than
  * guessed in either direction. PURE.
  */
+/**
+ * "we added 1" / "we added 1 and removed 1 unrelated record that belonged to a different app" / "".
+ *
+ * 🔒 SPLIT ON PURPOSE (admin screenshot, 2026-09-02: "all 1 record are now in place (we added 2)").
+ * `applyRecords` used to return ONE combined number covering two different operations: a desired
+ * record written, and a FOREIGN ownership token deleted as cleanup (see `dropForeignSiteTokens` for
+ * the same confusion found once already, in what a "Verified" badge was allowed to claim). Cleaning
+ * up one stale token while adding one desired record produced "2", printed beside "all 1 record" — a
+ * number contradicting the sentence it was in.
+ *
+ * `added` can never exceed the number of records actually desired (`cloudflareManagedDns.ts`'s
+ * `ApplyRecordsResult`); `removed` is cleanup and is named as such, so it explains the extra activity
+ * instead of silently inflating "added" past what the sentence claims. PURE.
+ */
+export function appliedCountsPhrase(added: number, removed: number): string {
+  const parts: string[] = [];
+  if (added > 0) parts.push(`added ${added}`);
+  if (removed > 0) parts.push(`removed ${removed} unrelated record${removed === 1 ? '' : 's'} that belonged to a different app`);
+  return parts.length === 0 ? '' : ` (we ${parts.join(' and ')})`;
+}
+
 export function autoDnsSummary(input: {
   zoneStatus: string | null;
-  applied: number | null;
+  /** Records that now hold a value that was actually DESIRED — never exceeds `desired`. */
+  added: number | null;
+  /** Records deleted as cleanup (a foreign ownership token, an excess stale value) — never desired. */
+  removed?: number | null;
   desired?: number | null;
   missing?: Array<{ type: string; name: string }> | null;
   zoneRecordCount?: number | null;
@@ -394,15 +418,23 @@ export function autoDnsSummary(input: {
       text: 'Waiting for your nameserver change to take effect. This is the one slow step, and it happens only once — after this, every record is written for you instantly.',
     };
   }
-  if (input.applied === null) return { tone: 'info', text: 'Nameservers are live. Tap “Check & apply records”.' };
+  if (input.added === null) return { tone: 'info', text: 'Nameservers are live. Tap “Check & apply records”.' };
   if (input.missing === null || input.missing === undefined) {
     // We wrote what we could but could not confirm. Say exactly that — claiming either verdict here
     // is how a screen ends up insisting a domain is fine while it is not, or vice versa.
+    const added = input.added ?? 0;
+    const removed = input.removed ?? 0;
+    if (added === 0 && removed === 0) {
+      return { tone: 'info', text: 'Nameservers live. We could not re-read your DNS to confirm what is in place; tap Check now in a minute.' };
+    }
+    // Named separately, not combined — the same reason `appliedCountsPhrase` exists: "written" and
+    // "removed" are different facts, and folding them into one count is what produced the original bug.
+    const parts: string[] = [];
+    if (added > 0) parts.push(`${added} record${added === 1 ? '' : 's'} written`);
+    if (removed > 0) parts.push(`${removed} unrelated record${removed === 1 ? '' : 's'} removed`);
     return {
       tone: 'info',
-      text: input.applied > 0
-        ? `Nameservers live — ${input.applied} record${input.applied === 1 ? '' : 's'} written. We could not re-read your DNS to confirm; tap Check now in a minute.`
-        : 'Nameservers live. We could not re-read your DNS to confirm what is in place; tap Check now in a minute.',
+      text: `Nameservers live — ${parts.join(', ')}. We could not re-read your DNS to confirm; tap Check now in a minute.`,
     };
   }
   if (input.missing.length === 0) {
@@ -422,11 +454,20 @@ export function autoDnsSummary(input: {
     }
     // THE CASE THAT USED TO READ AS FAILURE. Every record is in place; the only thing left is the
     // hosting service's own sweep, which is not ours to hurry — so say that, instead of a bare "0".
+    const added = input.added ?? 0;
+    const removed = input.removed ?? 0;
+    if (added === 0 && removed === 0) {
+      return { tone: 'ok', text: 'Done — every record is already in place. Nothing left for you to do; your domain connects on its own from here.' };
+    }
+    // `desired` names the target count only when we genuinely have one to name — a null/absent value
+    // used to print as a literal blank ("all  record are now in place"), papered over with a
+    // double-space collapse. "your records" is honest instead of guessing a number we do not have.
+    const desired = typeof input.desired === 'number' && input.desired > 0 ? input.desired : null;
+    const subject = desired !== null ? `all ${desired} record${desired === 1 ? '' : 's'}` : 'your records';
+    const verb = desired === 1 ? 'is' : 'are';
     return {
       tone: 'ok',
-      text: input.applied > 0
-        ? `Done — all ${input.desired ?? ''} record${input.desired === 1 ? '' : 's'} are now in place (we added ${input.applied}). Nothing left for you to do; your domain connects on its own from here.`.replace('  ', ' ')
-        : 'Done — every record is already in place. Nothing left for you to do; your domain connects on its own from here.',
+      text: `Done — ${subject} ${verb} now in place${appliedCountsPhrase(added, removed)}. Nothing left for you to do; your domain connects on its own from here.`,
     };
   }
   return {
@@ -573,7 +614,12 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
   // tap can actually deliver it (result.autoDns), and honest about the ONE registrar step it needs.
   const [autoNs, setAutoNs] = useState<string[] | null>(draft?.nameServers?.length ? draft.nameServers : null);
   const [autoZoneStatus, setAutoZoneStatus] = useState<string | null>(null);
-  const [autoApplied, setAutoApplied] = useState<number | null>(null);
+  // SPLIT, not summed (admin screenshot 2026-09-02: "all 1 record are now in place (we added 2)").
+  // `added` = records that now hold a value that was actually DESIRED (can never exceed `autoDesired`);
+  // `removed` = cleanup deletes (a foreign ownership token, an excess stale value) — never part of
+  // "desired", and reported separately so cleanup activity cannot inflate "we added N" past N's meaning.
+  const [autoAdded, setAutoAdded] = useState<number | null>(null);
+  const [autoRemoved, setAutoRemoved] = useState<number | null>(null);
   // The zone read-back (see autoDnsSummary): `null` = we could not look, `[]` = everything is there.
   const [autoMissing, setAutoMissing] = useState<Array<{ type: string; name: string }> | null>(null);
   const [autoDesired, setAutoDesired] = useState<number | null>(null);
@@ -789,7 +835,8 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
       if (!res.ok) { setError(data?.error || 'Could not apply the records.'); setErrorDetail(typeof data?.detail === 'string' ? data.detail : null); return; }
       setAutoZoneStatus(typeof data?.zoneStatus === 'string' ? data.zoneStatus : null);
       if (Array.isArray(data?.nameServers)) setAutoNs(data.nameServers);
-      if (typeof data?.applied === 'number') setAutoApplied(data.applied);
+      if (typeof data?.added === 'number') setAutoAdded(data.added);
+      if (typeof data?.removed === 'number') setAutoRemoved(data.removed);
       // The zone read-back: what is genuinely there, so the line below states a fact instead of a count.
       setAutoMissing(Array.isArray(data?.missing) ? data.missing : null);
       setAutoDesired(typeof data?.desired === 'number' ? data.desired : null);
@@ -1046,7 +1093,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                       // The host's own verdict travels WITH the record counts, so this line can never announce
                       // completion while the service is still refusing the domain — the exact pairing in the
                       // admin's screenshot: a green "nothing left to do" under a red `ownership: mismatch`.
-                      const s = autoDnsSummary({ zoneStatus: autoZoneStatus, applied: autoApplied, desired: autoDesired, missing: autoMissing, ownershipState: result?.ownershipState });
+                      const s = autoDnsSummary({ zoneStatus: autoZoneStatus, added: autoAdded, removed: autoRemoved, desired: autoDesired, missing: autoMissing, ownershipState: result?.ownershipState });
                       const tone = s.tone === 'ok' ? 'text-green-300' : s.tone === 'warn' ? 'text-amber-300' : 'text-zinc-400';
                       return <span className={`text-[10px] leading-relaxed ${tone}`}>{s.text}</span>;
                     })()}

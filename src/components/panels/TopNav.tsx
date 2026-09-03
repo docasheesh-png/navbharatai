@@ -9,7 +9,7 @@ import { signOutEverywhere } from '../../lib/firebase';
 import {
   readRoster, forgetAccount, addAccountLabel, canAddAccount,
   accountLabel, accountInitial, writeRoster, type RosterAccount,
-  SIGN_IN_HINT_KEY, SWITCH_ACCOUNT_LABEL, accountRows,
+  SIGN_IN_HINT_KEY, SIGN_IN_PROVIDER_KEY, SWITCH_ACCOUNT_LABEL, accountRows,
 } from '../../lib/accountRoster';
 import { NotificationBell } from '../NotificationBell';
 
@@ -97,6 +97,13 @@ export function TopNav({
       const hint = target?.email?.trim();
       if (hint) store()?.setItem(SIGN_IN_HINT_KEY, hint);
       else store()?.removeItem(SIGN_IN_HINT_KEY);
+      // …and WHICH METHOD signed them in, so the sign-in screen can say "continue with Google" instead
+      // of offering every method as if it had never met them. Written and cleared together with the
+      // email so the two can never disagree — a provider left behind from an earlier switch would
+      // name the wrong method on the next one.
+      const via = target?.provider?.trim();
+      if (hint && via) store()?.setItem(SIGN_IN_PROVIDER_KEY, via);
+      else store()?.removeItem(SIGN_IN_PROVIDER_KEY);
     } catch { /* the hint is a convenience; never block the sign-in on it */ }
     setShowAuth(true);
   };

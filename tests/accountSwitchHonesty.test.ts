@@ -22,7 +22,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { readRoster, writeRoster, MAX_ACCOUNTS, type RosterStore } from '../src/lib/accountRoster';
+import { readRoster, writeRoster, MAX_ACCOUNTS, switchBannerText, providerLabel, SIGN_IN_HINT_KEY, SIGN_IN_PROVIDER_KEY, type RosterStore } from '../src/lib/accountRoster';
 
 const NAV = readFileSync(join(__dirname, '..', 'src/components/panels/TopNav.tsx'), 'utf8');
 const ROSTER = readFileSync(join(__dirname, '..', 'src/lib/accountRoster.ts'), 'utf8');
@@ -85,5 +85,66 @@ describe('the menu does not claim more than it does elsewhere', () => {
     // The list cannot sign anyone out anywhere else, and someone would use it believing they had
     // secured a shared computer.
     expect(NAV).toMatch(/this device|This device/);
+  });
+});
+
+describe('the sign-in screen knows it was opened BY a switch', () => {
+  it('names the account AND the method', () => {
+    expect(switchBannerText('a@gmail.com', 'google.com')).toBe('Switching to a@gmail.com — continue with Google below.');
+    expect(switchBannerText('a@x.com', 'apple.com')).toMatch(/continue with Apple/);
+    expect(switchBannerText('a@x.com', 'password')).toMatch(/continue with your password/);
+  });
+
+  it('still helps when the provider is unknown, instead of naming a wrong one', () => {
+    const line = switchBannerText('a@x.com', 'saml.something');
+    expect(line).toMatch(/Switching to a@x\.com/);
+    expect(line).not.toMatch(/continue with\s*\./);
+    expect(providerLabel('saml.something')).toBe('');
+  });
+
+  it('shows nothing without an email — a banner with a blank name is worse than none', () => {
+    for (const e of ['', '   ', null, undefined]) {
+      expect(switchBannerText(e as string | null, 'google.com')).toBe('');
+    }
+  });
+
+  it('the two hint keys are distinct, so display and use cannot collide', () => {
+    expect(SIGN_IN_HINT_KEY).not.toBe(SIGN_IN_PROVIDER_KEY);
+  });
+});
+
+describe('the banner is display-only — it must not break the login it explains', () => {
+  const AUTH_SRC = readFileSync(join(__dirname, '..', 'src/components/AuthComponent.tsx'), 'utf8');
+
+  it('reads the email hint WITHOUT consuming it', () => {
+    // handleGoogleSignIn removes the hint when it passes it to Google as a login_hint. Taking it for
+    // the banner as well would clear it first and quietly put the chooser back to a full list.
+    const at = AUTH_SRC.indexOf('const [switchBanner]');
+    const block = AUTH_SRC.slice(at, at + 600);
+    expect(block).toMatch(/switchBannerText\(localStorage\.getItem\(SIGN_IN_HINT_KEY\)/);
+    expect(block).not.toMatch(/removeItem/);
+    // The consumer still does remove it.
+    expect(AUTH_SRC).toMatch(/if \(signInHint\) localStorage\.removeItem\(SIGN_IN_HINT_KEY\);/);
+  });
+
+  it('never auto-launches the provider — a blocked popup is worse than a tap', () => {
+    // Firing the popup from an effect loses the click's user gesture and browsers block it.
+    const at = AUTH_SRC.indexOf('const [switchBanner]');
+    expect(AUTH_SRC.slice(at, at + 900)).not.toMatch(/handleGoogleSignIn\(\)|useEffect/);
+  });
+
+  it('a blocked storage read falls back to the ordinary screen, never a crash', () => {
+    const at = AUTH_SRC.indexOf('const [switchBanner]');
+    expect(AUTH_SRC.slice(at, at + 800)).toMatch(/catch \{[\s\S]{0,120}return '';/);
+  });
+});
+
+describe('the provider hint cannot go stale', () => {
+  const NAV_SRC = readFileSync(join(__dirname, '..', 'src/components/panels/TopNav.tsx'), 'utf8');
+
+  it('is written and cleared together with the email', () => {
+    // A provider left behind from an earlier switch would name the wrong method on the next one.
+    expect(NAV_SRC).toMatch(/if \(hint && via\) store\(\)\?\.setItem\(SIGN_IN_PROVIDER_KEY, via\);/);
+    expect(NAV_SRC).toMatch(/else store\(\)\?\.removeItem\(SIGN_IN_PROVIDER_KEY\);/);
   });
 });

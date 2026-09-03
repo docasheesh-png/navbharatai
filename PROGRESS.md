@@ -43661,3 +43661,34 @@ attempted, and not recommended without a specific reason to take that risk.
 deleting the menu loses nothing but the menu. Offered rather than assumed.
 
 Gate: both `tsc` clean; FULL suite **1432 files / 18859 tests green**.
+
+### 2026-09-02 (cont.) — the third way, completed: the switch screen now knows who it was asked for
+
+The honest line in the menu was half of it. The other half was what happened AFTER the tap: the switch
+opened the ordinary sign-in screen — the same one a stranger sees. Someone who had just pointed at
+their own face and email landed on **"Sign in"**, every method offered as if we had never met them,
+and reasonably concluded the switch had failed. Nothing about the flow was wrong; it forgot, one
+screen later, what it had just been told.
+
+Now the screen says it: **"Switching to a@gmail.com — continue with Google below."** The provider
+travels with the email hint (`SIGN_IN_PROVIDER_KEY`), written and cleared **together** with it so a
+provider left over from an earlier switch can never name the wrong method on the next one.
+
+**Two things it deliberately does NOT do, both test-locked:**
+
+- **It does not consume the email hint.** `handleGoogleSignIn` removes that key when it passes it to
+  Google as a `login_hint`; reading it for the banner as well would clear it first and quietly put the
+  account chooser back to a full list — the display competing with the use of one key.
+- **It does not auto-launch the provider.** Firing the popup from an effect loses the click's user
+  gesture and browsers block it; a blocked popup is worse than the tap it saves. The fix is to make
+  the right button obvious, not to press it for the user.
+
+**Why the sign-in flow itself was not touched:** calling the Google path directly from the menu (which
+would genuinely remove a tap) means extracting ~200 lines tangled with force-logout, native-vs-web
+branching, the Capacitor plugin and popup/redirect strategy — out of the most dangerous surface in the
+app, one CLAUDE.md records as having silently broken every login before (the `FIREBASE_PROJECT_ID`
+incident, where every user became 'anon'). One tap is not worth that.
+
+15 tests now cover the promise, the three security decisions, and the banner's two boundaries.
+
+Gate: both `tsc` clean; FULL suite **1432 files / 18867 tests green**. Display-only guard verified to bite.

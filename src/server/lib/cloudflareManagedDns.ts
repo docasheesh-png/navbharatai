@@ -129,6 +129,28 @@ export function isSiteToken(txtValue: string): boolean {
 }
 
 /**
+ * How many records `applyRecords` actually touched — split, not summed.
+ *
+ * 🔒 ROOT CAUSE (admin screenshot, 2026-09-02): the return value used to be ONE number covering both
+ * "a desired record was created/replaced" AND "a foreign ownership token was deleted as cleanup" —
+ * two operations with nothing in common except that both call the Cloudflare API. Cleaning up ONE
+ * stale token while adding ONE desired record produced `changed: 2`, which the UI then read as "we
+ * added 2" beside "all 1 record are now in place" — a number contradicting the sentence it was in.
+ *
+ * `added` counts only records that now hold a DESIRED value (so `added` can never exceed the number
+ * of records asked for — the exact property that ends the contradiction). `removed` counts records
+ * deleted as cleanup (foreign `hosting-site=` tokens, or excess values beyond what a converged
+ * type+name set needs) — these are not part of what was "desired" and must never be added to that
+ * count. A caller that wants the old combined figure can still do `added + removed`.
+ */
+export interface ApplyRecordsResult {
+  /** Records created or replaced-in-place to hold a value that was actually asked for. */
+  added: number;
+  /** Records deleted as cleanup — never part of the desired set. */
+  removed: number;
+}
+
+/**
  * Write the desired records into the zone by CONVERGING each type+name set we manage.
  *
  * ROOT CAUSE HARDENING (mitrify.in live walk, 2026-08-06): when a zone activates, Cloudflare
@@ -143,11 +165,12 @@ export function isSiteToken(txtValue: string): boolean {
  *     re-written un-proxied.
  *   • TXT: desired values are added alongside (multiple TXT values are legal; the ownership/ACME
  *     challenge must not clobber unrelated TXT like SPF).
- * Records on names we were not asked about are never touched. Returns how many records were
- * created/updated/removed — an honest "0 changes" remains a valid, verifiable outcome.
+ * Records on names we were not asked about are never touched. Returns `{ added, removed }` — an
+ * honest "0 of each" remains a valid, verifiable outcome.
  */
-export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Promise<number> {
-  let changed = 0;
+export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Promise<ApplyRecordsResult> {
+  let added = 0;
+  let removed = 0;
   const groups = new Map<string, ReturnType<typeof toCfRecordPayloads>>();
   for (const want of toCfRecordPayloads(desired)) {
     const key = `${want.type}|${want.name}`;
@@ -166,7 +189,7 @@ export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Pr
         const present = existing.some((r) => stripQuotes(r.content) === stripQuotes(want.content));
         if (present) continue;
         await cf(`/zones/${zoneId}/dns_records`, { method: 'POST', body: want });
-        changed++;
+        added++; // a desired TXT value now exists
       }
       /**
        * 🔒 REMOVE THE OWNERSHIP TOKENS THAT ARE NO LONGER OURS — the fix for a domain that could
@@ -204,7 +227,7 @@ export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Pr
           const content = stripQuotes(r.content);
           if (!isSiteToken(content) || wantedTokens.has(content)) continue;
           await cf(`/zones/${zoneId}/dns_records/${r.id}`, { method: 'DELETE' });
-          changed++;
+          removed++; // a FOREIGN token, never a desired one — must not read as "added"
         }
       }
       continue;
@@ -218,21 +241,26 @@ export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Pr
     const missing = group.filter((w) => !goodContents.has(stripQuotes(w.content)));
 
     // Replace stale records with missing values pairwise, then create/delete the remainder.
+    // Every PUT/POST in this pass makes a record hold a value that was actually DESIRED — `added`,
+    // never `removed`, even though a PUT reuses an existing record id rather than creating a new one.
     let i = 0;
     for (; i < missing.length && i < stale.length; i++) {
       await cf(`/zones/${zoneId}/dns_records/${stale[i].id}`, { method: 'PUT', body: missing[i] });
-      changed++;
+      added++;
     }
     for (; i < missing.length; i++) {
       await cf(`/zones/${zoneId}/dns_records`, { method: 'POST', body: missing[i] });
-      changed++;
+      added++;
     }
+    // Beyond `missing.length` there is nothing left to place a desired value into — anything still
+    // stale here is a genuine EXTRA (e.g. an old multi-value A record with more entries than the
+    // desired set needs), so deleting it is cleanup, exactly like the foreign TXT tokens above.
     for (let j = missing.length; j < stale.length; j++) {
       await cf(`/zones/${zoneId}/dns_records/${stale[j].id}`, { method: 'DELETE' });
-      changed++;
+      removed++;
     }
   }
-  return changed;
+  return { added, removed };
 }
 
 /**

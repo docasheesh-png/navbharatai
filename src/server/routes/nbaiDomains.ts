@@ -293,21 +293,27 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       if (zone.status !== 'active') {
         // The one honest wait: the registrar's nameserver change has not propagated yet. Nothing to
         // apply until it has — pretending otherwise would write records into a zone nobody queries.
-        res.json({ zoneStatus: zone.status, nameServers: zone.nameServers, applied: 0 });
+        res.json({ zoneStatus: zone.status, nameServers: zone.nameServers, added: 0, removed: 0 });
         return;
       }
       const fb = await customDomainStatusLive(workspaceId, host);
       if (!fb) { res.status(404).json({ error: 'Connect the domain first, then run automatic setup.' }); return; }
-      const applied = await applyRecords(zone.id, fb.records);
+      // `added`/`removed` come back SEPARATE (admin screenshot 2026-09-02: "all 1 record are now in
+      // place (we added 2)"). The old single `applied` count mixed two different operations — a
+      // desired record written, and a FOREIGN ownership token deleted as cleanup — so cleaning up one
+      // stale token while adding one desired record produced "2", printed beside "1 record". `added`
+      // can never exceed `desired` (see ApplyRecordsResult in cloudflareManagedDns.ts); `removed` is
+      // reported separately so the cleanup is explained rather than silently inflating "added".
+      const { added, removed } = await applyRecords(zone.id, fb.records);
       const displayRecords = await stableRecordsFor(host, fb.records, workspaceId as string);
       /**
        * 🔒 READ THE ZONE BACK, AND REPORT EVIDENCE INSTEAD OF A COUNT (admin 2026-08-22).
        *
-       * `applied` is how many records CHANGED, so on its own it cannot tell the two opposite outcomes
-       * apart: "0" means either everything was already correct, or nothing was written at all. The
-       * screen printed "0 records applied automatically" for both, which reads as a failure in the
-       * success case and as success in the failure case — the worst possible pairing, and exactly
-       * what left a domain sitting for six hours with nobody able to say what was wrong.
+       * `added`/`removed` are how many records CHANGED, so on their own they cannot tell the two
+       * opposite outcomes apart: "0 added" means either everything was already correct, or nothing was
+       * written at all. The screen printed "0 records applied automatically" for both, which reads as a
+       * failure in the success case and as success in the failure case — the worst possible pairing,
+       * and exactly what left a domain sitting for six hours with nobody able to say what was wrong.
        *
        * So we ask the zone what it actually holds. `missing` is then a FACT, and the message can name
        * the real situation. Best-effort: a failed read-back must not fail a sync that already wrote
@@ -318,7 +324,8 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       res.json({
         zoneStatus: zone.status,
         nameServers: zone.nameServers,
-        applied,
+        added,
+        removed,
         desired: fb.records.length,
         // null ⇒ we genuinely could not look; [] ⇒ we looked and everything is there.
         missing: missing ? missing.map((r) => ({ type: r.type, name: r.name, value: r.value })) : null,

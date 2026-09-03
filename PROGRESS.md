@@ -43810,3 +43810,45 @@ Gate: both `tsc` clean; FULL suite **1439 files / 18956 tests green**.
 - **Firebase may send no `issues[]` for MISMATCH** (none was visible in the admin's screenshot), in
   which case our inferred sentence is all the user gets. It is labelled as the likely cause rather
   than stated as fact, which is the honest limit of what we know from an enum.
+
+## 2026-09-03 — the last open item closed: "we added 2" can no longer sit beside "all 1 record"
+
+Closes the one item the 2026-09-02 audit left open: *"'all 1 record are now in place (we added 2)' —
+`desired` and `applied` count different things, and the sentence is ungrammatical for 1."*
+
+**Root cause, traced to the exact line.** `applyRecords` (`cloudflareManagedDns.ts`) returned ONE
+combined `changed` count for two operations that have nothing in common except both calling the
+Cloudflare API: a DESIRED record being written, and a FOREIGN `hosting-site=` ownership token (another
+app's leftover) being deleted as cleanup. Writing one desired TXT record while cleaning up one stale
+token from a different app produced `changed: 2` — printed next to "all 1 record", the exact
+self-contradiction in the admin's screenshot.
+
+**Fix: split the count at the source, not at the message.** `applyRecords` now returns
+`{ added, removed }`. `added` counts only records that now hold a value that was actually asked for
+(so it can **never exceed** the desired count — the property that ends the contradiction, by
+construction, not by a display-side patch). `removed` counts cleanup deletes — a foreign ownership
+token, or a genuine excess value beyond what a converged type+name set needs — and is reported
+**separately**, so cleanup activity explains itself instead of silently inflating "added".
+
+Threaded end to end: the sync route (`/api/domains/nbai/auto-dns/sync`) returns `added`/`removed`
+instead of `applied`; the client (`autoAdded`/`autoRemoved` state, replacing `autoApplied`) reads them;
+`autoDnsSummary` builds an honest sentence via a new pure helper, `appliedCountsPhrase`, e.g. *"Done —
+all 1 record is now in place (we added 1 and removed 1 unrelated record that belonged to a different
+app)."* Grammar now agrees with the count ("record is" vs "records are" — the ungrammatical half of
+the same complaint), and a null/absent desired count says "your records" instead of the old
+double-space-collapse hack (`"all  record are…".replace('  ', ' ')`).
+
+**Verified to bite:** reintroduced the exact original bug (counting a foreign-token delete as `added`)
+and confirmed the regression test fails; restored, and it passes. 10 new tests across
+`tests/managedDns.test.ts` and `tests/autoDnsSummary.test.ts`, including the admin's literal scenario
+(1 desired record, 1 foreign token removed) and a check that `added` can never print a number the
+desired count did not license.
+
+### The zero-based audit's verdict stands, now fully closed out
+Both items the 2026-09-02 audit recorded as open are done: the honesty fix (leading with Firebase's own
+`issues[]` reason) shipped same-day in `6051888`; this closes the counting fix. Nothing else from that
+audit is outstanding — the custom-domain pipeline (Firebase API, dedicated-site deploy, managed DNS,
+foreign-token cleanup, live-serving verification, publish-to-domain on every build) was independently
+traced against the code and confirmed real, not assumed.
+
+Gate: both `tsc` clean; FULL suite **1439 files / 18966 tests green**.

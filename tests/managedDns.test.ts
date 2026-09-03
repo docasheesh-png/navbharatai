@@ -87,11 +87,12 @@ describe('applyRecords', () => {
       writes.push({ method, url });
       return j({ success: true, result: {} });
     });
-    const changed = await applyRecords('z1', [
+    const result = await applyRecords('z1', [
       { type: 'A', name: 'mitrify.in', value: '1.2.3.4' },      // differs → PUT replace
       { type: 'TXT', name: 'mitrify.in', value: 'fb-challenge' }, // new value → POST alongside
     ]);
-    expect(changed).toBe(2);
+    // BOTH writes place a DESIRED value, so both count as `added` — neither is cleanup.
+    expect(result).toEqual({ added: 2, removed: 0 });
     expect(writes[0].method).toBe('PUT');                        // single-value type replaced in place
     expect(writes[0].url).toContain('/dns_records/r1');
     expect(writes[1].method).toBe('POST');                       // TXT added, unrelated TXT untouched
@@ -112,8 +113,8 @@ describe('applyRecords', () => {
       writes.push({ method, url, body: init.body });
       return j({ success: true, result: {} });
     });
-    const changed = await applyRecords('z1', [{ type: 'A', name: 'mitrify.in', value: '199.36.158.100' }]);
-    expect(changed).toBe(1);
+    const result = await applyRecords('z1', [{ type: 'A', name: 'mitrify.in', value: '199.36.158.100' }]);
+    expect(result).toEqual({ added: 1, removed: 0 });
     expect(writes[0].method).toBe('PUT');
     expect(writes[0].url).toContain('/dns_records/r1');
     expect(writes[0].body).toContain('"proxied":false');
@@ -134,16 +135,17 @@ describe('applyRecords', () => {
       writes.push({ method, url });
       return j({ success: true, result: {} });
     });
-    const changed = await applyRecords('z1', [
+    const result = await applyRecords('z1', [
       { type: 'A', name: 'mitrify.in', value: '151.101.1.195' },
       { type: 'A', name: 'mitrify.in', value: '151.101.65.195' },
     ]);
-    // 2 replacements + 1 delete — the set ends EXACTLY at the two desired values, nothing thrashes.
-    expect(changed).toBe(3);
+    // 2 replacements (both DESIRED values, so `added`) + 1 delete of the genuine EXTRA (`removed`) —
+    // the set ends EXACTLY at the two desired values, nothing thrashes, and the two counts stay honest.
+    expect(result).toEqual({ added: 2, removed: 1 });
     expect(writes.map((w) => w.method)).toEqual(['PUT', 'PUT', 'DELETE']);
   });
 
-  it('an already-correct zone reports 0 changes — an honest, verifiable no-op', async () => {
+  it('an already-correct zone reports {added:0, removed:0} — an honest, verifiable no-op', async () => {
     process.env.CLOUDFLARE_API_TOKEN = 't';
     _setCfFetchForTests(async (url, init) => {
       if ((init.method ?? 'GET') === 'GET') {
@@ -151,7 +153,30 @@ describe('applyRecords', () => {
       }
       throw new Error('no write should happen');
     });
-    expect(await applyRecords('z1', [{ type: 'A', name: 'mitrify.in', value: '1.2.3.4' }])).toBe(0);
+    expect(await applyRecords('z1', [{ type: 'A', name: 'mitrify.in', value: '1.2.3.4' }])).toEqual({ added: 0, removed: 0 });
+  });
+
+  /**
+   * 🔒 THE ADMIN'S OWN SCREENSHOT (2026-09-02): "Done — all 1 record are now in place (we added 2)."
+   * One desired TXT record was written; one FOREIGN `hosting-site=` token from a different app was
+   * deleted as cleanup. The old single `changed` count summed both into "2" beside "all 1 record" — a
+   * number contradicting the sentence it was in. `added` and `removed` now travel separately, and
+   * `added` can never exceed the number of records actually desired.
+   */
+  it('🔒 a foreign ownership token cleaned up during a genuine add is `removed`, never folded into `added`', async () => {
+    process.env.CLOUDFLARE_API_TOKEN = 't';
+    _setCfFetchForTests(async (url, init) => {
+      if ((init.method ?? 'GET') === 'GET') {
+        // The zone already holds ANOTHER app's ownership token — nothing that matches what we want.
+        return j({ success: true, result: [{ id: 'foreign', type: 'TXT', name: 'mitrify.com', content: '"hosting-site=nbai-other-app"' }] });
+      }
+      return j({ success: true, result: {} });
+    });
+    const result = await applyRecords('z1', [{ type: 'TXT', name: 'mitrify.com', value: 'hosting-site=nbai-this-app' }]);
+    // Exactly ONE desired record was added; the foreign token's deletion is accounted separately.
+    expect(result).toEqual({ added: 1, removed: 1 });
+    // The property the admin's screenshot violated: `added` must never exceed the number desired (1).
+    expect(result.added).toBeLessThanOrEqual(1);
   });
 });
 

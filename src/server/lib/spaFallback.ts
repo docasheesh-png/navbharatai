@@ -21,6 +21,8 @@
 // IMPORTANT: only SERVER-owned paths belong here. Client-side SPA routes (/, /admin, /store, …) must
 // keep receiving index.html so the React router can handle them — deferring one would 404 the app.
 
+import { ALL_PUBLIC_LEGAL_PATHS } from './legalPaths';
+
 /**
  * Path prefixes owned by real server route handlers registered AFTER the SPA catch-all. A request
  * matching one of these must fall through (`next()`) to its handler instead of receiving index.html.
@@ -36,14 +38,11 @@ export const SERVER_ROUTE_PREFIXES: readonly string[] = [
 export const SERVER_ROUTE_EXACT: readonly string[] = [
   '/guide',   // U-9 auto-generated docs site (routes/KnowledgeDocs.ts)
   '/status',  // U-15 public status page (routes/health.ts)
-  // PUBLIC LEGAL PAGES (routes/legal.ts). These MUST be server-rendered rather than falling through
-  // to the SPA: Meta and Google Play require a Privacy Policy URL and check it with tools that may
-  // not run JavaScript, so an index.html shell would look like a working link and fail review.
-  '/privacy', // Privacy Policy
-  '/terms',   // Terms of Service
-  // Google Play REQUIRES this URL from any app that lets people create an account, and checks it with
-  // tools that may not run JavaScript — so it must be server-rendered like the two above.
-  '/delete-account',
+  // PUBLIC LEGAL PAGES — the canonical documents, the Play-required deletion page, and the legacy
+  // spellings that redirect to them. DERIVED from lib/legalPaths.ts rather than restated here: a
+  // path listed by the route module but forgotten here would be swallowed by the catch-all and
+  // answered with index.html — a 200 that looks alive to a human and is empty to a crawler.
+  ...ALL_PUBLIC_LEGAL_PATHS,
 ];
 
 /**

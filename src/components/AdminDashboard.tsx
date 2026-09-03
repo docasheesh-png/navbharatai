@@ -2709,14 +2709,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <h4 className="text-sm font-black text-white truncate">{selectedReport?.meta.appLabel ?? 'Loading…'}</h4>
                         {selectedReport && <p className="text-[10px] text-[#8b949e] truncate">{selectedReport.meta.email || selectedReport.meta.userId || 'unknown'} · {new Date(selectedReport.meta.reportedAt).toLocaleString()} · {partsSummary(selectedReport)}</p>}
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      {/* ⚠️ MOBILE CROP (admin 2026-09-03): on a narrow screen this row is wider than the
+                          buttons it holds (part picker + Copy JSON + Download JSON + Mark fixed + Delete
+                          + Close), and the modal's own `overflow-hidden` (for its rounded corners) simply
+                          clipped whatever didn't fit — Close was unreachable. `overflow-x-auto` alone did
+                          nothing here: a flex child only scrolls once something caps its width smaller than
+                          its content, so the cap (`max-w-[68vw]`, lifted on sm+ where the row already fits)
+                          is what turns the clip into a swipe. */}
+                      <div className="flex items-center gap-2 shrink-0 max-w-[68vw] sm:max-w-none overflow-x-auto">
                         {/* ⚠️ WE COULD NOT READ THIS SESSION'S HISTORY (admin 2026-08-27, on "shuru ke
                             9 gayab, only 10th report hi aati hai"). A read failure used to return an
                             empty list, which the record then rendered as a genuine one-build session —
                             a confident wrong number that nobody would ever question. Said out loud
                             here, because a missing report is only findable if it announces itself. */}
                         {selectedReport?.session?.historyUnreadable && (
-                          <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-2 rounded-xl border border-amber-500/50 text-amber-300 bg-amber-500/10">
+                          <span className="shrink-0 whitespace-nowrap text-[10px] font-black uppercase tracking-wider px-2.5 py-2 rounded-xl border border-amber-500/50 text-amber-300 bg-amber-500/10">
                             ⚠ Earlier builds could not be read — this may not be the whole session
                           </span>
                         )}
@@ -2728,7 +2735,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             value={reportPart}
                             onChange={(e) => setReportPart(e.target.value)}
                             aria-label="Which part of the report"
-                            className="bg-[#0d1117] border border-white/10 rounded-xl px-2.5 py-2 text-[11px] font-bold text-white focus:outline-none focus:border-indigo-500"
+                            className="shrink-0 bg-[#0d1117] border border-white/10 rounded-xl px-2.5 py-2 text-[11px] font-bold text-white focus:outline-none focus:border-indigo-500"
                           >
                             {selectedParts.map((p) => (
                               <option key={p.key} value={p.key}>{p.label}</option>
@@ -2738,14 +2745,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <button
                           onClick={copySelectedReport}
                           disabled={!selectedPartJson}
-                          className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-emerald-500/40 text-emerald-300 hover:text-white hover:bg-emerald-600/20 disabled:opacity-40"
+                          className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-emerald-500/40 text-emerald-300 hover:text-white hover:bg-emerald-600/20 disabled:opacity-40"
                         >
                           <FileText className="w-3.5 h-3.5" /> Copy JSON
                         </button>
                         <button
                           onClick={downloadSelectedReport}
                           disabled={!selectedPartJson}
-                          className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-indigo-500/40 text-indigo-300 hover:text-white hover:bg-indigo-600/20 disabled:opacity-40"
+                          className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-indigo-500/40 text-indigo-300 hover:text-white hover:bg-indigo-600/20 disabled:opacity-40"
                         >
                           <Download className="w-3.5 h-3.5" /> Download JSON
                         </button>
@@ -2763,7 +2770,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               title={isFixed
                                 ? reportStatusHint(selectedReport?.meta, (ms) => new Date(ms).toLocaleString())
                                 : 'Mark this report as fixed — only after the work is actually merged'}
-                              className={`flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border disabled:opacity-40 ${isFixed
+                              className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border disabled:opacity-40 ${isFixed
                                 ? 'border-emerald-500/60 text-emerald-200 bg-emerald-600/20 hover:bg-emerald-600/30'
                                 : 'border-white/15 text-[#8b949e] hover:text-white hover:bg-white/5'}`}
                             >
@@ -2777,11 +2784,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           onClick={() => selectedReport?.meta.id && void deleteReport(selectedReport.meta.id)}
                           disabled={!selectedReport?.meta.id}
                           title="Delete this report permanently (frees its storage)"
-                          className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-red-500/40 text-red-300 hover:text-white hover:bg-red-600/20 disabled:opacity-40"
+                          className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-red-500/40 text-red-300 hover:text-white hover:bg-red-600/20 disabled:opacity-40"
                         >
                           <Trash2 className="w-3.5 h-3.5" /> Delete
                         </button>
-                        <button onClick={() => setSelectedReport(null)} className="text-[#8b949e] hover:text-white px-2 py-2 rounded-xl hover:bg-white/5">Close</button>
+                        <button onClick={() => setSelectedReport(null)} className="shrink-0 whitespace-nowrap text-[#8b949e] hover:text-white px-2 py-2 rounded-xl hover:bg-white/5">Close</button>
                       </div>
                     </div>
                     <div className="flex-1 overflow-auto p-4">

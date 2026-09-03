@@ -43434,3 +43434,51 @@ at that job.
 **Verified:** tsc frontend + server clean · unused-imports clean · `vitest run` **1431 files / 18,872
 passed** · build green · bundle within budget · and the route exercised against a REAL booted server:
 `/delete-account` returns 200 with the steps in the first response and no SPA shell.
+
+---
+
+## 2026-09-03 (later) — In-app account deletion, and the endpoint that was not deleting the account (#TBD)
+
+**The admin's ask, in their own framing:** *"github me danger zone me delete button hota hai — waise hi
+ham bhi setting me dangerous zone bana dena to?"* A good instinct: it is exactly the pattern for an
+irreversible control, and it is the half of Play's account-deletion rule that `/delete-account` does
+not satisfy (Play wants the URL **and** an in-app control).
+
+**THE ROOT CAUSE FOUND WHILE BUILDING IT.** `DELETE /api/profile` erased the seven Firestore
+collections in `USER_SCOPED_COLLECTIONS` and stopped there — the **Firebase Auth record survived**. So
+a person who asked to be deleted could sign straight back in and find a blank account waiting. That is
+not what "delete my account" means to anyone who taps it, and not what Play's requirement means. A
+button shipped on top of that endpoint would have been the built-but-not-really-working state the
+second absolute rule forbids, wearing a red border.
+
+Fixed first: `deleteAuthAccount()` in `authMiddleware.ts` deletes the Auth record, and the route calls
+it **after** the data erase — deleting the credential first would strand any data whose deletion then
+failed, with the owner no longer able to sign in and retry. It returns a four-way outcome
+(`deleted` / `not-found` / `unavailable` / `failed`) rather than throwing, and `not-found` counts as
+success because it is the same end state.
+
+**THE HONESTY THAT MATTERS MOST HERE:** the data wipe and the credential removal can genuinely diverge
+(Firestore succeeds, the Auth SDK is unreachable). The response and the UI report which one happened.
+A green tick over a partial deletion would leave someone believing they are gone while they can still
+sign in — `deletionOutcomeMessage()` is a pure function precisely so that rule is test-locked, and the
+tests assert the partial case says "sign-in could not be removed" and names the support address.
+
+**The UI** is `settings/DangerZone.tsx`, last on the Settings root by deliberate placement: a control
+that irreversibly deletes an account must not sit where a thumb lands. It will not fire until the user
+types the word, reusing the SHARED `deleteConfirm.ts` rule that bulk file deletes already use rather
+than a second copy that could drift. On success it signs out and reloads — a session must not outlive
+its account, and staying on screens backed by deleted data would surface errors that look like fresh
+bugs.
+
+**Also:** `AppKnowledgeBase.ts` gained the entry (mandatory for a new user-facing control — without it
+every AI in the product is blind to a feature users will ask about, in both English and Hinglish), and
+`/delete-account` now leads with the in-app route and keeps email as the fallback for someone who
+cannot reach the app.
+
+**Verified:** tsc frontend + server clean · unused-imports clean · `vitest run` **1432 files / 18,879
+passed** · build green · bundle within budget · boot:check PASS.
+
+**STILL OPEN (rule 6):** built-app files stored outside those seven collections are not covered by the
+automated erase. The public page and the in-app copy both describe what IS removed rather than
+promising a total wipe, so nothing overstates — but closing this properly means extending
+`USER_SCOPED_COLLECTIONS`, and the page's drift test will then require the wording to grow with it.

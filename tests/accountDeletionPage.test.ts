@@ -14,9 +14,15 @@ describe('the page satisfies what Play actually asks for', () => {
     expect(ACCOUNT_DELETION).toMatch(/com\.navbharat\.ai/);
   });
 
-  it('gives a concrete, reachable way to make the request', () => {
+  it('leads with the IN-APP route, which is the half Play requires in the product itself', () => {
+    expect(ACCOUNT_DELETION).toMatch(/Danger zone/);
+    expect(ACCOUNT_DELETION).toMatch(/\*\*Delete account\*\*/);
+    expect(ACCOUNT_DELETION).toMatch(/type the word \*delete\*/i);
+  });
+
+  it('also gives a route for someone who cannot reach the app', () => {
     expect(ACCOUNT_DELETION).toMatch(/info@navbharatai\.com/);
-    expect(ACCOUNT_DELETION).toMatch(/## How to request deletion/);
+    expect(ACCOUNT_DELETION).toMatch(/## Or ask us to do it/);
     expect(ACCOUNT_DELETION).toMatch(/Delete my account/);
   });
 

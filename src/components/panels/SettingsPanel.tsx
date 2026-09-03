@@ -7,6 +7,7 @@ import { authedHeaders } from '../../lib/authHeaders';
 // LegalDocPage dynamic-imports the full registry into its own lazy chunk.
 import { LEGAL_META } from '../../content/legal/meta';
 import { LegalDocPage } from './LegalDocPage';
+import { DangerZone } from '../settings/DangerZone';
 import {
   type MotionMode, getStoredMotionMode, applyMotionMode,
   getStoredFontScale, applyFontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_STEP, FONT_SCALE_DEFAULT,
@@ -684,6 +685,13 @@ export function SettingsPanel({
                   <Lock className="w-4 h-4 text-[#484f58] group-hover:text-red-400 transition-colors" />
                   <span className="text-xs font-bold text-[#8b949e] group-hover:text-white transition-colors">Admin Login</span>
                 </button>
+
+                {/* DANGER ZONE — last on the screen, deliberately (GitHub's placement). A control that
+                    irreversibly deletes an account must never sit where a thumb lands by accident, and
+                    it will not fire until the user types the word. Google Play also requires in-app
+                    account deletion for any app that lets people sign up; the public /delete-account
+                    page satisfies the URL half of that rule, and this satisfies the in-app half. */}
+                <DangerZone signedIn={!!user} onLog={addLog} />
 
                 <div className="pt-4 border-t border-white/5 flex flex-col items-center">
                   <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-3">

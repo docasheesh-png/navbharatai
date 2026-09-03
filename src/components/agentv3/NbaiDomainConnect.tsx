@@ -105,6 +105,21 @@ export interface NbaiDomainConnectProps {
  *
  * Pure + exported for tests.
  */
+/**
+ * Firebase's own sentence, ready to prepend — or '' when it shipped none.
+ *
+ * Trimmed, single-spaced and capped, because these come from `google.rpc.Status` and can arrive long,
+ * multi-line, or duplicated across the domain's `issues[]` and the certificate's. Only the FIRST is
+ * used: a stack of provider messages in a user-facing note is how a real explanation becomes noise.
+ * PURE.
+ */
+export function hostingReason(issues?: string[] | null): string {
+  const first = (issues ?? []).map((i) => String(i ?? '').replace(/\s+/g, ' ').trim()).find((i) => i.length > 0);
+  if (!first) return '';
+  const text = first.length > 220 ? `${first.slice(0, 217)}…` : first;
+  return `Your host says: “${/[.!?]$/.test(text) ? text : `${text}.`}” `;
+}
+
 export function connectStage(
   s: {
     active: boolean; ownershipState: string; hostState: string; sslState: string;
@@ -114,6 +129,17 @@ export function connectStage(
      * The server forms this from the app's own manifests; see domainPublishBlockNote.
      */
     publishBlocked?: string | null;
+    /**
+     * WHAT FIREBASE ITSELF SAID IS WRONG (`issues[]`), when it said anything.
+     *
+     * 🔒 THIS FILE'S OWN RULE, APPLIED TO ITS OWN NEW CODE: "Never diagnose from a status enum when
+     * the API also shipped the reason" (firebaseCustomDomain.ts, after `ownership: missing` reached
+     * the admin as one unexplained word). The MISMATCH branch below was written on 2026-09-02 doing
+     * exactly what that rule forbids — it read the enum and ASSERTED a cause ("connected from another
+     * app before"), which is the likeliest cause and is not evidence. If Firebase shipped a reason, it
+     * outranks anything we infer; our sentence is the fallback for when it did not.
+     */
+    issues?: string[] | null;
   },
 ): { headline: string; action: 'check' | 'none' | 'publish'; note: string; tone?: 'ok' | 'warn' } {
   if (s.active) {
@@ -224,7 +250,7 @@ export function connectStage(
       headline: 'Your domain\'s ownership record points at a different app — waiting will not change it.',
       action: 'check',
       tone: 'warn',
-      note: 'The record is there, but it carries the wrong value — usually because this domain was '
+      note: `${hostingReason(s.issues)}The record is there, but it carries the wrong value — most often because this domain was `
         + 'connected from another app before. A wrong value does not fix itself, however long you wait. '
         + 'Tap “Check & apply records” above: we replace it with the right one and remove the wrong one.',
     };
@@ -234,7 +260,8 @@ export function connectStage(
       headline: 'Your domain has more than one ownership record — waiting will not clear it.',
       action: 'check',
       tone: 'warn',
-      note: 'This happens when the same domain was connected from more than one app: each one left its '
+      note: hostingReason(s.issues)
+        + 'This happens when the same domain was connected from more than one app: each one left its '
         + 'own ownership record, and only one is allowed. It will not fix itself, however long you wait. '
         + 'Tap “Check & apply records” above — we will remove the extra ones and keep the right one.',
     };

@@ -43749,3 +43749,64 @@ comment**, which quotes the waiting message it replaced — the ordering asserti
 the same trap this session hit twice before.
 
 Gate: both `tsc` clean; FULL suite **1435 files / 18909 tests green**.
+
+## 2026-09-02 — FULL AUDIT: can NavBharatAI genuinely connect a domain and host a real website?
+
+Admin: *"0 se scan kar ke audit karo — kya ham sach me app domain se connect kar ke real website host
+kar bhi sakte hai, ya nahi?"*
+
+**Answer: YES. The capability is genuinely built, and the architecture is right.** Every link traced
+against the code, not assumed:
+
+| Link | Verdict | Evidence |
+|---|---|---|
+| Firebase API | ✅ modern | `projects/*/sites/*/customDomains` v1beta1, verified against Google's own discovery doc — **not** the deprecated `sites/*/domains` |
+| A dedicated Hosting site per domain | ✅ | `siteIdForWorkspace()` → `nbai-<hash>` |
+| Deployed to the **LIVE** channel | ✅ | `deployToSite` → `sites/{id}/releases` (no channel segment) |
+| Domain and deploy target the **same** site | ✅ | both resolve through `ensureSite`/`siteIdForWorkspace` |
+| The live deploy actually RUNS when a domain is connected | ✅ | `customDomainPublish` → `deployToSite`, with one retry on retryable errors |
+| Managed DNS (one nameserver change, we write the rest) | ✅ | `cloudflareManagedDns.ts`, records written **DNS-only** |
+| Stale/wrong ownership tokens removed | ✅ | TXT sweep deletes every `hosting-site=` that is not the wanted one, and touches nothing else (SPF/DKIM safe) |
+| Firebase's own failure reasons surfaced | ✅ | `issues[]` + `cert.issues` merged and rendered |
+| Records for manual setup | ✅ | `requiredDnsUpdates` **and** the ACME `cert.verification.dns` challenge |
+
+**THE ONE THING WORTH KNOWING** — and it is right, not a bug: a custom domain **cannot** attach to a
+preview channel. The ordinary publish goes to a preview channel; a domain-connected workspace gets a
+dedicated site released to LIVE. `Deployment.ts` says so in the code, and both paths derive the site id
+from the same function, so they cannot drift apart. Had that not been true, every custom domain would
+have served Firebase's "Site Not Found" forever — which is exactly what the admin's first screenshot
+looked like, and why it was checked first.
+
+**So what was actually broken was never the hosting. It was the REPORTING** — and that is what the two
+fixes above address.
+
+### Rock-solid pass on today's own fix
+
+The MISMATCH branch I added earlier today **broke this file's own rule.** `firebaseCustomDomain.ts`
+states it, written after `ownership: missing` once reached the admin as a single unexplained word:
+
+> *"Never diagnose from a status enum when the API also shipped the reason."*
+
+My branch read the enum and **asserted** a cause — "connected from another app before". That is the
+likeliest cause; it is not evidence. Firebase ships `issues[]` explaining exactly why a domain is
+stuck, and it outranks anything we infer.
+
+Now both MISMATCH and CONFLICT lead with **Firebase's own sentence** when it sent one
+(`hostingReason()`), and fall back to our explanation only when it did not. `hostingReason` uses the
+**first** reason only (a stack of provider messages in a user-facing note turns a real explanation into
+noise), collapses newlines (these arrive multi-line from `google.rpc.Status`), caps at 220 chars, and
+does not double a punctuation mark the message already has.
+
+**The tests are now behavioural, not textual.** They call `connectStage` and `hostingReason` directly
+and assert the produced note — the earlier ones only grepped the source, which proves shape and not
+behaviour. 18 tests; verified to bite by dropping `hostingReason` from the branch again.
+
+Gate: both `tsc` clean; FULL suite **1439 files / 18956 tests green**.
+
+### Still open, honestly
+- **`"all 1 record are now in place (we added 2)"`** — `desired` and `applied` count different things
+  and the sentence is ungrammatical at 1. A self-contradicting number in the admin's primary
+  diagnostic; not fixed today.
+- **Firebase may send no `issues[]` for MISMATCH** (none was visible in the admin's screenshot), in
+  which case our inferred sentence is all the user gets. It is labelled as the likely cause rather
+  than stated as fact, which is the honest limit of what we know from an enum.

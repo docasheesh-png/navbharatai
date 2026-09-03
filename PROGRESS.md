@@ -43852,3 +43852,91 @@ foreign-token cleanup, live-serving verification, publish-to-domain on every bui
 traced against the code and confirmed real, not assumed.
 
 Gate: both `tsc` clean; FULL suite **1439 files / 18966 tests green**.
+
+---
+
+## 2026-09-03 — Autopsy: build report faa98da9 (Mitrify import + survey, weak/KIMI)
+
+**The turn.** "Import this app from my GitHub repository and give me a short survey of what it is and
+how it is structured. **Do not change any files yet.**" 327 archive entries → 175 source files landed,
+a local Postgres provisioned, `npm run db:push` clean, dev server up on port 3000, an accurate survey
+written. `ok: true`, 196s, ₹19.63 (free-list, so not actually charged). The app was fine; almost
+everything wrong here was the platform describing it.
+
+### Step 1 — the five-bucket ledger (78 events, every item counted)
+
+| Bucket | Count | Items |
+|---|---|---|
+| ✅ Self-healed | 5 | the 5 KIMI→KIMI fallbacks that rescued each dead-rung 404 — **every one of them a red flag, not a win** (Step 5) |
+| 🔀 Worked around | 3 | `kimi-k2.5` 404 routed around on all 5 calls · 34 unprovisionable env values set to empty placeholders · `plannedModel: claude-sonnet-4-6` vs 5/5 turns on `kimi-k2.6` (correct for weak, but the plan and the run still disagree in the record) |
+| ⏭️ Skipped | 5 | render check, route smoke, page check, journey, typecheck — **all five for the same reason**, see ❌2 |
+| ❌ Still broken | 3 | ①the dead rung burns a request on every call ②RELEASE_GATE UNKNOWN on false evidence ③"I changed 2 files" on a "don't change anything" turn |
+| 🥵 Struggle | 2 | 113s `TIME_TO_FIRST_CALL` (85s of it the GitHub zipball import; longest silent stretch 40s) · the final call 35.6s for 1,283 output tokens |
+
+Honest tally to the admin: **v3.0 self-healed 5, worked around 3, skipped 5, 3 survived, and struggled
+at import setup.** The five skips and one ❌ are the same defect counted twice, which is itself the
+finding — a single ordering mistake presented as five independent "not checked" lines.
+
+### Step 2 — the MISSING subsystem
+
+**The engine had no memory of a permanent failure.** It has excellent memory of transient ones — a
+429 cooldown, a timeout bench, an escalating circuit breaker, key-pool rotation. It had none at all
+for "this answer can never change", so the one failure class where retrying is *provably* pointless
+was the only one re-tried forever. `classifyProviderFailure` had even NAMED the class on 2026-09-01 —
+in the reporting layer, where nothing could act on it.
+
+### Step 3 — DNA-level fixes (all shipped, PR from `claude/build-report-autopsy-tmn3ov`)
+
+1. **`providerErrorClass.ts`** — one shared predicate, imported by both BuildDiagnostics and the
+   provider chain, so the report layer and the runner can no longer disagree about what a permanent
+   failure is. A rung that answers "no such model / permission denied" is retired after ONE attempt.
+   **Keyed on the MODEL, not the bench name** — the dead `kimi-k2.5` and the `kimi-k2.6` that delivered
+   all five turns share the bench name 'KIMI', so the obvious name-keyed fix would have replaced one
+   wasted round-trip per call with a build that had no Kimi at all. Transient benches stay name-keyed:
+   a 429 belongs to the key, a missing model belongs to the model.
+2. **The import's preview boot is awaited before anything judges it.** It was awaited only in
+   `finally`, ~2,700 lines below the post-build checks, every one of which is gated on
+   `lastPreviewUrl` — so on the import path they were structurally unreachable, not unlucky. Costs no
+   wall-clock: the identical bounded await already ran before the response could end, so the user was
+   already paying for it *after* the verdict instead of before it. New `IMPORT_PREVIEW_BOOT_AWAITED`
+   records the wait so a slow import is never mistaken for a slow build.
+3. **Engine setup files no longer read as the user's.** `.gitignore` joins `.env` in
+   `ENGINE_CONFIG_PATH`; `devSecretsBoot` writes both in one act, the `.gitignore` only because the
+   `.env` exists.
+
+### Step 4 — what the bar demands, stated honestly
+
+- **The `kimi-k2.5` ID ITSELF IS STILL AN OPEN ROOT CAUSE (rule 6).** Moonshot folds "no such model"
+  and "your key may not use it" into one sentence, and I cannot query their live model list from here,
+  so I cannot tell whether the fix is to drop the rung or to enable it on the account. **What changed
+  is the cost of being wrong**: the misconfiguration now costs one request per build instead of one
+  per call. **The admin's call, and it is worth taking** — the free ladder's first rung is currently
+  dead weight for every free build. Options: drop `kimi-k2.5` from `AGENTV3_FREE_KIMI_MODEL`, or
+  enable it on the Moonshot key.
+- **Second time this list has drifted.** The 2026-08-04 autopsy fixed exactly this "I changed N files"
+  complaint, for exactly this app, with an allowlist of the literal names that turn happened to write.
+  One extra file and it went false. **A fix that enumerates the instances it has seen is not a class
+  fix**, and this one lasted precisely until the change-set grew.
+
+### Step 5 — the 50/50 law
+
+**All five "self-heals" were one misconfiguration wearing a green checkmark.** A fallback that fires
+on every single call is not resilience. The upstream half is the retirement above; the ID decision
+that would stop it firing at all is the admin's open item.
+
+**The five skips were never a coverage gap.** They read as five separate "we could not check", which
+would send someone hunting five causes. They are one `await` in the wrong place.
+
+**The gate said something stronger than "unproven" — it said "never".** The 2026-08-27 fix taught it
+to distinguish "never came up" from "we never checked". Neither was true here: the preview was still
+starting. A verdict taken before its evidence arrives is not a coverage limit, it is a false statement,
+and it is the kind that teaches a reader to distrust the true parts of the same report.
+
+### Not touched (recorded, not silently dropped)
+- **113s before the first model call**, 85s of it the GitHub zipball import. A real struggle point,
+  outside this change's blast radius.
+- **`plannedModel` vs delivered model** still disagree in the manifest on weak builds. Correct
+  behaviour, misleading record.
+
+Gate: both `tsc` clean; FULL suite **1440 files / 18979 tests green**. All three guards verified to
+bite, including the mirror-image case that a genuine source edit is still reported as a real change.

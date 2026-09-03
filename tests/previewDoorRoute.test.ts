@@ -8,6 +8,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { shouldShowNotServingSurface, type FramingState } from '../src/components/agentv3/previewFraming';
+
+/** A healthy, checked, idle preview — the baseline each case below varies one field of. */
+const FRAMING_OK: FramingState = { unreachable: false, portDown: false, diagnosing: false, hasDoorUrl: false, hasSnapshotUrl: false, framingUnchecked: false };
 
 const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
 // Ends at the route registered immediately AFTER the door. It used to end at `preview-health`, which
@@ -159,16 +163,29 @@ describe('a host with nothing on its port is never framed', () => {
     // An older server sends no field; `=== false` keeps that case on today's behaviour rather than
     // blanking the preview for everyone the moment the field is missing.
     expect(surface).toContain('setPortDown(res.ok && health?.livePortUp === false);');
-    // Same repoint as previewUnreachable's: assert that portDown shares the refuse-to-frame branch,
-    // not the branch's exact literal. That literal has since grown a third term (framingUnchecked,
-    // 2026-08-24) which changes nothing about this guarantee.
-    expect(surface).toMatch(/\{unreachable \|\| \(portDown && !diagnosing\)[^?]*\? \(/);
+    // ANCHOR MOVED, GUARANTEE UNCHANGED (2026-09-03). The branch condition grew a fourth term and was
+    // extracted to a pure function so it could finally be EXERCISED rather than pattern-matched — the
+    // decision had been patched three times for three reports of one symptom while living inline in a
+    // 1,700-line component. The source check now proves the component asks that function; what the
+    // function ANSWERS is asserted for real in previewFraming.test.ts, which is strictly stronger than
+    // the literal this replaces.
+    expect(surface).toMatch(/shouldShowNotServingSurface\(\{[^}]*portDown[^}]*\}\) \? \(/);
+    expect(shouldShowNotServingSurface({ ...FRAMING_OK, portDown: true })).toBe(true);
   });
 
-  it('it stands down while a wake/diagnose is in flight — that is when the port is MEANT to be down', () => {
-    // Without the guard, pressing Wake up would replace the app with the not-serving panel for the
-    // whole reboot, which reads as "it broke" at exactly the moment it is being fixed.
-    expect(surface).toContain('portDown && !diagnosing');
+  it('it stands down while a wake/diagnose is in flight — but ONLY when the door is there to frame', () => {
+    // THE ORIGINAL INTENT, KEPT: pressing Wake up must not replace the app with a static panel for the
+    // whole reboot — that reads as "it broke" at exactly the moment it is being fixed. True of the
+    // door, which shows our own reconnecting page and walks back into the app by itself.
+    expect(shouldShowNotServingSurface({ ...FRAMING_OK, portDown: true, diagnosing: true, hasDoorUrl: true })).toBe(false);
+
+    // THE HALF THAT WAS NEVER TRUE, AND IS NOW CORRECTED (admin screenshot 2026-09-03). This guard was
+    // written 2026-08-13, nine days before the door existed, so with no door the only thing it could
+    // keep on screen was a RAW machine address — and a machine mid-wake is not serving by definition.
+    // What it actually preserved was the vendor's "Closed Port Error" page: the exact screenshot in
+    // this describe block's header, which is why standing down there re-opened the hole this whole
+    // guarantee was created to close.
+    expect(shouldShowNotServingSurface({ ...FRAMING_OK, portDown: true, diagnosing: true })).toBe(true);
   });
 
   it('a reading from ANOTHER machine can never trigger it', () => {

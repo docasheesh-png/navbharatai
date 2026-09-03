@@ -27,10 +27,11 @@ import { ConsentBanner } from './components/ConsentBanner';
 import { InviteAcceptGate } from './components/InviteAcceptGate';
 import { SharePortal } from './components/SharePortal';
 import { MobileEngagementGate } from './components/MobileEngagementGate';
-import { hasAnalyticsConsent, CONSENT_EVENT } from './lib/consent';
+import { hasAnalyticsConsent, getConsent, CONSENT_EVENT } from './lib/consent';
 import { isChunkLoadError, shouldReloadForStaleChunk } from './lib/chunkReload';
 import { installNativeApiRewrite, isNativeShell } from './lib/apiBase';
 import { initMetaPixel, fetchPixelIdFromServer } from './lib/metaPixel';
+import { syncNativeMetaConsent, nativeMetaConsentGranted } from './lib/metaNativeConsent';
 import { installNativeShellPolish, loadNativeShellContext } from './lib/nativeShell';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
@@ -246,6 +247,17 @@ const startMetaPixel = () => {
 };
 startMetaPixel();
 window.addEventListener(CONSENT_EVENT, startMetaPixel);
+
+// META ANDROID SDK — the NATIVE half of the same measurement, and the same consent gate. The pixel
+// above is a script we choose to inject, so withholding it is enough; the Facebook Android SDK is the
+// opposite — it initialises from a ContentProvider at process start, so the manifest ships its
+// switches OFF and this call is what opens them. Run on BOTH edges, not just on a grant: a withdrawal
+// has to close them again. A no-op everywhere but the installed Android shell.
+const syncNativeMeta = () => {
+  void syncNativeMetaConsent(nativeMetaConsentGranted(getConsent()));
+};
+syncNativeMeta();
+window.addEventListener(CONSENT_EVENT, syncNativeMeta);
 
 // NOTE: the public /sonic experiment route was removed (admin 2026-07-15) to close a misuse vector —
 // an unauthenticated, discoverable voice page. The voice capability itself is NOT deleted: it lives on

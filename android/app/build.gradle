@@ -38,13 +38,14 @@ android {
         def fbAppId = (System.getenv("FACEBOOK_APP_ID") ?: "").trim()
         def fbClientToken = (System.getenv("FACEBOOK_CLIENT_TOKEN") ?: "").trim()
         // BOTH are required: an app id with no client token cannot initialise, and half-configured is
-        // exactly the "built but not really working" state that is not allowed to exist.
-        def fbEnabled = !fbAppId.isEmpty() && !fbClientToken.isEmpty()
+        // exactly the "built but not really working" state that is not allowed to exist. The
+        // dependency block below re-tests the same pair — an id without a token adds no SDK.
         resValue "string", "facebook_app_id", fbAppId
         resValue "string", "facebook_client_token", fbClientToken
-        // `+=` rather than `=`: Capacitor's generated capacitor.build.gradle may contribute its own
-        // placeholders, and replacing the map would silently drop them.
-        manifestPlaceholders += [facebookEnabled: fbEnabled ? "true" : "false"]
+        // NOTE: there is deliberately NO manifest placeholder switching the SDK's three collection
+        // flags. They are hard-wired OFF in AndroidManifest.xml and opened at runtime only after the
+        // user grants consent (MetaConsentPlugin.java) — a build-time "true" would start collecting
+        // before the banner was even drawn.
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61

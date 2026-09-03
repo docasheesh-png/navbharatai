@@ -111,7 +111,7 @@ We advertise NavBharatAI on Facebook and Instagram so people can find it. To kno
 - that a purchase completed, with the **real amount in rupees**;
 - that an app was built.
 
-**In our Android app**, builds that enable Meta's measurement SDK report that the app was **installed** or **opened**, together with your device's **advertising ID** — the resettable identifier Android provides for exactly this purpose.
+**In our Android app**, again only if you accept the consent banner, builds that include Meta's measurement SDK report that the app was **installed** or **opened**, together with your device's **advertising ID** — the resettable identifier Android provides for exactly this purpose. Until you accept, that SDK is not switched on at all.
 
 **What is NEVER shared with Meta or any advertising platform:**
 
@@ -123,7 +123,7 @@ We advertise NavBharatAI on Facebook and Instagram so people can find it. To kno
 
 This is enforced in our code, not just promised: the pixel can only send the four events listed above, because that list is written into the software as a fixed allowlist.
 
-**Your control.** On the web, choose **Decline** on the consent banner and no advertising measurement runs at all — nothing loads, nothing is sent. In the Android app, your phone's *Settings → Privacy → Ads* lets you reset or delete your advertising ID.
+**Your control.** On the web, choose **Decline** on the consent banner and no advertising measurement runs at all — nothing loads, nothing is sent. **The Android app honours the same choice**: the measurement SDK ships switched off and is turned on only after you accept, and turned back off if you later withdraw. Separately, your phone's *Settings → Privacy → Ads* lets you reset or delete your advertising ID at any time.
 
 *(Basis: your consent, which you can withdraw at any time.)*
 

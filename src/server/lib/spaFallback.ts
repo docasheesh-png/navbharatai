@@ -41,6 +41,9 @@ export const SERVER_ROUTE_EXACT: readonly string[] = [
   // not run JavaScript, so an index.html shell would look like a working link and fail review.
   '/privacy', // Privacy Policy
   '/terms',   // Terms of Service
+  // Google Play REQUIRES this URL from any app that lets people create an account, and checks it with
+  // tools that may not run JavaScript — so it must be server-rendered like the two above.
+  '/delete-account',
 ];
 
 /**

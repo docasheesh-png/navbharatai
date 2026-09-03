@@ -43388,3 +43388,49 @@ counsel.
 
 **Verified:** tsc frontend + server clean · audit + license gates clean · unused-imports clean ·
 `vitest run` **1430 files / 18,864 passed** · build green · bundle within budget · boot:check PASS.
+
+---
+
+## 2026-09-03 — The Play deletion URL, and two things the Data safety form exposed (#TBD)
+
+**Context.** Filling Play Console → App content → **Data safety** for the advertising-ID declaration
+surfaced two problems that had nothing to do with Meta.
+
+**1. The existing Data safety declaration said the app collects NO user data.** It has said that since
+release 91. The app collects name, email, phone, chats, uploaded files, purchase records, crash logs
+and device IDs. A false Data safety declaration is "deceptive behaviour" under Play policy, whose
+consequence is account-level, not a rejected update. Corrected by the admin in the console (No → Yes);
+recorded here because it was never a code bug and would not have been found by any test.
+
+**2. There is no in-app account deletion, and no deletion URL.** Declaring that accounts can be created
+triggers Play's requirement for a published deletion URL. Verified rather than assumed:
+`DELETE /api/profile` genuinely exists (identity from the verified Firebase token, explicit
+`{confirm:'DELETE'}` body) and erases the seven collections in `USER_SCOPED_COLLECTIONS` — but **no UI
+anywhere calls it**, confirmed by searching both file names and component text.
+
+**Shipped: `/delete-account`**, server-rendered like `/privacy` and `/terms`, with the three things Play
+actually checks for — the app named, the steps prominent, and what is deleted / kept / for how long.
+
+**Every claim on it is code-anchored, and the test enforces that.** `accountDeletionPage.test.ts`
+iterates `USER_SCOPED_COLLECTIONS` and fails if a collection the eraser wipes has no plain-words
+description on the page — so adding a collection to the eraser cannot silently leave the page
+understating what happens to someone's data. It also pins the honest carve-outs: tax records retained,
+backups cycling on their own schedule, GitHub disconnection **not** touching the user's own repos, and
+the unused token balance not being refundable.
+
+**Why it is NOT one of the five legal documents:** the registry's contract requires 4,000+ characters
+per document, and padding the one page whose whole job is to be quickly actionable would make it worse
+at that job.
+
+**OPEN root causes (rule 6) — stated, not hidden:**
+- **The automated eraser does not cover everything the page promises.** It wipes seven Firestore
+  collections; it does **not** delete the Firebase **Auth** record itself, nor built-app files outside
+  those collections. The page therefore describes the EMAIL request path, which a human completes — so
+  the promise is true only for as long as the admin actually performs the manual part. Closing this
+  means extending `deleteUserData` and wiring an in-app button to it.
+- **There is still no in-app "Delete account" control**, which Play requires in addition to the URL.
+  The server half is built and safe; only the button and a confirmation screen are missing.
+
+**Verified:** tsc frontend + server clean · unused-imports clean · `vitest run` **1431 files / 18,872
+passed** · build green · bundle within budget · and the route exercised against a REAL booted server:
+`/delete-account` returns 200 with the steps in the first response and no SPA shell.

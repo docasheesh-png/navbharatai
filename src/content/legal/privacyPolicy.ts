@@ -20,6 +20,14 @@
 // hard-coded ALLOWLIST of four conversion events (src/lib/metaPixel.ts) and nothing else, which is a
 // promise a reader can hold us to rather than a claim of good intentions.
 //
+// ⚠️ 2026-09-02 — REMOVED a claim that could go stale silently: the Hosting bullet used to end
+// "…and Singapore is not a jurisdiction restricted by the Indian government for such transfers as of
+// the date above." That is a legal CONCLUSION about a government list which can change without us
+// noticing, and a policy that asserts it would become false the day it did — with nothing to flag it.
+// Replaced with a statement of what we actually control ("we transfer it only where permitted by
+// applicable law"). Do not restore the specific version: naming a jurisdiction as unrestricted is a
+// claim we cannot keep true by writing code.
+//
 // ⚠️ NOT LEGAL ADVICE: drafted to be reviewed by a lawyer before being relied on in a dispute.
 
 export const PRIVACY_POLICY_TITLE = 'Privacy Policy';
@@ -148,7 +156,7 @@ If you use it, you may enter health-related information or upload clinical docum
 
 ## 6. Where your data lives, and for how long
 
-- **Hosting.** The Platform runs on enterprise-grade cloud infrastructure. Our primary serving and storage region is **Asia (Singapore)**, with some services in other regions of the same providers. Because Singapore is outside India, your data is transferred across borders; we protect it in transit with TLS encryption and at rest with provider-grade encryption, and Singapore is not a jurisdiction restricted by the Indian government for such transfers as of the date above.
+- **Hosting.** The Platform runs on enterprise-grade cloud infrastructure. Our primary serving and storage region is **Asia (Singapore)**, with some services in other regions of the same providers. Because Singapore is outside India, your data is transferred across borders; we protect it in transit with TLS encryption and at rest with provider-grade encryption, and we transfer it only where permitted by applicable law.
 - **Retention.** We keep your account data, projects, chats and wallet records **for as long as your account is active**, because the product's promise is that your work and history are there when you return. Specific shorter windows: build sandboxes are recycled automatically after inactivity (minutes, not days); technical logs are retained for up to **90 days**; payment and tax records are retained for the period Indian law requires (typically **8 years**) even after account deletion.
 - **After deletion.** When you delete your account (Section 9), personal data is deleted or irreversibly anonymised within **30 days**, except the payment/tax records above and data we must keep for a live legal matter.
 

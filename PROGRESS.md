@@ -43336,3 +43336,55 @@ no SPA shell, while `/store` still returns the app.
 
 **Open (rule 6):** the policy is drafted to be reviewed by a lawyer before being relied on in a
 dispute — that has still not happened, and this change does not alter it.
+
+---
+
+## 2026-09-02 (later) — Meta's automatic matching could have broken the promise we had just written (#TBD)
+
+**Trigger.** The admin ran a privacy audit brief through ChatGPT and — correctly, per the
+external-suggestion rule — asked for it to be judged rather than obeyed. Most of it was inapplicable
+(it guessed at integrations we do not have, asked us to name AI providers in a way the white-label
+law forbids, and wanted an invented "compliance score /100"). One item was sharp and real, and one
+was fair.
+
+**THE REAL ONE — a promise that rested on someone else's dashboard.** Section 3.1, written hours
+earlier, says a user's name, email address and phone number are never shared with Meta. The allowlist
+does not deliver that on its own: **Meta's Automatic Advanced Matching** reads form fields on the page,
+hashes email/phone and attaches them to every event. It is a toggle in Events Manager, frequently ON
+by default for a new pixel, and it needs no code from us to start working. Our installer called a bare
+`fbq('init', pixelId)` — so the promise was true only for as long as a switch we do not control stayed
+off.
+
+That is the same class as the morning's finding, one layer down: a published statement whose truth was
+not enforced by anything we own.
+
+**Fix.** The boot sequence now sends `['set','autoConfig',false,pixelId]` **before** init, and
+`{ withAutoMatching: false }` on init as a second refusal. `autoConfig` also governs Meta's automatic
+event detection (inventing "events" from button text and page metadata), which is precisely the
+firehose `pixelEventFor`'s allowlist exists to prevent — so one call closes both.
+
+**Why it became a pure function.** `pixelBootSequence()` is extracted and exported because **the ORDER
+is the security property**: sent after init, advanced matching has already read the page. A pure,
+ordered value can be asserted; a side-effecting installer cannot. Verified to bite — moving the `set`
+after the `init` fails three assertions across two files.
+
+**THE FAIR ONE.** The Hosting bullet asserted "Singapore is not a jurisdiction restricted by the Indian
+government for such transfers as of the date above" — a legal conclusion about a government list that
+can change without us noticing, leaving the policy false with nothing to flag it. Replaced with what
+we actually control: "we transfer it only where permitted by applicable law." Test-locked so the
+specific version cannot come back.
+
+**WHERE THE SUGGESTION WAS WRONG, and following it would have hurt.** It called our Nav App Store
+sentence an unsafe absolute and proposed softer wording. Our line already reads "*nothing publishes
+without passing review — a failed or unavailable scan blocks publication rather than being skipped*",
+and the code genuinely is fail-closed. Its "safer" version would have understated a guarantee we
+actually keep. Recorded because it is the clearest example this month of why external advice is raw
+material, not instruction.
+
+**Still open (unchanged):** the Android SDK has **no consent gate** — it initialises on app start. The
+policy scopes the consent promise to the web, so nothing is false, but this is a genuine DPDP weakness
+and a decision the admin has not yet made. And the policy still awaits review by Indian privacy
+counsel.
+
+**Verified:** tsc frontend + server clean · audit + license gates clean · unused-imports clean ·
+`vitest run` **1430 files / 18,864 passed** · build green · bundle within budget · boot:check PASS.

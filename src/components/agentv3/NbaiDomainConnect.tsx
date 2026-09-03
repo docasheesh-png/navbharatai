@@ -204,6 +204,31 @@ export function connectStage(
    * plainly that waiting will not help, and names the one action that fixes it — which now genuinely
    * does, because "Check & apply records" removes the stale tokens (see applyRecords' TXT sweep).
    */
+  /**
+   * 🔒 MISMATCH IS THE SIBLING OF CONFLICT, AND IT WAS MISSED — the same wasted days, a different word.
+   *
+   * The branch below was written for `ownership: conflict` (more than one token). The hosting service
+   * also reports `ownership: MISMATCH` — a `hosting-site=` token that EXISTS but names a different
+   * site. It had no branch, so it fell straight through to "Waiting for your DNS records to spread
+   * across the internet", and the admin waited again (screenshot 2026-09-02, `mitrify.com`,
+   * `ownership: mismatch · host: active · SSL: active`).
+   *
+   * A wrong VALUE does not become right by waiting, any more than a duplicate does. And the same
+   * button fixes it, genuinely: `applyRecords`' TXT sweep adds the token the service is asking for and
+   * deletes every `hosting-site=` token that is not it — checked in cloudflareManagedDns.ts before
+   * this message was written, because pointing someone at a button that would not help is how the
+   * three days happened the first time.
+   */
+  if (/MISMATCH/i.test(s.ownershipState || '')) {
+    return {
+      headline: 'Your domain\'s ownership record points at a different app — waiting will not change it.',
+      action: 'check',
+      tone: 'warn',
+      note: 'The record is there, but it carries the wrong value — usually because this domain was '
+        + 'connected from another app before. A wrong value does not fix itself, however long you wait. '
+        + 'Tap “Check & apply records” above: we replace it with the right one and remove the wrong one.',
+    };
+  }
   if (/CONFLICT/i.test(s.ownershipState || '')) {
     return {
       headline: 'Your domain has more than one ownership record — waiting will not clear it.',
@@ -321,6 +346,20 @@ export function autoDnsSummary(input: {
   desired?: number | null;
   missing?: Array<{ type: string; name: string }> | null;
   zoneRecordCount?: number | null;
+  /**
+   * What the HOSTING SERVICE currently says about ownership (`OWNERSHIP_ACTIVE`, `…_MISMATCH`, …).
+   *
+   * 🔒 WHY THIS PARAMETER EXISTS. Without it this function claimed "Nothing left for you to do; your
+   * domain connects on its own from here" from `missing.length === 0` alone — and `missing` only means
+   * "the records we manage are present in the zone". It says nothing about whether the service has
+   * ACCEPTED them. The admin's screenshot showed both at once: every record in place, the green
+   * "nothing left to do", and `ownership: mismatch` printed two lines above it.
+   *
+   * A record existing in DNS is not the service accepting it. This file already learned that lesson in
+   * the other direction — the "Verified" badge below was computed from what the service was ASKING
+   * for, not from evidence the record existed. Same mistake, mirrored.
+   */
+  ownershipState?: string | null;
 }): { text: string; tone: 'ok' | 'warn' | 'info' } {
   if (input.zoneStatus !== 'active') {
     return {
@@ -340,6 +379,20 @@ export function autoDnsSummary(input: {
     };
   }
   if (input.missing.length === 0) {
+    const ownership = String(input.ownershipState ?? '');
+    const ownershipSettled = ownership === '' || /ACTIVE/i.test(ownership);
+    if (!ownershipSettled) {
+      // RECORDS IN PLACE ≠ THE SERVICE HAS ACCEPTED THEM. Claiming completion here is what put a
+      // green "nothing left to do" directly beneath a red `ownership: mismatch`. The records really
+      // are correct now, so this is not a failure — but the last word is the service's, not ours, and
+      // a wrong value that survives the re-check needs the button again rather than more patience.
+      return {
+        tone: 'info',
+        text: `Your records are in place. ${/MISMATCH|CONFLICT/i.test(ownership)
+          ? 'Your host still reports the ownership record as wrong — it re-checks on its own schedule, so give it a while. If it still says that in an hour, tap “Check & apply records” once more.'
+          : 'Your host has not confirmed ownership yet — it re-checks on its own schedule. Come back and tap Check in a little while.'}`,
+      };
+    }
     // THE CASE THAT USED TO READ AS FAILURE. Every record is in place; the only thing left is the
     // hosting service's own sweep, which is not ours to hurry — so say that, instead of a bare "0".
     return {
@@ -963,7 +1016,10 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                     {/* The line that used to say "0 records applied automatically" for BOTH complete
                         success and total failure. It now reports what is genuinely in the zone. */}
                     {(() => {
-                      const s = autoDnsSummary({ zoneStatus: autoZoneStatus, applied: autoApplied, desired: autoDesired, missing: autoMissing });
+                      // The host's own verdict travels WITH the record counts, so this line can never announce
+                      // completion while the service is still refusing the domain — the exact pairing in the
+                      // admin's screenshot: a green "nothing left to do" under a red `ownership: mismatch`.
+                      const s = autoDnsSummary({ zoneStatus: autoZoneStatus, applied: autoApplied, desired: autoDesired, missing: autoMissing, ownershipState: result?.ownershipState });
                       const tone = s.tone === 'ok' ? 'text-green-300' : s.tone === 'warn' ? 'text-amber-300' : 'text-zinc-400';
                       return <span className={`text-[10px] leading-relaxed ${tone}`}>{s.text}</span>;
                     })()}

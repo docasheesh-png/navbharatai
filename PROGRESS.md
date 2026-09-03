@@ -43692,3 +43692,60 @@ incident, where every user became 'anon'). One tap is not worth that.
 15 tests now cover the promise, the three security decisions, and the banner's two boundaries.
 
 Gate: both `tsc` clean; FULL suite **1432 files / 18867 tests green**. Display-only guard verified to bite.
+
+## 2026-09-02 — "ownership: mismatch" answered with "nothing left for you to do"
+
+Admin: *"website connect nahi ho rahi hai. Isko seriously theek karo."* — `mitrify.com` serving
+Firebase's **Site Not Found**, while the connect screen showed, at the same time:
+
+```
+ownership: mismatch · host: active · SSL: active
+Done — all 1 record are now in place (we added 2). Nothing left for you to do;
+your domain connects on its own from here.
+```
+
+A green completion claim printed two lines under a red refusal. **Two separate defects.**
+
+### 1 · Records in the zone is not the host accepting them
+
+`autoDnsSummary` claimed completion from **`missing.length === 0` alone** — and `missing` only means
+"the records WE manage are present in the zone". It says nothing about whether the hosting service has
+**accepted** them. It now takes `ownershipState`, and while ownership is unsettled it says the records
+are in place and the host has not confirmed yet, instead of announcing the domain is finished.
+
+This file had already learned the same lesson **mirrored**: the "Verified" badge was once computed from
+what the service was *asking for* rather than from evidence a record existed. Same confusion of two
+different facts, in the other direction.
+
+### 2 · `OWNERSHIP_MISMATCH` had no branch — and `CONFLICT` did
+
+The CONFLICT branch exists because the admin once lost **three days** to *"Waiting for your DNS records
+to spread across the internet"* on a state that could never resolve by waiting. Its own comment says
+it: *"Telling someone to wait for a thing that will never happen is the most expensive kind of
+dishonest message this codebase can produce: it is not a wrong label, it is wasted days."*
+
+**MISMATCH is its sibling** — a `hosting-site=` token that exists but names a **different site** — and
+it fell through to that very same message. The fix had been made for one word and the sibling was
+missed, which is precisely the "hunt the siblings" step of the fourth rule.
+
+It now says the value is wrong, that waiting will not change it, and points at **Check & apply
+records** — and that button genuinely fixes it: verified in `cloudflareManagedDns.ts` before the
+message was written that the sweep adds the wanted token and deletes every other `hosting-site=` one.
+Pointing someone at a button that would not help is how the three days happened the first time.
+
+### The admin's own domain, right now
+`host: active · SSL: active` means the DNS and certificate halves are already done. Only the ownership
+token is wrong — almost certainly because `mitrify.com` was connected from an earlier app, whose token
+is still there. **Tapping "Check & apply records" replaces it.** Before this change the screen told
+them there was nothing left to do.
+
+⚠️ Also seen in the screenshot and NOT fixed here: **"all 1 record are now in place (we added 2)"** —
+`desired` and `applied` are counting different things, and the sentence is ungrammatical for 1. Cosmetic
+beside a false completion claim, but it is a number that contradicts itself in the admin's primary
+diagnostic, so it is recorded rather than left unnoticed.
+
+8 tests; the completion guard verified to bite. One of them first failed on the new branch's **own doc
+comment**, which quotes the waiting message it replaced — the ordering assertion now scans code only,
+the same trap this session hit twice before.
+
+Gate: both `tsc` clean; FULL suite **1435 files / 18909 tests green**.

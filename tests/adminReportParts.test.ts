@@ -266,6 +266,35 @@ describe('wiring — the buttons genuinely use these helpers', () => {
   });
 });
 
+describe('the report modal header survives a mobile screen (admin 2026-09-03)', () => {
+  // Report: "header ke right side ke button mobile me show nahi hote, crop ho ja rahe hai" — the
+  // button row (part picker, Copy JSON, Download JSON, Mark fixed, Delete, Close) is wider than a
+  // phone screen, and the modal's own `overflow-hidden` (for its rounded corners) simply clipped
+  // whatever didn't fit, so Close was unreachable. The fix: cap the row's width below the modal's
+  // and let it scroll internally instead of being clipped by the parent.
+  const dash = read('src/components/AdminDashboard.tsx');
+  const rowAt = dash.indexOf('className="flex items-center gap-2 shrink-0 max-w-[68vw]');
+  // Wide enough to run past the row's own `</div>` and the "Close" button that ends it.
+  const header = dash.slice(rowAt, rowAt + 6200);
+
+  it('the button row is capped narrower than the modal AND scrolls, so it never relies on the clip', () => {
+    expect(rowAt).toBeGreaterThan(-1);
+    expect(header.slice(0, 90)).toMatch(/max-w-\[\d+vw\][^"]*overflow-x-auto/);
+  });
+
+  it('🔒 every item in the row refuses to shrink — a squished, wrapped button is not a fix', () => {
+    // Without this, the default flex-shrink would squeeze/wrap button text before the scrollbar
+    // ever kicks in — technically not clipped, but unreadable, which is the same failure in disguise.
+    for (const label of ['Copy JSON', 'Download JSON', 'Mark fixed', 'Delete', 'Close']) {
+      const at = header.indexOf(label);
+      expect(at, `${label} must be inside the scanned header window`).toBeGreaterThan(-1);
+      const tagStart = header.lastIndexOf('<button', at);
+      const classNameChunk = header.slice(tagStart, at);
+      expect(classNameChunk, `the ${label} button must not shrink`).toMatch(/shrink-0/);
+    }
+  });
+});
+
 describe('partsSummary tells the truth when the history could not be READ (admin 2026-08-27)', () => {
   it('a one-build record with an unreadable history no longer claims "Single build"', () => {
     const rec = { meta: { id: 'r' }, report: {}, session: { builds: [], count: 1, omittedBuilds: 0, historyUnreadable: true } };

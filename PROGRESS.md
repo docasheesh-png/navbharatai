@@ -43852,3 +43852,31 @@ foreign-token cleanup, live-serving verification, publish-to-domain on every bui
 traced against the code and confirmed real, not assumed.
 
 Gate: both `tsc` clean; FULL suite **1439 files / 18966 tests green**.
+
+## 2026-09-03 — admin build-report modal: the header buttons were cropped on mobile
+
+Report: *"header ke right side ke button mobile me show nahi hote, crop ho ja rahe hai. header ke
+button ko horizontal swip karne layak banwao!"*
+
+**Root cause.** The report-detail modal's header (`AdminDashboard.tsx`, the popup Copy JSON /
+Download JSON / Mark fixed / Delete / Close row) laid the title and the button group out with plain
+`flex justify-between`, and the button group carried `shrink-0` — so on a phone the row was wider
+than the screen, and the modal's own `overflow-hidden` (there for its rounded corners) simply clipped
+whatever button ran past the edge. `overflow-x-auto` on its own would not have fixed this: a flex
+child only becomes scrollable once something caps its width to less than its content — otherwise the
+box just grows to fit its content and overflows the parent instead.
+
+**Fix.** Capped the button row at `max-w-[68vw]` (lifted to `sm:max-w-none` once the screen is wide
+enough that the row already fits) and added `overflow-x-auto`, so the row now scrolls/swipes
+internally instead of relying on the parent's clip. Every item inside the row (part picker, Copy
+JSON, Download JSON, Mark fixed, Delete, Close, the "history unreadable" warning) got `shrink-0` (and
+`whitespace-nowrap` where relevant) too — without it, the browser's default flex-shrink would squeeze
+and wrap the button text before the scrollbar ever engaged, which is the same failure in a different
+shape.
+
+**Locked** in `tests/adminReportParts.test.ts` — a new describe block scans the live source for the
+width cap + `overflow-x-auto` pairing and for `shrink-0` on every button in the row. Verified to bite:
+reintroduced both halves of the original bug (dropped the cap; dropped `shrink-0` from Copy JSON) and
+confirmed the new tests fail with the expected message, then restored.
+
+Gate: both `tsc` clean; FULL suite **1439 files / 18968 tests green**.

@@ -782,6 +782,27 @@ describe('a model that can never answer is retired after ONE attempt (report faa
     expect(dead.runTurn).toHaveBeenCalledTimes(1);
   });
 
+  it('an ACCOUNT-level fatal still retires the WHOLE provider, every rung of the ladder', async () => {
+    // The inverse property, and the one that keeps the model-scoped key honest: a revoked key or an
+    // empty balance is not a fact about one model. If per-model retirement leaked into this class, a
+    // dead account would be re-proved once per rung — the exact re-grind the 2026-07-07 fix removed.
+    const rung1 = runnerFail('Your credit balance is too low');
+    const rung2 = runnerFail('Your credit balance is too low');
+    const backstop = runnerOk('from claude');
+    const runner = makeMultiProviderTurnRunner([
+      { name: 'KIMI', runner: rung1, modelId: 'kimi-k2.5' },
+      { name: 'KIMI', runner: rung2, modelId: 'kimi-k2.6' },
+      { name: 'CLAUDE', runner: backstop },
+    ]);
+    await runner.runTurn(PARAMS);
+    await runner.runTurn(PARAMS);
+    // Stronger than "not re-tried next turn": rung1's failure retires the bench name mid-chain, so its
+    // sibling is skipped inside the SAME turn and never called at all. Asserted at the real number
+    // because a guard that accepts either count would not notice per-model leakage into this class.
+    expect(rung1.runTurn).toHaveBeenCalledTimes(1);
+    expect(rung2.runTurn).toHaveBeenCalledTimes(0);
+  });
+
   it('a TRANSIENT failure is still retried — retirement is only for permanent answers', async () => {
     // The guard against over-reach: a 429 or a 5xx must never be mistaken for a dead rung, or a
     // momentarily-throttled cheap model would be lost for the whole build.

@@ -631,7 +631,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   here as an open item rather than left silent.
 
 - **Ad conversion measurement — Meta / Facebook + Instagram (added 2026-08-31, admin asked to run
-  "Download NavBharatAI" ads):** `META_PIXEL_ID` — the WEB pixel id, **NOT set yet**. Served to the
+  "Download NavBharatAI" ads):** `META_PIXEL_ID` — the WEB pixel id. ✅ **SET in Cloud Run by the admin
+  2026-09-03: `1836196930883481`** (the "navbharatai web" dataset in Events Manager — do not confuse
+  it with the separate Meta **App ID** `860811063666554` recorded above, which is the Android SDK's
+  id, a different credential entirely). Served to the
   browser at runtime by `GET /api/public-config` (`routes/health.ts`) and consumed by
   `src/lib/metaPixel.ts`. UNSET ⇒ the route answers `null` and the pixel never loads; a MALFORMED
   value is treated exactly like unset, so a typo disables measurement honestly instead of injecting

@@ -225,3 +225,39 @@ describe('summarizeProject', () => {
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// The EXACT change-set of report faa98da9 (2026-09-03): a "do not change any files yet" survey of an
+// imported repo, during which the engine provisioned `.env` and hardened `.gitignore` so the app
+// could boot. The 2026-08-04 fix covered `.env` alone, so this pair fell through to the alarming
+// branch and the user was told their files had been changed after asking that they not be.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+describe('engine setup files never read as "I changed your files" (report faa98da9)', () => {
+  const graph = { files: ['a.tsx'], components: ['A'], routes: ['/'], entry: 'a.tsx' } as never;
+
+  it('.env + .gitignore together are reported as setup, with the source called untouched', () => {
+    const out = summarizeProject(graph, 'survey it', {
+      changedFiles: 2, editMode: true, changedPaths: ['.env', '.gitignore'],
+    });
+    expect(out).toContain('Your source files are untouched');
+    expect(out).toContain('.env, .gitignore');
+    expect(out).not.toContain('I changed 2 files in your project');
+  });
+
+  it('.gitignore alone is setup too — it is written only because .env was', () => {
+    const out = summarizeProject(graph, 'survey it', {
+      changedFiles: 1, editMode: true, changedPaths: ['.gitignore'],
+    });
+    expect(out).toContain('Your source files are untouched');
+    expect(out).not.toContain('I changed 1 file in your project');
+  });
+
+  it('THE MIRROR-IMAGE GUARD: a real source edit is still reported as a real change', () => {
+    // The failure mode worse than the one being fixed — a genuine edit reported as "untouched".
+    const out = summarizeProject(graph, 'fix the header', {
+      changedFiles: 2, editMode: true, changedPaths: ['.gitignore', 'client/src/App.tsx'],
+    });
+    expect(out).toContain('I changed 2 files in your project');
+    expect(out).not.toContain('Your source files are untouched');
+  });
+});

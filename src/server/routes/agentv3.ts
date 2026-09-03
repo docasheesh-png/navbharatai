@@ -2098,7 +2098,13 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: b
           // + auto-shrink concurrency on 429/timeout. Keyed by the BASE provider name so all keys of one
           // provider share one bucket (global per-provider pacing). No-op passthrough when the flag is off.
           const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars), name);
-          runners.push(k === 0 ? { name, runner } : { name: `${name}#${k + 1}`, runner, reportAs: name });
+          // `modelId` rides along so a rung whose MODEL is unreachable on this account can be retired
+          // on its own (see deadKeyFor in MultiProviderTurnRunner). It must be the model this rung
+          // actually calls — every rung of a ladder shares one bench name, so the model id is the only
+          // thing that tells `kimi-k2.5` (dead) apart from `kimi-k2.6` (the rung that delivers).
+          runners.push(k === 0
+            ? { name, runner, modelId: model }
+            : { name: `${name}#${k + 1}`, runner, reportAs: name, modelId: model });
         } catch { /* misconfigured model/key rung — skip; the next rung / Claude still backstops */ }
       });
     }
@@ -13626,6 +13632,46 @@ async function noteBuildOutcome(
       // works but the recipe could not be stored, which the user is told plainly at the only moment it
       // is still actionable. `null` = no green preview happened, so there was nothing to promise.
       let previewRecipeSaved: boolean | null = null;
+      /**
+       * AN IMPORT'S PREVIEW MUST LAND BEFORE ANYTHING JUDGES IT (report faa98da9, 2026-09-03).
+       *
+       * ROOT CAUSE. A zip/GitHub import boots its dev server in the BACKGROUND so the model can work
+       * while npm installs — correct, and the whole point. But the promise was awaited only in the
+       * `finally` block, ~2,700 lines below, so every runtime check between here and there ran while
+       * the boot was still in flight and each one is gated on `lastPreviewUrl`. They did not lose a
+       * race; there was never a race to win. On the import path they could not fire AT ALL.
+       *
+       * What that cost in the report: the render check, route smoke, page check and journey all
+       * skipped; `RELEASE_GATE` returned UNKNOWN with the words "no live preview was ever
+       * available" — 7.5 seconds before `PREVIEW_PUBLISHED` recorded that address going live — and
+       * the recap told the user "The live preview didn't start automatically". Three false statements,
+       * one ordering mistake. The 2026-08-27 fix taught the gate to distinguish "never came up" from
+       * "we never checked"; it could not help here, because at the moment it was asked the honest
+       * answer was neither — the preview was still starting.
+       *
+       * ⚠️ THIS ADDS NO WALL-CLOCK. The identical bounded await already ran unconditionally in the
+       * `finally` before the response could end (Cloud Run throttles CPU after the stream closes, so
+       * the wait is not optional). The user was ALREADY paying for it — after the verdict instead of
+       * before it. Moving it here only decides whether the checks get to see what it produces; the
+       * `finally` await stays as the net for a build that throws before reaching this line, where it
+       * now resolves instantly on an already-settled promise.
+       */
+      if (importPreviewBoot) {
+        const bootWaitStartedAt = Date.now();
+        await raceTimeout(importPreviewBoot, 380_000, 'importPreviewBoot').catch(() => {});
+        // Say it out loud, so a slow import is never mistaken for a slow build (rule 5 — the report
+        // must tell the truth about its own timing, not only about the app's).
+        try {
+          const waitedMs = Date.now() - bootWaitStartedAt;
+          if (waitedMs >= 1_000) {
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'IMPORT_PREVIEW_BOOT_AWAITED',
+              message: `Waited ${Math.round(waitedMs / 1000)}s for the imported app's background dev-server boot to finish before running the runtime checks — so the page-render, journey and release-gate verdicts describe the app as it actually is, not as it looked while it was still starting.`,
+              autoResolved: true,
+            });
+          }
+        } catch { /* diagnostics are best-effort — never blocks a build */ }
+      }
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
         && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size })
@@ -16335,6 +16381,12 @@ async function noteBuildOutcome(
       // local Postgres + ~240s to install & boot the dev server. Even if this is cut off, the DB +
       // dev .env are already set up in the sandbox, so the Diagnose button (a manual re-boot)
       // succeeds afterwards.
+      //
+      // NOW A NET, NOT THE PRIMARY WAIT (report faa98da9, 2026-09-03). The main path awaits this same
+      // promise before the runtime checks, because when it was awaited ONLY here every preview-gated
+      // check on the import path was structurally unreachable — see IMPORT_PREVIEW_BOOT_AWAITED. This
+      // therefore resolves instantly on a normal build; it still matters for a build that threw or was
+      // aborted before reaching that point, which is exactly why it stays.
       if (importPreviewBoot) {
         await raceTimeout(importPreviewBoot, 380_000, 'importPreviewBoot').catch(() => {});
       }

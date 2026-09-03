@@ -25,6 +25,7 @@ import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
 import { frameworkRunsInBrowser } from '../../lib/frameworkDetect';
 import { inBrowserRefusal } from './inBrowserRefusal';
+import { shouldShowNotServingSurface } from './previewFraming';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { LIVE_SERVER_PAID_NOTE, LIVE_SERVER_PAID_TAG, isLiveServerNoticeDismissed, dismissLiveServerNotice } from '../../lib/liveServerNotice';
 
@@ -1341,7 +1342,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             The door normally prevents this from ever being reached, but it only takes over once the
             server has minted a link — and this is the one moment the raw address would otherwise be
             framed. Belt and braces, on the path that has burned the user three times. */}
-        {unreachable || (portDown && !diagnosing) || framingUnchecked ? (
+        {shouldShowNotServingSurface({ unreachable, portDown, diagnosing, hasDoorUrl: !!doorUrl, hasSnapshotUrl: !!idleSnapshotUrl, framingUnchecked }) ? (
           /**
            * THE URL IS NOT ANSWERING — so we do NOT frame it (admin report 2026-08-13, mitrify).
            *

@@ -23,9 +23,15 @@ This page explains how to ask us to delete your **NavBharatAI** account (Android
 
 ---
 
-## How to request deletion
+## The fastest way: delete it yourself, in the app
 
-**Email us from the address you signed up with:**
+Open **Settings**, scroll to the bottom to the red **Danger zone**, and choose **Delete account**. You will be asked to type the word *delete* to confirm — a single accidental tap can never delete an account. Deletion runs immediately and you are signed out.
+
+---
+
+## Or ask us to do it
+
+If you cannot reach the app — or you would rather we handled it — **email us from the address you signed up with:**
 
 **info@navbharatai.com**
 

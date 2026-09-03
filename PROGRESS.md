@@ -43482,3 +43482,331 @@ passed** · build green · bundle within budget · boot:check PASS.
 automated erase. The public page and the in-app copy both describe what IS removed rather than
 promising a total wipe, so nothing overstates — but closing this properly means extending
 `USER_SCOPED_COLLECTIONS`, and the page's drift test will then require the wording to grow with it.
+## 2026-09-01 — Apps were publishing themselves; publishing is now the user's decision
+
+Admin: *"jab ham koi app banwate hai, to bina kuch kiye automatic woh app publish on navbharatai ho
+jata hai — jab user publish kare tab hi ho."*
+
+**Confirmed from the build report they sent.** The user typed **"continue"**. The agent finished, then
+decided by itself — *"Build successful! Ab deploy karta hoon."* — `TOOL_CALL ▶ deploy` →
+`TOOL_DONE ✓ deploy (14s)` → the app went onto a permanent public URL. Nobody asked.
+
+**Root cause: consent was enforced by asking the model nicely.** The only thing between a private app
+and the open internet was a SENTENCE in the tool's own description — *"use when the user asks to
+deploy/publish/go live"* — and the model did not follow it. A prompt is guidance, not a gate. Same
+lesson as every other guard here that had to become structural after a comment failed to hold it.
+
+**Now it is a gate, and it DENIES by default** (`publishConsent.ts` + `ToolDispatcher._publishConsent`):
+- the **Publish button** grants it explicitly, immediately above its own dispatch so the two cannot drift;
+- a **build turn** grants it only when the user asked *in that message*;
+- a call site that forgets grants nothing, because the default is false;
+- a failure while deciding leaves it DENIED.
+
+**Why deny-by-default:** refusing someone who wanted their app live costs one sentence and the Publish
+button is right there. Allowing it wrongly puts unfinished work in public. Those are not comparable.
+
+**Consent is read from the CURRENT message only** — consent that carries forward is precisely how one
+"publish it" becomes an app that republishes on every later "continue".
+
+**Refused as a normal tool result, never a throw.** An error would read to the model as *this app
+cannot be published*, which is false and would reach the user as a failure. The truth is that nobody
+asked yet, so the message tells it to say the app is ready and point at the Publish button.
+
+⚠️ **A real bug my own test caught, worth remembering for every Hinglish pattern in this repo:** the
+first version ended the verb patterns with `\b` after `kar`, which matched "publish kar do" and
+**missed "publish karo"** — the most common way an Indian user asks — because "karo" is one word with
+no boundary inside it. Negations win over the ask (`abhi publish mat karna`, `deploy later`,
+`build it without deploying`), since publishing on a sentence that said *not* to would be worse than
+having no guard at all.
+
+`Deployment.test.ts`'s five deploy tests began failing and were RIGHT to: they exercise what deploy
+DOES once allowed, so the harness now grants consent exactly as the Publish route does — and three new
+tests assert the gate itself, including that an ungranted dispatcher never calls the deploy function
+and never leaks a URL.
+
+Gate: both `tsc` clean; FULL suite **1429 files / 18833 tests green**. Deny-by-default verified to bite.
+
+## 2026-09-01 — App Mart offered where it is earned; and the half of the ask that was refused
+
+Admin: *"koi user apni app publish on navbharatai kare, tabhi usko ek tick ✅ dikhe — post in app mart.
+Aur app mart me wahi app dikhe jo navbharatai par publish hai, ham host kar rahe hai. Isse loading
+jaldi ho?"*
+
+**Checked before building anything (safeguard #6) — most of this already exists.** `navStoreWeb.ts` is
+a complete, well-designed web-app store: publish = immutable snapshot, a key-scan gate that refuses a
+snapshot carrying a real-format secret with its file:line, a prover whose default answer is "no", and
+private apps gated server-side. The publish sheet already has a "Put it on App Mart" card.
+
+### Built — the tick
+
+The sheet's four paths (hosting, own domain, APK Builder, App Mart) are **siblings**, so App Mart sat
+beside the hosting card as one more option a user had to notice by themselves. The moment someone HAS
+just published is the moment showing it to people makes sense to them, so the prompt now appears then.
+
+Gated on **`liveUrl`** — the durable deployment record, the same signal the Unpublish control trusts,
+set only for a genuinely live app. It is a **prompt, not an automatic listing**: publishing your app
+and showing it to strangers are two different decisions, and the second stays the user's — the same
+principle as the publish-consent gate shipped the same day. The card still works **without** a live
+URL, because App Mart never required hosting and must not start to.
+
+### ⚠️ REFUSED, with reasons — "App Mart me sirf hosted apps dikhein"
+
+It would not be faster, and it would cost real capacity.
+
+**The store does not serve the hosted copy at all.** It runs an immutable snapshot in each viewer's
+OWN browser — `navStoreWeb.ts`: *"the viewer brings their own CPU, so 1 viewer or 10,000 cost us the
+same"*. So requiring a NavBharatAI publish first would make **every** store app consume a Firebase
+Hosting channel — and channels are finite per site (CLAUDE.md scale plan §3, tracked by the Publish
+Capacity panel, with ROADMAP §10.3 as the eventual fix) — **for a copy nobody ever reads.**
+
+The speed the admin wanted is already how it works. The honest framing given back: the store's LISTING
+was never the slow part (`listApps('approved', 100)` is metadata); the slow part in the **APK** store is
+getting to USE an app — a 5–50 MB download, an "unknown sources" warning and an install, Android-only.
+The web path is a tap. That is the win, and it is already built.
+
+### Recommended instead (not built — admin's call)
+
+Keep APKs, but as an **action on a listed web app** ("Download as Android app", via the existing APK
+Builder) rather than as an upload path. One pipeline, and the APK is built from code we hosted instead
+of a stranger's binary — which also removes the open licensing item in CLAUDE.md, where the FREE
+VirusTotal API is used to scan uploads in what is a commercial product.
+
+Gate: both `tsc` clean; FULL suite **1430 files / 18840 tests green**.
+
+## 2026-09-02 — Cloudflare 525 on a connected domain: we knew the answer and did not say it
+
+Admin connected their own domain, deployed, and got Cloudflare's **error 525 "SSL handshake failed"**
+— browser ✅, Cloudflare ✅, host ❌.
+
+**The cause is documented in our own code.** `cloudflareManagedDns.ts` header: *"Records are written
+PROXIED OFF (grey cloud). Firebase must see its own A records directly to validate ownership and issue
+the certificate; proxying through Cloudflare would break the attach. **This is a correctness
+constraint, not a style choice.**"* A 525 is only ever emitted by Cloudflare's EDGE, so seeing one
+proves the record is on the **orange cloud** — and while it is, the certificate can never be issued,
+so the connection can never succeed.
+
+**Why the user was stranded:** `checkDomainServing` recognises Firebase's empty-site page as its own
+state (`nothing_published`) but had nothing for Cloudflare. A 525 fell into the generic bucket and
+reported *"answered with an error (HTTP 525)"* — true, useless, and it left the user on Cloudflare's
+page being told to check *"the SSL configuration used"*, which means nothing to someone who did not
+know they had one. **The system knew the answer and did not say it** — the honesty half of the fifth
+rule.
+
+### Fixed
+- New serving state **`proxy_blocked`**, from `isCloudflareOriginError` (521–526). Cloudflare-only
+  codes, so matching the status alone cannot mislabel a user's own error page.
+- An actionable note instead of a status: names the **orange cloud**, the exact path
+  (Cloudflare → DNS → Records), what to click, and that the certificate then arrives by itself within
+  a few hours. It ends with **"Nothing about your app is broken"** — because it is not, and a message
+  implying otherwise sends someone rebuilding a working app.
+- It deliberately does **not** repeat Cloudflare's own advice about cipher suites and SSL
+  configuration; a test asserts that wording never appears.
+- ⚠️ **`canClaimLive` now excludes it.** Without that, adding the state would have made a 525 domain
+  claim **"Live"** — the exact fake success that function exists to prevent, with the user staring at
+  an error page while we said it was fine. `unknown` still does not withdraw the claim, because that
+  means OUR check failed and downgrading a working domain for that is the same dishonesty reversed.
+
+12 tests, including the admin's exact 525 and every neighbouring status that must NOT match.
+
+Gate: both `tsc` clean; FULL suite **1431 files / 18852 tests green**.
+
+### For the admin — the 30-second fix on the live domain
+Cloudflare → DNS → Records → click the **orange cloud** next to the domain so it turns **grey (DNS
+only)**. The certificate is normally issued within a few hours and the site starts working by itself.
+The proxy can be turned back on later, but only once HTTPS works, and then SSL/TLS mode must be
+**Full (strict)**.
+
+⚠️ Note for this domain specifically: CLAUDE.md records that `mitrify.xyz`'s branded-preview proxy VM
+(`e2b-custom-domain-proxy`) was **deleted for cost on 2026-08-02**. If any A record still points at
+that VM's old address, it must be removed as well — a record aimed at a released IP is its own failure
+and would survive fixing the orange cloud.
+
+## 2026-09-02 — Account switching: nothing was broken, the PROMISE was
+
+Admin: *"2 account login theek se nahi chal rahe — 2nd account add karo, wapas 1st par jao to login
+manta hai. Ya to fix kar do, ya hata do, ek single login hi rahne do."*
+
+**Investigated before changing anything, and the re-auth is correct, deliberate and documented:**
+
+- `accountRoster.ts` stores metadata and **never a token** — a refresh token in localStorage is a
+  permanent account takeover for anyone who reaches that storage (an XSS, a shared machine, an
+  extension). Not tradeable for one saved tap.
+- The **Firebase SDK holds ONE live session per app instance**, so a switch must re-authenticate. The
+  roster's own header says exactly this, and even warns *"the UI must not overstate it"*.
+- The Google path deliberately keeps `prompt: 'select_account'` because *"a login_hint alone can
+  silently sign them straight back into the WRONG account when only one session is live"* — in an app
+  with wallets, that is not a trade worth making for one tap.
+
+**Then the menu said "Switch account" and "Add account" — Gmail's exact words for a mechanism that DOES
+hold sessions live at once.** The user was promised Gmail and handed a re-auth, so a correct design
+read as a bug. The mechanism is right; **the promise was wrong**, and the header had predicted it.
+
+**Fix: one honest line in the menu** — *"Switching signs you in again — one tap with Google, your
+password for email accounts."* The two cases are stated separately because they genuinely differ: with
+Google the provider session is usually live, so it is a tap; an email/password account has no provider
+session to lean on and the password is genuinely required. Saying "one tap" for both would be the same
+overstatement in smaller print. Same tap as before — no longer a surprise.
+
+7 tests pin the promise AND the three security decisions behind it, including a real check that
+nothing token-shaped ever reaches the stored roster.
+
+### What was deliberately NOT done
+**True simultaneous sessions** are possible in principle (a separate named Firebase app per account),
+but every authenticated call in the codebase resolves ONE `auth` from `lib/firebase` — including the
+wallet, billing and build paths. Rewiring them all to a switchable instance risks one missed call site
+using the **wrong account's token on a money path**, which is far worse than an extra tap. Not
+attempted, and not recommended without a specific reason to take that risk.
+
+**Removal remains a small, safe option** if the admin prefers it: the roster is metadata-only, so
+deleting the menu loses nothing but the menu. Offered rather than assumed.
+
+Gate: both `tsc` clean; FULL suite **1432 files / 18859 tests green**.
+
+### 2026-09-02 (cont.) — the third way, completed: the switch screen now knows who it was asked for
+
+The honest line in the menu was half of it. The other half was what happened AFTER the tap: the switch
+opened the ordinary sign-in screen — the same one a stranger sees. Someone who had just pointed at
+their own face and email landed on **"Sign in"**, every method offered as if we had never met them,
+and reasonably concluded the switch had failed. Nothing about the flow was wrong; it forgot, one
+screen later, what it had just been told.
+
+Now the screen says it: **"Switching to a@gmail.com — continue with Google below."** The provider
+travels with the email hint (`SIGN_IN_PROVIDER_KEY`), written and cleared **together** with it so a
+provider left over from an earlier switch can never name the wrong method on the next one.
+
+**Two things it deliberately does NOT do, both test-locked:**
+
+- **It does not consume the email hint.** `handleGoogleSignIn` removes that key when it passes it to
+  Google as a `login_hint`; reading it for the banner as well would clear it first and quietly put the
+  account chooser back to a full list — the display competing with the use of one key.
+- **It does not auto-launch the provider.** Firing the popup from an effect loses the click's user
+  gesture and browsers block it; a blocked popup is worse than the tap it saves. The fix is to make
+  the right button obvious, not to press it for the user.
+
+**Why the sign-in flow itself was not touched:** calling the Google path directly from the menu (which
+would genuinely remove a tap) means extracting ~200 lines tangled with force-logout, native-vs-web
+branching, the Capacitor plugin and popup/redirect strategy — out of the most dangerous surface in the
+app, one CLAUDE.md records as having silently broken every login before (the `FIREBASE_PROJECT_ID`
+incident, where every user became 'anon'). One tap is not worth that.
+
+15 tests now cover the promise, the three security decisions, and the banner's two boundaries.
+
+Gate: both `tsc` clean; FULL suite **1432 files / 18867 tests green**. Display-only guard verified to bite.
+
+## 2026-09-02 — "ownership: mismatch" answered with "nothing left for you to do"
+
+Admin: *"website connect nahi ho rahi hai. Isko seriously theek karo."* — `mitrify.com` serving
+Firebase's **Site Not Found**, while the connect screen showed, at the same time:
+
+```
+ownership: mismatch · host: active · SSL: active
+Done — all 1 record are now in place (we added 2). Nothing left for you to do;
+your domain connects on its own from here.
+```
+
+A green completion claim printed two lines under a red refusal. **Two separate defects.**
+
+### 1 · Records in the zone is not the host accepting them
+
+`autoDnsSummary` claimed completion from **`missing.length === 0` alone** — and `missing` only means
+"the records WE manage are present in the zone". It says nothing about whether the hosting service has
+**accepted** them. It now takes `ownershipState`, and while ownership is unsettled it says the records
+are in place and the host has not confirmed yet, instead of announcing the domain is finished.
+
+This file had already learned the same lesson **mirrored**: the "Verified" badge was once computed from
+what the service was *asking for* rather than from evidence a record existed. Same confusion of two
+different facts, in the other direction.
+
+### 2 · `OWNERSHIP_MISMATCH` had no branch — and `CONFLICT` did
+
+The CONFLICT branch exists because the admin once lost **three days** to *"Waiting for your DNS records
+to spread across the internet"* on a state that could never resolve by waiting. Its own comment says
+it: *"Telling someone to wait for a thing that will never happen is the most expensive kind of
+dishonest message this codebase can produce: it is not a wrong label, it is wasted days."*
+
+**MISMATCH is its sibling** — a `hosting-site=` token that exists but names a **different site** — and
+it fell through to that very same message. The fix had been made for one word and the sibling was
+missed, which is precisely the "hunt the siblings" step of the fourth rule.
+
+It now says the value is wrong, that waiting will not change it, and points at **Check & apply
+records** — and that button genuinely fixes it: verified in `cloudflareManagedDns.ts` before the
+message was written that the sweep adds the wanted token and deletes every other `hosting-site=` one.
+Pointing someone at a button that would not help is how the three days happened the first time.
+
+### The admin's own domain, right now
+`host: active · SSL: active` means the DNS and certificate halves are already done. Only the ownership
+token is wrong — almost certainly because `mitrify.com` was connected from an earlier app, whose token
+is still there. **Tapping "Check & apply records" replaces it.** Before this change the screen told
+them there was nothing left to do.
+
+⚠️ Also seen in the screenshot and NOT fixed here: **"all 1 record are now in place (we added 2)"** —
+`desired` and `applied` are counting different things, and the sentence is ungrammatical for 1. Cosmetic
+beside a false completion claim, but it is a number that contradicts itself in the admin's primary
+diagnostic, so it is recorded rather than left unnoticed.
+
+8 tests; the completion guard verified to bite. One of them first failed on the new branch's **own doc
+comment**, which quotes the waiting message it replaced — the ordering assertion now scans code only,
+the same trap this session hit twice before.
+
+Gate: both `tsc` clean; FULL suite **1435 files / 18909 tests green**.
+
+## 2026-09-02 — FULL AUDIT: can NavBharatAI genuinely connect a domain and host a real website?
+
+Admin: *"0 se scan kar ke audit karo — kya ham sach me app domain se connect kar ke real website host
+kar bhi sakte hai, ya nahi?"*
+
+**Answer: YES. The capability is genuinely built, and the architecture is right.** Every link traced
+against the code, not assumed:
+
+| Link | Verdict | Evidence |
+|---|---|---|
+| Firebase API | ✅ modern | `projects/*/sites/*/customDomains` v1beta1, verified against Google's own discovery doc — **not** the deprecated `sites/*/domains` |
+| A dedicated Hosting site per domain | ✅ | `siteIdForWorkspace()` → `nbai-<hash>` |
+| Deployed to the **LIVE** channel | ✅ | `deployToSite` → `sites/{id}/releases` (no channel segment) |
+| Domain and deploy target the **same** site | ✅ | both resolve through `ensureSite`/`siteIdForWorkspace` |
+| The live deploy actually RUNS when a domain is connected | ✅ | `customDomainPublish` → `deployToSite`, with one retry on retryable errors |
+| Managed DNS (one nameserver change, we write the rest) | ✅ | `cloudflareManagedDns.ts`, records written **DNS-only** |
+| Stale/wrong ownership tokens removed | ✅ | TXT sweep deletes every `hosting-site=` that is not the wanted one, and touches nothing else (SPF/DKIM safe) |
+| Firebase's own failure reasons surfaced | ✅ | `issues[]` + `cert.issues` merged and rendered |
+| Records for manual setup | ✅ | `requiredDnsUpdates` **and** the ACME `cert.verification.dns` challenge |
+
+**THE ONE THING WORTH KNOWING** — and it is right, not a bug: a custom domain **cannot** attach to a
+preview channel. The ordinary publish goes to a preview channel; a domain-connected workspace gets a
+dedicated site released to LIVE. `Deployment.ts` says so in the code, and both paths derive the site id
+from the same function, so they cannot drift apart. Had that not been true, every custom domain would
+have served Firebase's "Site Not Found" forever — which is exactly what the admin's first screenshot
+looked like, and why it was checked first.
+
+**So what was actually broken was never the hosting. It was the REPORTING** — and that is what the two
+fixes above address.
+
+### Rock-solid pass on today's own fix
+
+The MISMATCH branch I added earlier today **broke this file's own rule.** `firebaseCustomDomain.ts`
+states it, written after `ownership: missing` once reached the admin as a single unexplained word:
+
+> *"Never diagnose from a status enum when the API also shipped the reason."*
+
+My branch read the enum and **asserted** a cause — "connected from another app before". That is the
+likeliest cause; it is not evidence. Firebase ships `issues[]` explaining exactly why a domain is
+stuck, and it outranks anything we infer.
+
+Now both MISMATCH and CONFLICT lead with **Firebase's own sentence** when it sent one
+(`hostingReason()`), and fall back to our explanation only when it did not. `hostingReason` uses the
+**first** reason only (a stack of provider messages in a user-facing note turns a real explanation into
+noise), collapses newlines (these arrive multi-line from `google.rpc.Status`), caps at 220 chars, and
+does not double a punctuation mark the message already has.
+
+**The tests are now behavioural, not textual.** They call `connectStage` and `hostingReason` directly
+and assert the produced note — the earlier ones only grepped the source, which proves shape and not
+behaviour. 18 tests; verified to bite by dropping `hostingReason` from the branch again.
+
+Gate: both `tsc` clean; FULL suite **1439 files / 18956 tests green**.
+
+### Still open, honestly
+- **`"all 1 record are now in place (we added 2)"`** — `desired` and `applied` count different things
+  and the sentence is ungrammatical at 1. A self-contradicting number in the admin's primary
+  diagnostic; not fixed today.
+- **Firebase may send no `issues[]` for MISMATCH** (none was visible in the admin's screenshot), in
+  which case our inferred sentence is all the user gets. It is labelled as the likely cause rather
+  than stated as fact, which is the honest limit of what we know from an enum.

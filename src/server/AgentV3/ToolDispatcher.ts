@@ -318,6 +318,7 @@ import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { lintDesign, designSummary } from '../AppMakerLab/intelligence/DesignLinter';
 import { publishableVerdict, entryPagesOf } from './publishablePayload';
 import { detectServerNeed } from './staticPublishGuard';
+import { PUBLISH_NOT_REQUESTED } from './publishConsent';
 import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
@@ -442,6 +443,16 @@ const MAX_SUMMARY = 200;
  * fake success), so the model can see and recover from it.
  */
 export class ToolDispatcher {
+  /**
+   * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
+   * Not a constructor parameter on purpose: the constructor is already 14 positional arguments deep,
+   * and a 15th optional boolean is exactly the kind of thing a later call site gets wrong by silence.
+   */
+  private _publishConsent = false;
+
+  /** Grant permission to publish for this dispatcher's lifetime (one turn). */
+  setPublishConsent(granted: boolean): void { this._publishConsent = granted === true; }
+
   constructor(
     private readonly actuator: ActuatorPort,
     private readonly workspaceId: string,
@@ -7740,6 +7751,23 @@ export class ToolDispatcher {
       }
 
       case 'deploy': {
+        // PUBLISHING IS THE USER'S DECISION (admin 2026-09-01).
+        //
+        // A user typed "continue". The build finished and the agent decided by itself — "Build
+        // successful! Ab deploy karta hoon." — and their app went onto a public URL. The only thing
+        // between a private app and the open internet was a SENTENCE in this tool's description
+        // ("use when the user asks to deploy/publish/go live"), and the model did not follow it. A
+        // permission enforced by asking the model nicely is not a permission.
+        //
+        // So it is a gate now, and it DENIES by default: the composition root grants it only for the
+        // explicit Publish button or a turn where the user actually asked. The asymmetry is what sets
+        // that default — refusing someone who wanted it live costs one sentence and the button is
+        // right there, while allowing it wrongly puts unfinished work in public.
+        //
+        // Refused as a normal tool result, not a throw: the model should RELAY this ("your app is
+        // ready, press Publish"), and an error would read to it as the app being unfit to publish.
+        if (!this._publishConsent) return PUBLISH_NOT_REQUESTED;
+
         // A DEPLOY THAT DID NOT DEPLOY MUST NOT REPORT SUCCESS (autopsy build aed2906d, 2026-08-09).
         //
         // Every branch below used to RETURN a sentence. A returned string is a SUCCESSFUL tool result, so

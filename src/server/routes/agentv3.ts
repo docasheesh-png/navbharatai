@@ -168,6 +168,7 @@ import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, 
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
 import { languageInstruction } from '../AgentV3/IndicLanguage';
+import { decidePublishConsent } from '../AgentV3/publishConsent';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
@@ -6516,6 +6517,10 @@ async function noteBuildOutcome(
         actuator, workspaceId, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
         makeDeployFn({ userId, githubToken, providerId, onDomainOutcome: (o) => { domainOutcome = o; } }),
       );
+      // THE USER PRESSED PUBLISH — that is the consent, and it is granted explicitly (2026-09-01).
+      // `deploy` denies by default now, so this line is what keeps the button working; without it the
+      // button would silently stop publishing, which is why it sits directly above the dispatch.
+      dispatcher.setPublishConsent(true);
       const result = await dispatcher.dispatch({ id: 'publish', name: 'deploy', input: {} });
       if (result.is_error) {
         res.status(422).json({ error: result.content });
@@ -10521,6 +10526,22 @@ async function noteBuildOutcome(
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
         (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
+      // PUBLISHING NEEDS AN ASK (admin 2026-09-01). On a build turn the agent used to decide for
+      // itself — a user typed "continue", the build finished, and their app went live on a public URL
+      // with nobody having requested it. Consent is read from THIS message only: consent that carries
+      // forward is how one "publish it" becomes an app that republishes on every later "continue".
+      // Denied is the default inside the dispatcher, so a path that forgets this line cannot publish.
+      try {
+        const consent = decidePublishConsent(prompt);
+        dispatcher.setPublishConsent(consent.consent === 'granted');
+        if (consent.consent === 'granted') {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'PUBLISH_REQUESTED',
+            message: 'The user asked for this app to be published in their message, so the deploy tool is enabled for this turn.',
+            autoResolved: true,
+          });
+        }
+      } catch { /* a consent failure must leave it DENIED, which is what the default already is */ }
       // "made by NavBharatAI" signature: default ON, off only when the user toggled it off in
       // Settings → General. The dispatcher bakes the badge into index.html on preview publish.
       dispatcher.setSignatureEnabled(appSignatureEnabled);

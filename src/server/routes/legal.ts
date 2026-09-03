@@ -15,6 +15,7 @@
 
 import type { Express, Request, Response } from 'express';
 import { renderLegalPageHtml } from '../lib/legalMarkdown';
+import { ACCOUNT_DELETION, ACCOUNT_DELETION_TITLE, ACCOUNT_DELETION_UPDATED } from '../../content/legal/accountDeletion';
 
 /** Public URL path → the legal registry id it serves. */
 export const PUBLIC_LEGAL_ROUTES: Readonly<Record<string, string>> = {
@@ -22,7 +23,23 @@ export const PUBLIC_LEGAL_ROUTES: Readonly<Record<string, string>> = {
   '/terms': 'legal_terms',
 };
 
+/**
+ * Account & data deletion — the URL Google Play requires from any app that lets people create an
+ * account. Served from its own module rather than the five-document registry: Play wants a short,
+ * prominently actionable set of STEPS, and the registry's documents are long-form by contract.
+ */
+export const DELETE_ACCOUNT_PATH = '/delete-account';
+
 export function registerLegalRoutes(app: Express): void {
+  app.get(DELETE_ACCOUNT_PATH, (_req: Request, res: Response) => {
+    res.set('Cache-Control', 'public, max-age=600');
+    res.type('html').send(renderLegalPageHtml({
+      title: ACCOUNT_DELETION_TITLE,
+      updated: ACCOUNT_DELETION_UPDATED,
+      body: ACCOUNT_DELETION,
+    }));
+  });
+
   for (const [path, docId] of Object.entries(PUBLIC_LEGAL_ROUTES)) {
     app.get(path, async (_req: Request, res: Response) => {
       try {

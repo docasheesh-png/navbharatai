@@ -16,21 +16,19 @@
 import type { Express, Request, Response } from 'express';
 import { renderLegalPageHtml } from '../lib/legalMarkdown';
 import { ACCOUNT_DELETION, ACCOUNT_DELETION_TITLE, ACCOUNT_DELETION_UPDATED } from '../../content/legal/accountDeletion';
+import { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, LEGAL_PATH_ALIASES } from '../lib/legalPaths';
 
-/** Public URL path → the legal registry id it serves. */
-export const PUBLIC_LEGAL_ROUTES: Readonly<Record<string, string>> = {
-  '/privacy': 'legal_privacy',
-  '/terms': 'legal_terms',
-};
-
-/**
- * Account & data deletion — the URL Google Play requires from any app that lets people create an
- * account. Served from its own module rather than the five-document registry: Play wants a short,
- * prominently actionable set of STEPS, and the registry's documents are long-form by contract.
- */
-export const DELETE_ACCOUNT_PATH = '/delete-account';
+// Re-exported so existing importers (and the tests that pin these paths) keep one import site.
+export { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, LEGAL_PATH_ALIASES } from '../lib/legalPaths';
 
 export function registerLegalRoutes(app: Express): void {
+  // Aliases first: a permanent redirect to the canonical path, which the handlers below serve.
+  for (const [alias, canonical] of Object.entries(LEGAL_PATH_ALIASES)) {
+    app.get(alias, (_req: Request, res: Response) => {
+      res.redirect(301, canonical);
+    });
+  }
+
   app.get(DELETE_ACCOUNT_PATH, (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=600');
     res.type('html').send(renderLegalPageHtml({

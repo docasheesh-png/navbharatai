@@ -44064,3 +44064,175 @@ Both `tsc` clean; FULL suite **1443 files / 19006 tests green**. Both guards ver
 **not** restore it — the file was still untracked, so the neutered version survived and the next gate
 would have been green against broken code. Caught by re-reading the file rather than trusting the
 restore. **An untracked file has no version to check out; verify the restore, don't assume it.**
+
+---
+
+## 2026-09-04 (later) — Solution #1 "stop the model writing boilerplate": mostly ALREADY BUILT, so the gap got built instead
+
+**The admin approved solution #1** from the 12 I proposed (stop paying a model to write boilerplate).
+Investigating before writing code — safeguard #6 — showed **most of it already exists**, and saying so
+is worth more than looking busy:
+
+- `ViteReactProviderContents` already ships `package.json`, `vite.config.ts`, all three tsconfigs,
+  `index.html`, `main.tsx`, `ErrorBoundary.tsx` and `index.css` **deterministically**.
+- `goldenScaffolds/` holds 20+ compile-tested starter apps that pre-seed a matching prompt.
+- `ScaffoldGuard` blocks `create-*` generators; `scaffoldBoilerplate` restores a broken ErrorBoundary;
+  `protectBoilerplateInRepair` stops a repair pass landing a change to it; SimpleBuilder drops these
+  paths from the parsed manifest.
+
+**So the honest answer to "build #1" is: it is built.** The remaining gap is not more scaffolding —
+it is that **the guard protecting the scaffolds swept 2 of the 25 providers the registry serves.**
+
+### Why that gap is the dangerous one
+
+The 2026-08-23 "Make an VPN App" build: `ViteReactProvider`'s package.json ran `tsc -p
+tsconfig.build.json`, the module EXPORTED that config and never wrote it, so `npm run build` died with
+TS5058 on **every app that provider had ever made**. The builder then "repaired" it by copying a
+different config — **96,610 characters** of fresh type errors on an app whose preview was already
+rendering. An 18-minute avalanche from a one-line omission.
+
+**Nothing caught it because `npm run dev` never reads those files.** It is invisible in every preview
+and appears only at publish — the "worst kind of green". `scaffoldScriptsResolve.test.ts` was written
+that day and covered the provider it happened in. **The other 24 had no such guard**, and the identical
+mistake in any of them would have reached users unseen.
+
+### Shipped
+
+- **The sweep now reads `TemplateRegistry` itself** instead of a hand-written list, so a provider added
+  tomorrow is covered the day it lands. 6 tests → **106**.
+- **Three sibling doors to the same failure**, all checked per provider: a tsconfig that `extends` a
+  file we do not write (TS5083), an `index.html` whose entry `<script src>` is missing (blank page in
+  dev AND in the built app), and a `package.json` `main`/`module` pointing nowhere.
+- **A false positive fixed before it could do harm.** Widening the sweep made it report a missing file
+  called **"3000"** — the static scaffold serves with `… -p 3000`, and `-p` is not a tsc-only flag. The
+  matcher now only looks inside commands that actually run `tsc`. This mattered more than a stray
+  failure: *the first thing anyone does with a guard that cries wolf is weaken it*, which is precisely
+  how the real bug would get back in.
+
+### Honest scope
+**All 25 scaffolds pass today — this is prevention, not a bug fix.** No user-visible defect was found or
+repaired. What changed is that the class can no longer be reintroduced unnoticed. Proven, not assumed:
+reintroducing the exact 2026-08-23 bug into `node-express` — a provider that was previously **unswept** —
+now fails the suite; before this change it passed.
+
+### ⚠️ A process lesson, learned twice in one session in OPPOSITE directions
+Verifying "does this guard bite?" means temporarily breaking the code, and **`git checkout` is the wrong
+way back both times**:
+- an **untracked** file (`partialReview.ts`): checkout does nothing, so the *broken* version survives and
+  the next gate goes green against it;
+- a **tracked** file (`scaffoldScriptsResolve.test.ts`): checkout reverts **everything**, silently
+  discarding the session's work on that file — which is what happened here, and the whole extension had
+  to be rewritten.
+
+**Back up to the scratchpad before the temporary break, and restore from that backup.** Then re-run the
+suite and confirm the count is what it was.
+
+Gate: both `tsc` clean; FULL suite **1444 files / 19112 tests green**. Both guards verified to bite.
+
+---
+
+## 2026-09-04 (later still) — an import's quiet minutes now have names
+
+**Priority 2 (fast), and it began as an investigation rather than a fix.** My own faa98da9 autopsy
+recorded, and did not touch, a struggle point: **113s before the first model call, 85s of it the GitHub
+import**, with a **40-second stretch where nothing at all was recorded**.
+
+### What the investigation actually found — including two dead ends worth recording
+
+Chasing the 71s between `IMPORT_LANDING` and `IMPORT_DIAGNOSTIC`, the obvious suspects were already
+fixed, and finding that out is the useful part:
+
+- **`materializeAssets` is already pooled.** The mitrify autopsy of 2026-08-04 measured this exact
+  thing — 129 assets + 22 large images as ~151 sequential round-trips, 100s of a 624s build — and fixed
+  it. Its comment calls it "the FOURTH instance of one bug class in this repo — serial awaits over a
+  network".
+- **The durable Firestore merge** is named in that same comment as already fixed.
+
+So the cause is NOT the obvious one, and I could not reproduce a real GitHub import from here to find
+it. **Guessing at an optimisation on the import path would risk the one absolute rule for a saving I
+cannot demonstrate**, so I built the thing that makes the next report answer the question instead.
+
+### The real gap: the mechanism existed and this path never called it
+
+`BuildDiagnostics.enterPhase()/exitPhase()` records `⏳ <name> took Ns` and — the half that matters to
+users — supplies the HEARTBEAT's label. Every PREVIEW stretch uses it, which is why that report could
+say *"creating the database tables took 50s"* and *"installing dependencies and starting your app took
+28s"*.
+
+**The import's own stretches never entered a phase.** Hence the 40-second hole, and hence minute 1's
+heartbeat reading *"⏱ minute 1 — still working (last: 🔗 Connected to https://github.com/…)"* — a
+stale echo, because the heartbeat had no active phase to name.
+
+Three stretches are now named: **importing your project's files**, **adding your project's images and
+fonts**, **saving your project so it survives a restart**.
+
+### Why this is safe by construction
+Purely additive: every call is optional-chained, wrapped in try/catch, and closed in a `finally` so a
+throwing import still releases its label — and `enterPhase` supersedes an unclosed phase by design, so
+even a missed exit cannot strand one. A diagnostics slip must never turn a reporting improvement into
+an import failure; that would be a worse bug than the one being fixed.
+
+### What it buys
+- the ADMIN report gets `⏳ … took Ns` lines for the import, so the next person chasing a slow import
+  **reads** the answer instead of guessing at a gap;
+- the USER stops seeing a stale narration echoed for a minute, and sees what is actually happening.
+
+**Honest scope: this does not make the import faster. It makes the next report able to say why it is
+slow** — which is the precondition for fixing it without guessing.
+
+### Method note (admin instruction, 2026-09-04)
+The admin asked that source code never be broken to prove a guard bites. Adopted, and it costs nothing:
+a guard is proven with **fabricated bad input inside the test** (as `scaffoldScriptsResolve` already
+did) rather than by mutating a real file. Same proof, no risk, and none of the `git checkout` hazards
+recorded above.
+
+Gate: both `tsc` clean; FULL suite **1445 files / 19120 tests green**.
+
+---
+
+## 2026-09-04 (cont.) — the FIFTH instance of a bug class this repo had declared closed
+
+**Found while investigating the import's 71s, and worth more than the investigation itself.**
+
+`materializeAssets` closed the "serial awaits over a network" class on 2026-08-04. Its comment names
+the four instances found by then — the sandbox landing (a 648s incident), the Firestore merge,
+`collectWorkspaceFiles` (a 13-minute per-turn stall), and the asset writes — and says: *"same fix, same
+shared helper, so the class is closed here rather than patched again."*
+
+**It was not closed.** `landImportedProject` still wrote `sandboxOnly` files in a serial awaited loop,
+**ten lines above** one of the four it fixed:
+
+```ts
+for (const [p, c] of Object.entries(opts.sandboxOnly ?? {})) {
+  try { await actuator.writeFile(workspaceId, p, c); } catch { /* … */ }
+}
+```
+
+**Small today, and that is exactly the point.** `sandboxOnly` holds oversized text files the durable
+store cannot take — usually ONE lockfile, so typically one round-trip. But a repo carrying several
+(package-lock + yarn.lock + pnpm-lock, or a monorepo's per-package locks) pays a full sandbox
+round-trip each, in series, before the build can start — and **nothing in the loop bounded that**,
+which is precisely how the other four grew from harmless to a 648-second incident.
+
+Now `pool(…, SANDBOX_ONLY_WRITE_CONCURRENCY, …)`, sharing the asset path's helper, clamp and env key so
+the two network-write paths of one import behave identically. Semantics preserved and test-locked: the
+per-file catch stays per-file (one unwritable lockfile must never fail an import — npm resolves fresh),
+ordering between independent writes carries no meaning, an empty set is a no-op.
+
+**Rule-3 lesson (hunt the siblings):** a comment declaring a class closed is a claim, not a guarantee.
+The sibling here was in the same file, in the same function, a few lines from the fix.
+
+### Four areas investigated and deliberately NOT changed — recorded so nobody redoes the work
+- **`read_file` returning full content** — looks like an obvious cost lever; the code explains why it is
+  the wrong trade (*"if the model's context has been trimmed, 'you already have this' leaves it unable
+  to proceed at all"*), and a transcript ceiling already exists.
+- **Grounding size** — already budgeted (`contextBudget.ts`, 4k tokens); the faa98da9 report measured
+  **~186 tokens against that budget**, so grounding was never the cost driver on that build.
+- **`honestModelLabel`** — the `plannedModel: claude-sonnet-4-6` vs `model: kimi-k2.6` split I flagged in
+  the autopsy is CORRECT by design: the report leads with what actually delivered and keeps the planned
+  label beside it for comparison. Not a bug.
+- **Account-deletion coverage** (a standing open root cause) — real and worth closing, but it is
+  irreversible data deletion where a wrong collection name would erase the wrong user's work. **Left for
+  explicit admin sign-off** rather than taken on initiative (safeguard #3).
+
+Gate: both `tsc` clean; FULL suite **1446 files / 19126 tests green**.

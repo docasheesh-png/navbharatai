@@ -351,7 +351,7 @@ import {
   type DesignContract,
 } from '../AgentV3/designContract';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
-import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
+import { collectWorkspaceFiles, writeWorkspaceFiles, pool } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
@@ -1477,6 +1477,14 @@ export function buildMaxTokensPerTurn(): number {
  * build wall-clock deadline timer is armed — without this, a single stalled provider/Firestore call hangs
  * the whole HTTP request forever (the deadline never starts). Pure + exported for testing.
  */
+/**
+ * How many oversized sandbox-only text files (lockfiles) an import writes to the sandbox at once.
+ *
+ * Mirrors ASSET_WRITE_CONCURRENCY's shape deliberately — same clamp, same env key — so the two
+ * network-write paths of one import behave identically and there is a single number to reason about.
+ */
+const SANDBOX_ONLY_WRITE_CONCURRENCY = Math.max(1, Math.min(32, Number(process.env.AGENTV3_ASSET_WRITE_CONCURRENCY) || 16));
+
 export function raceTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
@@ -8091,7 +8099,33 @@ async function noteBuildOutcome(
         // Best-effort: an 'import'-type workspace starts EMPTY so the imported app never gets
         // template scaffold files mixed in (mirrors the import-files route).
         try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
-        const landed = await writeWorkspaceFiles(actuator, workspaceId, importedFiles);
+        /**
+         * NAME THE QUIET MINUTES OF AN IMPORT (autopsy faa98da9, 2026-09-04).
+         *
+         * The phase mechanism has existed for a while and every PREVIEW stretch uses it — which is why
+         * that report could say "creating the database tables took 50s" and "installing dependencies …
+         * took 28s". The IMPORT's own stretches never entered a phase, so the same report carried a
+         * 40-SECOND HOLE with nothing recorded, and its own TIME_TO_FIRST_CALL warning could only say
+         * where the silence STARTED, not what caused it.
+         *
+         * Two things this buys, and neither is cosmetic:
+         *   • the ADMIN report gets `⏳ … took Ns` lines for the import, so the next person chasing a
+         *     slow import reads the answer instead of guessing at a gap;
+         *   • the USER's heartbeat stops echoing a stale narration. In that report minute 1 read
+         *     "still working (last: 🔗 Connected to https://github.com/…)" — the heartbeat names the
+         *     ACTIVE PHASE when there is one, and during the import there was none.
+         *
+         * Purely additive: optional-chained, wrapped, and closed in `finally`, so a diagnostics slip can
+         * never affect an import. `enterPhase` also supersedes an unclosed phase by design, so even a
+         * missed exit cannot strand the label.
+         */
+        let landed;
+        try { opts.diag?.enterPhase?.('importing your project\'s files'); } catch { /* diagnostics are best-effort */ }
+        try {
+          landed = await writeWorkspaceFiles(actuator, workspaceId, importedFiles);
+        } finally {
+          try { opts.diag?.exitPhase?.(); } catch { /* diagnostics are best-effort */ }
+        }
         written = landed.written;
         // HOW the files landed (bulk tar vs per-file) + the count-proof — into the build report, so a
         // future "files missing after import" report can be diagnosed from evidence instead of guesses
@@ -8108,9 +8142,29 @@ async function noteBuildOutcome(
         // Sandbox-only extras (big text lockfiles): the live sandbox gets them so `npm install`
         // reproduces the app's exact dependency tree; the durable store skips them by design
         // (over its per-doc cap — the import summary says so honestly). Best-effort.
-        for (const [p, c] of Object.entries(opts.sandboxOnly ?? {})) {
+        /**
+         * THE FIFTH INSTANCE OF ONE BUG CLASS — serial awaits over a network (2026-09-04).
+         *
+         * `materializeAssets` closed this class on 2026-08-04 and its comment names the four it had
+         * found: the sandbox landing (a 648s incident), the Firestore merge, `collectWorkspaceFiles`
+         * (a 13-minute per-turn stall), and the asset writes themselves — "same fix, same shared
+         * helper, so the class is closed here rather than patched again". This loop is a sibling that
+         * was missed, ten lines above one of them.
+         *
+         * SMALL TODAY, AND THAT IS THE POINT. `sandboxOnly` holds oversized text files the durable
+         * store cannot take — usually one lockfile, so this is typically ONE round-trip. But a repo
+         * carrying several (package-lock + yarn.lock + pnpm-lock, or a monorepo's per-package locks)
+         * pays one full sandbox round-trip each, in series, before the build can start. Nothing about
+         * the loop bounds that, which is exactly how the other four grew.
+         *
+         * Semantics are preserved exactly: the per-file catch stays per-file (one unwritable lockfile
+         * must never block the rest — npm just resolves fresh), ordering between independent writes
+         * carries no meaning, and the same shared `pool` and concurrency the asset path uses is used
+         * here, so there is one behaviour to reason about rather than two.
+         */
+        await pool(Object.entries(opts.sandboxOnly ?? {}), SANDBOX_ONLY_WRITE_CONCURRENCY, async ([p, c]) => {
           try { await actuator.writeFile(workspaceId, p, c); } catch { /* install falls back to fresh resolution */ }
-        }
+        });
       } else {
         written = Object.keys(importedFiles); // already in the sandbox (e.g. a git clone)
       }
@@ -8120,7 +8174,13 @@ async function noteBuildOutcome(
       // entirely out of `importedFiles`, so they never pollute the text map. Best-effort.
       const assets = opts.assets ?? {};
       if (Object.keys(assets).length > 0) {
-        if (opts.writeToSandbox) { try { await materializeAssets(actuator, workspaceId, assets); } catch { /* an asset failing never blocks the import */ } }
+        if (opts.writeToSandbox) {
+          // Named because it is the biggest one on a media-heavy repo: the report that prompted this
+          // carried 129 image/font assets plus 22 large images.
+          try { opts.diag?.enterPhase?.('adding your project\'s images and fonts'); } catch { /* best-effort */ }
+          try { await materializeAssets(actuator, workspaceId, assets); } catch { /* an asset failing never blocks the import */ }
+          finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
+        }
         void saveWorkspaceAssets(workspaceId, assets).catch(() => {});
       }
       // SANDBOX-ONLY images (large images the durable store can't hold): materialize them for the LIVE
@@ -8132,7 +8192,9 @@ async function noteBuildOutcome(
       }
       // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
       // empty": without it the import lives only in the ephemeral sandbox.
+      try { opts.diag?.enterPhase?.('saving your project so it survives a restart'); } catch { /* best-effort */ }
       try { await mergeWorkspaceFiles(workspaceId, importedFiles); } catch { /* durable persist is best-effort */ }
+      finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
       framework = validation.framework;
       // TELL THE REPORT (autopsy d6deaaf0): the diagnostics object captured `framework` at build
       // start, before the import existed, so it kept the request default while the manifest recorded

@@ -3,6 +3,7 @@ import { ACCOUNT_DELETION, ACCOUNT_DELETION_TITLE } from '../src/content/legal/a
 import { spaFallbackShouldDefer } from '../src/server/lib/spaFallback';
 import { DELETE_ACCOUNT_PATH } from '../src/server/routes/legal';
 import { USER_SCOPED_COLLECTIONS } from '../src/server/lib/DataRetentionManager';
+import { WORKSPACE_SCOPED_COLLECTIONS } from '../src/server/lib/workspaceDataErase';
 
 // Google Play requires an app that lets people create an account to publish a deletion URL that
 // (1) names the app, (2) prominently gives the STEPS, and (3) says what is deleted, what is kept and
@@ -78,5 +79,46 @@ describe('the page and the deletion code do not drift apart', () => {
       expect(phrase, `deletion page must describe the "${collection}" data it erases`).toBeDefined();
       expect(ACCOUNT_DELETION).toMatch(phrase);
     }
+  });
+});
+
+/**
+ * THE APPS HALF — automated on 2026-09-04, after PROGRESS.md carried it as an OPEN root cause twice:
+ * "built-app files stored outside those seven collections are not covered by the automated erase".
+ *
+ * The page already promised "your projects and built apps, including their files"; until now that
+ * promise was kept only by a human completing the emailed request. The automated eraser now covers it,
+ * and this pins the two halves together in the direction that actually matters: a collection added to
+ * the eraser must stay described, so the page can never quietly understate what happens.
+ */
+describe('the built-app eraser and the page do not drift apart', () => {
+  it('the page tells the user their built apps and their files are erased', () => {
+    expect(ACCOUNT_DELETION).toMatch(/projects and built apps/i);
+    expect(ACCOUNT_DELETION).toMatch(/including their files/i);
+  });
+
+  it('every workspace-scoped collection the eraser wipes is covered by that description', () => {
+    const described: Record<string, RegExp> = {
+      workspace_files_v3: /projects and built apps.*including their files/is,
+      workspace_assets_v3: /projects and built apps.*including their files/is,
+      workspace_checkpoints_v3: /projects and built apps/i,
+      workspace_embeddings_v3: /projects and built apps/i,
+      workspace_memory_v3: /projects and built apps/i,
+      workspace_diagnostics_v3: /build history and diagnostics/i,
+      workspace_manual_edits_v3: /projects and built apps/i,
+      project_plans_v3: /projects and built apps/i,
+    };
+    for (const { collection } of WORKSPACE_SCOPED_COLLECTIONS) {
+      const phrase = described[collection];
+      expect(phrase, `deletion page must describe the "${collection}" data it erases`).toBeDefined();
+      expect(ACCOUNT_DELETION).toMatch(phrase);
+    }
+  });
+
+  it('it does NOT claim to delete the user\'s own GitHub repositories', () => {
+    // We hold `repo workflow read:user user:email` — GitHub requires the separate `delete_repo` scope
+    // to remove a repository, so we cannot, and the repo lives in the USER's account anyway. The page
+    // must keep saying so: promising a deletion we cannot perform is the worse failure here.
+    expect(ACCOUNT_DELETION).toMatch(/does \*\*not\*\* delete anything in your own GitHub account/i);
   });
 });

@@ -44292,3 +44292,113 @@ The sibling here was in the same file, in the same function, a few lines from th
   explicit admin sign-off** rather than taken on initiative (safeguard #3).
 
 Gate: both `tsc` clean; FULL suite **1446 files / 19126 tests green**.
+
+---
+
+## 2026-09-04 — Deleting an account now deletes the apps too (the OPEN root cause, closed)
+
+**Admin:** *"jab user app banata hai, to woh app agar github me store hai, to ham usko delete kar sakte hai? agar han to karo, nahi to rahne do. hamare firebase me hai woh ham delete kar sakte hai karwa do."*
+
+### GitHub — the answer is NO, and it should stay no
+
+`GITHUB_SCOPE = 'repo workflow read:user user:email'` (`routes/githubAuth.ts`). GitHub requires the
+separate **`delete_repo`** scope to remove a repository; `repo` alone cannot. So we cannot delete it —
+**and that is the right outcome, not a limitation to route around**:
+
+- the repo lives in the **user's own GitHub account** (`aashishcpmt093-ui/mitrify-…` in the report), so
+  it is their property, not ours;
+- adding `delete_repo` would force **every** user to re-authorise with a scope letting us delete **any**
+  repo they own, forever, to serve account deletion — a large trust downgrade for everyone;
+- the user can delete it themselves in seconds.
+
+The deletion page already says exactly this and now has a test keeping it: *"It does not delete anything
+in your own GitHub account — that stays yours."* Promising a deletion we cannot perform would be the
+worse failure. **Left alone, per the admin's own "nahi to rahne do".**
+
+### Firestore — built apps are now erased automatically
+
+`deleteUserData` covers the platform's own user records and says so in its header (*"not generated
+apps"*). `PROGRESS.md` carried the consequence as an OPEN root cause **twice**: a user could delete
+their account and leave every app they ever built in our Firestore.
+
+`workspaceDataErase.ts` closes it, under the retention manager's own rule — **nothing added on a
+guess.** Every collection was read at its own store first:
+
+| collection | doc id | subcollection |
+|---|---|---|
+| `workspace_files_v3` | workspaceId | `files` ← the source code |
+| `workspace_assets_v3` | workspaceId | `assets` ← images/fonts |
+| `workspace_checkpoints_v3` | workspaceId | `items` |
+| `workspace_embeddings_v3` | workspaceId | `files` |
+| `workspace_memory_v3` · `workspace_diagnostics_v3` · `workspace_manual_edits_v3` · `project_plans_v3` | workspaceId | — |
+
+### The three things that make it safe
+
+1. **⚠️ FIRESTORE DOES NOT CASCADE.** Deleting a document leaves its subcollections intact and now
+   unreachable. Four of these keep the actual bytes one level down, so a parent-only delete would
+   report success while the user's source code and images stayed on disk — an erase that LOOKS
+   complete. Subcollection first, **then** the parent: reversed, a mid-failure would orphan the payload
+   with its parent gone; this order leaves a still-findable parent so a re-run finishes the job.
+2. **A hyphenated uid is REFUSED, not guessed at.** `agentv3-abc-` correctly cannot match
+   `agentv3-abcd-…` (the trailing `-`), but it DOES match `agentv3-abc-d-…` — the workspaces of a
+   different user whose uid is `abc-d`, which `WORKSPACE_UID_RE` permits. Real Firebase uids are 28
+   chars of `[A-Za-z0-9]`, so this cannot arise — **a reason to be confident, not a reason to skip the
+   check**, because the action is irreversible. Such a uid is refused and reported honestly so a human
+   can finish it. Deleting a stranger's apps to satisfy a compliance box would be far worse.
+3. **Every id is re-checked with the platform's own strictest ownership policy** (`ownedByVerifiedUid`)
+   before deletion, over and above the range. If the range and the policy ever disagreed, the
+   disagreement is the bug and the policy wins.
+
+Best-effort per collection (matching `deleteUserData`), never thrown — a failure here can never block
+the account deletion the user asked for — and reported **separately** in the response so someone
+checking whether their work is really gone can see that line on its own.
+
+### The page needed no correction
+It already promised *"your projects and built apps, including their files"* — a promise kept until now
+only by a human completing the emailed request. This makes the AUTOMATED path match it, and the drift
+test now pins both halves, so a collection added to the eraser must stay described.
+
+Gate: both `tsc` clean; FULL suite **1447 files / 19141 tests green**.
+
+---
+
+## 2026-09-04 — `kimi-k2.5` removed from the free ladder (admin-approved: *"jo theek hai NavBharatAI ke liye woh karo. hata do."*)
+
+**The open root cause from the faa98da9 autopsy, closed.** Two build reports proved the rung is
+unreachable on this account — *"404 Not found the model kimi-k2.5 or Permission denied"* — while
+sitting **first** in the free Kimi ladder: **5 wasted requests out of 5 calls** in one report, **57 out
+of 40** in an earlier one. PR #2741 cut that to one per build by retiring a dead rung after its first
+failure; this ends it.
+
+Free ladder: `kimi-k2.5 → kimi-k2.6 → kimi-k2.7-code` **becomes** `kimi-k2.6 → kimi-k2.7-code`.
+
+### Why REMOVE rather than re-enable it on the Moonshot account
+
+The decision turned on one fact from the rate card, not on a preference:
+
+- **`providerRates` prices k2.5 and k2.6 identically** — `/k2[.\-]?[56]/` → `$0.60` in / `$2.50` out.
+  So the rung that now leads is **exactly as cheap** as the one removed, and it is the rung that has
+  been delivering every turn anyway. **Removing costs nothing.**
+- **Re-enabling would have been strictly worse.** k2.5 is the OLDEST rung and sits FIRST, so a free
+  build's quality floor would drop to it — for no saving. One extra heal pass costs far more than any
+  per-token difference our rate card cannot even see.
+- Removing is one line and instantly reversible; re-enabling depended on a Moonshot-side change that
+  may not even be possible if the id is retired.
+
+### Two things deliberately NOT changed
+- **The rate-card entry for k2.5 STAYS.** An older build's telemetry still names it and must keep
+  pricing correctly. This is a routing change, not a billing one — and the test says so.
+- **The PAID ladder is untouched.** This was a free-tier decision; dropping a rung there would
+  silently downgrade paying users' repairs.
+
+### The test that had to change, and why that is not weakening it
+`agentv3.test.ts` asserted the free floor keeps "3 GLM + 3 KIMI rungs". Its guarantee is *"every
+configured rung survives when `flagshipOnly` is off"* — that is intact; only Kimi's ladder got shorter
+**by design**. The count is updated to 2 with the reason recorded inline, rather than loosened into a
+range that would stop catching an accidental drop.
+
+`tests/freeKimiLadder.test.ts` pins the new ladder, that the paid one is untouched, that the rate card
+still prices k2.5, and — the one worth keeping — **that the two rungs are priced equally**: if they ever
+diverge, the trade-off that settled this changes and the decision deserves revisiting.
+
+Gate: both `tsc` clean; FULL suite **1448 files / 19147 tests green**.

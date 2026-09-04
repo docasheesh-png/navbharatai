@@ -206,6 +206,7 @@ import {
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
 import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
+import { declaredAppPort } from '../lib/declaredAppPort';
 import { managedDnsConfigured, ensureZone, applyRecords } from '../lib/cloudflareManagedDns';
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
@@ -4221,10 +4222,24 @@ async function noteBuildOutcome(
        * framework guess only where BOTH are — so this can add knowledge but never overrule a better
        * source. Reading the files is best-effort; a failure leaves today's behaviour untouched.
        */
+      /**
+       * …AND AN IMPORTED REPO DECLARES IT SOMEWHERE ELSE AGAIN (admin 2026-09-04: *"jab github se koi
+       * repo import karta hai, to kis port par run karna hai yeh confuse ho jata hai"*).
+       *
+       * 🔒 THE CLASS, NOT A THIRD INSTANCE. This line used to call `serverPortFromFiles`, which reads a
+       * FIXED list of server entry paths. That is enough for an app WE scaffold, and wrong for an
+       * imported one, which pins its port in `vite.config.*`, in a `.env`, or in a server entry outside
+       * that list (`backend/server.js`, `api/index.js`). A `clientVitePort` reader already existed but
+       * was module-private, so this path — the one that most needed it — could not call it.
+       *
+       * `declaredAppPort` is the single resolver over EVERY declaration site, with the precedence
+       * documented there. Same precedence as before at the top (an explicit script flag still wins), so
+       * this can only ever ADD knowledge where we previously had none.
+       */
       let codePort: number | null = null;
       if (scriptPort === null) {
         const src = await loadWorkspaceFiles(workspaceId).catch(() => null);
-        if (src) codePort = serverPortFromFiles(src);
+        if (src) codePort = declaredAppPort(src, pkgRaw)?.port ?? null;
       }
       const effectivePort = scriptPort ?? codePort ?? expectedPort;
       if (!structure.ok) {
@@ -8795,8 +8810,19 @@ async function noteBuildOutcome(
             opts.diag?.enterPhase?.('checking the live preview');
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {
-              const scriptPort = devScriptPort(importedFiles['package.json'] ?? null);
-              let bootPort = port ?? scriptPort ?? oneShotDevPort(framework);
+              /**
+               * 🔒 THE IMPORT PATH IS WHERE THE ADMIN ACTUALLY HIT THIS (2026-09-04) — and it had the
+               * narrowest reader of all: `devScriptPort` (package.json scripts) and then a framework
+               * GUESS. An imported repo pins its port in `vite.config.*`, in a `.env`, or in a server
+               * entry the old fixed list never covered — so the common case fell straight through to
+               * the guess, we visited the wrong port, and the app was reported as not running while it
+               * served perfectly somewhere else.
+               *
+               * Order is unchanged in strength: the boot log's own testimony still wins (it is the app
+               * saying where it landed), then everything the app DECLARES, and only then the guess.
+               */
+              const declared = declaredAppPort(importedFiles)?.port ?? null;
+              let bootPort = port ?? declared ?? oneShotDevPort(framework);
               // EARN THE VERDICT (admin 2026-08-03, "Cannot GET /customer/home" shown as a live preview):
               // a bound port is NOT the app serving. Actually VISIT the home route and read the rendered
               // HTML — only claim "✅ up" when it genuinely serves the app; otherwise say WHY (the exact
@@ -8823,7 +8849,9 @@ async function noteBuildOutcome(
                 try {
                   listening = parseListeningPorts((await withTimeout(actuator.runCommand(workspaceId, LISTENING_PORTS_COMMAND), 10_000, 'import-preview-port-scan')).stdout);
                 } catch { /* best-effort — without the scan the flip simply has no extra candidates */ }
-                for (const cand of rankPortCandidates({ parsed: port, scriptPort, expected: bootPort, listening, framework })) {
+                // `declared` (every declaration site) replaces the old script-only value here too — the
+                // flip's second tier should rank whatever the app really declares, not just a flag.
+                for (const cand of rankPortCandidates({ parsed: port, scriptPort: declared, expected: bootPort, listening, framework })) {
                   if (cand === bootPort) continue;
                   const attempt = await visit(cand);
                   if (attempt.url && attempt.served.rendered) { winner = attempt; bootPort = cand; break; }

@@ -44531,3 +44531,44 @@ change removes the third, which was missing entirely and which no amount of user
 
 Gate: both `tsc` clean; FULL suite **1450 files / 19214 tests green**. Guards verified to bite (a DNS
 failure failing the deploy; treating "could not ask" as "no domain").
+
+## 2026-09-04 — GitHub import: "kis port par run karna hai yeh confuse ho jata hai"
+
+**Root cause was a SCATTERED check, not a missing one.** Three readers already existed, each seeing a
+different narrow slice, and each caller picked its own subset:
+
+| reader | sees | used by |
+|---|---|---|
+| `devScriptPort` | package.json scripts only (`--port`, `-p`, `PORT=`) | preview + import |
+| `serverPortFromFiles` | a FIXED list of server entry paths | preview only |
+| `clientVitePort` | `vite.config` `server.port` — **module-private** | nothing outside its own file |
+
+An app WE scaffold declares its port in a script, so the narrow readers sufficed and the gap never
+showed. An **imported repo is the opposite**: it pins its port in `vite.config.*`, in a `.env`, or in a
+server entry outside that fixed list (`backend/server.js`, `api/index.js`, `src/main.ts`) — none of
+which the preview path could see, and the IMPORT path had the narrowest reader of all (scripts, then a
+framework GUESS). So discovery fell through to the guess, we visited the wrong port, and reported "no
+service running" about an app that was serving perfectly somewhere else.
+
+The `.env` case is the sharpest: an imported Express app says `app.listen(process.env.PORT)` with **no
+literal fallback**, so the code reader finds nothing and the real number lives in `.env`, which nothing
+read at all.
+
+**Fix — the class, not a third instance.** New pure `lib/declaredAppPort.ts`: ONE resolver over every
+declaration site, with documented precedence (an explicit script flag → dev-server config → `.env` →
+the server's own `listen`), each step only ever filling the silence above it. Both callers now use it,
+so a fourth caller cannot invent a fourth subset. Same centralisation pattern as `safeRelPath` (4
+drifted copies → one module) and the retired model ids.
+
+**Kept deliberately unchanged:** the boot log's own testimony still outranks everything — it is the app
+saying where it *landed*, and an app that MOVED (port already in use) is only correct there. And
+`declaredAppPort` returns **null** when nothing is declared, which must stay a real answer: the caller
+then keeps the evidence-first listening-port sweep, strictly better than any guess. An infrastructure
+port (a provisioned Postgres on 5432) is never returned as the app's.
+
+⚠️ One assertion in `serverPortFromCode.test.ts` was re-anchored, not deleted — it pinned the narrow
+reader. The property it protected (the preview path reads the port from the project's own files rather
+than guessing) is unchanged and now strictly stronger.
+
+Gate: both `tsc` clean; FULL suite **1451 files / 19234 tests green**. Guards verified to bite
+(reverting the import path to the script-only reader; dropping the `.env` reader).

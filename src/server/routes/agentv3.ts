@@ -383,6 +383,7 @@ import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from 
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
 import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings } from '../AgentV3/ReviewerAgent';
+import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
 import {
   saveWorkspaceMemory,
   restoreWorkspaceMemory,
@@ -15048,6 +15049,8 @@ async function noteBuildOutcome(
           const reviewHeadroomMs = effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt));
           const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount);
           let review;
+          /** A verdict rebuilt from an unfinished review's own narration — see partialReview.ts. */
+          let salvaged: ReturnType<typeof salvageReview> = null;
           // THE TIMEOUT STOPS US WAITING — IT MUST NOT STOP US LOOKING (admin report 2026-08-12).
           //
           // The promise is held in its own binding so that when the budget expires it is still
@@ -15055,6 +15058,25 @@ async function noteBuildOutcome(
           // Styling — App will look broken` **1.5 seconds** after `raceTimeout` rejected; because the
           // reference was gone with the expression, that finding — 26 files of the user's tokens,
           // already spent — was discarded, and the user shipped the broken app instead.
+          /**
+           * LISTEN WHILE IT WORKS (admin report 2026-09-01, PROGRESS.md "STILL OPEN").
+           *
+           * That build spent 194s of budget plus the full 30s of grace on a 46-file review and got
+           * NOTHING — the findings were discarded and the app shipped with its completeness net down.
+           * Two earlier fixes moved that cliff (a size-scaled budget, then the grace window); neither
+           * could remove it, because the budget is a guess and some review will always land past it.
+           *
+           * The reviewer is a sub-agent on THIS event stream and narrates its findings as it goes —
+           * the 2026-08-12 timeline shows the full review text arriving as an AGENT_STEP one
+           * millisecond before `agent_done`. So the timeout can stop us WAITING without throwing away
+           * what the reviewer already said out loud. Costs nothing: no extra call, no extra token —
+           * this is money the user has already spent, being collected instead of binned.
+           */
+          const reviewerSaid: string[] = [];
+          const stopListening = events.subscribe((e) => {
+            if (e.type === 'narration' && e.agent === 'reviewer' && typeof e.text === 'string') reviewerSaid.push(e.text);
+            else if (e.type === 'agent_done' && e.agent === 'reviewer' && typeof e.summary === 'string') reviewerSaid.push(e.summary);
+          }, false); // no replay — only this review's own words, never an earlier turn's
           const reviewPromise = reviewBuild({
               userRequest: prompt,
               fileTree: rFiles,
@@ -15090,6 +15112,17 @@ async function noteBuildOutcome(
               // It landed. Everything downstream — recordReview, the C9 auto-fix, the honesty holder —
               // now runs exactly as it would have on a review that finished inside its budget.
               try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LATE', message: `Post-build review overran its ${reviewBudget}ms budget and was collected within the ${graceMs}ms grace — its findings were kept, not discarded.`, autoResolved: true }); } catch { /* best-effort */ }
+            } else if ((salvaged = salvageReview(reviewerSaid.join('\n'))) !== null) {
+              // SALVAGE before conceding. Everything the reviewer narrated is already paid for; the
+              // only question is whether anyone looks at it. A salvaged verdict can never FAIL the
+              // build (see salvageReview's honesty rules) and deliberately does NOT feed the C9
+              // auto-fix — a truncated finding may be one the reviewer was about to withdraw, and
+              // deep-test 66ec5c1e is what acting on a phantom critical costs. Reported as leads,
+              // which is strictly more than the nothing this branch used to deliver.
+              events.emit({ type: 'narration', agent: 'architect', text: formatPartialReview(salvaged), ts: Date.now() });
+              try { buildDiag.recordReview(formatPartialReview(salvaged, 50)); } catch { /* best-effort */ }
+              try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_PARTIAL', message: `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — but ${salvaged.issues.length} finding(s) it had already reported were RECOVERED from its own narration instead of discarded. Leads from an UNFINISHED review: they cannot fail a build and do not drive the auto-fix.`, autoResolved: false }); } catch { /* best-effort */ }
+              review = null;
             } else {
               events.emit({ type: 'narration', agent: 'architect', text: timedOut
                 ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish on this large app — send "review it" and I\'ll run it on its own.'
@@ -15101,6 +15134,10 @@ async function noteBuildOutcome(
               try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — its completeness findings are NOT available for this build` : 'Post-build review errored — its completeness findings are NOT available for this build', autoResolved: false }); } catch { /* best-effort */ }
               review = null;
             }
+          } finally {
+            // Always detach: the stream outlives this block, and a listener left attached would keep
+            // appending a later turn's reviewer output to this turn's buffer.
+            stopListening();
           }
           const reviewText = review ? formatReview(review) : '';
           if (reviewText) {

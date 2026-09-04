@@ -43968,6 +43968,39 @@ confirmed the new tests fail with the expected message, then restored.
 
 Gate: both `tsc` clean; FULL suite **1439 files / 18968 tests green**.
 
+## 2026-09-03 — Pro v5.0 Files panel: the per-row icon strip is desktop-only now
+
+Report (with a phone screenshot of the whole right-hand column ringed in red): *"jab koi app banata
+hai, aur user file wala button se jab file kholta hai, to yaha bahut se button dikhte hai … uske
+andar woh sare button hatao."*
+
+**Root cause — it was never one row of buttons, it was TWO SETS OF THE SAME ACTIONS.** `FilesPanel`
+renders a hover-revealed icon strip per file (View · Copy path · Duplicate · Rename · Delete) AND,
+when `tapActions` is on (every non-desktop device mode), a tap menu of real labelled buttons under
+the row. On a phone both were live at once: hover cannot reveal anything on touch, so the strip fell
+back to `opacity-60` and sat on screen permanently — five 10px icons duplicating a menu that was
+easier to hit, while stealing the width that made filenames truncate mid-name (visible in the
+admin's own screenshot: `src/components/DoseCalculat…`, `src/components/MedicineCard…`).
+
+**Fix.** The strip is now gated on `!tapActions`, so the strip and the tap menu are MUTUALLY
+EXCLUSIVE — every action reachable exactly once, on both device classes.
+
+**The other half, which is what makes this a fix and not a deletion.** The strip held two actions the
+tap menu did not: **Rename** and **Duplicate**. Hiding the strip alone would have silently removed
+two working capabilities from every phone user. Both were added to the tap menu in the same change,
+wired to the same handlers, behind the same `onRenameFile` / `onDuplicateFile` capability guards, and
+each closes the menu after acting.
+
+Deliberately NOT changed: the strip's `opacity-60 sm:opacity-0 sm:group-hover:opacity-100` classes.
+With `tapActions` false on a narrow viewport (a phone forced into desktop mode) there is no hover to
+reveal anything, so that `opacity-60` is the only thing keeping the icons reachable at all.
+
+**Locked** in `tests/filesPanelTouchActions.test.ts` — the strip's gate, all five icons living inside
+it, and every one of the tap menu's seven actions being present, wired and guarded. Verified to bite:
+reintroduced both failure modes separately (removed the `!tapActions` gate; removed Rename from the
+menu) and confirmed the matching tests fail each time, then restored.
+
+Gate: both `tsc` clean; FULL suite **1442 files / 18996 tests green**.
 ---
 
 ## 2026-09-04 — The review that ran out of time no longer throws its findings away (admin: build what's best)

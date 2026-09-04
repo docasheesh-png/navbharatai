@@ -158,3 +158,49 @@ describe('lastCheckedLabel — the honest replacement for fake motion', () => {
     expect(lastCheckedLabel(0, now)).toBe('');
   });
 });
+
+/**
+ * DNS FINISHED IS NOT "NOTHING LEFT TO DO" (admin 2026-09-04, *"bahut sari problem hai"*).
+ *
+ * The screenshot showed every record verified, ownership ACTIVE, and this line printing *"Done —
+ * every record is already in place. Nothing left for you to do; your domain connects on its own from
+ * here."* — while mitrify.com served "Site Not Found" and always would, because a fullstack
+ * ship-whole app cannot be published to that site at all.
+ *
+ * This is the SAME lesson the function already learned for `ownershipState`, one level up: records
+ * existing said nothing about the host accepting them; the host accepting them says nothing about
+ * whether the app can ever be SERVED.
+ */
+describe('🔒 the DNS summary cannot promise an outcome publishing has already ruled out', () => {
+  const settled = { zoneStatus: 'active' as const, desired: 3, missing: [], ownershipState: 'OWNERSHIP_ACTIVE' };
+  const BLOCK = 'Your app has a server half that runs alongside its website…';
+
+  it('withdraws "nothing left for you to do" when the app cannot be published here', () => {
+    const s = autoDnsSummary({ ...settled, added: 0, removed: 0, publishBlocked: BLOCK });
+    expect(s.text).not.toContain('Nothing left for you to do');
+    expect(s.text).not.toContain('connects on its own');
+    expect(s.text).toContain(BLOCK);          // the real blocker, verbatim
+    expect(s.tone).toBe('warn');
+  });
+
+  it('still says the DNS half is genuinely finished — that part IS true', () => {
+    // Understating it would send the user back to re-check records that are already perfect.
+    const s = autoDnsSummary({ ...settled, added: 0, removed: 0, publishBlocked: BLOCK });
+    expect(s.text).toContain('fully set up');
+  });
+
+  it('🔒 covers the just-applied path too, not only the already-in-place one', () => {
+    // Both completion branches made the same promise; a fix to one would have left the other lying.
+    const s = autoDnsSummary({ ...settled, added: 2, removed: 1, publishBlocked: BLOCK });
+    expect(s.text).not.toContain('Nothing left for you to do');
+    expect(s.text).toContain(BLOCK);
+  });
+
+  it('an unblocked app is completely unaffected', () => {
+    for (const blocked of ['', '   ', null, undefined]) {
+      const s = autoDnsSummary({ ...settled, added: 0, removed: 0, publishBlocked: blocked });
+      expect(s.tone).toBe('ok');
+      expect(s.text).toContain('Nothing left for you to do');
+    }
+  });
+});

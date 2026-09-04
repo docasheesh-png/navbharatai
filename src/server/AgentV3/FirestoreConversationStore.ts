@@ -62,6 +62,9 @@ interface ConversationMeta {
   appName?: string;
   /** The GitHub repo this app's code lives in — persisted so a rename cannot strand the app. */
   repoName?: string;
+  /** Which account that repo is under, and whether the user owns it (see ConversationRecord). */
+  repoOwner?: string;
+  repoOwnedByUser?: boolean;
 }
 
 export class FirestoreConversationStore implements ConversationStore {
@@ -297,6 +300,8 @@ export class FirestoreConversationStore implements ConversationStore {
       ...(meta.pinned ? { pinned: true } : {}),
       ...(meta.appName ? { appName: meta.appName } : {}),
       ...(meta.repoName ? { repoName: meta.repoName } : {}),
+      ...(meta.repoOwner ? { repoOwner: meta.repoOwner } : {}),
+      ...(meta.repoOwnedByUser ? { repoOwnedByUser: true } : {}),
     };
   }
 
@@ -311,6 +316,8 @@ export class FirestoreConversationStore implements ConversationStore {
     if (patch.pinned !== undefined) out.pinned = patch.pinned;
     if (patch.appName !== undefined) out.appName = patch.appName;
     if (patch.repoName !== undefined) out.repoName = patch.repoName;
+    if (patch.repoOwner !== undefined) out.repoOwner = patch.repoOwner;
+    if (patch.repoOwnedByUser !== undefined) out.repoOwnedByUser = patch.repoOwnedByUser;
     return out;
   }
 }

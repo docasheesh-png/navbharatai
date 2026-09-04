@@ -128,6 +128,8 @@ export interface HostingChooserProps {
    * not theirs, their host cannot see it, and a deploy offered from it could only ever fail.
    */
   deployRepo?: { owner: string; repo: string } | null;
+  /** Told when this app has just been saved into the user's own repo, so the screen can re-derive. */
+  onRepoPushed?: (repo: { owner: string; repo: string }) => void;
 }
 
 /** What the server knows about this app's data needs — see GET /api/agentv3/database-readiness. */
@@ -144,7 +146,7 @@ const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI
 export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr,
   liveUrl, onUnpublish, onLoadMyApps, onUnpublishApp,
-  ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
+  ownRepo, githubConnected, onConnectGitHub, onRepoPushed, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
   onMakeIcon, publishRefusalCode, backendKeySource, deployRepo,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost' | 'myapps'>('choose');
@@ -314,6 +316,42 @@ export function HostingChooser({
   });
   const [backendBusy, setBackendBusy] = useState(false);
   const [backendLines, setBackendLines] = useState<string[]>([]);
+  const [pushBusy, setPushBusy] = useState(false);
+
+  /**
+   * Create a private repo in the USER'S OWN GitHub account and save this app to it.
+   *
+   * The action the panel's own step 2 has always described and never offered. On success the repo is
+   * reported back and `onRepoPushed` lets the screen re-derive its state, so the very next thing the
+   * user sees is the real "Deploy backend" button rather than the same steps again.
+   */
+  const pushAppToGitHub = async (): Promise<void> => {
+    if (pushBusy || !authedFetch) return;
+    setPushBusy(true);
+    setBackendLines([]);
+    try {
+      let githubToken: string | undefined;
+      try { githubToken = localStorage.getItem('gh_token') || undefined; } catch { /* optional */ }
+      const res = await authedFetch('/api/agentv3/github/push-app', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId, githubToken }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        // The server's own reason — it knows whether the token expired, the sandbox was empty, or the
+        // push itself failed. A generic "could not save" is what made this area feel dead.
+        setBackendLines([data?.error || 'Could not save your app to GitHub. Your app is safe here — try again.']);
+        return;
+      }
+      setBackendLines([`Saved to ${data.fullName}. You can deploy the backend now.`]);
+      onRepoPushed?.({ owner: String(data.owner ?? ''), repo: String(data.repo ?? '') });
+    } catch {
+      setBackendLines(['Could not reach NavBharatAI — nothing was changed.']);
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const deployBackend = async () => {
     if (backendBusy || !authedFetch) return;
@@ -681,6 +719,19 @@ export function HostingChooser({
                     className="py-2 px-3 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 text-zinc-200 text-[11.5px] font-semibold transition-colors self-start"
                   >
                     Connect GitHub
+                  </button>
+                )}
+                {/* THE BUTTON THAT WAS MISSING (admin 2026-09-04). The steps asked the user to push
+                    their app to a repo of their own; with GitHub already connected the panel showed
+                    them no control at all, because every push lived inside the build route. */}
+                {backendOffer.cta === 'push-to-github' && (
+                  <button
+                    onClick={() => void pushAppToGitHub()}
+                    disabled={pushBusy || busy}
+                    className="py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-[11.5px] font-bold flex items-center justify-center gap-2 transition-colors self-start"
+                  >
+                    {pushBusy ? <TirangaLoader size={14} /> : <Server className="w-3.5 h-3.5" />}
+                    {pushBusy ? 'Saving to GitHub…' : 'Put this app in my GitHub'}
                   </button>
                 )}
               </>

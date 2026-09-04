@@ -2877,6 +2877,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
    * beside the message and handed to the chooser, which turns it into the real button.
    */
   const [publishRefusal, setPublishRefusal] = useState<{ code: string; keySource: 'user' | 'server' | null }>({ code: '', keySource: null });
+  // A repo created by "Put this app in my GitHub" during THIS visit. See deployRepo for why the build
+  // event alone is not enough.
+  const [pushedRepo, setPushedRepo] = useState<{ owner: string; repo: string } | null>(null);
   /**
    * Sibling of the live-URL leak above, found by asking what ELSE on this panel describes ONE app
    * while living for the whole session. `publishMsg` holds the last publish's own words — "Your app
@@ -3016,6 +3019,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
    * backend-deploy offer exists to remove.
    */
   const deployRepo = (() => {
+    // A repo we JUST created for this app wins: the `repo` build event that would otherwise carry
+    // this fact only fires during a build, so without it the panel would keep showing "put this app
+    // in my GitHub" for a repo the user had just made (admin 2026-09-04).
+    if (pushedRepo) return pushedRepo;
     if (state.ownRepo) return { owner: state.ownRepo.owner, repo: state.ownRepo.repo };
     if (!state.repoOwnedByUser) return null;
     const [owner, repo] = String(state.repoFullName ?? '').split('/');
@@ -3595,6 +3602,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           publishStatus={publishMsg}
           publishRefusalCode={publishRefusal.code}
           deployRepo={deployRepo}
+          onRepoPushed={(r) => { if (r.owner && r.repo) setPushedRepo(r); }}
           backendKeySource={publishRefusal.keySource}
           workspaceId={state.workspaceId}
           // Gates the Unpublish control: null unless this app is genuinely live (the server returns a

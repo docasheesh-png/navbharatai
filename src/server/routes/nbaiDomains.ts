@@ -243,7 +243,22 @@ export function registerNbaiDomainsRoutes(app: Express): void {
        * one is precisely the case where the user needs the answer. The two-stage read below still
        * charges the full workspace only to an app already judged non-static.
        */
-      if (serving && serving.state !== 'serving') {
+      /**
+       * ⚠️ THIRD CORRECTION, SAME GATE, SAME DAY — and the reason it kept being wrong is worth more
+       * than the fix. Each time I picked which STATES need the verdict; the answer was never a list of
+       * states, it is *"whatever makes the screen say press Publish"*, and only the client knows that.
+       *
+       * The client's branch is `s.serving?.state !== 'serving'` — which is TRUE when `serving` is null.
+       * This gate required it to be truthy. So when our probe cannot reach the domain at all (a real,
+       * common outcome — `checkDomainServing` returns null and the screen says *"We could not open
+       * your domain from here to confirm… If it shows an error page, press Publish once"*), the client
+       * told the user to press a button that always refuses while the server stayed silent.
+       *
+       * That is exactly the admin's mitrify.com screenshot, after two rounds of fixing this same gate.
+       * The expression is now CHARACTER-FOR-CHARACTER the client's, and `publishGateMatchesClient` in
+       * the tests fails if either side is edited without the other.
+       */
+      if (serving?.state !== 'serving') {
         try {
           const manifests = await loadWorkspaceFilesByPath(
             workspaceId as string,

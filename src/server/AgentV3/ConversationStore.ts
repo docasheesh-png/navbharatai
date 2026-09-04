@@ -46,6 +46,17 @@ export interface ConversationRecord {
    * pushes where it already pushed, and a rename that GitHub refuses cannot move it.
    */
   repoName?: string;
+  /**
+   * The GitHub account that repo lives under, and whether it is the USER'S OWN.
+   *
+   * ⚠️ ADDED 2026-09-04. Without these, the Publish screen learned the app's repo ONLY from a
+   * transient `repo` build event — so reopening the app and going straight to Publish showed
+   * "push this app to a repo of your own" for an app that already HAD one, with no control to do it.
+   * `repoOwnedByUser` is the fact that matters to a backend deploy: a mirror in the platform org is
+   * one the user's own host cannot read, so it must never be offered as deployable.
+   */
+  repoOwner?: string;
+  repoOwnedByUser?: boolean;
   status: ConversationStatus;
   /** The AgentRunner transcript, stored VERBATIM so a resumed run sees its exact prior context. */
   messages: unknown[];
@@ -103,6 +114,9 @@ export interface ConversationPatch {
   appName?: string;
   /** The GitHub repo this app's code lives in — written once when ensured, and on a real rename. */
   repoName?: string;
+  /** Which account that repo is under, and whether the user owns it (a deploy needs their own). */
+  repoOwner?: string;
+  repoOwnedByUser?: boolean;
 }
 
 /**
@@ -279,6 +293,8 @@ export class InMemoryConversationStore implements ConversationStore {
     if (patch.pinned !== undefined) rec.pinned = patch.pinned;
     if (patch.appName !== undefined) rec.appName = patch.appName;
     if (patch.repoName !== undefined) rec.repoName = patch.repoName;
+    if (patch.repoOwner !== undefined) rec.repoOwner = patch.repoOwner;
+    if (patch.repoOwnedByUser !== undefined) rec.repoOwnedByUser = patch.repoOwnedByUser;
     rec.updatedAt = patch.updatedAt;
   }
 }

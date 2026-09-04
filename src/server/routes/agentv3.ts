@@ -3981,6 +3981,74 @@ async function noteBuildOutcome(
     }
   });
 
+  /**
+   * PUT THIS APP IN THE USER'S OWN GITHUB REPO — on demand (admin 2026-09-04).
+   *
+   * 🔴 THE DEAD END THIS ENDS. The backend-deploy panel tells a fullstack user, in numbered steps:
+   * *"Your code has to live in a GitHub repository first… Connect GitHub, then push this app to a repo
+   * of your own."* On the admin's screenshot GitHub was ALREADY connected — the panel's own
+   * Connect-GitHub button was therefore absent — and **"push this app to a repo of your own" had no
+   * control anywhere in the product**. Every `pushAll` in this file lives inside the BUILD route, so
+   * the only way to get your app into your own repo was to run a build while a GitHub token happened
+   * to be attached. The user had done everything asked of them and the screen still had no next step.
+   *
+   * This is the same capability the build path already uses (`UserGitHubClient.ensureRepo` +
+   * `GitRepoSync.pushAll`) — exposed as an action, so the instruction on screen finally has a button.
+   *
+   * 🔒 THE USER'S OWN ACCOUNT, NEVER THE PLATFORM ORG. It uses THEIR token, so the repo is theirs and
+   * their own host can read it. The platform-org mirror is deliberately not offered for a deploy:
+   * their Render account cannot see it, so a deploy from it could only ever fail.
+   */
+  app.post('/api/agentv3/github/push-app', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken.trim() : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!githubToken) { res.status(401).json({ error: 'Connect GitHub first — we need your permission to create the repository in your account.' }); return; }
+    try {
+      const actuator = buildActuator();
+      // The files must be IN the sandbox to be pushed. After the idle sweep the sandbox comes back
+      // empty while the app sits safe in the durable store — the exact trap the publish route
+      // documents — so seed it first rather than pushing an empty repo.
+      const prep = await prepareSandboxForBuild(actuator, workspaceId);
+      if (!prep.ready) { res.status(422).json({ error: prep.reason }); return; }
+
+      const store = getConversationStore();
+      const rec = await store.get(workspaceId).catch(() => null);
+      // The PERSISTED name wins, exactly as the build path does — so this push lands in the repo the
+      // app already uses (including one the user renamed) instead of creating a second one beside it.
+      const repoName = rec?.repoName
+        || repoNameForProject(userId, workspaceId, {
+          appName: rec?.appName || rec?.title || 'app',
+          createdAtMs: typeof rec?.createdAt === 'number' && rec.createdAt > 0 ? rec.createdAt : Date.now(),
+        });
+
+      const client = new UserGitHubClient(githubToken);
+      const login = await client.getLogin();
+      const repo = await client.ensureRepo(repoName);
+      const authedUrl = client.authedCloneUrl(repoName, login);
+      const sync = new GitRepoSync(actuator, workspaceId);
+      const pushed = await sync.pushAll(authedUrl, repo.defaultBranch || 'main', 'Save this app to GitHub (NavBharatAI)');
+      if (!pushed.pushed && !pushed.noChange) {
+        res.status(502).json({ error: 'Your repository was created, but the code could not be pushed to it. Nothing was lost — your app is safe here. Try again in a moment.' });
+        return;
+      }
+      // Remember it, so the Publish screen knows about this repo on every later visit rather than only
+      // while a build event happens to be in flight — which is what made the panel ask for a repo the
+      // user already had.
+      await store.update(workspaceId, {
+        repoName, repoOwner: login, repoOwnedByUser: true, updatedAt: rec?.updatedAt ?? Date.now(),
+      }).catch(() => { /* the push is what mattered; a failed note only costs the shortcut */ });
+
+      res.json({ ok: true, fullName: repo.fullName || `${login}/${repoName}`, htmlUrl: repo.htmlUrl || '', owner: login, repo: repoName });
+    } catch (e) {
+      res.status(502).json({ error: `Could not save your app to GitHub: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  });
+
   app.post('/api/agentv3/preview-error', previewPollRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;

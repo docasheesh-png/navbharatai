@@ -44626,3 +44626,103 @@ working harness returns three. **The feature was fine; the harness was wrong.** 
 of the two is broken before touching the code under test.
 
 Gate: both `tsc` clean; FULL suite **1449 files / 19185 tests green**.
+
+## 2026-09-04 — "abhi bhi fix nahi hua bro" — the real dead end, found in the screenshot
+
+The admin's next screenshot showed the previous fix WORKING: the blue box no longer claims *"Render is
+configured — a real deploy can run"*; it correctly says the app needs a GitHub repository first. The
+contradiction is gone. **And the app still could not be shipped** — so the honest reading is that the
+message fixes were necessary and were never sufficient.
+
+### What the screenshot actually proves
+
+The panel renders numbered steps: *"Your code has to live in a GitHub repository first… **Connect
+GitHub, then push this app to a repo of your own**… Come back here and press Publish again."*
+
+**There is no Connect GitHub button in the screenshot.** That is not a rendering fault — it is
+`backendDeployOffer` returning `cta: 'none'` because `githubConnected` is TRUE. So:
+
+* GitHub was already connected. Step 2's first half was asking for something already done.
+* Step 2's second half — *push this app to a repo of your own* — **had no control anywhere in the
+  product.** Every `pushAll` in `routes/agentv3.ts` lives inside the BUILD route, so the only way to
+  get an app into your own GitHub repo was to run a build while a token happened to be attached.
+
+⇒ **The user had done everything the screen asked, and the screen had nothing left to offer.** A test
+even pinned it: `'does not re-offer GitHub to someone already connected'` asserted `cta === 'none'` —
+the right property (don't re-offer a pointless Connect) with the wrong conclusion (offer *nothing*).
+
+### Shipped
+
+**`POST /api/agentv3/github/push-app`** — the capability the steps had always described, exposed as an
+action. Ownership-checked; uses the USER'S token so the repo is theirs and their own host can read it
+(the platform-org mirror is invisible to their Render account and is never substituted); seeds the
+sandbox first, because after the idle sweep it comes back empty and a push then would replace their
+code with nothing; pushes to the PERSISTED repo name so it can never create an empty twin beside the
+real app; and a push that did not happen is reported as a failure, never as success.
+
+**The panel now offers it.** A connected user gets a real "Put this app in my GitHub" button and steps
+that describe that button, instead of steps describing an action that did not exist.
+
+**And the screen no longer depends on catching a build event.** `repoOwner` + `repoOwnedByUser` join
+the persisted `repoName`, and a repo created during this visit is reflected immediately — the `repo`
+event that carried this fact fires ONLY during a build, so reopening an app and going straight to
+Publish showed "push this to a repo of your own" for an app that already had one.
+
+⚠️ Two assertions rewritten, neither weakened: the `cta === 'none'` one above (its property kept, its
+conclusion corrected) and a new invariant that **no path may leave steps with nothing to press** —
+which is the whole failure class, stated once so it cannot come back in a new costume.
+
+Gate: both `tsc` clean; FULL suite **1451 files / 19250 tests green**. Verified to bite by restoring
+the dead end.
+### The same gate, wrong a THIRD time — and why guessing states kept failing
+
+Admin: *"same to same error abhi bhi hai"*, with the connect screen reading *"We could not open your
+domain from here to confirm it is showing your app — **If it shows an error page, press Publish
+once**"* and mitrify.com still on Firebase's "Site Not Found".
+
+**The two conditions had drifted, and I wrote both:**
+
+| | condition |
+|---|---|
+| client (`NbaiDomainConnect`) | `s.serving?.state !== 'serving'` |
+| server (`nbaiDomains`) | `serving && serving.state !== 'serving'` |
+
+`checkDomainServing` returns **null** when our probe cannot reach the domain — a normal outcome, and
+exactly the state in the screenshot. The client's `?.` makes its branch TRUE for null, so it printed
+"press Publish once"; the server's `serving &&` makes the gate FALSE for null, so `publishBlocked` was
+never computed. **The screen sent the user at a button that always refuses, and the server said
+nothing** — after two earlier rounds on this same line.
+
+**The lesson, recorded because it is the actual defect:** each round I picked which STATES deserve the
+verdict. The answer was never a list of states — it is *"whatever makes the screen say press
+Publish"*, and only the client knows that. Two independently-written conditions for one question will
+drift, and did, three times.
+
+**Fix:** the server's gate is now character-for-character the client's, and
+`publishGateMatchesClient` pins BOTH source lines — editing either side alone fails CI. Verified to
+bite from both directions.
+
+Gate: both `tsc` clean; FULL suite **1451 files / 19240 tests green**.
+
+### And the green line right beside it was promising an impossible outcome
+
+The same screenshot carried a third false statement, in the auto-DNS summary:
+
+> *"Done — every record is already in place. **Nothing left for you to do; your domain connects on its
+> own from here.**"*
+
+Every record genuinely WAS in place and ownership genuinely WAS active — and the promise was still
+false. There was a great deal left to do, and the domain would never connect on its own, because it
+points at a site that can never receive a fullstack ship-whole app.
+
+**This is the SAME lesson `autoDnsSummary` already learned once, one level up.** It takes
+`ownershipState` precisely because "records exist" says nothing about "the host accepted them". It now
+also takes `publishBlocked`, because "the host accepted them" says nothing about whether the app can
+ever be SERVED. Each layer's success was being reported as the whole outcome.
+
+The DNS half is still reported as finished — it is, and understating it would send the user back to
+re-check records that are already perfect — but the "connects on its own" promise is withdrawn and the
+real blocker named in its place. Both completion branches are covered; fixing one would have left the
+other lying.
+
+Gate: both `tsc` clean; FULL suite **1451 files / 19255 tests green**. Verified to bite.

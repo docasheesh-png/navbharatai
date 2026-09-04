@@ -411,6 +411,19 @@ export function autoDnsSummary(input: {
    * for, not from evidence the record existed. Same mistake, mirrored.
    */
   ownershipState?: string | null;
+  /**
+   * The server's verdict that this app CANNOT be published to this domain at all (see
+   * `domainPublishBlockNote`). '' / absent when publishing is a real option.
+   *
+   * 🔒 WHY THIS PARAMETER EXISTS — the same lesson as `ownershipState`, one level up (admin
+   * 2026-09-04). With every record in place and ownership ACTIVE, this function printed *"Nothing
+   * left for you to do; your domain connects on its own from here."* For a fullstack ship-whole app
+   * that is simply FALSE: there is a great deal left to do, and the domain will never connect on its
+   * own, because it points at a site that can never receive this app. DNS being finished says nothing
+   * about whether the app can ever be SERVED — exactly as records existing said nothing about the
+   * host accepting them.
+   */
+  publishBlocked?: string | null;
 }): { text: string; tone: 'ok' | 'warn' | 'info' } {
   if (input.zoneStatus !== 'active') {
     return {
@@ -454,8 +467,17 @@ export function autoDnsSummary(input: {
     }
     // THE CASE THAT USED TO READ AS FAILURE. Every record is in place; the only thing left is the
     // hosting service's own sweep, which is not ours to hurry — so say that, instead of a bare "0".
+    // 🔒 DNS DONE IS NOT "NOTHING LEFT TO DO". When the app itself cannot be published to this
+    // domain, the records being perfect changes nothing about the outcome — so the DNS half is still
+    // reported as finished (it genuinely is), and the promise that the domain "connects on its own"
+    // is withdrawn in favour of the real blocker. Checked before both completion branches so no path
+    // can make that claim while the app has nowhere to go.
+    const blocked = String(input.publishBlocked ?? '').trim();
     const added = input.added ?? 0;
     const removed = input.removed ?? 0;
+    if (blocked) {
+      return { tone: 'warn', text: `Your DNS is fully set up — nothing more to add there. But your domain still cannot show your app: ${blocked}` };
+    }
     if (added === 0 && removed === 0) {
       return { tone: 'ok', text: 'Done — every record is already in place. Nothing left for you to do; your domain connects on its own from here.' };
     }
@@ -1093,7 +1115,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                       // The host's own verdict travels WITH the record counts, so this line can never announce
                       // completion while the service is still refusing the domain — the exact pairing in the
                       // admin's screenshot: a green "nothing left to do" under a red `ownership: mismatch`.
-                      const s = autoDnsSummary({ zoneStatus: autoZoneStatus, added: autoAdded, removed: autoRemoved, desired: autoDesired, missing: autoMissing, ownershipState: result?.ownershipState });
+                      const s = autoDnsSummary({ zoneStatus: autoZoneStatus, added: autoAdded, removed: autoRemoved, desired: autoDesired, missing: autoMissing, ownershipState: result?.ownershipState, publishBlocked: result?.publishBlocked });
                       const tone = s.tone === 'ok' ? 'text-green-300' : s.tone === 'warn' ? 'text-amber-300' : 'text-zinc-400';
                       return <span className={`text-[10px] leading-relaxed ${tone}`}>{s.text}</span>;
                     })()}

@@ -206,6 +206,7 @@ import {
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
 import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
+import { createRenderService } from '../AgentV3/renderCreateService';
 import { declaredAppPort } from '../lib/declaredAppPort';
 import { managedDnsConfigured, ensureZone, applyRecords } from '../lib/cloudflareManagedDns';
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
@@ -398,7 +399,7 @@ import {
   deleteWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
-import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { makeFirstPaintHandler } from '../AgentV3/streamingFirstPaint';
@@ -3922,7 +3923,42 @@ async function noteBuildOutcome(
     const renderKey = resolveRenderKey(renderVault);
     if (!renderKey) { res.status(503).json({ ok: false, reason: 'not-configured', error: renderRequirement(process.env, renderVault) }); return; }
     try {
-      const result = await deployBackendToRender({ repoUrl, appName, apiKey: renderKey.key });
+      let result = await deployBackendToRender({ repoUrl, appName, apiKey: renderKey.key });
+      /**
+       * 🔴 NO SERVICE YET? CREATE ONE (admin 2026-09-04 — "han", after the four-step path was named).
+       *
+       * `deployBackendToRender` MATCHES an existing service and, finding none, returns an honest
+       * instruction to go build it by hand in Render's own dashboard. True, and still the last manual
+       * wall between an app and a live site — the user leaves NavBharatAI, works in someone else's UI,
+       * and comes back. Render's API can create the service, so that wall was ours, not theirs.
+       *
+       * 🔒 ONLY ON `no-service`, and only with a repo. Every other failure (a bad key, an API error)
+       * keeps its own message — creating a service in answer to an unrelated error would be guessing
+       * with the user's account. And a creation that Render REFUSES leaves the original hand-off
+       * message standing, so the fallback is never worse than what it replaced.
+       */
+      if (!result.ok && result.reason === 'no-service' && repoUrl) {
+        const repoPath = repoUrl.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '');
+        // The start command comes from the app's OWN package.json — see deriveServiceCommands for why
+        // a guessed one is worse than no service at all.
+        const pkgRaw = await loadWorkspaceFilesByPath(workspaceId, ['package.json'])
+          .then((f: Record<string, string>) => f['package.json'] ?? null)
+          .catch(() => null);
+        const created = await createRenderService({
+          apiKey: renderKey.key,
+          name: (appName || repoPath.split('/')[1] || 'app').slice(0, 60),
+          repoUrl, repoPath, packageJson: pkgRaw,
+        });
+        if (created.ok) {
+          // Render deploys a newly-created service by itself, so this IS the deploy — reporting it as
+          // one is honest, and triggering a second would be a duplicate build on the user's account.
+          result = { ok: true, url: created.service.serviceUrl, serviceId: created.service.id, serviceName: created.service.name };
+        } else {
+          // Keep the original hand-off AND say what we tried, so the user is never left with a
+          // silent downgrade from "we can do this" to the old manual instruction.
+          result = { ok: false, reason: 'no-service', message: `${created.message}` };
+        }
+      }
       /**
        * 🔴 AND NOW POINT THE DOMAIN AT IT (admin 2026-09-04 — the root cause behind a month of
        * mitrify.com serving "Site Not Found").

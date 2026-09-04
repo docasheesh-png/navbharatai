@@ -44674,3 +44674,32 @@ which is the whole failure class, stated once so it cannot come back in a new co
 
 Gate: both `tsc` clean; FULL suite **1451 files / 19250 tests green**. Verified to bite by restoring
 the dead end.
+### The same gate, wrong a THIRD time — and why guessing states kept failing
+
+Admin: *"same to same error abhi bhi hai"*, with the connect screen reading *"We could not open your
+domain from here to confirm it is showing your app — **If it shows an error page, press Publish
+once**"* and mitrify.com still on Firebase's "Site Not Found".
+
+**The two conditions had drifted, and I wrote both:**
+
+| | condition |
+|---|---|
+| client (`NbaiDomainConnect`) | `s.serving?.state !== 'serving'` |
+| server (`nbaiDomains`) | `serving && serving.state !== 'serving'` |
+
+`checkDomainServing` returns **null** when our probe cannot reach the domain — a normal outcome, and
+exactly the state in the screenshot. The client's `?.` makes its branch TRUE for null, so it printed
+"press Publish once"; the server's `serving &&` makes the gate FALSE for null, so `publishBlocked` was
+never computed. **The screen sent the user at a button that always refuses, and the server said
+nothing** — after two earlier rounds on this same line.
+
+**The lesson, recorded because it is the actual defect:** each round I picked which STATES deserve the
+verdict. The answer was never a list of states — it is *"whatever makes the screen say press
+Publish"*, and only the client knows that. Two independently-written conditions for one question will
+drift, and did, three times.
+
+**Fix:** the server's gate is now character-for-character the client's, and
+`publishGateMatchesClient` pins BOTH source lines — editing either side alone fails CI. Verified to
+bite from both directions.
+
+Gate: both `tsc` clean; FULL suite **1451 files / 19240 tests green**.

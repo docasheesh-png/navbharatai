@@ -136,7 +136,7 @@ describe('🔒 the wiring, end to end', () => {
     const route = src('src/server/routes/nbaiDomains.ts');
     // ⚠️ The anchor moved 2026-09-04: the gate is now every NON-SERVING state, because `error` and
     // `unknown` also tell the user to press Publish. See the widened-gate block below.
-    expect(route).toContain("if (serving && serving.state !== 'serving') {");
+    expect(route).toContain("if (serving?.state !== 'serving') {");
     expect(route).toContain('loadWorkspaceFilesByPath');
     expect(route).toContain('domainPublishBlockNote(plan, { splitAdvised })');
     expect(route).toContain('...(publishBlocked ? { publishBlocked } : {})');
@@ -160,7 +160,7 @@ describe('🔒 the wiring, end to end', () => {
    */
   it('🔒 the whole-workspace read happens ONLY for an app already judged non-static', () => {
     const route = src('src/server/routes/nbaiDomains.ts');
-    const blockAt = route.indexOf("if (serving && serving.state !== 'serving') {");
+    const blockAt = route.indexOf("if (serving?.state !== 'serving') {");
     const block = route.slice(blockAt, route.indexOf('res.json({ ...status', blockAt));
     const guardAt = block.indexOf('if (!plan.staticHostingSufficient) {');
     const readAt = block.indexOf('loadWorkspaceFiles(workspaceId as string)');
@@ -182,6 +182,29 @@ describe('🔒 the wiring, end to end', () => {
  * It caught two things the first fix did not, and one of them was a hole in that very fix.
  */
 describe('🔒 the block fires in EVERY state that says "press Publish"', () => {
+  /**
+   * 🔒 THE GATE AND THE SCREEN ARE THE SAME CONDITION — pinned character-for-character.
+   *
+   * This gate has now been wrong three times in one day, always the same way: each fix picked which
+   * STATES deserve the verdict, when the answer was never a list of states. It is *"whatever makes the
+   * screen say press Publish"* — and only the client knows that. The third miss was `serving === null`
+   * (our probe could not reach the domain): the client's `?.` made its branch TRUE, the server's
+   * `serving && …` made the gate FALSE, so the screen said "press Publish once" while the server
+   * stayed silent. That was the admin's mitrify.com screenshot, after two rounds on this same line.
+   *
+   * So the two are no longer written independently. If either is edited without the other, this fails.
+   */
+  it('🔒 publishGateMatchesClient — the server asks exactly when the screen would say "press Publish"', () => {
+    const route = src('src/server/routes/nbaiDomains.ts');
+    const screen = src('src/components/agentv3/NbaiDomainConnect.tsx');
+    // The client's own "not confidently serving" branch — the one whose note ends in "press Publish once".
+    expect(screen).toContain("if (s.serving?.state !== 'serving') {");
+    // The server's gate must be the SAME test, including the optional chain that makes a null
+    // (unreachable domain) count. `serving && serving.state !== 'serving'` is what silently excluded it.
+    expect(route).toContain("if (serving?.state !== 'serving') {");
+    expect(route).not.toContain("if (serving && serving.state !== 'serving') {");
+  });
+
   it('the status route gates on NOT-SERVING, never on one state name', () => {
     // THE HOLE. The gate was `state === 'nothing_published'`, because that is where the screen says
     // "one last step: press Publish". But `error` says "Publishing again usually fixes this", and
@@ -190,13 +213,13 @@ describe('🔒 the block fires in EVERY state that says "press Publish"', () => 
     // were looking at. The right gate was never a state name: it is "is this screen about to say
     // press Publish?", and every non-serving state does.
     const route = src('src/server/routes/nbaiDomains.ts');
-    expect(route).toContain("if (serving && serving.state !== 'serving') {");
+    expect(route).toContain("if (serving?.state !== 'serving') {");
     expect(route).not.toContain("if (serving?.state === 'nothing_published') {");
   });
 
   it('a SERVING domain still asks nothing — the cost guarantee is unchanged', () => {
     const route = src('src/server/routes/nbaiDomains.ts');
-    const at = route.indexOf("if (serving && serving.state !== 'serving') {");
+    const at = route.indexOf("if (serving?.state !== 'serving') {");
     const block = route.slice(at, route.indexOf('res.json({ ...status', at));
     expect(block).toContain('loadWorkspaceFilesByPath');
   });

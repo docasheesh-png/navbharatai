@@ -44065,6 +44065,62 @@ Both `tsc` clean; FULL suite **1443 files / 19006 tests green**. Both guards ver
 would have been green against broken code. Caught by re-reading the file rather than trusting the
 restore. **An untracked file has no version to check out; verify the restore, don't assume it.**
 
+## 2026-09-04 — Name your app, and rename it any time (admin-requested)
+
+**The ask:** *"jab jab bhi app bane to chat box me hi ek dedicated message sirf 'name' ke liye ho, aur
+us message ke aage edit button ho … jab user save kare to har jagah wahi name ho jo user ne dala hai
+(duplicate not allowed) aur sath me ai ka app building disturb bhi na ho. app ka naam / app building —
+dono smooth rahe."*
+
+### What was in the way — a rename was not a small change, and the reason matters
+
+The GitHub repo name was **never stored**. It was RECOMPUTED on every build turn from the
+conversation's `title` + `createdAt`, and `ensureRepo(name)` means *"find the repo with this name,
+else CREATE it"*. Those two facts make a naive rename destructive: change the input to that
+computation and the next turn computes a name GitHub does not have, so it creates a **brand-new empty
+repo** and pushes there — leaving the real app and its whole history stranded in the old one. That is
+precisely the repo sprawl `GitStorageTarget`'s own header says the design exists to prevent.
+
+So the fix had to make the name **stored data instead of a derivation**.
+
+### What shipped
+
+- **`appName.ts`** (new, pure): normalize / validate / slug / `effectiveAppName` / `findDuplicate`.
+  `effectiveAppName` is the ONE resolver every surface calls — that is what "har jagah" actually is.
+- **`appName` + `repoName` persisted** on the conversation record, through both the in-memory and
+  Firestore stores (following the existing `pinned` precedent, including the list view).
+- **`POST /api/agentv3/conversations/:id/name`** — ownership-checked, validated, duplicate-refused
+  (409) *before* anything is written. It writes the display name FIRST and only then attempts the
+  GitHub repo rename.
+- **`renameRepo`** on both GitHub clients — a real rename, so the repo **moves with its history**
+  rather than a new empty one appearing. Never throws.
+- **Chat name card + rename popup** in `AgentV3Panel`, deliberately usable *while a build runs*.
+
+### Why the build genuinely cannot be disturbed — a property, not a promise
+
+Because `repoName` is persisted, a build pushes to the **stored** name. If GitHub refuses the rename,
+that stored name is unchanged and the build keeps pushing exactly where it already was; the only
+casualty is the repo keeping its old name, which we then say out loud. The rename cannot half-apply
+either: `repoName` is written ONLY after GitHub confirms the move.
+
+**The derivation deliberately ignores `appName`** and reads only the immutable `title`. This is
+load-bearing and was found by tracing the ordering rather than assuming it: the conversation record is
+created *late in the first build request*, well after the repo name is computed — so turn one's pin
+write is a **no-op by construction**, and a rename right after the first build (the most likely
+moment) would otherwise have orphaned the app. Deriving from `title` means turn two recomputes the
+same name, finds the same repo, and pins it then.
+
+The rename endpoint closes the remaining gap by reconstructing the derived name from the record's own
+immutable identity when nothing is pinned yet, and pins the chosen name on a 404 so an app that has
+never been pushed is simply **born** with the user's name.
+
+**Locked** in `tests/appName.test.ts` (29) + store round-trip tests. Three guards verified to bite:
+feeding `appName` into the derivation, dropping the persisted-name preference, and disabling Save
+while a build runs — each fails its own test, then restored.
+
+`AppKnowledgeBase.ts` updated (mandatory for a user-facing capability).
+
+Gate: both `tsc` clean; FULL suite **1445 files / 19045 tests green**.
 ---
 
 ## 2026-09-04 (later) — Solution #1 "stop the model writing boilerplate": mostly ALREADY BUILT, so the gap got built instead

@@ -272,3 +272,45 @@ describe('deriveTitle', () => {
     expect(deriveTitle('   ')).toBe('Untitled build');
   });
 });
+
+describe('appName + repoName round-trip (admin 2026-09-04)', () => {
+  const base = { id: 'c1', userId: 'u1', workspaceId: 'w1', title: 'build me a shop', createdAt: 1_000 };
+
+  it('both are absent until set — an un-renamed build is byte-identical to before', async () => {
+    const s = new InMemoryConversationStore();
+    const rec = await s.create(base);
+    expect(rec.appName).toBeUndefined();
+    expect(rec.repoName).toBeUndefined();
+  });
+
+  it('a patch persists each one, and reads back through get()', async () => {
+    const s = new InMemoryConversationStore();
+    await s.create(base);
+    await s.update('c1', { appName: 'My Shop', updatedAt: 2_000 });
+    await s.update('c1', { repoName: 'my-shop', updatedAt: 3_000 });
+    const got = await s.get('c1');
+    expect(got?.appName).toBe('My Shop');
+    expect(got?.repoName).toBe('my-shop');
+  });
+
+  it('🔒 a patch that omits them leaves them ALONE — the repo name must survive every build turn', async () => {
+    // A build turn patches status/usage constantly. If any of those writes cleared repoName, the next
+    // turn would re-derive a name, ensureRepo would not find it, and the app would be orphaned in a
+    // brand-new empty repo — the exact failure persisting the name exists to prevent.
+    const s = new InMemoryConversationStore();
+    await s.create(base);
+    await s.update('c1', { appName: 'My Shop', repoName: 'my-shop', updatedAt: 2_000 });
+    await s.appendMessages('c1', [{ role: 'assistant', content: 'built it' }], { status: 'complete', updatedAt: 4_000 });
+    const got = await s.get('c1');
+    expect(got?.repoName).toBe('my-shop');
+    expect(got?.appName).toBe('My Shop');
+  });
+
+  it('the chosen name reaches the LIST view — that is what "har jagah" depends on', async () => {
+    const s = new InMemoryConversationStore();
+    await s.create(base);
+    await s.update('c1', { appName: 'My Shop', updatedAt: 2_000 });
+    const list = await s.listByUser('u1');
+    expect(list[0].appName).toBe('My Shop');
+  });
+});

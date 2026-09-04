@@ -27,6 +27,25 @@ export interface ConversationRecord {
   workspaceId: string;
   /** Short human label (typically derived from the first user prompt). */
   title: string;
+  /**
+   * The name the USER chose for this app (admin 2026-09-04), set from the chat's name card.
+   *
+   * Absent on every record until someone renames, so `title` remains the fallback and nothing about
+   * an un-renamed build changes. Never read this directly for display — call `effectiveAppName`,
+   * which is what makes the chosen name appear in EVERY surface rather than only the one that
+   * happened to be updated.
+   */
+  appName?: string;
+  /**
+   * The GitHub repo this app's code actually lives in, once one has been ensured.
+   *
+   * ⚠️ THIS FIELD IS WHY A RENAME IS SAFE. The repo name used to be recomputed from title+createdAt
+   * on every build turn, and `ensureRepo(name)` creates whatever name it is handed — so changing the
+   * inputs to that computation would have silently created a NEW empty repo and pushed there,
+   * stranding the real app. Persisted, the name becomes a FACT rather than a derivation: the build
+   * pushes where it already pushed, and a rename that GitHub refuses cannot move it.
+   */
+  repoName?: string;
   status: ConversationStatus;
   /** The AgentRunner transcript, stored VERBATIM so a resumed run sees its exact prior context. */
   messages: unknown[];
@@ -80,6 +99,10 @@ export interface ConversationPatch {
   framework?: string;
   /** Pin/unpin this build in the user's history list. */
   pinned?: boolean;
+  /** The user's chosen app name (admin 2026-09-04). Applies instantly; never touches the build. */
+  appName?: string;
+  /** The GitHub repo this app's code lives in — written once when ensured, and on a real rename. */
+  repoName?: string;
 }
 
 /**
@@ -254,6 +277,8 @@ export class InMemoryConversationStore implements ConversationStore {
     if (patch.finalState !== undefined) rec.finalState = { ...patch.finalState };
     if (patch.framework !== undefined) rec.framework = patch.framework;
     if (patch.pinned !== undefined) rec.pinned = patch.pinned;
+    if (patch.appName !== undefined) rec.appName = patch.appName;
+    if (patch.repoName !== undefined) rec.repoName = patch.repoName;
     rec.updatedAt = patch.updatedAt;
   }
 }

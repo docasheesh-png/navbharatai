@@ -76,6 +76,10 @@ import {
   planRevert,
   repoNameForProject,
   readableAppNameForRepo,
+  validateAppName,
+  appNameErrorMessage,
+  findDuplicate,
+  effectiveAppName,
   resolveStorageTarget,
   ownRepoStorageEnabled,
   parseGitHubRepo,
@@ -2979,8 +2983,13 @@ export function registerAgentV3Routes(app: Express): void {
           const dep = c.workspaceId ? deployments.get(c.workspaceId) : undefined;
           const live = isLiveDeployment(dep);
           return {
-            id: c.id, title: c.title, status: c.status, workspaceId: c.workspaceId,
+            // `title` carries the EFFECTIVE name (admin 2026-09-04: "har jagah wahi name") so every
+            // existing reader of this list shows the user's chosen name with no change of its own —
+            // the surest way to get "everywhere" right is to leave nothing to update. `appName` rides
+            // along separately so a caller can still tell a chosen name from a derived one.
+            id: c.id, title: effectiveAppName(c), status: c.status, workspaceId: c.workspaceId,
             billedUsd: c.billedUsd, createdAt: c.createdAt, updatedAt: c.updatedAt,
+            ...(c.appName ? { appName: c.appName } : {}),
             ...(c.pinned ? { pinned: true } : {}),
             ...(live ? { live: true, liveUrl: dep!.url } : {}),
           };
@@ -3134,6 +3143,122 @@ export function registerAgentV3Routes(app: Express): void {
         return;
       }
       res.json({ ok: true, pinned });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /**
+   * RENAME THE APP (admin 2026-09-04): *"jab user save kare to har jagah wahi name ho jo user ne dala
+   * hai (duplicate not allowed) aur sath me ai ka app building disturb bhi na ho."*
+   *
+   * TWO NAMES MOVE, AND THEY ARE DELIBERATELY NOT THE SAME PROMISE:
+   *
+   *  1. The DISPLAY name (`appName`) — persisted first, and once it is written the request has
+   *     succeeded. Every surface resolves through `effectiveAppName`, so this alone is what makes the
+   *     new name appear everywhere. It is a single field write: it cannot fail halfway.
+   *
+   *  2. The GITHUB REPO name — attempted afterwards, BEST-EFFORT, and never allowed to fail the
+   *     request. This is the half that touches something a build might be using, which is exactly why
+   *     it is second and why it cannot throw.
+   *
+   * WHY THE BUILD IS SAFE — a property, not a hope. Since `repoName` is now PERSISTED, the build
+   * pushes to the name stored on the record. If GitHub refuses the rename, that stored name is
+   * unchanged and the build carries on pushing precisely where it already was; the only casualty is
+   * that the repo keeps its old name, which we then say out loud instead of pretending. The rename
+   * cannot half-apply either: `repoName` is written ONLY after GitHub confirms the move.
+   *
+   * `updatedAt` is preserved (as pinning does): naming an app is not "working on" it, and bumping it
+   * would silently reorder the user's history list under them.
+   */
+  app.post('/api/agentv3/conversations/:id/name', async (req: Request, res: Response) => {
+    const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const validated = validateAppName(typeof req.body?.name === 'string' ? req.body.name : '');
+    if (!validated.ok) {
+      res.status(400).json({ error: appNameErrorMessage(validated.error!), reason: validated.error });
+      return;
+    }
+    try {
+      const store = getConversationStore();
+      // DUPLICATE CHECK across the user's OWN apps, before anything is written. An 'anon' identity is
+      // not enumerable by design (Phase 3.1), so this list comes back empty for it — no local check is
+      // possible there, and GitHub's own 422 remains the authoritative backstop on the repo name.
+      // `?? ''` is not a shrug: isEnumerableUserId('') is false, so a token-less identity yields an
+      // empty list here by the same Phase-3.1 rule that protects the shared-anon bucket.
+      const mine = await store.listByUser(userId ?? '', 200).catch(() => []);
+      let renamed: { id: string; repoName?: string } | null = null;
+      let forbidden = false;
+      for (const cid of candidateConversationIds(req.params.id, userId)) {
+        const rec = await store.get(cid).catch(() => null);
+        const access = conversationAccess(rec, userId);
+        if (access !== 'ok' || !rec) {
+          if (access === 'forbidden') forbidden = true;
+          continue;
+        }
+        const clash = findDuplicate(validated.name, mine, rec.id);
+        if (clash) {
+          res.status(409).json({ error: appNameErrorMessage('duplicate'), reason: 'duplicate' });
+          return;
+        }
+        await store.update(cid, { appName: validated.name, updatedAt: rec.updatedAt });
+        // WHICH REPO TO MOVE. A pinned name is a fact and always wins. When none is pinned yet — the
+        // normal state right after a first build, since the record is created only late in that
+        // request — reconstruct the name the build path would have derived, from the SAME immutable
+        // inputs (`title` + `createdAt`) and the same project id the builder uses (`req.params.id` is
+        // the client's sessionId, which is exactly that). A reconstruction that misses simply 404s and
+        // is reported honestly; it can never rename the wrong repo, because the name is derived from
+        // this record's own identity.
+        renamed = {
+          id: cid,
+          repoName: rec.repoName || repoNameForProject(userId, req.params.id, {
+            appName: rec.title,
+            createdAtMs: typeof rec.createdAt === 'number' && rec.createdAt > 0 ? rec.createdAt : Date.now(),
+          }),
+        };
+      }
+      if (!renamed) {
+        res.status(forbidden ? 403 : 404).json({
+          error: forbidden ? 'This build belongs to another account.' : 'Conversation not found.',
+        });
+        return;
+      }
+
+      // ---- The repo half. Everything below is best-effort and reported, never thrown. ----
+      let repoRenamed = false;
+      let repoNote = '';
+      const ghToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
+      const fromRepo = renamed.repoName || '';
+      const toRepo = validated.slug;
+      if (fromRepo === toRepo) {
+        // Already called this. Pin it anyway: an app whose repo name is only ever DERIVED is one
+        // rename away from ambiguity, and a fact costs nothing to record.
+        await store.update(renamed.id, { repoName: toRepo, updatedAt: Date.now() }).catch(() => { /* cosmetic */ });
+        repoNote = 'already-named';
+      } else if (ghToken) {
+        const out = await new UserGitHubClient(ghToken).renameRepo(fromRepo, toRepo);
+        if (out.ok) {
+          // Persist ONLY what GitHub confirmed — the name it reports, not the one we asked for.
+          await store.update(renamed.id, { repoName: out.name, updatedAt: Date.now() }).catch(() => { /* display rename already stands */ });
+          repoRenamed = true;
+        } else if (out.status === 404) {
+          // NOTHING TO MOVE — this app has never been pushed to GitHub. So pin the chosen name and the
+          // repo is simply BORN with it on the first save. This is the common path for a rename right
+          // after the first build, and pinning here is safe precisely because no repo exists to strand.
+          await store.update(renamed.id, { repoName: toRepo, updatedAt: Date.now() }).catch(() => { /* cosmetic */ });
+          repoNote = 'will-use-on-first-save';
+        } else {
+          // 422 is GitHub itself saying the name is taken — the authoritative duplicate check that no
+          // local scan can replace. Nothing is pinned, so the app keeps using the repo it already has.
+          repoNote = out.status === 422 ? 'repo-name-taken' : 'repo-rename-failed';
+        }
+      } else {
+        repoNote = 'no-github-token';
+      }
+      res.json({ ok: true, name: validated.name, repoRenamed, ...(repoNote ? { repoNote } : {}) });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -6968,7 +7093,15 @@ async function noteBuildOutcome(
             let repoName = repoNameForProject(userId, workspaceId);
             try {
               const idRec = await getConversationStore().get(workspaceId).catch(() => null);
-              if (idRec?.title) {
+              // Same precedence as the build path (admin 2026-09-04): a STORED repo name wins
+              // outright, then the user's chosen app name, then the auto-derived title. Converging on
+              // the identical rule here is the point of this block — an import that picked a
+              // different name would land the user's files in a second, disconnected repo.
+              if (idRec?.repoName) {
+                repoName = idRec.repoName;
+              } else if (idRec?.title) {
+                // `title`, never `appName` — same reason as the build path: a repo name derived from
+                // a value the user can change is a repo that moves out from under the app.
                 repoName = repoNameForProject(userId, workspaceId, {
                   appName: idRec.title,
                   createdAtMs: typeof idRec.createdAt === 'number' && idRec.createdAt > 0 ? idRec.createdAt : Date.now(),
@@ -9864,10 +9997,26 @@ async function noteBuildOutcome(
           // the record is about to be created with. Best-effort: any lookup failure falls back cleanly.
           let readableAppName = deriveTitle(prompt);
           let readableCreatedAt = Date.now();
+          // THE REPO WE ALREADY USE (admin 2026-09-04). `pinnedRepoName` is the repo this app is
+          // ALREADY stored in. When present it WINS over the derivation below — that is what lets the
+          // app be renamed without the next build computing an unfamiliar name and having ensureRepo
+          // create an empty repo beside the real one.
+          //
+          // ⚠️ THE DERIVATION DELIBERATELY IGNORES THE USER'S CHOSEN NAME, and this is load-bearing.
+          // `title` is written once at record creation and never changes; `appName` changes on every
+          // rename. Feeding a MUTABLE value into a name that `ensureRepo` treats as an identity is
+          // precisely how a rename would orphan an app — and it could not be caught by the pin above,
+          // because the conversation record does not exist yet on the FIRST build turn (it is created
+          // much later in this same request), so turn one's pin write is a no-op by construction.
+          // Deriving from `title` means turn two recomputes the SAME name, finds the same repo, and
+          // pins it then. Renaming the actual GitHub repo is the rename endpoint's job, not a
+          // side-effect of a derivation.
+          let pinnedRepoName = '';
           try {
             const idRec = await getConversationStore().get(workspaceId).catch(() => null);
             if (idRec) {
               if (idRec.title) readableAppName = idRec.title;
+              if (idRec.repoName) pinnedRepoName = idRec.repoName;
               if (typeof idRec.createdAt === 'number' && idRec.createdAt > 0) readableCreatedAt = idRec.createdAt;
             }
           } catch { /* readable-name identity lookup is best-effort — prompt + now is a valid fallback */ }
@@ -9876,7 +10025,19 @@ async function noteBuildOutcome(
           // `import-this-app-from-my-github-repositor-…` for an app called `mitrify`. The imported repo's
           // own name is the better, equally-stable identity. See readableAppNameForRepo (pure + tested).
           readableAppName = readableAppNameForRepo({ importedRepo: parseGitHubRepo(importUrl), fallbackTitle: readableAppName });
-          const repoName = repoNameForProject(userId, projectId, { appName: readableAppName, createdAtMs: readableCreatedAt });
+          // A STORED repo name is a FACT; the derivation is only a proposal for an app that has none
+          // yet. Preferring the stored one is the single line that makes renaming safe — and it also
+          // hardens the pre-existing case where a title edit or an import would have silently moved a
+          // build to a different repo mid-session.
+          const repoName = pinnedRepoName || repoNameForProject(userId, projectId, { appName: readableAppName, createdAtMs: readableCreatedAt });
+          // Remember it the FIRST time, so every later turn takes the branch above rather than
+          // re-deriving. Best-effort and non-blocking: the build already has the name it needs, and a
+          // failed write only means the next turn re-derives exactly what it derived this turn.
+          if (!pinnedRepoName) {
+            void getConversationStore().get(workspaceId)
+              .then((rec) => rec && getConversationStore().update(workspaceId, { repoName, updatedAt: rec.updatedAt }))
+              .catch(() => { /* the derivation is deterministic — an unwritten name costs nothing */ });
+          }
           const userToken = typeof req.body?.githubToken === 'string' && req.body.githubToken ? req.body.githubToken : '';
           // PREFER THE USER'S OWN GITHUB: when the user signed in with GitHub, store the project in a
           // repo under THEIR account (their code, no lock-in) and run PR/CI/merge there. Best-effort —

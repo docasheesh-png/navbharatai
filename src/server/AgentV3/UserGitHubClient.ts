@@ -63,6 +63,34 @@ export class UserGitHubClient implements PrCapableClient, ReviewCapableClient {
   }
 
   /**
+   * Rename the user's repo `<login>/<from>` to `<to>` (admin 2026-09-04, the app-name feature).
+   *
+   * A RENAME, NOT A RE-CREATE — that distinction is the whole point. GitHub moves the existing repo
+   * with all of its commits, branches and history intact, which is exactly what creating a new repo
+   * under the new name would NOT do. `ensureRepo` cannot express this: handed an unfamiliar name it
+   * creates an empty repo, so without this call a "rename" would strand the real app.
+   *
+   * NEVER THROWS. The caller has already applied the user's chosen display name, and a build may be
+   * running against the old repo; a thrown error here would turn a cosmetic outcome into a failed
+   * request. `ok:false` with a `status` lets the route tell the user the honest truth — 422 in
+   * particular means GitHub itself says that name is taken, which is the authoritative duplicate
+   * check no local scan can replace.
+   */
+  async renameRepo(from: string, to: string): Promise<{ ok: boolean; status: number; name: string }> {
+    if (!from || !to || from === to) return { ok: false, status: 0, name: from };
+    try {
+      const login = await this.getLogin();
+      const res = await this.request<RepoApi>('PATCH', `/repos/${login}/${encodeURIComponent(from)}`, { name: to });
+      // GitHub returns the repo it ended up with; trust ITS name over the one we asked for, since it
+      // may normalise what we sent and we must persist what actually exists.
+      const actual = (res.body?.full_name || '').split('/')[1] || to;
+      return { ok: res.ok, status: res.status, name: res.ok ? actual : from };
+    } catch {
+      return { ok: false, status: 0, name: from };
+    }
+  }
+
+  /**
    * Verify the authenticated user's access to their own repo `<login>/<name>`: does it exist, can the
    * token PUSH to it, and what is its default branch (the PR base). Used to gate own-repo working-branch
    * storage — we only ever write to a repo the user genuinely owns and can push to. Never throws: any

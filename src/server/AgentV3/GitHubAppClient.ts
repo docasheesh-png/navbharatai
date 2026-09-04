@@ -237,6 +237,24 @@ export class GitHubAppClient {
   }
 
   /**
+   * Rename the org repo `<org>/<from>` to `<to>` (admin 2026-09-04, the app-name feature). The
+   * platform-org twin of `UserGitHubClient.renameRepo` — same contract, same reasoning: GitHub moves
+   * the repo WITH its history, where `ensureRepo` under a new name would only ever make an empty one.
+   * Never throws; `ok:false` carries the status so the caller can be honest about what happened.
+   */
+  async renameRepo(from: string, to: string): Promise<{ ok: boolean; status: number; name: string }> {
+    if (!from || !to || from === to) return { ok: false, status: 0, name: from };
+    try {
+      const token = await this.getInstallationToken();
+      const res = await this.request<RepoApi>('PATCH', `/repos/${this.cfg.org}/${encodeURIComponent(from)}`, `token ${token}`, { name: to });
+      const actual = (res.body?.full_name || '').split('/')[1] || to;
+      return { ok: res.ok, status: res.status, name: res.ok ? actual : from };
+    } catch {
+      return { ok: false, status: 0, name: from };
+    }
+  }
+
+  /**
    * Open a PR (head → base). Idempotent: if an open PR already exists for that head/base GitHub
    * returns 422, and we look it up and return the existing one instead of failing.
    */

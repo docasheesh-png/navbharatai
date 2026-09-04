@@ -44403,6 +44403,175 @@ diverge, the trade-off that settled this changes and the decision deserves revis
 
 Gate: both `tsc` clean; FULL suite **1448 files / 19147 tests green**.
 
+## 2026-09-04 — mitrify.com: why a month of DNS fixes could never have worked
+
+**Report:** *"yeh error abhi bhi aa rahi hai! 1 month se aap isko fix kar rahe ho"* — with screenshots
+showing `mitrify.com` serving Firebase's **"Site Not Found"**, while the connect screen right beside it
+read `ownership: active · host: active · SSL: active`, *"3 records you added are verified"*, and
+**"Connected — one last step: press Publish."**
+
+### The diagnosis, traced through the code rather than guessed
+
+Every fix over the past month was on the DNS / ownership / SSL side — and that side is now genuinely,
+verifiably **finished**: the screenshot shows all three ACTIVE and every record verified. None of it
+could ever have made the site appear, because the blocker is somewhere else entirely:
+
+1. mitrify is a **fullstack ship-whole** app (its own refusal text says so: *"your website and your
+   server … share one address, so they belong together"*).
+2. `POST /api/agentv3/publish` **refuses such an app with 422** (`routes/agentv3.ts`, the
+   "IS THIS EVEN A WEBSITE?" block) — correctly, since uploading an Express app to a static CDN is
+   what produced the broken site in the first place.
+3. So the workspace's Firebase Hosting site **never receives a release**.
+4. The custom domain is attached to **that** site (`siteIdForWorkspace`), and Firebase serves
+   "Site Not Found" for a site with no release. ← exactly the screenshot.
+5. `renderDeploy.ts` contains **no custom-domain code at all** — so even a perfect "Deploy backend"
+   never points mitrify.com at the Render service where the app can actually run.
+
+**⇒ The domain is attached to a place that structurally cannot serve this app, and nothing in the
+product can move it to the place that can.** That is why the loop survived every fix.
+
+### Shipped now — the screen stops sending the user at a button that answers 422
+
+`domainPublishBlockNote` was written (2026-08-24) for exactly this class, but stayed **deliberately
+silent for `fullstack`** because a *splittable* fullstack app really can publish. That reasoning was
+sound and incomplete: the publish route's only fullstack path is `wiredToBackend`, which requires
+`strategy === 'split'`. For **ship-whole** the refusal is as certain as for a bare server. It now says
+so, and only on a real `analyzeApiWiring` verdict of `false` — never on a guess.
+
+### And the sibling bug that made it worse (rule 3 — hunt the class)
+
+The status route formed its verdict from **the manifests alone**. That is the very defect the publish
+route fixed on 2026-08-25: `planDeployment`'s file-based half — does the source actually IMPORT a
+server framework — can never fire when only four manifests are handed to it. So the two halves of one
+product could reach **opposite conclusions about the same app**: publish refusing it as a server while
+this screen cheerfully said "one last step: press Publish". The route now uses the same two-stage
+escalation, with the same cost profile (an ordinary static app pays exactly what it paid before).
+
+⚠️ A test asserting `not.toContain('loadWorkspaceFiles(...)')` was **rewritten, not deleted** — it had
+pinned the single-stage read that WAS the bug. The cost guarantee it protected is real and is kept,
+now asserted as *where* the read lives rather than as a blanket ban, which is strictly stronger.
+
+### 🔴 OPEN ROOT CAUSE (rule 6) — mitrify.com still will not serve until this is built
+
+Telling the truth is not the same as making the site work. For a ship-whole fullstack app the domain
+must point at the host that can RUN it (Render), not at Firebase static hosting. That capability does
+not exist: no Render custom-domain call, and no path that writes the DNS records Render requires.
+**Recorded as open rather than papered over.** The next step is a `renderCustomDomain` module plus a
+branch in the connect flow that attaches such an app's domain to its Render service, with the records
+written through the Cloudflare-managed zone we already run.
+
+Gate: both `tsc` clean; FULL suite **1449 files / 19184 tests green**. Both guards verified to bite.
+
+### Same day, second screenshot, same app — two more, and one was a hole in the fix above
+
+The admin sent a second pair (*"ye screenshot bhi same app ke hai"*) within the hour. It caught two
+things, and the first is a defect in the fix recorded immediately above.
+
+**1. 🔴 THE FIX ABOVE DID NOT FIRE IN THE STATE THEY WERE LOOKING AT.** The status route computed
+`publishBlocked` only when `serving.state === 'nothing_published'` — chosen because that is where the
+screen says *"one last step: press Publish"*. But that is not the only state that says it: `error`
+says *"Publishing again usually fixes this"*, and `unknown` — our probe could not reach the domain —
+says *"If it shows an error page, press Publish once."* The new screenshot shows exactly `unknown`
+("We could not open your domain from here to confirm…"), so the fix written to end this loop was
+silent precisely where the admin was standing. **The right gate was never a state name**: it is *is
+this screen about to tell the user to press Publish?*, and every non-serving state does. Now gated on
+`serving.state !== 'serving'`. Cost is unchanged where it matters — a serving domain asks nothing.
+
+**2. ONE SCREEN CONTRADICTING ITSELF about the same deploy.** The refusal read *"Render is configured
+— a real deploy can run"* and told the user to use "Deploy backend", while the panel directly beneath
+it said *"Your code has to live in a GitHub repository first"* — and no Deploy backend button existed
+anywhere, because `backendDeployOffer` had correctly withheld it for having no repo. Root cause:
+`renderRequirement` announced the capability from **half the facts** (a key resolved), while a Render
+deploy reads code FROM a repo and needs both. It now takes `hasRepo`, and a key without a repo says
+the honest thing instead. `undefined` keeps the old wording, so a caller that does not know says
+nothing new, and a missing KEY still reports the missing key rather than hiding it behind the repo.
+
+The fact is taken from the client's own `deployRepo` — the very value the panel renders — so the two
+agree **by construction** rather than by two implementations staying in step. It shapes a sentence
+only, never an authorisation.
+
+⚠️ Two assertions from the fix above were re-anchored, not deleted: they pinned the narrow gate that
+WAS the hole.
+
+Gate: both `tsc` clean; FULL suite **1449 files / 19191 tests green**. Both new guards verified to
+bite (narrowing the gate back; claiming a deploy can run with no repo).
+
+### The open root cause above is now CLOSED — the domain follows the app to Render
+
+Recorded above as an open root cause: *"a ship-whole fullstack app's domain must point at the host that
+can RUN it (Render), not at Firebase static hosting. That capability does not exist."* Built now.
+
+**`renderCustomDomain.ts`** (new, pure + 23 tests): attach a domain to the Render service and plan the
+DNS that makes it resolve. Idempotent — a domain already attached, or a 409 from the host, is SUCCESS,
+because pressing Connect twice must never turn a working setup into a failure.
+
+**🔒 A CNAME AT THE APEX, DELIBERATELY NOT AN A RECORD.** Render's documented apex recipe is an A record
+to their anycast IP. Writing that would bake a third-party address into our source, and the day they
+renumber, every domain we ever wrote goes dark together with nothing failing on our side to reveal it —
+the exact stale-hardcoded-value class this repo has already been burned by (retired model ids in five
+files). We only reach here for zones WE manage in Cloudflare, which flattens an apex CNAME on every
+lookup, so there is no address to go stale and Render can renumber freely. Test-locked, including an
+assertion that the planned records contain no IP literal at all.
+
+**Wired at the moment a service first exists — `POST /api/agentv3/deploy-backend`.** Not on the connect
+screen: a domain can only point at a service that exists, and a successful backend deploy is the exact
+instant one starts to. So there is no new button and no new step — deploying the backend simply takes
+the connected domain with it, attaching it at Render and writing the CNAME through the managed zone.
+
+**🔒 Strictly additive, and it cannot lie about the deploy.** Every domain failure is reported in
+`domainNote` and none can turn a successful deploy into a failed request — the deploy already happened,
+and reporting it as failed because a DNS write did would send the user to redo work that succeeded.
+`firebaseDomainsForWorkspaceStrict`'s `null` ("could not ask") is deliberately NOT read as "no domain",
+which would have silently skipped pointing a domain the user really has. With no managed zone we print
+the exact CNAME rather than implying it was done.
+
+**Honest about what is still required of the user:** mitrify has no repo and no deployed service yet, so
+the first two steps remain theirs — connect GitHub and push the app, then deploy the backend. This
+change removes the third, which was missing entirely and which no amount of user effort could supply.
+
+Gate: both `tsc` clean; FULL suite **1450 files / 19214 tests green**. Guards verified to bite (a DNS
+failure failing the deploy; treating "could not ask" as "no domain").
+
+## 2026-09-04 — GitHub import: "kis port par run karna hai yeh confuse ho jata hai"
+
+**Root cause was a SCATTERED check, not a missing one.** Three readers already existed, each seeing a
+different narrow slice, and each caller picked its own subset:
+
+| reader | sees | used by |
+|---|---|---|
+| `devScriptPort` | package.json scripts only (`--port`, `-p`, `PORT=`) | preview + import |
+| `serverPortFromFiles` | a FIXED list of server entry paths | preview only |
+| `clientVitePort` | `vite.config` `server.port` — **module-private** | nothing outside its own file |
+
+An app WE scaffold declares its port in a script, so the narrow readers sufficed and the gap never
+showed. An **imported repo is the opposite**: it pins its port in `vite.config.*`, in a `.env`, or in a
+server entry outside that fixed list (`backend/server.js`, `api/index.js`, `src/main.ts`) — none of
+which the preview path could see, and the IMPORT path had the narrowest reader of all (scripts, then a
+framework GUESS). So discovery fell through to the guess, we visited the wrong port, and reported "no
+service running" about an app that was serving perfectly somewhere else.
+
+The `.env` case is the sharpest: an imported Express app says `app.listen(process.env.PORT)` with **no
+literal fallback**, so the code reader finds nothing and the real number lives in `.env`, which nothing
+read at all.
+
+**Fix — the class, not a third instance.** New pure `lib/declaredAppPort.ts`: ONE resolver over every
+declaration site, with documented precedence (an explicit script flag → dev-server config → `.env` →
+the server's own `listen`), each step only ever filling the silence above it. Both callers now use it,
+so a fourth caller cannot invent a fourth subset. Same centralisation pattern as `safeRelPath` (4
+drifted copies → one module) and the retired model ids.
+
+**Kept deliberately unchanged:** the boot log's own testimony still outranks everything — it is the app
+saying where it *landed*, and an app that MOVED (port already in use) is only correct there. And
+`declaredAppPort` returns **null** when nothing is declared, which must stay a real answer: the caller
+then keeps the evidence-first listening-port sweep, strictly better than any guess. An infrastructure
+port (a provisioned Postgres on 5432) is never returned as the app's.
+
+⚠️ One assertion in `serverPortFromCode.test.ts` was re-anchored, not deleted — it pinned the narrow
+reader. The property it protected (the preview path reads the port from the project's own files rather
+than guessing) is unchanged and now strictly stronger.
+
+Gate: both `tsc` clean; FULL suite **1451 files / 19234 tests green**. Guards verified to bite
+(reverting the import path to the script-only reader; dropping the `.env` reader).
 ---
 
 ## 2026-09-04 — Solution #6: the FAST lane now fixes mechanical tsc errors itself

@@ -205,6 +205,9 @@ import {
 } from '../AgentV3/ShellSessions';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
+import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
+import { declaredAppPort } from '../lib/declaredAppPort';
+import { managedDnsConfigured, ensureZone, applyRecords } from '../lib/cloudflareManagedDns';
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
@@ -3920,7 +3923,59 @@ async function noteBuildOutcome(
     if (!renderKey) { res.status(503).json({ ok: false, reason: 'not-configured', error: renderRequirement(process.env, renderVault) }); return; }
     try {
       const result = await deployBackendToRender({ repoUrl, appName, apiKey: renderKey.key });
-      res.status(result.ok ? 200 : 409).json(result);
+      /**
+       * 🔴 AND NOW POINT THE DOMAIN AT IT (admin 2026-09-04 — the root cause behind a month of
+       * mitrify.com serving "Site Not Found").
+       *
+       * A fullstack ship-whole app cannot be served by static hosting, so its Firebase site never
+       * receives a release and Firebase answers "Site Not Found" forever. The user's domain was
+       * attached to THAT site, and nothing in the product could move it — so the domain was bound to a
+       * place that structurally could not serve the app, permanently.
+       *
+       * This is the missing half, and it belongs HERE rather than on the connect screen: a domain can
+       * only point at a service that exists, and this is the exact moment one starts to. No new button,
+       * no new step for the user — deploying the backend simply takes the domain with it.
+       *
+       * 🔒 STRICTLY ADDITIVE. Every failure is reported and none of it can turn a successful deploy
+       * into a failed request: the deploy already happened, and telling the user it failed because a
+       * DNS write did would be a lie about the thing they actually asked for.
+       */
+      let domainPointed: { domain: string; records: number } | null = null;
+      let domainNote = '';
+      if (result.ok) {
+        try {
+          // `Strict` returns null for "could not ask", which is NOT "no domain" — a lookup failure
+          // must never silently skip pointing a domain the user really does have.
+          const domains = await firebaseDomainsForWorkspaceStrict(workspaceId).catch(() => null);
+          if (domains === null) domainNote = 'Your app is deployed. We could not check whether you have a connected domain — open the domain screen to confirm it points here.';
+          const domain = domains?.[0] || '';
+          if (domain) {
+            const attach = await attachRenderCustomDomain({
+              apiKey: renderKey.key, serviceId: result.serviceId, serviceUrl: result.url, domain,
+            });
+            if (!attach.ok) {
+              domainNote = attach.message;
+            } else if (managedDnsConfigured()) {
+              // The zone is ours (nameserver delegation), so the records are written for the user —
+              // the same "DNS hum set kar dein" promise the connect screen already makes.
+              const zone = await ensureZone(domain);
+              const applied = await applyRecords(zone.id, attach.records);
+              domainPointed = { domain, records: applied.added };
+            } else {
+              // No managed zone ⇒ we cannot write it, and must say so rather than imply it is done.
+              domainNote = `Your app is deployed. Point ${domain} at it by adding a CNAME to `
+                + `${attach.records[0]?.value ?? 'your backend host'} at your registrar.`;
+            }
+          }
+        } catch (e) {
+          domainNote = `Your app deployed, but we could not point your domain at it yet: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
+      res.status(result.ok ? 200 : 409).json({
+        ...result,
+        ...(domainPointed ? { domainPointed } : {}),
+        ...(domainNote ? { domainNote } : {}),
+      });
     } catch (e) {
       res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${e instanceof Error ? e.message : String(e)}` });
     }
@@ -4167,10 +4222,24 @@ async function noteBuildOutcome(
        * framework guess only where BOTH are — so this can add knowledge but never overrule a better
        * source. Reading the files is best-effort; a failure leaves today's behaviour untouched.
        */
+      /**
+       * …AND AN IMPORTED REPO DECLARES IT SOMEWHERE ELSE AGAIN (admin 2026-09-04: *"jab github se koi
+       * repo import karta hai, to kis port par run karna hai yeh confuse ho jata hai"*).
+       *
+       * 🔒 THE CLASS, NOT A THIRD INSTANCE. This line used to call `serverPortFromFiles`, which reads a
+       * FIXED list of server entry paths. That is enough for an app WE scaffold, and wrong for an
+       * imported one, which pins its port in `vite.config.*`, in a `.env`, or in a server entry outside
+       * that list (`backend/server.js`, `api/index.js`). A `clientVitePort` reader already existed but
+       * was module-private, so this path — the one that most needed it — could not call it.
+       *
+       * `declaredAppPort` is the single resolver over EVERY declaration site, with the precedence
+       * documented there. Same precedence as before at the top (an explicit script flag still wins), so
+       * this can only ever ADD knowledge where we previously had none.
+       */
       let codePort: number | null = null;
       if (scriptPort === null) {
         const src = await loadWorkspaceFiles(workspaceId).catch(() => null);
-        if (src) codePort = serverPortFromFiles(src);
+        if (src) codePort = declaredAppPort(src, pkgRaw)?.port ?? null;
       }
       const effectivePort = scriptPort ?? codePort ?? expectedPort;
       if (!structure.ok) {
@@ -6573,9 +6642,23 @@ async function noteBuildOutcome(
           }
           // Wired: the frontend half is now an ordinary static publish, so fall through and run it.
           if (!wiredToBackend) {
+          /**
+           * ONE SCREEN, ONE STORY (admin 2026-09-04, from a screenshot of it contradicting itself).
+           *
+           * The refusal said *"Render is configured — a real deploy can run"* while the panel directly
+           * beneath it said *"Your code has to live in a GitHub repository first"* — and no "Deploy
+           * backend" button existed, because `backendDeployOffer` had correctly withheld it for
+           * having no repo. The panel checked key AND repo; this message checked only the key.
+           *
+           * The client's `deployRepo` is the very fact the panel renders, so taking it from there
+           * makes the two agree BY CONSTRUCTION rather than by two implementations staying in step.
+           * It shapes a sentence only — never an authorisation — so a client-supplied value costs
+           * nothing, and its absence (`undefined`) keeps exactly the old wording.
+           */
+          const hasRepo = typeof req.body?.hasRepo === 'boolean' ? req.body.hasRepo : undefined;
           const decision = deployDecision(plan, {
             canDeploy: key !== null,
-            requirement: renderRequirement(process.env, vault),
+            requirement: renderRequirement(process.env, vault, hasRepo),
             splitAdvised: wiring ? wiring.strategy === 'split' : undefined,
             wholeAppNote: wiring?.summary ?? '',
           });
@@ -8727,8 +8810,19 @@ async function noteBuildOutcome(
             opts.diag?.enterPhase?.('checking the live preview');
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {
-              const scriptPort = devScriptPort(importedFiles['package.json'] ?? null);
-              let bootPort = port ?? scriptPort ?? oneShotDevPort(framework);
+              /**
+               * 🔒 THE IMPORT PATH IS WHERE THE ADMIN ACTUALLY HIT THIS (2026-09-04) — and it had the
+               * narrowest reader of all: `devScriptPort` (package.json scripts) and then a framework
+               * GUESS. An imported repo pins its port in `vite.config.*`, in a `.env`, or in a server
+               * entry the old fixed list never covered — so the common case fell straight through to
+               * the guess, we visited the wrong port, and the app was reported as not running while it
+               * served perfectly somewhere else.
+               *
+               * Order is unchanged in strength: the boot log's own testimony still wins (it is the app
+               * saying where it landed), then everything the app DECLARES, and only then the guess.
+               */
+              const declared = declaredAppPort(importedFiles)?.port ?? null;
+              let bootPort = port ?? declared ?? oneShotDevPort(framework);
               // EARN THE VERDICT (admin 2026-08-03, "Cannot GET /customer/home" shown as a live preview):
               // a bound port is NOT the app serving. Actually VISIT the home route and read the rendered
               // HTML — only claim "✅ up" when it genuinely serves the app; otherwise say WHY (the exact
@@ -8755,7 +8849,9 @@ async function noteBuildOutcome(
                 try {
                   listening = parseListeningPorts((await withTimeout(actuator.runCommand(workspaceId, LISTENING_PORTS_COMMAND), 10_000, 'import-preview-port-scan')).stdout);
                 } catch { /* best-effort — without the scan the flip simply has no extra candidates */ }
-                for (const cand of rankPortCandidates({ parsed: port, scriptPort, expected: bootPort, listening, framework })) {
+                // `declared` (every declaration site) replaces the old script-only value here too — the
+                // flip's second tier should rank whatever the app really declares, not just a flag.
+                for (const cand of rankPortCandidates({ parsed: port, scriptPort: declared, expected: bootPort, listening, framework })) {
                   if (cand === bootPort) continue;
                   const attempt = await visit(cand);
                   if (attempt.url && attempt.served.rendered) { winner = attempt; bootPort = cand; break; }

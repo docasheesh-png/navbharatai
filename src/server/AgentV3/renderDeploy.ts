@@ -59,9 +59,29 @@ export function renderDeployAvailable(
 export function renderRequirement(
   envOrVault: NodeJS.ProcessEnv | null = process.env,
   vaultSecrets?: Record<string, string> | null,
+  /**
+   * Does this app have a GitHub repository behind it? A Render deploy reads the code FROM a repo, so a
+   * key alone cannot run one.
+   *
+   * ⚠️ ADDED 2026-09-04, from the admin's screenshot of ONE screen contradicting itself. The blue
+   * refusal said *"Render is configured — a real deploy can run"* while the panel immediately beneath
+   * it said *"Your code has to live in a GitHub repository first"* — and there was no "Deploy backend"
+   * button anywhere, because `backendDeployOffer` had correctly withheld it for having no repo.
+   *
+   * Both sentences were about the same deploy. The panel checked BOTH facts; this function checked
+   * only the key and announced the capability from half of them. Undefined keeps the old wording, so a
+   * caller that genuinely does not know says nothing new.
+   */
+  hasRepo?: boolean,
 ): string {
   const env = (envOrVault ?? {}) as NodeJS.ProcessEnv;
   const resolved = resolveRenderKey(vaultSecrets, env);
+  // No repo ⇒ no deploy can run, whoever's key it is. Said FIRST, because a key message here reads as
+  // "you are ready" and the user then hunts for a button that is deliberately not on the screen.
+  if (resolved && hasRepo === false) {
+    return 'To deploy the server part, your app needs to live in a GitHub repository first — that is what '
+      + 'the host reads your code from. Connect GitHub and push this app to a repo of your own, then deploy.';
+  }
   if (resolved?.source === 'user') return 'Deploying to YOUR own Render account, using the key you saved in Settings → Secrets & API Keys.';
   if (resolved?.source === 'server') return 'Render is configured — a real deploy can run.';
   return 'Save your own RENDER_API_KEY in Settings → Secrets & API Keys to deploy your backend to Render (Render → Account Settings → API Keys).';

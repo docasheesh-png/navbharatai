@@ -30,7 +30,8 @@ import { checkDomainServing } from '../lib/domainServingCheck';
 import { siteHasRelease } from '../lib/firebaseCustomDomain';
 import { resolvePublishState } from '../AgentV3/publishState';
 import { planDeployment, domainPublishBlockNote } from '../AgentV3/deployPlan';
-import { loadWorkspaceFilesByPath } from '../AgentV3/WorkspaceFileStore';
+import { loadWorkspaceFilesByPath, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { analyzeApiWiring } from '../AgentV3/apiWiring';
 
 /**
  * Firebase-NATIVE custom-domain routes (Slice 2) — connect a user's own domain directly to their
@@ -224,13 +225,58 @@ export function registerNbaiDomainsRoutes(app: Express): void {
        * publish them, which is a worse failure than the one it fixes.
        */
       let publishBlocked = '';
-      if (serving?.state === 'nothing_published') {
+      /**
+       * ⚠️ WIDENED 2026-09-04, HOURS AFTER THE FIRST FIX SHIPPED WITH THIS HOLE — and the admin's next
+       * screenshot is the proof, on the same domain.
+       *
+       * The gate was `state === 'nothing_published'`, chosen because that is where the screen says
+       * "one last step: press Publish". But `nothing_published` is not the only state that says it:
+       * `error` says "Publishing again usually fixes this", and `unknown` — our probe could not reach
+       * the domain — says *"If it shows an error page, press Publish once."* That last one is exactly
+       * what mitrify.com now shows, so the very fix written to stop this loop did not fire in the
+       * state the admin was actually looking at.
+       *
+       * The right gate was never a state name, it is the QUESTION: is this screen about to tell the
+       * user to press Publish? Every non-serving state does. So it asks for all of them.
+       *
+       * Cost is unchanged where it matters: a domain that IS serving asks nothing, and a non-serving
+       * one is precisely the case where the user needs the answer. The two-stage read below still
+       * charges the full workspace only to an app already judged non-static.
+       */
+      if (serving && serving.state !== 'serving') {
         try {
           const manifests = await loadWorkspaceFilesByPath(
             workspaceId as string,
             ['package.json', 'requirements.txt', 'pyproject.toml', 'Pipfile'],
           );
-          publishBlocked = domainPublishBlockNote(planDeployment(manifests));
+          /**
+           * 🔒 THE SIBLING OF A BUG THE PUBLISH ROUTE ALREADY FIXED (found 2026-09-04, hunting the
+           * class rather than the instance).
+           *
+           * On 2026-08-25 the publish route learned that a verdict formed on THE MANIFESTS ALONE is
+           * not good enough: `planDeployment`'s other half — does the app's own source actually
+           * IMPORT a server framework — can never fire when only four manifests are handed to it. The
+           * publish route was given a second stage that loads the real files before it refuses. This
+           * call was left on the old single stage, so the two halves of the very same product could
+           * reach OPPOSITE conclusions about one app: publish refuses it as a server, while this
+           * screen, seeing "static", cheerfully says "one last step: press Publish."
+           *
+           * Same two-stage shape as the publish route, and the same cost profile: the ordinary static
+           * app pays exactly what it paid before, and only an app about to be told something
+           * discouraging pays for the real read.
+           */
+          let plan = planDeployment(manifests);
+          let src: Record<string, string> | null = null;
+          if (!plan.staticHostingSufficient) {
+            src = await loadWorkspaceFiles(workspaceId as string).catch(() => null);
+            if (src) plan = planDeployment({ ...src, ...manifests });
+          }
+          // Only the app's own code can say whether it can be split, and only a real `false` (ship
+          // whole) makes a fullstack refusal certain enough to state. See domainPublishBlockNote.
+          const splitAdvised = plan.shape === 'fullstack' && src
+            ? analyzeApiWiring(src).strategy === 'split'
+            : undefined;
+          publishBlocked = domainPublishBlockNote(plan, { splitAdvised });
         } catch { /* never let a shape check break a status screen */ }
       }
       res.json({ ...status, displayRecords, dnsCheck, serving, publish, ...(publishBlocked ? { publishBlocked } : {}) });

@@ -44303,3 +44303,46 @@ only by a human completing the emailed request. This makes the AUTOMATED path ma
 test now pins both halves, so a collection added to the eraser must stay described.
 
 Gate: both `tsc` clean; FULL suite **1447 files / 19141 tests green**.
+
+---
+
+## 2026-09-04 — `kimi-k2.5` removed from the free ladder (admin-approved: *"jo theek hai NavBharatAI ke liye woh karo. hata do."*)
+
+**The open root cause from the faa98da9 autopsy, closed.** Two build reports proved the rung is
+unreachable on this account — *"404 Not found the model kimi-k2.5 or Permission denied"* — while
+sitting **first** in the free Kimi ladder: **5 wasted requests out of 5 calls** in one report, **57 out
+of 40** in an earlier one. PR #2741 cut that to one per build by retiring a dead rung after its first
+failure; this ends it.
+
+Free ladder: `kimi-k2.5 → kimi-k2.6 → kimi-k2.7-code` **becomes** `kimi-k2.6 → kimi-k2.7-code`.
+
+### Why REMOVE rather than re-enable it on the Moonshot account
+
+The decision turned on one fact from the rate card, not on a preference:
+
+- **`providerRates` prices k2.5 and k2.6 identically** — `/k2[.\-]?[56]/` → `$0.60` in / `$2.50` out.
+  So the rung that now leads is **exactly as cheap** as the one removed, and it is the rung that has
+  been delivering every turn anyway. **Removing costs nothing.**
+- **Re-enabling would have been strictly worse.** k2.5 is the OLDEST rung and sits FIRST, so a free
+  build's quality floor would drop to it — for no saving. One extra heal pass costs far more than any
+  per-token difference our rate card cannot even see.
+- Removing is one line and instantly reversible; re-enabling depended on a Moonshot-side change that
+  may not even be possible if the id is retired.
+
+### Two things deliberately NOT changed
+- **The rate-card entry for k2.5 STAYS.** An older build's telemetry still names it and must keep
+  pricing correctly. This is a routing change, not a billing one — and the test says so.
+- **The PAID ladder is untouched.** This was a free-tier decision; dropping a rung there would
+  silently downgrade paying users' repairs.
+
+### The test that had to change, and why that is not weakening it
+`agentv3.test.ts` asserted the free floor keeps "3 GLM + 3 KIMI rungs". Its guarantee is *"every
+configured rung survives when `flagshipOnly` is off"* — that is intact; only Kimi's ladder got shorter
+**by design**. The count is updated to 2 with the reason recorded inline, rather than loosened into a
+range that would stop catching an accidental drop.
+
+`tests/freeKimiLadder.test.ts` pins the new ladder, that the paid one is untouched, that the rate card
+still prices k2.5, and — the one worth keeping — **that the two rungs are priced equally**: if they ever
+diverge, the trade-off that settled this changes and the decision deserves revisiting.
+
+Gate: both `tsc` clean; FULL suite **1448 files / 19147 tests green**.

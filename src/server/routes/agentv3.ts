@@ -2143,7 +2143,22 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: b
   // The FREE ladder is deliberately UNCHANGED (admin: "weak module abhi jaisa hai vaise hi"): it is
   // ordered cheapest-first with the flagship LAST, so putting a newer flagship in front would invert
   // the free tier's whole cost model.
-  const kimiDefault = opts?.free ? ['kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code'] : ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'];
+  // ⚠️ `kimi-k2.5` REMOVED FROM THE FREE LADDER (admin-approved 2026-09-04). Two build reports proved
+  // it is unreachable on this account — "404 Not found the model kimi-k2.5 or Permission denied" — so
+  // it led every free build with a model that cannot answer: 5 wasted requests out of 5 calls in one
+  // report, 57 out of 40 in an earlier one. (#2741 cut that to one per build by retiring a dead rung
+  // after its first failure; this removes the waste entirely.)
+  //
+  // COSTS NOTHING TO REMOVE, which is what settled it: `providerRates` prices k2.5 and k2.6 at the
+  // SAME rate (`/k2[.\-]?[56]/` → $0.60 in / $2.50 out), so the rung below it is exactly as cheap and
+  // is the one that has been delivering every turn anyway. Re-enabling k2.5 on the Moonshot account
+  // would have been strictly worse: it is the OLDEST rung and sits FIRST, so a free build's quality
+  // floor would drop to it for no saving — and one extra heal pass costs far more than any per-token
+  // difference our rate card cannot even see.
+  //
+  // The rate-card entry for k2.5 deliberately STAYS: an older build's telemetry still names it, and it
+  // must keep pricing correctly. This is a routing change, not a billing one.
+  const kimiDefault = opts?.free ? ['kimi-k2.6', 'kimi-k2.7-code'] : ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'];
   const glmEnv = opts?.free ? process.env.AGENTV3_FREE_GLM_MODEL : process.env.GLM_MODEL;
   const kimiEnv = opts?.free ? process.env.AGENTV3_FREE_KIMI_MODEL : process.env.KIMI_MODEL;
   // FLAGSHIP-ONLY (admin 2026-08-02, weak-fail repair): when the WEAK build fails, its last repair pass

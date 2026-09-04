@@ -439,16 +439,20 @@ describe('cheapBuildFloorRunners flagshipOnly — weak-fail repair runs on the T
 
   it('free + flagshipOnly keeps ONLY the last (flagship) rung of each free ladder — no cheap flash/coder rungs', () => {
     process.env.GLM_API_KEY = 'k'; process.env.KIMI_API_KEY = 'k';
-    // free default ladders: GLM [flash,4.7,5.2] · KIMI [k2.5,k2.6,k2.7-code] → flagshipOnly → 1 GLM + 1 KIMI
+    // free default ladders: GLM [flash,4.7,5.2] · KIMI [k2.6,k2.7-code] → flagshipOnly → 1 GLM + 1 KIMI
     const runners = cheapBuildFloorRunners({ free: true, flagshipOnly: true });
     expect(runners.filter((r) => r.name === 'GLM').length).toBe(1);
     expect(runners.filter((r) => r.name === 'KIMI').length).toBe(1);
   });
-  it('free WITHOUT flagshipOnly keeps the full cheapest-first ladder (3 GLM + 3 KIMI rungs)', () => {
+  it('free WITHOUT flagshipOnly keeps the full cheapest-first ladder (3 GLM + 2 KIMI rungs)', () => {
     process.env.GLM_API_KEY = 'k'; process.env.KIMI_API_KEY = 'k';
     const runners = cheapBuildFloorRunners({ free: true });
+    // The GUARANTEE is "every configured rung survives when flagshipOnly is off" — the numbers encode
+    // the ladders themselves. KIMI went 3 → 2 on 2026-09-04 when `kimi-k2.5` was removed: it was
+    // unreachable on this account (404 on every call) and led the ladder, and the rung behind it is
+    // priced identically. See tests/freeKimiLadder.test.ts for that decision.
     expect(runners.filter((r) => r.name === 'GLM').length).toBe(3);
-    expect(runners.filter((r) => r.name === 'KIMI').length).toBe(3);
+    expect(runners.filter((r) => r.name === 'KIMI').length).toBe(2);
   });
 });
 

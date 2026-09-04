@@ -44402,3 +44402,58 @@ still prices k2.5, and — the one worth keeping — **that the two rungs are pr
 diverge, the trade-off that settled this changes and the decision deserves revisiting.
 
 Gate: both `tsc` clean; FULL suite **1448 files / 19147 tests green**.
+
+---
+
+## 2026-09-04 — Solution #6: the FAST lane now fixes mechanical tsc errors itself
+
+**Admin approved #6** (deterministic repair before model repair). Investigating first showed the
+deterministic layer already exists and is good — the gap was **which lane can reach it.**
+
+### The gap
+
+`EndgameRepair` was built for exactly this, and states the mandate verbatim: *"stop paying an LLM to do
+grep's job."* It followed a build that ground its last ten tsc errors one round-trip each until the
+step limit, when almost all were mechanical — an unused import, a missing `FormEvent` import, an
+export-name mismatch.
+
+Its deterministic layer is reachable only through `runEndgameRepair`, and **only `AgentRunner` calls
+that.** `SimpleBuilder` — which its own comments call *"the lane most builds take"* — went from the
+scaffold restore **straight to a model call**. So on the fast lane a build failing purely on
+`TS6133: 'X' is declared but its value is never read` paid a full repair pass for a pure string edit.
+
+**This is the SAME drift the scaffold-restore comment twenty lines above already describes:** *"the
+agentic lane has done this since 2026-08-12; THIS lane never did, and the two verify paths drifted
+apart in silence."* The restore was ported then; the deterministic tsc layer was not.
+
+### Shipped
+
+`SimpleBuilder`'s repair loop now calls the **shared** `endgameDeterministicPass` before the model —
+deliberately the shared function, not a copy of its pieces, because **a third variant of this logic is
+precisely what produced the drift being fixed.**
+
+Re-running the reconcilers there is not redundant with the generation-time pass: the files have
+**changed** since (later writes, an earlier repair attempt), so drift introduced after generation is
+catchable now, for free.
+
+Serves all three priorities at once: a deterministic fix **always** works where a model repair is a
+hypothesis (the same file records a repair that took a build from 4 errors to 41); it removes a model
+round-trip; and it removes the tokens entirely — which on a free build is money NavBharatAI pays.
+
+### Safe by construction
+Gated on `!verdict.ok`, so a healthy build costs nothing — asserted. Re-verifies only when something
+genuinely changed, so the model only ever sees what is left. Wrapped best-effort: a failure falls
+through to the model repair exactly as before. Kill switch `AGENTV3_ENDGAME_REPAIR=off`, the same one
+that governs the layer elsewhere.
+
+### Method note (admin instruction)
+The guard is proven **without breaking any source**: a test flips the documented kill switch and shows
+the same error DOES reach the model with the pass disabled. That proves the pass is what saved the
+call, and exercises the kill switch as real behaviour at the same time.
+
+⚠️ Also worth recording: my first four tests failed with `r.ok === false` and **zero** verifies — the
+build never reached verification, because my generator stub returned a one-file manifest while the
+working harness returns three. **The feature was fine; the harness was wrong.** Worth checking which
+of the two is broken before touching the code under test.
+
+Gate: both `tsc` clean; FULL suite **1449 files / 19185 tests green**.

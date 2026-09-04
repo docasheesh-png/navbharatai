@@ -3044,7 +3044,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         const res = await fetch('/api/agentv3/publish', {
           method: 'POST',
           headers: await authJsonHeaders(),
-          body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, deployProvider: prov0, githubToken }),
+          // `hasRepo` is the SAME fact the backend-deploy panel renders (see deployRepo above), sent so
+          // the server's refusal cannot claim "a real deploy can run" while the panel beneath it says
+          // the app needs a repo first — one screen contradicting itself, admin 2026-09-04.
+          body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, deployProvider: prov0, githubToken, hasRepo: !!deployRepo }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {

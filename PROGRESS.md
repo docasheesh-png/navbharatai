@@ -44461,3 +44461,37 @@ branch in the connect flow that attaches such an app's domain to its Render serv
 written through the Cloudflare-managed zone we already run.
 
 Gate: both `tsc` clean; FULL suite **1449 files / 19184 tests green**. Both guards verified to bite.
+
+### Same day, second screenshot, same app — two more, and one was a hole in the fix above
+
+The admin sent a second pair (*"ye screenshot bhi same app ke hai"*) within the hour. It caught two
+things, and the first is a defect in the fix recorded immediately above.
+
+**1. 🔴 THE FIX ABOVE DID NOT FIRE IN THE STATE THEY WERE LOOKING AT.** The status route computed
+`publishBlocked` only when `serving.state === 'nothing_published'` — chosen because that is where the
+screen says *"one last step: press Publish"*. But that is not the only state that says it: `error`
+says *"Publishing again usually fixes this"*, and `unknown` — our probe could not reach the domain —
+says *"If it shows an error page, press Publish once."* The new screenshot shows exactly `unknown`
+("We could not open your domain from here to confirm…"), so the fix written to end this loop was
+silent precisely where the admin was standing. **The right gate was never a state name**: it is *is
+this screen about to tell the user to press Publish?*, and every non-serving state does. Now gated on
+`serving.state !== 'serving'`. Cost is unchanged where it matters — a serving domain asks nothing.
+
+**2. ONE SCREEN CONTRADICTING ITSELF about the same deploy.** The refusal read *"Render is configured
+— a real deploy can run"* and told the user to use "Deploy backend", while the panel directly beneath
+it said *"Your code has to live in a GitHub repository first"* — and no Deploy backend button existed
+anywhere, because `backendDeployOffer` had correctly withheld it for having no repo. Root cause:
+`renderRequirement` announced the capability from **half the facts** (a key resolved), while a Render
+deploy reads code FROM a repo and needs both. It now takes `hasRepo`, and a key without a repo says
+the honest thing instead. `undefined` keeps the old wording, so a caller that does not know says
+nothing new, and a missing KEY still reports the missing key rather than hiding it behind the repo.
+
+The fact is taken from the client's own `deployRepo` — the very value the panel renders — so the two
+agree **by construction** rather than by two implementations staying in step. It shapes a sentence
+only, never an authorisation.
+
+⚠️ Two assertions from the fix above were re-anchored, not deleted: they pinned the narrow gate that
+WAS the hole.
+
+Gate: both `tsc` clean; FULL suite **1449 files / 19191 tests green**. Both new guards verified to
+bite (narrowing the gate back; claiming a deploy can run with no repo).

@@ -6573,9 +6573,23 @@ async function noteBuildOutcome(
           }
           // Wired: the frontend half is now an ordinary static publish, so fall through and run it.
           if (!wiredToBackend) {
+          /**
+           * ONE SCREEN, ONE STORY (admin 2026-09-04, from a screenshot of it contradicting itself).
+           *
+           * The refusal said *"Render is configured — a real deploy can run"* while the panel directly
+           * beneath it said *"Your code has to live in a GitHub repository first"* — and no "Deploy
+           * backend" button existed, because `backendDeployOffer` had correctly withheld it for
+           * having no repo. The panel checked key AND repo; this message checked only the key.
+           *
+           * The client's `deployRepo` is the very fact the panel renders, so taking it from there
+           * makes the two agree BY CONSTRUCTION rather than by two implementations staying in step.
+           * It shapes a sentence only — never an authorisation — so a client-supplied value costs
+           * nothing, and its absence (`undefined`) keeps exactly the old wording.
+           */
+          const hasRepo = typeof req.body?.hasRepo === 'boolean' ? req.body.hasRepo : undefined;
           const decision = deployDecision(plan, {
             canDeploy: key !== null,
-            requirement: renderRequirement(process.env, vault),
+            requirement: renderRequirement(process.env, vault, hasRepo),
             splitAdvised: wiring ? wiring.strategy === 'split' : undefined,
             wholeAppNote: wiring?.summary ?? '',
           });

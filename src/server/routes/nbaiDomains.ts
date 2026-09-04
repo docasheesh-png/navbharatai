@@ -225,7 +225,25 @@ export function registerNbaiDomainsRoutes(app: Express): void {
        * publish them, which is a worse failure than the one it fixes.
        */
       let publishBlocked = '';
-      if (serving?.state === 'nothing_published') {
+      /**
+       * ⚠️ WIDENED 2026-09-04, HOURS AFTER THE FIRST FIX SHIPPED WITH THIS HOLE — and the admin's next
+       * screenshot is the proof, on the same domain.
+       *
+       * The gate was `state === 'nothing_published'`, chosen because that is where the screen says
+       * "one last step: press Publish". But `nothing_published` is not the only state that says it:
+       * `error` says "Publishing again usually fixes this", and `unknown` — our probe could not reach
+       * the domain — says *"If it shows an error page, press Publish once."* That last one is exactly
+       * what mitrify.com now shows, so the very fix written to stop this loop did not fire in the
+       * state the admin was actually looking at.
+       *
+       * The right gate was never a state name, it is the QUESTION: is this screen about to tell the
+       * user to press Publish? Every non-serving state does. So it asks for all of them.
+       *
+       * Cost is unchanged where it matters: a domain that IS serving asks nothing, and a non-serving
+       * one is precisely the case where the user needs the answer. The two-stage read below still
+       * charges the full workspace only to an app already judged non-static.
+       */
+      if (serving && serving.state !== 'serving') {
         try {
           const manifests = await loadWorkspaceFilesByPath(
             workspaceId as string,

@@ -44128,3 +44128,62 @@ way back both times**:
 suite and confirm the count is what it was.
 
 Gate: both `tsc` clean; FULL suite **1444 files / 19112 tests green**. Both guards verified to bite.
+
+---
+
+## 2026-09-04 (later still) — an import's quiet minutes now have names
+
+**Priority 2 (fast), and it began as an investigation rather than a fix.** My own faa98da9 autopsy
+recorded, and did not touch, a struggle point: **113s before the first model call, 85s of it the GitHub
+import**, with a **40-second stretch where nothing at all was recorded**.
+
+### What the investigation actually found — including two dead ends worth recording
+
+Chasing the 71s between `IMPORT_LANDING` and `IMPORT_DIAGNOSTIC`, the obvious suspects were already
+fixed, and finding that out is the useful part:
+
+- **`materializeAssets` is already pooled.** The mitrify autopsy of 2026-08-04 measured this exact
+  thing — 129 assets + 22 large images as ~151 sequential round-trips, 100s of a 624s build — and fixed
+  it. Its comment calls it "the FOURTH instance of one bug class in this repo — serial awaits over a
+  network".
+- **The durable Firestore merge** is named in that same comment as already fixed.
+
+So the cause is NOT the obvious one, and I could not reproduce a real GitHub import from here to find
+it. **Guessing at an optimisation on the import path would risk the one absolute rule for a saving I
+cannot demonstrate**, so I built the thing that makes the next report answer the question instead.
+
+### The real gap: the mechanism existed and this path never called it
+
+`BuildDiagnostics.enterPhase()/exitPhase()` records `⏳ <name> took Ns` and — the half that matters to
+users — supplies the HEARTBEAT's label. Every PREVIEW stretch uses it, which is why that report could
+say *"creating the database tables took 50s"* and *"installing dependencies and starting your app took
+28s"*.
+
+**The import's own stretches never entered a phase.** Hence the 40-second hole, and hence minute 1's
+heartbeat reading *"⏱ minute 1 — still working (last: 🔗 Connected to https://github.com/…)"* — a
+stale echo, because the heartbeat had no active phase to name.
+
+Three stretches are now named: **importing your project's files**, **adding your project's images and
+fonts**, **saving your project so it survives a restart**.
+
+### Why this is safe by construction
+Purely additive: every call is optional-chained, wrapped in try/catch, and closed in a `finally` so a
+throwing import still releases its label — and `enterPhase` supersedes an unclosed phase by design, so
+even a missed exit cannot strand one. A diagnostics slip must never turn a reporting improvement into
+an import failure; that would be a worse bug than the one being fixed.
+
+### What it buys
+- the ADMIN report gets `⏳ … took Ns` lines for the import, so the next person chasing a slow import
+  **reads** the answer instead of guessing at a gap;
+- the USER stops seeing a stale narration echoed for a minute, and sees what is actually happening.
+
+**Honest scope: this does not make the import faster. It makes the next report able to say why it is
+slow** — which is the precondition for fixing it without guessing.
+
+### Method note (admin instruction, 2026-09-04)
+The admin asked that source code never be broken to prove a guard bites. Adopted, and it costs nothing:
+a guard is proven with **fabricated bad input inside the test** (as `scaffoldScriptsResolve` already
+did) rather than by mutating a real file. Same proof, no risk, and none of the `git checkout` hazards
+recorded above.
+
+Gate: both `tsc` clean; FULL suite **1445 files / 19120 tests green**.

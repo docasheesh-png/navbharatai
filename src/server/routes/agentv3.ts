@@ -8091,7 +8091,33 @@ async function noteBuildOutcome(
         // Best-effort: an 'import'-type workspace starts EMPTY so the imported app never gets
         // template scaffold files mixed in (mirrors the import-files route).
         try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
-        const landed = await writeWorkspaceFiles(actuator, workspaceId, importedFiles);
+        /**
+         * NAME THE QUIET MINUTES OF AN IMPORT (autopsy faa98da9, 2026-09-04).
+         *
+         * The phase mechanism has existed for a while and every PREVIEW stretch uses it — which is why
+         * that report could say "creating the database tables took 50s" and "installing dependencies …
+         * took 28s". The IMPORT's own stretches never entered a phase, so the same report carried a
+         * 40-SECOND HOLE with nothing recorded, and its own TIME_TO_FIRST_CALL warning could only say
+         * where the silence STARTED, not what caused it.
+         *
+         * Two things this buys, and neither is cosmetic:
+         *   • the ADMIN report gets `⏳ … took Ns` lines for the import, so the next person chasing a
+         *     slow import reads the answer instead of guessing at a gap;
+         *   • the USER's heartbeat stops echoing a stale narration. In that report minute 1 read
+         *     "still working (last: 🔗 Connected to https://github.com/…)" — the heartbeat names the
+         *     ACTIVE PHASE when there is one, and during the import there was none.
+         *
+         * Purely additive: optional-chained, wrapped, and closed in `finally`, so a diagnostics slip can
+         * never affect an import. `enterPhase` also supersedes an unclosed phase by design, so even a
+         * missed exit cannot strand the label.
+         */
+        let landed;
+        try { opts.diag?.enterPhase?.('importing your project\'s files'); } catch { /* diagnostics are best-effort */ }
+        try {
+          landed = await writeWorkspaceFiles(actuator, workspaceId, importedFiles);
+        } finally {
+          try { opts.diag?.exitPhase?.(); } catch { /* diagnostics are best-effort */ }
+        }
         written = landed.written;
         // HOW the files landed (bulk tar vs per-file) + the count-proof — into the build report, so a
         // future "files missing after import" report can be diagnosed from evidence instead of guesses
@@ -8120,7 +8146,13 @@ async function noteBuildOutcome(
       // entirely out of `importedFiles`, so they never pollute the text map. Best-effort.
       const assets = opts.assets ?? {};
       if (Object.keys(assets).length > 0) {
-        if (opts.writeToSandbox) { try { await materializeAssets(actuator, workspaceId, assets); } catch { /* an asset failing never blocks the import */ } }
+        if (opts.writeToSandbox) {
+          // Named because it is the biggest one on a media-heavy repo: the report that prompted this
+          // carried 129 image/font assets plus 22 large images.
+          try { opts.diag?.enterPhase?.('adding your project\'s images and fonts'); } catch { /* best-effort */ }
+          try { await materializeAssets(actuator, workspaceId, assets); } catch { /* an asset failing never blocks the import */ }
+          finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
+        }
         void saveWorkspaceAssets(workspaceId, assets).catch(() => {});
       }
       // SANDBOX-ONLY images (large images the durable store can't hold): materialize them for the LIVE
@@ -8132,7 +8164,9 @@ async function noteBuildOutcome(
       }
       // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
       // empty": without it the import lives only in the ephemeral sandbox.
+      try { opts.diag?.enterPhase?.('saving your project so it survives a restart'); } catch { /* best-effort */ }
       try { await mergeWorkspaceFiles(workspaceId, importedFiles); } catch { /* durable persist is best-effort */ }
+      finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
       framework = validation.framework;
       // TELL THE REPORT (autopsy d6deaaf0): the diagnostics object captured `framework` at build
       // start, before the import existed, so it kept the request default while the manifest recorded

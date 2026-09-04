@@ -44703,3 +44703,26 @@ drift, and did, three times.
 bite from both directions.
 
 Gate: both `tsc` clean; FULL suite **1451 files / 19240 tests green**.
+
+### And the green line right beside it was promising an impossible outcome
+
+The same screenshot carried a third false statement, in the auto-DNS summary:
+
+> *"Done — every record is already in place. **Nothing left for you to do; your domain connects on its
+> own from here.**"*
+
+Every record genuinely WAS in place and ownership genuinely WAS active — and the promise was still
+false. There was a great deal left to do, and the domain would never connect on its own, because it
+points at a site that can never receive a fullstack ship-whole app.
+
+**This is the SAME lesson `autoDnsSummary` already learned once, one level up.** It takes
+`ownershipState` precisely because "records exist" says nothing about "the host accepted them". It now
+also takes `publishBlocked`, because "the host accepted them" says nothing about whether the app can
+ever be SERVED. Each layer's success was being reported as the whole outcome.
+
+The DNS half is still reported as finished — it is, and understating it would send the user back to
+re-check records that are already perfect — but the "connects on its own" promise is withdrawn and the
+real blocker named in its place. Both completion branches are covered; fixing one would have left the
+other lying.
+
+Gate: both `tsc` clean; FULL suite **1451 files / 19255 tests green**. Verified to bite.

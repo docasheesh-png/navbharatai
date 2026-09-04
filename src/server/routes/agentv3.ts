@@ -351,7 +351,7 @@ import {
   type DesignContract,
 } from '../AgentV3/designContract';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
-import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
+import { collectWorkspaceFiles, writeWorkspaceFiles, pool } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
@@ -1477,6 +1477,14 @@ export function buildMaxTokensPerTurn(): number {
  * build wall-clock deadline timer is armed — without this, a single stalled provider/Firestore call hangs
  * the whole HTTP request forever (the deadline never starts). Pure + exported for testing.
  */
+/**
+ * How many oversized sandbox-only text files (lockfiles) an import writes to the sandbox at once.
+ *
+ * Mirrors ASSET_WRITE_CONCURRENCY's shape deliberately — same clamp, same env key — so the two
+ * network-write paths of one import behave identically and there is a single number to reason about.
+ */
+const SANDBOX_ONLY_WRITE_CONCURRENCY = Math.max(1, Math.min(32, Number(process.env.AGENTV3_ASSET_WRITE_CONCURRENCY) || 16));
+
 export function raceTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
@@ -8134,9 +8142,29 @@ async function noteBuildOutcome(
         // Sandbox-only extras (big text lockfiles): the live sandbox gets them so `npm install`
         // reproduces the app's exact dependency tree; the durable store skips them by design
         // (over its per-doc cap — the import summary says so honestly). Best-effort.
-        for (const [p, c] of Object.entries(opts.sandboxOnly ?? {})) {
+        /**
+         * THE FIFTH INSTANCE OF ONE BUG CLASS — serial awaits over a network (2026-09-04).
+         *
+         * `materializeAssets` closed this class on 2026-08-04 and its comment names the four it had
+         * found: the sandbox landing (a 648s incident), the Firestore merge, `collectWorkspaceFiles`
+         * (a 13-minute per-turn stall), and the asset writes themselves — "same fix, same shared
+         * helper, so the class is closed here rather than patched again". This loop is a sibling that
+         * was missed, ten lines above one of them.
+         *
+         * SMALL TODAY, AND THAT IS THE POINT. `sandboxOnly` holds oversized text files the durable
+         * store cannot take — usually one lockfile, so this is typically ONE round-trip. But a repo
+         * carrying several (package-lock + yarn.lock + pnpm-lock, or a monorepo's per-package locks)
+         * pays one full sandbox round-trip each, in series, before the build can start. Nothing about
+         * the loop bounds that, which is exactly how the other four grew.
+         *
+         * Semantics are preserved exactly: the per-file catch stays per-file (one unwritable lockfile
+         * must never block the rest — npm just resolves fresh), ordering between independent writes
+         * carries no meaning, and the same shared `pool` and concurrency the asset path uses is used
+         * here, so there is one behaviour to reason about rather than two.
+         */
+        await pool(Object.entries(opts.sandboxOnly ?? {}), SANDBOX_ONLY_WRITE_CONCURRENCY, async ([p, c]) => {
           try { await actuator.writeFile(workspaceId, p, c); } catch { /* install falls back to fresh resolution */ }
-        }
+        });
       } else {
         written = Object.keys(importedFiles); // already in the sandbox (e.g. a git clone)
       }

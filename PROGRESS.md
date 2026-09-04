@@ -44187,3 +44187,52 @@ did) rather than by mutating a real file. Same proof, no risk, and none of the `
 recorded above.
 
 Gate: both `tsc` clean; FULL suite **1445 files / 19120 tests green**.
+
+---
+
+## 2026-09-04 (cont.) — the FIFTH instance of a bug class this repo had declared closed
+
+**Found while investigating the import's 71s, and worth more than the investigation itself.**
+
+`materializeAssets` closed the "serial awaits over a network" class on 2026-08-04. Its comment names
+the four instances found by then — the sandbox landing (a 648s incident), the Firestore merge,
+`collectWorkspaceFiles` (a 13-minute per-turn stall), and the asset writes — and says: *"same fix, same
+shared helper, so the class is closed here rather than patched again."*
+
+**It was not closed.** `landImportedProject` still wrote `sandboxOnly` files in a serial awaited loop,
+**ten lines above** one of the four it fixed:
+
+```ts
+for (const [p, c] of Object.entries(opts.sandboxOnly ?? {})) {
+  try { await actuator.writeFile(workspaceId, p, c); } catch { /* … */ }
+}
+```
+
+**Small today, and that is exactly the point.** `sandboxOnly` holds oversized text files the durable
+store cannot take — usually ONE lockfile, so typically one round-trip. But a repo carrying several
+(package-lock + yarn.lock + pnpm-lock, or a monorepo's per-package locks) pays a full sandbox
+round-trip each, in series, before the build can start — and **nothing in the loop bounded that**,
+which is precisely how the other four grew from harmless to a 648-second incident.
+
+Now `pool(…, SANDBOX_ONLY_WRITE_CONCURRENCY, …)`, sharing the asset path's helper, clamp and env key so
+the two network-write paths of one import behave identically. Semantics preserved and test-locked: the
+per-file catch stays per-file (one unwritable lockfile must never fail an import — npm resolves fresh),
+ordering between independent writes carries no meaning, an empty set is a no-op.
+
+**Rule-3 lesson (hunt the siblings):** a comment declaring a class closed is a claim, not a guarantee.
+The sibling here was in the same file, in the same function, a few lines from the fix.
+
+### Four areas investigated and deliberately NOT changed — recorded so nobody redoes the work
+- **`read_file` returning full content** — looks like an obvious cost lever; the code explains why it is
+  the wrong trade (*"if the model's context has been trimmed, 'you already have this' leaves it unable
+  to proceed at all"*), and a transcript ceiling already exists.
+- **Grounding size** — already budgeted (`contextBudget.ts`, 4k tokens); the faa98da9 report measured
+  **~186 tokens against that budget**, so grounding was never the cost driver on that build.
+- **`honestModelLabel`** — the `plannedModel: claude-sonnet-4-6` vs `model: kimi-k2.6` split I flagged in
+  the autopsy is CORRECT by design: the report leads with what actually delivered and keeps the planned
+  label beside it for comparison. Not a bug.
+- **Account-deletion coverage** (a standing open root cause) — real and worth closing, but it is
+  irreversible data deletion where a wrong collection name would erase the wrong user's work. **Left for
+  explicit admin sign-off** rather than taken on initiative (safeguard #3).
+
+Gate: both `tsc` clean; FULL suite **1446 files / 19126 tests green**.

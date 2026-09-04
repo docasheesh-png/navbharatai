@@ -44001,3 +44001,66 @@ reintroduced both failure modes separately (removed the `!tapActions` gate; remo
 menu) and confirmed the matching tests fail each time, then restored.
 
 Gate: both `tsc` clean; FULL suite **1442 files / 18996 tests green**.
+---
+
+## 2026-09-04 — The review that ran out of time no longer throws its findings away (admin: build what's best)
+
+**The admin's brief:** read the code and `CLAUDE.md`, and build whatever best serves — in order —
+(1) world-best / error-free, (2) fast, (3) low admin cost.
+
+**Why THIS.** Rather than pick from my own list, I took the item the repo itself already records as
+unfixed: the 2026-09-01 autopsy's **STILL OPEN** line — *"291s of post-build work that produced
+nothing — the review timed out on 46 files and its findings were discarded. The user paid for it in
+time and money. Not touched here."* It is the rare item that serves all three priorities at once:
+findings that today vanish are real bugs shipping (1), 38% of a build spent for nothing (2), and
+tokens already bought and then binned (3).
+
+### The arithmetic, checked rather than assumed
+
+`reviewerBudgetMs(46 files)` = **194s**, `reviewGraceMs` = **30s**. So that build spent its full
+budget AND the entire grace window and still lost everything. I also probed whether the `Math.max(MIN,…)`
+floor could start a review with no headroom (it returns 45s even for NEGATIVE headroom) — **it cannot**,
+because the `reviewHeadroomOk` entry gate needs 120s first. Recorded because it looks like a bug and is
+not one; the next person to read that line deserves the answer without re-deriving it.
+
+### Root cause — the class, not the instance
+
+Two previous fixes both moved the CLIFF rather than removing it: 2026-07-07 made the budget
+size-scaled, 2026-08-12 added the grace window after a review landed 1.5s late. Neither could help
+here, because **the budget is a guess about how long a review takes, so some review will always land
+past it.** Raising the numbers again buys a slower build and a further-away cliff.
+
+**What nobody had used: the reviewer narrates its findings AS IT WORKS.** It is a sub-agent on the
+shared event stream, and the 2026-08-12 report's own timeline shows the complete review text arriving
+as an `AGENT_STEP` one millisecond before `agent_done`. The work was never unobservable — it was
+unobserved. So the timeout keeps its real job (stop WAITING) and loses the one it should never have
+had (throw away what was already said).
+
+### Shipped
+
+- **`partialReview.ts`** (pure) — `salvageReview()` rebuilds a verdict from the reviewer's own
+  narration. **Costs nothing: no extra call, no extra token** — this is money already spent, collected
+  instead of binned.
+- **Three honesty rules, each one something this codebase has already paid to learn:**
+  1. **A partial review can NEVER fail a build.** The reviewer is instructed to self-dismiss false
+     positives *in the same finding*, so a truncated stream may hold a `[CRITICAL]` it was about to
+     withdraw. Deep-test 66ec5c1e is the price of acting on a phantom one — a working, render-verified
+     app failed and the auto-fix chased it to the wall-clock cap. For the same reason it deliberately
+     does **not** feed the C9 auto-fix: leads, not a verdict.
+  2. **A score is never invented.** `reviewBuild` may infer 85/40 for a COMPLETE review that omitted
+     the number; doing that here would be scoring an unfinished inspection. Only a score the reviewer
+     actually printed is carried.
+  3. **It labels itself partial** in its own summary, so no surface can present it as complete.
+- **`formatPartialReview()`** rather than `formatReview()`, which returns `''` at score 0 — precisely
+  when a salvaged review has findings worth showing. Reusing it would have silently dropped the very
+  findings this rescues.
+- New report code **`REVIEW_PARTIAL`** (warning, `autoResolved: false`).
+- Subscription is `replay: false` and always detached in a `finally` — with replay on, a second build
+  in one session would salvage the PREVIOUS turn's findings and report them against new code.
+
+### Verification
+Both `tsc` clean; FULL suite **1443 files / 19006 tests green**. Both guards verified to bite.
+⚠️ Worth recording: when I neutered `partialReview.ts` to prove its guard bites, `git checkout` did
+**not** restore it — the file was still untracked, so the neutered version survived and the next gate
+would have been green against broken code. Caught by re-reading the file rather than trusting the
+restore. **An untracked file has no version to check out; verify the restore, don't assume it.**

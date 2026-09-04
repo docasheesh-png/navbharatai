@@ -44402,3 +44402,62 @@ still prices k2.5, and — the one worth keeping — **that the two rungs are pr
 diverge, the trade-off that settled this changes and the decision deserves revisiting.
 
 Gate: both `tsc` clean; FULL suite **1448 files / 19147 tests green**.
+
+## 2026-09-04 — mitrify.com: why a month of DNS fixes could never have worked
+
+**Report:** *"yeh error abhi bhi aa rahi hai! 1 month se aap isko fix kar rahe ho"* — with screenshots
+showing `mitrify.com` serving Firebase's **"Site Not Found"**, while the connect screen right beside it
+read `ownership: active · host: active · SSL: active`, *"3 records you added are verified"*, and
+**"Connected — one last step: press Publish."**
+
+### The diagnosis, traced through the code rather than guessed
+
+Every fix over the past month was on the DNS / ownership / SSL side — and that side is now genuinely,
+verifiably **finished**: the screenshot shows all three ACTIVE and every record verified. None of it
+could ever have made the site appear, because the blocker is somewhere else entirely:
+
+1. mitrify is a **fullstack ship-whole** app (its own refusal text says so: *"your website and your
+   server … share one address, so they belong together"*).
+2. `POST /api/agentv3/publish` **refuses such an app with 422** (`routes/agentv3.ts`, the
+   "IS THIS EVEN A WEBSITE?" block) — correctly, since uploading an Express app to a static CDN is
+   what produced the broken site in the first place.
+3. So the workspace's Firebase Hosting site **never receives a release**.
+4. The custom domain is attached to **that** site (`siteIdForWorkspace`), and Firebase serves
+   "Site Not Found" for a site with no release. ← exactly the screenshot.
+5. `renderDeploy.ts` contains **no custom-domain code at all** — so even a perfect "Deploy backend"
+   never points mitrify.com at the Render service where the app can actually run.
+
+**⇒ The domain is attached to a place that structurally cannot serve this app, and nothing in the
+product can move it to the place that can.** That is why the loop survived every fix.
+
+### Shipped now — the screen stops sending the user at a button that answers 422
+
+`domainPublishBlockNote` was written (2026-08-24) for exactly this class, but stayed **deliberately
+silent for `fullstack`** because a *splittable* fullstack app really can publish. That reasoning was
+sound and incomplete: the publish route's only fullstack path is `wiredToBackend`, which requires
+`strategy === 'split'`. For **ship-whole** the refusal is as certain as for a bare server. It now says
+so, and only on a real `analyzeApiWiring` verdict of `false` — never on a guess.
+
+### And the sibling bug that made it worse (rule 3 — hunt the class)
+
+The status route formed its verdict from **the manifests alone**. That is the very defect the publish
+route fixed on 2026-08-25: `planDeployment`'s file-based half — does the source actually IMPORT a
+server framework — can never fire when only four manifests are handed to it. So the two halves of one
+product could reach **opposite conclusions about the same app**: publish refusing it as a server while
+this screen cheerfully said "one last step: press Publish". The route now uses the same two-stage
+escalation, with the same cost profile (an ordinary static app pays exactly what it paid before).
+
+⚠️ A test asserting `not.toContain('loadWorkspaceFiles(...)')` was **rewritten, not deleted** — it had
+pinned the single-stage read that WAS the bug. The cost guarantee it protected is real and is kept,
+now asserted as *where* the read lives rather than as a blanket ban, which is strictly stronger.
+
+### 🔴 OPEN ROOT CAUSE (rule 6) — mitrify.com still will not serve until this is built
+
+Telling the truth is not the same as making the site work. For a ship-whole fullstack app the domain
+must point at the host that can RUN it (Render), not at Firebase static hosting. That capability does
+not exist: no Render custom-domain call, and no path that writes the DNS records Render requires.
+**Recorded as open rather than papered over.** The next step is a `renderCustomDomain` module plus a
+branch in the connect flow that attaches such an app's domain to its Render service, with the records
+written through the Cloudflare-managed zone we already run.
+
+Gate: both `tsc` clean; FULL suite **1449 files / 19184 tests green**. Both guards verified to bite.

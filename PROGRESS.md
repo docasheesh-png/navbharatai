@@ -44064,3 +44064,67 @@ Both `tsc` clean; FULL suite **1443 files / 19006 tests green**. Both guards ver
 **not** restore it — the file was still untracked, so the neutered version survived and the next gate
 would have been green against broken code. Caught by re-reading the file rather than trusting the
 restore. **An untracked file has no version to check out; verify the restore, don't assume it.**
+
+---
+
+## 2026-09-04 (later) — Solution #1 "stop the model writing boilerplate": mostly ALREADY BUILT, so the gap got built instead
+
+**The admin approved solution #1** from the 12 I proposed (stop paying a model to write boilerplate).
+Investigating before writing code — safeguard #6 — showed **most of it already exists**, and saying so
+is worth more than looking busy:
+
+- `ViteReactProviderContents` already ships `package.json`, `vite.config.ts`, all three tsconfigs,
+  `index.html`, `main.tsx`, `ErrorBoundary.tsx` and `index.css` **deterministically**.
+- `goldenScaffolds/` holds 20+ compile-tested starter apps that pre-seed a matching prompt.
+- `ScaffoldGuard` blocks `create-*` generators; `scaffoldBoilerplate` restores a broken ErrorBoundary;
+  `protectBoilerplateInRepair` stops a repair pass landing a change to it; SimpleBuilder drops these
+  paths from the parsed manifest.
+
+**So the honest answer to "build #1" is: it is built.** The remaining gap is not more scaffolding —
+it is that **the guard protecting the scaffolds swept 2 of the 25 providers the registry serves.**
+
+### Why that gap is the dangerous one
+
+The 2026-08-23 "Make an VPN App" build: `ViteReactProvider`'s package.json ran `tsc -p
+tsconfig.build.json`, the module EXPORTED that config and never wrote it, so `npm run build` died with
+TS5058 on **every app that provider had ever made**. The builder then "repaired" it by copying a
+different config — **96,610 characters** of fresh type errors on an app whose preview was already
+rendering. An 18-minute avalanche from a one-line omission.
+
+**Nothing caught it because `npm run dev` never reads those files.** It is invisible in every preview
+and appears only at publish — the "worst kind of green". `scaffoldScriptsResolve.test.ts` was written
+that day and covered the provider it happened in. **The other 24 had no such guard**, and the identical
+mistake in any of them would have reached users unseen.
+
+### Shipped
+
+- **The sweep now reads `TemplateRegistry` itself** instead of a hand-written list, so a provider added
+  tomorrow is covered the day it lands. 6 tests → **106**.
+- **Three sibling doors to the same failure**, all checked per provider: a tsconfig that `extends` a
+  file we do not write (TS5083), an `index.html` whose entry `<script src>` is missing (blank page in
+  dev AND in the built app), and a `package.json` `main`/`module` pointing nowhere.
+- **A false positive fixed before it could do harm.** Widening the sweep made it report a missing file
+  called **"3000"** — the static scaffold serves with `… -p 3000`, and `-p` is not a tsc-only flag. The
+  matcher now only looks inside commands that actually run `tsc`. This mattered more than a stray
+  failure: *the first thing anyone does with a guard that cries wolf is weaken it*, which is precisely
+  how the real bug would get back in.
+
+### Honest scope
+**All 25 scaffolds pass today — this is prevention, not a bug fix.** No user-visible defect was found or
+repaired. What changed is that the class can no longer be reintroduced unnoticed. Proven, not assumed:
+reintroducing the exact 2026-08-23 bug into `node-express` — a provider that was previously **unswept** —
+now fails the suite; before this change it passed.
+
+### ⚠️ A process lesson, learned twice in one session in OPPOSITE directions
+Verifying "does this guard bite?" means temporarily breaking the code, and **`git checkout` is the wrong
+way back both times**:
+- an **untracked** file (`partialReview.ts`): checkout does nothing, so the *broken* version survives and
+  the next gate goes green against it;
+- a **tracked** file (`scaffoldScriptsResolve.test.ts`): checkout reverts **everything**, silently
+  discarding the session's work on that file — which is what happened here, and the whole extension had
+  to be rewritten.
+
+**Back up to the scratchpad before the temporary break, and restore from that backup.** Then re-run the
+suite and confirm the count is what it was.
+
+Gate: both `tsc` clean; FULL suite **1444 files / 19112 tests green**. Both guards verified to bite.

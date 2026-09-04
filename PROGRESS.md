@@ -44626,3 +44626,51 @@ working harness returns three. **The feature was fine; the harness was wrong.** 
 of the two is broken before touching the code under test.
 
 Gate: both `tsc` clean; FULL suite **1449 files / 19185 tests green**.
+
+## 2026-09-04 — "abhi bhi fix nahi hua bro" — the real dead end, found in the screenshot
+
+The admin's next screenshot showed the previous fix WORKING: the blue box no longer claims *"Render is
+configured — a real deploy can run"*; it correctly says the app needs a GitHub repository first. The
+contradiction is gone. **And the app still could not be shipped** — so the honest reading is that the
+message fixes were necessary and were never sufficient.
+
+### What the screenshot actually proves
+
+The panel renders numbered steps: *"Your code has to live in a GitHub repository first… **Connect
+GitHub, then push this app to a repo of your own**… Come back here and press Publish again."*
+
+**There is no Connect GitHub button in the screenshot.** That is not a rendering fault — it is
+`backendDeployOffer` returning `cta: 'none'` because `githubConnected` is TRUE. So:
+
+* GitHub was already connected. Step 2's first half was asking for something already done.
+* Step 2's second half — *push this app to a repo of your own* — **had no control anywhere in the
+  product.** Every `pushAll` in `routes/agentv3.ts` lives inside the BUILD route, so the only way to
+  get an app into your own GitHub repo was to run a build while a token happened to be attached.
+
+⇒ **The user had done everything the screen asked, and the screen had nothing left to offer.** A test
+even pinned it: `'does not re-offer GitHub to someone already connected'` asserted `cta === 'none'` —
+the right property (don't re-offer a pointless Connect) with the wrong conclusion (offer *nothing*).
+
+### Shipped
+
+**`POST /api/agentv3/github/push-app`** — the capability the steps had always described, exposed as an
+action. Ownership-checked; uses the USER'S token so the repo is theirs and their own host can read it
+(the platform-org mirror is invisible to their Render account and is never substituted); seeds the
+sandbox first, because after the idle sweep it comes back empty and a push then would replace their
+code with nothing; pushes to the PERSISTED repo name so it can never create an empty twin beside the
+real app; and a push that did not happen is reported as a failure, never as success.
+
+**The panel now offers it.** A connected user gets a real "Put this app in my GitHub" button and steps
+that describe that button, instead of steps describing an action that did not exist.
+
+**And the screen no longer depends on catching a build event.** `repoOwner` + `repoOwnedByUser` join
+the persisted `repoName`, and a repo created during this visit is reflected immediately — the `repo`
+event that carried this fact fires ONLY during a build, so reopening an app and going straight to
+Publish showed "push this to a repo of your own" for an app that already had one.
+
+⚠️ Two assertions rewritten, neither weakened: the `cta === 'none'` one above (its property kept, its
+conclusion corrected) and a new invariant that **no path may leave steps with nothing to press** —
+which is the whole failure class, stated once so it cannot come back in a new costume.
+
+Gate: both `tsc` clean; FULL suite **1451 files / 19250 tests green**. Verified to bite by restoring
+the dead end.

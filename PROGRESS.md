@@ -44495,3 +44495,39 @@ WAS the hole.
 
 Gate: both `tsc` clean; FULL suite **1449 files / 19191 tests green**. Both new guards verified to
 bite (narrowing the gate back; claiming a deploy can run with no repo).
+
+### The open root cause above is now CLOSED — the domain follows the app to Render
+
+Recorded above as an open root cause: *"a ship-whole fullstack app's domain must point at the host that
+can RUN it (Render), not at Firebase static hosting. That capability does not exist."* Built now.
+
+**`renderCustomDomain.ts`** (new, pure + 23 tests): attach a domain to the Render service and plan the
+DNS that makes it resolve. Idempotent — a domain already attached, or a 409 from the host, is SUCCESS,
+because pressing Connect twice must never turn a working setup into a failure.
+
+**🔒 A CNAME AT THE APEX, DELIBERATELY NOT AN A RECORD.** Render's documented apex recipe is an A record
+to their anycast IP. Writing that would bake a third-party address into our source, and the day they
+renumber, every domain we ever wrote goes dark together with nothing failing on our side to reveal it —
+the exact stale-hardcoded-value class this repo has already been burned by (retired model ids in five
+files). We only reach here for zones WE manage in Cloudflare, which flattens an apex CNAME on every
+lookup, so there is no address to go stale and Render can renumber freely. Test-locked, including an
+assertion that the planned records contain no IP literal at all.
+
+**Wired at the moment a service first exists — `POST /api/agentv3/deploy-backend`.** Not on the connect
+screen: a domain can only point at a service that exists, and a successful backend deploy is the exact
+instant one starts to. So there is no new button and no new step — deploying the backend simply takes
+the connected domain with it, attaching it at Render and writing the CNAME through the managed zone.
+
+**🔒 Strictly additive, and it cannot lie about the deploy.** Every domain failure is reported in
+`domainNote` and none can turn a successful deploy into a failed request — the deploy already happened,
+and reporting it as failed because a DNS write did would send the user to redo work that succeeded.
+`firebaseDomainsForWorkspaceStrict`'s `null` ("could not ask") is deliberately NOT read as "no domain",
+which would have silently skipped pointing a domain the user really has. With no managed zone we print
+the exact CNAME rather than implying it was done.
+
+**Honest about what is still required of the user:** mitrify has no repo and no deployed service yet, so
+the first two steps remain theirs — connect GitHub and push the app, then deploy the backend. This
+change removes the third, which was missing entirely and which no amount of user effort could supply.
+
+Gate: both `tsc` clean; FULL suite **1450 files / 19214 tests green**. Guards verified to bite (a DNS
+failure failing the deploy; treating "could not ask" as "no domain").

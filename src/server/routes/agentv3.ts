@@ -205,6 +205,8 @@ import {
 } from '../AgentV3/ShellSessions';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
+import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
+import { managedDnsConfigured, ensureZone, applyRecords } from '../lib/cloudflareManagedDns';
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
@@ -3920,7 +3922,59 @@ async function noteBuildOutcome(
     if (!renderKey) { res.status(503).json({ ok: false, reason: 'not-configured', error: renderRequirement(process.env, renderVault) }); return; }
     try {
       const result = await deployBackendToRender({ repoUrl, appName, apiKey: renderKey.key });
-      res.status(result.ok ? 200 : 409).json(result);
+      /**
+       * 🔴 AND NOW POINT THE DOMAIN AT IT (admin 2026-09-04 — the root cause behind a month of
+       * mitrify.com serving "Site Not Found").
+       *
+       * A fullstack ship-whole app cannot be served by static hosting, so its Firebase site never
+       * receives a release and Firebase answers "Site Not Found" forever. The user's domain was
+       * attached to THAT site, and nothing in the product could move it — so the domain was bound to a
+       * place that structurally could not serve the app, permanently.
+       *
+       * This is the missing half, and it belongs HERE rather than on the connect screen: a domain can
+       * only point at a service that exists, and this is the exact moment one starts to. No new button,
+       * no new step for the user — deploying the backend simply takes the domain with it.
+       *
+       * 🔒 STRICTLY ADDITIVE. Every failure is reported and none of it can turn a successful deploy
+       * into a failed request: the deploy already happened, and telling the user it failed because a
+       * DNS write did would be a lie about the thing they actually asked for.
+       */
+      let domainPointed: { domain: string; records: number } | null = null;
+      let domainNote = '';
+      if (result.ok) {
+        try {
+          // `Strict` returns null for "could not ask", which is NOT "no domain" — a lookup failure
+          // must never silently skip pointing a domain the user really does have.
+          const domains = await firebaseDomainsForWorkspaceStrict(workspaceId).catch(() => null);
+          if (domains === null) domainNote = 'Your app is deployed. We could not check whether you have a connected domain — open the domain screen to confirm it points here.';
+          const domain = domains?.[0] || '';
+          if (domain) {
+            const attach = await attachRenderCustomDomain({
+              apiKey: renderKey.key, serviceId: result.serviceId, serviceUrl: result.url, domain,
+            });
+            if (!attach.ok) {
+              domainNote = attach.message;
+            } else if (managedDnsConfigured()) {
+              // The zone is ours (nameserver delegation), so the records are written for the user —
+              // the same "DNS hum set kar dein" promise the connect screen already makes.
+              const zone = await ensureZone(domain);
+              const applied = await applyRecords(zone.id, attach.records);
+              domainPointed = { domain, records: applied.added };
+            } else {
+              // No managed zone ⇒ we cannot write it, and must say so rather than imply it is done.
+              domainNote = `Your app is deployed. Point ${domain} at it by adding a CNAME to `
+                + `${attach.records[0]?.value ?? 'your backend host'} at your registrar.`;
+            }
+          }
+        } catch (e) {
+          domainNote = `Your app deployed, but we could not point your domain at it yet: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
+      res.status(result.ok ? 200 : 409).json({
+        ...result,
+        ...(domainPointed ? { domainPointed } : {}),
+        ...(domainNote ? { domainNote } : {}),
+      });
     } catch (e) {
       res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${e instanceof Error ? e.message : String(e)}` });
     }

@@ -58,6 +58,10 @@ interface ConversationMeta {
   framework?: string;
   /** User pinned this build to the top of their history list (absent/false = normal). */
   pinned?: boolean;
+  /** The name the USER chose for this app (admin 2026-09-04). Absent until someone renames. */
+  appName?: string;
+  /** The GitHub repo this app's code lives in — persisted so a rename cannot strand the app. */
+  repoName?: string;
 }
 
 export class FirestoreConversationStore implements ConversationStore {
@@ -291,6 +295,8 @@ export class FirestoreConversationStore implements ConversationStore {
       ...(meta.finalState ? { finalState: meta.finalState } : {}),
       ...(meta.framework ? { framework: meta.framework } : {}),
       ...(meta.pinned ? { pinned: true } : {}),
+      ...(meta.appName ? { appName: meta.appName } : {}),
+      ...(meta.repoName ? { repoName: meta.repoName } : {}),
     };
   }
 
@@ -303,6 +309,8 @@ export class FirestoreConversationStore implements ConversationStore {
     if (patch.finalState !== undefined) out.finalState = { ...patch.finalState };
     if (patch.framework !== undefined) out.framework = patch.framework;
     if (patch.pinned !== undefined) out.pinned = patch.pinned;
+    if (patch.appName !== undefined) out.appName = patch.appName;
+    if (patch.repoName !== undefined) out.repoName = patch.repoName;
     return out;
   }
 }

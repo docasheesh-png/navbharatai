@@ -1995,6 +1995,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // resulting no-op as "click hi nahi ho raha"). Any failed open sets this and a dismissible toast
   // shows the real reason.
   const [openChatError, setOpenChatError] = useState<string | null>(null);
+  // THE APP'S NAME (admin 2026-09-04) — a dedicated card at the top of the thread, with an edit
+  // button that opens the rename popup. `appName` is the EFFECTIVE name the server resolved (the
+  // user's choice if they made one, else the auto-derived title), so the card always shows what the
+  // rest of the app shows. null = not loaded/no app yet, and the card stays hidden rather than
+  // rendering an empty or invented name.
+  const [appName, setAppName] = useState<string | null>(null);
+  const [nameModalOpen, setNameModalOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  // A rename that moved the GitHub repo too says so once, quietly. It is genuinely different news
+  // from "renamed", because it is the half that could have failed.
+  const [nameNote, setNameNote] = useState<string | null>(null);
   // TAP TRACER (diagnostic, admin-only via ?tapdebug=1 or localStorage nbai_tapdebug=1): the history
   // menu taps are reported dead on iPhone even after the rows became real <button>s, so hypotheses are
   // exhausted — this captures ground truth from the device itself. While the menu is open it listens
@@ -2106,6 +2119,86 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setHistoryOpen(next);
     if (next) await loadHistory();
   };
+
+  /**
+   * Read this session's EFFECTIVE app name from the server (admin 2026-09-04).
+   *
+   * Deliberately asks the server rather than deriving anything locally: the server already resolves
+   * "the user's chosen name, else the derived title", and a second implementation here is exactly how
+   * two surfaces start disagreeing about what an app is called. Silent on failure — a name we could
+   * not read leaves the card hidden, which is honest; inventing one would not be.
+   */
+  const loadAppName = async (): Promise<void> => {
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    try {
+      const qs = new URLSearchParams();
+      if (userId) qs.set('userId', userId);
+      if (email) qs.set('email', email);
+      const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}?${qs.toString()}`, {
+        headers: await authJsonHeaders(),
+      });
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      const rec = data?.conversation;
+      const name = (rec?.appName || rec?.title || '').trim();
+      if (name) setAppName(name);
+    } catch { /* the card simply stays hidden — never a guessed name */ }
+  };
+
+  /**
+   * Save the name the user typed in the popup.
+   *
+   * THE BUILD IS NOT TOUCHED. This calls one endpoint that writes a single field; it never stops,
+   * pauses or restarts a build, and it stays enabled while one is running — which is the point of
+   * the admin's *"app ka naam / app building — dono smooth rahe"*. The server applies the display
+   * name first and only then attempts the GitHub repo rename, so a repo that could not be moved
+   * leaves both the name and the running build intact, and says so.
+   */
+  const saveAppName = async (): Promise<void> => {
+    const sid = sessionIdRef.current;
+    if (!sid || nameSaving) return;
+    const desired = nameDraft.replace(/\s+/g, ' ').trim();
+    if (!desired) { setNameError('Give your app a name.'); return; }
+    if (desired === (appName ?? '')) { setNameModalOpen(false); return; }
+    setNameSaving(true);
+    setNameError(null);
+    try {
+      const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}/name`, {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ name: desired, userId, email, githubToken: ghToken() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // The server's own sentence — it knows whether this was a duplicate, too long, or not yours.
+        setNameError(data?.error || 'Could not save the name. Try again.');
+        return;
+      }
+      setAppName(data?.name || desired);
+      setNameModalOpen(false);
+      setNameNote(data?.repoRenamed ? 'Renamed — your saved code moved with it.' : null);
+      // Keep the history list honest in the same breath, so the new name is already there when the
+      // user opens it rather than a refresh later.
+      setHistoryItems((prev) => prev.map((c) => (c.id === sid || c.workspaceId === expectedWorkspaceId()
+        ? { ...c, title: data?.name || desired } : c)));
+    } catch {
+      setNameError('Could not reach the server. Your app is untouched — try again.');
+    } finally {
+      setNameSaving(false);
+    }
+  };
+
+  // WHEN THE NAME IS (RE)READ. A build's title is written server-side as the record is created, so
+  // the honest moments to ask are: this session has a thread at all, and a build just finished (the
+  // record now exists, or its name may have been derived from the first prompt). Keyed on `running`
+  // falling rather than on a timer — nothing polls, and a session with no app never asks.
+  useEffect(() => {
+    if (running) return;            // mid-build the record is still being written; ask once it settles
+    if (convo.length === 0) return; // no app in this session yet — the card must stay hidden
+    void loadAppName();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, convo.length === 0, sessionIdRef.current]);
   // Open a specific saved conversation: load its thread + plan, and adopt its sessionId so a
   // follow-up continues THAT exact workspace/memory (same as the auto-restore of the most recent).
   // Allowed even while a build is actively streaming HERE — loadConversation() detaches from it (the
@@ -3882,6 +3975,38 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 })()}
               </div>
             )}
+            {/* THE APP-NAME MESSAGE (admin 2026-09-04): *"chat box me hi ek dedicated message sirf
+                'name' ke liye ho, aur us message ke aage edit button ho"*. A message of its own at the
+                head of the thread — not a header control — so it reads as part of the conversation and
+                is never scrolled away from the app it names. Shown only once the session HAS an app
+                and the server has told us its real name: a card with a guessed name would be worse
+                than no card. It stays interactive during a build on purpose — naming and building are
+                independent, which is the whole ask. */}
+            {appName && (
+              <div className="mx-auto my-3 w-full max-w-[92%] rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 shrink-0 text-indigo-400" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-black uppercase tracking-widest text-indigo-300/70">App name</div>
+                    <div className="truncate text-sm font-semibold text-zinc-100" title={appName}>{appName}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setNameDraft(appName); setNameError(null); setNameModalOpen(true); }}
+                    title="Change your app's name"
+                    aria-label="Change your app's name"
+                    className="shrink-0 flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 hover:text-white hover:bg-white/10 transition-colors touch-manipulation"
+                  >
+                    <Pencil className="w-3 h-3" /> Edit
+                  </button>
+                </div>
+                {nameNote && (
+                  <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-emerald-300">
+                    <span aria-hidden>✓</span>{nameNote}
+                  </div>
+                )}
+              </div>
+            )}
             {chatBlocks.map((b) => {
               if (b.kind !== 'msg') return <ActionGroupRow key={b.key} block={b} />;
               const isLastUser = lastUserTs !== null && b.msg.role === 'user' && b.msg.ts === lastUserTs && !unsending;
@@ -5476,6 +5601,64 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           >
             <X className="w-3.5 h-3.5" />
           </button>
+        </div>
+      )}
+
+      {/* RENAME-THE-APP POPUP (admin 2026-09-04) — opened by the name message's Edit button.
+          Deliberately NOT disabled while a build runs: the name and the build are independent, and
+          blocking one on the other is exactly the friction the admin asked to avoid. Saving writes a
+          name; it never interrupts, pauses or restarts anything the engine is doing. */}
+      {nameModalOpen && (
+        <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => { if (!nameSaving) setNameModalOpen(false); }} />
+          <div className="nb-sheet relative z-10 w-full max-w-sm overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-widest">App name</h3>
+                <p className="text-[10px] text-[#8b949e] mt-0.5">This name is used everywhere, including where your code is saved.</p>
+              </div>
+              <button onClick={() => { if (!nameSaving) setNameModalOpen(false); }} className="text-zinc-500 hover:text-white" aria-label="Close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <input
+              autoFocus
+              value={nameDraft}
+              onChange={(e) => { setNameDraft(e.target.value); if (nameError) setNameError(null); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !nameSaving) { e.preventDefault(); void saveAppName(); }
+                if (e.key === 'Escape' && !nameSaving) setNameModalOpen(false);
+              }}
+              maxLength={60}
+              placeholder="My Shop"
+              aria-label="Your app's name"
+              className="w-full bg-white/5 border border-indigo-500/30 rounded-xl px-3 py-2.5 text-sm text-white placeholder-[#484f58] outline-none focus:border-indigo-500"
+            />
+            {nameError && (
+              <p className="text-[11px] text-red-300 bg-red-900/20 border border-red-500/20 rounded-lg px-2.5 py-2">{nameError}</p>
+            )}
+            {running && (
+              // Said out loud because the opposite is what users expect from a builder, and a person
+              // who assumes renaming might break their build simply will not use this.
+              <p className="text-[11px] text-[#8b949e]">Your build keeps running — renaming does not interrupt it.</p>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { void saveAppName(); }}
+                disabled={nameSaving || !nameDraft.trim()}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-all"
+              >
+                {nameSaving ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                onClick={() => { if (!nameSaving) setNameModalOpen(false); }}
+                disabled={nameSaving}
+                className="px-4 py-2.5 border border-white/10 text-sm font-semibold text-zinc-300 hover:text-white hover:bg-white/5 rounded-xl transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

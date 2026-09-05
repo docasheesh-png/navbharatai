@@ -44764,3 +44764,103 @@ and the connected domain points itself at it.
 
 Gate: both `tsc` clean; FULL suite **1452 files / 19274 tests green**. Verified to bite (inventing a
 start command; creating on any failure rather than only `no-service`).
+
+## 2026-09-05 — the backend-deploy path, audited to zero (admin: "koi bhi single dot missing na rahe")
+
+The admin forwarded an external suggestion (ChatGPT) proposing a frontend/`api.domain.com` split
+architecture, and asked for an audit before any code. Per the external-suggestion rule the suggestion
+was treated as raw material: the real code was read, the parts that fit were built, and the part that
+would have HARMED the app was refused with reasons.
+
+**What the audit found — and the ONE cause behind all of it.** Every defect below is the same shape:
+
+> **each layer reported its own narrow success as the whole outcome**, or the platform could NAME a
+> situation correctly and then act as if it had not.
+
+**1. The deployed backend booted with NO environment (PR #2751).** The PREVIEW app is handed the
+user's saved keys — the build writes the scoped vault into the sandbox `.env` before anything runs.
+The DEPLOYED service was handed nothing: `buildCreateServiceRequest` had no `envVars` field at all. An
+app reading `DATABASE_URL` worked on screen, built on Render, **crashed on boot**, and the UI said
+"deployed". The second absolute rule's exact failure mode.
+The source is the VAULT, not the sandbox `.env`, and that is the whole design: the build prefers the
+sandbox's own Postgres, so `DATABASE_URL` there points at an address that dies with the sandbox.
+Copying it is WORSE than a missing variable — a service that boots, connects to nothing, and fails at
+the first request with a value that LOOKS configured. Such addresses are withheld and NAMED. The test
+is on the VALUE, never the name: a real hosted Postgres is also called `DATABASE_URL`.
+An EXISTING service is only READ — Render's env API replaces the whole set, so writing ours in would
+delete what the user configured themselves. An unreadable answer is `unknown`, never clean.
+
+**2. Nobody ever checked whether the app came up.** "Deploy triggered" is the host accepting a
+request; it was the last thing we ever said. New `renderDeployStatus.ts` + `POST /api/agentv3/deploy-status`.
+A host status is a claim about the host's pipeline; an HTTP reply from the real address is the app
+answering for itself — so **the probe outranks the status**, and a service the host calls `live` that
+refuses every connection is NOT reported live. Answering is the test, not a 200 (a backend that only
+serves `/api` 404s at its root and is healthy). An unfamiliar status is `unknown`. The client polls
+with backoff, bounded at five minutes, and EVERY exit says something true, including the timeout.
+
+**3. The free plan sleeps, and the user learned it from their own slow site.** Said only in the branch
+that CREATED the service, because we chose that plan and therefore know it; an existing service may be
+on any plan. Test-pinned to exactly one such claim.
+
+**4. Python apps could be NAMED but never HOSTED.** `deployPlan.ts` has always recognised Flask,
+FastAPI and Django — and the create request hardcoded `env: 'node'`. New `pythonStart.ts` reads the
+start command from the project: a Procfile `web:` line first (a declaration beats every derivation),
+then Django's own wsgi entry, then the app object — whose MODULE **and VARIABLE** both come from the
+file, because assuming the variable is called `app` is the near-always-right guess that produces a
+service which builds and cannot start. Without gunicorn/uvicorn declared the answer is null with the
+fix named. It always binds `$PORT`.
+
+**5. Splitting an app that cannot be split.** `apiWiring.ts` established that splitting a
+relative-path app breaks every button — and left a door open: an app that DOES read an env base still
+breaks if its server never allowed another origin, because on a CDN every request is cross-origin.
+The page loads, looks right, nothing works. A split now requires positive evidence of CORS; absence of
+evidence is treated as absence, because under-detecting ships the app WHOLE (working) while
+over-detecting ships it into a wall of blocked requests.
+**And the half that makes that gate safe rather than a cure worse than the disease:** an env-based
+frontend shipped whole builds `${base}/api/x`, which with no value is literally `undefined/api/x`.
+Shipped whole the API is at the app's own origin, so `buildEnvForWhole` sets the base EMPTY and the
+calls become relative. A value the user saved always wins over that default.
+
+**6. A hole in the 2026-09-04 custom-domain work.** The route already returned `domainPointed` /
+`domainNote` — the entire point of that work — and the client's outcome parser did not mention them in
+its body type, so every one of those sentences was parsed and DISCARDED. A user whose domain could not
+be pointed saw "Deploy triggered" and nothing else. **A server that returns an honest field has not
+communicated anything until a client renders it.**
+
+**7. A cost guard on my own new feature (PR #2750).** Found while answering the admin's question about
+how backend hosting works, i.e. by re-reading what I had just built. `resolveRenderKey` falls back to
+the SERVER's key — safe for TRIGGERING a deploy of a service someone deliberately created, NOT safe
+for CREATING one: every fullstack user without their own account would have had a service made inside
+NAVBHARATAI'S Render account, on its plan limits and bill. Creation now requires the user's own key;
+triggering is deliberately ungated, since restricting it would remove a working path for no cost
+saving.
+
+**8. A "coming soon" that had been false for weeks.** `staticHostingRefusal` told users "Backend
+hosting is coming to NavBharatAI" while `renderDeploy.ts` had been a real, wired deploy the whole time.
+`deployDecision` was written in August to stop that sentence reaching users — and covered only the
+branch where a key IS available, leaving this branch teaching every user WITHOUT a key that a feature
+they already have does not exist. Its own test enforced the falsehood (`toContain('Backend hosting is
+coming')`). Worse, it withheld the one fact that unlocks the feature (save your own key) which the
+panel beside it was already showing, so the screen contradicted itself — the same defect class as
+2026-09-04. Now corrected, with a sweep over EVERY shape rather than the reported one.
+**Standing lesson: a "coming soon" line in this codebase is a thing to distrust — re-check it against
+what the product actually does before leaving it standing.**
+
+**REFUSED, with reasons (external-suggestion rule).** The suggestion's centrepiece —
+`api.mitrify.com` for every app — is wrong as a DEFAULT for our apps and would be a regression:
+`apiWiring.ts` already documents that most fullstack apps call relative `/api/…` and that splitting
+them breaks every button silently. The split path is comparatively rare; a branded API subdomain adds
+a CNAME, a certificate wait and a CORS origin (three new failure points) and fixes nothing a user
+feels, since a split app already works on its host address. The CORS gate (#5) was the real
+correctness win in that area and was built instead. Recorded as a deliberate deferral, not an
+oversight — it can be built if the admin wants branded API addresses.
+
+**AppKnowledgeBase updated** (CLAUDE.md's mandatory rule, missed on the first pass and caught in this
+sweep): the hosting entry no longer says full-stack hosting is "coming soon", and now describes the
+push-to-GitHub button, automatic service creation, Python hosting, settings carried to the deployed
+backend, the come-up check, the free-plan sleep and the automatic domain pointing.
+
+Gate on every push: both `tsc` clean; FULL suite **1455 files / 19363 tests green**. Verified to bite
+(removing the probe's precedence over the host status makes the mismatch test fail). Five test anchors
+that pinned pre-change behaviour were REWRITTEN, never deleted, each keeping the property it protected
+with the reason recorded in place.

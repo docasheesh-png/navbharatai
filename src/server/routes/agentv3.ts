@@ -207,6 +207,7 @@ import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, 
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
 import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
 import { createRenderService, fetchServiceEnvKeys } from '../AgentV3/renderCreateService';
+import { readDeployVerdict } from '../AgentV3/renderDeployStatus';
 import { planBackendEnv, backendEnvNote, requiredBackendEnvNames } from '../AgentV3/backendEnvVars';
 import { declaredAppPort } from '../lib/declaredAppPort';
 import { managedDnsConfigured, ensureZone, applyRecords } from '../lib/cloudflareManagedDns';
@@ -3926,6 +3927,8 @@ async function noteBuildOutcome(
     // What we can honestly say about the environment the backend runs with. '' = nothing worth saying,
     // which is the ordinary case and must stay silent.
     let envNote = '';
+    // Only set when WE created the service and therefore know which plan it is on — see below.
+    let planNote = '';
     try {
       let result = await deployBackendToRender({ repoUrl, appName, apiKey: renderKey.key });
       /**
@@ -4016,6 +4019,22 @@ async function noteBuildOutcome(
           // one is honest, and triggering a second would be a duplicate build on the user's account.
           result = { ok: true, url: created.service.serviceUrl, serviceId: created.service.id, serviceName: created.service.name };
           envNote = backendEnvNote(envPlan);
+          /**
+           * THE FREE PLAN SLEEPS, AND THE USER SHOULD HEAR IT FROM US (admin 2026-09-05).
+           *
+           * `buildCreateServiceRequest` deliberately picks the FREE plan — a default that cannot
+           * surprise someone with a bill on their own account. The cost of that default is real: the
+           * service idles out after about a quarter of an hour, and the next visitor waits while it
+           * wakes. Someone who learns that from their own slow site concludes NavBharatAI built
+           * something bad; someone told up front knows it is a plan they can change.
+           *
+           * 🔒 SAID ONLY WHERE IT IS TRUE. This is the branch where WE created the service and chose
+           * that plan, so we know. An EXISTING service may be on any plan, and claiming it sleeps
+           * would be a confident guess about somebody else's account.
+           */
+          planNote = 'This runs on your host\'s free plan, which goes to sleep after about 15 minutes with no '
+            + 'visitors — the next visit then takes up to a minute to wake it. Upgrade that service in your '
+            + 'host\'s dashboard if you need it always-on.';
         } else {
           // Keep the original hand-off AND say what we tried, so the user is never left with a
           // silent downgrade from "we can do this" to the old manual instruction.
@@ -4075,10 +4094,50 @@ async function noteBuildOutcome(
         ...(domainPointed ? { domainPointed } : {}),
         ...(domainNote ? { domainNote } : {}),
         ...(envNote ? { envNote } : {}),
+        ...(planNote ? { planNote } : {}),
       });
     } catch (e) {
       res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${e instanceof Error ? e.message : String(e)}` });
     }
+  });
+
+  /**
+   * DID THE BACKEND ACTUALLY COME UP? (admin 2026-09-05)
+   *
+   * 🔴 THE GAP THIS CLOSES. `deploy-backend` reported success the moment the host ACCEPTED the
+   * request — which is all it ever knew. "Deploy triggered" was true; "your app is live" was never
+   * checked. A failed build, a service that boots and crashes on a missing setting, a start command
+   * that exits immediately: every one produced the same cheerful message, and the user found out by
+   * opening their own site.
+   *
+   * That is this path's recurring bug class in one line: each layer reported its own narrow success as
+   * the whole outcome. The records existed, so DNS was "done". The host accepted the domain, so it was
+   * "connected". The host accepted the request, so it was "deployed". Every one true, none of them
+   * meaning the user had a working site.
+   *
+   * 🔒 A SEPARATE ENDPOINT, NOT A WAIT INSIDE THE DEPLOY. A build takes minutes we do not control, so
+   * holding the deploy request open would trade a dishonest fast answer for an honest one that times
+   * out — no better. The client asks this as often as it likes, and each answer is evidence-backed.
+   */
+  app.post('/api/agentv3/deploy-status', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const serviceId = typeof req.body?.serviceId === 'string' ? req.body.serviceId.trim() : '';
+    const serviceUrl = typeof req.body?.serviceUrl === 'string' ? req.body.serviceUrl.trim() : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!serviceId) { res.status(400).json({ error: 'serviceId is required.' }); return; }
+    // The same ownership check the deploy itself makes — a status is about someone's own service, and
+    // reading one with a borrowed workspace id would leak which services exist.
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    const vault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
+    const key = resolveRenderKey(vault);
+    if (!key) { res.status(503).json({ error: renderRequirement(process.env, vault) }); return; }
+    const verdict = await readDeployVerdict({ apiKey: key.key, serviceId, serviceUrl });
+    // `status` is the HOST'S OWN word (build_failed, live, …) and names a provider's pipeline, so it
+    // stays out of the user-facing payload under the white-label law. The message is ours.
+    res.json({ live: verdict.live, phase: verdict.phase, message: verdict.message });
   });
 
   /**

@@ -162,6 +162,8 @@ export function managedDeployOutcome(
     domainPointed?: { domain?: string; records?: number } | null;
     domainNote?: string;
     envNote?: string;
+    /** Set only when the service was just created, so its plan is a fact and not a guess. */
+    planNote?: string;
   } | null,
 ): { kind: ManagedDeployKind; lines: string[] } {
   const serverSaid = String(body?.error ?? body?.message ?? '').trim();
@@ -180,6 +182,9 @@ export function managedDeployOutcome(
         // Said LAST because it is about settings, not about whether the deploy happened — leading with
         // it would read as a failure of the thing the user just pressed.
         ...(String(body?.envNote ?? '').trim() ? [`⚠️ ${String(body.envNote).trim()}`] : []),
+        // Not a warning: a true fact about a plan the user can change, and far better heard here than
+        // discovered as a mysteriously slow first visit.
+        ...(String(body?.planNote ?? '').trim() ? [`💤 ${String(body.planNote).trim()}`] : []),
       ],
     };
   }

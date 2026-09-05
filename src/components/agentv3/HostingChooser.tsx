@@ -353,6 +353,42 @@ export function HostingChooser({
     }
   };
 
+  /**
+   * Poll the honest verdict until it is decided, or until the window closes.
+   *
+   * 🔒 EVERY EXIT SAYS SOMETHING TRUE. Live, failed, or "still building after N minutes" — the one
+   * outcome that must not exist is silence, because silence after "Deploy triggered" is exactly what
+   * let a dead service pass for a live one.
+   */
+  const verifyBackend = async (serviceId: string, serviceUrl: string) => {
+    if (!authedFetch) return;
+    const DEADLINE = Date.now() + 5 * 60_000;
+    let delay = 8_000;
+    setBackendLines((prev) => [...prev, '⏳ Checking whether your backend comes up…']);
+    while (Date.now() < DEADLINE) {
+      await new Promise((r) => setTimeout(r, delay));
+      // Back off gently: a build takes minutes, and asking every eight seconds for five of them is
+      // noise on someone else's API for no extra information.
+      delay = Math.min(delay * 1.5, 30_000);
+      let verdict: { live?: boolean; phase?: string; message?: string } | null = null;
+      try {
+        const r = await authedFetch('/api/agentv3/deploy-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspaceId, serviceId, serviceUrl }),
+        });
+        verdict = await r.json().catch(() => null);
+      } catch { /* a lost check is not a failed deploy — try again inside the window */ }
+      if (!verdict) continue;
+      if (verdict.phase === 'in-progress') continue;   // still building: nothing new to report yet
+      setBackendLines((prev) => [...prev, `${verdict!.live ? '✅' : '⚠️'} ${verdict!.message ?? ''}`.trim()]);
+      return;
+    }
+    setBackendLines((prev) => [...prev,
+      'ℹ️ Your backend is still building after five minutes — that can be normal for a first deploy. '
+      + 'Open the address above in a few minutes to check.']);
+  };
+
   const deployBackend = async () => {
     if (backendBusy || !authedFetch) return;
     const body = managedDeployRequest('render', { repoPath: backendOffer.repoPath, workspaceId });
@@ -374,6 +410,22 @@ export function HostingChooser({
       setBackendLines(outcome.kind === 'needs-connect'
         ? [...outcome.lines, ...renderConnectSteps(body.repoUrl)]
         : outcome.lines);
+      /**
+       * 🔴 AND THEN FIND OUT WHETHER IT ACTUALLY CAME UP (admin 2026-09-05).
+       *
+       * "Deploy triggered" is the host accepting a request — it is not the app working, and until now
+       * it was the last thing we ever said. A failed build, a crash on a missing setting, a start
+       * command that exits: all of them ended at the same cheerful line, and the user discovered the
+       * truth by opening their own site.
+       *
+       * 🔒 THE CHECKING IS BOUNDED AND CANNOT BLOCK ANYTHING. It runs after the answer is already on
+       * screen, it stops at the first real verdict, and if the build outlives the window we say
+       * exactly that instead of pretending either way. A user who navigates away loses nothing —
+       * their deploy is unaffected, because this only ever READS.
+       */
+      if (outcome.kind === 'deployed' && typeof data?.serviceId === 'string') {
+        void verifyBackend(data.serviceId, typeof data?.url === 'string' ? data.url : '');
+      }
     } catch {
       setBackendLines(['Could not reach NavBharatAI — nothing was deployed.']);
     } finally {

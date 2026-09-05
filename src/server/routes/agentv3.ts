@@ -206,7 +206,9 @@ import {
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
 import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
-import { createRenderService } from '../AgentV3/renderCreateService';
+import { createRenderService, fetchServiceEnvKeys } from '../AgentV3/renderCreateService';
+import { readDeployVerdict } from '../AgentV3/renderDeployStatus';
+import { planBackendEnv, backendEnvNote, requiredBackendEnvNames } from '../AgentV3/backendEnvVars';
 import { declaredAppPort } from '../lib/declaredAppPort';
 import { managedDnsConfigured, ensureZone, applyRecords } from '../lib/cloudflareManagedDns';
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
@@ -216,7 +218,7 @@ import { designHealDecision, designHealGuardNote } from '../AgentV3/designHealGu
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
-import { analyzeApiWiring, buildEnvForSplit, mergeEnvFile } from '../AgentV3/apiWiring';
+import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
@@ -3922,8 +3924,44 @@ async function noteBuildOutcome(
     const renderVault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
     const renderKey = resolveRenderKey(renderVault);
     if (!renderKey) { res.status(503).json({ ok: false, reason: 'not-configured', error: renderRequirement(process.env, renderVault) }); return; }
+    // What we can honestly say about the environment the backend runs with. '' = nothing worth saying,
+    // which is the ordinary case and must stay silent.
+    let envNote = '';
+    // Only set when WE created the service and therefore know which plan it is on — see below.
+    let planNote = '';
     try {
       let result = await deployBackendToRender({ repoUrl, appName, apiKey: renderKey.key });
+      /**
+       * AN *EXISTING* SERVICE GETS THE TRUTH, NOT OUR KEYS (admin 2026-09-05).
+       *
+       * Render's env-var API replaces the whole set, so writing ours into a service the user already
+       * runs would delete anything they configured in Render's own dashboard — a destructive fix for a
+       * reporting problem. Creation is the one moment an environment can be set without taking
+       * something away. Here we only READ, and only to say what is absent.
+       *
+       * 🔒 AND AN UNREADABLE ANSWER IS NOT A CLEAN ONE. `fetchServiceEnvKeys` returns null when it
+       * could not find out, and null must never collapse into "has everything" — that is the exact
+       * habit of reporting a narrow success as the whole outcome that this deploy path keeps having to
+       * unlearn.
+       */
+      if (result.ok) {
+        const required = requiredBackendEnvNames(await loadWorkspaceFiles(workspaceId).catch(() => ({})));
+        if (required.length > 0) {
+          const have = await fetchServiceEnvKeys(renderKey.key, result.serviceId);
+          if (have === null) {
+            envNote = `We could not check whether your backend has the settings it reads (${required.join(', ')}). `
+              + 'If your app does not work, check those in your backend host.';
+          } else {
+            const absent = required.filter((n) => !have.includes(n));
+            if (absent.length > 0) {
+              envNote = `Your app reads ${absent.join(', ')}, and your backend does not have `
+                + `${absent.length === 1 ? 'it' : 'them'} set. Add `
+                + `${absent.length === 1 ? 'it' : 'them'} in your backend host, or save `
+                + `${absent.length === 1 ? 'it' : 'them'} under Settings → Secrets & API Keys.`;
+            }
+          }
+        }
+      }
       /**
        * 🔴 NO SERVICE YET? CREATE ONE (admin 2026-09-04 — "han", after the four-step path was named).
        *
@@ -3958,15 +3996,75 @@ async function noteBuildOutcome(
         const pkgRaw = await loadWorkspaceFilesByPath(workspaceId, ['package.json'])
           .then((f: Record<string, string>) => f['package.json'] ?? null)
           .catch(() => null);
+        /**
+         * 🔴 THE ENVIRONMENT THE SERVICE BOOTS WITH — the gap that made "deployed" a lie.
+         *
+         * The PREVIEW app is handed the user's saved keys before it runs; the created service used to
+         * be handed none. An app reading DATABASE_URL therefore worked on screen, built here, and
+         * crashed on boot while we reported success. `planBackendEnv` sources them from the VAULT
+         * (portable real credentials) rather than the sandbox `.env`, whose database address exists
+         * only inside that sandbox — see backendEnvVars.ts for why shipping that value would be worse
+         * than shipping none.
+         */
+        const envSource = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+        const envPlan = planBackendEnv(renderVault, envSource);
+        /**
+         * WHICH RUNTIME? — asked of the app, not assumed (2026-09-05).
+         *
+         * The create request used to ask for a Node service unconditionally, so a Flask or FastAPI app
+         * that `planDeployment` had correctly identified as `python-server` could be NAMED by the
+         * platform and never hosted by it. The same planner that classifies it now decides how it is
+         * built, so the two cannot disagree.
+         */
+        const backendRuntime = planDeployment(envSource).backend?.runtime === 'python' ? 'python' : 'node';
+        /**
+         * 🔒 AN APP SHIPPED WHOLE THAT STILL READS AN API BASE MUST BE TOLD WHAT THAT BASE IS —
+         * otherwise the CORS gate in apiWiring.ts would be a cure worse than the disease.
+         *
+         * Such a frontend builds `${base}/api/x`; with no value that becomes the literal string
+         * `undefined/api/x` and every call 404s. Shipped in one piece the API lives at the app's OWN
+         * origin, so the honest value is the EMPTY string — `${''}/api/x` is `/api/x`, the relative
+         * call that works precisely because one server serves both halves.
+         *
+         * This is a build-time value, which is why it belongs in the service's environment: the host
+         * runs the frontend build, so the variable has to exist there.
+         */
+        const wholeEnv = buildEnvForWhole(analyzeApiWiring(envSource));
+        const createEnvVars = [
+          ...envPlan.envVars,
+          ...Object.entries(wholeEnv)
+            // Never override a value the user deliberately saved — theirs is a decision, ours a default.
+            .filter(([k]) => !envPlan.envVars.some((e) => e.key === k))
+            .map(([key, value]) => ({ key, value })),
+        ];
         const created = await createRenderService({
           apiKey: renderKey.key,
           name: (appName || repoPath.split('/')[1] || 'app').slice(0, 60),
           repoUrl, repoPath, packageJson: pkgRaw,
+          envVars: createEnvVars,
+          runtime: backendRuntime, files: envSource,
         });
         if (created.ok) {
           // Render deploys a newly-created service by itself, so this IS the deploy — reporting it as
           // one is honest, and triggering a second would be a duplicate build on the user's account.
           result = { ok: true, url: created.service.serviceUrl, serviceId: created.service.id, serviceName: created.service.name };
+          envNote = backendEnvNote(envPlan);
+          /**
+           * THE FREE PLAN SLEEPS, AND THE USER SHOULD HEAR IT FROM US (admin 2026-09-05).
+           *
+           * `buildCreateServiceRequest` deliberately picks the FREE plan — a default that cannot
+           * surprise someone with a bill on their own account. The cost of that default is real: the
+           * service idles out after about a quarter of an hour, and the next visitor waits while it
+           * wakes. Someone who learns that from their own slow site concludes NavBharatAI built
+           * something bad; someone told up front knows it is a plan they can change.
+           *
+           * 🔒 SAID ONLY WHERE IT IS TRUE. This is the branch where WE created the service and chose
+           * that plan, so we know. An EXISTING service may be on any plan, and claiming it sleeps
+           * would be a confident guess about somebody else's account.
+           */
+          planNote = 'This runs on your host\'s free plan, which goes to sleep after about 15 minutes with no '
+            + 'visitors — the next visit then takes up to a minute to wake it. Upgrade that service in your '
+            + 'host\'s dashboard if you need it always-on.';
         } else {
           // Keep the original hand-off AND say what we tried, so the user is never left with a
           // silent downgrade from "we can do this" to the old manual instruction.
@@ -4025,10 +4123,51 @@ async function noteBuildOutcome(
         ...result,
         ...(domainPointed ? { domainPointed } : {}),
         ...(domainNote ? { domainNote } : {}),
+        ...(envNote ? { envNote } : {}),
+        ...(planNote ? { planNote } : {}),
       });
     } catch (e) {
       res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${e instanceof Error ? e.message : String(e)}` });
     }
+  });
+
+  /**
+   * DID THE BACKEND ACTUALLY COME UP? (admin 2026-09-05)
+   *
+   * 🔴 THE GAP THIS CLOSES. `deploy-backend` reported success the moment the host ACCEPTED the
+   * request — which is all it ever knew. "Deploy triggered" was true; "your app is live" was never
+   * checked. A failed build, a service that boots and crashes on a missing setting, a start command
+   * that exits immediately: every one produced the same cheerful message, and the user found out by
+   * opening their own site.
+   *
+   * That is this path's recurring bug class in one line: each layer reported its own narrow success as
+   * the whole outcome. The records existed, so DNS was "done". The host accepted the domain, so it was
+   * "connected". The host accepted the request, so it was "deployed". Every one true, none of them
+   * meaning the user had a working site.
+   *
+   * 🔒 A SEPARATE ENDPOINT, NOT A WAIT INSIDE THE DEPLOY. A build takes minutes we do not control, so
+   * holding the deploy request open would trade a dishonest fast answer for an honest one that times
+   * out — no better. The client asks this as often as it likes, and each answer is evidence-backed.
+   */
+  app.post('/api/agentv3/deploy-status', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const serviceId = typeof req.body?.serviceId === 'string' ? req.body.serviceId.trim() : '';
+    const serviceUrl = typeof req.body?.serviceUrl === 'string' ? req.body.serviceUrl.trim() : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!serviceId) { res.status(400).json({ error: 'serviceId is required.' }); return; }
+    // The same ownership check the deploy itself makes — a status is about someone's own service, and
+    // reading one with a borrowed workspace id would leak which services exist.
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    const vault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
+    const key = resolveRenderKey(vault);
+    if (!key) { res.status(503).json({ error: renderRequirement(process.env, vault) }); return; }
+    const verdict = await readDeployVerdict({ apiKey: key.key, serviceId, serviceUrl });
+    // `status` is the HOST'S OWN word (build_failed, live, …) and names a provider's pipeline, so it
+    // stays out of the user-facing payload under the white-label law. The message is ours.
+    res.json({ live: verdict.live, phase: verdict.phase, message: verdict.message });
   });
 
   /**

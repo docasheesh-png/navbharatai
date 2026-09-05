@@ -17,6 +17,8 @@
 //
 // PURE builders + a never-throwing orchestration, in the same shape as renderDeploy.ts.
 
+import { derivePythonCommands, pythonStartRefusal } from './pythonStart';
+
 const RENDER_API_BASE = 'https://api.render.com/v1';
 
 export interface RenderRequest {
@@ -84,6 +86,24 @@ export interface CreateServiceInput {
   repoUrl: string;
   branch: string;
   commands: ServiceCommands;
+  /**
+   * Which runtime the host should build this with.
+   *
+   * 🔴 THIS WAS HARDCODED TO 'node' (fixed 2026-09-05). `deployPlan.ts` has always recognised Flask,
+   * FastAPI and Django and classified them as `python-server` — and then nothing could deploy one,
+   * because the create request always asked for a Node service. The platform could NAME the app's
+   * shape and not host it.
+   */
+  runtime?: 'node' | 'python';
+  /**
+   * The environment the service boots with — the user's own saved keys, planned by `planBackendEnv`.
+   *
+   * 🔴 OMITTING THIS WAS A REAL DEFECT, not a missing nicety (found by audit 2026-09-05). The PREVIEW
+   * app is given these keys before it runs; the deployed service was given none, so an app reading
+   * `DATABASE_URL` worked on screen, built on Render, crashed on boot — and we reported "deployed".
+   * Optional so an app that needs nothing sends nothing.
+   */
+  envVars?: Array<{ key: string; value: string }>;
 }
 
 /**
@@ -105,8 +125,12 @@ export function buildCreateServiceRequest(apiKey: string, input: CreateServiceIn
       repo: input.repoUrl,
       branch: input.branch || 'main',
       autoDeploy: 'yes',
+      // Sent at CREATE time only. Render's env-var API REPLACES the whole set, so writing to an
+      // existing service would silently delete anything the user added in Render's own dashboard —
+      // see the deploy route, which reports what an existing service is missing instead of rewriting it.
+      ...(input.envVars && input.envVars.length > 0 ? { envVars: input.envVars } : {}),
       serviceDetails: {
-        env: 'node',
+        env: input.runtime === 'python' ? 'python' : 'node',
         plan: 'free',
         envSpecificDetails: {
           buildCommand: input.commands.buildCommand,
@@ -165,18 +189,33 @@ export type CreateServiceResult =
  * can show verbatim, and a failure always leaves the honest hand-off available underneath.
  */
 export async function createRenderService(
-  opts: { apiKey: string; name: string; repoUrl: string; repoPath: string; branch?: string; packageJson?: string | null },
+  opts: {
+    apiKey: string; name: string; repoUrl: string; repoPath: string; branch?: string;
+    packageJson?: string | null;
+    /** The environment to boot with — see CreateServiceInput.envVars. */
+    envVars?: Array<{ key: string; value: string }>;
+    /** 'python' reads the start command out of the project instead of package.json — see pythonStart.ts. */
+    runtime?: 'node' | 'python';
+    /** The project's files, required for python (its entry point lives in the source, not a manifest). */
+    files?: Record<string, string> | null;
+  },
   fetchImpl: typeof fetch = fetch,
 ): Promise<CreateServiceResult> {
   const apiKey = String(opts.apiKey ?? '').trim();
-  const commands = deriveServiceCommands(opts.packageJson);
+  const python = opts.runtime === 'python';
+  // Node declares its entry point in one manifest field; Python's lives in the source, so each runtime
+  // reads its own — and each returns null rather than guessing. See pythonStart.ts for why that is the
+  // harder half.
+  const commands = python ? derivePythonCommands(opts.files) : deriveServiceCommands(opts.packageJson);
   if (!commands) {
     // Refusing here is the point: a service created with an invented start command builds, crashes,
     // and bills the user for a dead site that our UI would report as deployed.
     return {
       ok: false,
       reason: 'no-commands',
-      message: 'We could not tell how your app starts (no "start" script in package.json), so we did not create a service that would fail to run. Add a start script, or set the service up yourself in Render.',
+      message: python
+        ? pythonStartRefusal(opts.files)
+        : 'We could not tell how your app starts (no "start" script in package.json), so we did not create a service that would fail to run. Add a start script, or set the service up yourself in Render.',
     };
   }
   try {
@@ -193,6 +232,7 @@ export async function createRenderService(
 
     const req = buildCreateServiceRequest(apiKey, {
       ownerId, name: opts.name, repoUrl: opts.repoUrl, branch: opts.branch || 'main', commands,
+      envVars: opts.envVars, runtime: opts.runtime,
     });
     const res = await fetchImpl(req.url, { method: req.method, headers: req.headers, body: req.body });
     if (!res.ok) {
@@ -207,5 +247,58 @@ export async function createRenderService(
     return { ok: true, service };
   } catch (e) {
     return { ok: false, reason: 'refused', message: `Could not reach your backend host: ${e instanceof Error ? e.message : String(e)}. Nothing was created.` };
+  }
+}
+
+/**
+ * WHAT ENVIRONMENT DOES AN *EXISTING* SERVICE ALREADY HAVE?
+ *
+ * 🔒 READ-ONLY, AND DELIBERATELY SO. Render's env-var API REPLACES the entire set, so "helpfully"
+ * writing our keys into a service the user already runs would delete every variable they added in
+ * Render's own dashboard — a destructive fix for a reporting problem. Creation is the one moment we
+ * can set an environment without taking anything away; after that, the honest move is to say what is
+ * absent and let the user decide.
+ */
+export function buildListEnvVarsRequest(apiKey: string, serviceId: string): RenderRequest {
+  return {
+    url: `${RENDER_API_BASE}/services/${encodeURIComponent(serviceId)}/env-vars?limit=100`,
+    method: 'GET',
+    headers: renderHeaders(apiKey),
+  };
+}
+
+/** The variable NAMES a service has set. Values are never read — we do not need them, so we do not take them. */
+export function parseEnvVarKeys(raw: any): string[] {
+  const rows = Array.isArray(raw) ? raw : [];
+  const keys: string[] = [];
+  for (const row of rows) {
+    const item = row && typeof row === 'object' ? (row.envVar ?? row) : null;
+    const key = item && typeof item.key === 'string' ? item.key.trim() : '';
+    if (key) keys.push(key);
+  }
+  return keys;
+}
+
+/**
+ * The names an existing service has, or **null** when we could not find out.
+ *
+ * 🔒 NULL IS NOT AN EMPTY SET. Treating an unreadable response as "it has nothing" would report every
+ * required variable as missing and send the user to fix a problem that may not exist; treating it as
+ * "it has everything" would hide a real one. Only a genuine answer produces a verdict — the caller
+ * says it could not check. Never throws.
+ */
+export async function fetchServiceEnvKeys(
+  apiKey: string,
+  serviceId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string[] | null> {
+  try {
+    const req = buildListEnvVarsRequest(apiKey, serviceId);
+    const res = await fetchImpl(req.url, { method: req.method, headers: req.headers });
+    if (!res.ok) return null;
+    const json = await res.json().catch(() => null);
+    return json === null ? null : parseEnvVarKeys(json);
+  } catch {
+    return null;
   }
 }

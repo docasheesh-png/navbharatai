@@ -36,6 +36,12 @@ const REF_RE = new RegExp(
   'g',
 );
 
+/** The same reference forms, restricted to `process.env` — see extractProcessEnvRefs. */
+const PROCESS_REF_RE = new RegExp(
+  'process\\.env' + `(?:\\.(${ENV_NAME})|\\[\\s*['"\`](${ENV_NAME})['"\`]\\s*\\])`,
+  'g',
+);
+
 /**
  * Well-known framework/runtime variables that are always present (or builtin to the
  * toolchain), so a missing `.env.example` entry for them is not a real defect. Skipping
@@ -68,6 +74,36 @@ export function extractEnvRefs(file: string, content: string): string[] {
     if (name) found.add(name);
   }
   return [...found];
+}
+
+/**
+ * The SERVER-side env references only — `process.env` and never `import.meta.env`.
+ *
+ * 🔒 WHY A SECOND EXTRACTOR RATHER THAN A FILTER ON THE FIRST. `extractEnvRefs` deliberately merges
+ * both forms, because its question is "did the project document this variable?" — and for that,
+ * where the read happens is irrelevant. Deploying a BACKEND asks a different question: which
+ * variables must exist in the SERVER'S process when it boots. `import.meta.env` reads are inlined by
+ * the bundler at build time and are never present in a running Node process, so counting one as a
+ * backend requirement would report a variable the server does not need and cannot use.
+ *
+ * Both extractors share this file's skip rules and name pattern on purpose: env scanning stays owned
+ * by one module, so a fix to either applies to both.
+ */
+export function extractProcessEnvRefs(file: string, content: string): string[] {
+  if (SKIP_PATH.test(file)) return [];
+  const found = new Set<string>();
+  PROCESS_REF_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = PROCESS_REF_RE.exec(content)) !== null) {
+    const name = m[1] ?? m[2];
+    if (name) found.add(name);
+  }
+  return [...found];
+}
+
+/** True for vars the host always provides, so they are never a deploy requirement. Shared rule. */
+export function isRuntimeProvidedEnv(name: string): boolean {
+  return isAlwaysPresent(name);
 }
 
 /**

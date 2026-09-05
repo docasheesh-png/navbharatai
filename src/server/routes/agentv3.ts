@@ -206,7 +206,8 @@ import {
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
 import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
-import { createRenderService } from '../AgentV3/renderCreateService';
+import { createRenderService, fetchServiceEnvKeys } from '../AgentV3/renderCreateService';
+import { planBackendEnv, backendEnvNote, requiredBackendEnvNames } from '../AgentV3/backendEnvVars';
 import { declaredAppPort } from '../lib/declaredAppPort';
 import { managedDnsConfigured, ensureZone, applyRecords } from '../lib/cloudflareManagedDns';
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
@@ -3922,8 +3923,42 @@ async function noteBuildOutcome(
     const renderVault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
     const renderKey = resolveRenderKey(renderVault);
     if (!renderKey) { res.status(503).json({ ok: false, reason: 'not-configured', error: renderRequirement(process.env, renderVault) }); return; }
+    // What we can honestly say about the environment the backend runs with. '' = nothing worth saying,
+    // which is the ordinary case and must stay silent.
+    let envNote = '';
     try {
       let result = await deployBackendToRender({ repoUrl, appName, apiKey: renderKey.key });
+      /**
+       * AN *EXISTING* SERVICE GETS THE TRUTH, NOT OUR KEYS (admin 2026-09-05).
+       *
+       * Render's env-var API replaces the whole set, so writing ours into a service the user already
+       * runs would delete anything they configured in Render's own dashboard — a destructive fix for a
+       * reporting problem. Creation is the one moment an environment can be set without taking
+       * something away. Here we only READ, and only to say what is absent.
+       *
+       * 🔒 AND AN UNREADABLE ANSWER IS NOT A CLEAN ONE. `fetchServiceEnvKeys` returns null when it
+       * could not find out, and null must never collapse into "has everything" — that is the exact
+       * habit of reporting a narrow success as the whole outcome that this deploy path keeps having to
+       * unlearn.
+       */
+      if (result.ok) {
+        const required = requiredBackendEnvNames(await loadWorkspaceFiles(workspaceId).catch(() => ({})));
+        if (required.length > 0) {
+          const have = await fetchServiceEnvKeys(renderKey.key, result.serviceId);
+          if (have === null) {
+            envNote = `We could not check whether your backend has the settings it reads (${required.join(', ')}). `
+              + 'If your app does not work, check those in your backend host.';
+          } else {
+            const absent = required.filter((n) => !have.includes(n));
+            if (absent.length > 0) {
+              envNote = `Your app reads ${absent.join(', ')}, and your backend does not have `
+                + `${absent.length === 1 ? 'it' : 'them'} set. Add `
+                + `${absent.length === 1 ? 'it' : 'them'} in your backend host, or save `
+                + `${absent.length === 1 ? 'it' : 'them'} under Settings → Secrets & API Keys.`;
+            }
+          }
+        }
+      }
       /**
        * 🔴 NO SERVICE YET? CREATE ONE (admin 2026-09-04 — "han", after the four-step path was named).
        *
@@ -3958,15 +3993,29 @@ async function noteBuildOutcome(
         const pkgRaw = await loadWorkspaceFilesByPath(workspaceId, ['package.json'])
           .then((f: Record<string, string>) => f['package.json'] ?? null)
           .catch(() => null);
+        /**
+         * 🔴 THE ENVIRONMENT THE SERVICE BOOTS WITH — the gap that made "deployed" a lie.
+         *
+         * The PREVIEW app is handed the user's saved keys before it runs; the created service used to
+         * be handed none. An app reading DATABASE_URL therefore worked on screen, built here, and
+         * crashed on boot while we reported success. `planBackendEnv` sources them from the VAULT
+         * (portable real credentials) rather than the sandbox `.env`, whose database address exists
+         * only inside that sandbox — see backendEnvVars.ts for why shipping that value would be worse
+         * than shipping none.
+         */
+        const envSource = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+        const envPlan = planBackendEnv(renderVault, envSource);
         const created = await createRenderService({
           apiKey: renderKey.key,
           name: (appName || repoPath.split('/')[1] || 'app').slice(0, 60),
           repoUrl, repoPath, packageJson: pkgRaw,
+          envVars: envPlan.envVars,
         });
         if (created.ok) {
           // Render deploys a newly-created service by itself, so this IS the deploy — reporting it as
           // one is honest, and triggering a second would be a duplicate build on the user's account.
           result = { ok: true, url: created.service.serviceUrl, serviceId: created.service.id, serviceName: created.service.name };
+          envNote = backendEnvNote(envPlan);
         } else {
           // Keep the original hand-off AND say what we tried, so the user is never left with a
           // silent downgrade from "we can do this" to the old manual instruction.
@@ -4025,6 +4074,7 @@ async function noteBuildOutcome(
         ...result,
         ...(domainPointed ? { domainPointed } : {}),
         ...(domainNote ? { domainNote } : {}),
+        ...(envNote ? { envNote } : {}),
       });
     } catch (e) {
       res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${e instanceof Error ? e.message : String(e)}` });

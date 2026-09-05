@@ -210,8 +210,12 @@ describe('🔒 the wiring — the route plans the environment and never overwrit
   })();
 
   it('creation passes the planned environment', () => {
+    // ⚠️ The assertion moved from `envVars: envPlan.envVars` to the variable that now carries it, when
+    // the whole-deploy API base joined the same list (apiWiring's CORS gate). The property is
+    // unchanged — the planned environment reaches the create call — so it is re-anchored, not dropped.
     expect(handler).toContain('planBackendEnv(renderVault');
-    expect(handler).toContain('envVars: envPlan.envVars');
+    expect(handler).toContain('...envPlan.envVars,');
+    expect(handler).toContain('envVars: createEnvVars');
   });
 
   it('🔒 an EXISTING service is only READ — Render replaces the whole set, so writing would delete', () => {

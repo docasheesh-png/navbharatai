@@ -218,7 +218,7 @@ import { designHealDecision, designHealGuardNote } from '../AgentV3/designHealGu
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
-import { analyzeApiWiring, buildEnvForSplit, mergeEnvFile } from '../AgentV3/apiWiring';
+import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
@@ -4008,11 +4008,41 @@ async function noteBuildOutcome(
          */
         const envSource = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
         const envPlan = planBackendEnv(renderVault, envSource);
+        /**
+         * WHICH RUNTIME? — asked of the app, not assumed (2026-09-05).
+         *
+         * The create request used to ask for a Node service unconditionally, so a Flask or FastAPI app
+         * that `planDeployment` had correctly identified as `python-server` could be NAMED by the
+         * platform and never hosted by it. The same planner that classifies it now decides how it is
+         * built, so the two cannot disagree.
+         */
+        const backendRuntime = planDeployment(envSource).backend?.runtime === 'python' ? 'python' : 'node';
+        /**
+         * 🔒 AN APP SHIPPED WHOLE THAT STILL READS AN API BASE MUST BE TOLD WHAT THAT BASE IS —
+         * otherwise the CORS gate in apiWiring.ts would be a cure worse than the disease.
+         *
+         * Such a frontend builds `${base}/api/x`; with no value that becomes the literal string
+         * `undefined/api/x` and every call 404s. Shipped in one piece the API lives at the app's OWN
+         * origin, so the honest value is the EMPTY string — `${''}/api/x` is `/api/x`, the relative
+         * call that works precisely because one server serves both halves.
+         *
+         * This is a build-time value, which is why it belongs in the service's environment: the host
+         * runs the frontend build, so the variable has to exist there.
+         */
+        const wholeEnv = buildEnvForWhole(analyzeApiWiring(envSource));
+        const createEnvVars = [
+          ...envPlan.envVars,
+          ...Object.entries(wholeEnv)
+            // Never override a value the user deliberately saved — theirs is a decision, ours a default.
+            .filter(([k]) => !envPlan.envVars.some((e) => e.key === k))
+            .map(([key, value]) => ({ key, value })),
+        ];
         const created = await createRenderService({
           apiKey: renderKey.key,
           name: (appName || repoPath.split('/')[1] || 'app').slice(0, 60),
           repoUrl, repoPath, packageJson: pkgRaw,
-          envVars: envPlan.envVars,
+          envVars: createEnvVars,
+          runtime: backendRuntime, files: envSource,
         });
         if (created.ok) {
           // Render deploys a newly-created service by itself, so this IS the deploy — reporting it as

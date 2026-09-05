@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeApiWiring, buildEnvForSplit, mergeEnvFile } from '../src/server/AgentV3/apiWiring';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import {
+  analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, backendAllowsCrossOrigin, mergeEnvFile,
+} from '../src/server/AgentV3/apiWiring';
 
 /**
  * SHOULD WE SPLIT THIS APP AT ALL? (slice 3 of "welcome any app, in any format", admin 2026-08-23.)
@@ -13,11 +17,35 @@ import { analyzeApiWiring, buildEnvForSplit, mergeEnvFile } from '../src/server/
  * These tests pin the decision, and above all the direction it errs in.
  */
 
+/**
+ * ⚠️ THESE FIXTURES GAINED A SERVER ON 2026-09-05, and the reason is the point of the change.
+ *
+ * They used to contain a frontend file alone and assert `split`. Reading an env base says the author
+ * ANTICIPATED a separate API; it does not say their server will ACCEPT one. Once the website is on a
+ * CDN every call is cross-origin, and a server with no CORS refuses all of them — the page loads,
+ * looks right, and nothing works. That is the same silent failure this file was written to prevent,
+ * arriving through the one door it had left open.
+ *
+ * So the property under test is unchanged — an env base is recognised, and it still outranks a
+ * relative or localhost call elsewhere — but a split is only ADVISED when the backend can really be
+ * called from another origin. The fixtures now say that out loud instead of assuming it.
+ */
+const SERVER_WITH_CORS = { 'server.js': "const cors = require('cors');\napp.use(cors());" };
+
 describe('analyzeApiWiring — split, or ship whole?', () => {
-  it('an app that reads an API base from a setting WAS BUILT to be split', () => {
-    const r = analyzeApiWiring({ 'src/api.ts': 'const base = import.meta.env.VITE_API_URL;' });
+  it('an app that reads an API base from a setting, whose server accepts other origins, is split', () => {
+    const r = analyzeApiWiring({ ...SERVER_WITH_CORS, 'src/api.ts': 'const base = import.meta.env.VITE_API_URL;' });
     expect(r.strategy).toBe('split');
     expect(r.envVar).toBe('VITE_API_URL');
+  });
+
+  it('🔒 built to be split is NOT the same as safe to split — no CORS means ship it whole', () => {
+    // Splitting here would produce a site whose every request is refused by its own backend.
+    const r = analyzeApiWiring({ 'server.js': 'app.get("/api/x", h);', 'src/api.ts': 'import.meta.env.VITE_API_URL' });
+    expect(r.wiring).toBe('env');
+    expect(r.strategy).toBe('whole');
+    expect(r.envVar).toBe('VITE_API_URL');   // kept: a whole deploy still has to answer it
+    expect(r.summary).toContain('another address');
   });
 
   it('recognises the CRA and Next conventions too, not just Vite', () => {
@@ -51,6 +79,7 @@ describe('analyzeApiWiring — split, or ship whole?', () => {
     // Order is the design. An app that reads an env base was written to be split; condemning it over
     // a dev-only fallback or a commented-out line that never runs in production would be wrong.
     const r = analyzeApiWiring({
+      ...SERVER_WITH_CORS,
       'src/api.ts': "const base = import.meta.env.VITE_API_URL || 'http://localhost:3000';",
     });
     expect(r.strategy).toBe('split');
@@ -72,7 +101,10 @@ describe('analyzeApiWiring — split, or ship whole?', () => {
 });
 
 describe('buildEnvForSplit — never invent a setting the code does not read', () => {
-  const split = analyzeApiWiring({ 'src/api.ts': 'import.meta.env.VITE_API_URL' });
+  const split = analyzeApiWiring({
+    'server.js': "const cors = require('cors');\napp.use(cors());",
+    'src/api.ts': 'import.meta.env.VITE_API_URL',
+  });
 
   it('hands the backend URL to the variable the app actually reads', () => {
     expect(buildEnvForSplit(split, 'https://my-api.onrender.com')).toEqual({ VITE_API_URL: 'https://my-api.onrender.com' });
@@ -132,5 +164,76 @@ describe('mergeEnvFile — merge, never overwrite', () => {
     const after = mergeEnvFile('VITE_API_URL_OLD=keep-me\n', { VITE_API_URL: 'https://a.com' });
     expect(after).toContain('VITE_API_URL_OLD=keep-me');
     expect(after).toContain('VITE_API_URL=https://a.com');
+  });
+});
+
+/**
+ * THE COMPANION TO THE CORS GATE (admin 2026-09-05).
+ *
+ * Downgrading a split to a whole deploy is only safe if the frontend is told what its API base is.
+ * An env-based frontend builds `${base}/api/x`; with no value that is the literal string
+ * `undefined/api/x` and every call 404s — so the gate that prevents one silent failure would have
+ * created another. Shipped whole, the API is at the app's own origin, and the empty string is the
+ * honest value.
+ */
+describe('buildEnvForWhole — the half that makes the CORS gate safe', () => {
+  it('an env-based app shipped whole gets an EMPTY base, so its calls become relative', () => {
+    const whole = analyzeApiWiring({ 'server.js': 'app.get("/api/x", h);', 'src/api.ts': 'import.meta.env.VITE_API_URL' });
+    expect(whole.strategy).toBe('whole');
+    expect(buildEnvForWhole(whole)).toEqual({ VITE_API_URL: '' });
+  });
+
+  it('🔒 a variable the code does not read is never invented', () => {
+    // A setting nothing consumes is indistinguishable from a working one.
+    const relative = analyzeApiWiring({ 'src/App.tsx': "fetch('/api/x')" });
+    expect(relative.envVar).toBe('');
+    expect(buildEnvForWhole(relative)).toEqual({});
+  });
+
+  it('a split app gets nothing from here — its real URL comes from buildEnvForSplit', () => {
+    const split = analyzeApiWiring({
+      'server.js': "const cors = require('cors');\napp.use(cors());",
+      'src/api.ts': 'import.meta.env.VITE_API_URL',
+    });
+    expect(buildEnvForWhole(split)).toEqual({});
+  });
+});
+
+describe('backendAllowsCrossOrigin — positive evidence only', () => {
+  it('recognises what the frameworks actually document', () => {
+    for (const files of [
+      { 'server.js': "app.use(cors());" },
+      { 'server.ts': "res.setHeader('Access-Control-Allow-Origin', '*');" },
+      { 'app.py': 'from flask_cors import CORS\nCORS(app)' },
+      { 'main.py': 'app.add_middleware(CORSMiddleware, allow_origins=["*"])' },
+    ]) expect(backendAllowsCrossOrigin(files), Object.keys(files)[0]).toBe(true);
+  });
+
+  it('🔒 no evidence is treated as absence — under-detecting ships a WORKING app', () => {
+    // Over-detecting ships a split into a wall of blocked requests. Only one of those is a bug.
+    expect(backendAllowsCrossOrigin({ 'server.js': 'app.get("/api/x", h);' })).toBe(false);
+    expect(backendAllowsCrossOrigin({})).toBe(false);
+    expect(backendAllowsCrossOrigin({ 'docs/cors.md': 'app.use(cors())' })).toBe(false);
+  });
+
+  it('a test file is not the app', () => {
+    expect(backendAllowsCrossOrigin({ 'server.test.js': 'app.use(cors());' })).toBe(false);
+  });
+});
+
+describe('🔒 the wiring — a whole deploy carries the base, and never overrides the user', () => {
+  const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
+  const handler = (() => {
+    const at = route.indexOf("app.post('/api/agentv3/deploy-backend'");
+    return route.slice(at, route.indexOf('app.post(', at + 40));
+  })();
+
+  it('the created service receives the whole-deploy base', () => {
+    expect(handler).toContain('buildEnvForWhole(analyzeApiWiring(envSource))');
+    expect(handler).toContain('envVars: createEnvVars');
+  });
+
+  it('🔒 a value the user saved WINS — theirs is a decision, ours a default', () => {
+    expect(handler).toContain('.filter(([k]) => !envPlan.envVars.some((e) => e.key === k))');
   });
 });

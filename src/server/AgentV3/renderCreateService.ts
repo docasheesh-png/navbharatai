@@ -17,6 +17,8 @@
 //
 // PURE builders + a never-throwing orchestration, in the same shape as renderDeploy.ts.
 
+import { derivePythonCommands, pythonStartRefusal } from './pythonStart';
+
 const RENDER_API_BASE = 'https://api.render.com/v1';
 
 export interface RenderRequest {
@@ -85,6 +87,15 @@ export interface CreateServiceInput {
   branch: string;
   commands: ServiceCommands;
   /**
+   * Which runtime the host should build this with.
+   *
+   * 🔴 THIS WAS HARDCODED TO 'node' (fixed 2026-09-05). `deployPlan.ts` has always recognised Flask,
+   * FastAPI and Django and classified them as `python-server` — and then nothing could deploy one,
+   * because the create request always asked for a Node service. The platform could NAME the app's
+   * shape and not host it.
+   */
+  runtime?: 'node' | 'python';
+  /**
    * The environment the service boots with — the user's own saved keys, planned by `planBackendEnv`.
    *
    * 🔴 OMITTING THIS WAS A REAL DEFECT, not a missing nicety (found by audit 2026-09-05). The PREVIEW
@@ -119,7 +130,7 @@ export function buildCreateServiceRequest(apiKey: string, input: CreateServiceIn
       // see the deploy route, which reports what an existing service is missing instead of rewriting it.
       ...(input.envVars && input.envVars.length > 0 ? { envVars: input.envVars } : {}),
       serviceDetails: {
-        env: 'node',
+        env: input.runtime === 'python' ? 'python' : 'node',
         plan: 'free',
         envSpecificDetails: {
           buildCommand: input.commands.buildCommand,
@@ -183,18 +194,28 @@ export async function createRenderService(
     packageJson?: string | null;
     /** The environment to boot with — see CreateServiceInput.envVars. */
     envVars?: Array<{ key: string; value: string }>;
+    /** 'python' reads the start command out of the project instead of package.json — see pythonStart.ts. */
+    runtime?: 'node' | 'python';
+    /** The project's files, required for python (its entry point lives in the source, not a manifest). */
+    files?: Record<string, string> | null;
   },
   fetchImpl: typeof fetch = fetch,
 ): Promise<CreateServiceResult> {
   const apiKey = String(opts.apiKey ?? '').trim();
-  const commands = deriveServiceCommands(opts.packageJson);
+  const python = opts.runtime === 'python';
+  // Node declares its entry point in one manifest field; Python's lives in the source, so each runtime
+  // reads its own — and each returns null rather than guessing. See pythonStart.ts for why that is the
+  // harder half.
+  const commands = python ? derivePythonCommands(opts.files) : deriveServiceCommands(opts.packageJson);
   if (!commands) {
     // Refusing here is the point: a service created with an invented start command builds, crashes,
     // and bills the user for a dead site that our UI would report as deployed.
     return {
       ok: false,
       reason: 'no-commands',
-      message: 'We could not tell how your app starts (no "start" script in package.json), so we did not create a service that would fail to run. Add a start script, or set the service up yourself in Render.',
+      message: python
+        ? pythonStartRefusal(opts.files)
+        : 'We could not tell how your app starts (no "start" script in package.json), so we did not create a service that would fail to run. Add a start script, or set the service up yourself in Render.',
     };
   }
   try {
@@ -211,7 +232,7 @@ export async function createRenderService(
 
     const req = buildCreateServiceRequest(apiKey, {
       ownerId, name: opts.name, repoUrl: opts.repoUrl, branch: opts.branch || 'main', commands,
-      envVars: opts.envVars,
+      envVars: opts.envVars, runtime: opts.runtime,
     });
     const res = await fetchImpl(req.url, { method: req.method, headers: req.headers, body: req.body });
     if (!res.ok) {

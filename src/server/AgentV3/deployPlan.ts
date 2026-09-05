@@ -252,19 +252,35 @@ export function planDeployment(files: Record<string, string>): DeployPlan {
  *
  * 🔒 IT NAMES THE SHAPE, THE REASON, AND THE NEXT STEP. A refusal without a next step is a dead end,
  * and this codebase keeps deleting those. It also never blames the user: they did nothing wrong by
- * bringing a backend — we simply have not finished the path that runs one, and saying so plainly is
- * more useful (and more honest) than a generic failure.
+ * bringing a backend.
+ *
+ * ⚠️ CORRECTED 2026-09-05, AND THE COMMENT BELOW `deployDecision` HAD ALREADY CALLED THIS OUT.
+ *
+ * This function used to say "Backend hosting is coming to NavBharatAI". That was true of the publish
+ * path when it was written and has been FALSE of the product for weeks: NavBharatAI deploys backends,
+ * on the user's own account, and now hosts Python as well as Node. `deployDecision` was added to stop
+ * that sentence reaching users — and it only covered the branch where a key IS available, leaving
+ * THIS branch teaching every user without one that a feature they already have does not exist.
+ *
+ * That is the same class of dishonesty as claiming something works when it does not; it simply errs
+ * in the other direction, and it costs the user the same thing — time spent on a false picture. Worse,
+ * it withheld the ONE fact that would unlock the feature (save your own key), which the panel beside
+ * it was already showing — so the screen contradicted itself, exactly as it did on 2026-09-04.
+ *
+ * A "coming soon" line is now a thing to distrust in this file: whenever one is written, it must be
+ * re-checked against what the product actually does before it is left standing.
  */
 export function staticHostingRefusal(plan: DeployPlan): string {
   if (plan.staticHostingSufficient) return '';
   const what = plan.backend?.framework ?? 'server';
+  // The one fact that unlocks the feature, said the same way the panel beside this says it.
+  const howTo = 'NavBharatAI can deploy it for you — save your own RENDER_API_KEY under '
+    + 'Settings → Secrets & API Keys and it runs in your own account, on your own billing.';
   if (plan.shape === 'fullstack') {
     return `${plan.summary} Publishing only the website half would put a page online that cannot reach its `
-      + `${what} server, so it would look broken. Backend hosting is coming to NavBharatAI — until then you can `
-      + 'deploy the server to your own provider and publish the website half here.';
+      + `${what} server, so it would look broken. ${howTo}`;
   }
-  return `${plan.summary} Backend hosting is coming to NavBharatAI — until then you can deploy it to your own `
-    + 'provider. Nothing has been published, so nothing is broken.';
+  return `${plan.summary} ${howTo} Nothing has been published, so nothing is broken.`;
 }
 
 /**

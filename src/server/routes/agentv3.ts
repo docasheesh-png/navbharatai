@@ -3937,7 +3937,21 @@ async function noteBuildOutcome(
        * with the user's account. And a creation that Render REFUSES leaves the original hand-off
        * message standing, so the fallback is never worse than what it replaced.
        */
-      if (!result.ok && result.reason === 'no-service' && repoUrl) {
+      /**
+       * 🔒 CREATING A SERVICE REQUIRES THE USER'S OWN KEY — a cost guard on this very feature.
+       *
+       * `resolveRenderKey` falls back to the SERVER's key so a deploy can still run. That is safe for
+       * TRIGGERING a deploy of a service someone deliberately created, and it is NOT safe for
+       * CREATING one: with the server key, every fullstack user without their own account would have a
+       * brand-new service made inside NAVBHARATAI'S Render account, on NavBharatAI's plan limits and
+       * bill. That is precisely what the standing rule forbids — "user apps run on the USER's own
+       * accounts", the same reason NavBharatAI's Firebase project is never used for user databases.
+       *
+       * Triggering keeps today's behaviour (it multiplies nothing). Creation is gated, and the honest
+       * hand-off underneath is what a server-key user still gets — the same instruction they had
+       * before this feature existed, so nobody is worse off.
+       */
+      if (!result.ok && result.reason === 'no-service' && repoUrl && renderKey.source === 'user') {
         const repoPath = repoUrl.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '');
         // The start command comes from the app's OWN package.json — see deriveServiceCommands for why
         // a guessed one is worse than no service at all.

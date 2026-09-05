@@ -168,7 +168,31 @@ describe('🔒 the wiring — creation replaces the hand-off, and nothing else',
   it('🔒 fires ONLY on no-service, and only with a repo', () => {
     // Creating a service in answer to a bad key or an API error would be guessing with the user's
     // own account, and would bury the message that actually explains the failure.
-    expect(handler).toContain("if (!result.ok && result.reason === 'no-service' && repoUrl) {");
+    expect(handler).toContain("result.reason === 'no-service' && repoUrl");
+  });
+
+  /**
+   * 🔒 THE COST GUARD ON THIS FEATURE ITSELF — found while answering the admin's question about how
+   * backend hosting works, i.e. by re-reading what I had just built.
+   *
+   * `resolveRenderKey` falls back to the SERVER's key. That is safe for TRIGGERING a deploy of a
+   * service someone deliberately created; it is NOT safe for CREATING one. With the server key, every
+   * fullstack user without their own account would get a brand-new service inside NAVBHARATAI'S
+   * Render account — on NavBharatAI's plan limits and bill — which is exactly what the standing rule
+   * forbids ("user apps run on the USER's own accounts"), and the same reason NavBharatAI's Firebase
+   * project is never used for user databases.
+   */
+  it('🔒 creation requires the USER\'S OWN key — never NavBharatAI\'s account', () => {
+    expect(handler).toContain("renderKey.source === 'user'");
+  });
+
+  it('triggering a deploy is NOT gated — it multiplies nothing, and a server-key user keeps it', () => {
+    // The gate belongs on creation alone. Restricting the trigger too would remove a working path
+    // from users who already have a service, which no cost argument supports.
+    const triggerAt = handler.indexOf('deployBackendToRender({');
+    const gateAt = handler.indexOf("renderKey.source === 'user'");
+    expect(triggerAt).toBeGreaterThan(-1);
+    expect(gateAt).toBeGreaterThan(triggerAt);   // the gate is downstream of the trigger, not around it
   });
 
   it('the start command comes from the app\'s own package.json', () => {

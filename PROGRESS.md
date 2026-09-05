@@ -44726,3 +44726,41 @@ real blocker named in its place. Both completion branches are covered; fixing on
 other lying.
 
 Gate: both `tsc` clean; FULL suite **1451 files / 19255 tests green**. Verified to bite.
+
+## 2026-09-04 — the last manual step: NavBharatAI now creates the backend service itself
+
+After the "Put this app in my GitHub" action landed, one wall remained. `deployBackendToRender` MATCHES
+an existing Render service and, finding none, returned an honest instruction: *"One-time step: in
+Render → New → Blueprint, pick your repo."* True — and still a hand-off. The user leaves NavBharatAI,
+works in someone else's dashboard, and comes back. **That was the only manual step left between an app
+and a live site**, and it was ours, not Render's: their API can create the service.
+
+New pure `renderCreateService.ts` (19 tests) + a branch in `deploy-backend`.
+
+**🔒 THE START COMMAND IS READ, NEVER INVENTED.** `deriveServiceCommands` returns **null** when the
+project has no `start` script, and null STOPS the creation. A guessed start command produces a service
+that builds, crashes, and bills the user for a dead site our own UI would report as deployed — worse
+than not creating one. A `build` script is optional (plenty of Node servers need none, and demanding
+one would refuse perfectly deployable apps); `start` is not, because it IS the service.
+
+**Defaults chosen for someone else's account:** `plan: free` (a default that cannot surprise them with
+a bill) and `autoDeploy: yes` (what makes every later NavBharatAI change reach their site without
+another button).
+
+**🔒 It fires ONLY on `no-service`, and only with a repo.** Creating a service in answer to a bad key
+or an API error would be guessing with the user's account and would bury the message that actually
+explains the failure. A creation Render REFUSES leaves an honest failure — never a silent success.
+
+**A refusal a retry cannot fix becomes the step that fixes it.** The likeliest one is GitHub access:
+Render can only build a repo its GitHub app can read, and the raw 403 means nothing to a user. That
+case now names the one-time authorisation, with their repository in the sentence. 401 → the key. 402 →
+the account's free-service limit. Anything else says plainly that nothing was created.
+
+**A 2xx we cannot parse is NOT a success** — claiming one would leave the caller pointing a domain at a
+service whose address we never learned.
+
+**The path is now:** *Put this app in my GitHub* → *Deploy backend* → the service is created, deployed,
+and the connected domain points itself at it.
+
+Gate: both `tsc` clean; FULL suite **1452 files / 19274 tests green**. Verified to bite (inventing a
+start command; creating on any failure rather than only `no-service`).

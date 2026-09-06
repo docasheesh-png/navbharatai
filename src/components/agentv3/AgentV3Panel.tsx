@@ -5464,7 +5464,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                that tracks the visible height; the `vh` value stays as the fallback for engines without
                it, exactly as App.tsx does for the shell. */
             className="fixed inset-x-0 z-[145] lg:hidden max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-t-2xl border-t border-zinc-700 bg-zinc-900 shadow-2xl pb-2"
-            style={{ bottom: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))' }}
+            /* Clears the app's tab bar by reading the SHARED height, never a hand-typed copy of it —
+               this line used to spell out `calc(3.5rem + env(safe-area-inset-bottom, 0px))`, which is
+               the fourth place that number had been written out and the reason lib/mobileNav.ts
+               exists. `var(--nb-bottom-nav)` is better than the constant here because it also
+               collapses to 0 on any screen where the bar is not rendered. */
+            style={{ bottom: 'var(--nb-bottom-nav, 0px)' }}
           >
             <div className="sticky top-0 z-10 bg-zinc-900 flex items-center justify-between px-4 pt-3 pb-2 border-b border-zinc-800">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">

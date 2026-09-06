@@ -654,6 +654,44 @@ the code (it is actually read somewhere) on 2026-07-11.
   the old "privacy-friendly analytics" wording would have been consent on a false description. The
   white-label law forbids naming the AI PROVIDERS behind a build; it does not licence hiding who
   receives a user's data.
+- **Google Play in-app purchases — the Android token top-up rail (built 2026-09-06, NOT live yet):**
+  `STORE_BILLING` (the master switch — **unset today, and unset means today's behaviour exactly**),
+  `GOOGLE_PLAY_SA_JSON` (the WHOLE service-account JSON as one string — a Google Cloud service
+  account with the Play Developer API enabled and granted access in Play Console → Setup → API
+  access), `GOOGLE_PLAY_PACKAGE_NAME` (= `com.navbharat.ai`). Optional: `STORE_FEE_PCT` (default 15
+  — Google's commission on the first $1M/yr; retune it the day the first real payout report shows
+  the true rate, GST included) and `STORE_PACKS` (JSON override of the catalogue).
+  **WHY THIS EXISTS:** Google Play policy requires digital goods consumed inside a Play-distributed
+  app to be sold through Play's own billing. NavBharatAI's wallet top-up is exactly that, and the
+  Android app currently sells it through the Cashfree web rail — a real, standing policy exposure
+  that this rail closes.
+  🔒 **THE FLAG IS THE MIGRATION, AND IT FAILS SAFE BY CONSTRUCTION.** With `STORE_BILLING` unset,
+  `purchaseRail()` returns `web-gateway` on every device and the app is byte-identical to today.
+  Turning it on switches ONLY the native Android shell to Play packs — and only when the server also
+  confirms Google is configured AND the installed build carries the native plugin. A user on an
+  older `.aab`, or a device with no Play Store, silently keeps the working web rail rather than
+  losing the ability to top up. Test-locked in `tests/storePurchase.test.ts`.
+  ⚠️ **BEFORE FLIPPING IT ON, four things must be true or a user will hit a dead button:**
+  (1) the four products exist and are **ACTIVE** in Play Console → Monetise → In-app products with
+  the EXACT ids `nbai.tokens.99` / `.249` / `.499` / `.999` and prices **₹119 / ₹299 / ₹599 /
+  ₹1199** (they must match `DEFAULT_STORE_PACKS` in `storeBilling.ts` exactly — Google is the
+  authority on price, our catalogue on credit); (2) both env keys above are set in Cloud Run;
+  (3) a build carrying `PlayBillingPlugin` is LIVE on Play (the plugin shipped in this change, so
+  release 103 and earlier do NOT have it); (4) Play Console → Monetisation setup has a payments
+  profile. The plugin names a missing/inactive product explicitly in its failure message, so the
+  first real tap says which of these is wrong instead of "failed".
+  💰 **WHAT IT COSTS THE USER, AND WHY THAT IS SHOWN.** A pack is priced above the credit it gives so
+  our net after Google's cut is unchanged (₹119 → ₹99 of credit). The admin's instruction was
+  "google ka charge add kar ke clear dikhao", so each pack card shows the split — `₹99 + ₹20 fee`
+  beside the ₹119 total. It is labelled **"fee"/"Play Store fee", never "Google's fee"**: Google's
+  actual commission on ₹119 is ₹17.85, and the rest is rounding to a price point Play's tier table
+  carries — printing "Google's fee: ₹20" would be a number no payout report will ever match, which
+  the billing law above forbids even when it flatters us. The internal split stays admin-only; the
+  server records `storeFeePct` and `storeNetInr` on every store transaction for reconciliation.
+  ⚠️ **ANTI-STEERING — do NOT add "cheaper on the web" copy to the app.** Google's Payments policy
+  restricts steering users to an external purchase path from inside the app, and this account has
+  already taken one policy strike (the medical-features rejection). The pack card explains the fee
+  factually and stops there, deliberately.
 - **`FACEBOOK_APP_ID` + `FACEBOOK_CLIENT_TOKEN` — GitHub REPO SECRETS, *not* Cloud Run keys.** Recorded
   here anyway so nobody searches Cloud Run for them and concludes they are missing. They are read at
   **build** time by `android/app/build.gradle` (via `.github/workflows/android-aab.yml`) and are what

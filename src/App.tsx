@@ -279,6 +279,7 @@ export default function App() {
     referralHistory, setReferralHistory,
     fetchWallet,
     createBillingOrder,
+    storeRail, storeConfig, buyStorePack, buyingProductId, storePurchaseNotice,
     createVishwakarmaOrder,
     verifyBillingPayment,
     redeemPromoCoupon,
@@ -3613,6 +3614,11 @@ export default function App() {
               copiedReferral={copiedReferral}
               buyAmountInput={buyAmountInput}
               isRecharging={isRecharging}
+              storeRail={storeRail}
+              storeConfig={storeConfig}
+              buyingProductId={buyingProductId}
+              storePurchaseNotice={storePurchaseNotice}
+              onBuyStorePack={(id) => { void buyStorePack(id); }}
               tempReminderLimit={tempReminderLimit}
               tempBudgetLimit={tempBudgetLimit}
               limitError={limitError}

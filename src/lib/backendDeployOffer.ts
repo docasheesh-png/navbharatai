@@ -165,3 +165,37 @@ export function backendDeployOffer(input: {
       : '',
   };
 }
+
+/**
+ * SHOULD PRESSING "PUBLISH" DEPLOY THE BACKEND BY ITSELF? (admin 2026-09-05)
+ *
+ * 🔴 THE STEP THIS REMOVES. To a user, "Publish" means *make my app live*. For an app with a server
+ * half that means BOTH halves — and what happened instead was: press Publish → refused → find the
+ * "Deploy backend" button → press that. The refusal was honest and the button worked; the second
+ * press was still ours to ask for, not theirs to make.
+ *
+ * 🔒 IT FIRES ONLY ON A FRESH REFUSAL, WHICH IS WHAT KEEPS IT FROM BEING A SURPRISE. The publish
+ * attempt CLEARS the refusal code before it runs, so the transition from anything else INTO
+ * `backend-deploy-available` can only mean "this person just pressed Publish and this is why it could
+ * not proceed". Reacting to the code merely BEING set would deploy on reopening a panel — an action
+ * nobody asked for, in someone's own hosting account.
+ *
+ * 🔒 AND ONLY WHEN IT COULD ALREADY HAVE BEEN PRESSED. `canDeploy` means the repository and the key
+ * are both already there — nothing new is being consented to, and no question is being skipped. With
+ * either missing the screen still shows the prerequisites and their buttons, exactly as before.
+ *
+ * PURE, so the rule is tested rather than inferred from a component. */
+export function shouldAutoDeployBackend(input: {
+  /** The refusal code the publish attempt just returned. */
+  code: string;
+  /** The code before it — a fresh refusal is a TRANSITION, never a standing value. */
+  previousCode: string;
+  /** Is the deploy button one the user could have pressed right now? */
+  canDeploy: boolean;
+  /** A deploy already running is never restarted. */
+  busy: boolean;
+}): boolean {
+  if (input.code !== 'backend-deploy-available') return false;
+  if (input.previousCode === input.code) return false;
+  return input.canDeploy && !input.busy;
+}

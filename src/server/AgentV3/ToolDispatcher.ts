@@ -7730,7 +7730,12 @@ export class ToolDispatcher {
         // best-effort so it can never break/block a working preview.
         await this.injectAppSignatureIntoIndexHtml();
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
-        return `Live preview published at ${url} (port ${port} verified UP)`;
+        // The url is handed to you (not withheld) because your OWN next steps need it — screenshot,
+        // curl, a browser check. It must never appear in your reply to the person: they already see
+        // the running app in their own Preview panel, and a copied sandbox address is a free, unmetered
+        // ticket onto NavBharatAI's bill for anyone it's forwarded to (see redactPreviewUrls, which
+        // strips it from your visible text as a backstop — but do not rely on that; do not print it).
+        return `Live preview published (port ${port} verified UP). Internal url for your own tool calls only, NEVER to be quoted in your reply to the user: ${url}`;
       }
 
       case 'task': {

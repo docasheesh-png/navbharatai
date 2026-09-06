@@ -44934,3 +44934,63 @@ padding fails the geometry test, and removing one opt-out fails the z-index pair
 **Two pre-existing tests that pinned the OLD geometry were REWRITTEN, never deleted**, each keeping
 the property it protected (`HistoryPopup` still proves it never grows into a full page; the
 celebration test still proves the card scrolls and is capped) with the reason recorded in place.
+
+---
+
+## 2026-09-06 — Apple sign-in, reported "fir" (again): the reason was being read, but never USED
+
+**The report.** Admin screenshot, Safari on navbharatai.com: the Apple sign-in toast, filling the
+entire phone screen, ending in `error=invalid_client`.
+
+**First, the honest headline, unchanged from 2026-08-22: THIS SESSION CANNOT FIX APPLE LOGIN.** The
+four values live in Firebase Console → Authentication → Sign-in method → Apple, which no session can
+read or write. That remains an OPEN root cause (rule 6). What follows is the half that IS in our
+hands, and it is not nothing — it is the reason a second round of "check all four" was never going to
+end this either.
+
+**What the screenshot proves, and what it rules out.** Reaching Apple's `/auth/token` at all means
+every earlier leg works: Apple accepted the login, the return landed on our handler, a code came back.
+`invalid_client` is Apple's documented answer for *the client authentication failed* — the Services ID
+plus the client-secret JWT signed from Team ID / Key ID / .p8. A wrong Return URL or a spent code
+produces `invalid_grant` instead, a different portal entirely. So the Return URL, the
+domain-association file and the browser are all RULED OUT by this one token.
+
+**The defect in our code.** Since #2579 the detail has carried Apple's own reason. **Nothing read it**
+— verified by grep: `invalid_client` appeared nowhere in `src/` outside tests. The message therefore
+gave the same "check ALL of: Services ID, Team ID, Key ID, .p8" for every cause at that step, which
+is (a) not narrowed by evidence we already had, and (b) demonstrably insufficient, since that exact
+advice has now been followed and reported as still-failing twice.
+
+**Fixed three things, all inside `socialSignInPolicy.ts`:**
+
+1. **The reason now narrows the advice.** `appleTokenExchangeFault()` classifies Apple's own error:
+   `invalid_client` → the credential quartet, and say what that rules out; `invalid_grant` → the
+   Apple Developer portal's Return URLs, explicitly NOT the four values; anything unrecognised → the
+   original unnarrowed advice, because guessing a portal is the failure being prevented. It only
+   claims to know when the detail genuinely names `appleid.apple.com`.
+
+2. **The two traps that re-reading four values cannot reveal**, now named — this is the actual new
+   information after two failed rounds: a **.p8 downloads only ONCE**, so a re-created key leaves the
+   old file no longer matching its Key ID while all four fields still *look* right; and the key and
+   the Services ID must be in the **same Apple team**, with the Services ID grouped under the key's
+   primary App ID.
+
+3. **The toast is readable again.** The raw reason arrived with ~700 characters of
+   `httpMetadata{status, cachePolicy, staleWhileRevalidate, crossOriginEmbedderPolicy, varyHeaderNames,
+   cookieList…}` — byte-identical on every failure, carrying no information, and it had pushed the one
+   line that matters out of a message that already overflowed the screen. `condenseProviderDetail()`
+   TRUNCATES at that boundary and never rewords, so what is shown is still Apple's own text and cannot
+   become a paraphrase that says something the server did not. Net message length **1230 → 984 chars**,
+   with the signal now visible.
+
+**Also corrected: who this message is written for.** It is rendered by a `addToast` for a **signed-out**
+visitor, so it cannot be gated on admin identity — every user who tries Apple sign-in was reading a
+Java-shaped debug dump and a Firebase Console instruction they cannot act on. The user's half now
+leads, is short, and says the two things they need: it is our fault, not theirs, and Google or email
+works right now. The admin's half follows, because a phone has no console and this toast is
+deliberately the only readable surface for that reason (2026-08-21) — undoing that would reverse a
+decision made from a real debugging session.
+
+**Gate:** `tsc --noEmit` clean; FULL suite **1456 files / 19391 tests green**. Verified to bite
+(removing the `invalid_client` branch fails two tests by name). Truncation is locked as a **prefix**
+of the original, so it can never gain words the server did not send.

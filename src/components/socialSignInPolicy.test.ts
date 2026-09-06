@@ -11,6 +11,8 @@ import {
   webSignInStrategy,
   socialRedirectFailureMessage,
   authErrorDetail,
+  appleTokenExchangeFault,
+  condenseProviderDetail,
   type MinimalAuthLike,
 } from './socialSignInPolicy';
 
@@ -334,5 +336,101 @@ describe('socialRedirectFailureMessage', () => {
       expect(m.length).toBeGreaterThan(20);
       expect(m).not.toMatch(/GLM|Kimi|Claude|Sonnet|Opus|Gemini|Grok|Anthropic|Moonshot/i);
     }
+  });
+});
+
+/**
+ * 🔒 THE SAME FAILURE, REPORTED TWICE (admin screenshots 2026-08-22 and 2026-09-06, "fir ruk gaya").
+ *
+ * Both times the advice was "check all four values", and both times that was not enough to end it.
+ * The detail had carried Apple's own reason since #2579 and nothing read it — so the message could not
+ * tell `invalid_client` (our credential) from `invalid_grant` (the Return URL), which are two
+ * different portals. These lock the narrowing, and the truncation that made the message readable.
+ */
+describe('Apple token-exchange: the reason narrows the advice', () => {
+  const APPLE_INVALID_CLIENT =
+    'Error getting access token from https://appleid.apple.com, OAuth2 redirect uri is: '
+    + 'https://navbharatai.com/__/auth/handler, response: OAuth2TokenResponse{params: '
+    + 'error=invalid_client, httpMetadata: HttpMetadata{status=400, cachePolicy=NO_CACHE, '
+    + 'cacheDurationJava=null, cacheImmutable=false, staleWhileRevalidate=null, filename=null, '
+    + 'lastModified=null, retryAfter=null, crossOriginEmbedderPolicy=null, varyHeaderNames=[], '
+    + 'cookieList=[]}}';
+
+  it('reads invalid_client as the credential, and says what that rules OUT', () => {
+    const m = socialRedirectFailureMessage('auth/invalid-credential', APPLE_INVALID_CLIENT)!;
+    expect(m).toContain('invalid_client');
+    expect(m).toMatch(/RULES OUT/);
+    // The two traps that re-reading the four values cannot reveal — the whole reason a second
+    // "check all four" round was not going to end this either.
+    expect(m).toMatch(/downloads only ONCE/);
+    expect(m).toMatch(/SAME Apple team/);
+  });
+
+  it('sends invalid_grant to the OTHER portal, never to the four values', () => {
+    const grant = 'Error getting access token from https://appleid.apple.com, response: '
+      + 'OAuth2TokenResponse{params: error=invalid_grant, httpMetadata: HttpMetadata{status=400}}';
+    const m = socialRedirectFailureMessage('auth/invalid-credential', grant)!;
+    expect(m).toContain('invalid_grant');
+    expect(m).toContain('Apple Developer portal');
+    expect(m).not.toMatch(/check ALL of/);
+  });
+
+  it('keeps the original unnarrowed advice when the reason is not Apple\'s', () => {
+    // Never guess a portal from a reason we do not recognise.
+    const m = socialRedirectFailureMessage('auth/invalid-credential', 'something we have not met')!;
+    expect(m).toContain('check ALL of');
+  });
+
+  it('always leads with the SIGNED-OUT user, who cannot be identified as the admin', () => {
+    for (const d of [APPLE_INVALID_CLIENT, 'unrecognised', null]) {
+      const m = socialRedirectFailureMessage('auth/invalid-credential', d)!;
+      expect(m).toMatch(/not yours/);
+      expect(m).toMatch(/Google or email/);
+    }
+  });
+});
+
+describe('the raw provider reason is truncated, never reworded', () => {
+  it('drops httpMetadata noise and keeps the one line that matters', () => {
+    const out = condenseProviderDetail(
+      'response: OAuth2TokenResponse{params: error=invalid_client, httpMetadata: HttpMetadata{'
+      + 'status=400, cachePolicy=NO_CACHE, cookieList=[]}}',
+    )!;
+    expect(out).toContain('error=invalid_client');
+    expect(out).not.toContain('cachePolicy');
+    expect(out).not.toContain('cookieList');
+  });
+
+  it('is a prefix of the original — so it cannot say anything the server did not', () => {
+    const raw = 'a real reason here, httpMetadata: HttpMetadata{status=400}';
+    expect(raw.startsWith(condenseProviderDetail(raw)!)).toBe(true);
+  });
+
+  it('leaves a reason with no noise completely alone', () => {
+    expect(condenseProviderDetail('plain reason, nothing to trim')).toBe('plain reason, nothing to trim');
+  });
+
+  it('keeps the original rather than returning a useless husk', () => {
+    // If the noise were the whole string, truncating would report nothing at all.
+    const raw = 'x, httpMetadata: HttpMetadata{status=400}';
+    expect(condenseProviderDetail(raw)).toBe(raw);
+  });
+
+  it('returns null for no detail, so nothing is appended', () => {
+    expect(condenseProviderDetail('')).toBeNull();
+    expect(condenseProviderDetail(null)).toBeNull();
+  });
+});
+
+describe('appleTokenExchangeFault only claims to know when Apple is talking', () => {
+  it('classifies Apple reasons', () => {
+    expect(appleTokenExchangeFault('…appleid.apple.com… error=invalid_client')).toBe('client-secret');
+    expect(appleTokenExchangeFault('…appleid.apple.com… error=invalid_grant')).toBe('authorization-code');
+    expect(appleTokenExchangeFault('…appleid.apple.com… error=something_new')).toBe('unknown');
+  });
+
+  it('will not read invalid_client out of a non-Apple reason', () => {
+    expect(appleTokenExchangeFault('some google thing invalid_client')).toBe('unknown');
+    expect(appleTokenExchangeFault(null)).toBe('unknown');
   });
 });

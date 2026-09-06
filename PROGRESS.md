@@ -44864,3 +44864,73 @@ Gate on every push: both `tsc` clean; FULL suite **1455 files / 19363 tests gree
 (removing the probe's precedence over the host status makes the mismatch test fail). Five test anchors
 that pinned pre-change behaviour were REWRITTEN, never deleted, each keeping the property it protected
 with the reason recorded in place.
+
+---
+
+## 2026-09-06 — THE APP'S OWN TAB BAR WAS COVERING THE BOTTOM OF EVERY DIALOG (admin screenshot)
+
+**The report.** Building an app with v5, then Publish → connect a domain: the sheet "niche tak scroll
+nahi hota hai, vertical scroll ke bad bhi niche page crop ho raha hai, jisse button chupp jate hain."
+Plus the standing instruction: find every other place with the same problem and fix them all.
+
+**Root cause — the THIRD subtraction nobody had made.** The global mobile tab bar is `fixed bottom-0`
+at **z-150**. Every modal in the app declares a LOWER z-index, so the bar paints **over** them. The
+shared sheet geometry (`nb-sheet-overlay`, added 2026-08-23 for the *browser toolbar* version of this
+bug) subtracted the two things CSS can see for itself — the browser toolbar via `dvh`, the device
+home-indicator via `env()` — and stopped there. It never subtracted **our own bar**.
+
+Measured on the reported screen: overlay height `100dvh`, bottom padding `max(1rem, 0) = 16px`, card
+`max-height: 100%` → the card's bottom edge lands at `100dvh − 16px`, while the bar's top edge is at
+`100dvh − 56px`. **40px of the card sits under the bar on web/Android, ~56px on iOS.**
+
+**Why "just scroll down" could not save the user, which is the part that made it a functional bug
+rather than a cosmetic one:** the scroll container ends under the bar too. Scrolling to the very
+bottom of the sheet leaves those rows still covered, with no scroll left to give. The buttons were
+*unreachable*, not merely off-screen — exactly what the admin reported.
+
+**Why the stylesheet could not fix itself.** Whether the bar exists is a RUNTIME fact
+(`showsGlobalMobileNav` — device mode, focus mode, Code Studio, BotBuilder), not a media query. CSS
+cannot detect it, which is why the original author reached for `dvh`/`env()` and stopped. React now
+publishes it: `publishMobileNavHeight()` writes `--nb-bottom-nav` onto `<html>` from the **same
+boolean that renders the bar**, so the two cannot disagree. Written to `<html>`, not the app root,
+because dialogs that portal to `document.body` would not inherit it there.
+
+**The 50/50 half — why the problem was POSSIBLE at all.** This is the FOURTH drift of this one
+number: focus mode (a strip reserved for an absent bar), Code Studio (same), the iPhone home indicator
+(`pb-14` reserving the 3.5rem but not the inset), and now modal sheets. Each was fixed by hand at the
+site that broke. The class fix is that all four consumers now read ONE source — the boolean, the
+height constant, and the CSS variable derived from both — and the pairing is **machine-checked**
+rather than remembered:
+
+- `tests/sheetOverlayGeometry.test.ts` walks every `nb-sheet-overlay` in `src/`, parses the z-index
+  out of the same className, and asserts the invariant in both directions: **z < 150 ⟹ reserves**,
+  **z ≥ 150 ⟹ opts out** (`nb-sheet-over-nav`). A new dialog cannot get this wrong silently.
+- The same file forbids the hand-typed `calc(3.5rem + env(safe-area-inset-bottom, 0px))` anywhere in
+  `src/` — a rule `tests/ideMobile.test.ts` already enforced for `App.tsx` only. **It immediately
+  found a copy I had missed** (AgentV3Panel's mobile More sheet), which is the sibling hunt working.
+- **Reserving is the DEFAULT, opting out is explicit**, deliberately: a dialog that reserves when it
+  needn't loses 56px — visible and harmless; one that fails to reserve hides its own buttons — the
+  bug itself. The safe state is the one you get by doing nothing.
+
+**The sweep (every `fixed` anchored overlay in `src/`, audited by z-index):**
+- **11 dialogs on the shared geometry** fixed by the one CSS change — HostingChooser (the reported
+  one), AdminDashboard ×3, AgentV3Panel ×3, NavAppStore ×2, BotBuilder ×2.
+- **2 dialogs that paint ABOVE the bar** got the opt-out so they do not hold a dead strip:
+  AppModals' Vishwakarma modal (z-9999) and PublishCelebration (z-300, portaled).
+- **2 hand-rolled bottom sheets** never on the shared geometry, migrated: `HistoryPopup` (z-130) and
+  `DoseCalculator` (z-50). Their design heights (80% / 92%) are preserved but now pass through
+  `nb-sheet-partial`, which clamps them with `min(cap, 100%)` — unclamped, 92dvh exceeds the room
+  left on any phone under ~700px and, because these are bottom-anchored, the overflow was cut off
+  the **top**.
+- **1 hand-typed nav height** centralised (AgentV3Panel's More sheet, found by the new test).
+- Verified NOT at risk, so deliberately untouched: click-catchers and anchored popovers (they are not
+  bottom-reaching), every dialog at z ≥ 150 (the bar does not cover them), and all IDE dialogs
+  (Code Studio hides the bar, so the variable is `0px` there and the change is a no-op by
+  construction).
+
+**Gate:** `tsc --noEmit` clean; production build clean and the four CSS rules verified present in the
+emitted bundle; FULL suite **1456 files / 19380 tests green**. Verified to bite twice — reverting the
+padding fails the geometry test, and removing one opt-out fails the z-index pairing test by name.
+**Two pre-existing tests that pinned the OLD geometry were REWRITTEN, never deleted**, each keeping
+the property it protected (`HistoryPopup` still proves it never grows into a full page; the
+celebration test still proves the card scrolls and is capped) with the reason recorded in place.

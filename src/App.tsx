@@ -36,7 +36,7 @@ import { medicalViewBlocked, medicalFeaturesHidden } from './lib/playCompliance'
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
-import { MOBILE_NAV_TOTAL_HEIGHT } from './lib/mobileNav';
+import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
 import { isModeSurface, FREE_MODE_ID, NEW_FREE_MODE_ID } from './components/chat/modePicker';
 import { ReportSheet } from './components/ReportSheet';
@@ -2775,6 +2775,21 @@ export default function App() {
    */
   const showsGlobalMobileNav =
     effectiveDeviceMode === 'mobile' && !focusMode && activeView !== 'botbuilder' && activeView !== 'studio';
+
+  /**
+   * …and publish that same answer to CSS, for the THIRD consumer of it.
+   *
+   * The bar is `fixed bottom-0` at z-150, so it paints over every dialog below that z-index. Two
+   * consumers already read the boolean above — the <nav> itself, and the page padding that keeps the
+   * composer clear of it. Modal sheets are the third: `nb-sheet-overlay` (index.css) has to know how
+   * much of the visible viewport our own chrome is occupying, and a stylesheet cannot work that out,
+   * because it depends on device mode / focus mode / the active view rather than on a media query.
+   *
+   * Written to <html> rather than the root <div> below, because the dialogs that portal to
+   * document.body — the publish celebration, the report sheet — sit outside that div and would not
+   * inherit the variable from it.
+   */
+  useEffect(() => { publishMobileNavHeight(showsGlobalMobileNav); }, [showsGlobalMobileNav]);
 
   return (
     <div

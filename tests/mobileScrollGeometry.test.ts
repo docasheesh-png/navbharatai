@@ -81,7 +81,10 @@ describe('mobile scroll geometry — a scroll container may never be taller than
 
   it('the publish celebration card can scroll and is capped (it had neither)', () => {
     const src = read('src/components/agentv3/PublishCelebration.tsx');
-    expect(src).toContain('nb-sheet-overlay fixed inset-0');
+    // `nb-sheet-over-nav` sits between the two class names now: CELEBRATION_Z (300) is ABOVE the
+    // global tab bar's z-150, so this card covers the bar and must NOT reserve a strip for it — the
+    // opposite of the sheets below the bar. The pairing is enforced in sheetOverlayGeometry.test.ts.
+    expect(src).toContain('nb-sheet-overlay nb-sheet-over-nav fixed inset-0');
     expect(src).toContain('nb-sheet relative w-full max-w-md overflow-y-auto');
   });
 });

@@ -100,6 +100,62 @@ export function authErrorDetail(err: unknown): string | null {
   return detail;
 }
 
+/**
+ * What Apple's OWN OAuth error at the token-exchange step rules in and out.
+ *
+ * 🔒 WHY THIS EXISTS (admin screenshot 2026-09-06, the same failure reported "fir"/again). The
+ * `auth/invalid-credential` sentence below names FOUR values and asks the admin to check all of them.
+ * That was right when the code was all we had — but since #2579 the detail carries Apple's own reason,
+ * and that reason is not one bucket. Apple documents two different outcomes at this one step:
+ *
+ *   • `invalid_client`  → Apple rejected the CLIENT CREDENTIAL (the Services ID + the client-secret
+ *                         JWT signed from Team ID / Key ID / .p8). It cannot be produced by a wrong
+ *                         Return URL or a spent code, so those are RULED OUT.
+ *   • `invalid_grant`   → the authorization code or the redirect_uri is the problem — a completely
+ *                         different portal and a different fix.
+ *
+ * Telling an admin to re-check four values that are already correct is how an evening goes into the
+ * wrong portal, which this file's own history records happening once already. So we read the reason.
+ */
+export type AppleTokenExchangeFault = 'client-secret' | 'authorization-code' | 'unknown';
+
+export function appleTokenExchangeFault(detail: string | null | undefined): AppleTokenExchangeFault {
+  const d = String(detail || '').toLowerCase();
+  // Only claim to know when the detail is genuinely Apple's token endpoint talking. Anything else
+  // keeps the unnarrowed advice rather than guessing at a portal.
+  if (!d.includes('appleid.apple.com')) return 'unknown';
+  if (d.includes('invalid_client')) return 'client-secret';
+  if (d.includes('invalid_grant')) return 'authorization-code';
+  return 'unknown';
+}
+
+/**
+ * Keep the signal in a provider's raw reason; drop the transport bookkeeping.
+ *
+ * 🔒 WHY (same screenshot). The reason arrives as, verbatim:
+ *
+ *     …response: OAuth2TokenResponse{params: error=invalid_client, httpMetadata: HttpMetadata{
+ *     status=400, cachePolicy=NO_CACHE, cacheDurationJava=null, cacheImmutable=false,
+ *     staleWhileRevalidate=null, filename=null, … varyHeaderNames=[], cookieList=[]}}
+ *
+ * Everything from `httpMetadata:` onward is identical on EVERY failure — cache policy, CORS headers,
+ * empty lists — so it carries no information and ate roughly two thirds of a toast that already filled
+ * the whole phone screen, pushing the one line that matters (`error=invalid_client`) out of sight.
+ *
+ * This TRUNCATES, it never rewords: what is shown is still Apple's own text, so the message cannot
+ * become a paraphrase that quietly says something the server did not.
+ */
+export function condenseProviderDetail(detail: string | null | undefined): string | null {
+  const d = String(detail || '').trim();
+  if (!d) return null;
+  const cut = d.search(/,?\s*httpMetadata\s*:/i);
+  if (cut < 0) return d;
+  const kept = d.slice(0, cut).replace(/[\s,{(]+$/, '').trim();
+  // Never return an empty or uselessly short husk — if the noise was the whole string, keep the
+  // original rather than silently reporting nothing.
+  return kept.length >= 12 ? kept : d;
+}
+
 export function socialRedirectFailureMessage(
   code: string | null | undefined,
   /**
@@ -113,15 +169,15 @@ export function socialRedirectFailureMessage(
   const c = String(code || '').trim();
   // Not a failure: no redirect was in flight. Silent, exactly as before.
   if (!c || c === 'auth/no-auth-event') return null;
-  const base = socialRedirectBaseMessage(c);
-  const d = String(detail || '').trim();
+  const base = socialRedirectBaseMessage(c, detail);
+  const d = condenseProviderDetail(detail) ?? '';
   // Not for the default branch: it already prints the code, and the detail there is usually the same
   // words again. Everywhere else the detail is strictly new information.
   if (!d || c === 'auth/network-request-failed') return base;
   return `${base} (Reported reason: ${d})`;
 }
 
-function socialRedirectBaseMessage(c: string): string {
+function socialRedirectBaseMessage(c: string, detail?: string | null): string {
   switch (c) {
     case 'auth/missing-initial-state':
       // The classic proxied/partitioned-storage failure: the browser dropped the state this app saved
@@ -157,10 +213,7 @@ function socialRedirectBaseMessage(c: string): string {
        * "check the client id / key", which is where the previous wording sent people looking in the
        * wrong portal.
        */
-      return 'Apple accepted your sign-in, but NavBharatAI\'s sign-in service could not complete it. '
-        + 'This is the last step — exchanging Apple\'s code — and it needs four values to match. '
-        + `Admin: Firebase Console → Authentication → Sign-in method → Apple, and check ALL of: Services ID (must be exactly ${APPLE_SERVICE_ID}), Apple Team ID, Key ID, and the .p8 private key. `
-        + 'Everything before this step is already correct.';
+      return appleInvalidCredentialMessage(appleTokenExchangeFault(detail));
     case 'auth/network-request-failed':
       return 'Could not reach the sign-in provider. Check your connection and try again.';
     case 'auth/user-disabled':
@@ -173,6 +226,42 @@ function socialRedirectBaseMessage(c: string): string {
       // The code itself travels — this is the line that would have ended the Apple debugging in one round.
       return `Sign-in could not be completed (${c}). Please try again — if it keeps happening, send us this code.`;
   }
+}
+
+/**
+ * The `auth/invalid-credential` sentence, narrowed by what Apple actually said.
+ *
+ * The USER's half comes first and is short, because the person reading it is signed OUT and cannot be
+ * identified as the admin — so everyone gets this, and everyone needs the one thing they can act on:
+ * it is our fault, not theirs, and another sign-in method works right now. The ADMIN's half follows,
+ * because a phone has no console and this toast is deliberately the only place that reason is
+ * readable (2026-08-21) — removing it would undo a decision made from a real debugging session.
+ */
+function appleInvalidCredentialMessage(fault: AppleTokenExchangeFault): string {
+  const user = 'Apple accepted your sign-in, but NavBharatAI could not finish it — this is a setup problem on our side, not yours. '
+    + 'Please use Google or email sign-in for now. ';
+
+  if (fault === 'client-secret') {
+    // The narrowed case, and the one the admin is actually looking at.
+    return user
+      + `Admin: Apple rejected our credential itself (invalid_client), which RULES OUT the Return URL, the domain-association file and the browser — only the Apple credential quartet can produce this. In Firebase Console → Authentication → Sign-in method → Apple, check Services ID (exactly ${APPLE_SERVICE_ID}), Team ID, Key ID and the .p8. `
+      // The two traps that re-reading the four values cannot reveal, which is why "check all four" has
+      // now been reported as not-fixed twice.
+      + 'If all four LOOK right, check the two things looking cannot show: a .p8 downloads only ONCE, so a re-created key leaves the old file no longer matching its Key ID; and the key and the Services ID must live in the SAME Apple team, with the Services ID grouped under the key\'s primary App ID.';
+  }
+
+  if (fault === 'authorization-code') {
+    // A genuinely different portal — saying "check the four values" here would send the admin to the
+    // wrong one, which is the exact failure this narrowing exists to prevent.
+    return user
+      + `Admin: Apple rejected the code/return URL, not our key (invalid_grant). Check the Return URLs on Service ID ${APPLE_SERVICE_ID} in the Apple Developer portal — the credential quartet in Firebase is not the cause here.`;
+  }
+
+  // Unknown reason: the original, unnarrowed advice stands. Never guess a portal.
+  return user
+    + 'This is the last step — exchanging Apple\'s code — and it needs four values to match. '
+    + `Admin: Firebase Console → Authentication → Sign-in method → Apple, and check ALL of: Services ID (must be exactly ${APPLE_SERVICE_ID}), Apple Team ID, Key ID, and the .p8 private key. `
+    + 'Everything before this step is already correct.';
 }
 
 /** The minimal auth surface waitForSignedInUser needs — injected so the helper is unit-testable. */

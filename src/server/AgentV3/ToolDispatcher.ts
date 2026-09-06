@@ -148,6 +148,7 @@ import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
+import { addDependency, removeDependency as removeOneDependency, listDependencies } from './packageEdit';
 import { planE2eScaffold, e2eScaffoldSummary } from './e2eScaffold';
 import { pickDevScript, parsePackageJson } from './devScript';
 import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
@@ -4578,6 +4579,37 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('helpdesk starter');
         const hdDeps = hdcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a Helpdesk / ticketing backend:\n${hdWritten.join('\n')}\nAdd the dependencies: ${hdDeps}\n\n${hdcfg.instructions}`;
+      }
+
+      case 'manage_dependency': {
+        // Add / remove / list a package in the project's package.json (ROADMAP §8C / minor 30). All the
+        // logic that can go wrong — a bad name reaching the manifest, malformed package.json, a duplicate
+        // across sections — lives in the pure, unit-tested packageEdit.ts. This only edits the manifest;
+        // the existing build/preview `npm install` picks the change up, so nothing is left half-installed.
+        const mdAction = typeof input.action === 'string' ? input.action : 'add';
+        const mdName = typeof input.name === 'string' ? input.name : '';
+        const mdVersion = typeof input.version === 'string' ? input.version : '';
+        let mdPkg: string;
+        try { mdPkg = await this.actuator.readFile(this.workspaceId, 'package.json'); }
+        catch { return 'manage_dependency: this project has no package.json yet — build the app first.'; }
+        if (mdAction === 'list') {
+          const deps = listDependencies(mdPkg);
+          return deps.length
+            ? `Dependencies (${deps.length}):\n${deps.map((d) => `  ${d.name}@${d.version} (${d.section})`).join('\n')}`
+            : 'No dependencies are declared in package.json yet.';
+        }
+        if (mdAction !== 'add' && mdAction !== 'remove') {
+          return 'manage_dependency: action must be "add", "remove" or "list".';
+        }
+        const mdResult = mdAction === 'remove' ? removeOneDependency(mdPkg, mdName) : addDependency(mdPkg, mdName, mdVersion);
+        if (!mdResult.ok) return `manage_dependency: ${mdResult.message}`;
+        if (mdResult.changed) {
+          await this.actuator.writeFile(this.workspaceId, 'package.json', mdResult.text);
+          this.state?.recordFileChange({ path: 'package.json', kind: 'modify' }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile('package.json', mdResult.text);
+          this.scheduleCheckpoint(`${mdAction} dependency ${mdName}`);
+        }
+        return mdResult.note;
       }
 
       case 'generate_events': {

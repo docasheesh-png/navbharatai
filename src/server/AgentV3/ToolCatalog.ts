@@ -1365,6 +1365,25 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'manage_dependency',
+      description:
+        "Add, remove, or list an npm package in the project's package.json — use it when the user asks to " +
+        'add / install / remove / uninstall a library (e.g. "add axios", "install stripe", "remove lodash") ' +
+        'or to see the current dependencies. The package name is validated against npm\'s naming rules and ' +
+        'rejected if invalid; an add lands in "dependencies" (or updates it in place if it already sits in ' +
+        'dev/peer/optional — never a duplicate across sections); a remove clears it from every section. It ' +
+        'edits the manifest only — the change is installed by the next build/preview, so it is never left ' +
+        'half-installed. Prefer this over hand-editing package.json.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['add', 'remove', 'list'], description: 'What to do. Defaults to "add".' },
+          name: { type: 'string', description: 'The package name (required for add/remove), e.g. "axios" or "@scope/pkg".' },
+          version: { type: 'string', description: 'Optional version/range for add, e.g. "^1.6.0". Defaults to "latest".' },
+        },
+      },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -3263,6 +3282,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_recruitment',
   'generate_invoicing',
   'generate_helpdesk',
+  'manage_dependency',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',

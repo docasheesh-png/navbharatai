@@ -44864,3 +44864,41 @@ Gate on every push: both `tsc` clean; FULL suite **1455 files / 19363 tests gree
 (removing the probe's precedence over the host status makes the mismatch test fail). Five test anchors
 that pinned pre-change behaviour were REWRITTEN, never deleted, each keeping the property it protected
 with the reason recorded in place.
+
+## 2026-09-05 — Publish now deploys the server half by itself (admin: "bana do!")
+
+The admin asked whether the backend hosts itself or needs a click. Honest answer: three things the
+first time (save your own key once, "Put this app in my GitHub", "Deploy backend"), then ZERO clicks
+forever after, because the service is created with `autoDeploy: yes`. Full automation is deliberately
+impossible: the service is created in the USER'S OWN hosting account on their own bill, and making one
+without asking would be the same overreach the 2026-09-05 cost guard exists to prevent.
+
+But ONE of those three presses was ours to ask for, not theirs to make. To a user "Publish" means
+*make my app live*; for an app with a server half that means BOTH halves. What happened instead was:
+press Publish → honest refusal → find the "Deploy backend" button → press that. The refusal was true
+and the button worked, and the second press was still friction we invented.
+
+**Now:** pressing Publish on such an app starts the server deploy itself, says on screen that it is
+doing so and why, and runs the SAME path as the button — so the come-up verification added earlier
+today still applies.
+
+**The two guards, and why each exists:**
+- It fires only on a TRANSITION into `backend-deploy-available`. The publish attempt clears the
+  refusal code before it runs, so that transition can only mean "someone just pressed Publish and this
+  is why it could not proceed". Reacting to the code merely BEING set would deploy on reopening the
+  panel — an action nobody asked for, in somebody's own hosting account.
+- It fires only when `canDeploy` is already true — the repository and the key are both present, so
+  nothing new is consented to and no question is skipped. With either missing the screen shows the
+  prerequisites and their own buttons, exactly as before.
+
+The rule is a PURE function (`shouldAutoDeployBackend`) rather than a condition buried in a component,
+so it is tested directly; verified to bite by removing the transition guard and watching the standing
+-code test fail. `deployBackend` remains the single implementation — a second one would have drifted
+from the verification built the same day, and a test pins that there is only one.
+
+Deliberately NOT extended to the domain-connect screen in this change: that screen's job is to get the
+domain connected, and deploying is what the Publish surface does — the domain then points itself
+during that deploy. Recorded as a choice, not an oversight.
+
+Gate: both `tsc` clean; FULL suite **1455 files / 19373 tests green**. AppKnowledgeBase updated in the
+same change (CLAUDE.md's rule), since this changes what a user has to do.

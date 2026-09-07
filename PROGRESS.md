@@ -44865,6 +44865,125 @@ Gate on every push: both `tsc` clean; FULL suite **1455 files / 19363 tests gree
 that pinned pre-change behaviour were REWRITTEN, never deleted, each keeping the property it protected
 with the reason recorded in place.
 
+## 2026-09-05 — Publish now deploys the server half by itself (admin: "bana do!")
+
+The admin asked whether the backend hosts itself or needs a click. Honest answer: three things the
+first time (save your own key once, "Put this app in my GitHub", "Deploy backend"), then ZERO clicks
+forever after, because the service is created with `autoDeploy: yes`. Full automation is deliberately
+impossible: the service is created in the USER'S OWN hosting account on their own bill, and making one
+without asking would be the same overreach the 2026-09-05 cost guard exists to prevent.
+
+But ONE of those three presses was ours to ask for, not theirs to make. To a user "Publish" means
+*make my app live*; for an app with a server half that means BOTH halves. What happened instead was:
+press Publish → honest refusal → find the "Deploy backend" button → press that. The refusal was true
+and the button worked, and the second press was still friction we invented.
+
+**Now:** pressing Publish on such an app starts the server deploy itself, says on screen that it is
+doing so and why, and runs the SAME path as the button — so the come-up verification added earlier
+today still applies.
+
+**The two guards, and why each exists:**
+- It fires only on a TRANSITION into `backend-deploy-available`. The publish attempt clears the
+  refusal code before it runs, so that transition can only mean "someone just pressed Publish and this
+  is why it could not proceed". Reacting to the code merely BEING set would deploy on reopening the
+  panel — an action nobody asked for, in somebody's own hosting account.
+- It fires only when `canDeploy` is already true — the repository and the key are both present, so
+  nothing new is consented to and no question is skipped. With either missing the screen shows the
+  prerequisites and their own buttons, exactly as before.
+
+The rule is a PURE function (`shouldAutoDeployBackend`) rather than a condition buried in a component,
+so it is tested directly; verified to bite by removing the transition guard and watching the standing
+-code test fail. `deployBackend` remains the single implementation — a second one would have drifted
+from the verification built the same day, and a test pins that there is only one.
+
+Deliberately NOT extended to the domain-connect screen in this change: that screen's job is to get the
+domain connected, and deploying is what the Publish surface does — the domain then points itself
+during that deploy. Recorded as a choice, not an oversight.
+
+Gate: both `tsc` clean; FULL suite **1455 files / 19373 tests green**. AppKnowledgeBase updated in the
+same change (CLAUDE.md's rule), since this changes what a user has to do.
+
+## 2026-09-06 — the DNS setup that would not stop showing itself, and the repo memory that never stuck (admin: "build karo!!")
+
+Two real defects, both diagnosed from the admin's own screenshots + a UX lesson they drew from Google
+Workspace's own domain-connect flow, both implemented + tested + shipped (not just discussed).
+
+**1. THE DNS SETUP BLOCK NEVER TUCKED ITSELF AWAY.** Screenshot: an ALREADY-connected domain
+("Connected, with HTTPS" in green, ownership/host/SSL all active) still showing the FULL "Set these
+two nameservers… Check & apply records… Where did you buy this domain?" block directly underneath —
+inviting exactly what the admin reported: users re-reading finished setup instructions and
+re-pressing "Check & apply" believing something is still pending.
+
+New pure `shouldShowDnsSetup(active, sectionOpen)` in `NbaiDomainConnect.tsx`: while still connecting,
+ALWAYS visible (hiding it behind a button someone has to discover would make finishing setup HARDER —
+the opposite of the point). Once genuinely active, collapsed by DEFAULT behind a "DNS records" button
+— but a manual re-open always wins, because the values are still needed occasionally (re-copy a
+record, re-check a nameserver after a registrar reset). The Google Workspace lesson the admin drew
+("leave this page open, we process in background") was checked against the actual code rather than
+copied: NavBharatAI has NO background poller — every DNS check is a manual button press, server or
+client. Claiming otherwise would have been the exact fake-progress dishonesty the absolute rules
+forbid. The honest version of that lesson is in the closing reassurance instead: DNS propagation takes
+its own time regardless of the tab, which is true and was already partly said — now said more plainly
+while pending.
+
+**2. THE REPO MEMORY GAP — "GitHub se import ki hai, matlab connect hai!" (the admin was RIGHT).**
+The admin disputed my earlier claim that an imported app had "no repo" — and was correct. An import
+CAN genuinely land code in the user's own GitHub (their real repo on a working branch, or a fresh repo
+NavBharatAI creates in their account). The actual bug, found by tracing the code rather than assuming:
+that fact reached the CLIENT only as a live stream event during the import turn, scoped to that one
+browser tab. `deployRepo` (the Publish/Deploy-backend screen's own signal) is built from React state
+that starts EMPTY on every reload — so a workspace whose import genuinely succeeded would, on the very
+next visit, be told to "push this app to a repo of your own": a true fact about that SESSION's memory,
+delivered as if it were a fact about the app. Confirmed by grep: `repoOwner`/`repoOwnedByUser` were
+durably written in exactly ONE place in the whole server (the "Put this app in my GitHub" endpoint) —
+never by the import flow's own-repo or user-account-mirror storage modes, even though both genuinely
+deposit code in the user's own account.
+
+Root-caused end to end, not patched at one layer:
+- `ConversationRecord`/`ConversationPatch` (both stores) gained `deployBranch` — the app's SHIPPED
+  branch, so a deploy never silently targets `main` when a repo's real base branch differs, and never
+  targets `navbharatai/work` (which can hold unreviewed, mid-session edits — deploying it would be
+  worse than deploying nothing).
+- BOTH import storage modes (own-repo AND user-account-mirror) now durably persist `repoOwner` +
+  `repoOwnedByUser: true` + `deployBranch` the moment they establish where code lives — not only the
+  push-app endpoint, which gained `deployBranch` too for consistency.
+- New pure `deployRepoMemory.ts`: `repoAvailableForDeploy` is an OR (client claim OR durable record) —
+  never an override, because an empty client claim only ever means "nothing happened THIS session",
+  never "this has never happened". `resolveDeployRepo` picks the freshest usable signal (client first,
+  durable memory as fallback) and carries the BRANCH with it. Staleness (revoked access, deleted repo)
+  is deliberately NOT guarded against by withholding the offer — the real deploy attempt is the ground
+  truth and already reports the honest reason when access has gone away; a wrong upfront refusal is a
+  worse failure than an honest deploy-time error.
+- `/publish`'s refusal message and `/deploy-backend`'s actual repo resolution (matching AND creation
+  AND the branch passed to `createRenderService`, which previously received no branch at all and
+  silently defaulted to `main`) both now consult durable memory as a fallback — closing the gap on the
+  SERVER side.
+- `agentV3History.ts`'s `conversationToEvents` now synthesizes the SAME `repo` stream event a live
+  import would have emitted, from the durably-persisted fields — replayed through the SAME
+  `agentV3Reducer` used for live streams, no new client logic. This is what closes the loop on the
+  CLIENT side too: session resume (auto-restore AND opening from History) now hydrates
+  `state.repoOwnedByUser`/`repoFullName`, so the "Deploy backend" button and the auto-deploy-on-Publish
+  trigger (#2753) both work on a RETURNING visit, not only within the one live session that happened to
+  do the import.
+
+Deliberately deferred: an "unshipped edits on your work branch" warning at deploy time. Detecting it
+correctly needs a live diff between the work and base branches — a real extra API call, extra latency,
+and extra failure surface on every deploy — for a case the branch-correctness fix already makes SAFE
+(deploying `main` never exposes in-progress code; the fallback is a real known state, never mid-edit
+code). Recorded as a deliberate scoping choice, not an oversight.
+
+Verified to bite: removing the repo-replay block from `conversationToEvents` was confirmed to fail the
+new tests, then restored. Verified to bite (Step 1, earlier in the day): removing the probe's
+precedence over the host status in `deployVerdict` was confirmed to fail its test, then restored — same
+discipline applied again here.
+
+One pre-existing test anchor (`renderCreateService.test.ts`, "fires ONLY on no-service, and only with a
+repo") pinned the raw `repoUrl` variable name literally; re-anchored to `effectiveRepoUrl` with the
+reason recorded in place — the PROPERTY it protects (no-service AND a repo, nothing else) is unchanged.
+
+Gate: both `tsc` clean; FULL suite **1457 files / 19402 tests green**. AppKnowledgeBase updated in the
+same change (CLAUDE.md's rule) — both the DNS-collapse behaviour and the durable repo memory are new
+user-facing facts.
 ---
 
 ## 2026-09-06 — THE APP'S OWN TAB BAR WAS COVERING THE BOTTOM OF EVERY DIALOG (admin screenshot)

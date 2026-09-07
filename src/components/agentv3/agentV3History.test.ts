@@ -398,3 +398,47 @@ describe('legacyPrependMessages', () => {
     expect(legacyPrependMessages([{ text: '  old question  ', isUser: true }], ['old question'])).toEqual([]);
   });
 });
+
+/**
+ * "GITHUB SE IMPORT KI HAI, MATLAB CONNECT HAI!" (admin 2026-09-06).
+ *
+ * The server has durably remembered whose GitHub repo an app lives in since the moment it was
+ * established — but that fact used to reach the client ONLY as a live `repo` stream event, which a
+ * page reload never replays. `deployRepo` (the Publish/Deploy-backend screen's own signal) is built
+ * from React state that starts empty on every reload, so a workspace whose import genuinely landed in
+ * the user's own GitHub would, on the very next visit, be told to "push this app to a repo of your
+ * own" — a true fact about the SESSION'S memory, delivered as if it were a fact about the app.
+ */
+describe('conversationToEvents — replays the durable repo fact, not only the chat', () => {
+  it('🔒 a durably-owned repo synthesizes the SAME repo event a live import would have streamed', () => {
+    const events = conversationToEvents(conv({ repoOwner: 'asheesh', repoOwnedByUser: true, repoName: 'mitrify' }));
+    expect(events[0]).toEqual({ type: 'workspace', workspaceId: 'ws-1', ts: 0 });
+    expect(events[1]).toEqual({
+      type: 'repo', url: 'https://github.com/asheesh/mitrify', fullName: 'asheesh/mitrify', ownedByUser: true, ts: 0,
+    });
+  });
+
+  it('feeding it through the real reducer resolves exactly what the Publish screen reads', () => {
+    let state = initialAgentV3State();
+    for (const e of conversationToEvents(conv({ repoOwner: 'asheesh', repoOwnedByUser: true, repoName: 'mitrify' }))) {
+      state = agentV3Reducer(state, e);
+    }
+    expect(state.repoOwnedByUser).toBe(true);
+    expect(state.repoFullName).toBe('asheesh/mitrify');
+  });
+
+  it('no repo recorded ⇒ no synthetic event — never invents one', () => {
+    const events = conversationToEvents(conv());
+    expect(events.some((e) => e.type === 'repo')).toBe(false);
+  });
+
+  it('🔒 a platform-org mirror (repoOwnedByUser false) is never replayed as deployable', () => {
+    const events = conversationToEvents(conv({ repoOwner: 'navbharatai', repoOwnedByUser: false, repoName: 'mitrify' }));
+    expect(events.some((e) => e.type === 'repo')).toBe(false);
+  });
+
+  it('an incomplete record (owner without a name, or vice versa) is never replayed', () => {
+    expect(conversationToEvents(conv({ repoOwnedByUser: true, repoOwner: 'asheesh' })).some((e) => e.type === 'repo')).toBe(false);
+    expect(conversationToEvents(conv({ repoOwnedByUser: true, repoName: 'mitrify' })).some((e) => e.type === 'repo')).toBe(false);
+  });
+});

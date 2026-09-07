@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type PublishRefusalCode } from '../src/lib/backendDeployOffer';
+import { backendDeployOffer, shouldAutoDeployBackend, DEPLOY_BACKEND_LABEL, type PublishRefusalCode } from '../src/lib/backendDeployOffer';
 import { deployDecision, planDeployment } from '../src/server/AgentV3/deployPlan';
 
 const REPO = { owner: 'asheesh', repo: 'my-app' };
@@ -220,5 +220,66 @@ describe('🔒 the client offers it, and the screen updates without waiting for 
 
   it('a failed push shows the server\'s own reason, and says the app is safe', () => {
     expect(chooser).toContain("data?.error || 'Could not save your app to GitHub. Your app is safe here — try again.'");
+  });
+});
+
+/**
+ * PRESSING "PUBLISH" DEPLOYS THE SERVER HALF BY ITSELF (admin 2026-09-05).
+ *
+ * To a user, Publish means *make my app live*. For an app with a server half that means BOTH halves —
+ * and what happened instead was: press Publish → refused → find the "Deploy backend" button → press
+ * that. The refusal was honest and the button worked; the second press was still ours to ask for.
+ */
+describe('shouldAutoDeployBackend — removes a press, never adds a surprise', () => {
+  const fresh = { code: 'backend-deploy-available', previousCode: '', canDeploy: true, busy: false };
+
+  it('a fresh refusal with everything already in place deploys', () => {
+    expect(shouldAutoDeployBackend(fresh)).toBe(true);
+  });
+
+  it('🔒 a STANDING code never deploys — only a transition means someone just pressed Publish', () => {
+    // Reacting to the code merely being set would deploy on reopening the panel: an action nobody
+    // asked for, in someone else's hosting account.
+    expect(shouldAutoDeployBackend({ ...fresh, previousCode: 'backend-deploy-available' })).toBe(false);
+  });
+
+  it('🔒 nothing happens unless the button could already have been pressed', () => {
+    // canDeploy false means the repo or the key is missing — the screen shows those prerequisites and
+    // their own buttons, and no consent is being skipped.
+    expect(shouldAutoDeployBackend({ ...fresh, canDeploy: false })).toBe(false);
+  });
+
+  it('a deploy already running is never restarted', () => {
+    expect(shouldAutoDeployBackend({ ...fresh, busy: true })).toBe(false);
+  });
+
+  it('🔒 no other refusal triggers a deploy', () => {
+    // needs-server-hosting means there is no key at all; deploying would be impossible, and trying
+    // would replace an honest instruction with a failure.
+    for (const code of ['', 'needs-server-hosting', 'something-new']) {
+      expect(shouldAutoDeployBackend({ ...fresh, code }), code).toBe(false);
+    }
+  });
+});
+
+describe('🔒 the wiring — the panel really does it, and explains itself', () => {
+  const chooser = readFileSync(join(__dirname, '..', 'src/components/agentv3/HostingChooser.tsx'), 'utf8');
+
+  it('the rule is used, not re-implemented in the component', () => {
+    expect(chooser).toContain('shouldAutoDeployBackend({ code, previousCode');
+    expect(chooser).toContain('void deployBackend();');
+  });
+
+  it('🔒 the ref starts at the CURRENT code, so mounting can never deploy', () => {
+    expect(chooser).toContain('useRef<string>(publishRefusalCode ?? \'\')');
+  });
+
+  it('an action the user did not click explains why it started', () => {
+    expect(chooser).toContain('publishing means putting that online too');
+  });
+
+  it('🔒 it reuses the same deploy path, so the come-up check still runs', () => {
+    // A second implementation would have drifted from the verification added the same day.
+    expect(chooser.split('const deployBackend = async').length - 1).toBe(1);
   });
 });

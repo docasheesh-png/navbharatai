@@ -120,6 +120,28 @@ export function hostingReason(issues?: string[] | null): string {
   return `Your host says: “${/[.!?]$/.test(text) ? text : `${text}.`}” `;
 }
 
+/**
+ * Should the DNS setup instructions (nameserver fields, "Check & apply records", the registrar
+ * picker, the reference record list) be visible right now?
+ *
+ * 🔴 THE PROBLEM THIS CLOSES (admin 2026-09-06, screenshot of an ALREADY-connected domain still
+ * showing the full nameserver-change block under a green "Connected, with HTTPS" banner). Once DNS
+ * is genuinely done, re-showing "Set these two nameservers… Check & apply records" invites exactly
+ * the mistake the admin found: a user re-reading setup instructions for a thing that is already set
+ * up, and re-pressing "Check & apply" believing something is still pending.
+ *
+ * 🔒 WHILE STILL CONNECTING, THIS ALWAYS RETURNS TRUE — never gated behind a click. `active` false
+ * means the user still needs these instructions to finish; hiding them behind a button they have to
+ * discover would make setup HARDER, the opposite of the point. Only once DNS is genuinely done does
+ * this collapse, and even then a manual re-open (`sectionOpen`) always wins — the records must stay
+ * reachable for someone who needs to re-copy a value or check their nameservers again.
+ *
+ * PURE, so the rule is tested directly instead of inferred from JSX.
+ */
+export function shouldShowDnsSetup(active: boolean, sectionOpen: boolean): boolean {
+  return !active || sectionOpen;
+}
+
 export function connectStage(
   s: {
     active: boolean; ownershipState: string; hostState: string; sslState: string;
@@ -646,6 +668,9 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
   const [autoMissing, setAutoMissing] = useState<Array<{ type: string; name: string }> | null>(null);
   const [autoDesired, setAutoDesired] = useState<number | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
+  // Manual override for the collapsed DNS-setup section — see shouldShowDnsSetup. Starts collapsed;
+  // a user who wants to see it again (re-copy a record, re-check nameservers) can always reopen it.
+  const [dnsSectionOpen, setDnsSectionOpen] = useState(false);
   // Domain Connect one-click (registrar-approved template) + Hostinger token flow (Slice B/C).
   const [dcCheck, setDcCheck] = useState<{ supported: boolean; providerName?: string; applyUrl?: string; reason?: string } | null>(null);
   const [hostingerToken, setHostingerToken] = useState('');
@@ -1077,6 +1102,22 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
 
               For someone shipping app after app, that difference is hours per app versus hours once.
               We were leading with the worse deal because of where a div sat. */}
+          {/* THE BUTTON THAT REPLACES THE REPEATED SETUP BLOCK (admin 2026-09-06). Once DNS is
+              genuinely done there is nothing left to press below except by mistake — see
+              shouldShowDnsSetup. Always offered once active, never forced open: someone who needs to
+              re-copy a record or re-check their nameservers can still get there in one tap. */}
+          {result.active && (
+            <button
+              onClick={() => setDnsSectionOpen((v) => !v)}
+              className="self-start flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/60 border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-[11px] font-bold transition-colors"
+            >
+              <Check className="w-3.5 h-3.5 text-green-400 shrink-0" />
+              DNS records
+              <span className="text-zinc-500 font-normal">{dnsSectionOpen ? '— hide' : '— all done, tap to view'}</span>
+            </button>
+          )}
+          {shouldShowDnsSetup(result.active, dnsSectionOpen) && (
+          <>
           {result.autoDns && (
             <div className="px-3 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex flex-col gap-2">
               <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">Or: automatic setup (one-time nameserver change)</span>
@@ -1299,9 +1340,11 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               a second copy here would be two sources of truth for one state. What remains is the
               closing reassurance, which belongs after the reference material. */}
           <p className="text-[10px] text-zinc-500 leading-relaxed">
-            DNS changes can take a few minutes to a few hours. Publish your app once after connecting, so the
+            DNS changes can take a few minutes to a few hours{result.active ? '' : ' — this is your registrar and the public internet catching up, not something on our side you can speed up'}. Publish your app once after connecting, so the
             domain serves your latest build. HTTPS is issued automatically once the records resolve.
           </p>
+          </>
+          )}
           {/* THE ONE Check now, and it is now the prominent one (admin 2026-08-22). It sits directly
               under the records the user just added, which is the only place where pressing it means
               anything — and it is the primary action of this whole screen while a domain is pending,

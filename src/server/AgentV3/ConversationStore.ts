@@ -57,6 +57,12 @@ export interface ConversationRecord {
    */
   repoOwner?: string;
   repoOwnedByUser?: boolean;
+  /**
+   * The branch a backend deploy should build from — the app's SHIPPED state, never a work-in-progress
+   * branch (own-repo storage keeps live edits on `navbharatai/work` until the user ships them to this
+   * branch). Absent means "derive the ordinary default" (main), exactly as before this field existed.
+   */
+  deployBranch?: string;
   status: ConversationStatus;
   /** The AgentRunner transcript, stored VERBATIM so a resumed run sees its exact prior context. */
   messages: unknown[];
@@ -117,6 +123,8 @@ export interface ConversationPatch {
   /** Which account that repo is under, and whether the user owns it (a deploy needs their own). */
   repoOwner?: string;
   repoOwnedByUser?: boolean;
+  /** See ConversationRecord.deployBranch. */
+  deployBranch?: string;
 }
 
 /**
@@ -295,6 +303,7 @@ export class InMemoryConversationStore implements ConversationStore {
     if (patch.repoName !== undefined) rec.repoName = patch.repoName;
     if (patch.repoOwner !== undefined) rec.repoOwner = patch.repoOwner;
     if (patch.repoOwnedByUser !== undefined) rec.repoOwnedByUser = patch.repoOwnedByUser;
+    if (patch.deployBranch !== undefined) rec.deployBranch = patch.deployBranch;
     rec.updatedAt = patch.updatedAt;
   }
 }

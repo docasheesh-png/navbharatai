@@ -20,14 +20,14 @@
 // so a deploy can never target a host that isn't set up. Pricing here is intentionally simple + honest
 // (static = Free); it is the single place to change when the admin sets real numbers.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, Store, Clipboard, Sparkles, Loader2, Check } from 'lucide-react';
 import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
 import { usePublishState } from '../../hooks/usePublishState';
 import { needsPublishDot } from '../../lib/publishFreshness';
-import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type BackendKeySource } from '../../lib/backendDeployOffer';
+import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type BackendKeySource, shouldAutoDeployBackend } from '../../lib/backendDeployOffer';
 import { managedDeployRequest, managedDeployOutcome, renderConnectSteps } from '../../lib/backendDeployWiring';
 
 export interface HostingProvider {
@@ -432,6 +432,33 @@ export function HostingChooser({
       setBackendBusy(false);
     }
   };
+
+  /**
+   * PRESSING "PUBLISH" NOW DEPLOYS THE SERVER HALF BY ITSELF (admin 2026-09-05).
+   *
+   * 🔴 THE STEP THIS REMOVES. To a user, Publish means *make my app live*. For an app with a server
+   * half that means BOTH halves — and what happened instead was: press Publish → refused → find the
+   * "Deploy backend" button → press that. The refusal was honest and the button worked; the second
+   * press was still ours to ask for, not theirs to make.
+   *
+   * The rule lives in `shouldAutoDeployBackend` so it can be tested directly: it fires only on a
+   * TRANSITION into this refusal (which can only mean a publish was just attempted — the panel clears
+   * the code before every attempt) and only when the button could already have been pressed. On mount
+   * the ref starts at the current code, so simply reopening this panel can never deploy anything.
+   */
+  const lastRefusalCode = useRef<string>(publishRefusalCode ?? '');
+  useEffect(() => {
+    const code = publishRefusalCode ?? '';
+    const previousCode = lastRefusalCode.current;
+    lastRefusalCode.current = code;
+    if (!shouldAutoDeployBackend({ code, previousCode, canDeploy: backendOffer.canDeploy, busy: backendBusy })) return;
+    // Say WHY a deploy started without being pressed — an action the user did not click must explain
+    // itself, or it reads as the app doing something behind their back.
+    setBackendLines(['🚀 Your app has a server half, so publishing means putting that online too — starting it now.']);
+    void deployBackend();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publishRefusalCode]);
+
 
   // The honest reason the LAST publish attempt didn't start. Shown inline; cleared on the next try.
   // A publish that cannot run must SAY SO here — never a button that silently does nothing.

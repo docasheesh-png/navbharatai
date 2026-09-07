@@ -13,6 +13,9 @@ import { safeLocalJson } from '../lib/safeLocalJson';
 import { authedHeaders } from '../lib/authHeaders';
 import { trackEvent } from '../lib/analytics';
 import { decideReportOnce } from '../lib/conversionOnce';
+import { isNativeApp } from '../lib/mobileNative';
+import { purchaseRail, type StoreConfig, type PurchaseOutcome } from '../lib/storePurchase';
+import { launchPlayPurchase, consumePlayPurchase, pendingPlayPurchases, playBillingAvailable, outcomeForNativeStatus } from '../lib/playBillingNative';
 /** Free-tier daily message ceiling for anonymous (not-signed-in) users. */
 export const FREE_DAILY_MESSAGES = 10;
 
@@ -65,6 +68,16 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   const [showVishwakarmaChooser, setShowVishwakarmaChooser] = useState(false);
   const [showVishwakarmaUnlockModal, setShowVishwakarmaUnlockModal] = useState(false);
   const [vkTokenInput, setVkTokenInput] = useState<string>('50');
+  /**
+   * GOOGLE PLAY BILLING (admin 2026-09-06). `storeConfig` is the server's honest answer about
+   * whether the Play rail can work at all; `playPluginReady` is whether THIS installed shell has the
+   * native plugin (an older .aab does not). Both default to "no", so every device keeps today's
+   * behaviour until all of them are genuinely true.
+   */
+  const [storeConfig, setStoreConfig] = useState<StoreConfig | null>(null);
+  const [playPluginReady, setPlayPluginReady] = useState(false);
+  const [buyingProductId, setBuyingProductId] = useState<string | null>(null);
+  const [storePurchaseNotice, setStorePurchaseNotice] = useState<string | null>(null);
   const [billingLogs, setBillingLogs] = useState<any[]>([]);
   const [billingTransactions, setBillingTransactions] = useState<any[]>([]);
   const [loadingWallet, setLoadingWallet] = useState(false);
@@ -254,6 +267,144 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
       trackEvent('purchase', Number.isFinite(value) && value > 0 ? { value, currency: 'INR' } : {});
     } catch { /* measurement must never affect a payment */ }
   }, []);
+
+  // ───────────────────────── Google Play Billing ─────────────────────────
+  //
+  // Google Play requires digital goods consumed inside a Play-distributed app to be sold through
+  // Play's own billing; the wallet top-up is exactly that. The SERVER owns every money decision
+  // (storeBilling.ts's catalogue, storeVerify.ts's call to Google, the idempotent credit route) —
+  // this hook only drives the sheet, hands the opaque token to the server, and consumes AFTER.
+
+  /**
+   * Ask the server to verify one purchase with Google and credit the wallet. Shared by the buy flow
+   * and the pending sweep so both take the identical path — a second implementation is how the
+   * retry route ends up subtly different from the one anybody tested.
+   *
+   * `paidValueInr` is what the STORE charged (not what the wallet received) — the real amount the
+   * user was billed, which is the only honest value to report as a purchase conversion.
+   */
+  const creditPlayPurchase = useCallback(async (
+    purchaseToken: string,
+    productId: string,
+    paidValueInr?: number,
+  ): Promise<PurchaseOutcome> => {
+    try {
+      const res = await axios.post('/api/payment/store/verify', {
+        platform: 'google',
+        productId,
+        purchaseToken,
+      }, { headers: await authedHeaders() });
+      if (res.data?.alreadyProcessed) return 'already-credited';
+      if (res.data?.ok) {
+        reportPurchaseOnce(purchaseToken, paidValueInr);
+        return 'credited';
+      }
+      // A 2xx that is neither shape is not something to call success — the wallet is the truth, and
+      // fetchWallet below will show whatever really landed.
+      return 'paid-not-verified';
+    } catch {
+      // The money HAS left the user's account (Google only reports `purchased` after charging), so
+      // this can never be reported as "not charged". Leaving the purchase unconsumed is what makes
+      // it recoverable: Google re-delivers it, the sweep replays it, and the route is idempotent.
+      return 'paid-not-verified';
+    }
+  }, [reportPurchaseOnce]);
+
+  /**
+   * Buy one pack through Google Play. Ordering is the whole safety property:
+   * launch → server credits → THEN consume. Consuming before the credit would erase Google's record
+   * of a purchase the user paid for; consuming after a failure simply leaves it replayable.
+   */
+  const buyStorePack = useCallback(async (productId: string): Promise<PurchaseOutcome> => {
+    if (!user) return 'failed';
+    const pack = storeConfig?.packs.find((p) => p.productId === productId) ?? null;
+    setBuyingProductId(productId);
+    setStorePurchaseNotice(null);
+    try {
+      const native = await launchPlayPurchase(productId);
+      const early = outcomeForNativeStatus(native.status);
+      if (early) return early;
+      if (native.status === 'pending') {
+        // Play's deferred payment methods (real in India) settle later. No money has arrived, so
+        // nothing may be credited — the sweep picks it up once Google marks it purchased.
+        return 'paid-not-verified';
+      }
+      if (!native.purchaseToken) return 'failed';
+
+      const outcome = await creditPlayPurchase(
+        native.purchaseToken,
+        native.productId || productId,
+        pack?.priceInr,
+      );
+      if (outcome === 'credited' || outcome === 'already-credited') {
+        // Only now: tell Google the goods were delivered, so the pack can be bought again.
+        await consumePlayPurchase(native.purchaseToken);
+        await fetchWallet();
+      }
+      return outcome;
+    } catch {
+      return 'failed';
+    } finally {
+      setBuyingProductId(null);
+    }
+  }, [user, storeConfig, creditPlayPurchase]);
+
+  /**
+   * Replay any purchase Google still considers undelivered — the crash/offline safety net.
+   *
+   * WITHOUT THIS, a user who pays and then loses network before the verify call lands has given
+   * Google money and received nothing; the only thing that would eventually happen is Google's
+   * automatic refund three days later, after an experience we never noticed. With it, the credit
+   * appears the next time they open the app.
+   */
+  const sweepPendingPlayPurchases = useCallback(async () => {
+    if (!user) return;
+    const pending = await pendingPlayPurchases();
+    if (pending.length === 0) return;
+    let credited = false;
+    for (const p of pending) {
+      const pack = storeConfig?.packs.find((x) => x.productId === p.productId) ?? null;
+      const outcome = await creditPlayPurchase(p.purchaseToken, p.productId, pack?.priceInr);
+      if (outcome === 'credited' || outcome === 'already-credited') {
+        await consumePlayPurchase(p.purchaseToken);
+        credited = credited || outcome === 'credited';
+      }
+    }
+    if (credited) {
+      setStorePurchaseNotice('A purchase from earlier has been added to your balance.');
+      await fetchWallet();
+    }
+  }, [user, storeConfig, creditPlayPurchase]);
+
+  /**
+   * Discover the Play rail once per session, and only on a native shell — the web has no Play
+   * Billing to ask about, so this costs a web user nothing at all. Both probes fail CLOSED
+   * (`config` stays null / `pluginReady` stays false), which `purchaseRail` reads as "keep the
+   * existing rail", so a server hiccup here can never take away a user's ability to top up.
+   */
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    let cancelled = false;
+    (async () => {
+      const [available, cfg] = await Promise.all([
+        playBillingAvailable(),
+        axios.get('/api/payment/store/packs').then((r) => r.data as StoreConfig).catch(() => null),
+      ]);
+      if (cancelled) return;
+      setPlayPluginReady(available);
+      setStoreConfig(cfg && Array.isArray(cfg.packs) ? cfg : null);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  /** Sweep once the user is known AND the rail is genuinely live — never on the web. */
+  useEffect(() => {
+    if (!user || !playPluginReady || !storeConfig?.enabled || !storeConfig?.google) return;
+    void sweepPendingPlayPurchases();
+  }, [user, playPluginReady, storeConfig, sweepPendingPlayPurchases]);
+
+  /** Which rail this device should show. Pure decision, unit-tested in storePurchase.test.ts. */
+  const storeRail = purchaseRail({ isNative: isNativeApp(), config: storeConfig, pluginReady: playPluginReady });
 
   const verifyBillingPayment = async (status: 'SUCCESS' | 'FAILED') => {
     if (!paymentSession || !user) return;
@@ -448,6 +599,10 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     // actions
     fetchWallet,
     createBillingOrder,
+    // Google Play billing (native only — storeRail is 'web-gateway' everywhere else)
+    storeRail, storeConfig,
+    buyStorePack, buyingProductId,
+    storePurchaseNotice, setStorePurchaseNotice,
     createVishwakarmaOrder,
     verifyBillingPayment,
     redeemPromoCoupon,

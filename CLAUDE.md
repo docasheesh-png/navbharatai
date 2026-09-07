@@ -631,7 +631,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   here as an open item rather than left silent.
 
 - **Ad conversion measurement — Meta / Facebook + Instagram (added 2026-08-31, admin asked to run
-  "Download NavBharatAI" ads):** `META_PIXEL_ID` — the WEB pixel id, **NOT set yet**. Served to the
+  "Download NavBharatAI" ads):** `META_PIXEL_ID` — the WEB pixel id. ✅ **SET in Cloud Run by the admin
+  2026-09-03: `1836196930883481`** (the "navbharatai web" dataset in Events Manager — do not confuse
+  it with the separate Meta **App ID** `860811063666554` recorded above, which is the Android SDK's
+  id, a different credential entirely). Served to the
   browser at runtime by `GET /api/public-config` (`routes/health.ts`) and consumed by
   `src/lib/metaPixel.ts`. UNSET ⇒ the route answers `null` and the pixel never loads; a MALFORMED
   value is treated exactly like unset, so a typo disables measurement honestly instead of injecting
@@ -651,6 +654,44 @@ the code (it is actually read somewhere) on 2026-07-11.
   the old "privacy-friendly analytics" wording would have been consent on a false description. The
   white-label law forbids naming the AI PROVIDERS behind a build; it does not licence hiding who
   receives a user's data.
+- **Google Play in-app purchases — the Android token top-up rail (built 2026-09-06, NOT live yet):**
+  `STORE_BILLING` (the master switch — **unset today, and unset means today's behaviour exactly**),
+  `GOOGLE_PLAY_SA_JSON` (the WHOLE service-account JSON as one string — a Google Cloud service
+  account with the Play Developer API enabled and granted access in Play Console → Setup → API
+  access), `GOOGLE_PLAY_PACKAGE_NAME` (= `com.navbharat.ai`). Optional: `STORE_FEE_PCT` (default 15
+  — Google's commission on the first $1M/yr; retune it the day the first real payout report shows
+  the true rate, GST included) and `STORE_PACKS` (JSON override of the catalogue).
+  **WHY THIS EXISTS:** Google Play policy requires digital goods consumed inside a Play-distributed
+  app to be sold through Play's own billing. NavBharatAI's wallet top-up is exactly that, and the
+  Android app currently sells it through the Cashfree web rail — a real, standing policy exposure
+  that this rail closes.
+  🔒 **THE FLAG IS THE MIGRATION, AND IT FAILS SAFE BY CONSTRUCTION.** With `STORE_BILLING` unset,
+  `purchaseRail()` returns `web-gateway` on every device and the app is byte-identical to today.
+  Turning it on switches ONLY the native Android shell to Play packs — and only when the server also
+  confirms Google is configured AND the installed build carries the native plugin. A user on an
+  older `.aab`, or a device with no Play Store, silently keeps the working web rail rather than
+  losing the ability to top up. Test-locked in `tests/storePurchase.test.ts`.
+  ⚠️ **BEFORE FLIPPING IT ON, four things must be true or a user will hit a dead button:**
+  (1) the four products exist and are **ACTIVE** in Play Console → Monetise → In-app products with
+  the EXACT ids `nbai.tokens.99` / `.249` / `.499` / `.999` and prices **₹119 / ₹299 / ₹599 /
+  ₹1199** (they must match `DEFAULT_STORE_PACKS` in `storeBilling.ts` exactly — Google is the
+  authority on price, our catalogue on credit); (2) both env keys above are set in Cloud Run;
+  (3) a build carrying `PlayBillingPlugin` is LIVE on Play (the plugin shipped in this change, so
+  release 103 and earlier do NOT have it); (4) Play Console → Monetisation setup has a payments
+  profile. The plugin names a missing/inactive product explicitly in its failure message, so the
+  first real tap says which of these is wrong instead of "failed".
+  💰 **WHAT IT COSTS THE USER, AND WHY THAT IS SHOWN.** A pack is priced above the credit it gives so
+  our net after Google's cut is unchanged (₹119 → ₹99 of credit). The admin's instruction was
+  "google ka charge add kar ke clear dikhao", so each pack card shows the split — `₹99 + ₹20 fee`
+  beside the ₹119 total. It is labelled **"fee"/"Play Store fee", never "Google's fee"**: Google's
+  actual commission on ₹119 is ₹17.85, and the rest is rounding to a price point Play's tier table
+  carries — printing "Google's fee: ₹20" would be a number no payout report will ever match, which
+  the billing law above forbids even when it flatters us. The internal split stays admin-only; the
+  server records `storeFeePct` and `storeNetInr` on every store transaction for reconciliation.
+  ⚠️ **ANTI-STEERING — do NOT add "cheaper on the web" copy to the app.** Google's Payments policy
+  restricts steering users to an external purchase path from inside the app, and this account has
+  already taken one policy strike (the medical-features rejection). The pack card explains the fee
+  factually and stops there, deliberately.
 - **`FACEBOOK_APP_ID` + `FACEBOOK_CLIENT_TOKEN` — GitHub REPO SECRETS, *not* Cloud Run keys.** Recorded
   here anyway so nobody searches Cloud Run for them and concludes they are missing. They are read at
   **build** time by `android/app/build.gradle` (via `.github/workflows/android-aab.yml`) and are what
@@ -748,6 +789,30 @@ weeks-long registration) — localStorage/IndexedDB are per-origin from day one,
   `SEMANTIC_MEMORY_MAX_CHUNKS` (60) and `SEMANTIC_MEMORY_TOP_K` (5) are code-defaulted.
 - **`PUBLISHED_APP_DOMAIN`** — the branded published-app host; see item 2 for why it must stay
   unset until the Cloudflare Worker is live.
+
+- **Published-app hosting — the THREE keys that together remove the publish ceiling (added 2026-09-07):**
+  `PUBLISHED_APPS_BUCKET` (the public Cloud Storage bucket published apps are mirrored into —
+  ⚠️ **NEVER `NAV_STORE_BUCKET`**, which holds unreviewed APKs and must never be public; the code
+  refuses that fallback deliberately and a test locks it), `PUBLISHED_APPS_MIRROR` (kill switch, `off`
+  disables the mirror while leaving the bucket configured), and **`PUBLISHED_APPS_BUCKET_ONLY`** —
+  `on` makes a publish skip Firebase Hosting **entirely**, which is the only thing that actually removes
+  the ~50-channels-per-site ceiling (ROADMAP §10.3 step 4).
+  🔴 **THE BUCKET ALONE DOES NOT RAISE THE CEILING, and believing it does is the exact mistake this
+  entry exists to prevent — I made it, in writing, to the admin, and corrected it the same session.**
+  The mirror runs AFTER the channel is created and released, so a mirrored publish still consumes a
+  channel; the bucket made publishing cheaper and faster to serve, never roomier. Only
+  `PUBLISHED_APPS_BUCKET_ONLY=on` stops a channel being created at all.
+  ⚠️ **ORDER OF ACTIVATION MATTERS, and getting it wrong hands users dead links.** All THREE of
+  `PUBLISHED_APPS_BUCKET`, `PUBLISHED_APP_DOMAIN` and `PUBLISHED_APPS_BUCKET_ONLY=on` must hold, and
+  the code ANDs them rather than warning: with no branded domain there is NO working URL to return,
+  because the default `<site>--<sub>.web.app` host resolves only *because* the channel exists. So the
+  sequence is **bucket public-readable → Worker's `APPS_BUCKET` set and deployed → `PUBLISHED_APP_DOMAIN`
+  set and a test app confirmed loading → only then `PUBLISHED_APPS_BUCKET_ONLY=on`.** Missing any
+  precondition disables the path silently and correctly (today's behaviour, byte-identical).
+  **Reverting is one key.** Unset `PUBLISHED_APPS_BUCKET_ONLY` and new publishes go back to Firebase
+  immediately. Apps ALREADY published bucket-only keep working (the Worker serves them) and stay
+  removable — takedown deletes their bucket objects unconditionally, not behind the flag, precisely so
+  turning the flag off can never strand an app nobody can unpublish.
 
 **🔵 4. `FIREBASE_DEPLOY_PROJECT` is NOT set — and that CLOSES a live hypothesis.** While diagnosing the
 2026-08-19 publish 404 I proposed that the deploy might be pointing at the wrong project, since that env

@@ -1365,6 +1365,71 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_society',
+      description:
+        'Add a real housing-society / RWA (residents\' welfare association) backend to the app ' +
+        '(server/society/) — a packaged domain vertical for apartment complexes and gated communities. ' +
+        'THREE real guarantees: (1) EXACT MAINTENANCE-DUES LEDGER — a unit\'s balance is invoiced minus ' +
+        'paid, a payment can NEVER exceed the outstanding balance (rejected 409, balance never negative), ' +
+        'and every invoice/payment is append-only; (2) COMPLAINT STATE-MACHINE — open → in_progress → ' +
+        'resolved → closed along allowed transitions only (+ reopen), an invalid jump rejected (409); ' +
+        '(3) APPEND-ONLY visitor log + notice board. Emits a dependency-free SocietyService (addUnit, ' +
+        'invoice, pay, balanceOf, ledgerFor, defaulters, checkInVisitor, checkOutVisitor, currentlyInside, ' +
+        'raiseComplaint, setComplaintStatus, postNotice) + an Express router + a README. In-memory by ' +
+        'default — swap the Maps for your DB. Use for society / apartment / RWA / maintenance-dues / ' +
+        'visitor-log / housing-complex prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_ngo',
+      description:
+        'Add a real NGO / donation-management backend to the app (server/ngo/) — a packaged India-first ' +
+        'domain vertical for non-profits and fundraisers. THREE real guarantees: (1) GAPLESS, UNIQUE ' +
+        'RECEIPT NUMBERS per Indian financial year (Apr–Mar), e.g. FY2024-25/0001 — an 80G receipt series ' +
+        'must have no gaps or duplicates, so the number is minted from a per-FY counter, never reused; ' +
+        '(2) a campaign\'s RAISED amount is DERIVED (the exact sum of its donations, never a stored field) ' +
+        'and a CLOSED campaign takes no donations (409); (3) APPEND-ONLY donation ledger. Emits a ' +
+        'dependency-free NgoService (addDonor, createCampaign, closeCampaign, donate, raisedFor, ' +
+        'donationsFor, receiptFor, totalRaised) + an Express router + a README. In-memory by default — ' +
+        'swap the Maps for your DB. Use for NGO / donation / fundraiser / 80G / charity prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_field_service',
+      description:
+        'Add a real field-service / job-dispatch backend to the app (server/fieldservice/) — a packaged ' +
+        'domain vertical for on-site service businesses (plumbing, electrical, AC/appliance repair, pest ' +
+        'control). THREE real guarantees: (1) JOB STATE-MACHINE — requested → assigned → en_route → ' +
+        'on_site → completed along allowed transitions only (cancel from any non-terminal; unassign back ' +
+        'to requested), an invalid jump rejected (409), and a job becomes assigned ONLY via assign() (never ' +
+        'a bare status change with no technician); (2) ONE ACTIVE JOB PER TECHNICIAN — assigning a ' +
+        'technician who already has an active job (assigned/en_route/on_site) is rejected (409); completing ' +
+        'or cancelling frees them automatically (derived); (3) APPEND-ONLY job history. Emits a ' +
+        'dependency-free FieldServiceService (addTechnician, createJob, assign, setStatus, cancel, ' +
+        'activeJobOf, listJobs) + an Express router + a README. In-memory by default — swap the Maps for ' +
+        'your DB. Use for field-service / technician / dispatch / on-site / repair / service-visit prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'manage_dependency',
+      description:
+        "Add, remove, or list an npm package in the project's package.json — use it when the user asks to " +
+        'add / install / remove / uninstall a library (e.g. "add axios", "install stripe", "remove lodash") ' +
+        'or to see the current dependencies. The package name is validated against npm\'s naming rules and ' +
+        'rejected if invalid; an add lands in "dependencies" (or updates it in place if it already sits in ' +
+        'dev/peer/optional — never a duplicate across sections); a remove clears it from every section. It ' +
+        'edits the manifest only — the change is installed by the next build/preview, so it is never left ' +
+        'half-installed. Prefer this over hand-editing package.json.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['add', 'remove', 'list'], description: 'What to do. Defaults to "add".' },
+          name: { type: 'string', description: 'The package name (required for add/remove), e.g. "axios" or "@scope/pkg".' },
+          version: { type: 'string', description: 'Optional version/range for add, e.g. "^1.6.0". Defaults to "latest".' },
+        },
+      },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -3263,6 +3328,10 @@ export const CATALOG_TOOL_NAMES = [
   'generate_recruitment',
   'generate_invoicing',
   'generate_helpdesk',
+  'generate_society',
+  'generate_ngo',
+  'generate_field_service',
+  'manage_dependency',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',

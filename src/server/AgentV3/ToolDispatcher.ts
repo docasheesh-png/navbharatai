@@ -148,6 +148,7 @@ import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
+import { addDependency, removeDependency as removeOneDependency, listDependencies } from './packageEdit';
 import { planE2eScaffold, e2eScaffoldSummary } from './e2eScaffold';
 import { pickDevScript, parsePackageJson } from './devScript';
 import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
@@ -194,6 +195,9 @@ import { generatePharmacyIntegration } from '../lib/PharmacyGenerator';
 import { generateRecruitmentIntegration } from '../lib/RecruitmentGenerator';
 import { generateInvoicingIntegration } from '../lib/InvoicingGenerator';
 import { generateHelpdeskIntegration } from '../lib/HelpdeskGenerator';
+import { generateSocietyIntegration } from '../lib/SocietyGenerator';
+import { generateNgoIntegration } from '../lib/NgoGenerator';
+import { generateFieldServiceIntegration } from '../lib/FieldServiceGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -4580,6 +4584,95 @@ export class ToolDispatcher {
         return `Wired a Helpdesk / ticketing backend:\n${hdWritten.join('\n')}\nAdd the dependencies: ${hdDeps}\n\n${hdcfg.instructions}`;
       }
 
+      case 'generate_society': {
+        // Breadth recipe (domain vertical) — Housing-society / RWA (server/society/): a real SocietyService
+        // with an EXACT maintenance-dues ledger (a payment can never exceed the balance; no negative), a
+        // complaint STATE-MACHINE (invalid jumps → 409), and an append-only visitor log + notice board,
+        // plus an Express router. Pure gen in SocietyGenerator.ts.
+        const socCfg = generateSocietyIntegration();
+        const socWritten: string[] = [];
+        for (const [path, content] of Object.entries(socCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          socWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('society starter');
+        const socDeps = socCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a housing-society / RWA backend:\n${socWritten.join('\n')}\nAdd the dependencies: ${socDeps}\n\n${socCfg.instructions}`;
+      }
+
+      case 'generate_ngo': {
+        // Breadth recipe (domain vertical) — NGO / donations (server/ngo/): a real NgoService with GAPLESS,
+        // unique 80G-style receipt numbers per Indian financial year, campaign totals DERIVED from
+        // donations (a closed campaign takes none), and an append-only ledger. Pure gen in NgoGenerator.ts.
+        const ngoCfg = generateNgoIntegration();
+        const ngoWritten: string[] = [];
+        for (const [path, content] of Object.entries(ngoCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ngoWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('ngo starter');
+        const ngoDeps = ngoCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an NGO / donation backend:\n${ngoWritten.join('\n')}\nAdd the dependencies: ${ngoDeps}\n\n${ngoCfg.instructions}`;
+      }
+
+      case 'generate_field_service': {
+        // Breadth recipe (domain vertical) — Field-service / dispatch (server/fieldservice/): a real
+        // FieldServiceService with a job STATE-MACHINE (assigned only via assign()), a ONE-ACTIVE-JOB-per-
+        // technician guarantee (busy assign → 409), and an append-only history. Pure gen in FieldServiceGenerator.ts.
+        const fsCfg = generateFieldServiceIntegration();
+        const fsWritten: string[] = [];
+        for (const [path, content] of Object.entries(fsCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          fsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('field-service starter');
+        const fsDeps = fsCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a field-service / dispatch backend:\n${fsWritten.join('\n')}\nAdd the dependencies: ${fsDeps}\n\n${fsCfg.instructions}`;
+      }
+
+      case 'manage_dependency': {
+        // Add / remove / list a package in the project's package.json (ROADMAP §8C / minor 30). All the
+        // logic that can go wrong — a bad name reaching the manifest, malformed package.json, a duplicate
+        // across sections — lives in the pure, unit-tested packageEdit.ts. This only edits the manifest;
+        // the existing build/preview `npm install` picks the change up, so nothing is left half-installed.
+        const mdAction = typeof input.action === 'string' ? input.action : 'add';
+        const mdName = typeof input.name === 'string' ? input.name : '';
+        const mdVersion = typeof input.version === 'string' ? input.version : '';
+        let mdPkg: string;
+        try { mdPkg = await this.actuator.readFile(this.workspaceId, 'package.json'); }
+        catch { return 'manage_dependency: this project has no package.json yet — build the app first.'; }
+        if (mdAction === 'list') {
+          const deps = listDependencies(mdPkg);
+          return deps.length
+            ? `Dependencies (${deps.length}):\n${deps.map((d) => `  ${d.name}@${d.version} (${d.section})`).join('\n')}`
+            : 'No dependencies are declared in package.json yet.';
+        }
+        if (mdAction !== 'add' && mdAction !== 'remove') {
+          return 'manage_dependency: action must be "add", "remove" or "list".';
+        }
+        const mdResult = mdAction === 'remove' ? removeOneDependency(mdPkg, mdName) : addDependency(mdPkg, mdName, mdVersion);
+        if (!mdResult.ok) return `manage_dependency: ${mdResult.message}`;
+        if (mdResult.changed) {
+          await this.actuator.writeFile(this.workspaceId, 'package.json', mdResult.text);
+          this.state?.recordFileChange({ path: 'package.json', kind: 'modify' }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile('package.json', mdResult.text);
+          this.scheduleCheckpoint(`${mdAction} dependency ${mdName}`);
+        }
+        return mdResult.note;
+      }
+
       case 'generate_events': {
         // Breadth recipe (domain vertical) — events/RSVP (server/events/): a real EventService with CAPACITY
         // enforcement + a waitlist (auto-promote on cancel) + an Express router. Pure gen in EventsGenerator.ts.
@@ -7698,7 +7791,12 @@ export class ToolDispatcher {
         // best-effort so it can never break/block a working preview.
         await this.injectAppSignatureIntoIndexHtml();
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
-        return `Live preview published at ${url} (port ${port} verified UP)`;
+        // The url is handed to you (not withheld) because your OWN next steps need it — screenshot,
+        // curl, a browser check. It must never appear in your reply to the person: they already see
+        // the running app in their own Preview panel, and a copied sandbox address is a free, unmetered
+        // ticket onto NavBharatAI's bill for anyone it's forwarded to (see redactPreviewUrls, which
+        // strips it from your visible text as a backstop — but do not rely on that; do not print it).
+        return `Live preview published (port ${port} verified UP). Internal url for your own tool calls only, NEVER to be quoted in your reply to the user: ${url}`;
       }
 
       case 'task': {

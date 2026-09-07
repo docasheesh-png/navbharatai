@@ -44984,3 +44984,261 @@ reason recorded in place — the PROPERTY it protects (no-service AND a repo, no
 Gate: both `tsc` clean; FULL suite **1457 files / 19402 tests green**. AppKnowledgeBase updated in the
 same change (CLAUDE.md's rule) — both the DNS-collapse behaviour and the durable repo memory are new
 user-facing facts.
+---
+
+## 2026-09-06 — THE APP'S OWN TAB BAR WAS COVERING THE BOTTOM OF EVERY DIALOG (admin screenshot)
+
+**The report.** Building an app with v5, then Publish → connect a domain: the sheet "niche tak scroll
+nahi hota hai, vertical scroll ke bad bhi niche page crop ho raha hai, jisse button chupp jate hain."
+Plus the standing instruction: find every other place with the same problem and fix them all.
+
+**Root cause — the THIRD subtraction nobody had made.** The global mobile tab bar is `fixed bottom-0`
+at **z-150**. Every modal in the app declares a LOWER z-index, so the bar paints **over** them. The
+shared sheet geometry (`nb-sheet-overlay`, added 2026-08-23 for the *browser toolbar* version of this
+bug) subtracted the two things CSS can see for itself — the browser toolbar via `dvh`, the device
+home-indicator via `env()` — and stopped there. It never subtracted **our own bar**.
+
+Measured on the reported screen: overlay height `100dvh`, bottom padding `max(1rem, 0) = 16px`, card
+`max-height: 100%` → the card's bottom edge lands at `100dvh − 16px`, while the bar's top edge is at
+`100dvh − 56px`. **40px of the card sits under the bar on web/Android, ~56px on iOS.**
+
+**Why "just scroll down" could not save the user, which is the part that made it a functional bug
+rather than a cosmetic one:** the scroll container ends under the bar too. Scrolling to the very
+bottom of the sheet leaves those rows still covered, with no scroll left to give. The buttons were
+*unreachable*, not merely off-screen — exactly what the admin reported.
+
+**Why the stylesheet could not fix itself.** Whether the bar exists is a RUNTIME fact
+(`showsGlobalMobileNav` — device mode, focus mode, Code Studio, BotBuilder), not a media query. CSS
+cannot detect it, which is why the original author reached for `dvh`/`env()` and stopped. React now
+publishes it: `publishMobileNavHeight()` writes `--nb-bottom-nav` onto `<html>` from the **same
+boolean that renders the bar**, so the two cannot disagree. Written to `<html>`, not the app root,
+because dialogs that portal to `document.body` would not inherit it there.
+
+**The 50/50 half — why the problem was POSSIBLE at all.** This is the FOURTH drift of this one
+number: focus mode (a strip reserved for an absent bar), Code Studio (same), the iPhone home indicator
+(`pb-14` reserving the 3.5rem but not the inset), and now modal sheets. Each was fixed by hand at the
+site that broke. The class fix is that all four consumers now read ONE source — the boolean, the
+height constant, and the CSS variable derived from both — and the pairing is **machine-checked**
+rather than remembered:
+
+- `tests/sheetOverlayGeometry.test.ts` walks every `nb-sheet-overlay` in `src/`, parses the z-index
+  out of the same className, and asserts the invariant in both directions: **z < 150 ⟹ reserves**,
+  **z ≥ 150 ⟹ opts out** (`nb-sheet-over-nav`). A new dialog cannot get this wrong silently.
+- The same file forbids the hand-typed `calc(3.5rem + env(safe-area-inset-bottom, 0px))` anywhere in
+  `src/` — a rule `tests/ideMobile.test.ts` already enforced for `App.tsx` only. **It immediately
+  found a copy I had missed** (AgentV3Panel's mobile More sheet), which is the sibling hunt working.
+- **Reserving is the DEFAULT, opting out is explicit**, deliberately: a dialog that reserves when it
+  needn't loses 56px — visible and harmless; one that fails to reserve hides its own buttons — the
+  bug itself. The safe state is the one you get by doing nothing.
+
+**The sweep (every `fixed` anchored overlay in `src/`, audited by z-index):**
+- **11 dialogs on the shared geometry** fixed by the one CSS change — HostingChooser (the reported
+  one), AdminDashboard ×3, AgentV3Panel ×3, NavAppStore ×2, BotBuilder ×2.
+- **2 dialogs that paint ABOVE the bar** got the opt-out so they do not hold a dead strip:
+  AppModals' Vishwakarma modal (z-9999) and PublishCelebration (z-300, portaled).
+- **2 hand-rolled bottom sheets** never on the shared geometry, migrated: `HistoryPopup` (z-130) and
+  `DoseCalculator` (z-50). Their design heights (80% / 92%) are preserved but now pass through
+  `nb-sheet-partial`, which clamps them with `min(cap, 100%)` — unclamped, 92dvh exceeds the room
+  left on any phone under ~700px and, because these are bottom-anchored, the overflow was cut off
+  the **top**.
+- **1 hand-typed nav height** centralised (AgentV3Panel's More sheet, found by the new test).
+- Verified NOT at risk, so deliberately untouched: click-catchers and anchored popovers (they are not
+  bottom-reaching), every dialog at z ≥ 150 (the bar does not cover them), and all IDE dialogs
+  (Code Studio hides the bar, so the variable is `0px` there and the change is a no-op by
+  construction).
+
+**Gate:** `tsc --noEmit` clean; production build clean and the four CSS rules verified present in the
+emitted bundle; FULL suite **1456 files / 19380 tests green**. Verified to bite twice — reverting the
+padding fails the geometry test, and removing one opt-out fails the z-index pairing test by name.
+**Two pre-existing tests that pinned the OLD geometry were REWRITTEN, never deleted**, each keeping
+the property it protected (`HistoryPopup` still proves it never grows into a full page; the
+celebration test still proves the card scrolls and is capped) with the reason recorded in place.
+
+---
+
+## 2026-09-06 — Apple sign-in, reported "fir" (again): the reason was being read, but never USED
+
+**The report.** Admin screenshot, Safari on navbharatai.com: the Apple sign-in toast, filling the
+entire phone screen, ending in `error=invalid_client`.
+
+**First, the honest headline, unchanged from 2026-08-22: THIS SESSION CANNOT FIX APPLE LOGIN.** The
+four values live in Firebase Console → Authentication → Sign-in method → Apple, which no session can
+read or write. That remains an OPEN root cause (rule 6). What follows is the half that IS in our
+hands, and it is not nothing — it is the reason a second round of "check all four" was never going to
+end this either.
+
+**What the screenshot proves, and what it rules out.** Reaching Apple's `/auth/token` at all means
+every earlier leg works: Apple accepted the login, the return landed on our handler, a code came back.
+`invalid_client` is Apple's documented answer for *the client authentication failed* — the Services ID
+plus the client-secret JWT signed from Team ID / Key ID / .p8. A wrong Return URL or a spent code
+produces `invalid_grant` instead, a different portal entirely. So the Return URL, the
+domain-association file and the browser are all RULED OUT by this one token.
+
+**The defect in our code.** Since #2579 the detail has carried Apple's own reason. **Nothing read it**
+— verified by grep: `invalid_client` appeared nowhere in `src/` outside tests. The message therefore
+gave the same "check ALL of: Services ID, Team ID, Key ID, .p8" for every cause at that step, which
+is (a) not narrowed by evidence we already had, and (b) demonstrably insufficient, since that exact
+advice has now been followed and reported as still-failing twice.
+
+**Fixed three things, all inside `socialSignInPolicy.ts`:**
+
+1. **The reason now narrows the advice.** `appleTokenExchangeFault()` classifies Apple's own error:
+   `invalid_client` → the credential quartet, and say what that rules out; `invalid_grant` → the
+   Apple Developer portal's Return URLs, explicitly NOT the four values; anything unrecognised → the
+   original unnarrowed advice, because guessing a portal is the failure being prevented. It only
+   claims to know when the detail genuinely names `appleid.apple.com`.
+
+2. **The two traps that re-reading four values cannot reveal**, now named — this is the actual new
+   information after two failed rounds: a **.p8 downloads only ONCE**, so a re-created key leaves the
+   old file no longer matching its Key ID while all four fields still *look* right; and the key and
+   the Services ID must be in the **same Apple team**, with the Services ID grouped under the key's
+   primary App ID.
+
+3. **The toast is readable again.** The raw reason arrived with ~700 characters of
+   `httpMetadata{status, cachePolicy, staleWhileRevalidate, crossOriginEmbedderPolicy, varyHeaderNames,
+   cookieList…}` — byte-identical on every failure, carrying no information, and it had pushed the one
+   line that matters out of a message that already overflowed the screen. `condenseProviderDetail()`
+   TRUNCATES at that boundary and never rewords, so what is shown is still Apple's own text and cannot
+   become a paraphrase that says something the server did not. Net message length **1230 → 984 chars**,
+   with the signal now visible.
+
+**Also corrected: who this message is written for.** It is rendered by a `addToast` for a **signed-out**
+visitor, so it cannot be gated on admin identity — every user who tries Apple sign-in was reading a
+Java-shaped debug dump and a Firebase Console instruction they cannot act on. The user's half now
+leads, is short, and says the two things they need: it is our fault, not theirs, and Google or email
+works right now. The admin's half follows, because a phone has no console and this toast is
+deliberately the only readable surface for that reason (2026-08-21) — undoing that would reverse a
+decision made from a real debugging session.
+
+**Gate:** `tsc --noEmit` clean; FULL suite **1456 files / 19391 tests green**. Verified to bite
+(removing the `invalid_client` branch fails two tests by name). Truncation is locked as a **prefix**
+of the original, so it can never gain words the server did not send.
+
+---
+
+## 2026-09-07 — 🎯 THE PUBLISH CEILING IS REMOVED, not merely visible (ROADMAP §10.3 step 4)
+
+**The admin's instruction was exact, and it named the gap I had just admitted:** *"Bucket ON karne se
+channel-cap ceiling nahi hatta — wo abhi bhi ~50 channels/site pe atkega, chahe bucket ho ya na ho.
+isko fix karo! channel-cap ceilling badhao!!"*
+
+**How that gap came to be stated at all is the honest part of this entry.** While writing the §10.3
+activation guide I told the admin that switching the bucket on "activates the scaling fix". Verifying
+it against `Deployment.ts` before the guide shipped showed the opposite: `deployStatic` calls
+`ensureChannel` unconditionally and the mirror runs AFTER the release, so a mirrored publish consumes a
+channel exactly like an unmirrored one. I corrected it to the admin in the same session rather than
+letting a wrong premise reach the console — and that correction is what produced this task.
+
+### What was actually wrong
+
+Steps 2 and 3 of §10.3 (server mirror + Worker bucket-first) made published apps **cheaper and faster
+to serve**. Neither made them **roomier**. The channel POOL is the finite thing, and serving a channel
+from a nearer origin does not un-consume it. The pool exhausted at the same app count either way.
+
+### The fix: stop asking Firebase for a channel
+
+`PUBLISHED_APPS_BUCKET_ONLY=on` makes `deployStatic` mirror to Cloud Storage FIRST and return the bucket
+URL — Firebase is never called, no channel exists, and there is no per-site cap to reach. The ceiling
+does not move up; it stops existing, because an object store has no channel concept.
+
+- **`src/server/AgentV3/bucketOnlyPublish.ts`** (new, pure) — subdomain derivation, the three-way
+  enable predicate, URL construction, and the mirror-completeness bar. 14 tests.
+- **`Deployment.ts`** — the branch sits BEFORE `authHeaders()`, i.e. before any Firebase call. A
+  source-lock test pins that ordering, because if it ever moved after `ensureChannel` the app would
+  still serve from the bucket while quietly holding a slot: the exact "looks fixed, is not" state §10.3
+  already had once.
+
+### Four decisions worth not re-deriving
+
+1. **Three preconditions, ANDed, not warned about.** `PUBLISHED_APPS_BUCKET` + `PUBLISHED_APP_DOMAIN` +
+   the explicit opt-in. The middle one is the one that is easy to miss and fatal to skip: the default
+   published host is Firebase's own `<site>--<sub>.web.app`, which resolves **because** the channel
+   exists. Skipping the channel with no branded domain configured hands the user a link to a host that
+   was never created — and the server cannot detect that, because the publish reports success either
+   way. Refusing the path is the only outcome that cannot mislead.
+2. **Our own subdomain namespace, disjoint by construction.** `a-<sha256(workspaceId)[:24]>`. Every
+   channel id this platform makes starts with `v3-`, so a collision with a Firebase-derived `<sub>` is
+   structurally impossible rather than unlikely — one app can never be served another's files. A
+   contract test imports the REAL `makeChannelId` rather than restating the rule.
+3. **A partial mirror falls back to Firebase.** With the channel skipped there is no second origin to
+   cover for a missing chunk, and a missing chunk is a blank page. Falling through costs a slot; handing
+   the user a broken app costs the user.
+4. **A takedown bug was found and fixed before it could ship.** A bucket-only app has no channel, so the
+   existing cleanup — which keys off the channel's host — could never find it: unpublish would have
+   reported success while the app stayed LIVE. `deleteChannel` now removes the bucket objects
+   unconditionally, NOT behind the flag, so an app published while the flag was on stays removable after
+   it is turned off. This is exactly the "reports removed, is not removed" class §10.4(b) already cost
+   us once.
+
+Bucket-only apps are correctly invisible to the Publish Capacity panel — `classifyChannels` iterates
+Firebase's channel list, and these have no channel. No change needed there, verified rather than assumed.
+
+**Activation order (in `CLAUDE.md`, because getting it wrong hands users dead links):** bucket
+public-readable → Worker `APPS_BUCKET` set and deployed → `PUBLISHED_APP_DOMAIN` set and a test app
+confirmed loading → **only then** `PUBLISHED_APPS_BUCKET_ONLY=on`. Unset ⇒ byte-identical to today;
+reverting is one key.
+
+---
+
+## 2026-09-07 — the publish ceiling now ALERTS, and a six-hour silence in the alerting itself is fixed
+
+ROADMAP §10.3 step 1 named its own follow-on: *"the dashboard is only seen when the admin looks. A
+push/email alert at 'warn' … is the cheap follow-on that makes it genuinely unmissable."* Done — and it
+turned up a bug in the alerting machinery that was costing every alert, not just this one.
+
+### 1 · The capacity alert
+
+`publishCapacityAlert()` turns the existing Publish Capacity verdict into a `MetricAlert` that rides the
+EXISTING `monitor-alerts` sweep (registered in `server.ts`, every 15 minutes) into the admin's
+notification bell and email. No second delivery path — the sweep's own header explains why that would
+mean a second set of dedupe bugs.
+
+**A skipped or failed probe must never look like a recovery — that is the whole design.** Reading the
+inventory costs a Hosting API call plus a 500-record Firestore read, so probing on every 15-minute sweep
+in every live instance was not acceptable. But in this alerting model an alert ABSENT from a sweep is
+treated as RESOLVED and sends a green all-clear, so simply skipping the probe would announce "publish
+capacity is back within its normal range" without measuring anything — at the moment the number is least
+trustworthy. So `publishCapacityAlerts.ts` caches the last **successful** probe and re-emits it unchanged
+until another probe succeeds. Only a measurement that actually saw the ceiling clear can clear the alert.
+A failed probe does not even reset the cache's timestamp — it is not a measurement, so it must not buy
+itself another quiet hour.
+
+The accepted cost, stated rather than left to be discovered: if probes fail indefinitely after a warning,
+the warning persists. That is the correct side to fail on — a stuck warning is visibly wrong and prompts
+a look; a false all-clear is invisibly wrong and stops anyone looking.
+
+### 2 · 🔴 The bug this uncovered: an escalation was silent for six hours
+
+`decideAlertActions` keyed purely on the alert **id**. So an alert announced as a `warning` that then
+became `critical` was "already announced, still inside the quiet period" and said nothing for the rest of
+the cooldown — **six hours by default**, in exactly the window where the admin most needs to hear from
+us. Nothing failed and nothing looked wrong; the condition WAS firing, we had simply already mentioned a
+milder version of it.
+
+This was not hypothetical or specific to capacity: **`slow-builds` has had both severities since it was
+written** (10-minute warning, 20-minute critical), so builds could go from 11 minutes to half an hour
+with the admin hearing nothing.
+
+Fixed at the class level, in the shared decision function rather than at one call site:
+
+- An **upward** severity change breaks the cooldown and notifies immediately.
+- **Once per episode.** `AlertStateEntry.severity` records the highest severity *announced*, not the last
+  one *observed* — so a condition sitting on the threshold cannot notify on every crossing, which is the
+  flapping noise this module exists to prevent.
+- A **de-escalation** stays quiet. "Still bad, slightly less bad" is not worth interrupting for.
+- **A legacy entry with no recorded severity is not read as an escalation.** Reading "unknown" as "was a
+  warning" would have made every currently-critical alert re-announce itself on the first sweep after
+  deploy — a notification burst caused by shipping, about nothing that changed. The quiet branch
+  backfills the field instead, so genuine escalations are caught from the next sweep onwards.
+
+### 3 · A correction worth recording, because I stated it before checking properly
+
+Mid-task I concluded — and said so — that `runMonitorAlertSweep` had **no caller anywhere** and the whole
+alert delivery path was dead code. That was wrong. It is registered in **`server.ts`**, which sits at the
+repo root, not under `src/`, and my grep was scoped to `src/`. The sweep has been running all along.
+
+The lesson is the one this repo already records about capped search output, in a second form: **a
+conclusion is only as wide as the search that produced it, and "I searched the code" is not the same as
+"I searched all of it".** For an existence question about wiring, the entry point must be in scope.
+
+**Gate:** `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · full suite green.

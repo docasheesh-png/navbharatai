@@ -177,7 +177,9 @@ export function AppModals({
       {/* Agent Vishwakarma Premium Access Modal */}
       <AnimatePresence>
         {showVishwakarmaUnlockModal && (
-          <div className="nb-sheet-overlay fixed inset-0 bg-[#0d1117]/95 backdrop-blur-md flex items-start md:items-center justify-center p-3 pt-24 md:pt-4 z-[9999] overflow-y-auto modal-scroll-lock">
+          // `nb-sheet-over-nav`: z-9999 is above the global tab bar's z-150, so this modal covers the
+          // bar rather than sitting under it, and must not reserve a strip for it.
+          <div className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 bg-[#0d1117]/95 backdrop-blur-md flex items-start md:items-center justify-center p-3 pt-24 md:pt-4 z-[9999] overflow-y-auto modal-scroll-lock">
             <motion.div
               initial={{ scale: 0.96, y: 15, opacity: 0 }}
               animate={{ scale: 1, y: 0, opacity: 1 }}

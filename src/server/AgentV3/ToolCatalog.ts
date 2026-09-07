@@ -1381,6 +1381,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_ngo',
+      description:
+        'Add a real NGO / donation-management backend to the app (server/ngo/) — a packaged India-first ' +
+        'domain vertical for non-profits and fundraisers. THREE real guarantees: (1) GAPLESS, UNIQUE ' +
+        'RECEIPT NUMBERS per Indian financial year (Apr–Mar), e.g. FY2024-25/0001 — an 80G receipt series ' +
+        'must have no gaps or duplicates, so the number is minted from a per-FY counter, never reused; ' +
+        '(2) a campaign\'s RAISED amount is DERIVED (the exact sum of its donations, never a stored field) ' +
+        'and a CLOSED campaign takes no donations (409); (3) APPEND-ONLY donation ledger. Emits a ' +
+        'dependency-free NgoService (addDonor, createCampaign, closeCampaign, donate, raisedFor, ' +
+        'donationsFor, receiptFor, totalRaised) + an Express router + a README. In-memory by default — ' +
+        'swap the Maps for your DB. Use for NGO / donation / fundraiser / 80G / charity prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'manage_dependency',
       description:
         "Add, remove, or list an npm package in the project's package.json — use it when the user asks to " +
@@ -3299,6 +3313,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_invoicing',
   'generate_helpdesk',
   'generate_society',
+  'generate_ngo',
   'manage_dependency',
   'generate_events',
   'generate_subscriptions',

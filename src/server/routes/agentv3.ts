@@ -222,6 +222,11 @@ import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } fr
 import { repoAvailableForDeploy, resolveDeployRepo } from '../AgentV3/deployRepoMemory';
 import { decidePushBranch } from '../AgentV3/pushAppTarget';
 import { hostingAvailability, hostAppOnNavBharatCloud } from '../AgentV3/hostApp';
+import { appsProject, serviceNameFor } from '../AgentV3/cloudRunHosting';
+import { readHostingUsage, usageGapNote } from '../AgentV3/hostingUsage';
+import {
+  hostingCostUsd, hostingBillableUsd, hostingBillingEnabled, hostingMarkupPct, hostingCostNote,
+} from '../AgentV3/hostingCost';
 // ADC for the apps project — on Cloud Run the service identity is used automatically, exactly as
 // Deployment.ts does for Firebase Hosting.
 import { GoogleAuth } from 'google-auth-library';
@@ -4281,6 +4286,73 @@ async function noteBuildOutcome(
       });
     } catch (e) {
       res.status(502).json({ ok: false, reason: 'deploy-failed', error: `Hosting failed: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  });
+
+  /**
+   * WHAT DID THIS HOSTED APP USE, AND WHAT WOULD IT COST? (ROADMAP §11, slice 2. Admin-only.)
+   *
+   * 🔴 WHY THIS EXISTS BEFORE THE CHARGING DOES. D5 sets hosting at real cost + 20%, and ROADMAP's own
+   * cost plan closes with the rule that "a saving nobody measured is a story, not a saving" — every
+   * money change should be preceded by a look at real numbers and followed by another. So this route
+   * ships FIRST: it reads what a real app actually used and reports what it WOULD be billed, with
+   * `NAVBHARAT_BILL_HOSTING` still off and nobody's wallet touched. Flipping that switch is then a
+   * decision made against measurements rather than against a plan.
+   *
+   * 🔒 ADMIN-ONLY, AND HONEST ABOUT ITS GAPS. Two different kinds of hole are reported separately and
+   * neither is allowed to look like zero: `unmeasured` is usage we could not read from Google, and
+   * `unbilled` is usage we read but have no admin-set rate for. Both under-bill, which is the safe
+   * direction — the billing law permits absorbing our own cost and never permits charging for
+   * something we did not observe.
+   */
+  app.post('/api/agentv3/host-usage', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    const { userId, email } = await resolveReadIdentity(req);
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    // Cost figures are OUR infrastructure spend, which the white-label law keeps admin-side. A user
+    // never sees a provider line item — they see the wallet, once slice 2c debits it.
+    if (!isReportAdmin(email)) { res.status(403).json({ error: 'Not available for this account.' }); return; }
+
+    const gate = hostingAvailability({ isAdmin: true });
+    if (!gate.available) { res.status(503).json({ ok: false, error: gate.message }); return; }
+
+    try {
+      const project = appsProject();
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const token = await auth.getAccessToken().catch(() => null);
+      if (!token) { res.status(503).json({ ok: false, error: 'Could not authenticate with Google Cloud just now.' }); return; }
+
+      const hours = Math.min(720, Math.max(1, Number(req.body?.hours) || 24));
+      const endIso = new Date().toISOString();
+      const startIso = new Date(Date.now() - hours * 3600_000).toISOString();
+      const rec = await getConversationStore().get(workspaceId).catch(() => null);
+      const serviceName = serviceNameFor(workspaceId, rec?.appName || rec?.title || null);
+
+      const measured = await readHostingUsage({
+        token: String(token),
+        projectId: String(project.projectId),
+        serviceName,
+        startIso,
+        endIso,
+        buildMinutes: Number(req.body?.buildMinutes) || 0,
+      });
+      const cost = hostingCostUsd(measured.usage);
+      res.json({
+        ok: true,
+        service: serviceName,
+        window: { startIso, endIso, hours },
+        usage: measured.usage,
+        cost: cost.usd,
+        lines: cost.lines,
+        wouldBill: hostingBillableUsd(cost),
+        markupPct: hostingMarkupPct(),
+        billingOn: hostingBillingEnabled(),
+        note: `${hostingCostNote(cost)} ${usageGapNote(measured)}`.trim(),
+      });
+    } catch (e) {
+      res.status(502).json({ ok: false, error: `Could not read hosting usage: ${e instanceof Error ? e.message : String(e)}` });
     }
   });
 

@@ -14,6 +14,7 @@
 
 import { makeChannelId, channelIdFromResourceName, isChannelQuotaError, HOSTING_FULL_MESSAGE } from './Deployment';
 import { isLiveDeployment, type DeploymentRecord } from './DeploymentStore';
+import type { MetricAlert } from '../lib/metricsAlerts';
 
 // Re-exported so callers reasoning about the ceiling have one import, not two. All three are DEFINED
 // in Deployment.ts because they describe the Hosting API's resource and failure shapes, which is that
@@ -164,4 +165,48 @@ export function channelCeilingVerdict(
       ? `Hosting channels are filling up: ${used} of about ${cap} in use.${reclaimNote}`
       : `${used} of about ${cap} hosting channels in use.${reclaimNote}`;
   return { used, cap, remaining, reclaimable, level, message };
+}
+
+/**
+ * THE ALERT — because the Publish Capacity panel is only seen when the admin happens to look.
+ *
+ * ROADMAP §10.3 step 1 named this as its own follow-on and said why: the panel makes the ceiling
+ * visible, but visible is not the same as *noticed*. The whole failure mode here is that publishing
+ * stops for EVERY user at once, with nothing in the product hinting it was coming — so a warning that
+ * requires someone to already be worried enough to open the right screen is not really a warning.
+ *
+ * 🔒 IT ONLY EVER SPEAKS ABOUT A NUMBER IT ACTUALLY READ. Returns null at 'ok', so a healthy platform
+ * is silent. The caller must also return null when the inventory could not be read at all — "we cannot
+ * see the channel list" is not "the platform is full", and inventing an alert out of a failed read is
+ * the same dishonesty as drawing a zero line over a dead feed.
+ *
+ * ⚠️ A KNOWN, DELIBERATE BLIND SPOT: when Firebase's channel list is read only partially, `used` is an
+ * UNDER-count, so the verdict can read 'ok' while the real number is past the threshold. That direction
+ * is the safe one — a partial read can miss an alarm but can never invent one — and the panel carries
+ * the completeness warning for the admin who is looking. It is stated here so a later reader does not
+ * mistake silence for proof.
+ *
+ * Pure.
+ */
+export function publishCapacityAlert(verdict: CeilingVerdict): MetricAlert | null {
+  if (verdict.level === 'ok') return null;
+  const reclaimHint = verdict.reclaimable > 0
+    ? ` ${verdict.reclaimable} can be reclaimed right now in Admin → Overview → Publish Capacity.`
+    : '';
+  return {
+    // ONE id across both severities, deliberately. Two ids ('…-warn' / '…-critical') would make an
+    // escalation look like one condition RECOVERING while another appeared — the admin would get a
+    // green all-clear at the exact moment things got worse. The sweep announces the escalation
+    // instead, because `decideAlertActions` breaks its cooldown when severity rises.
+    id: 'publish-capacity',
+    severity: verdict.level === 'critical' ? 'critical' : 'warning',
+    message: verdict.level === 'critical'
+      ? `Publishing is close to stopping for EVERY user: ${verdict.used} of about ${verdict.cap} hosting `
+        + `channels are in use, ${verdict.remaining} left.${reclaimHint}`
+      : `Hosting channels are filling up: ${verdict.used} of about ${verdict.cap} in use, `
+        + `${verdict.remaining} left.${reclaimHint}`,
+    metric: 'hosting.channelsUsed',
+    value: verdict.used,
+    threshold: verdict.cap,
+  };
 }

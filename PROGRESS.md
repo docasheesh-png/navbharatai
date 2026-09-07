@@ -45058,3 +45058,68 @@ Firebase's channel list, and these have no channel. No change needed there, veri
 public-readable → Worker `APPS_BUCKET` set and deployed → `PUBLISHED_APP_DOMAIN` set and a test app
 confirmed loading → **only then** `PUBLISHED_APPS_BUCKET_ONLY=on`. Unset ⇒ byte-identical to today;
 reverting is one key.
+
+---
+
+## 2026-09-07 — the publish ceiling now ALERTS, and a six-hour silence in the alerting itself is fixed
+
+ROADMAP §10.3 step 1 named its own follow-on: *"the dashboard is only seen when the admin looks. A
+push/email alert at 'warn' … is the cheap follow-on that makes it genuinely unmissable."* Done — and it
+turned up a bug in the alerting machinery that was costing every alert, not just this one.
+
+### 1 · The capacity alert
+
+`publishCapacityAlert()` turns the existing Publish Capacity verdict into a `MetricAlert` that rides the
+EXISTING `monitor-alerts` sweep (registered in `server.ts`, every 15 minutes) into the admin's
+notification bell and email. No second delivery path — the sweep's own header explains why that would
+mean a second set of dedupe bugs.
+
+**A skipped or failed probe must never look like a recovery — that is the whole design.** Reading the
+inventory costs a Hosting API call plus a 500-record Firestore read, so probing on every 15-minute sweep
+in every live instance was not acceptable. But in this alerting model an alert ABSENT from a sweep is
+treated as RESOLVED and sends a green all-clear, so simply skipping the probe would announce "publish
+capacity is back within its normal range" without measuring anything — at the moment the number is least
+trustworthy. So `publishCapacityAlerts.ts` caches the last **successful** probe and re-emits it unchanged
+until another probe succeeds. Only a measurement that actually saw the ceiling clear can clear the alert.
+A failed probe does not even reset the cache's timestamp — it is not a measurement, so it must not buy
+itself another quiet hour.
+
+The accepted cost, stated rather than left to be discovered: if probes fail indefinitely after a warning,
+the warning persists. That is the correct side to fail on — a stuck warning is visibly wrong and prompts
+a look; a false all-clear is invisibly wrong and stops anyone looking.
+
+### 2 · 🔴 The bug this uncovered: an escalation was silent for six hours
+
+`decideAlertActions` keyed purely on the alert **id**. So an alert announced as a `warning` that then
+became `critical` was "already announced, still inside the quiet period" and said nothing for the rest of
+the cooldown — **six hours by default**, in exactly the window where the admin most needs to hear from
+us. Nothing failed and nothing looked wrong; the condition WAS firing, we had simply already mentioned a
+milder version of it.
+
+This was not hypothetical or specific to capacity: **`slow-builds` has had both severities since it was
+written** (10-minute warning, 20-minute critical), so builds could go from 11 minutes to half an hour
+with the admin hearing nothing.
+
+Fixed at the class level, in the shared decision function rather than at one call site:
+
+- An **upward** severity change breaks the cooldown and notifies immediately.
+- **Once per episode.** `AlertStateEntry.severity` records the highest severity *announced*, not the last
+  one *observed* — so a condition sitting on the threshold cannot notify on every crossing, which is the
+  flapping noise this module exists to prevent.
+- A **de-escalation** stays quiet. "Still bad, slightly less bad" is not worth interrupting for.
+- **A legacy entry with no recorded severity is not read as an escalation.** Reading "unknown" as "was a
+  warning" would have made every currently-critical alert re-announce itself on the first sweep after
+  deploy — a notification burst caused by shipping, about nothing that changed. The quiet branch
+  backfills the field instead, so genuine escalations are caught from the next sweep onwards.
+
+### 3 · A correction worth recording, because I stated it before checking properly
+
+Mid-task I concluded — and said so — that `runMonitorAlertSweep` had **no caller anywhere** and the whole
+alert delivery path was dead code. That was wrong. It is registered in **`server.ts`**, which sits at the
+repo root, not under `src/`, and my grep was scoped to `src/`. The sweep has been running all along.
+
+The lesson is the one this repo already records about capped search output, in a second form: **a
+conclusion is only as wide as the search that produced it, and "I searched the code" is not the same as
+"I searched all of it".** For an existence question about wiring, the entry point must be in scope.
+
+**Gate:** `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · full suite green.

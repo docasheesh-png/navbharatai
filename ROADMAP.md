@@ -750,9 +750,29 @@ near 36.
      iterates Firebase's channel list, and these have no channel.
 5. Migrate existing channels lazily (on next publish), then reclaim them.
 
-**Next step after this, if the panel ever shows warn/critical:** the dashboard is only seen when the
-admin looks. A push/email alert at 'warn' (the alerting path already exists — `metricsAlerts.ts`) is
-the cheap follow-on that makes it genuinely unmissable.
+✅ **DONE 2026-09-07 — the panel no longer has to be looked at.** This step named its own follow-on:
+the dashboard is only seen when the admin opens it, which is not monitoring. `publishCapacityAlert()`
+now turns the same verdict into a real alert that rides the EXISTING sweep (`monitor-alerts`, every 15
+minutes) into the admin's notification bell and email — no second delivery path, so no second set of
+dedupe bugs.
+
+Two things in it are worth not re-deriving:
+
+- **A skipped or failed probe must never look like a recovery.** Reading the inventory costs a Hosting
+  API call plus a 500-record Firestore read, so the probe runs on its own hourly cadence rather than
+  every sweep — but in this alerting model an alert ABSENT from a sweep is treated as RESOLVED and
+  sends a green all-clear. So the cache holds the last **successful** probe and re-emits it unchanged
+  until another probe succeeds. Only a measurement that actually saw the ceiling clear can clear the
+  alert. (`publishCapacityAlerts.ts`; the accepted cost is that a warning persists if probes keep
+  failing — a stuck warning is visibly wrong, a false all-clear is invisibly wrong.)
+- **A pre-existing bug had to be fixed for this to work at all:** `decideAlertActions` keyed only on
+  the alert id, so an alert announced as a *warning* that became *critical* stayed silent for the rest
+  of its cooldown — six hours by default. That is the window in which the admin most needs to hear
+  from us. It now breaks the cooldown on an upward severity change, once per episode (never on a
+  de-escalation, so a condition sitting on the threshold cannot flap). This also fixes `slow-builds`,
+  which has had both severities since it was written.
+
+Kill switch `MONITOR_CAPACITY_ALERTS=off`; probe cadence `MONITOR_CAPACITY_PROBE_MINUTES` (60).
 
 ### 10.4 · Two findings from wiring the 5-app free limit (2026-08-21)
 

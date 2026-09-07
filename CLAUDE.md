@@ -478,6 +478,28 @@ the code (it is actually read somewhere) on 2026-07-11.
   change how the app behaves. This directly addresses the "1 vulnerable dep(s)" advisory seen on real game
   builds. When OFF (default), a build that ships with high/critical vulns says so honestly and points at
   this flag; when ON, the compatible fixes are applied automatically before ship. Never blocks a build.
+- **Adversarial robustness testing — NOW LIVE (admin SET in Cloud Run 2026-09-07):** ✅
+  **`AGENTV3_REDTEAM=on`** turns on the RED-TEAM pass (`FuzzProbe.ts`; Immune System Phase 3 / GA-17).
+  After a build renders, it drives a real browser to type HOSTILE values into the app's OWN inputs —
+  empty, oversized, injection-shaped, malformed numbers — and watches for a CRASH (uncaught error,
+  React error boundary, unhandled rejection), recorded as a `FUZZ_ROBUSTNESS` finding.
+  **WHY IT WAS WORTH TURNING ON: the happy-path preview check only ever proves the app renders on GOOD
+  input.** A crash on hostile input is a real bug that reaches the user and that no other gate looks
+  for. The rest of the post-build suite reads code or checks that the app loads; this is the only one
+  that tries to break it.
+  **It costs no model call.** The fuzzing is browser automation, so a clean build pays nothing extra —
+  which is why it was the one flag recommended while the admin was asking to REDUCE spend, and why
+  `AGENTV3_REVIEW_FASTLANE` was recommended AGAINST in the same breath (that one adds 3-6 model calls
+  and 30-90s to every simple build, for a reviewer that already runs on the complex ones where it earns
+  its keep). Bounded by construction: **12 cases max, 90-second wall clock**, abortable, and skipped
+  entirely unless ≥2 minutes of build budget remain. It can never block, fail or hang a build.
+  ⚠️ **REPAIR IS A SEPARATE, ALREADY-ON SWITCH.** The red-team only RECORDS findings on its own; the
+  bounded repair pass that hardens them rides `AGENTV3_FEATURE_HEAL`, which is `on` at
+  `AGENTV3_FEATURE_HEAL_PCT=20`. So today ~20% of builds get the fix and the rest get an honest
+  finding. Widening the heal percentage therefore widens this too — one number, two behaviours, same
+  as the vaccine repair budget noted in that flag's own entry.
+  **What to watch:** `FUZZ_ROBUSTNESS` findings in the admin build report. A build that suddenly takes
+  ~90s longer at the very end is this pass; unset the key to revert instantly.
 - **Payment recovery (shipped 2026-08-04):** `PAYMENT_RECONCILE_MIN_AGE_MINUTES` (2),
   `PAYMENT_RECONCILE_MAX_AGE_DAYS` (7), `PAYMENT_RECONCILE_MAX_ORDERS` (5). On sign-in the server settles
   the user's own unfinished orders against Cashfree. ⚠️ CORRECTION 2026-08-10: this entry used to say
@@ -1057,12 +1079,29 @@ same way a green Cloud Run deploy is — it is not optional cleanup.
 
 **Honest boundaries (rule 6 — what Claude CAN and CANNOT do here):**
 - Claude CAN trigger the workflow and confirm it goes green.
-- ⛔ **ORGANIZATION DEVELOPER ACCOUNT (D-U-N-S) — DEFERRED, do NOT start it (admin 2026-08-26: "yeh baad
-  me karenge jab user badhenge").** The full, verified conversion guide lives in `MOBILE_PUBLISHING.md` §10
-  — including the finding that the EXISTING account converts in place (no new account, no app transfer),
-  the four easy-to-miss traps, and the fact that this is the ONLY thing that brings Doctor AI, Pharmacist,
-  First Aid and Maternity back to the Play app. §10.6 records the separate (also deferred) HPR/ABDM
-  doctor-verification plan. A session must not begin either without the admin asking.
+- 🟢 **ORGANIZATION DEVELOPER ACCOUNT (D-U-N-S) — STARTED. The admin asked for it on 2026-09-07
+  ("DUNS account banwao"), which lifts the earlier deferral** (admin 2026-08-26: "yeh baad me karenge jab
+  user badhenge"). The old ⛔ "do NOT start it" line stood here until that moment; it is replaced rather
+  than deleted so the change of instruction is legible, and so no session stalls on an order that has
+  been withdrawn. The full, verified conversion guide is `MOBILE_PUBLISHING.md` §10 — including the
+  finding that the EXISTING account converts in place (no new account, no app transfer), the four
+  easy-to-miss traps, and the fact that this is the ONLY thing that brings Doctor AI, Pharmacist, First
+  Aid and Maternity back to the Play app.
+  **What a session may do, and where the line is.** Almost all of this is admin work a session cannot
+  touch: registering a company, applying to Dun & Bradstreet, and every click in Play Console. A session
+  CAN do exactly one piece end to end — Track A's **HTML-file website verification**, because `public/`
+  is copied into `dist/` and both serving paths serve `dist/`, so a file committed there is live at
+  `https://navbharatai.com/<name>` on the next merge. Google issues that filename only AFTER the admin
+  presses *Send verification request*, so a session waits for the admin to hand it over; it cannot be
+  prepared in advance.
+  🔒 **THE ORDER IS A COMPLIANCE REQUIREMENT, NOT A PREFERENCE.** `MEDICAL_PROFESSIONAL_IDS` in
+  `src/lib/playCompliance.ts` may be touched ONLY after the org account is live AND the Health-apps
+  declaration is filed. Reversing that order is a deceptive-behaviour violation that can ban the whole
+  developer account — a far worse outcome than the rejected update it would be trying to fix.
+  ⚠️ **AND IT IS A ONE-WAY DOOR:** Google does not convert an organization account back to an individual
+  one. Going back would mean a brand-new account plus an app transfer.
+  §10.6 records the separate HPR/ABDM doctor-verification plan, which **remains deferred** — it is a
+  different thing that does NOT unlock the mobile app, and it must not be started without its own ask.
 - Claude CANNOT set/rotate the signing keystore secrets (`ANDROID_KEYSTORE_BASE64`,
   `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`) — that is a one-time
   admin setup (documented in the workflow header); the keystore is the app's permanent identity

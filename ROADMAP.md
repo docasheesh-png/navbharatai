@@ -70,8 +70,8 @@ what makes the flag *reviewable* if a real report ever turns against it.
 |---|---|---|
 | `AGENTV3_OBSERVABILITY_INJECT` | Adds a `/health` route to an Express app that lacks one. | ✅ **SAFE.** Purely additive, build-end, never blocks. It does modify the user's app — the only thing to be aware of. |
 | `AGENTV3_PRETTIER_GATE` | "N files need formatting" note on the summary. | ✅ Safe, advisory. **Lowest value on this page** — say no and lose nothing. |
-| `AGENTV3_REDTEAM` | Really attacks the built app's inputs, then hardens them. | ⚠️ **SAFE but COSTS MONEY.** Correctly routed (weak stays on GLM/Kimi, never Sonnet/Opus), well bounded (successful builds only, 12-case cap, needs ≥120s budget, abortable). But it is an extra LLM pass on **every successful build** — a money decision, not a technical one. |
-| `AGENTV3_REVIEW_FASTLANE` | Runs the reviewer on fast-lane builds that currently skip it. | ⚠️ **SAFE but COSTS MONEY** — same shape as `REDTEAM`. |
+| `AGENTV3_REDTEAM` | Really attacks the built app's inputs, then hardens them. | ✅ **LIVE — admin SET it `on` 2026-09-07.** ⚠️ **This row used to say "an extra LLM pass on EVERY successful build — a money decision", and that was WRONG.** The fuzz pass makes **no model call at all**: `FuzzProbe.ts` imports only `envFlag`, and the loop is browser automation (navigate / type / press / read console errors). A clean build therefore costs **nothing** extra. The LLM pass runs only when BOTH a crash was actually found AND the workspace is in the `AGENTV3_FEATURE_HEAL` cohort (20%) — so it is rare and self-limiting, not per-build. Bounded regardless: successful builds only, 12-case cap, 90s wall clock, needs ≥120s budget, abortable. |
+| `AGENTV3_REVIEW_FASTLANE` | Runs the reviewer on fast-lane builds that currently skip it. | ⚠️ **SAFE but genuinely COSTS MONEY — and NOT "the same shape as REDTEAM", which is how this row read while that comparison was false.** This one really does add **3-6 model calls and 30-90s to EVERY simple build**. Fast-lane builds already pass `tsc --noEmit` + CSS-consistency verify + repair, and the reviewer still runs on complex builds where it earns its keep. Recommended AGAINST while the admin is asking to reduce spend. |
 | `AGENTV3_ASK_USER` | The clarify card. | 👤 **Declined by the admin deliberately** — friction vs zero-UI. Not a task; do not re-propose. |
 | `AGENTV3_INLINE_BABEL` | — | 🚫 **A REVERSE kill switch. OFF is correct.** See the box below; it must never appear on a "turn these on" list. |
 
@@ -335,9 +335,20 @@ Claude cannot reach any of these. Ordered by urgency.
 > unmaintained for eight days telling the admin to redo finished work. **Corrected 2026-08-16.**
 
 The live state now lives in **one** place — `CLAUDE.md`'s env registry — and is mirrored in §0 above.
-There is no pending switch. The four genuinely-off flags are in §0's second table, and only two of them
-are real decisions (`REDTEAM` and `REVIEW_FASTLANE`, both "better quality for one more LLM pass per
-build" — a money call, not a technical one).
+There is no pending switch. The genuinely-off flags are in §0's second table.
+
+⚠️ **This paragraph used to lump `REDTEAM` and `REVIEW_FASTLANE` together as "both better quality for
+one more LLM pass per build — a money call". That summary was false for one of the two, and the error
+was load-bearing:** it is the line a session would quote when advising the admin, and it argued against
+the cheaper of the two flags on a cost that does not exist. `REDTEAM` costs **no model call** on a clean
+build (the fuzzing is browser automation; see its row above). `REVIEW_FASTLANE` really does add 3-6
+model calls to every simple build. Verified against `FuzzProbe.ts` and the red-team block in
+`routes/agentv3.ts` on 2026-09-07, and `REDTEAM` was turned on the same day *because* the real cost
+turned out to be nothing.
+
+**The general lesson, since this is the second time this table has misled:** a trade-off column is a
+CLAIM ABOUT CODE and decays exactly like the flag lists above it. Re-read the code before quoting one
+to the admin — a wrong cost estimate does not fail loudly, it just quietly prevents a good change.
 
 **The rule that keeps this true:** when the admin says they flipped a switch, the same session updates
 `CLAUDE.md`'s registry **and** §0 here. A flag list that lags reality does not merely go stale — it

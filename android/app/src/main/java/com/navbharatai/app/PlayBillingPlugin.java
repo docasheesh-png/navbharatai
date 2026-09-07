@@ -182,12 +182,19 @@ public class PlayBillingPlugin extends Plugin {
                                     .build()))
                     .build();
 
-            client().queryProductDetailsAsync(params, (result, productDetailsList) -> {
+            // v8.0.0 REPLACED the callback's second argument: it used to be a bare
+            // List<ProductDetails>, and is now a QueryProductDetailsResult that separates
+            // successfully-fetched products from ones Google could not fetch (with a reason each) —
+            // a real, checked source-breaking change (queried against the library's own class
+            // reference; it is not a formatting choice made here). getProductDetailsList() is the
+            // v7-equivalent list; getUnfetchedProductList() is new and worth the debug message below
+            // when it is the ONLY thing that came back, since that is precisely the shape of "the
+            // product id is not created (or not ACTIVE) in the Play Console" — the single most likely
+            // cause on a first run.
+            client().queryProductDetailsAsync(params, (result, queryResult) -> {
+                List<ProductDetails> productDetailsList = queryResult != null ? queryResult.getProductDetailsList() : null;
                 if (result.getResponseCode() != BillingClient.BillingResponseCode.OK
                         || productDetailsList == null || productDetailsList.isEmpty()) {
-                    // The single most likely cause on a first run: the product id is not created (or
-                    // not ACTIVE) in the Play Console. Say so rather than a bare "failed" — this is
-                    // the message that saves an afternoon.
                     call.resolve(status("failed", "product '" + productId
                             + "' not found in Play (is it created and active in the Play Console?): "
                             + result.getDebugMessage()));

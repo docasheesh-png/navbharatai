@@ -45345,3 +45345,52 @@ ONE pure rule gates the block, never a second ad-hoc condition — is unchanged 
 there is exactly one gate).
 
 Gate: both `tsc` clean; FULL suite **1468 files / 19568 tests green**. AppKnowledgeBase updated.
+---
+
+## 2026-09-07 — `AGENTV3_REDTEAM=on` is live, and the ROADMAP line that argued against it was wrong
+
+The admin set `AGENTV3_REDTEAM=on` in Cloud Run. Recorded in `CLAUDE.md`'s env registry per the
+hand-to-hand rule. What is worth keeping is *why* the recommendation went the way it did.
+
+### The correction
+
+`ROADMAP.md` §0 described this flag as **"an extra LLM pass on every successful build — a money
+decision"**, and grouped it with `AGENTV3_REVIEW_FASTLANE` as *"both better quality for one more LLM
+pass per build"*. Checked against the code while answering the admin, both statements are false for
+this flag:
+
+- **`FuzzProbe.ts` imports exactly one thing — `envFlag`.** There is no model client in it.
+- The red-team loop in `routes/agentv3.ts` is browser automation end to end: `browseUrl`,
+  `browserAction` (navigate / type / press), `getConsoleErrors`, then the deterministic
+  `interpretFuzzErrors`. **A clean build pays nothing extra.**
+- The one LLM call (`rtRunner.run(fuzzRepairPrompt(findings))`) is guarded by **two** conditions:
+  `findings.length > 0` — a crash was genuinely reproduced — **and** `featureHealEnabled(workspaceId)`,
+  the 20% cohort. That is rare and self-limiting, not per-build.
+
+`REVIEW_FASTLANE`, by contrast, really does add 3-6 model calls and 30-90s to **every** simple build,
+which is exactly why the fast lane skips the reviewer today. So the two flags are opposites, and the
+table said they were the same shape.
+
+### Why this mattered rather than being a tidy-up
+
+The admin had just asked to reduce spend. Quoting that row from memory would have argued against the
+one flag that is free and for treating both as equivalent — **a wrong cost estimate does not fail
+loudly; it quietly prevents a good change.** The flag went on because the code was read instead.
+
+Both the row and the summary paragraph are corrected, and the general lesson is written next to them:
+**a trade-off column is a claim about code and decays exactly like a flag list.** This is the second
+time this table has misled (the first, in August, told a session to redo finished work).
+
+### What the flag buys
+
+The happy-path preview check only proves an app renders on GOOD input. The red-team types hostile
+values into the app's own inputs — empty, oversized, injection-shaped, malformed numbers — and watches
+for a crash. It is the only post-build gate that tries to break the app rather than reading its code
+or checking that it loads. Findings appear as `FUZZ_ROBUSTNESS`; the ~20% heal cohort also gets them
+hardened, and the rest get an honest finding.
+
+Bounded by construction: 12 cases, 90-second wall clock, successful builds only, needs ≥2 minutes of
+remaining budget, abortable. It can never block, fail or hang a build. Reverting is unsetting the key.
+
+**Also merged today:** #2764 (the D-U-N-S conversion recorded as started, with the critical-path order
+and who holds each step).

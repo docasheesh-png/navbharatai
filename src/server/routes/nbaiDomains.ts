@@ -12,12 +12,13 @@ import {
   customDomainErrorMessage,
   sanitizeDomainErrorDetail,
   siteIdForWorkspace,
+  type CustomDomainStatus,
 } from '../lib/firebaseCustomDomain';
 import {
   linkWorkspaceDomain, firebaseDomainsForWorkspace, firebaseDomainLinksForUser,
   rememberDomainDnsRecords, getStoredDomainDnsRecords,
 } from '../lib/firebaseDomainLink';
-import { mergeStableRecords, dropForeignSiteTokens, type StableDnsRecord } from '../lib/domainDnsRecords';
+import { mergeStableRecords, dropForeignSiteTokens, recordsStillPending, type StableDnsRecord } from '../lib/domainDnsRecords';
 import {
   managedDnsConfigured, ensureZone, zoneStatus, applyRecords, sanitizeManagedDnsError,
   listZoneRecords, missingFromZone,
@@ -89,6 +90,180 @@ async function stableRecordsFor(
   }
 }
 
+/**
+ * ONE VERDICT FOR A DOMAIN, WHICHEVER ROUTE WAS ASKED (admin screenshots 2026-09-07, mitrify.com).
+ *
+ * 🔴 THE FLIP THIS ENDS. Two screenshots a minute apart, same domain: an amber *"Connected — but this
+ * app needs its server part deployed first"*, then a green *"Connected, with HTTPS … If it shows an
+ * error page, press Publish once"* — with a Publish button that, for this app, can only refuse. The
+ * second came from pressing Connect on an already-connected domain: the connect route answered with a
+ * BARE status (no `serving`, no `publishBlocked`, no `dnsCheck`), and the screen rendered that as if it
+ * were a verdict. Two routes, two shapes, one screen that trusted both.
+ *
+ * So the enrichment that turns a hosting-service status into something honest to show — the stable
+ * record view, the live DNS check, the serving probe, the backend-pointed verdict, the publish state
+ * and the "press Publish cannot help this app" note — lives HERE, once, and both routes return it.
+ * A screen can no longer receive two different truths about one domain depending on which button was
+ * pressed. Test-pinned: exactly one serving probe and one DNS check exist in this file.
+ */
+async function formDomainVerdict(
+  workspaceId: string,
+  host: string,
+  status: CustomDomainStatus,
+): Promise<CustomDomainStatus & Record<string, unknown>> {
+  const displayRecords = await stableRecordsFor(host, status.records, workspaceId);
+  // DID THE USER'S RECORDS ACTUALLY LAND? (admin 2026-08-21, mitrify.com.) The screen used to
+  // show one word from Firebase — `ownership: missing` — while every required record was live and
+  // byte-perfect in public DNS. That state is indistinguishable from "you typed it wrong", so a
+  // user who had done everything right kept editing correct records. We now look ourselves and
+  // say which of the three it is: wrong value (they fix it), not published yet (their registrar
+  // is still working), or correct and live (nothing left for them to do but wait for Firebase).
+  // Best-effort and bounded — a DNS hiccup must never turn a working status screen into an error.
+  const dnsCheck = await verifyRecordsLive(recordsStillPending(displayRecords)).catch(() => null);
+  // DOES THE DOMAIN ACTUALLY SHOW THE APP? (admin 2026-08-21, mitrify.com.) The screen said
+  // "Live! Your domain is connected, with HTTPS" while opening mitrify.com gave Firebase's "Site
+  // Not Found" — both true at once, because ownership/host/SSL describe DNS and a certificate,
+  // NOT whether anything was ever published to the site the domain points at. A domain connected
+  // AFTER the last publish points at an empty site. The only honest way to claim a domain is live
+  // is to OPEN it. Bounded, best-effort, and SSRF-guarded (the domain is user-supplied).
+  // 🔒 THE AUTHORITATIVE ANSWER FIRST. `siteHasRelease` asks FIREBASE whether anything was ever
+  // published to this app's site — no egress to the user's domain, and a site with zero releases
+  // has unambiguously never been published to. The HTTP fetch below stays as a SECOND opinion for
+  // everything a release count cannot see (a release exists but the page errors), but it must not
+  // be the only witness: it failed to reach mitrify.com and the screen printed "Live!" over a
+  // domain the admin was watching show "Site Not Found".
+  /**
+   * 🔴 A DOMAIN THAT MOVED TO THE BACKEND IS NOT "STILL CONNECTING" (admin 2026-09-07).
+   *
+   * `status.active` is the STATIC host's answer to "are MY records in place?". Once a backend
+   * deploy moves the domain to the running service those records are deliberately gone, so that
+   * answer is legitimately false while the site is legitimately LIVE. Letting it drive the verdict
+   * printed "still connecting" over a working domain — and worse, re-opened the setup block whose
+   * button would have taken the site down (see the sync route's guard).
+   *
+   * So for a backend-pointed domain the verdict comes from whether the domain ANSWERS, which is
+   * the question the user was asking all along.
+   */
+  const pointingRec = await getConversationStore().get(String(workspaceId)).catch(() => null);
+  const backendPointed = isBackendPointed(pointingRec, host);
+  let serving = (status.active || backendPointed) ? await checkDomainServing(host).catch(() => null) : null;
+  let everPublished: boolean | null = null;
+  if (backendPointed) {
+    const stage = backendPointedStage(host, serving);
+    return {
+      ...status,
+      // The domain genuinely works (or genuinely does not) on its own merits now — never on the
+      // static host's record check, which cannot see the service at all.
+      active: serving?.state === 'serving',
+      backendPointed: true,
+      backendStage: stage,
+      displayRecords: [],
+      serving,
+    };
+  }
+  if (status.active) {
+    everPublished = await siteHasRelease(workspaceId).catch(() => null);
+    if (everPublished === false) {
+      serving = {
+        state: 'nothing_published',
+        status: serving?.status ?? 0,
+        note: 'Your domain is connected, but this app has never been published to it — opening it '
+          + 'shows an error page. Press Publish once and your domain will start showing your app.',
+      };
+    }
+  }
+  // IS THE LIVE SITE STILL THE APP THEY HAVE? (admin 2026-08-21, the Publish-button request.) A
+  // button answers "how do I republish"; this answers the question nobody was asking them — "do I
+  // NEED to?". Two real timestamps off the SAME server clock: when the bytes went live, and when
+  // the workspace's files were last written. Both reads are metadata-only and bounded, and either
+  // one missing yields `unknown`, which the UI renders as silence rather than a guess.
+  const publish = await resolvePublishState(workspaceId, everPublished);
+  /**
+   * CAN "PRESS PUBLISH" EVEN WORK FOR THIS APP? (admin 2026-08-24.)
+   *
+   * Asked ONLY when we are about to tell them to press it — an app that is already serving needs
+   * no verdict, and paying four document reads on every status poll for a question nobody asked
+   * is how a correct feature becomes too expensive to keep. `loadWorkspaceFilesByPath` fetches the
+   * manifests by id: no listing, no whole-workspace load.
+   *
+   * 🔒 SILENT ON DOUBT. An unreadable workspace yields `{}`, and `planDeployment` calls that
+   * static-sufficient — so the note is '' and the screen says exactly what it says today. A
+   * classifier that guessed would start telling users with perfectly publishable apps not to
+   * publish them, which is a worse failure than the one it fixes.
+   */
+  let publishBlocked = '';
+  /**
+   * ⚠️ WIDENED 2026-09-04, HOURS AFTER THE FIRST FIX SHIPPED WITH THIS HOLE — and the admin's next
+   * screenshot is the proof, on the same domain.
+   *
+   * The gate was `state === 'nothing_published'`, chosen because that is where the screen says
+   * "one last step: press Publish". But `nothing_published` is not the only state that says it:
+   * `error` says "Publishing again usually fixes this", and `unknown` — our probe could not reach
+   * the domain — says *"If it shows an error page, press Publish once."* That last one is exactly
+   * what mitrify.com now shows, so the very fix written to stop this loop did not fire in the
+   * state the admin was actually looking at.
+   *
+   * The right gate was never a state name, it is the QUESTION: is this screen about to tell the
+   * user to press Publish? Every non-serving state does. So it asks for all of them.
+   *
+   * Cost is unchanged where it matters: a domain that IS serving asks nothing, and a non-serving
+   * one is precisely the case where the user needs the answer. The two-stage read below still
+   * charges the full workspace only to an app already judged non-static.
+   */
+  /**
+   * ⚠️ THIRD CORRECTION, SAME GATE, SAME DAY — and the reason it kept being wrong is worth more
+   * than the fix. Each time I picked which STATES need the verdict; the answer was never a list of
+   * states, it is *"whatever makes the screen say press Publish"*, and only the client knows that.
+   *
+   * The client's branch is `s.serving?.state !== 'serving'` — which is TRUE when `serving` is null.
+   * This gate required it to be truthy. So when our probe cannot reach the domain at all (a real,
+   * common outcome — `checkDomainServing` returns null and the screen says *"We could not open
+   * your domain from here to confirm… If it shows an error page, press Publish once"*), the client
+   * told the user to press a button that always refuses while the server stayed silent.
+   *
+   * That is exactly the admin's mitrify.com screenshot, after two rounds of fixing this same gate.
+   * The expression is now CHARACTER-FOR-CHARACTER the client's, and `publishGateMatchesClient` in
+   * the tests fails if either side is edited without the other.
+   */
+  if (serving?.state !== 'serving') {
+    try {
+      const manifests = await loadWorkspaceFilesByPath(
+        workspaceId,
+        ['package.json', 'requirements.txt', 'pyproject.toml', 'Pipfile'],
+      );
+      /**
+       * 🔒 THE SIBLING OF A BUG THE PUBLISH ROUTE ALREADY FIXED (found 2026-09-04, hunting the
+       * class rather than the instance).
+       *
+       * On 2026-08-25 the publish route learned that a verdict formed on THE MANIFESTS ALONE is
+       * not good enough: `planDeployment`'s other half — does the app's own source actually
+       * IMPORT a server framework — can never fire when only four manifests are handed to it. The
+       * publish route was given a second stage that loads the real files before it refuses. This
+       * call was left on the old single stage, so the two halves of the very same product could
+       * reach OPPOSITE conclusions about one app: publish refuses it as a server, while this
+       * screen, seeing "static", cheerfully says "one last step: press Publish."
+       *
+       * Same two-stage shape as the publish route, and the same cost profile: the ordinary static
+       * app pays exactly what it paid before, and only an app about to be told something
+       * discouraging pays for the real read.
+       */
+      let plan = planDeployment(manifests);
+      let src: Record<string, string> | null = null;
+      if (!plan.staticHostingSufficient) {
+        src = await loadWorkspaceFiles(workspaceId).catch(() => null);
+        if (src) plan = planDeployment({ ...src, ...manifests });
+      }
+      // Only the app's own code can say whether it can be split, and only a real `false` (ship
+      // whole) makes a fullstack refusal certain enough to state. See domainPublishBlockNote.
+      const splitAdvised = plan.shape === 'fullstack' && src
+        ? analyzeApiWiring(src).strategy === 'split'
+        : undefined;
+      publishBlocked = domainPublishBlockNote(plan, { splitAdvised });
+    } catch { /* never let a shape check break a status screen */ }
+  }
+  return { ...status, displayRecords, dnsCheck, serving, publish, ...(publishBlocked ? { publishBlocked } : {}) };
+}
+
 export function registerNbaiDomainsRoutes(app: Express): void {
   app.post('/api/domains/nbai/connect', domainOpsRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     if (!firebaseCustomDomainsEnabled()) {
@@ -136,10 +311,13 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       // Persist the link so the deploy path publishes future builds to this workspace's dedicated site.
       await linkWorkspaceDomain({ domain: host, workspaceId, userId: verifiedUid });
       // Remember these records + return the STABLE (never-forgotten) view alongside the live set.
-      const displayRecords = await stableRecordsFor(host, status.records, workspaceId as string);
+      // 🔒 THE SAME VERDICT THE STATUS ROUTE FORMS — never a bare status (admin screenshot 2026-09-07).
+      // Pressing Connect on an already-connected domain used to answer without `serving` / `publishBlocked`
+      // / `dnsCheck`, and the screen rendered that as a second, contradictory verdict. See formDomainVerdict.
+      const verdict = await formDomainVerdict(workspaceId, host, status);
       // autoDns tells the client whether the zero-copy-paste path (nameserver delegation) exists on
       // this server — the UI offers it only when a tap can actually deliver it.
-      res.json({ ...status, displayRecords, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() });
+      res.json({ ...verdict, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() });
     } catch (err: any) {
       // HONEST failure (admin 2026-08-02): a permanent problem (server not permitted, domain taken)
       // must NOT tell the user to "try again" — that loops them forever on something a retry can
@@ -173,158 +351,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
         res.status(404).json({ error: 'This domain has not been connected yet.' });
         return;
       }
-      const displayRecords = await stableRecordsFor(host, status.records, workspaceId as string);
-      // DID THE USER'S RECORDS ACTUALLY LAND? (admin 2026-08-21, mitrify.com.) The screen used to
-      // show one word from Firebase — `ownership: missing` — while every required record was live and
-      // byte-perfect in public DNS. That state is indistinguishable from "you typed it wrong", so a
-      // user who had done everything right kept editing correct records. We now look ourselves and
-      // say which of the three it is: wrong value (they fix it), not published yet (their registrar
-      // is still working), or correct and live (nothing left for them to do but wait for Firebase).
-      // Best-effort and bounded — a DNS hiccup must never turn a working status screen into an error.
-      const dnsCheck = await verifyRecordsLive(displayRecords).catch(() => null);
-      // DOES THE DOMAIN ACTUALLY SHOW THE APP? (admin 2026-08-21, mitrify.com.) The screen said
-      // "Live! Your domain is connected, with HTTPS" while opening mitrify.com gave Firebase's "Site
-      // Not Found" — both true at once, because ownership/host/SSL describe DNS and a certificate,
-      // NOT whether anything was ever published to the site the domain points at. A domain connected
-      // AFTER the last publish points at an empty site. The only honest way to claim a domain is live
-      // is to OPEN it. Bounded, best-effort, and SSRF-guarded (the domain is user-supplied).
-      // 🔒 THE AUTHORITATIVE ANSWER FIRST. `siteHasRelease` asks FIREBASE whether anything was ever
-      // published to this app's site — no egress to the user's domain, and a site with zero releases
-      // has unambiguously never been published to. The HTTP fetch below stays as a SECOND opinion for
-      // everything a release count cannot see (a release exists but the page errors), but it must not
-      // be the only witness: it failed to reach mitrify.com and the screen printed "Live!" over a
-      // domain the admin was watching show "Site Not Found".
-      /**
-       * 🔴 A DOMAIN THAT MOVED TO THE BACKEND IS NOT "STILL CONNECTING" (admin 2026-09-07).
-       *
-       * `status.active` is the STATIC host's answer to "are MY records in place?". Once a backend
-       * deploy moves the domain to the running service those records are deliberately gone, so that
-       * answer is legitimately false while the site is legitimately LIVE. Letting it drive the verdict
-       * printed "still connecting" over a working domain — and worse, re-opened the setup block whose
-       * button would have taken the site down (see the sync route's guard).
-       *
-       * So for a backend-pointed domain the verdict comes from whether the domain ANSWERS, which is
-       * the question the user was asking all along.
-       */
-      const pointingRec = await getConversationStore().get(String(workspaceId)).catch(() => null);
-      const backendPointed = isBackendPointed(pointingRec, host);
-      let serving = (status.active || backendPointed) ? await checkDomainServing(host).catch(() => null) : null;
-      let everPublished: boolean | null = null;
-      if (backendPointed) {
-        const stage = backendPointedStage(host, serving);
-        res.json({
-          ...status,
-          // The domain genuinely works (or genuinely does not) on its own merits now — never on the
-          // static host's record check, which cannot see the service at all.
-          active: serving?.state === 'serving',
-          backendPointed: true,
-          backendStage: stage,
-          displayRecords: [],
-          serving,
-        });
-        return;
-      }
-      if (status.active) {
-        everPublished = await siteHasRelease(workspaceId).catch(() => null);
-        if (everPublished === false) {
-          serving = {
-            state: 'nothing_published',
-            status: serving?.status ?? 0,
-            note: 'Your domain is connected, but this app has never been published to it — opening it '
-              + 'shows an error page. Press Publish once and your domain will start showing your app.',
-          };
-        }
-      }
-      // IS THE LIVE SITE STILL THE APP THEY HAVE? (admin 2026-08-21, the Publish-button request.) A
-      // button answers "how do I republish"; this answers the question nobody was asking them — "do I
-      // NEED to?". Two real timestamps off the SAME server clock: when the bytes went live, and when
-      // the workspace's files were last written. Both reads are metadata-only and bounded, and either
-      // one missing yields `unknown`, which the UI renders as silence rather than a guess.
-      const publish = await resolvePublishState(workspaceId, everPublished);
-      /**
-       * CAN "PRESS PUBLISH" EVEN WORK FOR THIS APP? (admin 2026-08-24.)
-       *
-       * Asked ONLY when we are about to tell them to press it — an app that is already serving needs
-       * no verdict, and paying four document reads on every status poll for a question nobody asked
-       * is how a correct feature becomes too expensive to keep. `loadWorkspaceFilesByPath` fetches the
-       * manifests by id: no listing, no whole-workspace load.
-       *
-       * 🔒 SILENT ON DOUBT. An unreadable workspace yields `{}`, and `planDeployment` calls that
-       * static-sufficient — so the note is '' and the screen says exactly what it says today. A
-       * classifier that guessed would start telling users with perfectly publishable apps not to
-       * publish them, which is a worse failure than the one it fixes.
-       */
-      let publishBlocked = '';
-      /**
-       * ⚠️ WIDENED 2026-09-04, HOURS AFTER THE FIRST FIX SHIPPED WITH THIS HOLE — and the admin's next
-       * screenshot is the proof, on the same domain.
-       *
-       * The gate was `state === 'nothing_published'`, chosen because that is where the screen says
-       * "one last step: press Publish". But `nothing_published` is not the only state that says it:
-       * `error` says "Publishing again usually fixes this", and `unknown` — our probe could not reach
-       * the domain — says *"If it shows an error page, press Publish once."* That last one is exactly
-       * what mitrify.com now shows, so the very fix written to stop this loop did not fire in the
-       * state the admin was actually looking at.
-       *
-       * The right gate was never a state name, it is the QUESTION: is this screen about to tell the
-       * user to press Publish? Every non-serving state does. So it asks for all of them.
-       *
-       * Cost is unchanged where it matters: a domain that IS serving asks nothing, and a non-serving
-       * one is precisely the case where the user needs the answer. The two-stage read below still
-       * charges the full workspace only to an app already judged non-static.
-       */
-      /**
-       * ⚠️ THIRD CORRECTION, SAME GATE, SAME DAY — and the reason it kept being wrong is worth more
-       * than the fix. Each time I picked which STATES need the verdict; the answer was never a list of
-       * states, it is *"whatever makes the screen say press Publish"*, and only the client knows that.
-       *
-       * The client's branch is `s.serving?.state !== 'serving'` — which is TRUE when `serving` is null.
-       * This gate required it to be truthy. So when our probe cannot reach the domain at all (a real,
-       * common outcome — `checkDomainServing` returns null and the screen says *"We could not open
-       * your domain from here to confirm… If it shows an error page, press Publish once"*), the client
-       * told the user to press a button that always refuses while the server stayed silent.
-       *
-       * That is exactly the admin's mitrify.com screenshot, after two rounds of fixing this same gate.
-       * The expression is now CHARACTER-FOR-CHARACTER the client's, and `publishGateMatchesClient` in
-       * the tests fails if either side is edited without the other.
-       */
-      if (serving?.state !== 'serving') {
-        try {
-          const manifests = await loadWorkspaceFilesByPath(
-            workspaceId as string,
-            ['package.json', 'requirements.txt', 'pyproject.toml', 'Pipfile'],
-          );
-          /**
-           * 🔒 THE SIBLING OF A BUG THE PUBLISH ROUTE ALREADY FIXED (found 2026-09-04, hunting the
-           * class rather than the instance).
-           *
-           * On 2026-08-25 the publish route learned that a verdict formed on THE MANIFESTS ALONE is
-           * not good enough: `planDeployment`'s other half — does the app's own source actually
-           * IMPORT a server framework — can never fire when only four manifests are handed to it. The
-           * publish route was given a second stage that loads the real files before it refuses. This
-           * call was left on the old single stage, so the two halves of the very same product could
-           * reach OPPOSITE conclusions about one app: publish refuses it as a server, while this
-           * screen, seeing "static", cheerfully says "one last step: press Publish."
-           *
-           * Same two-stage shape as the publish route, and the same cost profile: the ordinary static
-           * app pays exactly what it paid before, and only an app about to be told something
-           * discouraging pays for the real read.
-           */
-          let plan = planDeployment(manifests);
-          let src: Record<string, string> | null = null;
-          if (!plan.staticHostingSufficient) {
-            src = await loadWorkspaceFiles(workspaceId as string).catch(() => null);
-            if (src) plan = planDeployment({ ...src, ...manifests });
-          }
-          // Only the app's own code can say whether it can be split, and only a real `false` (ship
-          // whole) makes a fullstack refusal certain enough to state. See domainPublishBlockNote.
-          const splitAdvised = plan.shape === 'fullstack' && src
-            ? analyzeApiWiring(src).strategy === 'split'
-            : undefined;
-          publishBlocked = domainPublishBlockNote(plan, { splitAdvised });
-        } catch { /* never let a shape check break a status screen */ }
-      }
-      res.json({ ...status, displayRecords, dnsCheck, serving, publish, ...(publishBlocked ? { publishBlocked } : {}) });
+      res.json(await formDomainVerdict(workspaceId, host, status));
     } catch (err: any) {
       sendSafeError(res, 500, 'Failed to check domain status. Please try again.', err, 'nbai domain status');
     }

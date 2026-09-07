@@ -108,7 +108,11 @@ describe('connectStage — the screen stops repeating an impossible instruction'
       serving: { state: 'nothing_published', note: 'x' },
       publishBlocked: 'Your app is a Express server that has to keep running…',
     });
-    expect(s.action).toBe('none');
+    // ⚠️ RE-ANCHORED 2026-09-07: the blocked verdict now carries a REAL action — 'deploy-backend',
+    // the button that goes to the controls — instead of 'none'. The property is unchanged: it is
+    // never 'publish', because that button could only ever refuse.
+    expect(s.action).toBe('deploy-backend');
+    expect(s.action).not.toBe('publish');
     expect(s.tone).toBe('warn');
     expect(s.note).toContain('Express server');
     expect(s.headline).not.toContain('press Publish');
@@ -117,7 +121,7 @@ describe('connectStage — the screen stops repeating an impossible instruction'
   it('the block wins over the serving branch — it is the more specific fact about the same state', () => {
     // Both describe "nothing is on your domain"; only one of them says what will actually fix it.
     const s = connectStage({ ...active, serving: { state: 'error', note: 'y' }, publishBlocked: 'server app' });
-    expect(s.action).toBe('none');
+    expect(s.action).toBe('deploy-backend');   // re-anchored 2026-09-07, see above — still never 'publish'
     expect(s.note).toBe('server app');
   });
 
@@ -161,9 +165,11 @@ describe('🔒 the wiring, end to end', () => {
   it('🔒 the whole-workspace read happens ONLY for an app already judged non-static', () => {
     const route = src('src/server/routes/nbaiDomains.ts');
     const blockAt = route.indexOf("if (serving?.state !== 'serving') {");
-    const block = route.slice(blockAt, route.indexOf('res.json({ ...status', blockAt));
+    const block = route.slice(blockAt, route.indexOf('return { ...status',blockAt));
     const guardAt = block.indexOf('if (!plan.staticHostingSufficient) {');
-    const readAt = block.indexOf('loadWorkspaceFiles(workspaceId as string)');
+    // Re-anchored 2026-09-07: the block moved into formDomainVerdict, whose parameter is typed, so the
+    // `as string` cast is gone. The ordering property below is unchanged.
+    const readAt = block.indexOf('loadWorkspaceFiles(workspaceId)');
     expect(guardAt).toBeGreaterThan(-1);
     expect(readAt).toBeGreaterThan(guardAt); // inside the escalation, never on the hot path
     // And the cheap by-path read still runs first, for every app.
@@ -220,7 +226,7 @@ describe('🔒 the block fires in EVERY state that says "press Publish"', () => 
   it('a SERVING domain still asks nothing — the cost guarantee is unchanged', () => {
     const route = src('src/server/routes/nbaiDomains.ts');
     const at = route.indexOf("if (serving?.state !== 'serving') {");
-    const block = route.slice(at, route.indexOf('res.json({ ...status', at));
+    const block = route.slice(at, route.indexOf('return { ...status',at));
     expect(block).toContain('loadWorkspaceFilesByPath');
   });
 

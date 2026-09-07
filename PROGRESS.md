@@ -45680,3 +45680,76 @@ uses, so a revert lands where a resolve does and the preview follows both.
 
 **Gate:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean; 21 new tests in `fileDiff.test.ts`
 including "revert one hunk, the other change survives" and the full round-trip back to the original.
+
+---
+
+## 2026-09-07 — publishing finally has an undo (gap #3 from the Cursor audit)
+
+Publishing was the ONLY action in this platform with no way back — and it is the one action the
+user's own users can see. A bad publish left exactly one route: restore files from History and
+publish again. That is minutes of work, and a *different* operation with different risks, at the
+moment the user is panicking about a broken live app.
+
+### The design decision worth keeping: this costs nothing to store
+
+The obvious implementation is to snapshot every published bundle so there is something to restore —
+storage on every publish, forever, for a feature most people never use.
+
+It is also unnecessary. The host already keeps every VERSION we have finalized, and the channel's
+release history says which one was live when. So a rollback is not a restore at all: it is one API
+call pointing the channel at a version already being held. No snapshot, no storage, no new failure
+mode, and atomic on the host's side — the switch either happens or it does not, and nobody ever sees
+half an app.
+
+Nothing is deleted, either. A rollback CREATES a release on an older version, so the history keeps
+growing and the undo is itself undoable.
+
+### `pickRollbackTarget` — why it is not "index 1"
+
+The rule is "the most recent release whose version is not the one live now". Three real cases break
+the naive version:
+
+- **A re-publish of identical files** makes a new release on a NEW version. Rolling back to it would
+  appear to do nothing at all.
+- **A previous rollback** appends a release pointing at an OLDER version. Index-based logic would
+  then bounce between the same two versions forever; walking by version identity keeps going back,
+  which is what pressing undo twice means.
+- **An expired version.** The host garbage-collects old versions and a release can outlive the
+  version it points at. Re-releasing a non-FINALIZED one would fail at the API — at exactly the worst
+  moment — so those are skipped in the decision rather than discovered as an error the user sees.
+
+### Honest limits, stated rather than discovered
+
+- **A bucket-only app has no version history at all.** The channel-ceiling fix serves straight from
+  storage and each publish overwrites the last. The refusal says so and points at History, instead of
+  offering a button that cannot work. Making that path reversible needs object versioning on the
+  bucket — a deliberate infrastructure decision with its own bill, recorded as an open item.
+- **An unreadable history is "unknown", never "nothing to roll back to."** Same rule the channel
+  inventory already holds: a failed read is not evidence of absence.
+- Four distinct refusal reasons, each with words a person can act on. A greyed-out button explains
+  none of them and reads as broken.
+- **The refusal messages name no vendor** — test-locked, because the white-label law applies to this
+  surface like every other.
+
+### Security
+
+The rollback target is re-derived on the SERVER and never taken from the request. A version name
+accepted from the browser is an instruction to serve arbitrary content at the user's published URL,
+so the check that it is genuinely this app's previous version has to happen where it cannot be
+edited. Both routes verify workspace ownership, exactly like publish and unpublish. Test-locked
+against the real route source.
+
+The deployment registry is deliberately NOT rewritten: its fields describe WHICH app is published and
+where, and a rollback changes none of them — only which version that url serves. Bumping `updatedAt`
+would make the record claim a publish that did not happen, and the Publish Capacity screen reads
+these records.
+
+### UI
+
+"Undo last publish — put the previous version back" sits ABOVE Unpublish on purpose: a user whose new
+version broke wants the old one back, not the app taken offline, and the destructive control should
+never be the first one they reach for. Two-step, like Unpublish, because it changes what the public
+sees this second.
+
+**Gate:** both typechecks clean; 21 new tests; full suite green (1477 files / 19692 tests).
+AppKnowledgeBase gains `publish_rollback`.

@@ -3004,6 +3004,38 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   };
 
   /**
+   * PUT THE LIVE APP BACK to the version before this one.
+   *
+   * The reason this exists at all: publishing was the only action in the platform with no undo, and
+   * it is the one action the user's OWN users can see. Before this, a bad publish meant restoring
+   * files from History and republishing — minutes of work, and a different operation with different
+   * risks, at exactly the moment the user is panicking about a broken live app.
+   *
+   * Nothing is deleted server-side: the previous version is re-released, so this is itself undoable.
+   * The message shown is the SERVER's, including every reason it might refuse (never published, only
+   * one version, served from storage which keeps no history, or simply unreadable right now) — a
+   * greyed-out button with no explanation reads as broken rather than as "there is nothing to undo".
+   */
+  const rollbackLive = async (): Promise<void> => {
+    if (!state.workspaceId) return;
+    setPublishMsg('Bringing back the previous version…');
+    try {
+      const res = await fetch('/api/agentv3/rollback', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email }),
+      });
+      const data = await res.json().catch(() => ({}));
+      // A refusal here is NOT a failure to hide — it names something the user can act on, so it is
+      // shown verbatim rather than replaced with a generic error.
+      if (!res.ok) { setPublishMsg(data?.error || 'Could not bring back the previous version. Your app is unchanged.'); return; }
+      setPublishMsg(data?.message || 'Your live app is back to the previous published version.');
+    } catch {
+      setPublishMsg('Could not reach NavBharatAI. Check your connection and try again.');
+    }
+  };
+
+  /**
    * Take this app off NavBharatAI hosting (admin 2026-08-21).
    *
    * Reports the SERVER's own outcome: the route deletes the real Firebase channel before it touches
@@ -3629,6 +3661,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           // URL only for an ACTIVE deployment), so it never offers to remove something that is not there.
           liveUrl={liveUrl}
           onUnpublish={unpublishLive}
+          onRollback={rollbackLive}
           onLoadMyApps={loadMyPublishedApps}
           onUnpublishApp={unpublishByWorkspace}
           customDomainsEnabled={customDomainsEnabled}

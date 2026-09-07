@@ -13,6 +13,7 @@
 
 import { GoogleAuth } from 'google-auth-library';
 import { mirrorPublishToBucket, removePublishFromBucket } from './bucketPublish';
+import { pickRollbackTarget, type HostingRelease, type RollbackTarget } from './publishRollback';
 import {
   bucketOnlyPublishEnabled,
   bucketOnlyPublishUsable,
@@ -435,6 +436,73 @@ export class FirebaseHostingDeployer {
    * never saw as gone. Same class as the registry-side bug this was found with (2026-08-21): a
    * returned list standing in for a complete list.
    */
+  /**
+   * The publish history of one app's channel, newest first — what a rollback chooses from.
+   *
+   * Returns `null` when the history could not be read. That is DELIBERATELY distinct from `[]`: an
+   * empty list means "this app has never been published", while null means "we do not know", and the
+   * caller must not turn the second into the first. Reporting an unreadable history as "nothing to
+   * roll back to" is the same dishonesty as reporting an unreadable channel list as zero channels in
+   * use — a mistake this file has already made once.
+   */
+  async listChannelReleases(channelId: string): Promise<HostingRelease[] | null> {
+    try {
+      const { headers } = await this.authHeaders();
+      const site = FIREBASE_PROJECT;
+      const out: HostingRelease[] = [];
+      let pageToken = '';
+      // Bounded like the channel listing, for the same reason: a malformed nextPageToken must not spin
+      // forever. A rollback only ever looks at the most recent handful, so this is far past enough.
+      for (let page = 0; page < 10; page += 1) {
+        const resp = await this.hostingCall('release list', () =>
+          axios.get<{ releases?: HostingRelease[]; nextPageToken?: string }>(
+            `${HOSTING_API}/sites/${site}/channels/${channelId}/releases?pageSize=100${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`,
+            { headers },
+          ));
+        for (const r of resp.data?.releases ?? []) out.push(r);
+        pageToken = typeof resp.data?.nextPageToken === 'string' ? resp.data.nextPageToken : '';
+        if (!pageToken) break;
+      }
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Point the live app back at an earlier version.
+   *
+   * This creates a NEW release on the SAME version rather than deleting anything, which is what makes
+   * the operation safe: nothing is destroyed, the history keeps growing, and a rollback can itself be
+   * rolled back (`pickRollbackTarget` walks by version identity precisely so a second undo goes
+   * further back instead of bouncing between two versions).
+   *
+   * Returns the target on success and null on failure — never a thrown error, because the caller is a
+   * user pressing "undo" on a broken live app and deserves an honest "that did not work" rather than
+   * a 500.
+   */
+  async rollbackChannel(channelId: string, target: RollbackTarget): Promise<RollbackTarget | null> {
+    try {
+      const { headers } = await this.authHeaders();
+      const site = FIREBASE_PROJECT;
+      await this.hostingCall('rollback release', () =>
+        axios.post(
+          `${HOSTING_API}/sites/${site}/channels/${channelId}/releases?versionName=${encodeURIComponent(target.versionName)}`,
+          {},
+          { headers },
+        ));
+      return target;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Convenience: read the history and choose, in one call. Null when either step cannot be done. */
+  async findRollbackTarget(workspaceId: string): Promise<RollbackTarget | null> {
+    const releases = await this.listChannelReleases(makeChannelId(workspaceId));
+    return releases === null ? null : pickRollbackTarget(releases);
+  }
+
   async listChannelsWithCompleteness(): Promise<{ channels: Array<{ channelId: string; url: string; updateTime: string | null }>; complete: boolean }> {
     const { headers } = await this.authHeaders();
     const site = FIREBASE_PROJECT;

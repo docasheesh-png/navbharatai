@@ -46,6 +46,72 @@ export interface BackendEnvPlan {
   sandboxOnly: string[];
   /** Names the server's own code requires and we have no value for. */
   missing: string[];
+  /**
+   * Vault names NOT sent because nothing in the app's code reads them (audit 2026-09-07).
+   *
+   * 🔴 THE LEAK THIS CLOSES. The plan used to forward EVERY key in the user's vault to the deployed
+   * service — including the very `RENDER_API_KEY` that deploys it. A deploy credential sitting in a
+   * running app's `process.env` is readable by that app, by its logs, and by anyone with the host
+   * dashboard: a compromise of the app becomes a compromise of the account that hosts it. A service
+   * only needs what its code reads, so that is all it gets.
+   */
+  unreferenced: string[];
+  /** Platform-control keys that are never given to a deployed app, whatever the code reads. */
+  platformControl: string[];
+  /**
+   * True when no code file could be read at all, so "what does the code read" had no answer. Nothing
+   * is sent in that case — and it is SAID, because a silent empty environment would be a crash with
+   * no explanation, the exact shape this module exists to prevent.
+   */
+  codeUnreadable: boolean;
+}
+
+/**
+ * Keys that control the user's DEPLOYMENT INFRASTRUCTURE, never the app: the tokens NavBharatAI itself
+ * uses to deploy on the user's behalf. A deployed app has no legitimate reason to hold its own deploy
+ * key, and giving it one turns any bug in the app into a foothold on the hosting account.
+ *
+ * `RENDER_API_KEY` and `RAILWAY_TOKEN` are the `tokenEnv` names in backendDeployConfig.ts; the rest
+ * are the deploy-provider tokens the publish path reads. Test-pinned against that config.
+ */
+export const PLATFORM_CONTROL_ENV_KEYS: readonly string[] = [
+  'RENDER_API_KEY', 'RAILWAY_TOKEN', 'GCP_SERVICE_ACCOUNT_KEY',
+  'VERCEL_TOKEN', 'NETLIFY_AUTH_TOKEN', 'CLOUDFLARE_API_TOKEN', 'FLY_API_TOKEN', 'HEROKU_API_KEY',
+];
+
+export function isPlatformControlKey(name: string): boolean {
+  return PLATFORM_CONTROL_ENV_KEYS.includes(String(name ?? '').trim().toUpperCase());
+}
+
+const CODE_FILE = /\.(?:[cm]?[jt]sx?|py)$/i;
+const PY_ENV_RE = /(?:os\.environ|\benviron)(?:\.get\(\s*['"]([A-Z_][A-Z0-9_]*)['"]|\[\s*['"]([A-Z_][A-Z0-9_]*)['"]\s*\])|os\.getenv\(\s*['"]([A-Z_][A-Z0-9_]*)['"]/g;
+const SKIP_PY_PATH = /(^|\/)(node_modules|dist|build|\.venv|venv|site-packages|tests?|__tests__)\//i;
+
+/**
+ * Every env name the app's OWN code reads — `process.env.X` in JS/TS and `os.environ["X"]` /
+ * `os.environ.get("X")` / `os.getenv("X")` in Python. Required or optional makes no difference here:
+ * a read with a fallback still WANTS the value when it exists. PURE.
+ */
+export function referencedEnvNames(files: Record<string, string> | null | undefined): string[] {
+  const out = new Set<string>();
+  for (const [path, content] of Object.entries(files ?? {})) {
+    if (typeof content !== 'string') continue;
+    for (const n of extractProcessEnvRefs(path, content)) out.add(n);
+    if (/\.py$/i.test(path) && !SKIP_PY_PATH.test(path)) {
+      PY_ENV_RE.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = PY_ENV_RE.exec(content)) !== null) {
+        const n = m[1] ?? m[2] ?? m[3];
+        if (n) out.add(n);
+      }
+    }
+  }
+  return [...out].sort();
+}
+
+/** Did we see any code at all? Without a single code file, "what does it read" has no answer. PURE. */
+export function hasReadableCode(files: Record<string, string> | null | undefined): boolean {
+  return Object.entries(files ?? {}).some(([p, c]) => CODE_FILE.test(p) && typeof c === 'string');
 }
 
 /**
@@ -116,19 +182,28 @@ export function planBackendEnv(
 ): BackendEnvPlan {
   const envVars: BackendEnvVar[] = [];
   const sandboxOnly: string[] = [];
+  const unreferenced: string[] = [];
+  const platformControl: string[] = [];
   const supplied = new Set<string>();
+  const codeUnreadable = !hasReadableCode(files);
+  const referenced = new Set(referencedEnvNames(files));
   for (const [key, value] of Object.entries(vaultSecrets ?? {})) {
     if (key === DB_PROVIDER_MARKER) continue;
     if (typeof value !== 'string' || value === '') continue;
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;   // same rule the vault itself enforces
+    // 🔒 ORDER: the deploy-key rule first, because it must hold even for code that reads the key.
+    if (isPlatformControlKey(key)) { platformControl.push(key); continue; }
+    // 🔒 ONLY WHAT THE CODE READS. Unreadable code sends nothing rather than everything — see the
+    // BackendEnvPlan doc: a silent flood of credentials is the failure, not the empty environment.
+    if (codeUnreadable || !referenced.has(key)) { unreferenced.push(key); continue; }
     if (isSandboxLocalValue(value)) { sandboxOnly.push(key); continue; }
     envVars.push({ key, value });
     supplied.add(key);
   }
   envVars.sort((a, b) => a.key.localeCompare(b.key));
-  sandboxOnly.sort();
+  sandboxOnly.sort(); unreferenced.sort(); platformControl.sort();
   const missing = requiredBackendEnvNames(files ?? {}).filter((n) => !supplied.has(n));
-  return { envVars, sandboxOnly, missing };
+  return { envVars, sandboxOnly, missing, unreferenced, platformControl, codeUnreadable };
 }
 
 /**
@@ -142,6 +217,13 @@ export function planBackendEnv(
  */
 export function backendEnvNote(plan: BackendEnvPlan): string {
   const parts: string[] = [];
+  if (plan.codeUnreadable && plan.unreferenced.length > 0) {
+    parts.push(
+      'We could not read your app\'s code, so none of your saved keys were sent to the service — '
+      + 'sending keys an app may not use is not safe. Add the ones it needs in your backend host, or '
+      + 'deploy again in a moment.',
+    );
+  }
   if (plan.sandboxOnly.length > 0) {
     parts.push(
       `${plan.sandboxOnly.join(', ')} could not be carried over — ${plan.sandboxOnly.length === 1 ? 'its value points' : 'their values point'} `

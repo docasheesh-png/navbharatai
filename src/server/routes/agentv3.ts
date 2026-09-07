@@ -3956,6 +3956,13 @@ async function noteBuildOutcome(
     // Only set when WE created the service and therefore know which plan it is on — see below.
     let planNote = '';
     try {
+      /**
+       * THE APP'S OWN FILES, READ ONCE (audit 2026-09-07). Three decisions below need them — the
+       * env check, service creation, and whether the DOMAIN may follow the backend — and each used to
+       * load the workspace on its own, or not at all. One read, one verdict, no way to disagree.
+       */
+      const appFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+      const wiring = analyzeApiWiring(appFiles);
       let result = await deployBackendToRender({ repoUrl: effectiveRepoUrl, appName, apiKey: renderKey.key });
       /**
        * AN *EXISTING* SERVICE GETS THE TRUTH, NOT OUR KEYS (admin 2026-09-05).
@@ -3971,7 +3978,7 @@ async function noteBuildOutcome(
        * unlearn.
        */
       if (result.ok) {
-        const required = requiredBackendEnvNames(await loadWorkspaceFiles(workspaceId).catch(() => ({})));
+        const required = requiredBackendEnvNames(appFiles);
         if (required.length > 0) {
           const have = await fetchServiceEnvKeys(renderKey.key, result.serviceId);
           if (have === null) {
@@ -4032,7 +4039,7 @@ async function noteBuildOutcome(
          * only inside that sandbox — see backendEnvVars.ts for why shipping that value would be worse
          * than shipping none.
          */
-        const envSource = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+        const envSource = appFiles;
         const envPlan = planBackendEnv(renderVault, envSource);
         /**
          * WHICH RUNTIME? — asked of the app, not assumed (2026-09-05).
@@ -4055,7 +4062,7 @@ async function noteBuildOutcome(
          * This is a build-time value, which is why it belongs in the service's environment: the host
          * runs the frontend build, so the variable has to exist there.
          */
-        const wholeEnv = buildEnvForWhole(analyzeApiWiring(envSource));
+        const wholeEnv = buildEnvForWhole(wiring);
         const createEnvVars = [
           ...envPlan.envVars,
           ...Object.entries(wholeEnv)
@@ -4096,9 +4103,10 @@ async function noteBuildOutcome(
             + 'visitors — the next visit then takes up to a minute to wake it. Upgrade that service in your '
             + 'host\'s dashboard if you need it always-on.';
         } else {
-          // Keep the original hand-off AND say what we tried, so the user is never left with a
-          // silent downgrade from "we can do this" to the old manual instruction.
-          result = { ok: false, reason: 'no-service', message: `${created.message}` };
+          // Its OWN reason (audit 2026-09-07): folded into `no-service`, the client answered a "no
+          // start script" or "no GitHub access" refusal with the Blueprint walkthrough — a fix for a
+          // problem the user did not have. The message names the real step; the reason keeps it so.
+          result = { ok: false, reason: 'create-refused', message: `${created.message}` };
         }
       }
       /**
@@ -4127,7 +4135,18 @@ async function noteBuildOutcome(
           const domains = await firebaseDomainsForWorkspaceStrict(workspaceId).catch(() => null);
           if (domains === null) domainNote = 'Your app is deployed. We could not check whether you have a connected domain — open the domain screen to confirm it points here.';
           const domain = domains?.[0] || '';
-          if (domain) {
+          /**
+           * 🔴 A SPLIT APP'S DOMAIN BELONGS TO ITS WEBSITE, NOT ITS API (audit 2026-09-07). This
+           * pointed the domain at the backend whenever a deploy succeeded — right for an app shipped
+           * whole (the server IS the site), wrong for one whose website is published separately: the
+           * user would open their domain and be looking at their API. The same wiring verdict the
+           * publish route uses decides here, so the two halves cannot disagree about one app.
+           */
+          if (domain && wiring.strategy === 'split') {
+            domainNote = `${domain} stays on your website, which is where it belongs for an app whose website `
+              + `and server are hosted separately. Your server runs at ${result.url}. Press Publish once so the `
+              + 'website is rebuilt to use it.';
+          } else if (domain) {
             const attach = await attachRenderCustomDomain({
               apiKey: renderKey.key, serviceId: result.serviceId, serviceUrl: result.url, domain,
             });
@@ -4161,7 +4180,17 @@ async function noteBuildOutcome(
           domainNote = `Your app deployed, but we could not point your domain at it yet: ${e instanceof Error ? e.message : String(e)}`;
         }
       }
-      res.status(result.ok ? 200 : 409).json({
+      /**
+       * ONE STATUS PER REASON (audit 2026-09-07). Every failure used to be a 409, and the client reads
+       * 409 as "connect your repo in Render" — so a rejected key, a host outage and a refused creation
+       * all came back as a Blueprint walkthrough. The code now says what the reason says.
+       */
+      const status = result.ok ? 200
+        : result.reason === 'no-service' ? 409
+        : result.reason === 'not-configured' ? 503
+        : result.reason === 'create-refused' ? 422
+        : 502;
+      res.status(status).json({
         ...result,
         ...(domainPointed ? { domainPointed } : {}),
         ...(domainNote ? { domainNote } : {}),
@@ -6944,9 +6973,21 @@ async function noteBuildOutcome(
            * right, and every request goes nowhere. Falling through to the offer below is the correct
            * outcome — the user deploys the backend first, then publishes.
            */
+          /**
+           * 🔴 LOOKED UP BY THE WRONG KEY (audit 2026-09-07). This asked the host for a service NAMED
+           * `<workspaceId>`. No service is ever named that — a created one is named after the app or
+           * its repository — so the lookup could never match, the address stayed empty, and every
+           * split app was refused on every publish while the message said "deploy the server first,
+           * then publish". The repository is what the host matches on; it comes from the workspace's
+           * durable record (deployRepoMemory.ts), with the repo name as the name fallback.
+           */
+          const durableRepoRec = await getConversationStore().get(workspaceId).catch(() => null);
           let wiredToBackend = false;
           if (wiring?.strategy === 'split' && key) {
-            const backendUrl = await findBackendUrl({ apiKey: key.key, appName: workspaceId }).catch(() => '');
+            const splitRepo = resolveDeployRepo(undefined, durableRepoRec);
+            const backendUrl = await findBackendUrl({
+              apiKey: key.key, repoUrl: splitRepo?.repoUrl, appName: durableRepoRec?.repoName || undefined,
+            }).catch(() => '');
             const envVars = buildEnvForSplit(wiring, backendUrl);
             if (Object.keys(envVars).length > 0) {
               const existing = await actuator.readFile(workspaceId, '.env.production').catch(() => '');
@@ -6977,7 +7018,7 @@ async function noteBuildOutcome(
            * The workspace's OWN durable record is consulted too; see deployRepoMemory.ts for why an
            * empty client claim never overrides a durable yes.
            */
-          const durableRepoRec = await getConversationStore().get(workspaceId).catch(() => null);
+          // `durableRepoRec` was read above, before the split lookup — one read serves both.
           const hasRepo = repoAvailableForDeploy(
             { hasRepo: typeof req.body?.hasRepo === 'boolean' ? req.body.hasRepo : false },
             durableRepoRec,

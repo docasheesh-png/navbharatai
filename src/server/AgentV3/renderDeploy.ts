@@ -167,7 +167,13 @@ export function matchRenderService(services: RenderService[], opts: { repoUrl?: 
 
 export type RenderDeployResult =
   | { ok: true; url: string; serviceId: string; serviceName: string }
-  | { ok: false; reason: 'not-configured' | 'no-service' | 'api-error'; message: string };
+  /**
+   * `create-refused` (audit 2026-09-07): the host had no matching service AND refused to create one
+   * (no start script, no GitHub access, plan full). Its own reason, because the client used to fold
+   * it into `no-service` and answer with "connect your repo in Render → Blueprint" — a walkthrough
+   * for a problem the user did not have.
+   */
+  | { ok: false; reason: 'not-configured' | 'no-service' | 'api-error' | 'create-refused'; message: string };
 
 /**
  * Trigger a REAL Render deploy of the user's backend. Lists their services, matches the one for this repo/app,

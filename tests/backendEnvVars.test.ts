@@ -103,7 +103,8 @@ describe('planBackendEnv — what the service boots with, and the honest gaps', 
   it('🔒 the internal database marker never reaches a deployed service', () => {
     // It records WHICH database the user connected; it is not an app secret. The build strips it from
     // the sandbox .env for the same reason.
-    const plan = planBackendEnv({ [DB_PROVIDER_MARKER]: 'supabase', REAL_KEY: 'v' }, {});
+    // Re-anchored 2026-09-07: the plan now sends only what the code READS, so the file names the key.
+    const plan = planBackendEnv({ [DB_PROVIDER_MARKER]: 'supabase', REAL_KEY: 'v' }, { 'server.js': 'process.env.REAL_KEY' });
     expect(plan.envVars.map((e) => e.key)).toEqual(['REAL_KEY']);
   });
 
@@ -121,7 +122,8 @@ describe('planBackendEnv — what the service boots with, and the honest gaps', 
   });
 
   it('a name the vault could never hold is skipped rather than sent', () => {
-    const plan = planBackendEnv({ 'not-a-name': 'v', GOOD: 'v' } as Record<string, string>, {});
+    // Re-anchored 2026-09-07 for the same reason as above — the code must read GOOD for it to be sent.
+    const plan = planBackendEnv({ 'not-a-name': 'v', GOOD: 'v' } as Record<string, string>, { 'server.js': 'process.env.GOOD' });
     expect(plan.envVars.map((e) => e.key)).toEqual(['GOOD']);
   });
 });

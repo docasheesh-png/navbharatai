@@ -132,7 +132,7 @@ export function managedDeployRequest(
   };
 }
 
-export type ManagedDeployKind = 'deployed' | 'not-configured' | 'needs-connect' | 'failed';
+export type ManagedDeployKind = 'deployed' | 'not-configured' | 'needs-connect' | 'create-refused' | 'failed';
 
 /**
  * Turn the route's response into an honest outcome + printable lines.
@@ -196,6 +196,24 @@ export function managedDeployOutcome(
         serverSaid || 'Deploy from your Render dashboard instead; your render.yaml is already in the project.',
       ],
     };
+  }
+  /**
+   * 🔒 THE REASON OUTRANKS THE STATUS (audit 2026-09-07). Every failure used to arrive as 409, and
+   * this branch turned a rejected key, a host outage and a refused creation alike into "connect your
+   * repo in Render → Blueprint" plus numbered steps — a walkthrough for a problem the user did not
+   * have. A refused creation names its own real step; an API error is a failure, not a to-do.
+   */
+  if (body?.reason === 'create-refused' || status === 422) {
+    return {
+      kind: 'create-refused',
+      lines: [
+        '❌ We could not create the backend service in your account.',
+        serverSaid || 'Nothing was created. Fix what the message names, then press Deploy backend again.',
+      ],
+    };
+  }
+  if (body?.reason === 'api-error') {
+    return { kind: 'failed', lines: ['❌ The Render deploy could not be started.', serverSaid || 'Please try again in a moment, or deploy from your Render dashboard.'] };
   }
   if (body?.reason === 'no-service' || status === 409) {
     return {

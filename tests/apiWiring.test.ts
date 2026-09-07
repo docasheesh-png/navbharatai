@@ -229,7 +229,12 @@ describe('🔒 the wiring — a whole deploy carries the base, and never overrid
   })();
 
   it('the created service receives the whole-deploy base', () => {
-    expect(handler).toContain('buildEnvForWhole(analyzeApiWiring(envSource))');
+    // ⚠️ RE-ANCHORED 2026-09-07: the wiring verdict is now computed ONCE at the top of the handler
+    // (`const wiring = analyzeApiWiring(appFiles)`) and shared by env, creation and the domain gate —
+    // a second `analyzeApiWiring(...)` inside the creation branch would be a second verdict that could
+    // disagree with the first. The property (the created service gets the whole-deploy base) is unchanged.
+    expect(handler).toContain('const wiring = analyzeApiWiring(appFiles);');
+    expect(handler).toContain('buildEnvForWhole(wiring)');
     expect(handler).toContain('envVars: createEnvVars');
   });
 

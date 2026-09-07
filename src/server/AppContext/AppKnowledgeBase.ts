@@ -581,6 +581,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'publish_rollback',
+    name: 'Undo the last publish — put the previous live version back',
+    path: 'NavBharatAI Pro v5.0 → Publish → "Undo last publish — put the previous version back"',
+    description: 'If you publish a new version and it turns out worse than the last one, this puts your LIVE app back to the version you published before it. Visitors see the change straight away. Your files and your chat are untouched — this only changes which version the public link serves — and you can undo the undo, because nothing is deleted: each time you do this, the earlier version is simply made live again.\n\nIt asks you to confirm first, because it changes what your users see immediately.\n\nThe button tells you honestly when it cannot help, and each reason is different: the app has not been published yet; this is the very first published version so there is nothing earlier; the app is served in a way that keeps only the latest version; or the publish history could not be read just now (try again in a moment). In the cases where no earlier version is kept, use "Restore all files" in the History tab and publish again instead.',
+    howToUse: 'Open NavBharatAI Pro v5.0 → Publish. Under your live link, tap "Undo last publish — put the previous version back", then confirm with "Yes, go back". To undo a change in your CODE rather than in what is published, use the Diff tab instead; to go back further than one publish, use "Restore all files" in History and publish again.',
+    relatedFeatures: ['agentv3_deploy', 'diff_review', 'agentv3_restore_files'],
+    keywords: ['rollback', 'roll back', 'undo publish', 'undo deploy', 'previous version', 'purana version', 'wapas purana', 'revert publish', 'publish undo', 'live app kharab', 'app toot gaya', 'last version', 'pichla version wapas', 'restore live', 'old version live', 'publish galat ho gaya', 'naya version kharab'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'diff_review',
     name: 'See exactly what the AI changed — and put any part of it back',
     path: 'Header → Diff tab (opens after a build, comparing against the files from just before it)',

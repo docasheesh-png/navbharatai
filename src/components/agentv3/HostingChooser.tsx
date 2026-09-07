@@ -88,6 +88,13 @@ export interface HostingChooserProps {
   /** Take the app off NavBharatAI hosting. Resolves to an honest message; the caller shows it. */
   onUnpublish?: () => Promise<void>;
   /**
+   * Put the live app back to the version before this one.
+   *
+   * Optional like `onUnpublish`: where the host cannot do it, no control appears at all rather than a
+   * button that could only fail.
+   */
+  onRollback?: () => Promise<void>;
+  /**
    * Load every app this USER has live. Keyed by user rather than workspace on purpose — an app whose
    * chat was deleted has nothing pointing at it, and this list is the only way back to it.
    */
@@ -155,7 +162,7 @@ const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI
 
 export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr,
-  liveUrl, onUnpublish, onLoadMyApps, onUnpublishApp,
+  liveUrl, onUnpublish, onRollback, onLoadMyApps, onUnpublishApp,
   ownRepo, githubConnected, onConnectGitHub, onRepoPushed, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
   onMakeIcon, publishRefusalCode, backendKeySource, deployRepo,
 }: HostingChooserProps) {
@@ -169,6 +176,9 @@ export function HostingChooser({
   // Unpublish: two-step, because taking a public site down is irreversible from the visitor's side —
   // anyone holding the link loses it the moment this runs. `confirm` is the second step.
   const [unpubConfirm, setUnpubConfirm] = useState(false);
+  // Undo-last-publish: two-step like Unpublish, because it also changes what the public sees now.
+  const [rollbackConfirm, setRollbackConfirm] = useState(false);
+  const [rollbackBusy, setRollbackBusy] = useState(false);
   const [unpubBusy, setUnpubBusy] = useState(false);
   const [unpubNote, setUnpubNote] = useState('');
   // ── Nav App Store one-click publish (Kadam 1, admin: "1 click release/publish … v5 ke publish ke
@@ -960,6 +970,56 @@ export function HostingChooser({
                     rather than ending on this screen. Same source of truth as both its neighbours. */}
                 {showPublishDot && <span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-label="You have unpublished changes" />}
               </button>
+            )}
+
+            {/* UNDO LAST PUBLISH — above Unpublish deliberately: a user whose new version broke wants
+                the OLD one back, not the app taken offline, and the destructive control should never
+                be the first one they reach for. Two-step for the same reason Unpublish is: it changes
+                what the public sees this second.
+
+                Whether an earlier version actually exists is decided by the SERVER when the button is
+                pressed, and its refusal is shown verbatim — there are four different reasons ("never
+                published", "only one version", "served from storage, no history kept", "could not be
+                read right now") and a greyed-out button explains none of them. */}
+            {liveUrl && onRollback && (
+              <div className="pt-1">
+                {!rollbackConfirm ? (
+                  <button
+                    onClick={() => setRollbackConfirm(true)}
+                    disabled={busy || rollbackBusy || unpubBusy}
+                    className="w-full py-1.5 rounded-lg border border-zinc-700 hover:border-amber-600 text-zinc-400 hover:text-amber-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40"
+                  >
+                    Undo last publish — put the previous version back
+                  </button>
+                ) : (
+                  <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-2.5 flex flex-col gap-2">
+                    <p className="text-[11px] text-amber-100 leading-relaxed">
+                      Your live app goes back to the version you published before this one. Visitors see the
+                      change straight away. Your files and chat are untouched, and you can undo this too.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setRollbackBusy(true);
+                          void onRollback()
+                            .finally(() => { setRollbackBusy(false); setRollbackConfirm(false); });
+                        }}
+                        disabled={rollbackBusy}
+                        className="flex-1 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 text-white text-[11px] font-semibold disabled:opacity-50"
+                      >
+                        {rollbackBusy ? 'Bringing it back…' : 'Yes, go back'}
+                      </button>
+                      <button
+                        onClick={() => setRollbackConfirm(false)}
+                        disabled={rollbackBusy}
+                        className="flex-1 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 text-[11px] font-semibold disabled:opacity-50"
+                      >
+                        Keep this version
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* UNPUBLISH — shown ONLY when this app is genuinely live on our hosting. `liveUrl` comes

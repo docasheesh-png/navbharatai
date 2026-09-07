@@ -346,7 +346,9 @@ import { decideAppSignature, appSignatureNotice } from '../AgentV3/appSignatureE
 import { probeHostingPlan } from '../lib/hostingPlan';
 import { lastDevServerLaunch } from '../AgentV3/devServerLaunchLog';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
-import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
+import { FirebaseHostingDeployer, makeChannelId } from '../AgentV3/Deployment';
+import { bucketOnlyPublishEnabled } from '../AgentV3/bucketOnlyPublish';
+import { rollbackAvailability, rollbackSummary } from '../AgentV3/publishRollback';
 import { firebaseCustomDomainsEnabled } from '../lib/firebaseCustomDomain';
 import { firebaseDomainsForWorkspaceStrict } from '../lib/firebaseDomainLink';
 import { publishToCustomDomainSite, type CustomDomainPublishOutcome } from '../AgentV3/customDomainPublish';
@@ -6712,6 +6714,92 @@ async function noteBuildOutcome(
    * status is 'unpublished', NOT 'taken_down' — the owner must be able to publish it again (see
    * DeploymentStatus), and the deploy gate only blocks republish for a takedown.
    */
+  /**
+   * IS THERE AN EARLIER VERSION TO GO BACK TO? — read-only, so the UI can show an honest control.
+   *
+   * The client asks this rather than guessing, because every reason a rollback is unavailable needs
+   * different words: never published, only one version, served from storage (which keeps no history),
+   * or simply unreadable right now. A greyed-out button with no explanation reads as broken.
+   */
+  app.post('/api/agentv3/rollback-status', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    // Same owner check as publish and unpublish: this discloses an app's publish history.
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+
+    const rec = await deploymentStore.get(workspaceId).catch(() => null);
+    if (!isLiveDeployment(rec)) {
+      res.json({ available: false, reason: 'never-published', message: 'This app is not published right now, so there is no live version to undo.' });
+      return;
+    }
+    const bucketOnly = bucketOnlyPublishEnabled();
+    // A bucket-only app has no channel at all, so its history is not merely empty — it does not
+    // exist. Asking for it would be a wasted call that could only fail.
+    const releases = bucketOnly ? [] : await new FirebaseHostingDeployer().listChannelReleases(makeChannelId(workspaceId));
+    res.json(rollbackAvailability({ releases, bucketOnly }));
+  });
+
+  /**
+   * PUT THE LIVE APP BACK to the version before this one.
+   *
+   * Nothing is deleted: this creates a NEW release pointing at a version the host already holds, so
+   * the history keeps growing and a rollback can itself be undone. The target is re-derived here
+   * rather than trusted from the client — a version name from the browser is an instruction to serve
+   * arbitrary content, and the check that it is genuinely this app's previous version must happen on
+   * the server.
+   */
+  app.post('/api/agentv3/rollback', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+
+    const rec = await deploymentStore.get(workspaceId).catch(() => null);
+    if (!isLiveDeployment(rec)) {
+      res.status(409).json({ ok: false, error: 'This app is not published right now, so there is nothing to undo.' });
+      return;
+    }
+    const bucketOnly = bucketOnlyPublishEnabled();
+    const deployer = new FirebaseHostingDeployer();
+    const releases = bucketOnly ? [] : await deployer.listChannelReleases(makeChannelId(workspaceId));
+    const availability = rollbackAvailability({ releases, bucketOnly });
+    if (!availability.available) {
+      // 409, not 500: nothing failed — there is genuinely nothing to roll back to, and the message
+      // says which of the several reasons applies.
+      res.status(409).json({ ok: false, reason: availability.reason, error: availability.message });
+      return;
+    }
+
+    const done = await deployer.rollbackChannel(makeChannelId(workspaceId), availability.target);
+    if (!done) {
+      res.status(502).json({ ok: false, error: 'The previous version could not be brought back just now. Your app is unchanged — nothing was removed. Please try again in a moment.' });
+      return;
+    }
+    // The registry is deliberately NOT rewritten here. Its fields describe WHICH app is published and
+    // where — the url, the owner, the file count — and a rollback changes none of them; it changes
+    // which version that same url serves. Bumping `updatedAt` would make the record claim a publish
+    // that did not happen, and the Publish Capacity screen reads these records to reason about
+    // channels. The version history lives with the host, which is the thing that actually knows it.
+    res.json({ ok: true, message: rollbackSummary(availability.target), url: rec?.url ?? null });
+  });
+
   app.post('/api/agentv3/unpublish', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;

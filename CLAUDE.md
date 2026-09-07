@@ -478,6 +478,28 @@ the code (it is actually read somewhere) on 2026-07-11.
   change how the app behaves. This directly addresses the "1 vulnerable dep(s)" advisory seen on real game
   builds. When OFF (default), a build that ships with high/critical vulns says so honestly and points at
   this flag; when ON, the compatible fixes are applied automatically before ship. Never blocks a build.
+- **Adversarial robustness testing — NOW LIVE (admin SET in Cloud Run 2026-09-07):** ✅
+  **`AGENTV3_REDTEAM=on`** turns on the RED-TEAM pass (`FuzzProbe.ts`; Immune System Phase 3 / GA-17).
+  After a build renders, it drives a real browser to type HOSTILE values into the app's OWN inputs —
+  empty, oversized, injection-shaped, malformed numbers — and watches for a CRASH (uncaught error,
+  React error boundary, unhandled rejection), recorded as a `FUZZ_ROBUSTNESS` finding.
+  **WHY IT WAS WORTH TURNING ON: the happy-path preview check only ever proves the app renders on GOOD
+  input.** A crash on hostile input is a real bug that reaches the user and that no other gate looks
+  for. The rest of the post-build suite reads code or checks that the app loads; this is the only one
+  that tries to break it.
+  **It costs no model call.** The fuzzing is browser automation, so a clean build pays nothing extra —
+  which is why it was the one flag recommended while the admin was asking to REDUCE spend, and why
+  `AGENTV3_REVIEW_FASTLANE` was recommended AGAINST in the same breath (that one adds 3-6 model calls
+  and 30-90s to every simple build, for a reviewer that already runs on the complex ones where it earns
+  its keep). Bounded by construction: **12 cases max, 90-second wall clock**, abortable, and skipped
+  entirely unless ≥2 minutes of build budget remain. It can never block, fail or hang a build.
+  ⚠️ **REPAIR IS A SEPARATE, ALREADY-ON SWITCH.** The red-team only RECORDS findings on its own; the
+  bounded repair pass that hardens them rides `AGENTV3_FEATURE_HEAL`, which is `on` at
+  `AGENTV3_FEATURE_HEAL_PCT=20`. So today ~20% of builds get the fix and the rest get an honest
+  finding. Widening the heal percentage therefore widens this too — one number, two behaviours, same
+  as the vaccine repair budget noted in that flag's own entry.
+  **What to watch:** `FUZZ_ROBUSTNESS` findings in the admin build report. A build that suddenly takes
+  ~90s longer at the very end is this pass; unset the key to revert instantly.
 - **Payment recovery (shipped 2026-08-04):** `PAYMENT_RECONCILE_MIN_AGE_MINUTES` (2),
   `PAYMENT_RECONCILE_MAX_AGE_DAYS` (7), `PAYMENT_RECONCILE_MAX_ORDERS` (5). On sign-in the server settles
   the user's own unfinished orders against Cashfree. ⚠️ CORRECTION 2026-08-10: this entry used to say

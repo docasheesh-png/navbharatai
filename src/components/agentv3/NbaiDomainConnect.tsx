@@ -43,6 +43,14 @@ interface DomainStatus {
   publishBlocked?: string | null;
   /** Firebase's OWN explanation of why the domain is stuck. Absent on an older server. */
   issues?: string[];
+  /**
+   * This domain was moved to the app's OWN SERVER by a backend deploy, so the static host's record
+   * states describe a setup deliberately no longer in use — and the setup block below must stay shut,
+   * because its "Check & apply records" would hand the domain back and take the live site down.
+   * See domainPointing.ts. Absent on an older server ⇒ exactly today's behaviour.
+   */
+  backendPointed?: boolean;
+  backendStage?: { headline: string; note: string; tone: 'ok' | 'warn' } | null;
   /** When the hosting service last looked at the user's DNS (ISO). Absent on an older server. */
   lastCheckedAt?: string;
   /** What OUR resolver can see of the user's records right now. Absent on an older server. */
@@ -152,6 +160,12 @@ export function connectStage(
      */
     publishBlocked?: string | null;
     /**
+     * This domain was moved to the app's OWN SERVER by a backend deploy — so the static host's
+     * record states describe a setup that is deliberately no longer in use. See domainPointing.ts.
+     */
+    backendPointed?: boolean;
+    backendStage?: { headline: string; note: string; tone: 'ok' | 'warn' } | null;
+    /**
      * WHAT FIREBASE ITSELF SAID IS WRONG (`issues[]`), when it said anything.
      *
      * 🔒 THIS FILE'S OWN RULE, APPLIED TO ITS OWN NEW CODE: "Never diagnose from a status enum when
@@ -164,6 +178,21 @@ export function connectStage(
     issues?: string[] | null;
   },
 ): { headline: string; action: 'check' | 'none' | 'publish'; note: string; tone?: 'ok' | 'warn' } {
+  /**
+   * 🔴 CHECKED FIRST, BECAUSE EVERY BRANCH BELOW READS THE STATIC HOST'S VIEW (admin 2026-09-07).
+   *
+   * Once a backend deploy moves this domain to the app's own server, the static host's records are
+   * deliberately gone and its states go non-active — so those branches would announce "still
+   * connecting" over a live site and offer a Check button whose action would take it down. The server
+   * has already formed the honest verdict from whether the domain ANSWERS; this reproduces it rather
+   * than re-deriving one from states that no longer describe this domain.
+   *
+   * `action: 'none'` on purpose — there is nothing left for the user to do here, and the one thing
+   * this screen could offer them is the thing that must not be pressed.
+   */
+  if (s.backendPointed && s.backendStage) {
+    return { headline: s.backendStage.headline, action: 'none', note: s.backendStage.note, tone: s.backendStage.tone };
+  }
   if (s.active) {
     /**
      * 🔒 NEVER SEND SOMEONE AT A BUTTON THAT CANNOT WORK (admin 2026-08-24).
@@ -1106,7 +1135,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               genuinely done there is nothing left to press below except by mistake — see
               shouldShowDnsSetup. Always offered once active, never forced open: someone who needs to
               re-copy a record or re-check their nameservers can still get there in one tap. */}
-          {result.active && (
+          {(result.active || result.backendPointed === true) && (
             <button
               onClick={() => setDnsSectionOpen((v) => !v)}
               className="self-start flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/60 border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-[11px] font-bold transition-colors"
@@ -1116,7 +1145,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               <span className="text-zinc-500 font-normal">{dnsSectionOpen ? '— hide' : '— all done, tap to view'}</span>
             </button>
           )}
-          {shouldShowDnsSetup(result.active, dnsSectionOpen) && (
+          {shouldShowDnsSetup(result.active || result.backendPointed === true, dnsSectionOpen) && (
           <>
           {result.autoDns && (
             <div className="px-3 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex flex-col gap-2">

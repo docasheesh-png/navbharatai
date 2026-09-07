@@ -168,7 +168,11 @@ describe('🔒 the wiring — creation replaces the hand-off, and nothing else',
   it('🔒 fires ONLY on no-service, and only with a repo', () => {
     // Creating a service in answer to a bad key or an API error would be guessing with the user's
     // own account, and would bury the message that actually explains the failure.
-    expect(handler).toContain("result.reason === 'no-service' && repoUrl");
+    //
+    // ⚠️ RE-ANCHORED 2026-09-06: the raw `repoUrl` this checked against was replaced by
+    // `effectiveRepoUrl` (durable-memory fallback, see deployRepoMemory.ts) — the PROPERTY under test
+    // (no-service AND a repo, nothing else) is unchanged, only which variable carries "a repo" now.
+    expect(handler).toContain("result.reason === 'no-service' && effectiveRepoUrl");
   });
 
   /**

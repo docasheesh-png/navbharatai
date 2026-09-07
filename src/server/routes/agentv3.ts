@@ -219,6 +219,7 @@ import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findC
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
+import { repoAvailableForDeploy, resolveDeployRepo } from '../AgentV3/deployRepoMemory';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
@@ -3924,13 +3925,27 @@ async function noteBuildOutcome(
     const renderVault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
     const renderKey = resolveRenderKey(renderVault);
     if (!renderKey) { res.status(503).json({ ok: false, reason: 'not-configured', error: renderRequirement(process.env, renderVault) }); return; }
+    /**
+     * 🔴 THE REPO REMEMBERED, NOT ONLY THE ONE JUST CLICKED (admin 2026-09-06, "GitHub se import ki
+     * hai, matlab connect hai!"). `repoUrl` above is whatever THIS request's client happened to send
+     * — real when a build just streamed a `repo` event this session, empty on a reload. The
+     * workspace's own durable record (written the moment code lands in the user's own GitHub — see
+     * deployRepoMemory.ts) now backs it up, so a returning visit can deploy the SAME app the import
+     * already connected, without repeating work that already happened.
+     *
+     * `resolvedRepo.branch` is what finally makes the deploy target the app's shipped state rather
+     * than silently defaulting to `main` regardless of what the workspace actually uses.
+     */
+    const durableRepoRec = await getConversationStore().get(workspaceId).catch(() => null);
+    const resolvedRepo = resolveDeployRepo(repoUrl, durableRepoRec);
+    const effectiveRepoUrl = resolvedRepo?.repoUrl ?? repoUrl;
     // What we can honestly say about the environment the backend runs with. '' = nothing worth saying,
     // which is the ordinary case and must stay silent.
     let envNote = '';
     // Only set when WE created the service and therefore know which plan it is on — see below.
     let planNote = '';
     try {
-      let result = await deployBackendToRender({ repoUrl, appName, apiKey: renderKey.key });
+      let result = await deployBackendToRender({ repoUrl: effectiveRepoUrl, appName, apiKey: renderKey.key });
       /**
        * AN *EXISTING* SERVICE GETS THE TRUTH, NOT OUR KEYS (admin 2026-09-05).
        *
@@ -3989,8 +4004,8 @@ async function noteBuildOutcome(
        * hand-off underneath is what a server-key user still gets — the same instruction they had
        * before this feature existed, so nobody is worse off.
        */
-      if (!result.ok && result.reason === 'no-service' && repoUrl && renderKey.source === 'user') {
-        const repoPath = repoUrl.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '');
+      if (!result.ok && result.reason === 'no-service' && effectiveRepoUrl && renderKey.source === 'user') {
+        const repoPath = effectiveRepoUrl.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '');
         // The start command comes from the app's OWN package.json — see deriveServiceCommands for why
         // a guessed one is worse than no service at all.
         const pkgRaw = await loadWorkspaceFilesByPath(workspaceId, ['package.json'])
@@ -4040,9 +4055,13 @@ async function noteBuildOutcome(
         const created = await createRenderService({
           apiKey: renderKey.key,
           name: (appName || repoPath.split('/')[1] || 'app').slice(0, 60),
-          repoUrl, repoPath, packageJson: pkgRaw,
+          repoUrl: effectiveRepoUrl, repoPath, packageJson: pkgRaw,
           envVars: createEnvVars,
           runtime: backendRuntime, files: envSource,
+          // The app's shipped state — never a work-in-progress branch. Falls back to 'main' inside
+          // buildCreateServiceRequest when no durable record names one (an app the client just pushed
+          // this very turn, before its durable write landed).
+          branch: resolvedRepo?.branch,
         });
         if (created.ok) {
           // Render deploys a newly-created service by itself, so this IS the deploy — reporting it as
@@ -4229,7 +4248,8 @@ async function noteBuildOutcome(
       // while a build event happens to be in flight — which is what made the panel ask for a repo the
       // user already had.
       await store.update(workspaceId, {
-        repoName, repoOwner: login, repoOwnedByUser: true, updatedAt: rec?.updatedAt ?? Date.now(),
+        repoName, repoOwner: login, repoOwnedByUser: true, deployBranch: repo.defaultBranch || 'main',
+        updatedAt: rec?.updatedAt ?? Date.now(),
       }).catch(() => { /* the push is what mattered; a failed note only costs the shortcut */ });
 
       res.json({ ok: true, fullName: repo.fullName || `${login}/${repoName}`, htmlUrl: repo.htmlUrl || '', owner: login, repo: repoName });
@@ -6912,7 +6932,19 @@ async function noteBuildOutcome(
            * It shapes a sentence only — never an authorisation — so a client-supplied value costs
            * nothing, and its absence (`undefined`) keeps exactly the old wording.
            */
-          const hasRepo = typeof req.body?.hasRepo === 'boolean' ? req.body.hasRepo : undefined;
+          /**
+           * 🔴 THE CLIENT'S CLAIM IS NOT THE ONLY FACT WE HAVE (admin 2026-09-06, "GitHub se import
+           * ki hai, matlab connect hai!"). `req.body.hasRepo` reflects only THIS browser tab's
+           * live-session state, which starts empty on every reload — so a workspace whose import
+           * genuinely landed in the user's own GitHub would still be told to go connect and push one.
+           * The workspace's OWN durable record is consulted too; see deployRepoMemory.ts for why an
+           * empty client claim never overrides a durable yes.
+           */
+          const durableRepoRec = await getConversationStore().get(workspaceId).catch(() => null);
+          const hasRepo = repoAvailableForDeploy(
+            { hasRepo: typeof req.body?.hasRepo === 'boolean' ? req.body.hasRepo : false },
+            durableRepoRec,
+          );
           const decision = deployDecision(plan, {
             canDeploy: key !== null,
             requirement: renderRequirement(process.env, vault, hasRepo),
@@ -10449,6 +10481,25 @@ async function noteBuildOutcome(
                     : `Connected to your own repo ${target.owner}/${target.repo} — edits will be saved to the ‘${target.workBranch}’ branch; your ‘${target.baseBranch}’ stays safe until you merge the PR.`,
                   ts: Date.now(),
                 });
+                /**
+                 * 🔴 REMEMBER THIS, DURABLY — not just for the live stream (admin 2026-09-06, "GitHub
+                 * se import ki hai, matlab connect hai!").
+                 *
+                 * Until now this fact only ever reached the CLIENT as a `repo`/`own_repo` stream
+                 * event — real, but scoped to this one live session. The Publish/Deploy-backend screen
+                 * reads it from REACT STATE, which starts empty on every reload. So a workspace whose
+                 * import genuinely landed in the user's own repo would, on the very next visit, tell
+                 * that same user to "push this app to a repo of your own" — a true fact about THIS
+                 * session's memory, reported as if it were a fact about the app.
+                 *
+                 * `deployBranch` is the BASE branch (`main`), never the working branch — a Render
+                 * deploy must never build from `navbharatai/work`, which can hold unreviewed,
+                 * mid-session edits. See renderCreateService's branch wiring.
+                 */
+                void getConversationStore().update(workspaceId, {
+                  repoOwner: target.owner, repoOwnedByUser: true, deployBranch: target.baseBranch,
+                  updatedAt: Date.now(),
+                }).catch(() => { /* best-effort — the live stream event above still reaches this session */ });
               } else {
                 // MIRROR (today's behaviour): a private per-project repo in the user's account.
                 const repo = await userClient.ensureRepo(repoName);
@@ -10467,6 +10518,12 @@ async function noteBuildOutcome(
                     : `Connected to your GitHub — this build will be saved to ${login}/${repoName}.`,
                   ts: Date.now(),
                 });
+                // Same durable memory as the own-repo branch above — this repo IS the user's own
+                // account (userClient.ensureRepo created it there), so it is exactly as deployable.
+                void getConversationStore().update(workspaceId, {
+                  repoOwner: login, repoOwnedByUser: true, deployBranch: repoBranch,
+                  updatedAt: Date.now(),
+                }).catch(() => { /* best-effort — the live stream event above still reaches this session */ });
               }
             } catch { repoSync = undefined; prClient = undefined; ownRepoTarget = null; /* fall through to the platform store */ }
           }

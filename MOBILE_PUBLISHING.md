@@ -402,6 +402,47 @@ admin saying users have grown enough to need it. Until then, the correct action 
 
 ---
 
+## 🟢 STATUS: STARTED — the admin asked on 2026-09-07 ("DUNS account banwao")
+
+The trigger above has fired, so this section is no longer a map for later. It is the live plan. What
+follows is unchanged and still accurate; this block only records where the work stands and who is
+holding each piece, so a session resuming mid-way does not restart it or wait for permission it
+already has.
+
+**The critical-path order, because the two tracks have very different lengths:**
+
+| # | Step | Who | Time |
+|---|---|---|---|
+| 1 | Register the business entity (Private Limited recommended) | **admin / CA** | 7-15 days |
+| 2 | Apply for the D-U-N-S number — free, start the moment #1 issues a certificate | **admin** | 5-30 days |
+| 3 | Play Console → website → Save → **Send verification request** | **admin** | minutes |
+| 4 | Serve the verification file Google names | **a Claude session** | one PR |
+| 5 | Change account type → new payments profile → D-U-N-S → identity docs | **admin** | ~1 hour |
+| 6 | Wait 72 hours. Do not schedule a release into it | — | 3 days |
+| 7 | App content → **Health apps declaration** | **admin** | minutes |
+| 8 | Remove the ids from `MEDICAL_PROFESSIONAL_IDS`, fresh `.aab` | **a Claude session** | one PR |
+
+**Steps 1 and 3 can run on the same day** — Track A is free, takes an afternoon, and its only job is
+to make the *Change account type* button clickable. Track B is the long pole and gates everything
+after step 4, which is why it starts first.
+
+⚠️ **Step 4 cannot be prepared in advance.** Google issues the verification filename only after step 3,
+so a session has nothing to commit until the admin pastes it. (If the admin prefers the **DNS TXT**
+route instead, no code is needed at all — the record goes straight into Cloudflare and step 4 is
+skipped.)
+
+🔒 **Steps 7 and 8 are in that order for a compliance reason, not a tidiness one** — see §10.5 step 9.
+
+**Verified 2026-09-07, since §10.4 asserts it:** `public/` is Vite's default `publicDir` and is copied
+into `dist/`, and BOTH serving paths use `dist/` — `express.static(path.join(process.cwd(), 'dist'))`
+in `server.ts`, and `"public": "dist"` in `firebase.json`. Static files are matched BEFORE the SPA
+fallback, and `public/preview-sandbox.html` is an existing `.html` file served this way, so an
+`.html` verification file will be served as a file rather than swallowed by the SPA route. This was
+re-checked against the code rather than trusted from the earlier write-up; it could NOT be confirmed
+against the live site, because this environment's egress proxy refuses `navbharatai.com`.
+
+---
+
 ## 10.1 Why this exists at all — the ONE thing it unlocks
 
 `src/lib/playCompliance.ts` hides four medical-class AIs inside the Play-distributed app:

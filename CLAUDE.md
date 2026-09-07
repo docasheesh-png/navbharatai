@@ -1057,12 +1057,29 @@ same way a green Cloud Run deploy is — it is not optional cleanup.
 
 **Honest boundaries (rule 6 — what Claude CAN and CANNOT do here):**
 - Claude CAN trigger the workflow and confirm it goes green.
-- ⛔ **ORGANIZATION DEVELOPER ACCOUNT (D-U-N-S) — DEFERRED, do NOT start it (admin 2026-08-26: "yeh baad
-  me karenge jab user badhenge").** The full, verified conversion guide lives in `MOBILE_PUBLISHING.md` §10
-  — including the finding that the EXISTING account converts in place (no new account, no app transfer),
-  the four easy-to-miss traps, and the fact that this is the ONLY thing that brings Doctor AI, Pharmacist,
-  First Aid and Maternity back to the Play app. §10.6 records the separate (also deferred) HPR/ABDM
-  doctor-verification plan. A session must not begin either without the admin asking.
+- 🟢 **ORGANIZATION DEVELOPER ACCOUNT (D-U-N-S) — STARTED. The admin asked for it on 2026-09-07
+  ("DUNS account banwao"), which lifts the earlier deferral** (admin 2026-08-26: "yeh baad me karenge jab
+  user badhenge"). The old ⛔ "do NOT start it" line stood here until that moment; it is replaced rather
+  than deleted so the change of instruction is legible, and so no session stalls on an order that has
+  been withdrawn. The full, verified conversion guide is `MOBILE_PUBLISHING.md` §10 — including the
+  finding that the EXISTING account converts in place (no new account, no app transfer), the four
+  easy-to-miss traps, and the fact that this is the ONLY thing that brings Doctor AI, Pharmacist, First
+  Aid and Maternity back to the Play app.
+  **What a session may do, and where the line is.** Almost all of this is admin work a session cannot
+  touch: registering a company, applying to Dun & Bradstreet, and every click in Play Console. A session
+  CAN do exactly one piece end to end — Track A's **HTML-file website verification**, because `public/`
+  is copied into `dist/` and both serving paths serve `dist/`, so a file committed there is live at
+  `https://navbharatai.com/<name>` on the next merge. Google issues that filename only AFTER the admin
+  presses *Send verification request*, so a session waits for the admin to hand it over; it cannot be
+  prepared in advance.
+  🔒 **THE ORDER IS A COMPLIANCE REQUIREMENT, NOT A PREFERENCE.** `MEDICAL_PROFESSIONAL_IDS` in
+  `src/lib/playCompliance.ts` may be touched ONLY after the org account is live AND the Health-apps
+  declaration is filed. Reversing that order is a deceptive-behaviour violation that can ban the whole
+  developer account — a far worse outcome than the rejected update it would be trying to fix.
+  ⚠️ **AND IT IS A ONE-WAY DOOR:** Google does not convert an organization account back to an individual
+  one. Going back would mean a brand-new account plus an app transfer.
+  §10.6 records the separate HPR/ABDM doctor-verification plan, which **remains deferred** — it is a
+  different thing that does NOT unlock the mobile app, and it must not be started without its own ask.
 - Claude CANNOT set/rotate the signing keystore secrets (`ANDROID_KEYSTORE_BASE64`,
   `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`) — that is a one-time
   admin setup (documented in the workflow header); the keystore is the app's permanent identity

@@ -168,6 +168,36 @@ export interface ApplyRecordsResult {
  * Records on names we were not asked about are never touched. Returns `{ added, removed }` — an
  * honest "0 of each" remains a valid, verifiable outcome.
  */
+/**
+ * WHICH EXISTING RECORDS MUST GO BEFORE THIS ONE CAN EXIST — the cross-type conflict DNS itself
+ * forbids (admin 2026-09-07, and it is the last thing standing between mitrify.com and a live app).
+ *
+ * 🔴 THE BUG THIS CLOSES. `applyRecords` groups desired records by `type|name` and reads the zone
+ * back with `?type=<type>&name=<name>` — so it only ever SEES records of the same type. That is the
+ * right invariant WITHIN a type and the wrong one across types, because DNS (RFC 1034) forbids a
+ * CNAME from coexisting with any other data at the same name. A domain already connected to our
+ * static host carries an A record at its apex; pointing that same domain at a backend service writes
+ * a CNAME there — and the provider rejects it, every time, for as long as the A record survives.
+ *
+ * That is exactly the shape of the ownership-TXT conflict fixed above: not a slow state that
+ * eventually resolves, a permanent refusal. The deploy succeeds, the domain never moves, and the user
+ * keeps seeing the old host's error page.
+ *
+ * 🔒 A AND AAAA ONLY — NEVER TXT, MX OR NS. Strict RFC says a CNAME excludes everything, but our zones
+ * are Cloudflare's, whose apex CNAME flattening deliberately permits TXT and MX alongside. Those
+ * records carry the user's EMAIL (SPF/DKIM/MX) and other services' verifications; sweeping them to
+ * satisfy a rule the provider does not enforce would silently break mail to fix a problem that is not
+ * there. So the sweep is scoped to the record types that genuinely block the write and nothing else.
+ *
+ * PURE.
+ */
+export function conflictingTypesFor(desiredType: string): string[] {
+  const t = String(desiredType ?? '').trim().toUpperCase();
+  if (t === 'CNAME') return ['A', 'AAAA'];
+  if (t === 'A' || t === 'AAAA') return ['CNAME'];
+  return [];
+}
+
 export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Promise<ApplyRecordsResult> {
   let added = 0;
   let removed = 0;
@@ -231,6 +261,35 @@ export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Pr
         }
       }
       continue;
+    }
+
+    /**
+     * 🔴 CLEAR THE CROSS-TYPE CONFLICT FIRST, or the write below cannot succeed at all.
+     *
+     * DNS forbids a CNAME beside an A record at the same name, so a domain moving from our static
+     * host (an A record at the apex) to a backend service (a CNAME) is REFUSED by the provider until
+     * the A record is gone. Nothing above this line could ever see that record: the zone read is
+     * filtered by the record's own type. See conflictingTypesFor for why only A/AAAA/CNAME are swept
+     * and never TXT or MX.
+     *
+     * Ordering is the whole point — deleting AFTER the create would leave the create already rejected.
+     */
+    for (const conflictType of conflictingTypesFor(type)) {
+      const raw = await cf<CfDnsRecord[]>(
+        `/zones/${zoneId}/dns_records?type=${encodeURIComponent(conflictType)}&name=${encodeURIComponent(name)}&per_page=100`,
+      );
+      const blockers = Array.isArray(raw) ? raw : [];
+      for (const r of blockers) {
+        /**
+         * 🔒 NEVER DELETE A RECORD WHOSE TYPE WE DID NOT ASK TO SWEEP. The query already filters by
+         * type, so this can only differ if the provider answers with something else — and a DELETE is
+         * irreversible. Re-checking what came back costs nothing and makes an unexpected response
+         * impossible to act on destructively.
+         */
+        if (String(r.type ?? '').trim().toUpperCase() !== conflictType) continue;
+        await cf(`/zones/${zoneId}/dns_records/${r.id}`, { method: 'DELETE' });
+        removed++; // cleanup of a record that BLOCKS the desired one — never a desired value itself
+      }
     }
 
     // Non-TXT: converge to exactly the desired value set, all DNS-only (grey cloud).

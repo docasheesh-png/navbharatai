@@ -45242,3 +45242,51 @@ conclusion is only as wide as the search that produced it, and "I searched the c
 "I searched all of it".** For an existence question about wiring, the entry point must be in scope.
 
 **Gate:** `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · full suite green.
+
+## 2026-09-07 — the cross-type DNS conflict: why the domain could never have moved to the backend
+
+Asked "ab kuch bacha hai?" — and re-reading the newly-wired domain-pointing path found a defect that
+would have made every one of yesterday's fixes stop one step short of a live site.
+
+**THE BUG.** `applyRecords` groups desired records by `type|name` and reads the zone back with
+`?type=<type>&name=<name>` — so it can only ever SEE records of the same type. That is the correct
+invariant WITHIN a type and the wrong one ACROSS types: DNS (RFC 1034) forbids a CNAME from coexisting
+with other data at the same name.
+
+mitrify.com's apex carries an **A record** (our static host — visible as "A @ Verified" in the admin's
+own screenshot). Pointing that domain at the backend service writes a **CNAME** at the same apex. The
+provider refuses that write for as long as the A record survives, and nothing above that line could
+see the A record to remove it. So: backend deploys successfully, `domainNote` honestly reports it
+could not point the domain, and mitrify.com keeps serving the old host's error page — forever.
+
+Same shape as the ownership-TXT conflict fixed in this file on 2026-08-22: **not a slow state that
+eventually resolves, a permanent refusal.**
+
+**THE FIX.** New pure `conflictingTypesFor(desiredType)` + a sweep that runs BEFORE the write (ordering
+is the whole point — deleting after the create would leave the create already rejected):
+- CNAME ⇒ remove A / AAAA at that name
+- A / AAAA ⇒ remove CNAME at that name
+
+**🔒 A AND AAAA ONLY — NEVER TXT, MX OR NS.** Strict RFC says a CNAME excludes everything, but our
+zones are Cloudflare's, whose apex CNAME flattening deliberately permits TXT and MX alongside. Those
+records carry the user's EMAIL (SPF/DKIM/MX) and other services' verifications; sweeping them to
+satisfy a rule the provider does not enforce would silently break mail to fix a problem that is not
+there. The sweep is scoped to the types that genuinely block the write and nothing else — the same
+reasoning that keeps the TXT branch add-only.
+
+**Two safety additions the existing tests forced out, and both are real.** The pre-existing suite went
+red in ways that were fake artefacts on the surface and genuine hardening underneath:
+- an unexpected non-array response was iterated (`Array.isArray` guard now);
+- a returned record whose type differs from the one we asked to sweep would have been deleted. The
+  query already filters by type, so that can only happen if the provider answers with something else —
+  and a DELETE is irreversible. Re-checking what came back costs nothing and makes an unexpected
+  response impossible to act on destructively.
+
+Two test anchors re-pointed, neither deleted: one pre-existing fake treated every unmatched request as
+a WRITE (fine while the only reads were the two it matched; the new conflict read shifted its write
+indices), and one of my own new fakes collided on the substring `type=A` inside `type=AAAA`. Both
+reasons recorded in place; the properties under test are unchanged.
+
+Verified to bite: neutering the sweep loop was confirmed to fail both new tests, then restored.
+
+Gate: both `tsc` clean; FULL suite **1467 files / 19553 tests green**.

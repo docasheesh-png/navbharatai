@@ -196,6 +196,7 @@ import { generateRecruitmentIntegration } from '../lib/RecruitmentGenerator';
 import { generateInvoicingIntegration } from '../lib/InvoicingGenerator';
 import { generateHelpdeskIntegration } from '../lib/HelpdeskGenerator';
 import { generateSocietyIntegration } from '../lib/SocietyGenerator';
+import { generateNgoIntegration } from '../lib/NgoGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -4600,6 +4601,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('society starter');
         const socDeps = socCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a housing-society / RWA backend:\n${socWritten.join('\n')}\nAdd the dependencies: ${socDeps}\n\n${socCfg.instructions}`;
+      }
+
+      case 'generate_ngo': {
+        // Breadth recipe (domain vertical) — NGO / donations (server/ngo/): a real NgoService with GAPLESS,
+        // unique 80G-style receipt numbers per Indian financial year, campaign totals DERIVED from
+        // donations (a closed campaign takes none), and an append-only ledger. Pure gen in NgoGenerator.ts.
+        const ngoCfg = generateNgoIntegration();
+        const ngoWritten: string[] = [];
+        for (const [path, content] of Object.entries(ngoCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ngoWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('ngo starter');
+        const ngoDeps = ngoCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an NGO / donation backend:\n${ngoWritten.join('\n')}\nAdd the dependencies: ${ngoDeps}\n\n${ngoCfg.instructions}`;
       }
 
       case 'manage_dependency': {

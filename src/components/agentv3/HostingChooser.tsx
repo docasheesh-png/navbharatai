@@ -649,6 +649,9 @@ export function HostingChooser({
               /* The SAME takedown the "Your published apps" list uses — one implementation, so the
                  domain screen can never drift into taking a site down differently from the list. */
               onUnpublish={onUnpublishApp && workspaceId ? () => onUnpublishApp(workspaceId) : undefined}
+              /* The Deploy-backend controls live on THIS sheet's server-half card (the `choose` view);
+                 the domain screen's verdict names that step, so it gets a button that goes there. */
+              onDeployBackend={() => setView('choose')}
             />
           </div>
         ) : view === 'myapps' ? (

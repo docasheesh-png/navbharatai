@@ -101,6 +101,15 @@ export interface NbaiDomainConnectProps {
    * The screen's own status response takes over as soon as it lands — it is the fresher reading.
    */
   publishFreshness?: PublishFreshness;
+  /**
+   * Take the user to the Deploy-backend controls (admin screenshot 2026-09-07).
+   *
+   * For an app with a server half this screen's verdict says *"deploy the whole app to a host that can
+   * run a server, then point this domain there"* — an instruction with no control beside it, on a
+   * screen two levels deep. The controls that do it ("Put this app in my GitHub", "Deploy backend")
+   * live on the Publish sheet's server-half card. Absent ⇒ the sentence stands alone, as before.
+   */
+  onDeployBackend?: () => void;
 }
 
 /**
@@ -177,7 +186,7 @@ export function connectStage(
      */
     issues?: string[] | null;
   },
-): { headline: string; action: 'check' | 'none' | 'publish'; note: string; tone?: 'ok' | 'warn' } {
+): { headline: string; action: 'check' | 'none' | 'publish' | 'deploy-backend'; note: string; tone?: 'ok' | 'warn' } {
   /**
    * 🔴 CHECKED FIRST, BECAUSE EVERY BRANCH BELOW READS THE STATIC HOST'S VIEW (admin 2026-09-07).
    *
@@ -210,7 +219,9 @@ export function connectStage(
     if (s.publishBlocked) {
       return {
         headline: 'Connected — but this app needs its server part deployed first.',
-        action: 'none',
+        // A real path to the one thing that is left (admin screenshot 2026-09-07): the sentence below
+        // names the step, and the screen renders the button that goes to it — never a bare instruction.
+        action: 'deploy-backend',
         tone: 'warn',
         note: s.publishBlocked,
       };
@@ -646,7 +657,7 @@ export function relativeRecordName(name: string, domain: string): string {
 }
 
 
-export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy, publishResult, publishFreshness, onUnpublish }: NbaiDomainConnectProps) {
+export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy, publishResult, publishFreshness, onUnpublish, onDeployBackend }: NbaiDomainConnectProps) {
   /**
    * OPENS WITH WHAT YOU ALREADY TYPED (admin 2026-08-22: "abhi lagta hai sab gayab ho gaya").
    *
@@ -1083,6 +1094,17 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                     Go to Publish
                   </button>
                 )}
+                {/* THE SAME PRINCIPLE FOR A SERVER APP (admin screenshot 2026-09-07). The verdict said
+                    "deploy the whole app to a host that can run a server" and offered nothing to press;
+                    the controls that do it live on the Publish sheet's server-half card. */}
+                {stage.action === 'deploy-backend' && onDeployBackend && (
+                  <button
+                    onClick={onDeployBackend}
+                    className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold"
+                  >
+                    Go to Deploy backend
+                  </button>
+                )}
                 {/* WHAT WE CAN SEE OF THEIR DNS (admin 2026-08-21, mitrify.com). The status line
                     below said `ownership: missing` while all three records were live and byte-perfect
                     in public DNS — a state indistinguishable from "you typed it wrong", so the user
@@ -1463,18 +1485,30 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
             );
           })()}
 
-          {result.active && (
-            <a
-              href={visitUrl(cleanDomain)}
-              target="_blank"
-              rel="noreferrer"
-              className="self-start flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-500 text-white text-[13px] font-bold transition-colors"
-            >
-              <Globe className="w-4 h-4" />
-              Visit {cleanDomain}
-              <ExternalLink className="w-3.5 h-3.5 opacity-80" />
-            </a>
-          )}
+          {/* GREEN ONLY WHEN THE DOMAIN WAS SEEN SERVING THE APP (admin screenshot 2026-09-07: a bright
+              green "Visit mitrify.com" directly under a verdict saying the server part is not deployed,
+              and the domain answering Firebase's "Site Not Found"). The link stays — it is their domain
+              and the box above says what they will find — but a green button is a claim, and it is now
+              made only from evidence. See visitTone. */}
+          {result.active && (() => {
+            const tone = visitTone(result);
+            return (
+              <a
+                href={visitUrl(cleanDomain)}
+                target="_blank"
+                rel="noreferrer"
+                className={`self-start flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13px] font-bold transition-colors ${
+                  tone === 'live'
+                    ? 'bg-green-600 hover:bg-green-500 text-white'
+                    : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'
+                }`}
+              >
+                <Globe className="w-4 h-4" />
+                {tone === 'live' ? 'Visit' : 'Open'} {cleanDomain}
+                <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+              </a>
+            );
+          })()}
 
           {/* UNPUBLISH (admin 2026-08-22). Offered only for an app that is genuinely LIVE — there is
               nothing to take down otherwise, and a control with nothing behind it is the dead button
@@ -1573,6 +1607,26 @@ export function cleanDomainInput(raw: string): string {
 export function visitUrl(domain: string): string {
   const host = cleanDomainInput(domain);
   return host ? `https://${host}` : '';
+}
+
+/**
+ * How the Visit link is painted — `live` (green, "Visit") only when the domain was actually SEEN
+ * serving the app; `muted` (a plain link, "Open") for everything else.
+ *
+ * 🔒 A GREEN BUTTON IS A CLAIM. "Connected" describes DNS and a certificate; it says nothing about
+ * what the domain shows. Under a verdict that the server part is not deployed, or a probe that saw an
+ * error page, or no probe at all, painting the link green tells the user the opposite of the box above
+ * it. The link itself is never withheld — it is their domain — only the colour has to be earned. PURE.
+ */
+export function visitTone(s: {
+  serving?: { state: string } | null;
+  backendPointed?: boolean;
+  backendStage?: { tone: 'ok' | 'warn' } | null;
+  publishBlocked?: string | null;
+}): 'live' | 'muted' {
+  if (s.backendPointed) return s.backendStage?.tone === 'ok' ? 'live' : 'muted';
+  if (s.publishBlocked) return 'muted';
+  return s.serving?.state === 'serving' ? 'live' : 'muted';
 }
 
 /** Trim the API's verbose state enums (OWNERSHIP_ACTIVE -> active) for the status line. */

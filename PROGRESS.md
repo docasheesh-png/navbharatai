@@ -45458,3 +45458,47 @@ requiring the same three fields as the server; wiring pins each call's ceiling, 
 
 **Still on the user's side for mitrify.com (platform cannot check):** their own `RENDER_API_KEY` in
 Settings → Secrets & API Keys, a `start` script, and real backend keys in Settings.
+
+## 2026-09-07 (4) — the domain screen told two truths a minute apart, re-checked a record nobody needs, and painted "Visit" green over "Site Not Found"
+
+Admin, three screenshots of mitrify.com within one minute: (1) amber *"Connected — but this app needs
+its server part deployed first"* with, above it, *"Not visible on the internet yet: TXT
+_acme-challenge.mitrify.com … Nothing is wrong"* beside `SSL: active`; (2) green *"Connected, with
+HTTPS … If it shows an error page, press Publish once"* plus a Publish button, for an app whose Publish
+is refused; (3) the domain itself answering Firebase's "Site Not Found" — under a bright green
+**Visit mitrify.com**. The true state (backend not deployed) was correct in exactly one of the three.
+
+**Four root causes, none of them "deploy the backend":**
+
+1. **Two routes, two verdict shapes, one screen trusting both.** `POST /connect` answered with the
+   BARE hosting status — no `serving`, `publishBlocked`, `dnsCheck`, `publish` — and the client did
+   `setResult(data)` with it. Pressing Connect on an already-connected domain (the admin did; the
+   button is lit in screenshot 2) therefore REPLACED the honest verdict with a bare one, and
+   `connectStage` fell through to *"Connected, with HTTPS … press Publish once"*. The next poll flipped
+   it back. → All enrichment now lives in ONE `formDomainVerdict(workspaceId, host, status)` and
+   BOTH routes return it. Test-pinned: exactly one `checkDomainServing(host)` and one
+   `verifyRecordsLive(` in the file, and the old connect shape is asserted gone.
+2. **The live DNS check verified records the host had already accepted.** The stable record view
+   remembers every record ever shown (by design), and the check ran over ALL of them — so an ACME
+   challenge TXT, dropped once the certificate was issued, was reported "not visible yet" on a
+   domain with nothing left to do. → `recordsStillPending()` (pure): only `done: false` records are
+   checked; a finished domain shows no sentence at all; a record the host re-lists is checked again.
+3. **"Visit" was green whenever `active` was true.** `active` describes DNS and a certificate, not
+   what the domain shows. → `visitTone()` (pure): green "Visit" only when the probe SAW the app
+   serving (or the backend verdict is ok); a server app with nothing deployed, an error page, or no
+   probe gets a plain "Open" link. The link is never withheld — only the colour is earned.
+4. **The server-app verdict was an instruction with no control** — *"deploy the whole app to a host
+   that can run a server"* two screens deep, while the buttons live on the Publish sheet's server-half
+   card. → `connectStage` returns `action: 'deploy-backend'`, the screen renders **Go to Deploy
+   backend**, and HostingChooser wires it to the `choose` view. Two anchors re-pointed from `'none'`
+   to `'deploy-backend'`; the property (never `'publish'`) is unchanged and now asserted explicitly.
+
+Two `domainPublishBlock` slices re-anchored from `res.json({ ...status` to `return { ...status` — the
+same block, now returned to two callers instead of sent from one.
+
+**Tests:** `tests/domainVerdictOneSource.test.ts` (one-source wiring, `recordsStillPending`,
+`visitTone`, the deploy-backend action and its wiring). `AppKnowledgeBase` updated.
+
+**What the admin should now see on mitrify.com's screen, consistently:** amber "needs its server part
+deployed first" + **Go to Deploy backend** + a plain "Open mitrify.com" — and no DNS-record note.
+The backend deploy itself is still theirs to run: repo (the button), their own `RENDER_API_KEY`.

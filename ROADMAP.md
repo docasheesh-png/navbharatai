@@ -1100,8 +1100,16 @@ Creating a GCP project is console work. Slice 1 cannot deploy anywhere until the
 4. **Cross-project IAM** — grant the PLATFORM's Cloud Run service account `run.admin` +
    `cloudbuild.builds.editor` + `iam.serviceAccountUser` **in the apps project only**, so the platform
    can deploy there and nowhere else.
-5. **Set `NAVBHARAT_APPS_PROJECT`** in the platform's Cloud Run env to that project id, and record it
-   in `CLAUDE.md`'s registry per the hand-to-hand rule.
+5. **Set the env keys** in the platform's Cloud Run env, and record them in `CLAUDE.md`'s registry per
+   the hand-to-hand rule:
+   | Key | What it does | Default |
+   |---|---|---|
+   | `NAVBHARAT_APPS_PROJECT` | The separate project user apps run in. **Required** — hosting is off without it, and it is REFUSED if it names the platform project. | unset ⇒ off |
+   | `NAVBHARAT_CLOUD` | Master switch. Off ⇒ the route 404s and nothing else changes. | off |
+   | `NAVBHARAT_CLOUD_PUBLIC` | Off ⇒ hosting is ADMIN-ONLY even with the master on. Do not set it before slice 2 (metering) exists. | off |
+   | `NAVBHARAT_APPS_REGION` | Where apps run. | `asia-south1` (Mumbai) |
+   | `NAVBHARAT_APPS_IMAGE_REPO` | Artifact Registry repo for app images. | `nbai-apps` |
+   | `NAVBHARAT_APPS_BUILD_BUCKET` | Source staging. | `<project>_cloudbuild` |
 
 🔒 **The code must FAIL CLOSED on this**: with `NAVBHARAT_APPS_PROJECT` unset, hosting is simply
 unavailable and says so. It must never fall back to the platform's own project — that fallback would

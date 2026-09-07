@@ -221,6 +221,10 @@ import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
 import { repoAvailableForDeploy, resolveDeployRepo } from '../AgentV3/deployRepoMemory';
 import { decidePushBranch } from '../AgentV3/pushAppTarget';
+import { hostingAvailability, hostAppOnNavBharatCloud } from '../AgentV3/hostApp';
+// ADC for the apps project — on Cloud Run the service identity is used automatically, exactly as
+// Deployment.ts does for Firebase Hosting.
+import { GoogleAuth } from 'google-auth-library';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
@@ -4201,6 +4205,82 @@ async function noteBuildOutcome(
       });
     } catch (e) {
       res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  });
+
+  /**
+   * NAVBHARAT CLOUD — host this app on NavBharatAI's own infrastructure (ROADMAP §11, slice 1c).
+   *
+   * 🔴 WHAT THIS REPLACES. Hosting an app with a server half means, today: press Publish, be refused,
+   * put the app in GitHub, open Render, make an account, generate an API key, paste it back, press
+   * Deploy backend. Five steps through two other websites. Researched 2026-09-07: Replit, Lovable,
+   * Base44, Bolt, v0 and Emergent all host the backend themselves, and NONE of them makes a
+   * third-party dashboard key the default path. This route is the first half of closing that gap.
+   *
+   * 🔒 INERT UNTIL DELIBERATELY SWITCHED ON, in two flags. `NAVBHARAT_CLOUD` off — the default —
+   * means this answers 404 and nothing else in the product changes. With it on, hosting stays
+   * ADMIN-ONLY until `NAVBHARAT_CLOUD_PUBLIC` is also set. The same shape as AGENTV3_ENABLED /
+   * AGENTV3_PAID_PUBLIC, for the same reason: a path that spends real money should take two
+   * deliberate acts to reach real users.
+   *
+   * 🔒 AND IT CANNOT RUN IN THE PLATFORM'S OWN PROJECT. `hostingAvailability` refuses when
+   * NAVBHARAT_APPS_PROJECT is unset AND when it names the platform project (admin decision D4,
+   * 2026-09-07) — user code must not share a project with Firestore, the wallet and every user
+   * record. There is deliberately no fallback: a working fallback is how an isolation decision gets
+   * quietly reversed.
+   *
+   * ⚠️ NOT BILLED YET. Metering is slice 2, and nothing goes past admin-only before it exists —
+   * unmetered hosting is precisely the loss ROADMAP's cost plan exists to prevent.
+   */
+  app.post('/api/agentv3/host-app', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    // The VERIFIED identity, never the body's claim — a spoofed email deciding admin access is the
+    // exact hole every other gate in this file closes.
+    const { userId, email } = await resolveReadIdentity(req);
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+
+    const gate = hostingAvailability({ isAdmin: isReportAdmin(email) });
+    if (!gate.available) { res.status(503).json({ ok: false, reason: 'unavailable', error: gate.message }); return; }
+
+    try {
+      const files = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+      // Scoped to THIS app, so hosting inherits the same least-privilege the build path uses; and
+      // planBackendEnv then narrows further to the names the app's own code actually reads.
+      const vault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
+      // ADC — on Cloud Run the service identity is used automatically. The cloud-platform scope covers
+      // Cloud Build, Cloud Storage and Cloud Run in the apps project.
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const token = await auth.getAccessToken().catch(() => null);
+      if (!token) {
+        res.status(503).json({ ok: false, reason: 'unavailable', error: 'Hosting could not authenticate with Google Cloud just now. Nothing was changed.' });
+        return;
+      }
+      const appRec = await getConversationStore().get(workspaceId).catch(() => null);
+      const result = await hostAppOnNavBharatCloud({
+        workspaceId,
+        appName: appRec?.appName || appRec?.title || null,
+        files,
+        vaultSecrets: vault,
+        token: String(token),
+      });
+      if (!result.ok) {
+        // The provider's own words are ADMIN-ONLY (the white-label law): the user gets our sentence,
+        // the server log gets the reason. A build's compiler output must never reach a response body.
+        if (result.detail) console.error(`[host-app] ${workspaceId} ${result.reason}: ${result.detail}`);
+        const status = result.reason === 'unavailable' ? 503
+          : result.reason === 'no-source' || result.reason === 'unpackable' ? 422
+          : 502;
+        res.status(status).json({ ok: false, reason: result.reason, error: result.message });
+        return;
+      }
+      res.json({
+        ok: true, url: result.url, service: result.service, ready: result.ready,
+        ...(result.envNote ? { envNote: result.envNote } : {}),
+      });
+    } catch (e) {
+      res.status(502).json({ ok: false, reason: 'deploy-failed', error: `Hosting failed: ${e instanceof Error ? e.message : String(e)}` });
     }
   });
 

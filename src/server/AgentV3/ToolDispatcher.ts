@@ -197,6 +197,7 @@ import { generateInvoicingIntegration } from '../lib/InvoicingGenerator';
 import { generateHelpdeskIntegration } from '../lib/HelpdeskGenerator';
 import { generateSocietyIntegration } from '../lib/SocietyGenerator';
 import { generateNgoIntegration } from '../lib/NgoGenerator';
+import { generateFieldServiceIntegration } from '../lib/FieldServiceGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -4620,6 +4621,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('ngo starter');
         const ngoDeps = ngoCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired an NGO / donation backend:\n${ngoWritten.join('\n')}\nAdd the dependencies: ${ngoDeps}\n\n${ngoCfg.instructions}`;
+      }
+
+      case 'generate_field_service': {
+        // Breadth recipe (domain vertical) — Field-service / dispatch (server/fieldservice/): a real
+        // FieldServiceService with a job STATE-MACHINE (assigned only via assign()), a ONE-ACTIVE-JOB-per-
+        // technician guarantee (busy assign → 409), and an append-only history. Pure gen in FieldServiceGenerator.ts.
+        const fsCfg = generateFieldServiceIntegration();
+        const fsWritten: string[] = [];
+        for (const [path, content] of Object.entries(fsCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          fsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('field-service starter');
+        const fsDeps = fsCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a field-service / dispatch backend:\n${fsWritten.join('\n')}\nAdd the dependencies: ${fsDeps}\n\n${fsCfg.instructions}`;
       }
 
       case 'manage_dependency': {

@@ -51,13 +51,20 @@ describe('🔒 the wiring — the toggle exists, defaults collapsed, and a manua
   });
 
   it('the setup block itself is gated by the pure rule, not a second ad-hoc condition', () => {
-    expect(src).toContain('shouldShowDnsSetup(result.active, dnsSectionOpen)');
+    // ⚠️ RE-ANCHORED 2026-09-07: the gate now ALSO holds shut for a backend-pointed domain, whose
+    // "Check & apply records" would hand the domain back to static hosting and take the live site
+    // down (see domainPointing.ts). The property here is unchanged — ONE pure rule gates the block,
+    // never a second ad-hoc condition — so the anchor moves to the call rather than its arguments.
+    expect(src).toContain('shouldShowDnsSetup(');
+    expect(src).toContain('dnsSectionOpen)');
+    // Exactly one gate: a second call would mean two places deciding the same thing.
+    expect(src.split('shouldShowDnsSetup(').length - 1).toBe(2);   // the import/definition + the gate
   });
 
   it('🔒 the nameserver fields, Check & apply, and registrar picker are all INSIDE the gate', () => {
     // Anchor on the gate open-brace and confirm the setup controls appear after it before the closing
     // fragment — if any of these slipped OUTSIDE the gate they would keep showing exactly as before.
-    const gateAt = src.indexOf('shouldShowDnsSetup(result.active, dnsSectionOpen)');
+    const gateAt = src.indexOf('{shouldShowDnsSetup(');
     const closeAt = src.indexOf('HTTPS is issued automatically once the records resolve.');
     expect(gateAt).toBeGreaterThan(-1);
     expect(closeAt).toBeGreaterThan(gateAt);

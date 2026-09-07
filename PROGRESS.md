@@ -45291,6 +45291,60 @@ Verified to bite: neutering the sweep loop was confirmed to fail both new tests,
 
 Gate: both `tsc` clean; FULL suite **1467 files / 19553 tests green**.
 
+## 2026-09-07 (2) — the screen would have offered a button that took the live site down
+
+Asked "ab app publish me koi problem bachi hai?" — traced the publish path end to end rather than
+answering from memory, and found one. It is the sharpest defect of the whole sequence, and the
+cross-type DNS sweep shipped hours earlier is what gave it teeth.
+
+**THE TRAP.** A backend deploy moves a fullstack app's domain OFF static hosting and onto the running
+service: it attaches the domain there and writes a CNAME at the apex, removing the static host's A
+record first (DNS forbids both at one name). From that moment the STATIC host's view of the domain is,
+correctly, "my records are gone" — its ownership/host states go non-active. And every screen and route
+here read exactly that view:
+
+- the connect screen concluded the domain was "still connecting", so it re-opened the setup block;
+- that block offers **"Check & apply records"**, which applies the STATIC host's records — an A record
+  at the apex;
+- and the new cross-type sweep would then **delete the service's CNAME**, because an A and a CNAME
+  cannot share a name.
+
+So a domain that was genuinely live would be taken down **by the button the screen put in front of the
+user** — handed back to a host which, for a fullstack app, can only ever answer "Site Not Found". The
+UI led them out of a working state.
+
+**THE FIX IS A RECORDED FACT, NOT A HEURISTIC.** Nothing infers where a domain points by inspecting
+DNS: the deploy that moved it now records `backendDomain` on the workspace, and every decision reads
+that record. A guess would be wrong in exactly the case that matters (a domain mid-move), and a wrong
+guess here deletes a working site.
+
+- **`domainPointing.ts`** (new, pure): `isBackendPointed` (host-specific — a second domain on the same
+  workspace is a different question), `backendPointedRefusal` (names what would be LOST, and how to
+  move the domain back — a refusal without a way forward is a dead end), `backendPointedStage` (the
+  verdict from whether the domain ANSWERS).
+- **The sync route refuses**, and the guard sits UPSTREAM of `applyRecords`, not beside it — a test
+  pins that ordering, because a guard that runs after the write guards nothing.
+- **The status route stops treating the static host as the verdict.** `status.active` answers "are MY
+  records in place?" while the user is asking "does my domain work?" — once the domain has moved those
+  are different questions with legitimately different answers. For a backend-pointed domain the answer
+  now comes from a real probe.
+- **`connectStage` checks it FIRST**, before every branch that reads static-host states, and returns
+  `action: 'none'` — there is nothing left to do here, and the one thing this screen could offer is
+  the thing that must not be pressed.
+- **The DNS setup block stays shut** for such a domain (the toggle still offers it, so the records
+  stay reachable for reference).
+
+**One conversation store, not two.** The domains route needed the durable record, and the store was a
+module-private singleton in `agentv3.ts`. It is now EXPORTED rather than reconstructed: two instances
+would each hold their own client and their own in-memory fallback, so a fact written through one would
+be invisible through the other — the exact drift this codebase keeps unlearning. Test-pinned.
+
+Verified to bite: removing the `connectStage` branch was confirmed to fail both its tests, then
+restored. Two of my OWN anchors from yesterday re-pointed (the gate's arguments changed; the property —
+ONE pure rule gates the block, never a second ad-hoc condition — is unchanged and now also asserts
+there is exactly one gate).
+
+Gate: both `tsc` clean; FULL suite **1468 files / 19568 tests green**. AppKnowledgeBase updated.
 ---
 
 ## 2026-09-07 — `AGENTV3_REDTEAM=on` is live, and the ROADMAP line that argued against it was wrong

@@ -32,6 +32,8 @@ import { resolvePublishState } from '../AgentV3/publishState';
 import { planDeployment, domainPublishBlockNote } from '../AgentV3/deployPlan';
 import { loadWorkspaceFilesByPath, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { analyzeApiWiring } from '../AgentV3/apiWiring';
+import { isBackendPointed, backendPointedRefusal, backendPointedStage } from '../AgentV3/domainPointing';
+import { getConversationStore } from './agentv3';
 
 /**
  * Firebase-NATIVE custom-domain routes (Slice 2) — connect a user's own domain directly to their
@@ -192,8 +194,36 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       // everything a release count cannot see (a release exists but the page errors), but it must not
       // be the only witness: it failed to reach mitrify.com and the screen printed "Live!" over a
       // domain the admin was watching show "Site Not Found".
-      let serving = status.active ? await checkDomainServing(host).catch(() => null) : null;
+      /**
+       * 🔴 A DOMAIN THAT MOVED TO THE BACKEND IS NOT "STILL CONNECTING" (admin 2026-09-07).
+       *
+       * `status.active` is the STATIC host's answer to "are MY records in place?". Once a backend
+       * deploy moves the domain to the running service those records are deliberately gone, so that
+       * answer is legitimately false while the site is legitimately LIVE. Letting it drive the verdict
+       * printed "still connecting" over a working domain — and worse, re-opened the setup block whose
+       * button would have taken the site down (see the sync route's guard).
+       *
+       * So for a backend-pointed domain the verdict comes from whether the domain ANSWERS, which is
+       * the question the user was asking all along.
+       */
+      const pointingRec = await getConversationStore().get(String(workspaceId)).catch(() => null);
+      const backendPointed = isBackendPointed(pointingRec, host);
+      let serving = (status.active || backendPointed) ? await checkDomainServing(host).catch(() => null) : null;
       let everPublished: boolean | null = null;
+      if (backendPointed) {
+        const stage = backendPointedStage(host, serving);
+        res.json({
+          ...status,
+          // The domain genuinely works (or genuinely does not) on its own merits now — never on the
+          // static host's record check, which cannot see the service at all.
+          active: serving?.state === 'serving',
+          backendPointed: true,
+          backendStage: stage,
+          displayRecords: [],
+          serving,
+        });
+        return;
+      }
       if (status.active) {
         everPublished = await siteHasRelease(workspaceId).catch(() => null);
         if (everPublished === false) {
@@ -348,6 +378,25 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     }
     const host = normalizeDomain(req.body?.domain);
     if (!DOMAIN_RE.test(host)) { res.status(400).json({ error: 'Invalid domain.' }); return; }
+    /**
+     * 🔴 REFUSE TO WRITE THE WEBSITE RECORDS OVER A DOMAIN THAT IS SERVING THE APP'S OWN SERVER
+     * (admin 2026-09-07). This is the single most destructive thing this route could do.
+     *
+     * Once a backend deploy moves a domain to the running service, the static host's records are
+     * deliberately gone — so its status goes non-active, the connect screen concludes the domain is
+     * "still connecting", re-opens the setup block and offers this very button. Pressing it would
+     * write an A record at the apex; the cross-type sweep would then delete the service's CNAME
+     * (DNS forbids both at one name); and the live site would go down, handed back to a host that —
+     * for a fullstack app — can only ever answer "Site Not Found".
+     *
+     * The button looks helpful and is destructive, so the refusal names what would be LOST rather
+     * than merely saying no. See domainPointing.ts.
+     */
+    const pointingRec = await getConversationStore().get(String(workspaceId)).catch(() => null);
+    if (isBackendPointed(pointingRec, host)) {
+      res.status(409).json({ error: backendPointedRefusal(host) });
+      return;
+    }
     try {
       const zone = await zoneStatus(host);
       if (!zone) { res.status(404).json({ error: 'Automatic setup has not been started for this domain.' }); return; }

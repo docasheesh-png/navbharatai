@@ -604,7 +604,13 @@ let sharedConversationStore: ConversationStore | null = null;
  * missing-credentials environment never errors). Singleton. Gated on AGENTV3_PERSIST_FIRESTORE
  * so CI/local stay on the in-memory store, matching the cautious v5.0 flag-gating.
  */
-function getConversationStore(): ConversationStore {
+/**
+ * EXPORTED (2026-09-07) so other routes read the SAME singleton rather than constructing a second
+ * one. Two stores in one process would each hold their own Firestore client and, worse, their own
+ * in-memory fallback — so a fact written through one would be invisible through the other, which is
+ * exactly the drift this codebase keeps having to unlearn.
+ */
+export function getConversationStore(): ConversationStore {
   if (sharedConversationStore) return sharedConversationStore;
   // Durable chat history by DEFAULT — it survives a process restart, a redeploy, and
   // horizontal scaling across Cloud Run instances. Previously this was OFF unless
@@ -4132,6 +4138,18 @@ async function noteBuildOutcome(
               const zone = await ensureZone(domain);
               const applied = await applyRecords(zone.id, attach.records);
               domainPointed = { domain, records: applied.added };
+              /**
+               * 🔒 REMEMBER THAT THIS DOMAIN NOW BELONGS TO THE SERVICE — a safety fact, not a note.
+               *
+               * From here the STATIC host's records for this domain are deliberately gone, so its own
+               * status goes non-active and every screen reading that view concludes the domain is
+               * broken and offers to re-apply those records. That would write an A record at the apex,
+               * the cross-type sweep would delete this CNAME, and the live site would go down. The
+               * routes that could do that read this field and refuse. See domainPointing.ts.
+               */
+              await getConversationStore().update(workspaceId, {
+                backendDomain: domain, updatedAt: Date.now(),
+              }).catch(() => { /* best-effort — the domain is already pointed either way */ });
             } else {
               // No managed zone ⇒ we cannot write it, and must say so rather than imply it is done.
               domainNote = `Your app is deployed. Point ${domain} at it by adding a CNAME to `

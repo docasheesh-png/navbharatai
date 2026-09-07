@@ -63,6 +63,15 @@ export interface ConversationRecord {
    * branch). Absent means "derive the ordinary default" (main), exactly as before this field existed.
    */
   deployBranch?: string;
+  /**
+   * The domain a backend deploy pointed at the RUNNING SERVICE, when one did.
+   *
+   * ⚠️ THIS IS A SAFETY FACT, not a convenience. Once a domain moves to the backend, the static
+   * host's records are deliberately gone — and every screen that reads the static host's opinion
+   * would conclude the domain is broken and offer to re-apply those records, which would delete the
+   * backend's CNAME and take the live site down. See domainPointing.ts.
+   */
+  backendDomain?: string;
   status: ConversationStatus;
   /** The AgentRunner transcript, stored VERBATIM so a resumed run sees its exact prior context. */
   messages: unknown[];
@@ -125,6 +134,8 @@ export interface ConversationPatch {
   repoOwnedByUser?: boolean;
   /** See ConversationRecord.deployBranch. */
   deployBranch?: string;
+  /** See ConversationRecord.backendDomain — written when a deploy moves a domain to the service. */
+  backendDomain?: string;
 }
 
 /**
@@ -304,6 +315,7 @@ export class InMemoryConversationStore implements ConversationStore {
     if (patch.repoOwner !== undefined) rec.repoOwner = patch.repoOwner;
     if (patch.repoOwnedByUser !== undefined) rec.repoOwnedByUser = patch.repoOwnedByUser;
     if (patch.deployBranch !== undefined) rec.deployBranch = patch.deployBranch;
+    if (patch.backendDomain !== undefined) rec.backendDomain = patch.backendDomain;
     rec.updatedAt = patch.updatedAt;
   }
 }

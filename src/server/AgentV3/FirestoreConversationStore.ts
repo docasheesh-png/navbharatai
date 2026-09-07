@@ -67,6 +67,8 @@ interface ConversationMeta {
   repoOwnedByUser?: boolean;
   /** See ConversationRecord.deployBranch. */
   deployBranch?: string;
+  /** See ConversationRecord.backendDomain. */
+  backendDomain?: string;
 }
 
 export class FirestoreConversationStore implements ConversationStore {
@@ -305,6 +307,7 @@ export class FirestoreConversationStore implements ConversationStore {
       ...(meta.repoOwner ? { repoOwner: meta.repoOwner } : {}),
       ...(meta.repoOwnedByUser ? { repoOwnedByUser: true } : {}),
       ...(meta.deployBranch ? { deployBranch: meta.deployBranch } : {}),
+      ...(meta.backendDomain ? { backendDomain: meta.backendDomain } : {}),
     };
   }
 
@@ -322,6 +325,7 @@ export class FirestoreConversationStore implements ConversationStore {
     if (patch.repoOwner !== undefined) out.repoOwner = patch.repoOwner;
     if (patch.repoOwnedByUser !== undefined) out.repoOwnedByUser = patch.repoOwnedByUser;
     if (patch.deployBranch !== undefined) out.deployBranch = patch.deployBranch;
+    if (patch.backendDomain !== undefined) out.backendDomain = patch.backendDomain;
     return out;
   }
 }

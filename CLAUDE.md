@@ -1047,25 +1047,26 @@ sets `webDir: 'dist'` with **no `server.url`**, so the app boots from its own bu
 **What this means in practice:** a SERVER/backend change reaches installed app users immediately (API
 calls are rewritten to the production origin by `src/lib/apiBase.ts`), but a FRONTEND change does NOT —
 it is baked into `dist/` and needs a fresh signed `.aab`/`.ipa`. Locked by
-`tests/nativeShellInvariants.test.ts`. Because of that, the store build must track
-our progress: **whenever a roadmap phase completes, or any big checkpoint/milestone ships to
-`main`, Claude MUST build a fresh signed Android App Bundle (`.aab`) so a current, uploadable
-release is always ready for Play Console.** This is part of "done" for a phase/checkpoint, the
-same way a green Cloud Run deploy is — it is not optional cleanup.
+`tests/nativeShellInvariants.test.ts`.
 
-**What counts as a trigger (use judgement — do NOT over-build):**
-- ✅ A roadmap **phase/Tier** completes, or a named milestone (a cluster of merged PRs that forms
-  one shippable increment), or the admin explicitly asks for a build.
+**⚠️ CORRECTION 2026-09-07 (admin, verbatim: "jab mai bolu tab ipa,aab banana hai") — this SUPERSEDES
+the "on every milestone/phase" trigger that used to stand here.** A store build is now made **ONLY**
+when the admin explicitly asks — never automatically on a roadmap phase completing, a checkpoint
+shipping, or any other milestone. Do NOT build one on your own initiative for any reason; the
+admin's word is the ONLY trigger.
+
+**The trigger, and only the trigger:**
 - ✅ **STANDING INSTRUCTION (admin 2026-08-24, verbatim: "jab jab mai bolu to aab aur ipa bana
   dena"): whenever the admin asks, build BOTH — the Android `.aab` AND the iOS `.ipa`, together.**
-  Not one or the other, and no waiting for a phase boundary: their word IS the trigger. Both
-  workflows are dispatched (`android-aab.yml` and `ios-ipa.yml`, ref `main`), both are polled to
-  green in the background, and both run URLs are reported back. ⚠️ Build from **`main`**, after the
-  work is merged — an `.aab` cut from a feature branch is not the app anyone is shipping. And per
-  the BUNDLED-MODE note above, a FRONTEND change reaches installed users ONLY through a fresh
-  bundle, which is precisely why this instruction exists.
-- ❌ NOT every individual small PR. Each `.aab` run consumes CI and burns a Play `versionCode`
-  (it auto-increments per run), so batch to phase/checkpoint boundaries, not micro-commits.
+  Not one or the other. Both workflows are dispatched (`android-aab.yml` and `ios-ipa.yml`, ref
+  `main`), both are polled to green in the background, and both run URLs are reported back.
+  ⚠️ Build from **`main`**, after the work is merged — an `.aab` cut from a feature branch is not
+  the app anyone is shipping. And per the BUNDLED-MODE note above, a FRONTEND change reaches
+  installed users ONLY through a fresh bundle, which is precisely why this instruction exists.
+- ❌ A roadmap phase completing, a checkpoint shipping, or any other milestone is **NOT** a trigger
+  on its own anymore — only the admin explicitly asking is. Each `.aab` run consumes CI and burns a
+  Play `versionCode` (it auto-increments per run), which is exactly the cost this correction avoids
+  paying on every merge.
 
 **How to build it (the pipeline is real and already working — last green run: #4 on `main`):**
 - The signed bundle is produced by **`.github/workflows/android-aab.yml`** (`workflow_dispatch`).

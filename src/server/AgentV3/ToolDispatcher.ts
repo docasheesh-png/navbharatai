@@ -195,6 +195,7 @@ import { generatePharmacyIntegration } from '../lib/PharmacyGenerator';
 import { generateRecruitmentIntegration } from '../lib/RecruitmentGenerator';
 import { generateInvoicingIntegration } from '../lib/InvoicingGenerator';
 import { generateHelpdeskIntegration } from '../lib/HelpdeskGenerator';
+import { generateSocietyIntegration } from '../lib/SocietyGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -4579,6 +4580,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('helpdesk starter');
         const hdDeps = hdcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a Helpdesk / ticketing backend:\n${hdWritten.join('\n')}\nAdd the dependencies: ${hdDeps}\n\n${hdcfg.instructions}`;
+      }
+
+      case 'generate_society': {
+        // Breadth recipe (domain vertical) — Housing-society / RWA (server/society/): a real SocietyService
+        // with an EXACT maintenance-dues ledger (a payment can never exceed the balance; no negative), a
+        // complaint STATE-MACHINE (invalid jumps → 409), and an append-only visitor log + notice board,
+        // plus an Express router. Pure gen in SocietyGenerator.ts.
+        const socCfg = generateSocietyIntegration();
+        const socWritten: string[] = [];
+        for (const [path, content] of Object.entries(socCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          socWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('society starter');
+        const socDeps = socCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a housing-society / RWA backend:\n${socWritten.join('\n')}\nAdd the dependencies: ${socDeps}\n\n${socCfg.instructions}`;
       }
 
       case 'manage_dependency': {

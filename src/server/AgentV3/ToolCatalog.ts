@@ -1365,6 +1365,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_society',
+      description:
+        'Add a real housing-society / RWA (residents\' welfare association) backend to the app ' +
+        '(server/society/) — a packaged domain vertical for apartment complexes and gated communities. ' +
+        'THREE real guarantees: (1) EXACT MAINTENANCE-DUES LEDGER — a unit\'s balance is invoiced minus ' +
+        'paid, a payment can NEVER exceed the outstanding balance (rejected 409, balance never negative), ' +
+        'and every invoice/payment is append-only; (2) COMPLAINT STATE-MACHINE — open → in_progress → ' +
+        'resolved → closed along allowed transitions only (+ reopen), an invalid jump rejected (409); ' +
+        '(3) APPEND-ONLY visitor log + notice board. Emits a dependency-free SocietyService (addUnit, ' +
+        'invoice, pay, balanceOf, ledgerFor, defaulters, checkInVisitor, checkOutVisitor, currentlyInside, ' +
+        'raiseComplaint, setComplaintStatus, postNotice) + an Express router + a README. In-memory by ' +
+        'default — swap the Maps for your DB. Use for society / apartment / RWA / maintenance-dues / ' +
+        'visitor-log / housing-complex prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'manage_dependency',
       description:
         "Add, remove, or list an npm package in the project's package.json — use it when the user asks to " +
@@ -3282,6 +3298,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_recruitment',
   'generate_invoicing',
   'generate_helpdesk',
+  'generate_society',
   'manage_dependency',
   'generate_events',
   'generate_subscriptions',

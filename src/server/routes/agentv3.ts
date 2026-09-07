@@ -220,6 +220,7 @@ import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
 import { repoAvailableForDeploy, resolveDeployRepo } from '../AgentV3/deployRepoMemory';
+import { decidePushBranch } from '../AgentV3/pushAppTarget';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
@@ -4259,22 +4260,36 @@ async function noteBuildOutcome(
       const client = new UserGitHubClient(githubToken);
       const login = await client.getLogin();
       const repo = await client.ensureRepo(repoName);
+      /**
+       * 🔴 NEVER FORCE-PUSH OVER A REPOSITORY WE DID NOT CREATE (2026-09-07). `ensureRepo` is
+       * get-or-create and `pushAll` is `git push --force` — so when the name resolved to a repository
+       * the USER made (their own history on its default branch), this route would have replaced that
+       * history with the sandbox, irreversibly. The decision now comes from evidence — created just
+       * now, or carrying the description every NavBharatAI-made repository carries — and anything else
+       * is pushed to the working branch only, with the default branch left exactly as it was. See
+       * pushAppTarget.ts. The pushed branch is also the DEPLOY branch: it is the one holding this app.
+       */
+      const target = decidePushBranch({ created: repo.created, description: repo.description, defaultBranch: repo.defaultBranch || 'main' });
       const authedUrl = client.authedCloneUrl(repoName, login);
       const sync = new GitRepoSync(actuator, workspaceId);
-      const pushed = await sync.pushAll(authedUrl, repo.defaultBranch || 'main', 'Save this app to GitHub (NavBharatAI)');
+      const pushed = await sync.pushAll(authedUrl, target.branch, 'Save this app to GitHub (NavBharatAI)');
       if (!pushed.pushed && !pushed.noChange) {
         res.status(502).json({ error: 'Your repository was created, but the code could not be pushed to it. Nothing was lost — your app is safe here. Try again in a moment.' });
         return;
       }
       // Remember it, so the Publish screen knows about this repo on every later visit rather than only
       // while a build event happens to be in flight — which is what made the panel ask for a repo the
-      // user already had.
+      // user already had. It is ALSO how a client that stopped waiting learns the push landed: the
+      // screen polls this record after its own timeout (see HostingChooser.awaitRepoFact).
       await store.update(workspaceId, {
-        repoName, repoOwner: login, repoOwnedByUser: true, deployBranch: repo.defaultBranch || 'main',
+        repoName, repoOwner: login, repoOwnedByUser: true, deployBranch: target.branch,
         updatedAt: rec?.updatedAt ?? Date.now(),
       }).catch(() => { /* the push is what mattered; a failed note only costs the shortcut */ });
 
-      res.json({ ok: true, fullName: repo.fullName || `${login}/${repoName}`, htmlUrl: repo.htmlUrl || '', owner: login, repo: repoName });
+      res.json({
+        ok: true, fullName: repo.fullName || `${login}/${repoName}`, htmlUrl: repo.htmlUrl || '', owner: login, repo: repoName,
+        pushedBranch: target.branch, defaultBranch: repo.defaultBranch || 'main', mode: target.mode,
+      });
     } catch (e) {
       res.status(502).json({ error: `Could not save your app to GitHub: ${e instanceof Error ? e.message : String(e)}` });
     }
@@ -7518,11 +7533,20 @@ async function noteBuildOutcome(
               }
             } catch { /* readable-name lookup is best-effort — the stable fallback name still works */ }
             const repo = await userClient.ensureRepo(repoName);
+            // Same guard as push-app (2026-09-07): a name that resolves to a repository the USER made
+            // must never be force-pushed on its default branch. See pushAppTarget.ts.
+            const target = decidePushBranch({ created: repo.created, description: repo.description, defaultBranch: repo.defaultBranch || 'main' });
             const authedUrl = userClient.authedCloneUrl(repoName, login);
             const repoSync = new GitRepoSync(actuator, workspaceId);
-            const pushed = await repoSync.pushAll(authedUrl, repo.defaultBranch || 'main', 'Import large project from ZIP');
+            const pushed = await repoSync.pushAll(authedUrl, target.branch, 'Import large project from ZIP');
             if (pushed.pushed || pushed.noChange) {
               github = { url: repo.htmlUrl, fullName: repo.fullName || `${login}/${repoName}` };
+              // Remember it durably — this repo is in the user's own account, so it is exactly as
+              // deployable as one made by "Put this app in my GitHub" (the 2026-09-06 memory rule).
+              // Best-effort: an import that precedes any conversation record has nothing to update yet.
+              await getConversationStore().update(workspaceId, {
+                repoName, repoOwner: login, repoOwnedByUser: true, deployBranch: target.branch, updatedAt: Date.now(),
+              }).catch(() => { /* the backup itself is what mattered; a missing record only costs the shortcut */ });
             }
           } catch { /* GitHub backup is a best-effort backstop — never blocks the import */ }
         } else {

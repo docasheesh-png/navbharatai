@@ -29,6 +29,11 @@ import { usePublishState } from '../../hooks/usePublishState';
 import { needsPublishDot } from '../../lib/publishFreshness';
 import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type BackendKeySource, shouldAutoDeployBackend } from '../../lib/backendDeployOffer';
 import { managedDeployRequest, managedDeployOutcome, renderConnectSteps } from '../../lib/backendDeployWiring';
+import { LONG_REQUEST_TIMEOUT_MS, fetchFailureLine, isFetchTimeout } from '../../lib/longRequest';
+import {
+  DEPLOY_BACKEND_FAILURE, PROVISION_DB_FAILURE, PUSH_APP_FAILURE, PUSH_APP_UNCONFIRMED_LINE,
+  pushSavedLine, repoFactOf, type PushAppResult,
+} from './pushAppFeedback';
 
 export interface HostingProvider {
   id: string;
@@ -96,7 +101,12 @@ export interface HostingChooserProps {
   /** Start the GitHub connect flow (reuses the panel's existing OAuth redirect). */
   onConnectGitHub?: () => void;
   /** Authenticated fetch, so the data gate can ask the server about THIS user's workspace. */
-  authedFetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  /**
+   * The third parameter is the request ceiling (see lib/longRequest.ts). It is part of the contract
+   * because the long actions on this screen — a GitHub push, a backend deploy, a database — take
+   * minutes, and a fetch that cannot be told so is cut at the 20-second default and lies about it.
+   */
+  authedFetch?: (url: string, init?: RequestInit, timeoutMs?: number) => Promise<Response>;
   /** Open Settings → App Settings → Database, for the "connect my own" answer. */
   onOpenDatabaseSettings?: () => void;
   /** Open the APK Builder (Other AI → APK Builder), pre-targeted to this app, to make an Android app. */
@@ -269,15 +279,17 @@ export function HostingChooser({
     // A publish that has not answered in 90 seconds has not worked. The user is told exactly that, and
     // told the safe thing to do — checking before republishing, because a re-publish updates the same
     // listing rather than creating a second one, so the honest advice is "look first".
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 90_000);
+    // ⚠️ RE-ANCHORED 2026-09-07: this used to build its OWN AbortController and pass `signal`, and
+    // `authedFetch` overwrote that signal with its 20-second default — so the 90 seconds promised
+    // above never applied, and the abort arrived as authedFetch's error rather than an AbortError, so
+    // the timed-out branch below never ran either. The ceiling is now passed to authedFetch itself,
+    // and its timeout error is the one thing the catch checks for. See lib/longRequest.ts.
     try {
       const res = await authedFetch('/api/nav-store/web/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: ac.signal,
         body: JSON.stringify({ workspaceId, name, visibility: 'public', ...(storeIcon ? { iconDataUrl: storeIcon } : {}), ...(storeShots.length ? { screenshots: storeShots } : {}) }),
-      });
+      }, LONG_REQUEST_TIMEOUT_MS.storePublish);
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
         // The gate's refusals are REAL and specific (a hardcoded key with its file:line, "needs a
@@ -292,12 +304,11 @@ export function HostingChooser({
         ? 'Published! Your app is live on the store.'
         : 'Published! Your link works right now (copied) — the store listing goes live after a quick human review.' });
     } catch (e) {
-      const timedOut = (e as { name?: string })?.name === 'AbortError';
+      const timedOut = isFetchTimeout(e);
       setStoreResult({ ok: false, message: timedOut
         ? 'Publishing is taking longer than expected, so we stopped waiting. Check "Your published apps" — if it is not there, try again.'
         : 'Could not reach the server — nothing was published.' });
     } finally {
-      clearTimeout(timer);
       setStoreBusy(false);
     }
   };
@@ -325,6 +336,34 @@ export function HostingChooser({
    * reported back and `onRepoPushed` lets the screen re-derive its state, so the very next thing the
    * user sees is the real "Deploy backend" button rather than the same steps again.
    */
+  /**
+   * After a push outlived its request: watch the durable record until the repo lands, or say so.
+   *
+   * 🔒 THE RECORD IS THE PROOF, NOT THE RESPONSE (admin 2026-09-07). Saving a large app resumes a
+   * sandbox and pushes every file — minutes, not seconds — and the route records the repo the moment
+   * the push lands, whether or not anyone is still listening. So when this screen stops waiting it
+   * reads that record instead of guessing: the repo appears here the moment it is real, and the user
+   * is never told "nothing was changed" over a save that was completing behind them. Bounded, read-only,
+   * and a lost poll is not a failed push.
+   */
+  const awaitRepoFact = async (): Promise<void> => {
+    if (!authedFetch || !workspaceId) return;
+    const DEADLINE = Date.now() + 3 * 60_000;
+    while (Date.now() < DEADLINE) {
+      await new Promise((r) => setTimeout(r, 10_000));
+      try {
+        const r = await authedFetch(`/api/agentv3/conversations/${encodeURIComponent(workspaceId)}`);
+        const fact = repoFactOf(await r.json().catch(() => null));
+        if (fact) {
+          setBackendLines([pushSavedLine({ fullName: `${fact.owner}/${fact.repo}`, ...fact })]);
+          onRepoPushed?.(fact);
+          return;
+        }
+      } catch { /* a lost poll is not a failed push — try again inside the window */ }
+    }
+    setBackendLines([PUSH_APP_UNCONFIRMED_LINE]);
+  };
+
   const pushAppToGitHub = async (): Promise<void> => {
     if (pushBusy || !authedFetch) return;
     setPushBusy(true);
@@ -332,11 +371,14 @@ export function HostingChooser({
     try {
       let githubToken: string | undefined;
       try { githubToken = localStorage.getItem('gh_token') || undefined; } catch { /* optional */ }
+      // The real duration of this request is a sandbox resume plus a full git push — minutes for a
+      // large app. The 20-second default cut it every time and reported "nothing was changed" over a
+      // push that then landed (admin 2026-09-07). See lib/longRequest.ts.
       const res = await authedFetch('/api/agentv3/github/push-app', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspaceId, githubToken }),
-      });
+      }, LONG_REQUEST_TIMEOUT_MS.pushAppToGitHub);
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
         // The server's own reason — it knows whether the token expired, the sandbox was empty, or the
@@ -344,10 +386,12 @@ export function HostingChooser({
         setBackendLines([data?.error || 'Could not save your app to GitHub. Your app is safe here — try again.']);
         return;
       }
-      setBackendLines([`Saved to ${data.fullName}. You can deploy the backend now.`]);
+      setBackendLines([pushSavedLine(data as PushAppResult)]);
       onRepoPushed?.({ owner: String(data.owner ?? ''), repo: String(data.repo ?? '') });
-    } catch {
-      setBackendLines(['Could not reach NavBharatAI — nothing was changed.']);
+    } catch (e) {
+      setBackendLines([fetchFailureLine(e, PUSH_APP_FAILURE)]);
+      // Our own timer fired — the server is still pushing. Watch for the fact rather than assume.
+      if (isFetchTimeout(e)) void awaitRepoFact();
     } finally {
       setPushBusy(false);
     }
@@ -402,7 +446,7 @@ export function HostingChooser({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      });
+      }, LONG_REQUEST_TIMEOUT_MS.deployBackend);
       const data = await res.json().catch(() => null);
       const outcome = managedDeployOutcome(res.status, data);
       // `needs-connect` is the one outcome whose next action is a walkthrough on somebody else's site,
@@ -426,8 +470,8 @@ export function HostingChooser({
       if (outcome.kind === 'deployed' && typeof data?.serviceId === 'string') {
         void verifyBackend(data.serviceId, typeof data?.url === 'string' ? data.url : '');
       }
-    } catch {
-      setBackendLines(['Could not reach NavBharatAI — nothing was deployed.']);
+    } catch (e) {
+      setBackendLines([fetchFailureLine(e, DEPLOY_BACKEND_FAILURE)]);
     } finally {
       setBackendBusy(false);
     }
@@ -498,7 +542,7 @@ export function HostingChooser({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspaceId: workspaceId ?? '' }),
-      });
+      }, LONG_REQUEST_TIMEOUT_MS.provisionDatabase);
       const data = await res.json().catch(() => null);
       // The server words these to tell the user what to do next (plan full, still starting up,
       // reconnect); passing them through unchanged is more useful than any generic line here.
@@ -507,8 +551,8 @@ export function HostingChooser({
       setDbNote(data?.schemaApplied === false
         ? 'Database created and connected — its tables could not be set up yet, so ask me to run your migrations after publishing.'
         : 'Database created in your own account and connected. You can publish now.');
-    } catch {
-      setDbNote('Could not reach NavBharatAI. Check your connection and try again.');
+    } catch (e) {
+      setDbNote(fetchFailureLine(e, PROVISION_DB_FAILURE));
     } finally {
       setDbBusy(false);
     }

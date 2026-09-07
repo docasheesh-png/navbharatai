@@ -26,6 +26,13 @@ export interface GitHubConfig {
   org: string;
 }
 
+/**
+ * The description stamped on every repository NavBharatAI creates — in the user's account or the
+ * platform org. It is also EVIDENCE: `pushAppTarget.ts` reads it back to tell a mirror NavBharatAI made
+ * from a repository the user made, and only the former may ever be force-pushed on its default branch.
+ */
+export const PLATFORM_REPO_DESCRIPTION = 'Built with NavBharatAI Pro v5.0';
+
 export interface RepoInfo {
   fullName: string;
   cloneUrl: string;
@@ -33,6 +40,8 @@ export interface RepoInfo {
   defaultBranch: string;
   /** True when this call created the repo (vs reused an existing one). */
   created: boolean;
+  /** The repository's description as GitHub reports it — absent when GitHub sent none. */
+  description?: string;
 }
 
 interface ClientDeps {
@@ -223,7 +232,7 @@ export class GitHubAppClient {
       throw new Error(`ensureRepo: unexpected GET /repos response (HTTP ${got.status}).`);
     }
     const created = await this.request<RepoApi>('POST', `/orgs/${this.cfg.org}/repos`, `token ${token}`, {
-      name, private: true, auto_init: true, description: 'Built with NavBharatAI Pro v5.0',
+      name, private: true, auto_init: true, description: PLATFORM_REPO_DESCRIPTION,
     });
     if (!created.ok || !created.body) {
       throw new Error(`ensureRepo: could not create repo "${name}" (HTTP ${created.status}).`);
@@ -376,6 +385,7 @@ interface RepoApi {
   clone_url?: string;
   html_url?: string;
   default_branch?: string;
+  description?: string | null;
 }
 
 function toRepoInfo(r: RepoApi, created: boolean): RepoInfo {
@@ -385,6 +395,7 @@ function toRepoInfo(r: RepoApi, created: boolean): RepoInfo {
     htmlUrl: r.html_url ?? '',
     defaultBranch: r.default_branch ?? 'main',
     created,
+    ...(typeof r.description === 'string' ? { description: r.description } : {}),
   };
 }
 

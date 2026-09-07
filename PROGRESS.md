@@ -45394,3 +45394,67 @@ remaining budget, abortable. It can never block, fail or hang a build. Reverting
 
 **Also merged today:** #2764 (the D-U-N-S conversion recorded as started, with the critical-path order
 and who holds each step).
+
+## 2026-09-07 (3) — "Put this app in my GitHub" said nothing was changed over a push that landed, and could have force-pushed a user's own repository
+
+Admin screenshot: the Publish screen of an app "already on GitHub" still showed the three setup
+steps, and pressing **Put this app in my GitHub** answered *"Could not reach NavBharatAI — nothing
+was changed."* after ~20 seconds. Traced end to end rather than answered from the message.
+
+**THREE ROOT CAUSES, one report.**
+
+**A. A 20-second client ceiling on a minutes-long request — and a catch that lied about it.**
+`authedFetch` defaults to 20 s. `pushAppToGitHub` passed no timeout, and the route behind it resumes
+(or re-seeds) a sandbox and then runs a full `git push` of every file — deterministically longer than
+20 s for a real app. The client aborted, its `catch` printed "nothing was changed", and the server kept
+going and (most likely) finished. **The message was false in exactly the case it is shown for**, and it
+invited the user to press again on top of a push still landing.
+- *Siblings, all confirmed:* `deploy-backend` and `supabase/provision` inherited the same default with
+  the same "nothing was deployed / try again" catch. Worse: the App-Mart publish had been given its OWN
+  90-second `AbortController` on 2026-08-27 — and `authedFetch` **overwrote** `init.signal` with its
+  own controller, so the 90 s never applied AND the abort arrived as a plain Error rather than an
+  `AbortError`, so that handler's timed-out branch never ran either. A fix that shipped, was
+  test-anchored on its wording, and never once executed.
+- *Fix (class, not instance):* `lib/longRequest.ts` — `FetchTimeoutError` (typed, so "we stopped
+  waiting" is distinguishable from "the network failed"), `LONG_REQUEST_TIMEOUT_MS` per action (5 min
+  push / 2 min deploy / 3 min database / 90 s store, all under Cloud Run's 3600 s), and
+  `fetchFailureLine`, which is the ONLY way a long-action catch may word a failure: a timeout says
+  "still running, nothing lost", never "nothing happened". `authedFetch` now HONOURS a caller's signal
+  (either aborts; a caller's own abort is rethrown untouched) instead of replacing it.
+- *Honesty closed:* after a push timeout the screen **polls the durable record** (`awaitRepoFact`,
+  bounded 3 min, read-only) — the route writes `repoOwner/repoName/repoOwnedByUser` the moment the
+  push lands, so the record, not the lost response, is the proof. The repo appears the moment it is
+  real; if it never does, the line says "could not confirm" — not success, not failure.
+
+**B. 🔴 `ensureRepo` + `git push --force` onto the default branch, with no idea whose repository it was.**
+`ensureRepo` is get-or-create; `pushAll` is `--force HEAD:<default>`. Correct for a mirror NavBharatAI
+created (its only prior commit is GitHub's auto-init, and the build path already force-pushes mirrors
+every build). Irreversible destruction for a repository the USER created whose default branch holds
+their history — reachable when the derived/renamed app name coincides with one of their real repos.
+- *Fix:* pure `pushAppTarget.ts` — `decidePushBranch` from EVIDENCE: created just now → default
+  branch; carries `PLATFORM_REPO_DESCRIPTION` (now one exported constant, stamped by both GitHub
+  clients, read back through a new `RepoInfo.description`) → default branch; anything else →
+  **`navbharatai/work` only**, default branch untouched, and the screen names the branch. The pushed
+  branch is also the recorded `deployBranch` — it is the branch that holds THIS app, and their default
+  branch is theirs. Sibling fixed the same way: the large-ZIP GitHub backstop (same two calls), which
+  now also records the repo durably (it never did — the 2026-09-06 memory rule missed it).
+- *Verified not a wider hole:* `repoNameForProject` derives `<app>-<stamp>-<uniq>`, so an ordinary
+  import never resolves to the user's real repository name; the build path's mirror push is safe.
+
+**C. Apps imported before 2026-09-06 have no durable repo record** (`repoOwner/repoName/repoOwnedByUser`
+were all introduced in #2749), so the screen genuinely does not know — which is why the button appeared
+for an app that was "already on GitHub". With A and B fixed the button IS the backfill: it finds the
+existing repo, pushes safely, records it, and the Deploy-backend button appears. A read-time discovery
+(ask GitHub with the user's token whether `<login>/<recorded name>` exists) would remove even that
+press; recorded here as a follow-up, not built — it needs the token on the publish request.
+
+**Tests:** `tests/pushAppTarget.test.ts` (decision table incl. the near-miss description; wiring pins
+the decision UPSTREAM of `pushAll`, the deploy branch = pushed branch, both clients carrying the
+description, the ZIP sibling) and `tests/longRequest.test.ts` (typed timeout, `fetchFailureLine`, every
+wording, ceilings > 20 s and < 3600 s, `pushSavedLine` naming the untouched branch, `repoFactOf`
+requiring the same three fields as the server; wiring pins each call's ceiling, no private
+`AbortController` in the chooser, catches routed through `fetchFailureLine`, the post-timeout poll, and
+`authedFetch` honouring an outer signal). `AppKnowledgeBase` updated for the two user-visible facts.
+
+**Still on the user's side for mitrify.com (platform cannot check):** their own `RENDER_API_KEY` in
+Settings → Secrets & API Keys, a `start` script, and real backend keys in Settings.

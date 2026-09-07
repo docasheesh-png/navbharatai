@@ -647,8 +647,13 @@ more features in the app, it is not — and 9.1 alone was still worth building.
 
 ---
 
-## 10 · 🟡 THE PUBLISH CEILING — every published app takes a Firebase channel (added 2026-08-21;
-##      made VISIBLE + reclaimable 2026-08-21, still not REMOVED — see §10.3)
+## 10 · ✅ THE PUBLISH CEILING — REMOVED 2026-09-07 (found 2026-08-21; made VISIBLE + reclaimable
+##      2026-08-21; the ceiling itself removed by §10.3 step 4 — a bucket-only publish takes no channel)
+
+⚠️ **READ §10.3 STEP 4 BEFORE ACTING ON ANYTHING BELOW.** §10.1–§10.2 describe the ceiling as it stood
+while every publish took a Firebase channel. That is still exactly what happens when
+`PUBLISHED_APPS_BUCKET_ONLY` is off — which is the default — so none of it is stale. It stops applying
+only to apps published with that flag on, which take no channel at all.
 
 **Found while answering the admin's cost question, not from a failure.** Publishing works; it simply
 does not scale, and the wall arrives sooner than anyone would guess.
@@ -707,11 +712,43 @@ near 36.
    - `HOSTING_CHANNEL_CAP` (default 50) is env-tunable **because the number is a guess** — the first
      real "quota reached" settles it, and that value belongs here.
    ⚠️ **This does NOT raise the ceiling.** It makes it visible, recovers what is wasted, and makes
-   hitting it honest. §10.3 is still what removes it.
-2. Publish path writes the built files to the bucket under the channel-id key it already computes.
-3. Worker serves from the bucket, falling back to Firebase for anything not yet migrated — so the
-   switch is reversible and no existing link breaks.
-4. Migrate existing channels lazily (on next publish), then reclaim them.
+   hitting it honest. §10.3 step 4 is what removes it (shipped 2026-09-07).
+2. ✅ **SHIPPED — publish path mirrors the built files into the bucket** (`bucketPublish.ts`), under the
+   public `<sub>` Firebase derives from the channel id.
+3. ✅ **SHIPPED — the Worker prefers the bucket** and falls back to Firebase for anything not mirrored,
+   so the switch is reversible and no existing link breaks.
+4. ✅ **SHIPPED 2026-09-07 — THE CEILING IS ACTUALLY REMOVED. Steps 2+3 did NOT remove it, and that
+   distinction was the whole problem.** The mirror runs AFTER `ensureChannel` + release, so every
+   published app still took a channel; serving that channel faster from the bucket does not un-consume
+   it, and the pool ran out at the same number of apps either way. (I told the admin the opposite while
+   writing the activation guide and corrected it the same session — the bucket made publishing cheaper
+   and faster, never roomier.)
+   **The fix is to stop asking Firebase for a channel at all.** With the bucket AND a branded domain
+   both live, `deployStatic` mirrors first and returns the bucket URL — Firebase is never called, so no
+   channel exists and there is no cap to hit. An object store has no channel concept and no per-site
+   limit: the ceiling does not move up, it stops existing.
+   - **Switch:** `PUBLISHED_APPS_BUCKET_ONLY=on`, and it is ANDed with two hard preconditions —
+     `PUBLISHED_APPS_BUCKET` (somewhere to put the files) and `PUBLISHED_APP_DOMAIN` (a URL that works
+     without Firebase). The middle one is the subtle one: the default published host is Firebase's own
+     `<site>--<sub>.web.app`, which resolves only BECAUSE the channel exists — skipping the channel with
+     no branded domain would hand the user a link to a host that was never created. Missing either
+     precondition disables the path silently and correctly; unset ⇒ byte-identical to today.
+   - **Its own subdomain namespace, disjoint by construction.** A bucket-only app has no channel to ask
+     for a name, so it gets `a-<sha256(workspaceId)[:24]>`. Every channel id this platform makes starts
+     with `v3-`, so a collision with a Firebase-derived `<sub>` is structurally impossible rather than
+     unlikely — one app can never be served another's files. Deterministic, so a republish keeps the
+     same permanent public link.
+   - **A partial mirror falls back to Firebase rather than shipping a broken app.** With the channel
+     skipped there is no second origin to cover for a missing chunk, and a missing chunk is a blank
+     page. Anything short of every-file-uploaded costs a slot instead of costing the user.
+   - **Takedown was fixed in the same change, before it could bite.** A bucket-only app has no channel,
+     so the existing cleanup — which keys off the channel's host — could never find it: unpublish would
+     have reported success while the app stayed live. `deleteChannel` now removes the bucket objects
+     unconditionally (not behind the flag), so apps published while it was on stay removable after it is
+     turned off.
+   - Bucket-only apps are correctly invisible to the Publish Capacity panel: `classifyChannels`
+     iterates Firebase's channel list, and these have no channel.
+5. Migrate existing channels lazily (on next publish), then reclaim them.
 
 **Next step after this, if the panel ever shows warn/critical:** the dashboard is only seen when the
 admin looks. A push/email alert at 'warn' (the alerting path already exists — `metricsAlerts.ts`) is
@@ -723,6 +760,12 @@ the cheap follow-on that makes it genuinely unmissable.
 user and ~50 channels total, the platform is full at **ten users**. The cap is still right (it stops
 one account taking everything, and it is what the admin asked for), but nobody should read it as the
 ceiling being handled. §10.3 is what handles the ceiling.
+
+✅ **UPDATE 2026-09-07 — §10.3 step 4 shipped, so this arithmetic now applies only to channel-backed
+publishing.** With `PUBLISHED_APPS_BUCKET_ONLY=on` a published app consumes no channel and the "full at
+ten users" number does not apply to it. The per-user cap remains, deliberately: it was never about the
+ceiling — it bounds what one account can take of storage and support, which no amount of bucket room
+changes.
 
 **(b) 🔴 DELETING A CHAT ORPHANS ITS PUBLISHED APP — needs an admin decision.** Purging a workspace
 (`purgeWorkspace` → `deleteDeployment`) removes the deployment RECORD but never deletes the Firebase

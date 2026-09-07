@@ -55,6 +55,19 @@ const APEX = 'mitrify.in';
 const APPS_BUCKET = '';                       // e.g. 'navbharatai-published-apps'
 const APP_PREFIX = 'published-apps';          // must match bucketPublish.APP_PREFIX on the server
 
+// ── BUCKET-ONLY APPS: `a-…` SUBDOMAINS HAVE NO FIREBASE CHANNEL AT ALL ────────────────────────────
+// Once the server runs with PUBLISHED_APPS_BUCKET_ONLY=on (ROADMAP §10.3 step 4) a published app skips
+// Firebase entirely — that is what removes the channel ceiling — and gets a subdomain WE generate:
+//   a-<24 hex>       (bucketOnlyPublish.ts; a Firebase-derived <sub> always begins `v3-`, so the two
+//                     namespaces cannot overlap and one app can never be served another's files)
+// Nothing below needs to special-case them: the `[a-z0-9-]` check already accepts them, the bucket
+// lookup already finds them, and the Firebase fallback simply 404s for an app that was never there.
+//
+// ⚠️ TWO THINGS NOT TO "TIDY UP":
+//   • Do NOT tighten the subdomain regex to require `v3-`. It would 404 every bucket-only app.
+//   • Do NOT remove the Firebase fallback because "apps live in the bucket now". Every app published
+//     before the flag was turned on still lives on a channel, and those links must keep working.
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);

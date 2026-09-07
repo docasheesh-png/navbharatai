@@ -44994,3 +44994,67 @@ decision made from a real debugging session.
 **Gate:** `tsc --noEmit` clean; FULL suite **1456 files / 19391 tests green**. Verified to bite
 (removing the `invalid_client` branch fails two tests by name). Truncation is locked as a **prefix**
 of the original, so it can never gain words the server did not send.
+
+---
+
+## 2026-09-07 — 🎯 THE PUBLISH CEILING IS REMOVED, not merely visible (ROADMAP §10.3 step 4)
+
+**The admin's instruction was exact, and it named the gap I had just admitted:** *"Bucket ON karne se
+channel-cap ceiling nahi hatta — wo abhi bhi ~50 channels/site pe atkega, chahe bucket ho ya na ho.
+isko fix karo! channel-cap ceilling badhao!!"*
+
+**How that gap came to be stated at all is the honest part of this entry.** While writing the §10.3
+activation guide I told the admin that switching the bucket on "activates the scaling fix". Verifying
+it against `Deployment.ts` before the guide shipped showed the opposite: `deployStatic` calls
+`ensureChannel` unconditionally and the mirror runs AFTER the release, so a mirrored publish consumes a
+channel exactly like an unmirrored one. I corrected it to the admin in the same session rather than
+letting a wrong premise reach the console — and that correction is what produced this task.
+
+### What was actually wrong
+
+Steps 2 and 3 of §10.3 (server mirror + Worker bucket-first) made published apps **cheaper and faster
+to serve**. Neither made them **roomier**. The channel POOL is the finite thing, and serving a channel
+from a nearer origin does not un-consume it. The pool exhausted at the same app count either way.
+
+### The fix: stop asking Firebase for a channel
+
+`PUBLISHED_APPS_BUCKET_ONLY=on` makes `deployStatic` mirror to Cloud Storage FIRST and return the bucket
+URL — Firebase is never called, no channel exists, and there is no per-site cap to reach. The ceiling
+does not move up; it stops existing, because an object store has no channel concept.
+
+- **`src/server/AgentV3/bucketOnlyPublish.ts`** (new, pure) — subdomain derivation, the three-way
+  enable predicate, URL construction, and the mirror-completeness bar. 14 tests.
+- **`Deployment.ts`** — the branch sits BEFORE `authHeaders()`, i.e. before any Firebase call. A
+  source-lock test pins that ordering, because if it ever moved after `ensureChannel` the app would
+  still serve from the bucket while quietly holding a slot: the exact "looks fixed, is not" state §10.3
+  already had once.
+
+### Four decisions worth not re-deriving
+
+1. **Three preconditions, ANDed, not warned about.** `PUBLISHED_APPS_BUCKET` + `PUBLISHED_APP_DOMAIN` +
+   the explicit opt-in. The middle one is the one that is easy to miss and fatal to skip: the default
+   published host is Firebase's own `<site>--<sub>.web.app`, which resolves **because** the channel
+   exists. Skipping the channel with no branded domain configured hands the user a link to a host that
+   was never created — and the server cannot detect that, because the publish reports success either
+   way. Refusing the path is the only outcome that cannot mislead.
+2. **Our own subdomain namespace, disjoint by construction.** `a-<sha256(workspaceId)[:24]>`. Every
+   channel id this platform makes starts with `v3-`, so a collision with a Firebase-derived `<sub>` is
+   structurally impossible rather than unlikely — one app can never be served another's files. A
+   contract test imports the REAL `makeChannelId` rather than restating the rule.
+3. **A partial mirror falls back to Firebase.** With the channel skipped there is no second origin to
+   cover for a missing chunk, and a missing chunk is a blank page. Falling through costs a slot; handing
+   the user a broken app costs the user.
+4. **A takedown bug was found and fixed before it could ship.** A bucket-only app has no channel, so the
+   existing cleanup — which keys off the channel's host — could never find it: unpublish would have
+   reported success while the app stayed LIVE. `deleteChannel` now removes the bucket objects
+   unconditionally, NOT behind the flag, so an app published while the flag was on stays removable after
+   it is turned off. This is exactly the "reports removed, is not removed" class §10.4(b) already cost
+   us once.
+
+Bucket-only apps are correctly invisible to the Publish Capacity panel — `classifyChannels` iterates
+Firebase's channel list, and these have no channel. No change needed there, verified rather than assumed.
+
+**Activation order (in `CLAUDE.md`, because getting it wrong hands users dead links):** bucket
+public-readable → Worker `APPS_BUCKET` set and deployed → `PUBLISHED_APP_DOMAIN` set and a test app
+confirmed loading → **only then** `PUBLISHED_APPS_BUCKET_ONLY=on`. Unset ⇒ byte-identical to today;
+reverting is one key.

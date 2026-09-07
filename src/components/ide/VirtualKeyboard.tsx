@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Keyboard, X, Search, Move, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
+import { availableItems, type EditorCapability } from './editorCapabilities';
 
 interface ShortcutEntry {
   key: string;
@@ -9,6 +10,15 @@ interface ShortcutEntry {
   command?: string;
   category: string;
   keys: string[];
+  /**
+   * A capability this shortcut needs before it may be OFFERED at all.
+   *
+   * Most shortcuts need nothing — Monaco implements them itself. A few dispatch a real Monaco command
+   * whose effect depends on something we have to provide; those must name it here, or they become a
+   * button that does nothing and reports nothing. See editorCapabilities.ts for the bug that made
+   * this field necessary.
+   */
+  requires?: EditorCapability;
 }
 
 const VS_CODE_SHORTCUTS: ShortcutEntry[] = [
@@ -110,10 +120,14 @@ const VS_CODE_SHORTCUTS: ShortcutEntry[] = [
   { category: '🪄 ADVANCED POWER USER', key: 'ctrl+k ctrl+j', label: 'Unfold All', command: 'editor.unfoldAll', keys: ['Ctrl', 'K', 'J'] },
 
   // 🤖 AI CODING SHORTCUTS
-  { category: '🤖 AI CODING SHORTCUTS', key: 'tab', label: 'Accept AI Suggestion', command: 'editor.action.inlineSuggest.commit', keys: ['Tab'] },
-  { category: '🤖 AI CODING SHORTCUTS', key: 'esc', label: 'Reject AI Suggestion', command: 'editor.action.inlineSuggest.hide', keys: ['Esc'] },
-  { category: '🤖 AI CODING SHORTCUTS', key: 'alt+]', label: 'Next AI Suggestion', command: 'editor.action.inlineSuggest.showNext', keys: ['Alt', ']'] },
-  { category: '🤖 AI CODING SHORTCUTS', key: 'alt+[', label: 'Previous AI Suggestion', command: 'editor.action.inlineSuggest.showPrevious', keys: ['Alt', '['] },
+  // Every one of these acts on an INLINE SUGGESTION, which exists only while an inline-completions
+  // provider is registered. Until the AI autocomplete engine ships there is nothing to accept, hide
+  // or cycle through — so they are gated rather than shown, and Monaco is never asked to commit a
+  // suggestion that was never offered.
+  { category: '🤖 AI CODING SHORTCUTS', key: 'tab', label: 'Accept AI Suggestion', command: 'editor.action.inlineSuggest.commit', keys: ['Tab'], requires: 'inlineAiSuggestions' },
+  { category: '🤖 AI CODING SHORTCUTS', key: 'esc', label: 'Reject AI Suggestion', command: 'editor.action.inlineSuggest.hide', keys: ['Esc'], requires: 'inlineAiSuggestions' },
+  { category: '🤖 AI CODING SHORTCUTS', key: 'alt+]', label: 'Next AI Suggestion', command: 'editor.action.inlineSuggest.showNext', keys: ['Alt', ']'], requires: 'inlineAiSuggestions' },
+  { category: '🤖 AI CODING SHORTCUTS', key: 'alt+[', label: 'Previous AI Suggestion', command: 'editor.action.inlineSuggest.showPrevious', keys: ['Alt', '['], requires: 'inlineAiSuggestions' },
 
   // 🚀 SUPER USEFUL HIDDEN
   { category: '🚀 SUPER USEFUL HIDDEN', key: 'ctrl+shift+v', label: 'Markdown Preview', command: 'markdown.showPreview', keys: ['Ctrl', 'Shift', 'V'] },
@@ -144,7 +158,11 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const filtered = VS_CODE_SHORTCUTS.filter(s => 
+  // Capability gate FIRST, search second. Filtering here — at the one place the list is read — means
+  // a gated shortcut cannot reach the dropdown, the keyboard-navigation index, or `handleRun`; a gate
+  // applied only at render time would still let Enter fire a command with nothing behind it.
+  const offered = availableItems(VS_CODE_SHORTCUTS);
+  const filtered = offered.filter(s => 
      s.label.toLowerCase().includes(search.toLowerCase()) || 
      s.category.toLowerCase().includes(search.toLowerCase())
   );

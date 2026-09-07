@@ -45552,3 +45552,131 @@ split domain stays on the website).
   matching can pick an unrelated same-named service.
 - P2 no timeout on Render API calls; Python ship-whole static serving unverified; Render apex
   verification over a flattened CNAME unverified live; 5-minute verify window vs 3–8 min first builds.
+
+---
+
+## 2026-09-07 — the phone keyboard's four "AI CODING SHORTCUTS" were dead buttons (rule 2)
+
+Found while auditing NavBharatAI against Cursor and Claude Code at the admin's request. It is not a
+competitive gap — it is the second absolute rule broken in its plainest form.
+
+### What was wrong
+
+`VirtualKeyboard.tsx` offered four buttons under **🤖 AI CODING SHORTCUTS**: Tab "Accept AI
+Suggestion", Esc "Reject AI Suggestion", Alt+] / Alt+[ for next and previous. They dispatch Monaco's
+real `editor.action.inlineSuggest.*` commands, so nothing errors and nothing warns.
+
+But an inline suggestion only exists while an inline-completions provider is registered, and
+**nothing in this codebase has ever called `registerInlineCompletionsProvider`** — verified twice, on
+that name and on `provideInlineCompletions`, zero hits either way. Monaco was being asked to accept a
+suggestion it had never been offered, and did exactly the right thing: nothing.
+
+**A user tapped a button labelled "Accept AI Suggestion" and got silence.** That is the worst shape a
+defect can take, because there is no error to notice and no log to find — the feature just looks shy.
+
+### The audit that came with it, since a symptom is not a class
+
+Rather than delete four lines, every shortcut was checked against its real handler:
+
+- **86 shortcuts total.** 50 forwarded to Monaco, 36 handled by a `switch` case in `CodeStudio.tsx`.
+- **0 have no handler at all.** So the `workbench.*` half is genuinely wired — the dead set is
+  exactly the four that need a *provider* rather than a *command*.
+
+That distinction is the finding worth keeping: `handleShortcut` forwards anything starting with
+`editor.` straight to `editorInstance.trigger(...)`, which silently succeeds whether or not the
+capability behind the command exists. The same blind spot the `workbench.view.debug` comment already
+records — "the shortcut was handled and still went nowhere" — in a second form.
+
+### The fix: capability declared, not assumed
+
+`src/components/ide/editorCapabilities.ts` — a shortcut (or menu item, or palette entry) may name a
+capability it `requires`, and `availableItems()` drops anything whose capability is absent. The four
+AI shortcuts now declare `requires: 'inlineAiSuggestions'`, which is `false`.
+
+**Why a flag rather than deleting the buttons.** Deleting fixes today and teaches nothing. The class
+of bug is *a control that advertises a capability nobody checked was present*, and this makes the
+check the only way to add one. It is generic over the item type on purpose, so the keyboard, palette
+and menu bar can share ONE gate — two copies of this rule would eventually disagree about which
+controls are honest.
+
+**Why the check could not be automatic.** Monaco's `editor.getAction(id)` catches a command that does
+not exist — but all four of these DO exist as real built-in Monaco actions. What is missing is the
+provider behind them, and Monaco offers no way to ask "does anything provide inline completions right
+now?". A capability that cannot be detected has to be declared.
+
+**The flag cannot drift ahead of the code.** `editorCapabilities.test.ts` greps the real source for
+`registerInlineCompletionsProvider` and asserts the flag equals what it finds — so setting it `true`
+without building the engine fails CI by name. Verified to bite: flipping it produces exactly two
+named failures. The gate is also applied BEFORE the search filter, so a hidden shortcut cannot be
+reached through keyboard navigation or `handleRun` either.
+
+When the AI autocomplete engine ships, one flag flips and the four buttons return on their own.
+
+**Gate:** `tsc --noEmit` clean; 8 new tests; full suite green.
+
+---
+
+## 2026-09-07 — the Diff view can now UNDO a change, not only show it (gap #2 from the Cursor audit)
+
+### First, a correction to my own audit
+
+The gap report I gave the admin said NavBharatAI had **no diff review** at all, on the strength of a
+grep for `acceptHunk` / `diffReview` / `approveChange` that returned nothing.
+
+That was wrong, and wrong in a way this file has now recorded twice in one day: **a conclusion is only
+as wide as the search that produced it.** `DiffViewer.tsx` has existed all along — 538 lines,
+LCS-based, side-by-side and unified, merge-conflict resolution — wired into the Diff tab, with
+`App.tsx` snapshotting `previousFiles` in `onBeforeBuild` so there is a real before/after to compare.
+I never grepped for the obvious word: `DiffViewer`.
+
+The real gap was much narrower, and much more buildable: **the view was read-only.** Verified — no
+Revert, Reject, Undo, discard or restore control anywhere in the file; its only buttons were compare,
+view-toggle, copy, close and resolve-conflicts.
+
+### Why the narrow gap still mattered
+
+A user could see the AI had rewritten a function they liked and had exactly two options: keep it, or
+restore the whole project from History and lose everything else the build did too.
+
+That is worse for a non-technical user than for a developer. A developer reads the diff and fixes it
+by hand. Someone who does not write code has no way back at all — so "the AI changed something I did
+not want" becomes "I have to rebuild and hope". The fear that the AI has quietly broken your work is
+the most common reason people stop trusting a builder, and a visible per-change undo is the honest
+answer to it.
+
+### What shipped
+
+**`src/lib/fileDiff.ts`** — the diff maths moved OUT of the component (rule 4: centralize rather than
+duplicate) and gained the revert half. The reason it had to move: revert needs the SAME line
+classification the view is displaying. Two copies would eventually disagree, and the user would click
+revert on one hunk and get another.
+
+- `revertHunk(old, new, i)` — one rule, and it is the whole feature: inside the reverted hunk take the
+  OLD side of the diff, everywhere else take the NEW side. So a removed line comes back, an added line
+  goes away, and nothing outside that hunk moves.
+- `revertFile(previous)` — returns the previous text verbatim rather than reverting every hunk in turn.
+  For the whole-file case the answer is not an approximation of the old file, it IS the old file, and
+  going through the diff could only introduce a way to get it wrong.
+
+**Three things that would have been bugs, caught in the design:**
+
+1. **`Hunk` carries `indices`.** The view shows hunks with context, so a hunk is a WINDOW onto the
+   diff, not a slice of the file. Matching a hunk back by comparing line contents breaks the instant a
+   file repeats a line — and every `}` in a file looks identical.
+2. **`splitLines` treats the trailing newline as the end of the file, not an empty last line.**
+   `"a\nb\n".split('\n')` is `['a','b','']`; diffing that phantom element shows a spurious blank-line
+   change AND reassembles the file with the newline dropped or doubled. The view now uses the same
+   splitter, so what the user reverts is what they were shown.
+3. **An out-of-range hunk returns `null`, and the UI honours the refusal.** A stale click (the file
+   moved under the view) gets nothing rather than a corrupted file.
+
+**UI:** "Revert file" in the header, and a small "Revert" on each `@@ hunk N @@`. Both appear only when
+there is genuinely something to go back to — a file the build CREATED has no previous version, and
+offering revert there would promise a restore that cannot happen (deleting it is a different action
+with different consequences). Persisting goes through the SAME path the conflict resolver already
+uses, so a revert lands where a resolve does and the preview follows both.
+
+**AppKnowledgeBase:** the Diff view had no entry at all — now `diff_review`, covering both halves.
+
+**Gate:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean; 21 new tests in `fileDiff.test.ts`
+including "revert one hunk, the other change survives" and the full round-trip back to the original.

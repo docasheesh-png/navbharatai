@@ -581,6 +581,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'diff_review',
+    name: 'See exactly what the AI changed — and put any part of it back',
+    path: 'Header → Diff tab (opens after a build, comparing against the files from just before it)',
+    description: 'After a build you can see every line the AI changed, file by file, either side-by-side or as one combined list. Green lines were added, red lines were removed, and the count at the top tells you how many of each. If a file came out with merge conflicts you can resolve them here too.\n\nYou can also UNDO any part of it, which is the important half. "Revert file" puts one whole file back to exactly how it was before the build. Each block of changes also has its own small "Revert" button, which undoes ONLY that block and leaves every other change the build made in place — so if the AI improved four things and spoiled one, you keep the four and lose only the one. Reverting writes the file straight back into your project and refreshes the preview, so you see the result immediately.\n\nThe Revert buttons appear only when there is genuinely something to go back to. A file the build CREATED has no earlier version, so it shows no Revert button — removing it is a delete, which is a different thing you do from the Files tab.',
+    howToUse: 'Build or edit something, then open the Diff tab in the header. Pick a file from the dropdown if more than one changed. Use the Columns/Unified buttons to switch between side-by-side and single-list view. To undo the whole file, tap "Revert file" at the top. To undo just one change, find that block and tap the small "Revert" next to "@@ hunk N @@". To go back further than the last build, use "Restore all files" in the History tab instead.',
+    relatedFeatures: ['agentv3_restore_files', 'agentv3_files', 'agentv3_builder', 'ide'],
+    keywords: ['diff', 'changes', 'what changed', 'kya badla', 'kya change hua', 'revert', 'undo', 'undo changes', 'wapas karo', 'purana wapas', 'compare', 'before after', 'pehle baad', 'ai ne kya kiya', 'ai ne kya badla', 'restore one file', 'ek file wapas', 'reject change', 'change hatao', 'side by side', 'unified diff', 'added lines', 'removed lines', 'galat change'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'agentv3_restore_files',
     name: 'Restore all files (bring your whole project back)',
     path: 'NavBharatAI Pro v5.0 → header → History tab (or Files tab when empty) → "Restore all files" button',

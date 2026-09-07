@@ -981,6 +981,30 @@ company. This costs nothing to do on day one and is close to impossible to undo 
 - **D3 — How much hosting does a FREE user get?** Options: (a) none — hosting is a paid capability;
   (b) it draws on the existing gift wallet, so it is already capped; (c) a small separate allowance.
   **(b) is the recommendation** — one wallet, no new currency, and the cap already exists. **OPEN.**
+- **D4 — User apps live in a SEPARATE GCP project.** ✅ **APPROVED 2026-09-07** ("han isko fix karo,
+  alag alag project me rakho"). See the architecture note above for why it cannot be retrofitted, and
+  the admin checklist below for the five steps only the admin can take.
+- **D5 — Hosting is billed at REAL measured cost + 20%.** ✅ **APPROVED 2026-09-07** ("hamara jo bhi
+  kharcha ayega, usme 20+% add kar ke user se charge karenge"). This is deliberately far below the
+  build markup (4× / 3×) and that is a sound strategic call: hosting is what keeps a user inside the
+  product, and the margin lives in builds. **It does NOT change build billing.**
+
+  🔒 **WHAT THE 20% MUST BE APPLIED TO — the part that decides whether it is a margin or a loss.**
+  "Our cost" for a hosted app is not one number, and metering only the obvious one loses money:
+  1. **Compute** — Cloud Run CPU + memory per request. The obvious one.
+  2. **EGRESS (network out)** — billed separately, and it is the line that surprises people: an app
+     serving images or video can have egress dwarf its compute. Metering compute alone and adding 20%
+     makes every bandwidth-heavy app a **loss**.
+  3. **Build minutes** — Cloud Build runs on every deploy.
+  4. **Storage** — the container image in Artifact Registry, and the website bytes in the bucket.
+
+  And two costs the 20% can never recover, which must be counted as acquisition, not margin:
+  - **The payment gateway's cut.** Cashfree takes its fee off the TOP-UP, so of ₹100 added, ~₹98 reaches
+    the wallet. Charging cost+20% against a wallet that was filled at 98% leaves ~18% real, not 20%.
+  - **Free-tier hosting** (D3), which is unrecovered by definition — exactly like the ₹163 gift.
+
+  **So the rule to implement: meter all four cost lines, sum them, add 20%, debit the wallet.** A
+  slice that meters only compute would satisfy the letter of this decision and quietly break it.
 
 ### The slices, in dependency order — each one ships on its own
 
@@ -1032,8 +1056,56 @@ does not move at the same speed"* is the structural problem.
    before it ships — credentials posted to a third-party domain, a copied brand, a mining library. **No
    other builder can do this.** `SecretLeakAnalysis` / `SecurityAnalysis` are already this shape.
 
-So slice 4 is: a pre-publish content check (our own code, free) → Web Risk at publish → caps at runtime
-→ an `/abuse` route and one-click takedown (`unpublish` already exists).
+⚠️ **CORRECTED 2026-09-07, hours after this section was written** — the admin asked whether the Web
+Risk check would make the user wait, and the question exposed a design error worth keeping.
+
+The section originally said "Web Risk **at publish**". **That check would be worthless**, and always
+"clean": Web Risk answers *"is this URL on a list of KNOWN-bad URLs?"*, and at publish the app's URL is
+seconds old, so it cannot be on any list. A check that always passes is not a check — it is
+reassurance, which is the same failure class as the connect screen reading `ownership: active` over a
+site that was down.
+
+**Where Web Risk genuinely earns its place, and it is two other places:**
+- **The URLs the app's code POINTS AT.** A generated app posting credentials to
+  `http://collect-logins.xyz/steal` — *that* host can be on the list, and we find it by reading the
+  code we ourselves wrote.
+- **A periodic RE-SCAN of already-published apps.** An app that was clean on Monday can be listed by
+  Friday. Pure background, on a schedule.
+
+**So the ordering, and the user-visible answer: nothing blocks except the check that is instant.**
+1. **Blocking, no network, milliseconds** — read the generated source for credential-posting to a
+   third-party host, a copied brand, a mining library. This is the check that actually catches things,
+   and it is only possible because we wrote the app.
+2. **After the publish returns, in the background** — Web Risk on any outbound URLs found, cached by
+   URL (the same `api.stripe.com` appears across hundreds of apps) so the free tier is barely touched.
+3. **On a cron** — re-scan published apps; anything listed is taken down (`unpublish` already exists).
+
+The user never waits on a network call. (A later option to verify: Web Risk's **Update API** downloads
+the hash list for local checking, which would make even the background calls free — pricing not
+confirmed, so it is not promised here.)
+
+So slice 4 is: an instant pre-publish content check (our own code, free) → background Web Risk on
+outbound URLs → caps at runtime → a cron re-scan → an `/abuse` route and one-click takedown.
+
+### 👤 ADMIN-ONLY — the five steps for D4 that no session can take
+
+Creating a GCP project is console work. Slice 1 cannot deploy anywhere until these exist:
+1. **Create the project** — suggested id `navbharat-apps-prod`.
+2. **Enable** Cloud Run, Cloud Build and Artifact Registry APIs in it.
+3. **Link a billing account.** ⚠️ **Strongly prefer a SEPARATE billing account from the platform's.**
+   Isolation of the project protects against an abuse complaint; a separate billing account also
+   protects against a billing incident — an unpaid or suspended account cannot then take the platform
+   down with it. This is the difference between "the blast radius is smaller" and "there is no blast
+   radius".
+4. **Cross-project IAM** — grant the PLATFORM's Cloud Run service account `run.admin` +
+   `cloudbuild.builds.editor` + `iam.serviceAccountUser` **in the apps project only**, so the platform
+   can deploy there and nowhere else.
+5. **Set `NAVBHARAT_APPS_PROJECT`** in the platform's Cloud Run env to that project id, and record it
+   in `CLAUDE.md`'s registry per the hand-to-hand rule.
+
+🔒 **The code must FAIL CLOSED on this**: with `NAVBHARAT_APPS_PROJECT` unset, hosting is simply
+unavailable and says so. It must never fall back to the platform's own project — that fallback would
+silently undo the entire decision, and nothing would fail to reveal it.
 
 ### What NOT to build
 - ⛔ **One shared Render key for every user.** Account limits, the entire bill, and one leak exposing

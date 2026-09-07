@@ -790,6 +790,30 @@ weeks-long registration) — localStorage/IndexedDB are per-origin from day one,
 - **`PUBLISHED_APP_DOMAIN`** — the branded published-app host; see item 2 for why it must stay
   unset until the Cloudflare Worker is live.
 
+- **Published-app hosting — the THREE keys that together remove the publish ceiling (added 2026-09-07):**
+  `PUBLISHED_APPS_BUCKET` (the public Cloud Storage bucket published apps are mirrored into —
+  ⚠️ **NEVER `NAV_STORE_BUCKET`**, which holds unreviewed APKs and must never be public; the code
+  refuses that fallback deliberately and a test locks it), `PUBLISHED_APPS_MIRROR` (kill switch, `off`
+  disables the mirror while leaving the bucket configured), and **`PUBLISHED_APPS_BUCKET_ONLY`** —
+  `on` makes a publish skip Firebase Hosting **entirely**, which is the only thing that actually removes
+  the ~50-channels-per-site ceiling (ROADMAP §10.3 step 4).
+  🔴 **THE BUCKET ALONE DOES NOT RAISE THE CEILING, and believing it does is the exact mistake this
+  entry exists to prevent — I made it, in writing, to the admin, and corrected it the same session.**
+  The mirror runs AFTER the channel is created and released, so a mirrored publish still consumes a
+  channel; the bucket made publishing cheaper and faster to serve, never roomier. Only
+  `PUBLISHED_APPS_BUCKET_ONLY=on` stops a channel being created at all.
+  ⚠️ **ORDER OF ACTIVATION MATTERS, and getting it wrong hands users dead links.** All THREE of
+  `PUBLISHED_APPS_BUCKET`, `PUBLISHED_APP_DOMAIN` and `PUBLISHED_APPS_BUCKET_ONLY=on` must hold, and
+  the code ANDs them rather than warning: with no branded domain there is NO working URL to return,
+  because the default `<site>--<sub>.web.app` host resolves only *because* the channel exists. So the
+  sequence is **bucket public-readable → Worker's `APPS_BUCKET` set and deployed → `PUBLISHED_APP_DOMAIN`
+  set and a test app confirmed loading → only then `PUBLISHED_APPS_BUCKET_ONLY=on`.** Missing any
+  precondition disables the path silently and correctly (today's behaviour, byte-identical).
+  **Reverting is one key.** Unset `PUBLISHED_APPS_BUCKET_ONLY` and new publishes go back to Firebase
+  immediately. Apps ALREADY published bucket-only keep working (the Worker serves them) and stay
+  removable — takedown deletes their bucket objects unconditionally, not behind the flag, precisely so
+  turning the flag off can never strand an app nobody can unpublish.
+
 **🔵 4. `FIREBASE_DEPLOY_PROJECT` is NOT set — and that CLOSES a live hypothesis.** While diagnosing the
 2026-08-19 publish 404 I proposed that the deploy might be pointing at the wrong project, since that env
 overrides `FIREBASE_PROJECT` and this file records the exact `navbharatai-3395f` / `gen-lang-client-…`

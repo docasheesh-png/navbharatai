@@ -13,6 +13,12 @@
 
 import { GoogleAuth } from 'google-auth-library';
 import { mirrorPublishToBucket, removePublishFromBucket } from './bucketPublish';
+import {
+  bucketOnlyPublishEnabled,
+  bucketOnlyPublishUsable,
+  bucketOnlyPublishedUrl,
+  bucketOnlySubdomain,
+} from './bucketOnlyPublish';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
@@ -105,6 +111,40 @@ export class FirebaseHostingDeployer {
     if (files.size === 0) {
       throw new Error('No files to deploy. Ensure "npm run build" produced a dist/ directory.');
     }
+
+    // ═══ THE CEILING FIX (ROADMAP §10.3) — publish WITHOUT consuming a Hosting channel ═══
+    //
+    // The channel POOL is what runs out, so the only fix that removes the ceiling is to stop drawing
+    // from it. When the bucket and the branded domain are both live, the app is served end-to-end by
+    // Cloud Storage behind the Cloudflare Worker and Firebase has no part in it — no channel, no slot,
+    // no cap. See bucketOnlyPublish.ts for why all three preconditions are required.
+    //
+    // ONLY the workspace's own PUBLISH channel takes this path. A preview snapshot passes its own
+    // channelId (previewSnapshot.ts) and must keep its separate, throwaway Firebase channel — the id
+    // check is the same one the mirror uses, so a future caller cannot forget to opt out.
+    //
+    // 🔒 A BUCKET PROBLEM CAN NEVER BREAK A PUBLISH. Anything short of a COMPLETE mirror falls through
+    // to the Firebase path below, which still works and still costs a slot: the ceiling matters, and
+    // handing the user a broken app matters more. The partial objects are swept on the way out so a
+    // failed attempt cannot leave paid-for garbage behind.
+    if (channelId === makeChannelId(workspaceId) && bucketOnlyPublishEnabled()) {
+      const sub = bucketOnlySubdomain(workspaceId);
+      const mirror = await mirrorPublishToBucket(sub, files).catch((err) => ({
+        attempted: true, bucket: '', uploaded: 0, failed: files.size, error: String((err as Error)?.message ?? err),
+      }));
+      const url = bucketOnlyPublishedUrl(sub);
+      if (bucketOnlyPublishUsable(mirror) && url) {
+        return url;
+      }
+      console.warn(
+        `[PUBLISH-BUCKET-ONLY] ${sub}: falling back to Firebase — ${mirror.uploaded} uploaded, `
+        + `${mirror.failed} failed${mirror.error ? ` — ${mirror.error}` : ''}`,
+      );
+      // Best-effort sweep: nothing will ever request this key (the URL returned below is Firebase's),
+      // so leaving a half-written app in the bucket is pure cost with no reader.
+      await removePublishFromBucket(sub).catch(() => undefined);
+    }
+
     const { token, headers } = await this.authHeaders();
     const site = FIREBASE_PROJECT;
 
@@ -286,6 +326,27 @@ export class FirebaseHostingDeployer {
    * Admin role). Returns true when the channel is gone (deleted or already absent).
    */
   async deleteChannel(workspaceId: string): Promise<boolean> {
+    // 🔒 A BUCKET-ONLY APP HAS NO CHANNEL TO DELETE, AND THIS IS THE ONLY PLACE ITS COPY IS REACHABLE.
+    //
+    // Without this line "unpublish" on a bucket-only app would delete nothing and report success: the
+    // Firebase delete 404s (idempotent success), and the bucket cleanup inside deleteChannelById keys
+    // off the CHANNEL's own host, which does not exist — so the app would stay live at its public URL
+    // with the platform insisting it was taken down. A takedown that is not one is the worst outcome
+    // this file can produce.
+    //
+    // The key is derivable from the workspace id alone (that is the point of generating it ourselves),
+    // so this works whether or not bucket-only mode is still switched on — a previously published app
+    // must stay removable after the flag is turned off. For a Firebase-published app the prefix simply
+    // does not exist and the delete is a harmless no-op, so it runs unconditionally rather than behind
+    // a flag that could be wrong.
+    const bucketOnlyRemoved = await removePublishFromBucket(bucketOnlySubdomain(workspaceId))
+      .catch((err) => ({ attempted: true, deleted: false, error: String((err as Error)?.message ?? err) }));
+    if (bucketOnlyRemoved.attempted && !bucketOnlyRemoved.deleted) {
+      console.warn(
+        `[PUBLISH-BUCKET-ONLY] takedown left bucket objects for ${bucketOnlySubdomain(workspaceId)}: `
+        + `${bucketOnlyRemoved.error ?? 'unknown'}`,
+      );
+    }
     return this.deleteChannelById(makeChannelId(workspaceId));
   }
 

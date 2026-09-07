@@ -205,7 +205,11 @@ describe('🔒 the wiring — creation replaces the hand-off, and nothing else',
   });
 
   it('🔒 a REFUSED creation leaves an honest failure, never a silent success', () => {
-    expect(handler).toContain("result = { ok: false, reason: 'no-service', message: `${created.message}` };");
+    // ⚠️ RE-ANCHORED 2026-09-07: the refusal now carries its OWN reason. Folded into `no-service`, the
+    // client answered "no start script" / "no GitHub access" with the Blueprint walkthrough — a fix for
+    // a problem the user did not have. The property (an honest failure, never success) is unchanged.
+    expect(handler).toContain("result = { ok: false, reason: 'create-refused', message: `${created.message}` };");
+    expect(handler).not.toContain("result = { ok: false, reason: 'no-service', message: `${created.message}` };");
   });
 
   it('a created service is reported as deployed without triggering a second build', () => {

@@ -45502,3 +45502,53 @@ same block, now returned to two callers instead of sent from one.
 **What the admin should now see on mitrify.com's screen, consistently:** amber "needs its server part
 deployed first" + **Go to Deploy backend** + a plain "Open mitrify.com" — and no DNS-record note.
 The backend deploy itself is still theirs to run: repo (the button), their own `RENDER_API_KEY`.
+
+## 2026-09-07 (5) — the deploy flow audited from zero; four P0 defects fixed in one change
+
+Admin: *"ek bar wapas se pure deploy flow ka audit karo, ek dam 0 se"*. The whole path — build →
+Publish → shape verdict → refusal/offer → Put-in-GitHub → Deploy backend → create/trigger → env →
+verify → domain pointing → domain screen — read end to end. Full ledger in the session; the four
+P0 items are fixed here, the P1/P2 ones recorded below as open.
+
+**P0-1 — the split-app publish could never find its backend.** `findBackendUrl({ appName:
+workspaceId })`: no service is ever named after a workspace id, so the lookup never matched, the
+address stayed empty, `buildEnvForSplit` returned `{}`, and every split app was refused on every
+publish while the message said "deploy the server first, then publish". → the lookup uses the
+durable repository (`resolveDeployRepo`) with the repo name as fallback; one durable read serves
+both the lookup and the refusal wording (test-pinned).
+
+**P0-2 — 🔴 every vault key, the deploy key included, was forwarded into the deployed app.**
+`planBackendEnv` filtered only the DB marker and sandbox-local values, so `RENDER_API_KEY` landed in
+the user's service environment — readable by the app, its logs and the host dashboard. → the plan
+sends ONLY names the app's own code reads (`process.env.X`, and Python `os.environ` / `getenv`),
+NEVER a platform-control key (`PLATFORM_CONTROL_ENV_KEYS`, pinned against `backendDeployConfig`'s
+`tokenEnv`s), and when no code can be read it sends nothing and says so (`codeUnreadable`) rather
+than everything. Two `backendEnvVars` anchors re-pointed (the fixture now names the key it expects).
+
+**P0-3 — a split app's domain was pointed at its API.** deploy-backend attached the domain to the
+service on every success; correct shipped-whole, wrong when the website is published separately. →
+gated on the same `analyzeApiWiring` verdict the publish route uses (files read once, one verdict for
+env, creation and domain); a split app's domain stays on the website and the note says where the
+server runs.
+
+**P0-4 — every failure was HTTP 409, and 409 means "connect your repo in Render".** A rejected key,
+a host outage and a refused creation all arrived as the Blueprint walkthrough. → one status per
+reason (`no-service` 409 · `not-configured` 503 · new `create-refused` 422 · `api-error` 502) and the
+client answers the REASON first (`create-refused` has its own kind, `api-error` is a failure even on
+an old 409).
+
+**Tests:** `tests/deployFlowAudit.test.ts`. `AppKnowledgeBase` updated (keys-only-what-code-reads,
+split domain stays on the website).
+
+**Open from the audit (not fixed here — recorded, rule 6):**
+- P1 no durable deploy record (serviceId/url/live-state) → after reload the Publish screen shows
+  "Deploy backend" again and never "live at …". Proposed: a server-side "make it live" job with its
+  verdict stored on the workspace.
+- P1 an EXISTING service's env is never updated, yet the note says "save it under Settings" —
+  Render's per-key `PUT /env-vars/{key}` would make that true without replacing the whole set.
+- P1 manual-DNS apex users are told to add a CNAME most registrars cannot hold at the apex; the A
+  record / nameserver-delegation path should be offered, and the static host's A records named.
+- P1 an existing service's BRANCH is not checked against `deployBranch` on trigger; name-only
+  matching can pick an unrelated same-named service.
+- P2 no timeout on Render API calls; Python ship-whole static serving unverified; Render apex
+  verification over a flattened CNAME unverified live; 5-minute verify window vs 3–8 min first builds.

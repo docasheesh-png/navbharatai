@@ -194,11 +194,14 @@ describe('🔒 deploy-backend points a connected domain at the new service', () 
   it('🔒 a DNS failure can NEVER fail the deploy the user actually asked for', () => {
     // The deploy already happened. Reporting it as failed because a domain write did would be a lie
     // about the thing they requested — and would send them to redo a deploy that succeeded.
-    expect(handler).toContain('res.status(result.ok ? 200 : 409)');
+    // ⚠️ RE-ANCHORED 2026-09-07: failures now carry one status per reason (409/503/422/502) instead of
+    // a flat 409 — but the status is still decided by `result.ok` ALONE, so no domain outcome can
+    // change it. That is the property here, and it is unchanged.
+    expect(handler).toContain('const status = result.ok ? 200');
     expect(handler).toContain('domainNote');
     // The whole domain block is inside a try/catch that only ever sets a note.
     const blockAt = handler.indexOf('let domainPointed');
-    const block = handler.slice(blockAt, handler.indexOf('res.status(result.ok', blockAt));
+    const block = handler.slice(blockAt, handler.indexOf('const status = result.ok', blockAt));
     expect(block).toContain('catch (e) {');
     expect(block).not.toContain('res.status(5');
   });

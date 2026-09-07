@@ -121,6 +121,18 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
+    <!-- Advertising ID — REQUIRED to declare explicitly once an app targets Android 13 (API 33) and
+         has an advertising-ID collector in the build (Meta's SDK, added when FACEBOOK_APP_ID/
+         FACEBOOK_CLIENT_TOKEN are configured — see build.gradle). Before API 33 this permission was
+         implicitly granted to any app whose manifest merged an ad SDK; from API 33 it must be
+         declared here or the platform ZEROES OUT the advertising ID for every app on the device,
+         silently breaking the Data safety declaration this project already filed ("Device or other
+         IDs" collected, shared, for Advertising/Analytics — see the Play Data safety form and
+         MetaConsentPlugin.java). This permission alone does not collect anything — it only lets the
+         OS return a real value to whatever asks; MetaConsentPlugin still gates the ACTUAL read
+         behind the user's consent choice at runtime, exactly as before. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
+
     <!-- Features are optional so the app installs on devices lacking a camera/mic. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />

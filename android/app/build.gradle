@@ -103,10 +103,14 @@ dependencies {
     // instead of reflective. The FEATURE is gated at runtime by the server's STORE_BILLING flag —
     // with it off, this library ships but nothing in the app ever opens a purchase sheet.
     //
-    // v7 is the floor Google requires for new submissions, and is the version PlayBillingPlugin is
-    // written against (PendingPurchasesParams + queryProductDetailsAsync are v6/v7 shapes — a
-    // downgrade to v5 would not compile, which is the failure mode we want rather than a silent one).
-    implementation 'com.android.billingclient:billing:7.1.1'
+    // v8 is Google's hard floor for any new app/update from 31 Aug 2026 ("By Aug 31, 2026, all new
+    // apps and updates to existing apps must use Billing Library version 8 or later" — Play Console
+    // refused this release on 7.1.1 with exactly that message). 9.1.0 is the latest stable as of this
+    // writing, so it is used directly rather than pinning the bare floor and needing this bump again
+    // on the next upload. PlayBillingPlugin is written against v8's ProductDetailsResponseListener
+    // shape (QueryProductDetailsResult, not a bare List<ProductDetails> — a real, checked breaking
+    // change from v7), so a downgrade below 8.0.0 would not compile, which is the failure mode wanted.
+    implementation 'com.android.billingclient:billing:9.1.0'
 
     // Meta app events — added ONLY when both credentials are configured (see defaultConfig above).
     // `facebook-core` is the minimal artifact: install + app-event reporting, WITHOUT Facebook Login,

@@ -9,7 +9,7 @@
 // login as the repo owner. Implements PrCapableClient so it plugs straight into mergeViaPullRequest.
 // Everything is injectable (fetch) so it is fully unit-testable without GitHub.
 
-import type { CiVerdict, PrComment, PullRequestInfo, RepoInfo } from './GitHubAppClient';
+import { PLATFORM_REPO_DESCRIPTION, type CiVerdict, type PrComment, type PullRequestInfo, type RepoInfo } from './GitHubAppClient';
 import type { PrCapableClient, ReviewCapableClient } from './GitHubPrFlow';
 import { normalizePrComments, type RawPrComment } from './prCommentMapping';
 
@@ -49,7 +49,7 @@ export class UserGitHubClient implements PrCapableClient, ReviewCapableClient {
       throw new Error(`ensureRepo: unexpected GET /repos response (HTTP ${got.status}).`);
     }
     const created = await this.request<RepoApi>('POST', '/user/repos', {
-      name, private: true, auto_init: true, description: 'Built with NavBharatAI Pro v5.0',
+      name, private: true, auto_init: true, description: PLATFORM_REPO_DESCRIPTION,
     });
     if (!created.ok || !created.body) {
       throw new Error(`ensureRepo: could not create repo "${name}" in your GitHub account (HTTP ${created.status}).`);
@@ -249,6 +249,7 @@ interface RepoApi {
   clone_url?: string;
   html_url?: string;
   default_branch?: string;
+  description?: string | null;
   permissions?: { push?: boolean; admin?: boolean; pull?: boolean };
 }
 
@@ -259,6 +260,7 @@ function toRepoInfo(r: RepoApi, created: boolean): RepoInfo {
     htmlUrl: r.html_url ?? '',
     defaultBranch: r.default_branch ?? 'main',
     created,
+    ...(typeof r.description === 'string' ? { description: r.description } : {}),
   };
 }
 

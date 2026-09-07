@@ -96,6 +96,18 @@ dependencies {
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
 
+    // GOOGLE PLAY BILLING — the in-app token top-up rail (PlayBillingPlugin.java).
+    //
+    // UNCONDITIONAL, unlike the Meta SDK below: Play Billing needs no credential, so there is no
+    // half-configured state to guard against, and a direct dependency keeps the plugin readable
+    // instead of reflective. The FEATURE is gated at runtime by the server's STORE_BILLING flag —
+    // with it off, this library ships but nothing in the app ever opens a purchase sheet.
+    //
+    // v7 is the floor Google requires for new submissions, and is the version PlayBillingPlugin is
+    // written against (PendingPurchasesParams + queryProductDetailsAsync are v6/v7 shapes — a
+    // downgrade to v5 would not compile, which is the failure mode we want rather than a silent one).
+    implementation 'com.android.billingclient:billing:7.1.1'
+
     // Meta app events — added ONLY when both credentials are configured (see defaultConfig above).
     // `facebook-core` is the minimal artifact: install + app-event reporting, WITHOUT Facebook Login,
     // sharing or the rest of the SDK surface. We need measurement, not a login provider, and every

@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
         // Registered BEFORE super.onCreate(), which is when the bridge is built — a plugin registered
         // afterwards is not visible to the web layer.
         registerPlugin(MetaConsentPlugin.class);
+        registerPlugin(PlayBillingPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

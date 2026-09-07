@@ -909,6 +909,154 @@ oversight — do not re-propose it without new evidence.
 directly. Both shipped 2026-08-23. **Every action above should be preceded by a look at that screen
 and followed by another** — a saving nobody measured is a story, not a saving.
 
+## 11 · 🔵 NAVBHARAT CLOUD — one Publish button, no second website (admin-approved 2026-09-07)
+
+**Admin, in their own words:** *"jab mai pura app navbharatai apse banwa raha hu, to apko aisa kuch
+solution dena chahiye, jo sabhi user ke liye ho"* — after being told that hosting a backend needs each
+user to fetch their own Render API key. That answer was correct about today's code and wrong about the
+product, and the admin was right to reject it.
+
+### The competitor check that settles the direction (researched 2026-09-07)
+
+| Builder | Who runs the backend | User fetches a key elsewhere? | Real always-on server? |
+|---|---|---|---|
+| Replit | Replit (Autoscale, scale-to-zero) | No | Yes |
+| Lovable Cloud | Lovable (Supabase underneath) | No | No — functions only |
+| Base44 (Wix) | Base44 | No | No — managed backend |
+| Bolt.new | Bolt hosting + Supabase | Supabase yes, hosting no | No |
+| v0 | Vercel (same company) | No | Serverless routes |
+| Emergent / Databutton | They do | No | **Yes** |
+| Firebase Studio | Google, in the user's project | Same-company account | Yes (Cloud Run) |
+
+**Nobody sends a user to a third-party dashboard for an API key as the DEFAULT path.** It exists only
+as a power-user option. That is the gap, and it is a product gap, not a code defect.
+
+### What NavBharat Cloud is
+
+**One button — Publish — and the app is live: website, server, database, domain.** No GitHub step, no
+Render account, no second website. Three layers, one decision made by the engine, not by the user:
+
+| Layer | What runs it | Idle cost |
+|---|---|---|
+| Website | Cloud Storage bucket + Cloudflare CDN (§10.3 half-built) | ~₹0 |
+| Server | **Cloud Run container, scale-to-zero** | **₹0** |
+| Data / auth / files | Supabase (starter, or the user's own) | free tier |
+
+The engine that picks the layer ALREADY EXISTS — `planDeployment`, `analyzeApiWiring`, `serviceGraph`.
+Today it only chooses "refuse or publish"; here it chooses which engine runs the app.
+
+**Cloud Run, not Render, and the reason is money:** Render's free plan is always-on, so it sleeps after
+15 minutes and wakes slowly. Cloud Run bills per request and genuinely reaches zero — an app nobody
+visits costs nothing. The platform already runs on Cloud Run, so this is not a new dependency.
+
+### 🔴 THE ARCHITECTURAL DECISION THAT CANNOT BE RETROFITTED
+
+**User apps MUST go in a SEPARATE GCP project from the platform.** Today everything is in
+`gen-lang-client-0866594388` — Firestore, the wallet, the users, the platform itself. If a user's
+hosted app draws an abuse complaint or a billing incident, the blast radius must not include the
+company. This costs nothing to do on day one and is close to impossible to undo later. Slice 1 creates
+`navbharat-apps-prod` and never deploys user code anywhere else.
+
+### How this reconciles with the two standing rules it appears to break
+
+1. **"User apps run on the USER's own accounts"** (CLAUDE.md). Written to stop NavBharatAI paying for
+   user resources. Here NavBharatAI pays the provider and recovers it from the wallet with markup —
+   which is exactly the exception the admin already authorised for AgentV3 billing on 2026-06-22. This
+   is that exception's hosting twin, and it needs recording there in the same words.
+2. **"Spend nothing that a user does not pay for"** (§💰). That section's own reframe is *"the right
+   target is ZERO LOSS, not zero cost"*, with category 1 being *recovered from the user who caused it*.
+   Metered hosting billed to the wallet is category 1 by construction. **The one line that must not be
+   forgotten is the FREE tier** — free hosting would become a second ₹163-shaped line that scales with
+   signups and returns nothing. See D3.
+
+### THE THREE DECISIONS (admin) — nothing wide ships before these
+
+- **D1 — NavBharatAI hosts user backends on its own GCP and bills the wallet.** ✅ **APPROVED
+  2026-09-07** ("apka plan theek hai, bana dena").
+- **D2 — A STARTER DATABASE in NavBharatAI's own Supabase org, quota-bound**, so an app has a database
+  before the user is asked for anything. Today's zero-setup path creates it in the USER's account
+  (works, and is genuinely good), but Supabase's free plan allows **2 projects per org**, so a user's
+  third app hits a wall. This widens the quota-bound exception the admin already granted on 2026-08-15
+  for App Mart's `window.NavData` — same reasoning, bigger scope. **OPEN.**
+- **D3 — How much hosting does a FREE user get?** Options: (a) none — hosting is a paid capability;
+  (b) it draws on the existing gift wallet, so it is already capped; (c) a small separate allowance.
+  **(b) is the recommendation** — one wallet, no new currency, and the cap already exists. **OPEN.**
+
+### The slices, in dependency order — each one ships on its own
+
+1. **The engine, admin-only.** `hostBackend()` beside `renderDeploy`: build the container from the
+   DURABLE store via Cloud Build buildpacks (no Dockerfile authored, no GitHub in the path), deploy to
+   Cloud Run in the apps project with hard caps (`max-instances` small, memory, request timeout,
+   concurrency), return an honest verdict reusing `readDeployVerdict`. Flag OFF. mitrify.com is the
+   test. **This is the slice that makes a fullstack app live without Render at all.**
+2. **The money.** Meter real Cloud Run usage per app, debit the wallet through the SAME rate-card +
+   tiered markup the sandbox uses (`sandboxCost.ts` is the working precedent). Free allowance per D3.
+   **Nothing goes wide before this slice** — unmetered hosting is the failure mode §💰 exists to stop.
+3. **The domain.** Extend the existing Cloudflare Worker so a custom domain routes to the Cloud Run
+   service. Managed DNS is already built; `backendDomain` already records where a domain points.
+4. **The guard** (see the abuse section below).
+5. **One button.** Publish stops refusing a fullstack app and just does it; GitHub + BYO Render move
+   under "Advanced". Deletes the five-step path the admin has been walking all week.
+6. **The starter database** (needs D2). Provision at BUILD time, not publish time — that is what makes
+   Base44/Lovable feel magical: the app is written against a real database from its first line.
+7. **Always-on tier.** `min-instances: 1` as a paid upgrade for anyone who wants no cold start —
+   Replit's Reserved VM, priced honestly.
+
+### The abuse layer — researched 2026-09-07, and it is FREE
+
+| Need | Tool | Cost |
+|---|---|---|
+| Phishing / malware URL check | **Google Web Risk API** | **free to 100,000 lookups/month**, then $0.50/1k |
+| Cryptomining on Cloud Run | **Security Command Center — Standard** | **free** (detects bad images + mining commands) |
+| Runaway bill | Cloud Run `max-instances` + wallet cap | free (configuration) |
+| DDoS / WAF / bots | **Cloudflare free plan** — already ours | free |
+| APK malware scan | **ClamAV**, self-hosted | free, and **commercial use is permitted** |
+
+⚠️ **Use Web Risk, NOT the Safe Browsing API** — Safe Browsing is free but **non-commercial only**, and
+NavBharatAI is commercial.
+✅ **This also closes CLAUDE.md's open VirusTotal licensing item**: VirusTotal's free tier forbids
+commercial use; ClamAV does not.
+❌ **SCC's cryptomining financial protection is Premium-only AND does not cover Cloud Run** — so nothing
+is lost by staying on Standard. The real insurance is `max-instances` plus the wallet cap.
+
+**The honest part, which no tool fixes:** Vercel, Netlify and Cloudflare Pages are all abused for
+phishing at scale — Cloudflare's free tier is described in 2026 reporting as default phishing
+infrastructure. Their model is not prevention, it is fast takedown. *"Deploy takes seconds; takedown
+does not move at the same speed"* is the structural problem.
+
+**Three things make NavBharatAI structurally better placed than any of them:**
+1. **The wallet IS the cap.** Hosting bills the wallet, so a miner runs until their balance is empty and
+   then stops. A free-tier host has no such natural bound. The attack ends itself.
+2. **No anonymous deploys.** An account is required, and paid hosting means a Cashfree payment identity.
+3. **We wrote the app.** Vercel is a blind file host; NavBharatAI GENERATED the code and can check it
+   before it ships — credentials posted to a third-party domain, a copied brand, a mining library. **No
+   other builder can do this.** `SecretLeakAnalysis` / `SecurityAnalysis` are already this shape.
+
+So slice 4 is: a pre-publish content check (our own code, free) → Web Risk at publish → caps at runtime
+→ an `/abuse` route and one-click takedown (`unpublish` already exists).
+
+### What NOT to build
+- ⛔ **One shared Render key for every user.** Account limits, the entire bill, and one leak exposing
+  every app. No competitor does this.
+- ⛔ **Kubernetes / GKE.** Cloud Run is sufficient until its per-project service quota bites; that is a
+  §SCALE-PLAN trigger, not a plan.
+- ⛔ **Redis / queues** — §💰 forbids standing monthly bills to save variable ones.
+- ⛔ **Removing BYO Render.** It stays as the Advanced option, exactly as Bolt keeps BYO Supabase.
+
+### Risks, stated plainly
+- **Cold start** 1–3s on the free path; slice 7 is the answer, and it is a paid one.
+- **Cloud Run per-project service quota** — sharding is a later trigger, not a now.
+- **We become a host**, so abuse reports become our inbox. The human minutes are the one cost no free
+  tool removes.
+- **Supabase Edge Functions** would need the `edge_functions` OAuth scope, which `supabaseOAuth.ts`
+  deliberately does NOT request today — a scope change plus fresh user consent, not a rebuild.
+
+### How we will know it worked
+- A fullstack app reaches a live URL **with zero steps outside NavBharatAI**.
+- Hosting revenue ≥ hosting cost, read off the same Monitor tiles §💰 relies on.
+- Time from Publish to live, and the share of fullstack apps that ever reach live — today that share is
+  effectively zero, which is the whole point.
+
 ## How to use this file
 
 1. **Re-grep before you start.** Every line here is a hint. Nine were wrong on 2026-08-07.

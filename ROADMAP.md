@@ -1156,7 +1156,7 @@ improvement. **Two exceptions are marked 🟢 DO NOW — they are free, and they
 | 1 | ✅ **Scheduled jobs run on EVERY instance** — FIXED 2026-09-08 (`lib/jobLease.ts`) | `lib/ScheduledJobs.ts` | **2 instances** | free |
 | 2 | ✅ **Platform capped at 10 Cloud Run instances** — RAISED to 100, 2026-09-08 | `cloudbuild.yaml` | ~1,000 concurrent requests | free (a number) |
 | 3 | 🟠 **No retention on ~8 growing collections** | `lib/DataRetentionManager.ts` | months, silently | free |
-| 4 | 🟠 **Hot Firestore document** | `lib/metricsTimeline.ts` | ~30-60 instances | free (sharding) |
+| 4 | ✅ **Hot Firestore document** — SHARDED 2026-09-08 | `lib/metricsTimeline.ts` | ~30-60 instances | free (sharding) |
 | 5 | 🟡 **1,000 hosted apps per project** | Cloud Run quota | 1,000 hosted apps | one config change |
 | 6 | 🟡 **Publish channel ceiling** | Firebase Hosting | ~50 per site | already solved, §10.3 |
 | 7 | 🟡 **E2B sandbox concurrency + bill** | E2B plan | concurrent builds | commercial |
@@ -1272,24 +1272,49 @@ That warning is load-bearing — do not batch it.
 per PR as each timestamp is verified. Deleted-app data should also cascade — `workspaceDataErase.ts`
 already knows how.
 
-### 4 · 🟠 THE HOT DOCUMENT — correct, but capped at ~1 write/second
+### 4 · 🟠 THE HOT DOCUMENT — ✅ **SHARDED 2026-09-08**, immediately after raising the ceiling
 
 Firestore allows roughly **one sustained write per second to a single document**. `metricsTimeline`
-writes every instance's counters into ONE document per 5-minute bucket.
+wrote every instance's counters into ONE document per 5-minute bucket.
 
 **The good news, verified by reading it:** it uses `FieldValue.increment`, so N instances writing the
-same bucket **add up correctly** — this is not a correctness bug. And the flush is batched to once per
-`MONITOR_FLUSH_SECONDS` per instance, which is exactly what keeps it under the limit today.
+same bucket **add up correctly** — this was never a correctness bug. And the flush is batched to once
+per `MONITOR_FLUSH_SECONDS` per instance, which is what kept it under the limit.
 
-**The bad news:** at ~60 concurrent instances the same design becomes contention, and the failure is
-SILENT — the flush swallows its error and retries, so the Monitor quietly under-counts rather than
-breaking. `monitor_alert_state` has the same shape at lower volume.
+**Why it moved to the front of the queue.** The arithmetic is the point: each instance flushes once a
+minute, so the write rate on that one document is *instances ÷ 60* per second. At ten instances that is
+0.17/s and comfortable — at the **100** item 2 now permits, it is **1.67/s**, past the limit. Raising
+the ceiling without this would have created the contention rather than merely permitting it. And the
+failure is SILENT: `doFlush` catches, restores the deltas and retries, so the Monitor would quietly
+under-count rather than break.
 
-**The economical fix (free):** sharded counters — write to `bucket_<t>_shard_<0..N>` chosen at random
-per instance, and SUM the shards on read. Standard Firestore practice, no new infrastructure, no
-monthly cost.
+**What shipped (free, no new infrastructure):** one bucket is now spread over `MONITOR_SHARDS`
+documents (**default 8**, env-tunable, clamped 1-64), each instance picking one shard **once per
+process** and keeping it. A hundred instances then write ~**0.2/s per document** — an order of
+magnitude of headroom — while dashboard reads grow only 8x. Legacy unsharded buckets are still read and
+summed, because the query filters on the `bucketStart` **field**, not on ids: no migration, and no seam
+in the graph across the deploy.
 
-**TRIGGER: sustained instances above ~30, or any Firestore contention error in the logs.**
+**🔴 TWO SIBLING BUGS FOUND WHILE DOING IT (rule 3), both fixed in the same change:**
+- **`fillSeries` OVERWROTE on a repeated bucket** (`byBucket.set(t, d)` — last document wins). Invisible
+  while one bucket meant one document; the instant buckets are sharded it would have silently discarded
+  **7 of every 8 shards** and drawn a confident graph of a fraction of the truth. It now sums, which is
+  what it should always have done — these counters are additive by construction, the same property that
+  makes the `increment` write correct.
+- **The read was a flat `limit(2000)` ordered `bucketStart asc`.** A 7-day window at 5-minute buckets is
+  **2,016 buckets — already over that limit before sharding existed**, and because the order is
+  ascending what it dropped was the **NEWEST** data. The longest view was silently missing its most
+  recent hours. The limit is now computed from the window and the shard count (`readLimitFor`, bounded
+  at 30,000), and a read that still hits its limit reports `truncated: true` instead of looking like a
+  quiet stretch of nothing.
+
+The retention sweep was scaled with the shard count too — at a flat 200 it would have swept a sharded
+collection 8x slower than it grows, so retention would have quietly stopped keeping up with its own
+window.
+
+**Still open here:** `monitor_alert_state` has the same one-document shape at much lower volume (one
+transactional write per sweep, not per instance per minute), so it is nowhere near the limit and is
+deliberately left alone. **TRIGGER for revisiting it: any Firestore contention error naming it.**
 
 ### 5 · 🟡 HOSTED APPS: 1,000 per project per region — Google does not raise it
 

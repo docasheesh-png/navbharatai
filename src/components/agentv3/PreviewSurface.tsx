@@ -253,6 +253,22 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const [liveReloadKey, setLiveReloadKey] = useState(0);
   /** Set when the server is serving the VM-free copy of this app because its machine has expired. */
   const [snapshotNote, setSnapshotNote] = useState('');
+  /**
+   * Was the saved copy in the frame on the previous health poll?
+   *
+   * 🔒 THE HALF THAT MAKES THE WAKING FALLBACK COMPLETE (admin 2026-09-08). The door may now hand back
+   * the saved copy while the machine is still starting — and once it 302s, the frame has LEFT our
+   * door, so nothing in it is watching for the live app any more. The saved copy would simply stay up
+   * until something else happened to reload the frame, which for a wake that healed itself could be
+   * never: an app that was ready would go on showing a static copy of itself.
+   *
+   * The transition is the signal, not our own guess about readiness: the SERVER stops reporting
+   * `snapshotServing` the moment its own decision says the live app is answering, so the frame
+   * remounts exactly once, on the edge, and the door resolves it to the live machine. Bumping on the
+   * level instead would remount the iframe on every 150-second poll — the very bug the door-url
+   * adoption rule above exists to avoid.
+   */
+  const snapshotFramedRef = useRef(false);
   /** The saved copy to frame while a FINISHED app's machine is deliberately left asleep, and its note. */
   const [idleSnapshotUrl, setIdleSnapshotUrl] = useState('');
   const [idleSnapshotNote, setIdleSnapshotNote] = useState('');
@@ -614,8 +630,16 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         // THE USER IS LOOKING AT THEIR APP, NOT AT A SPINNER — but it is the last BUILT version, not
         // the live one. Saying so is the whole difference between a graceful fallback and a confusing
         // one: without this line they would report a bug about an edit that is simply not in this copy.
-        setSnapshotNote(res.ok && health?.snapshotServing === true && typeof health.snapshotNote === 'string'
+        const servingSnapshot = res.ok && health?.snapshotServing === true;
+        setSnapshotNote(servingSnapshot && typeof health?.snapshotNote === 'string'
           ? health.snapshotNote : '');
+        // ── AND THE FRAME COMES BACK TO THE LIVE APP BY ITSELF ────────────────────────────────────
+        // The server has stopped serving the saved copy, which is its own statement that the live app
+        // is answering. The frame is still on the copy (the door 302'd it there and it has not been
+        // near our origin since), so remount it once: the door re-resolves and lands on the machine.
+        // See snapshotFramedRef for why this is an edge and never a level.
+        if (snapshotFramedRef.current && !servingSnapshot) setLiveReloadKey((k) => k + 1);
+        snapshotFramedRef.current = servingSnapshot;
         // THE MACHINE IS ALIVE AND WE ARE DELIBERATELY NOT WAKING IT (snapshotServeDecision.ts).
         // Distinct from the case above, where it is GONE. The build is finished, a saved copy of the
         // app exists, and framing that copy is what lets the idle sweep finally pause a sandbox that

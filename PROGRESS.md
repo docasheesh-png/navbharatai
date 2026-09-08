@@ -46063,3 +46063,65 @@ green.
 **1491 files / 20012 tests green, 1 skipped** (first run caught one pre-existing source-pin test,
 `previewKeepAliveWiring` #4, whose 1800-char window my 3-line sweep comment had pushed `pauseSandbox`
 out of — the comment was shortened to one line, the guard is unchanged; re-run green).
+
+---
+
+## 2026-09-08 — while the preview wakes, show the user their app instead of a spinner (and the guard I had to argue with first)
+
+**Where this came from.** After the dead-preview chain was fixed (#2782), I proposed to the admin that
+the door should show the saved copy while a machine wakes, so nobody watches an empty spinner for the
+new ten-minute budget. The admin said build it.
+
+**FIRST FINDING — MY OWN SUGGESTION WAS HALF WRONG, and the code said so before I wrote a line.**
+`shouldServeSnapshot` already refused the 'starting' state ON PURPOSE, with the reason written above it:
+*"a sandbox that exists but whose port has not come up yet is usually seconds from serving, and replacing
+a live app that is still starting with a STALE copy of itself would be a regression dressed as a
+feature — the user would silently lose the edits they were waiting to see."* That is a real harm and the
+refusal was right. Building what I proposed, as I proposed it, would have re-introduced exactly the bug
+that comment exists to prevent (rule 3: the codebase gets to disagree with me, and here it was correct).
+
+**WHAT ACTUALLY CHANGED, AND WHY THE WIDENING IS NOW LEGITIMATE.** Two things, and one of them is our
+own doing:
+1. *"Usually seconds" stopped being true.* #2782 raised the wake budget from 90 s to ten minutes so a
+   cold install can finish. Ten minutes of spinner over an app whose copy we are holding is not caution.
+2. *The fear is answerable with EVIDENCE rather than by refusing.* What the old rule protects against is
+   a snapshot that is no longer this app. That is a checkable fact — and the check already existed:
+   `canServeFromSnapshot` has carried a `lastChangeAt` rule since it was written, and **it was wired to
+   nothing** (grep: one test, zero production callers). This is that idea finally reaching the door.
+
+**The fix.** `snapshotStillCurrent(snapshotAt, lastChangeAt)` — true only when both stamps are real and
+nothing has been written since the snapshot; an unknown stamp is NOT proof and answers false, so an
+unreadable store yields today's waiting page rather than a guess. `shouldServeSnapshot` keeps 'asleep'
+exactly as it was and allows 'starting' only on that proof. The door reads the stamp once
+(`workspaceFilesSavedAt`, bounded, best-effort) and BOTH of its starting exits go through one `starting()`
+helper — two exits were two chances for a later edit to fix one and leave the other on the spinner.
+
+**THE TWO HALVES THAT MAKE IT HONEST RATHER THAN A SILENT SUBSTITUTION — both shipped in the same change,
+because either one alone would be the regression the old guard feared:**
+- **The user is told.** `preview-health` now applies THE DOOR'S OWN rule (same function, same record,
+  'asleep' vs 'starting' chosen from whether a sandbox exists) instead of answering only for a gone
+  machine. Without this the panel would have framed a saved copy under no note at all. Two situations get
+  two notes: `SNAPSHOT_NOTE` for an expired machine (the user may want it back) and the new
+  `SNAPSHOT_WAKING_NOTE` for one that is starting (nothing is wrong, nothing to press, and the copy is
+  current — so it must NOT say "last built version").
+- **The frame returns by itself.** Once the door 302s to the copy, the iframe has left our origin and
+  nothing in it is watching for the live app; the copy would have stayed up until something else happened
+  to reload the frame, which for a self-healing wake could be never. `snapshotFramedRef` remounts the
+  frame exactly once, on the EDGE where the server stops reporting `snapshotServing` — the server's own
+  statement that the live app is answering. On the level it would remount the framed app every 150 s,
+  which is the bug the door-url adoption rule already exists to avoid.
+
+**Honest limits, stated rather than papered over:** a full-stack app still gets NO snapshot at all
+(`snapshotSuitable` excludes it, correctly — a static copy of an app whose server lives in the sandbox
+renders the shell and fails every request), so this does not help the class of app in the original report.
+Cost is unchanged: the port sweep already ran before either exit, so no extra sandbox work is done, and
+serving the copy actually stops the waiting page's 6-second self-retries.
+
+**Tests:** `previewSnapshot.test.ts` extended (boundary equality, an edit one millisecond later, every
+unknown-stamp shape, asleep unaffected, kill switch on both paths, both notes' wording and distinctness);
+`previewDoorRoute.test.ts` and `previewSnapshotWiring.test.ts` had assertions pinning the old literals —
+rewritten to the new rule with the reasoning recorded, never deleted. One of my OWN new assertions was
+wrong on the first run (it swept the `catch` block in and demanded no plain waiting page anywhere after
+the sweep; the catch answers with the plain page deliberately, because a request that threw has no
+trustworthy record to decide a snapshot from) — the test was fixed, not the route.
+`AppKnowledgeBase.ts` updated in the same change, per the sync rule.

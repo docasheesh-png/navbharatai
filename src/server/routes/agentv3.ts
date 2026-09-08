@@ -346,7 +346,7 @@ import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage
 import { previewKeepAliveEnabled, isTopLevelNavigation } from '../AgentV3/previewKeepAlive';
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
-import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE } from '../AgentV3/previewSnapshot';
+import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
 import { scoreBuildOutcome, shouldAutoReport, autoReportReason, complaintInText } from '../AgentV3/buildOutcomeSignals';
@@ -415,7 +415,7 @@ import {
   deleteWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
-import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { makeFirstPaintHandler } from '../AgentV3/streamingFirstPaint';
@@ -4982,6 +4982,23 @@ async function noteBuildOutcome(
     const page = (status: number, kind: 'asleep' | 'starting' | 'refused' | 'in-app-only') =>
       res.status(status).type('html').send(doorPage(kind));
     try {
+      /**
+       * THE SPINNER IS THE LAST THING TO TRY, NOT THE FIRST (admin 2026-09-08).
+       *
+       * A machine that exists but is not answering yet is now a MINUTES-long state, not a seconds-long
+       * one: the wake budget was raised to ten minutes so a cold install can finish (previewWake.ts).
+       * Watching a spinner for that long, over an app whose saved copy we are holding, is the worse
+       * experience — so when the copy is PROVABLY still this app (nothing written since it was taken),
+       * the user gets their app and the live one takes over on its own.
+       *
+       * Declared here so BOTH 'starting' exits below go through it. Two exits meant two chances for a
+       * later edit to fix one and leave the other on the spinner.
+       */
+      let startingSnapshot: (() => boolean) | null = null;
+      const starting = (): void => {
+        if (startingSnapshot?.()) return;
+        page(200, 'starting');
+      };
       if (!previewDoorEnabled()) return page(404, 'refused');
       const ws = typeof req.query?.ws === 'string' ? req.query.ws : '';
       if (!verifyDoorToken(ws, typeof req.query?.exp === 'string' ? req.query.exp : null,
@@ -5027,6 +5044,25 @@ async function noteBuildOutcome(
         }
         return page(200, 'asleep');
       }
+      // A machine EXISTS. Below this line every exit that cannot reach it goes through `starting()`,
+      // which offers the saved copy first — but only on PROOF that the copy is still this app. The
+      // stamp is read once, bounded and best-effort: unreadable means no proof, which means today's
+      // waiting page, never a guess. (Read here rather than inside the helper so the port sweep's
+      // latency and this Firestore read do not stack on the slowest path.)
+      const lastChangeAt = previewSnapshotEnabled() && doorRecord?.snapshotUrl
+        ? await raceTimeout(workspaceFilesSavedAt(ws), 3_000, 'doorLastChange').catch(() => null)
+        : null;
+      startingSnapshot = () => {
+        if (!shouldServeSnapshot({
+          enabled: previewSnapshotEnabled(),
+          doorState: 'starting',
+          snapshotUrl: doorRecord?.snapshotUrl,
+          snapshotAt: doorRecord?.snapshotAt,
+          lastChangeAt,
+        })) return false;
+        res.redirect(302, String(doorRecord!.snapshotUrl));
+        return true;
+      };
       // The PROVEN port leads the sweep — recorded the moment this app last genuinely rendered — and
       // the sweep verifies whatever it claims: the door never redirects to a port it did not just see
       // answer. This is what kills the 3000-vs-5000 loop: no url is ever believed about a port again.
@@ -5069,9 +5105,9 @@ async function noteBuildOutcome(
         20_000, 'doorPortSweep',
       ).catch(() => null);
       const found = parsePortSweep(sweep?.stdout);
-      if (found === null) return page(200, 'starting');
+      if (found === null) return starting();
       const live = await raceTimeout(actuator.getPortUrl(ws, found), 5_000, 'doorPortUrl').catch(() => '');
-      if (!live) return page(200, 'starting');
+      if (!live) return starting();
       const target = applyPreviewDomain(String(live));
       // THE KEEP-ALIVE SHELL USED TO BE SERVED HERE, and it is deliberately gone (admin 2026-08-25).
       // Its only consumer was a popped-out tab, which the in-app-only rule above now refuses before
@@ -5255,11 +5291,19 @@ async function noteBuildOutcome(
       );
       const describesUserView = measurementDescribesUserView(urlVerdict);
 
-      // Is the user currently being shown the VM-free copy? True only when the machine is genuinely
-      // gone AND a snapshot exists — the same condition the door itself applies, read from the same
-      // record, so the two can never tell the user different stories.
+      // Is the user currently being shown the VM-free copy? Answered by applying THE DOOR'S OWN
+      // decision to the same record, so the two can never tell the user different stories.
+      //
+      // 🔒 THIS IS THE HALF THAT MAKES THE WAKING FALLBACK HONEST, not a nicety (admin 2026-09-08).
+      // The door may now serve the saved copy while a machine is still starting. It is the CURRENT
+      // app when it does — that is the proof the door demands — but it is static, and the user must be
+      // told which of the two they are looking at. If this block still answered only for a machine
+      // that is GONE, the panel would show a saved copy under no note at all, which is precisely the
+      // silent substitution the old blanket refusal existed to prevent. The two decisions therefore
+      // move together, from one shared function, or neither should move.
       let snapshotServing = false;
       let snapshotTakenAt: number | null = null;
+      let snapshotWaking = false;
       try {
         if (previewSnapshotEnabled() && livePortUp !== true) {
           const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'healthSnapshot').catch(() => null);
@@ -5267,12 +5311,24 @@ async function noteBuildOutcome(
             buildActuator().getSandboxId ? buildActuator().getSandboxId!(workspaceId) : Promise.resolve(null),
             3_000, 'healthSandboxId',
           ).catch(() => null));
-          if (sandboxGone && shouldServeSnapshot({ enabled: true, doorState: 'asleep', snapshotUrl: rec?.snapshotUrl })) {
+          // The stamp is only needed for the 'starting' case, so it is only read there.
+          const lastChangeAt = sandboxGone || !rec?.snapshotUrl
+            ? null
+            : await raceTimeout(workspaceFilesSavedAt(workspaceId), 3_000, 'healthLastChange').catch(() => null);
+          const doorState = sandboxGone ? 'asleep' as const : 'starting' as const;
+          if (shouldServeSnapshot({
+            enabled: true,
+            doorState,
+            snapshotUrl: rec?.snapshotUrl,
+            snapshotAt: rec?.snapshotAt,
+            lastChangeAt,
+          })) {
             snapshotServing = true;
+            snapshotWaking = doorState === 'starting';
             snapshotTakenAt = typeof rec?.snapshotAt === 'number' ? rec.snapshotAt : null;
           }
         }
-      } catch { /* the note is a nicety; the door already does the real work */ }
+      } catch { /* a read failure means no note and today's waiting page — never a wrong note */ }
 
       const health = classifyPreviewHealth({
         hasFiles: fileCount > 0,
@@ -5311,7 +5367,10 @@ async function noteBuildOutcome(
         // app rather than a spinner (previewSnapshot.ts); this is what lets the surface SAY so. It
         // matters: they are looking at the last built version, and without being told they would
         // report a bug about an edit that is simply not in this copy.
-        ...(snapshotServing ? { snapshotServing: true, snapshotNote: SNAPSHOT_NOTE, snapshotAt: snapshotTakenAt } : {}),
+        // Two situations, two notes: an EXPIRED machine (the user may want to bring it back) and one
+        // that is STARTING (nothing is wrong and they need do nothing). One note for both would be
+        // wrong for one of them every time.
+        ...(snapshotServing ? { snapshotServing: true, snapshotNote: snapshotWaking ? SNAPSHOT_WAKING_NOTE : SNAPSHOT_NOTE, snapshotAt: snapshotTakenAt } : {}),
         // The machine is deliberately asleep and the saved copy is answering for the app. Distinct from
         // `snapshotServing` above, which means the machine is GONE — here it is alive and we are simply
         // not waking it. The client frames the copy and says so; nothing is broken and nothing is lost.

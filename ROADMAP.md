@@ -1153,7 +1153,7 @@ improvement. **Two exceptions are marked 🟢 DO NOW — they are free, and they
 
 | # | Ceiling | Where | Bites at | Cost to fix |
 |---|---|---|---|---|
-| 1 | 🔴 **Scheduled jobs run on EVERY instance** | `lib/ScheduledJobs.ts` | **2 instances** | free |
+| 1 | ✅ **Scheduled jobs run on EVERY instance** — FIXED 2026-09-08 (`lib/jobLease.ts`) | `lib/ScheduledJobs.ts` | **2 instances** | free |
 | 2 | 🔴 **Platform capped at 10 Cloud Run instances** | `cloudbuild.yaml` | ~1,000 concurrent requests | free (a number) |
 | 3 | 🟠 **No retention on ~8 growing collections** | `lib/DataRetentionManager.ts` | months, silently | free |
 | 4 | 🟠 **Hot Firestore document** | `lib/metricsTimeline.ts` | ~30-60 instances | free (sharding) |
@@ -1164,24 +1164,51 @@ improvement. **Two exceptions are marked 🟢 DO NOW — they are free, and they
 
 ---
 
-### 1 · 🔴 EVERY INSTANCE RUNS EVERY SCHEDULED JOB — the most urgent finding, and it is FREE to fix
+### 1 · 🔴 EVERY INSTANCE RUNS EVERY SCHEDULED JOB — ✅ **BUILT 2026-09-08**, and it was free
 
-`ScheduledJobs.ts` says plainly what it is: *"this runs while a Cloud Run instance is ALIVE"*. There is
-**no leader election, no lock, no claim** — a grep for all three finds nothing. Every instance starts
-its own 60-second tick loop and runs every registered job.
+`ScheduledJobs.ts` says plainly what it is: *"this runs while a Cloud Run instance is ALIVE"*. There was
+**no leader election, no lock, no claim** — a grep for all three found nothing. Every instance starts its
+own 60-second tick loop and runs every registered job.
 
-**Why this is the top of the list rather than the bottom.** It bites at **TWO instances**, not at a
-million users. Cloud Run starts a second instance under quite ordinary load, and from that moment every
-scheduled sweep, top-up and purge runs twice — then five times, then ten. These jobs WRITE. The failure
-is not a crash; it is duplicated work and duplicated writes, on a schedule, with nothing failing to
-reveal it. It is also the cheapest thing in this entire section to fix.
+⚠️ **A CORRECTION TO THIS ENTRY'S FIRST DRAFT, recorded rather than quietly edited away.** It used to
+read: *"from that moment every scheduled sweep, top-up and purge runs twice — then five times, then
+ten."* That was **overstated**, and verifying it before building is what showed why. Only TWO jobs are
+registered today: `monitor-alerts`, which **already protects itself** — its state write is a Firestore
+transaction, with the comment saying exactly why ("so several instances sweeping at the same moment send
+ONE notification between them") — and `retention-purge`, which is **currently switched off**. So there
+was **no live duplicate-work bug**, and this section should not have implied one. The lesson is
+safeguard #1 applied to a defect claim: a missing mechanism is not the same as an active failure, and
+the difference is one grep away.
 
-**The economical fix (free):** a Firestore lease. Before running, a job writes `{ owner, expiresAt }`
-to one document in a transaction; whoever wins runs it, everyone else skips. Roughly 30 lines, no new
-infrastructure, no monthly cost. The same shape the sandbox reaper already uses for its durable stamp.
+**What made it worth building anyway, honestly stated.** The *engine* offers no protection, so every
+FUTURE job is unprotected by default, and the very next job this section recommends switching on
+(#3, retention) is the one that **DELETES**. Its deletes are idempotent, so N instances would not
+destroy anything they should not — they would simply do the whole purge N times, paying N times the
+Firestore reads and writes on a schedule. A safety net that must be remembered per job is not a safety
+net; this makes it a property of the scheduler.
 
-**TRIGGER: none needed — 🟢 DO NOW.** It is free, it is small, and it is already wrong today whenever a
-second instance exists.
+**What shipped (free, no new infrastructure):** `lib/jobLease.ts` — a Firestore lease. Before running,
+a job claims `{ owner, expiresAt }` on one document per job id **in a transaction**; the winner runs,
+the losers skip. Wired into `ScheduledJobs.tick()` behind a per-job `exclusive: true` flag, and
+`retention-purge` carries it.
+
+Four properties that matter more than the mechanism, each test-locked in `tests/jobLease.test.ts`:
+- **An unreachable store RUNS the job.** Failing closed would let one database hiccup silently cancel
+  every scheduled job on the platform. Duplication is waste; a purge that never runs is a bill that
+  never stops.
+- **An expired lease is claimable**, so one crashed instance cannot cancel a job forever — and a
+  corrupt expiry counts as expired for the same reason.
+- **A lease the instance already holds is claimable**, so a job that overruns its TTL does not lock
+  itself out of its own next run.
+- **A loser still reschedules.** Otherwise it would retry on every tick and hammer the lease document
+  once a minute — a deduplication mechanism that becomes its own load.
+- **Nothing changes until a job opts in**, and with no claim wired every job runs exactly as before, so
+  the unsafe direction of this change is unreachable.
+
+**Still open here:** the other jobs are not marked `exclusive` yet — deliberately, since flipping jobs
+nobody has re-examined is how a job quietly stops running. Each opts in when somebody has thought about
+it, and the scheduler's status now reports a `skipped` count so "this job never runs on this instance"
+reads as coordination rather than as a fault.
 
 ### 2 · 🔴 THE PLATFORM'S OWN CEILING IS 10 INSTANCES — and it is one number
 

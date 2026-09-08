@@ -1154,7 +1154,7 @@ improvement. **Two exceptions are marked 🟢 DO NOW — they are free, and they
 | # | Ceiling | Where | Bites at | Cost to fix |
 |---|---|---|---|---|
 | 1 | ✅ **Scheduled jobs run on EVERY instance** — FIXED 2026-09-08 (`lib/jobLease.ts`) | `lib/ScheduledJobs.ts` | **2 instances** | free |
-| 2 | 🔴 **Platform capped at 10 Cloud Run instances** | `cloudbuild.yaml` | ~1,000 concurrent requests | free (a number) |
+| 2 | ✅ **Platform capped at 10 Cloud Run instances** — RAISED to 100, 2026-09-08 | `cloudbuild.yaml` | ~1,000 concurrent requests | free (a number) |
 | 3 | 🟠 **No retention on ~8 growing collections** | `lib/DataRetentionManager.ts` | months, silently | free |
 | 4 | 🟠 **Hot Firestore document** | `lib/metricsTimeline.ts` | ~30-60 instances | free (sharding) |
 | 5 | 🟡 **1,000 hosted apps per project** | Cloud Run quota | 1,000 hosted apps | one config change |
@@ -1210,22 +1210,42 @@ nobody has re-examined is how a job quietly stops running. Each opts in when som
 it, and the scheduler's status now reports a `skipped` count so "this job never runs on this instance"
 reads as coordination rather than as a fault.
 
-### 2 · 🔴 THE PLATFORM'S OWN CEILING IS 10 INSTANCES — and it is one number
+### 2 · 🔴 THE PLATFORM'S OWN CEILING WAS 10 INSTANCES — ✅ **RAISED TO 100, 2026-09-08**
 
-`cloudbuild.yaml` deploys with `--max-instances 10` and `--concurrency 100`. That is a hard ceiling of
-**~1,000 concurrent in-flight requests**, after which Cloud Run queues and then sheds. `--min-instances 0`
-also means the first user after a quiet period waits through a cold start.
+`cloudbuild.yaml` deployed with `--max-instances 10` and `--concurrency 100`. That is a hard ceiling of
+**~1,000 concurrent in-flight requests**, after which Cloud Run queues and then sheds.
 
 This is the honest answer to "server load": Cloud Run scales itself, **but only up to the number we told
-it.** The intuition that the server "just scales" is right about the mechanism and wrong about this
+it.** The intuition that the server "just scales" is right about the mechanism and wrong about that
 config.
 
-**The economical fix:** raise `--max-instances` when the Monitor shows real queueing. It costs nothing
-to raise — Cloud Run bills per request, so a higher ceiling with no traffic is free. `--min-instances 1`
-costs real money continuously and buys away cold starts; that one is a deliberate trade, not a default.
+**What shipped:**
+- `--max-instances` is now the substitution **`_MAX_INSTANCES`, default 100** (~10,000 concurrent
+  requests), so the admin can retune it in the Cloud Build trigger with no code change and no PR.
+- **The running server is handed the SAME number** as `PLATFORM_MAX_INSTANCES`, via the same
+  substitution on `--update-env-vars`. This is the part that matters beyond the number itself: the
+  Load board's "Server load" tile now reports the ceiling Cloud Run actually enforces, so the drift
+  this file keeps recording — a doc or a constant saying one thing while the deployment does another —
+  is **unrepresentable** here rather than merely discouraged.
+- `lib/platformInstances.ts` measures the live count from **Cloud Monitoring**, because no process can
+  count its siblings: instances share no memory, and `metricsTimeline` deliberately sums with
+  `FieldValue.increment` rather than recording who wrote what, so there is no instance identity in our
+  own data to count. Aligned by **MAX, not mean** — an average over the window hides exactly the spike
+  that hit the ceiling. A failed read reports **null (unmeasured), never zero**, and the cap is still
+  reported so the admin can see the ceiling even when the count is unavailable.
 
-**TRIGGER: sustained request queueing, or instance count pinned at 10.** Both are visible on the Load
-board (below). ⚠️ Raise it only WITH item 1 fixed and item 4 sharded — more instances multiply both.
+**What it costs: nothing while idle.** `--min-instances` stays **0** and Cloud Run bills instances that
+actually run. What a higher ceiling does buy is **exposure** — a spike, including an abusive one, can
+now scale to 100 × 2 vCPU before anything stops it. That is why it stays a bound rather than becoming
+unlimited, and why it is one trigger setting to lower.
+
+`--min-instances 1` would cost real money continuously and buy away cold starts. Still **not** taken —
+a deliberate trade, not a default.
+
+**Sequencing, honoured:** item 1 (the scheduled-job lease) shipped FIRST, because more instances
+multiply anything that runs per-instance. ⚠️ **Item 4 (the hot metrics document) is now the one to
+watch** as this headroom is actually used — it bites around 30-60 instances, which this ceiling
+newly permits.
 
 ### 3 · 🟠 STORAGE GROWS FOREVER — only ONE collection has retention
 

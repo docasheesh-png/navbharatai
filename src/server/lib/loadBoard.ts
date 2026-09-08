@@ -149,8 +149,8 @@ export function loadBoard(r: LoadReadings | null | undefined): LoadTile[] {
       ? 'Could not read how many servers are running. The number below is not zero — it is unmeasured.'
       : instLevel === 'ok'
         ? 'Servers are keeping up.'
-        : 'Nearing the instance ceiling set in the deploy config. Raising it costs nothing when idle — '
-          + 'but fix the scheduled-job leases first, because more instances multiply that work.',
+        : 'Nearing the instance ceiling set in the deploy config (`_MAX_INSTANCES` in the Cloud Build '
+          + 'trigger). Raising it costs nothing while idle — Cloud Run bills instances that actually run.',
   });
 
   // 2 · CPU + MEMORY of the container we are actually in.

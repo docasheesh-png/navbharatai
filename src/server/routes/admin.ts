@@ -70,6 +70,7 @@ import {
   appsProject, appsRegion, buildListServicesRequest, parseServiceList, SERVICES_PER_PROJECT_CAP,
 } from '../AgentV3/cloudRunHosting';
 import { loadBoard, worstLevel, type LoadReadings } from '../lib/loadBoard';
+import { readPlatformInstances, platformProjectId } from '../lib/platformInstances';
 import { RETENTION_POLICIES } from '../lib/DataRetentionManager';
 
 /**
@@ -1531,6 +1532,21 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       if (s.cpuPercent !== null) readings.cpuFraction = s.cpuPercent / 100;
       if (s.memoryPercent !== null) readings.memoryFraction = s.memoryPercent / 100;
     } catch { /* absent stays absent — it renders as unknown, never as zero */ }
+
+    // The platform's OWN instance count and ceiling (§12 #2). No process can count its siblings, so
+    // this is Cloud Monitoring; every failure degrades to null, which the board renders as unmeasured.
+    try {
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/monitoring.read'] });
+      const token = await auth.getAccessToken().catch(() => null);
+      const inst = await readPlatformInstances({
+        token: token ? String(token) : null,
+        projectId: platformProjectId(),
+      });
+      // 🔒 The CAP is reported even when the COUNT could not be read, so the admin can at least see the
+      // ceiling they are deployed against. `gradeLoad` renders a null value as unknown regardless.
+      readings.instances = inst.peak;
+      readings.instancesCap = inst.cap;
+    } catch { /* unknown */ }
 
     // Hosting: services that EXIST against the 1,000-per-project cap (§12 #5).
     try {

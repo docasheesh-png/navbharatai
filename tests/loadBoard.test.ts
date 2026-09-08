@@ -123,10 +123,15 @@ describe('loadBoard — every ceiling §12 found has a tile', () => {
     expect(t.note).toMatch(/ratchets/);
   });
 
-  it('the server tile points at the scheduled-job fix before raising instances', () => {
+  it('the server tile names the ONE setting that raises the ceiling, and what it costs', () => {
+    // This note used to say "fix the scheduled-job leases first" (§12 #1). That shipped
+    // (`lib/jobLease.ts`), so the advice would now send the admin to work already done — a tile whose
+    // note is stale is worse than one with no note, because it is followed.
     const t = loadBoard({ ...full, instances: 9 }).find((t) => t.id === 'server')!;
     expect(t.level).toBe('critical');
-    expect(t.note).toMatch(/scheduled-job leases first/);
+    expect(t.note).toMatch(/_MAX_INSTANCES/);
+    expect(t.note).toMatch(/costs nothing while idle/);
+    expect(t.note).not.toMatch(/scheduled-job leases first/);
   });
 
   it('user and request tiles are never graded red for being popular', () => {

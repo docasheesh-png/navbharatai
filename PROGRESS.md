@@ -45753,3 +45753,105 @@ sees this second.
 
 **Gate:** both typechecks clean; 21 new tests; full suite green (1477 files / 19692 tests).
 AppKnowledgeBase gains `publish_rollback`.
+
+---
+
+## 2026-09-07 — MCP CLIENT, slice 1: the safety layer (gap #4 from the Cursor audit)
+
+NavBharatAI could already GENERATE an MCP server for an app it builds (`McpServerGenerator.ts`). What
+it could not do is the other direction: **use** one. So a user with Notion, Linear, an internal
+company API — or any of the hundreds of published MCP servers — had no way to let the builder reach
+it. Every integration had to be written by us, one at a time, forever.
+
+That is why this was the top of the gap list: it turns 211 built-in tools into 211 **plus whatever the
+user already has**, without us writing another integration.
+
+### This slice is the part that must be right
+
+Two files, both landed with tests and NOT yet wired into the build loop — the dispatcher and UI come
+next. Shipping the decision layer first is deliberate: this is a feature where a stranger's code
+describes tools our AI then decides to call, so the security model is the product, not a section of it.
+
+**`mcpClient.ts` (pure, 32 tests)** — three distinct attacks, each closed structurally:
+
+1. **SSRF.** A URL the user supplies that OUR SERVER fetches. `http://169.254.169.254/` is the cloud
+   metadata endpoint; `localhost` is whatever runs beside us. **No new check was written** — the
+   existing `assertPublicHttpUrl` (what `web_fetch` uses) resolves DNS before deciding, which is what
+   catches a hostname pointing at a private address. One implementation to keep correct.
+2. **Prompt injection through tool descriptions.** A description goes straight into the model's
+   context, so a hostile server can ship an "instruction" disguised as documentation. Descriptions are
+   treated as untrusted data: newlines collapsed (almost every injection needs a line break to start a
+   fake block), fence/tag characters stripped, hard length cap. The stronger half is
+   `externalToolsPreamble`, which TELLS the model these came from an outside service and carry no
+   authority — sanitising makes an injection look odd, labelling makes it powerless.
+3. **Name shadowing.** A server offering `write_file` or `deploy` could be called by the model
+   believing it was the platform's own. Every external tool is prefixed `ext__<server>__<tool>`, so a
+   collision is **structurally impossible** rather than unlikely — the same namespace-separation
+   reasoning as the `a-` / `v3-` published-subdomain split.
+
+**`mcpTransport.ts` (13 tests)** — the thin guarded layer:
+
+- 🔒 **HTTP only; stdio is refused on purpose.** The spec's stdio transport launches a LOCAL PROCESS
+  from a user-supplied string, which on a server is remote code execution dressed as a feature. Locked
+  by a test that asserts nothing in the file can spawn. (If local servers are ever wanted, the honest
+  place is the user's OWN sandbox — a separate feature, not a flag on this one.)
+- **The SSRF check runs on EVERY call, not once at connect time.** A host that resolved publicly when
+  the user added it can resolve elsewhere later.
+- **The response is capped BEFORE parsing** — `resp.text()` with a byte limit, never `resp.json()`,
+  because a size limit applied after parsing is applied too late to stop a memory exhaustion.
+- Timeout + abort + `clearTimeout` in a `finally`; every path returns a result object rather than
+  throwing. A build must never hang because somebody's server had a bad afternoon.
+- **Only the user's own headers are sent.** A connected service is theirs, and so is its
+  authentication; NavBharatAI's secrets are never in scope. Test-locked against `process.env.*KEY`.
+
+### Two test bugs worth recording, because both were MY error and not the code's
+
+- `indexOf('MCP_MAX_RESPONSE_BYTES')` found the `export const` declaration at the top of the file
+  rather than the usage inside `rpc()`, so an ordering assertion compared the wrong positions. Fixed
+  by slicing the function body first.
+- A raw substring check for `resp.json()` failed on the COMMENT that explains why `resp.json()` is
+  avoided. Fixed by stripping comments before asserting — the test should read code, not prose.
+
+Both are the same lesson as the searches that went wrong earlier today: **an assertion is only as
+precise as what it actually looks at.**
+
+**Gate:** both typechecks clean; 45 new tests; full suite green.
+
+### Completed the same day — the guard was right, and the feature is whole
+
+The slice above shipped unwired, and `tests/deadCodeGuard.test.ts` refused it by name:
+
+> *Unreachable from src/main.tsx, server.ts and every tooling script … Either wire it up, delete it,
+> or add it to KNOWN_UNREACHABLE with the reason it stays.*
+
+That guard is the second absolute rule made automatic, and it was correct: "built but not wired" is
+exactly the state this project says cannot exist. The allowlist was NOT used — its own comment says
+*"the allowlist is meant to shrink"*, so putting a brand-new file in it to silence a guard would be
+the dishonesty the guard exists to catch. The remaining four pieces were built instead.
+
+- **`McpServerStore.ts`** — one document per workspace (the cap is 5; a document-per-server would cost
+  a query where an array costs a read). 🔒 `listFull` and `listForDisplay` are **two functions, not one
+  optional flag**: the display path never returns the user's key, and a call site cannot leak one by
+  forgetting an argument. The cap is enforced here as well as in `canConnectServer`, because this is
+  the last point before the write and a check that lives only in a route is one a second route misses.
+- **`ToolDispatcher`** — external tools are matched in `default:`, i.e. **after every built-in case**.
+  That is a second, independent defence: the `ext__` prefix keeps the namespaces apart, and reaching
+  `default` last means a built-in always wins even if that guard were somehow bypassed. The tool is
+  resolved against what a server **really advertised** this build, never against the string the model
+  produced — so an invented `ext__x__y` reaches nothing. It never throws: a stranger's server being
+  down must not fail a build that was otherwise fine.
+- **Build wiring** — tools are fetched ONCE before the loop, so a server cannot swap a tool out from
+  under a call the model has already decided to make. Built-ins are concatenated FIRST. Wholly
+  best-effort: a slow, down or hostile service yields no tools and the build proceeds as today.
+- **Three routes** (`mcp/list`, `mcp/connect`, `mcp/remove`) — all owner-verified. Connect runs the
+  shared SSRF guard **before** saving, then **proves** the connection by asking the service for its
+  tools; a service that answers nothing is refused rather than stored as connected-but-useless.
+- **`ConnectedServices.tsx`** in v5's More menu, opening IN PLACE like Keys & Secrets — sending
+  someone to Settings mid-build loses the build, the preview and the chat.
+
+**One thing worth recording for the next session:** `lucide-react`'s installed *types* lag its runtime.
+`Plug` and `Undo2` both exist at runtime and both fail `tsc`. Check the `.d.ts` before picking an icon
+rather than trusting the icon gallery.
+
+**Gate:** both typechecks clean; 64 MCP tests (46 + 13 + the dead-code guard); full suite green —
+**19751 passed, 0 failed**. AppKnowledgeBase gains `connected_services`.

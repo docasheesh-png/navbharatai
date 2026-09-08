@@ -413,6 +413,10 @@ import { buildRuntimeLogCommand, parseRuntimeLogOutput, runtimeLogGapNotice } fr
 import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeServiceStatus, extraPorts, portsSummary } from '../AgentV3/portsPanel';
 import { findProjectInstructionPath, normalizeProjectInstructions, projectInstructionsBlock, projectInstructionsNotice } from '../AgentV3/projectInstructions';
 import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '../AgentV3/fileMentions';
+import { mcpServerStore } from '../AgentV3/McpServerStore';
+import { listRemoteTools } from '../AgentV3/mcpTransport';
+import { externalToolDefs, externalToolsPreamble, canConnectServer, MAX_SERVERS_PER_WORKSPACE, type SafeMcpTool } from '../AgentV3/mcpClient';
+import { assertPublicHttpUrl } from '../lib/ssrfGuard';
 import { parseIgnoreFile, ignoreRulesBlock, IGNORE_FILE } from '../AgentV3/ignoreRules';
 import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } from '../AgentV3/terminalQuota';
 import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../AgentV3/terminalMeter';
@@ -6721,6 +6725,79 @@ async function noteBuildOutcome(
    * different words: never published, only one version, served from storage (which keeps no history),
    * or simply unreadable right now. A greyed-out button with no explanation reads as broken.
    */
+  /** The services connected to this app. Credentials are NEVER returned — see McpServerStore. */
+  app.post('/api/agentv3/mcp/list', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    res.json({ servers: await mcpServerStore.listForDisplay(workspaceId), max: MAX_SERVERS_PER_WORKSPACE });
+  });
+
+  /**
+   * Connect a service.
+   *
+   * 🔒 The address is checked with `assertPublicHttpUrl` — the SAME guard web_fetch uses, which
+   * resolves DNS — because this URL is one OUR SERVER will fetch. Without it a connect form is a
+   * request to read the cloud metadata endpoint. The check is repeated on every later call too
+   * (mcpTransport): a host that resolves publicly today can resolve elsewhere tomorrow.
+   *
+   * The connection is PROVEN before it is saved: we ask the service for its tools, and refuse to
+   * store one that answered nothing. Saving an unverified connection would leave the user with a
+   * service listed as connected that silently contributes nothing.
+   */
+  app.post('/api/agentv3/mcp/connect', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+    const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    const headers = (req.body?.headers && typeof req.body.headers === 'object' && !Array.isArray(req.body.headers))
+      ? req.body.headers as Record<string, string> : undefined;
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+
+    const urlCheck = await assertPublicHttpUrl(url).catch(() => ({ ok: false }));
+    const existing = await mcpServerStore.listForDisplay(workspaceId);
+    const verdict = canConnectServer({
+      serverId: id,
+      urlIsValid: /^https?:\/\//i.test(url),
+      urlIsPublic: !!urlCheck.ok,
+      existingIds: existing.map((e) => e.id),
+    });
+    if (!verdict.ok) { res.status(400).json({ error: verdict.message, reason: verdict.reason }); return; }
+
+    const probe = await listRemoteTools({ id, url, headers });
+    if (probe.tools.length === 0) {
+      res.status(400).json({
+        error: probe.error
+          || 'That service did not offer any tools, so there is nothing to connect. Check the address and any key it needs.',
+      });
+      return;
+    }
+    if (!(await mcpServerStore.add(workspaceId, { id, url, headers }))) {
+      res.status(500).json({ error: 'The connection could not be saved. Please try again.' });
+      return;
+    }
+    res.json({ ok: true, id, toolCount: probe.tools.length, tools: probe.tools.map((t) => t.remoteName) });
+  });
+
+  /** Disconnect a service. Idempotent — already gone is success, not an error. */
+  app.post('/api/agentv3/mcp/remove', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const id = typeof req.body?.id === 'string' ? req.body.id : '';
+    if (!workspaceId || !id) { res.status(400).json({ error: 'Nothing to remove.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const ok = await mcpServerStore.remove(workspaceId, id);
+    res.json(ok ? { ok: true } : { ok: false, error: 'Could not remove that service right now.' });
+  });
+
   app.post('/api/agentv3/rollback-status', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
@@ -11395,6 +11472,9 @@ async function noteBuildOutcome(
       // the user's SHARED keys plus the ones tied to THIS app. Keys saved before scoping existed have no
       // workspace, so they count as shared and every existing build behaves exactly as it did.
       let vaultSecrets: Record<string, string> = {};
+      // Tools contributed by services the user connected (MCP). Empty unless they connected one, so
+      // every path that reads it is byte-identical to today for everyone else.
+      let mcpTools: SafeMcpTool[] = [];
       try {
         if (userId) {
           vaultSecrets = await loadUserVaultSecrets(userId, workspaceId);
@@ -11402,6 +11482,26 @@ async function noteBuildOutcome(
           // keep it OUT of the built app's .env; it is only used to build the DB context prompt below.
           const { [DB_PROVIDER_MARKER]: _dbMarker, ...appEnv } = vaultSecrets;
           dispatcher.setUserSecrets(appEnv);
+          // CONNECTED SERVICES (MCP). Fetched ONCE here, before the loop, so the tool list the model
+          // sees is fixed for the whole build — a server that changes its tools mid-build cannot swap
+          // one out from under a call the model has already decided to make.
+          //
+          // Wholly best-effort: a service that is slow, down or hostile yields no tools and the build
+          // proceeds exactly as it does today. It must never be able to fail or delay a build.
+          try {
+            const servers = await mcpServerStore.listFull(workspaceId);
+            if (servers.length > 0) {
+              const lists = await Promise.all(servers.map((sv) => listRemoteTools(sv).catch(() => ({ tools: [] as SafeMcpTool[] }))));
+              mcpTools = lists.flatMap((l) => l.tools);
+              if (mcpTools.length > 0) {
+                dispatcher.setMcpServers(servers, mcpTools);
+                events.emit({
+                  type: 'narration', agent: 'architect', ts: Date.now(),
+                  text: `🔌 Using ${mcpTools.length} tool(s) from ${servers.length} service(s) you connected.`,
+                });
+              }
+            }
+          } catch { /* connected services are additive — never a reason a build fails */ }
           // PRE-FLIGHT WRITE (mitrify autopsy 2026-08-04). The secrets .env used to be written lazily from
           // inside run_command, so any path that starts a dev server through the ACTUATOR instead — an
           // import turn, the Diagnose button, update_preview — booted the app with NONE of the keys the
@@ -11898,7 +11998,9 @@ async function noteBuildOutcome(
         // are billed even when their `result` is later discarded.
         usageSink: buildUsage,
         system: architectSystem,
-        tools: catalogForTools(roleConfig('architect').tools),
+        // Built-in tools PLUS anything the user connected. Concatenated with ours FIRST so a
+        // connected service can never displace a platform tool in the list the model reads.
+        tools: [...catalogForTools(roleConfig('architect').tools), ...externalToolDefs(mcpTools)],
         onlyOpus,
         powerLevel: powerLevelReqEffective,
         // Slice 2 — weak-tier mid-build checkpoint scope. Same signal Slice 1 uses: a weak/cheap-only
@@ -12120,6 +12222,13 @@ async function noteBuildOutcome(
         // against the REAL tree, so a mention is a checked claim, never a path we invented; anything we
         // could not find is told to the user rather than silently dropped, because a dropped mention is
         // indistinguishable from the AI ignoring what they asked for.
+        // CONNECTED SERVICES — the model is told, before it sees them, that these tools and their
+        // descriptions were written by an OUTSIDE service and are DATA, not instructions. Sanitising
+        // (mcpClient.ts) makes an injection look odd; this is what makes it powerless. '' when nothing
+        // is connected, so the prompt is unchanged for everyone else.
+        const mcpPreamble = externalToolsPreamble(mcpTools);
+        if (mcpPreamble) buildPrompt = `${mcpPreamble}\n\n---\n\n${buildPrompt}`;
+
         const mentions = parseFileMentions(prompt, tree);
         const mentionBlock = fileMentionsBlock(mentions);
         if (mentionBlock) buildPrompt = `${mentionBlock}\n\n---\n\n${buildPrompt}`;

@@ -9,7 +9,7 @@ const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ defaul
 // A2 — the REAL shell. LAZY on purpose: it pulls xterm (~70 KB gz), which must never land on the
 // first-paint path for the many users who never open a terminal.
 const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
-import { Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Github, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key } from 'lucide-react';
+import { Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Github, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
 import { PublishCelebration } from './PublishCelebration';
@@ -21,6 +21,7 @@ import { needsPublishDot } from '../../lib/publishFreshness';
 import { getStoredMotionMode, resolveReduceMotion, systemPrefersReducedMotion } from '../../lib/a11y';
 import {  } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
+const ConnectedServices = lazy(() => import('./ConnectedServices').then((m) => ({ default: m.ConnectedServices })));
 import { importProjectArchive, importProjectFolder, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
 import { resolveImportWorkspaceId, importTargetUnavailableMessage } from './zipImportTarget';
 import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
@@ -2466,7 +2467,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // ── Mobile footer (admin 2026-07-07): v5.0 owns the app's bottom nav while it is the active view.
   // One sheet at a time: the footer's History and More items open bottom sheets anchored above the
   // nav; any footer navigation action closes them.
-  const [mobileSheet, setMobileSheet] = useState<null | 'history' | 'more' | 'report' | 'secrets'>(null);
+  const [mobileSheet, setMobileSheet] = useState<null | 'history' | 'more' | 'report' | 'secrets' | 'services'>(null);
   // How many keys the vault already holds, for the More-menu label. Fetched only when that menu is
   // opened — a count nobody is looking at is not worth a request on every panel mount.
   const [savedKeyCount, setSavedKeyCount] = useState<number | null>(null);
@@ -5536,7 +5537,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           >
             <div className="sticky top-0 z-10 bg-zinc-900 flex items-center justify-between px-4 pt-3 pb-2 border-b border-zinc-800">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                {mobileSheet === 'history' ? 'Session history' : mobileSheet === 'report' ? 'Which build had the problem?' : mobileSheet === 'secrets' ? 'Keys & Secrets' : 'More'}
+                {mobileSheet === 'history' ? 'Session history' : mobileSheet === 'report' ? 'Which build had the problem?' : mobileSheet === 'secrets' ? 'Keys & Secrets' : mobileSheet === 'services' ? 'Connected services' : 'More'}
               </span>
               <button onClick={() => setMobileSheet(null)} aria-label="Close" className="p-1 rounded text-zinc-400 hover:text-white touch-manipulation">
                 <X className="w-4 h-4" />
@@ -5546,6 +5547,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               <div className="py-1.5">{historyListBody}</div>
             ) : mobileSheet === 'report' ? (
               <div>{reportPickerRows((b) => { setMobileSheet(null); askForReportNote(b); }, true)}</div>
+            ) : mobileSheet === 'services' ? (
+              // Opens IN PLACE, like Keys & Secrets — sending someone away mid-build loses the build,
+              // the preview and the chat. Lazy, so a user who never connects anything never downloads it.
+              state.workspaceId
+                ? <Suspense fallback={<div className="px-4 py-6 text-xs text-zinc-500">Loading…</div>}>
+                    <ConnectedServices workspaceId={state.workspaceId} authedFetch={authedFetch} />
+                  </Suspense>
+                : <div className="px-4 py-6 text-xs text-zinc-500">Start or open an app first, then connect your tools to it.</div>
             ) : mobileSheet === 'secrets' ? (
               // The SAME vault component the Settings screen renders — not a copy of it. Lazy, so a
               // user who never opens this door never downloads it.
@@ -5596,6 +5605,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   {savedKeyCount !== null && savedKeyCount > 0 && (
                     <span className="text-xs text-zinc-500">{savedKeyCount} saved</span>
                   )}
+                </button>
+                {/* CONNECTED SERVICES — the user's own tools (MCP). Same in-place pattern as the vault
+                    above: this is a build-time capability, so leaving the build to configure it would
+                    be the wrong shape. */}
+                <button
+                  onClick={() => setMobileSheet('services')}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
+                >
+                  <Puzzle className="w-4 h-4 shrink-0 text-zinc-400" />
+                  <span className="flex-1 text-left">Connected services</span>
                 </button>
                 <button onClick={() => openSurfaceFromFooter('history')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
                   <History className="w-4 h-4 shrink-0 text-zinc-400" />

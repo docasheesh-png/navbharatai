@@ -86,6 +86,10 @@ import { redactCredentialLogs } from './credentialLogRedaction';
 import type { DependencyIssue } from './DependencyAnalysis';
 import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
+import { isExternalToolName, parseToolName } from './mcpClient';
+import { callRemoteTool } from './mcpTransport';
+import type { SafeMcpTool } from './mcpClient';
+import type { McpServerConfig } from './mcpTransport';
 import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
@@ -638,6 +642,21 @@ export class ToolDispatcher {
   }
 
   /** Set by the composition root from the user's decrypted vault (Settings → Secrets & API Keys). */
+  /**
+   * The services this workspace has connected, and the tools they offered.
+   *
+   * Empty by default, so a build with nothing connected behaves exactly as it did before — no extra
+   * branch is even reachable.
+   */
+  private mcpServers: McpServerConfig[] = [];
+  private mcpTools: SafeMcpTool[] = [];
+
+  /** Wire in the connected services for this build. Called once, before the loop starts. */
+  setMcpServers(servers: McpServerConfig[], tools: SafeMcpTool[]): void {
+    this.mcpServers = Array.isArray(servers) ? servers : [];
+    this.mcpTools = Array.isArray(tools) ? tools : [];
+  }
+
   setUserSecrets(env: Record<string, string>): void {
     this.secretsEnvWritten = false; // a fresh secret set must be able to reach disk even if a write already ran
     this.userSecretsEnv = env && typeof env === 'object' ? env : {};
@@ -1968,6 +1987,30 @@ export class ToolDispatcher {
    * the model can SEE the page. Requires a real sandbox with a browser; degrades to an honest
    * "not available" message on Local/Docker actuators (or any actuator that lacks the method).
    */
+  /**
+   * Run a tool that belongs to a service the user connected.
+   *
+   * Every refusal returns TEXT rather than throwing. A throw here becomes a build failure, and a
+   * stranger's server being down must never fail a build that was otherwise fine — the model reads
+   * the sentence, learns the tool is unavailable, and carries on with what the user actually asked.
+   */
+  private async runExternalTool(call: ToolUse): Promise<string> {
+    const parsed = parseToolName(call.name);
+    if (!parsed) return `The connected tool ${call.name} could not be identified, so it was not run.`;
+    // Resolve against the tools we ACTUALLY fetched and sanitised at the start of this build — never
+    // against the name the model produced. A model that invents `ext__x__y` therefore reaches nothing:
+    // the only callable tools are ones a connected server really advertised.
+    const tool = this.mcpTools.find((t) => t.name === call.name);
+    const server = this.mcpServers.find((sv) => sv.id === parsed.serverId);
+    if (!tool || !server) {
+      return `There is no connected tool called ${call.name}. Use one of the tools listed for this build.`;
+    }
+    const args = (call.input && typeof call.input === 'object' && !Array.isArray(call.input))
+      ? call.input as Record<string, unknown>
+      : {};
+    return await callRemoteTool(server, tool, args);
+  }
+
   private async runVisual(call: ToolUse): Promise<{ content: string; image?: { base64: string; mimeType: string } }> {
     const input = call.input;
     if (call.name === 'find_ui_element') {
@@ -8145,6 +8188,10 @@ export class ToolDispatcher {
       }
 
       default:
+        // A CONNECTED SERVICE'S TOOL (MCP). Checked here, at the END, on purpose: a built-in `case`
+        // always wins, so a connected server can never take over a platform tool even if the prefix
+        // guard were somehow bypassed. Two independent defences, not one.
+        if (isExternalToolName(call.name)) return await this.runExternalTool(call);
         throw new Error(`Unknown tool: ${call.name}`);
     }
   }

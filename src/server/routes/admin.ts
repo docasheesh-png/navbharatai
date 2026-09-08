@@ -66,7 +66,25 @@ import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
 import { classifyChannels, channelCeilingVerdict, channelCap } from '../AgentV3/channelInventory';
 import { GoogleAuth } from 'google-auth-library';
 import { classifyHostedServices, hostingCapacity } from '../AgentV3/hostedServiceInventory';
-import { appsProject, appsRegion, buildListServicesRequest, parseServiceList } from '../AgentV3/cloudRunHosting';
+import {
+  appsProject, appsRegion, buildListServicesRequest, parseServiceList, SERVICES_PER_PROJECT_CAP,
+} from '../AgentV3/cloudRunHosting';
+import { loadBoard, worstLevel, type LoadReadings } from '../lib/loadBoard';
+import { RETENTION_POLICIES } from '../lib/DataRetentionManager';
+
+/**
+ * The collections that GROW with use — per build, per user, per app (ROADMAP §12 #3).
+ *
+ * Verified by reading each store on 2026-09-07. Kept here beside the load board because its only job
+ * is to be compared against RETENTION_POLICIES: the gap between these two lists IS the storage
+ * warning. When a collection gains a policy, it stops counting automatically.
+ */
+const GROWING_COLLECTIONS: readonly string[] = [
+  'app_builds', 'build_sessions', 'user_build_history', 'user_costs', 'server_logs',
+  'metrics_snapshots', 'session_error_hints', 'hosting_usage',
+  'workspace_files_v3', 'workspace_assets_v3', 'workspace_checkpoints_v3', 'workspace_embeddings_v3',
+  'workspace_memory_v3', 'workspace_diagnostics_v3', 'workspace_manual_edits_v3', 'project_plans_v3',
+];
 import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
 
 /**
@@ -1490,6 +1508,80 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       console.error('[ADMIN] Hosted service inventory error:', e?.message);
       res.status(502).json({ error: 'The hosting inventory could not be read, so no capacity figure is available.' });
     }
+  });
+
+  /**
+   * THE LOAD BOARD (ROADMAP §12) — every ceiling in the platform as one number, on the admin home page.
+   *
+   * The admin asked for this directly: *"admin panel ke home page par to load dikhna chahiye — server
+   * load, user load, storage load, hosting load… sabhi load likhne hai."* §12's audit found eight
+   * ceilings and gave each a trigger; a trigger nobody can see is a hope, not a trigger.
+   *
+   * 🔒 EVERY READING IS OPTIONAL, AND THAT IS THE DESIGN. A source that cannot be read is simply left
+   * out, and `loadBoard` turns absence into UNKNOWN rather than zero. This route therefore never
+   * fabricates a healthy number to fill a tile — the one failure that would make the whole screen
+   * worse than not having it.
+   */
+  app.get('/api/admin/load', verifyAdminToken, async (_req: Request, res: Response) => {
+    const readings: LoadReadings = {};
+    // The container we are actually in. Always available — it is this process.
+    try {
+      const s = serverLoad.snapshot();
+      readings.requestsInFlight = s.inFlightRequests;
+      if (s.cpuPercent !== null) readings.cpuFraction = s.cpuPercent / 100;
+      if (s.memoryPercent !== null) readings.memoryFraction = s.memoryPercent / 100;
+    } catch { /* absent stays absent — it renders as unknown, never as zero */ }
+
+    // Hosting: services that EXIST against the 1,000-per-project cap (§12 #5).
+    try {
+      const project = appsProject();
+      if (project.projectId) {
+        const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+        const token = await auth.getAccessToken().catch(() => null);
+        if (token) {
+          const names: string[] = [];
+          let pageToken = '';
+          for (let page = 0; page < 12; page++) {
+            const q = buildListServicesRequest(String(token), project.projectId, appsRegion(), 100, pageToken);
+            const r = await fetch(q.url, { method: q.method, headers: q.headers });
+            if (!r.ok) { names.length = 0; break; }
+            const parsed = parseServiceList(await r.json().catch(() => null));
+            names.push(...parsed.names);
+            pageToken = parsed.nextPageToken;
+            if (!pageToken) break;
+          }
+          if (names.length > 0 || pageToken === '') {
+            readings.hostedServices = names.length;
+            readings.hostedServicesCap = SERVICES_PER_PROJECT_CAP;
+          }
+        }
+      }
+    } catch { /* unknown */ }
+
+    // Publish channels against their cap (§10).
+    try {
+      const chan = await new FirebaseHostingDeployer().listChannelsWithCompleteness();
+      // 🔒 An INCOMPLETE list is not a count. Reporting a partial read as the number would understate
+      // exactly the ceiling this tile exists to warn about.
+      if (chan.complete) {
+        readings.publishChannels = chan.channels.length;
+        readings.publishChannelsCap = channelCap();
+      }
+    } catch { /* unknown */ }
+
+    // Storage: how many of the collections that GROW have no retention policy (§12 #3).
+    try {
+      readings.collectionsWithoutRetention = GROWING_COLLECTIONS
+        .filter((c) => !RETENTION_POLICIES.some((p) => p.collection === c)).length;
+    } catch { /* unknown */ }
+
+    const tiles = loadBoard(readings);
+    res.json({
+      level: worstLevel(tiles),
+      tiles,
+      // Named so the screen can say WHICH ceilings it could not read, rather than showing a quiet zero.
+      unknown: tiles.filter((t) => t.level === 'unknown').map((t) => t.id),
+    });
   });
 
   app.get('/api/admin/hosting/channels', verifyAdminToken, async (_req: Request, res: Response) => {

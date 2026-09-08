@@ -159,19 +159,39 @@ export const DOOR_RETRY_SECONDS = 6;
  * The counter lives in sessionStorage, which is per-tab and survives the page replacing itself.
  */
 export function doorPage(kind: DoorPageKind): string {
+  // THE HOUR-LONG SPIN (admin screenshot, 2026-09-08 — a Capacitor WebView, "ek ghante se yah ghume
+  // ja raha hai"). `giveUp()` is the escape hatch: it swaps the spinner for "Still waiting on your
+  // app… press Wake up" with a manual retry link, and it is now called from TWO places, not one.
+  //
+  // It used to exist only in the `n<=CAP` `else` branch. The surrounding `try` also wraps the
+  // sessionStorage read itself, and that call THROWS in exactly the storage-partitioned contexts a
+  // real user hits — a nested cross-origin iframe inside a Capacitor WebView foremost among them,
+  // but also Safari ITP and private browsing. The `catch` ran, and its entire body was a COMMENT
+  // claiming "retry once-per-load only, which is exactly the safe direction" — there was no code
+  // there to retry with. No timer was ever armed, so the page never reloaded again, and the give-up
+  // UI never ran either, because that lived in the branch the throw had already jumped past. The
+  // user was left on a permanently frozen spinner with no click that could ever move it — worse than
+  // either designed outcome, and silent, because nothing here ever threw past the `catch`.
+  //
+  // The fix keeps the money-cap's own logic untouched for the common case (sessionStorage works):
+  // count, retry up to DOOR_RETRY_CAP times, then give up. It only changes what "cannot count" means
+  // — from "silently do nothing forever" to "show the escape hatch now", which is the side rule 5's
+  // own 50/50 law asks for: a self-heal that cannot run its normal path must still terminate somewhere
+  // a person can act, not nowhere.
   const retryScript = (kind === 'refused' || kind === 'in-app-only') ? '' : `<script>(function(){
+  function giveUp(){
+    var h=document.getElementById('h'),p=document.getElementById('p'),s=document.getElementById('s'),r=document.getElementById('r');
+    if(h)h.textContent='Still waiting on your app';
+    if(p)p.textContent='It has not come up on its own. Go back to NavBharatAI and press Wake up — or try again here.';
+    if(s)s.style.display='none';
+    if(r){r.style.display='inline-block';r.onclick=function(){try{sessionStorage.removeItem('nbai:door-tries:'+location.search);}catch(e){}location.reload();return false;};}
+  }
   try {
     var k='nbai:door-tries:'+location.search;
     var n=Number(sessionStorage.getItem(k)||'0')+1;
     if(n<=${DOOR_RETRY_CAP}){sessionStorage.setItem(k,String(n));setTimeout(function(){location.reload();},${DOOR_RETRY_SECONDS * 1000});}
-    else{
-      var h=document.getElementById('h'),p=document.getElementById('p'),s=document.getElementById('s'),r=document.getElementById('r');
-      if(h)h.textContent='Still waiting on your app';
-      if(p)p.textContent='It has not come up on its own. Go back to NavBharatAI and press Wake up — or try again here.';
-      if(s)s.style.display='none';
-      if(r){r.style.display='inline-block';r.onclick=function(){try{sessionStorage.removeItem(k);}catch(e){}location.reload();return false;};}
-    }
-  } catch(e){ /* blocked storage: retry once-per-load only, which is exactly the safe direction */ }
+    else{giveUp();}
+  } catch(e){ giveUp(); }
 })();</script>`;
   const heading = kind === 'asleep'
     ? 'Your preview is waking up'

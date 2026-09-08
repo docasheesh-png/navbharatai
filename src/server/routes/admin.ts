@@ -71,14 +71,20 @@ import {
 } from '../AgentV3/cloudRunHosting';
 import { loadBoard, worstLevel, type LoadReadings } from '../lib/loadBoard';
 import { readPlatformInstances, platformProjectId } from '../lib/platformInstances';
-import { RETENTION_POLICIES } from '../lib/DataRetentionManager';
+import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
 
 /**
  * The collections that GROW with use — per build, per user, per app (ROADMAP §12 #3).
  *
  * Verified by reading each store on 2026-09-07. Kept here beside the load board because its only job
- * is to be compared against RETENTION_POLICIES: the gap between these two lists IS the storage
- * warning. When a collection gains a policy, it stops counting automatically.
+ * is to be compared against the retention registries: the gap IS the storage warning, and a collection
+ * stops counting automatically once it gains a policy.
+ *
+ * ⚠️ "Growing" is not the same as "should be purged". A collection grows either because the platform
+ * keeps writing about itself, or because USERS keep creating things — and the second is the product,
+ * not garbage. `collectionsNeedingRetention` subtracts BOTH the collections with a policy AND the ones
+ * `RETAINED_INDEFINITELY` records a reason for, so this list stays a complete inventory while the
+ * warning counts only what a human still has to decide.
  */
 const GROWING_COLLECTIONS: readonly string[] = [
   'app_builds', 'build_sessions', 'user_build_history', 'user_costs', 'server_logs',
@@ -1587,8 +1593,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
     // Storage: how many of the collections that GROW have no retention policy (§12 #3).
     try {
-      readings.collectionsWithoutRetention = GROWING_COLLECTIONS
-        .filter((c) => !RETENTION_POLICIES.some((p) => p.collection === c)).length;
+      // 🔒 Only the collections a human still has to decide about. A collection kept forever ON PURPOSE
+      // (the user's own code, their billing record) is NOT a missing policy — counting it would leave
+      // the tile warning about something correct, permanently, and a warning nobody can clear is a
+      // warning nobody reads.
+      readings.collectionsWithoutRetention = collectionsNeedingRetention(GROWING_COLLECTIONS).length;
     } catch { /* unknown */ }
 
     const tiles = loadBoard(readings);

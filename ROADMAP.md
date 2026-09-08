@@ -1155,7 +1155,7 @@ improvement. **Two exceptions are marked 🟢 DO NOW — they are free, and they
 |---|---|---|---|---|
 | 1 | ✅ **Scheduled jobs run on EVERY instance** — FIXED 2026-09-08 (`lib/jobLease.ts`) | `lib/ScheduledJobs.ts` | **2 instances** | free |
 | 2 | ✅ **Platform capped at 10 Cloud Run instances** — RAISED to 100, 2026-09-08 | `cloudbuild.yaml` | ~1,000 concurrent requests | free (a number) |
-| 3 | 🟠 **No retention on ~8 growing collections** | `lib/DataRetentionManager.ts` | months, silently | free |
+| 3 | ✅ **No retention on ~8 growing collections** — POLICIES WRITTEN 2026-09-08 (purge flag = admin's call) | `lib/DataRetentionManager.ts` | months, silently | free |
 | 4 | ✅ **Hot Firestore document** — SHARDED 2026-09-08 | `lib/metricsTimeline.ts` | ~30-60 instances | free (sharding) |
 | 5 | 🟡 **1,000 hosted apps per project** | Cloud Run quota | 1,000 hosted apps | one config change |
 | 6 | 🟡 **Publish channel ceiling** | Firebase Hosting | ~50 per site | already solved, §10.3 |
@@ -1247,30 +1247,68 @@ multiply anything that runs per-instance. ⚠️ **Item 4 (the hot metrics docum
 watch** as this headroom is actually used — it bites around 30-60 instances, which this ceiling
 newly permits.
 
-### 3 · 🟠 STORAGE GROWS FOREVER — only ONE collection has retention
+### 3 · 🟠 STORAGE GROWS FOREVER — ✅ **POLICIES WRITTEN 2026-09-08**, purge still the admin's switch
 
-`RETENTION_POLICIES` contains exactly one entry: `build_jobs`, 90 days. And per CLAUDE.md the purge flag
-`DATA_RETENTION_PURGE_ENABLED` is **OFF**, so even that has never run.
-
-Meanwhile these grow per build or per user, with no TTL at all — verified by reading their stores:
-`app_builds`, `build_sessions`, `user_build_history`, `user_costs`, `server_logs`, `metrics_snapshots`,
-`session_error_hints`, `hosting_usage`, plus the `workspace_*_v3` family (files, assets, checkpoints,
-embeddings, memory, diagnostics, manual edits, plans).
-
-`workspace_files_v3` is the heavy one: it holds **every file of every app anyone has ever built**.
+`RETENTION_POLICIES` contained exactly one entry: `build_jobs`, 90 days. And the purge flag
+`DATA_RETENTION_PURGE_ENABLED` is **OFF**, so even that had never run.
 
 **Why this is dangerous rather than merely untidy:** storage cost never spikes. It ratchets, invisibly,
 and the bill arrives long after the decision that caused it. There is no moment where anything breaks
 and tells you.
 
-**The economical fix (free):** turn the purge ON, and extend `RETENTION_POLICIES` one collection at a
-time. The module's own comment says why it is one at a time: **each collection's timestamp FIELD and
-TYPE must be verified first**, because a `< cutoff` bound against a string field deletes RECENT records.
-That warning is load-bearing — do not batch it.
+#### 🔴 The defect found while doing it — retention that could not have worked
 
-**TRIGGER: 🟢 DO NOW for the flag** (it only ever deletes 90-day-old build jobs), then one collection
-per PR as each timestamp is verified. Deleted-app data should also cascade — `workspaceDataErase.ts`
-already knows how.
+The purge built its bound as **`new Date(cutoffMs)` unconditionally**, which is correct only for a field
+stored as a Date. Reading the real write paths showed the collections use **three different types**:
+`build_jobs.updatedAt` is a `Date`, `server_logs.ts` / `metrics_snapshots.updatedAt` /
+`build_sessions.savedAt` are `Date.now()` **numbers**, and `session_error_hints.updatedAt` is an
+**ISO string**.
+
+Firestore orders values **by type first** — every number sorts before every timestamp — so a policy on a
+numeric field would have matched **nothing, forever, with no error**, while reporting itself configured.
+Retention that looks done and deletes nothing, and invisible by nature: a purge that deletes nothing
+looks exactly like a purge with nothing to delete.
+
+⚠️ **This also CORRECTS what this section previously claimed.** It said a mismatched bound "deletes
+RECENT records". That is wrong in the dangerous direction — it made the risk sound like over-deletion
+when the real behaviour is silent under-deletion. The fix keeps the safe direction as a property: a
+policy with the WRONG type deletes **nothing**, never something recent, and there is a test asserting
+exactly that.
+
+**The fix:** `timestampKind` is now a **required** field on every policy (`'date' | 'epochMs' | 'iso'`)
+and the bound is built in that type. Required rather than optional-with-a-default, because a default is
+precisely how the wrong guess would ship silently again.
+
+#### 🔒 "Every growing collection needs retention" is wrong, and acting on it would delete users' work
+
+A collection grows for two very different reasons: the platform keeps writing about **itself**, or
+**users keep creating things** — and the second is not garbage to sweep, it is the product.
+`workspace_files_v3` holds **every file of every app anyone has ever built**. A clock must never touch
+it.
+
+So the registry is now split, and both halves ship:
+- **`RETENTION_POLICIES`** — five operational collections, each verified for field AND type:
+  `build_jobs` (90d), `server_logs` (30d), `metrics_snapshots` (400d — one document per day, so a long
+  window is cheap), `build_sessions` (90d), `session_error_hints` (30d).
+- **`RETAINED_INDEFINITELY`** — twelve collections kept on purpose, each with its **reason recorded
+  next to it**: the user's source, assets, checkpoints, memory, manual edits, embeddings, plans, build
+  record, history, and `user_costs` ("money — a billing record deleted on a timer cannot be reconciled
+  or disputed"). The right mechanism for these is deletion on **account** deletion, which
+  `deleteUserData` already does, or a per-user cap — never age.
+
+The Load board now counts only `collectionsNeedingRetention` — growing, no policy, and no documented
+reason. Counting the deliberate ones would leave the tile warning about something correct forever, and
+a warning nobody can clear is a warning nobody reads.
+
+**One more bound added:** the purge had **no limit at all**. The first run against a collection with
+months of backlog would have been one query returning everything plus a delete per document. It is now
+`maxPerRun` (default 500), so a backlog drains over successive runs instead — slower, and unable to
+spike anything.
+
+**🟢 WHAT IS LEFT, AND IT IS THE ADMIN'S CALL:** `DATA_RETENTION_PURGE_ENABLED` is still **off**,
+so nothing is deleted yet. Setting it to `true` in Cloud Run starts the daily 03:00 UTC sweep — which,
+with §12 #1, now runs on exactly one instance. Recommended, and deliberately not something a session
+switches on by itself: it is the one change here that destroys data.
 
 ### 4 · 🟠 THE HOT DOCUMENT — ✅ **SHARDED 2026-09-08**, immediately after raising the ceiling
 

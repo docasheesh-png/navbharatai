@@ -221,6 +221,15 @@ import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
 import { repoAvailableForDeploy, resolveDeployRepo } from '../AgentV3/deployRepoMemory';
 import { decidePushBranch } from '../AgentV3/pushAppTarget';
+import { hostingAvailability, hostAppOnNavBharatCloud } from '../AgentV3/hostApp';
+import { appsProject, appsRegion, serviceNameFor, deleteHostedService } from '../AgentV3/cloudRunHosting';
+import { readHostingUsage, usageGapNote } from '../AgentV3/hostingUsage';
+import {
+  hostingCostUsd, hostingBillableUsd, hostingBillingEnabled, hostingMarkupPct, hostingCostNote,
+} from '../AgentV3/hostingCost';
+// ADC for the apps project — on Cloud Run the service identity is used automatically, exactly as
+// Deployment.ts does for Firebase Hosting.
+import { GoogleAuth } from 'google-auth-library';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
@@ -4209,6 +4218,149 @@ async function noteBuildOutcome(
   });
 
   /**
+   * NAVBHARAT CLOUD — host this app on NavBharatAI's own infrastructure (ROADMAP §11, slice 1c).
+   *
+   * 🔴 WHAT THIS REPLACES. Hosting an app with a server half means, today: press Publish, be refused,
+   * put the app in GitHub, open Render, make an account, generate an API key, paste it back, press
+   * Deploy backend. Five steps through two other websites. Researched 2026-09-07: Replit, Lovable,
+   * Base44, Bolt, v0 and Emergent all host the backend themselves, and NONE of them makes a
+   * third-party dashboard key the default path. This route is the first half of closing that gap.
+   *
+   * 🔒 INERT UNTIL DELIBERATELY SWITCHED ON, in two flags. `NAVBHARAT_CLOUD` off — the default —
+   * means this answers 404 and nothing else in the product changes. With it on, hosting stays
+   * ADMIN-ONLY until `NAVBHARAT_CLOUD_PUBLIC` is also set. The same shape as AGENTV3_ENABLED /
+   * AGENTV3_PAID_PUBLIC, for the same reason: a path that spends real money should take two
+   * deliberate acts to reach real users.
+   *
+   * 🔒 AND IT CANNOT RUN IN THE PLATFORM'S OWN PROJECT. `hostingAvailability` refuses when
+   * NAVBHARAT_APPS_PROJECT is unset AND when it names the platform project (admin decision D4,
+   * 2026-09-07) — user code must not share a project with Firestore, the wallet and every user
+   * record. There is deliberately no fallback: a working fallback is how an isolation decision gets
+   * quietly reversed.
+   *
+   * ⚠️ NOT BILLED YET. Metering is slice 2, and nothing goes past admin-only before it exists —
+   * unmetered hosting is precisely the loss ROADMAP's cost plan exists to prevent.
+   */
+  app.post('/api/agentv3/host-app', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    // The VERIFIED identity, never the body's claim — a spoofed email deciding admin access is the
+    // exact hole every other gate in this file closes.
+    const { userId, email } = await resolveReadIdentity(req);
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+
+    const gate = hostingAvailability({ isAdmin: isReportAdmin(email) });
+    if (!gate.available) { res.status(503).json({ ok: false, reason: 'unavailable', error: gate.message }); return; }
+
+    try {
+      const files = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+      // Scoped to THIS app, so hosting inherits the same least-privilege the build path uses; and
+      // planBackendEnv then narrows further to the names the app's own code actually reads.
+      const vault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
+      // ADC — on Cloud Run the service identity is used automatically. The cloud-platform scope covers
+      // Cloud Build, Cloud Storage and Cloud Run in the apps project.
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const token = await auth.getAccessToken().catch(() => null);
+      if (!token) {
+        res.status(503).json({ ok: false, reason: 'unavailable', error: 'Hosting could not authenticate with Google Cloud just now. Nothing was changed.' });
+        return;
+      }
+      const appRec = await getConversationStore().get(workspaceId).catch(() => null);
+      const result = await hostAppOnNavBharatCloud({
+        workspaceId,
+        appName: appRec?.appName || appRec?.title || null,
+        files,
+        vaultSecrets: vault,
+        token: String(token),
+      });
+      if (!result.ok) {
+        // The provider's own words are ADMIN-ONLY (the white-label law): the user gets our sentence,
+        // the server log gets the reason. A build's compiler output must never reach a response body.
+        if (result.detail) console.error(`[host-app] ${workspaceId} ${result.reason}: ${result.detail}`);
+        const status = result.reason === 'unavailable' ? 503
+          : result.reason === 'no-source' || result.reason === 'unpackable' ? 422
+          : 502;
+        res.status(status).json({ ok: false, reason: result.reason, error: result.message });
+        return;
+      }
+      res.json({
+        ok: true, url: result.url, service: result.service, ready: result.ready,
+        ...(result.envNote ? { envNote: result.envNote } : {}),
+      });
+    } catch (e) {
+      res.status(502).json({ ok: false, reason: 'deploy-failed', error: `Hosting failed: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  });
+
+  /**
+   * WHAT DID THIS HOSTED APP USE, AND WHAT WOULD IT COST? (ROADMAP §11, slice 2. Admin-only.)
+   *
+   * 🔴 WHY THIS EXISTS BEFORE THE CHARGING DOES. D5 sets hosting at real cost + 20%, and ROADMAP's own
+   * cost plan closes with the rule that "a saving nobody measured is a story, not a saving" — every
+   * money change should be preceded by a look at real numbers and followed by another. So this route
+   * ships FIRST: it reads what a real app actually used and reports what it WOULD be billed, with
+   * `NAVBHARAT_BILL_HOSTING` still off and nobody's wallet touched. Flipping that switch is then a
+   * decision made against measurements rather than against a plan.
+   *
+   * 🔒 ADMIN-ONLY, AND HONEST ABOUT ITS GAPS. Two different kinds of hole are reported separately and
+   * neither is allowed to look like zero: `unmeasured` is usage we could not read from Google, and
+   * `unbilled` is usage we read but have no admin-set rate for. Both under-bill, which is the safe
+   * direction — the billing law permits absorbing our own cost and never permits charging for
+   * something we did not observe.
+   */
+  app.post('/api/agentv3/host-usage', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    const { userId, email } = await resolveReadIdentity(req);
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    // Cost figures are OUR infrastructure spend, which the white-label law keeps admin-side. A user
+    // never sees a provider line item — they see the wallet, once slice 2c debits it.
+    if (!isReportAdmin(email)) { res.status(403).json({ error: 'Not available for this account.' }); return; }
+
+    const gate = hostingAvailability({ isAdmin: true });
+    if (!gate.available) { res.status(503).json({ ok: false, error: gate.message }); return; }
+
+    try {
+      const project = appsProject();
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const token = await auth.getAccessToken().catch(() => null);
+      if (!token) { res.status(503).json({ ok: false, error: 'Could not authenticate with Google Cloud just now.' }); return; }
+
+      const hours = Math.min(720, Math.max(1, Number(req.body?.hours) || 24));
+      const endIso = new Date().toISOString();
+      const startIso = new Date(Date.now() - hours * 3600_000).toISOString();
+      const rec = await getConversationStore().get(workspaceId).catch(() => null);
+      const serviceName = serviceNameFor(workspaceId, rec?.appName || rec?.title || null);
+
+      const measured = await readHostingUsage({
+        token: String(token),
+        projectId: String(project.projectId),
+        serviceName,
+        startIso,
+        endIso,
+        buildMinutes: Number(req.body?.buildMinutes) || 0,
+      });
+      const cost = hostingCostUsd(measured.usage);
+      res.json({
+        ok: true,
+        service: serviceName,
+        window: { startIso, endIso, hours },
+        usage: measured.usage,
+        cost: cost.usd,
+        lines: cost.lines,
+        wouldBill: hostingBillableUsd(cost),
+        markupPct: hostingMarkupPct(),
+        billingOn: hostingBillingEnabled(),
+        note: `${hostingCostNote(cost)} ${usageGapNote(measured)}`.trim(),
+      });
+    } catch (e) {
+      res.status(502).json({ ok: false, error: `Could not read hosting usage: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  });
+
+  /**
    * DID THE BACKEND ACTUALLY COME UP? (admin 2026-09-05)
    *
    * 🔴 THE GAP THIS CLOSES. `deploy-backend` reported success the moment the host ACCEPTED the
@@ -6914,8 +7066,44 @@ async function noteBuildOutcome(
       return;
     }
 
+    /**
+     * 🔴 GIVE THE HOSTING SLOT BACK (ROADMAP §11, after the admin asked "aisa to nahi kuch user ke bad
+     * hosting band ho jaye").
+     *
+     * Cloud Run allows **1,000 services per project per region and Google does not raise it**. §10's
+     * lesson about the Firebase channel ceiling applies exactly: the cap is not reached by working
+     * apps, it is reached by DEAD ones nobody deleted. An unpublished app whose service survives costs
+     * nothing to run (it scales to zero) and still holds a slot forever — so the ceiling would arrive
+     * early, and for the stupidest possible reason.
+     *
+     * 🔒 BEST-EFFORT ON PURPOSE, AND ONLY IN THIS DIRECTION. The static site is already down by the
+     * time we get here, which is what the user asked for; failing their takedown because a Cloud Run
+     * delete did not answer would be refusing to do the thing that already succeeded. A service that
+     * survives is waste, and `hostedServiceInventory` classifies exactly that as reclaimable — it is
+     * visible rather than lost. The reverse order would not be safe, which is why the channel delete
+     * above still gates the response.
+     */
+    let hostedSlotFreed: boolean | null = null;
+    try {
+      const project = appsProject();
+      if (project.projectId) {
+        const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+        const token = await auth.getAccessToken().catch(() => null);
+        if (token) {
+          const convo = await getConversationStore().get(workspaceId).catch(() => null);
+          const del = await deleteHostedService({
+            token: String(token),
+            projectId: project.projectId,
+            region: appsRegion(),
+            service: serviceNameFor(workspaceId, convo?.appName || convo?.title || null),
+          });
+          hostedSlotFreed = del.ok;
+        }
+      }
+    } catch { /* the takedown the user asked for has already happened — never fail it on this */ }
+
     const marked = await deploymentStore.setStatus(workspaceId, 'unpublished').catch(() => false);
-    try { audit('APP_UNPUBLISHED_BY_OWNER', { workspaceId, userId: userId ?? 'anon', registryUpdated: marked }); }
+    try { audit('APP_UNPUBLISHED_BY_OWNER', { workspaceId, userId: userId ?? 'anon', registryUpdated: marked, hostedSlotFreed }); }
     catch { /* audit never blocks */ }
     res.json({
       ok: true,

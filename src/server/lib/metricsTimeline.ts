@@ -79,6 +79,12 @@ export interface TimelineSeries {
   summary: TimelineSummary;
   /** Per-provider totals over the window (ADMIN-only surface — never shown to an end user). */
   providers: Record<string, ProviderCounters>;
+  /**
+   * True when the read hit its document limit, so the window shown is NOT the whole window asked for.
+   * Optional so every existing caller is unchanged; present so a truncated graph can say it is one
+   * rather than looking like a quiet stretch of nothing.
+   */
+  truncated?: boolean;
 }
 
 export interface ProviderCounters {
@@ -133,6 +139,65 @@ export function bucketStartMs(ms: number, bucket: number): number {
   return Math.floor(ms / bucket) * bucket;
 }
 
+/**
+ * How many documents ONE time bucket is spread across (ROADMAP §12 #4).
+ *
+ * 🔴 THE CEILING THIS EXISTS FOR: Firestore sustains roughly **one write per second to a single
+ * document**. Every instance flushes once a minute into the bucket for "now", so the write rate on that
+ * one document is (instances / 60) per second — fine at ten instances, and at the hundred the platform
+ * is now deployed to allow (§12 #2) it is 1.67/s, i.e. past the limit. The failure would be SILENT:
+ * `doFlush` catches, puts the deltas back, and retries, so the Monitor would quietly under-count rather
+ * than break. A graph that is wrong without saying so is the thing this module was written to avoid.
+ *
+ * Eight is the default because it puts a hundred instances at ~0.2 writes/s per shard — an order of
+ * magnitude of headroom — while multiplying dashboard reads by only 8. Env-tunable, clamped. PURE.
+ */
+export function shardCount(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.MONITOR_SHARDS);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(64, Math.max(1, Math.floor(raw))) : 8;
+}
+
+/**
+ * Which shard THIS process writes to. Chosen once per process and then stable.
+ *
+ * Stable rather than per-write so one instance's minute-by-minute flushes keep landing on one document
+ * — two instances colliding on a shard is harmless at one write a minute, but an instance hopping
+ * shards would spread its own retries across documents for no benefit. PURE given the process. 
+ */
+export function shardIndex(count: number = shardCount()): number {
+  const n = Math.max(1, Math.floor(count));
+  return SHARD_SEED % n;
+}
+const SHARD_SEED = Math.floor(Math.random() * 1_000_003);
+
+/**
+ * The document id for one bucket on one shard.
+ *
+ * ⚠️ LEGACY DOCUMENTS ARE STILL READ. Buckets written before sharding have the bare `${t}` id, and the
+ * read query filters on the `bucketStart` FIELD rather than on ids — so old and new documents come back
+ * together and are summed. No migration, no gap in the graph across the deploy. PURE.
+ */
+export function bucketDocId(bucketStart: number, shard: number): string {
+  return `${Math.floor(bucketStart)}_s${Math.max(0, Math.floor(shard))}`;
+}
+
+/**
+ * How many documents a read of this window must be allowed to return.
+ *
+ * 🔴 A SIBLING BUG, FOUND WHILE SHARDING AND FIXED HERE (rule 3). The read was a flat `limit(2000)`
+ * ordered `bucketStart asc`. A 7-day window at 5-minute buckets is 2,016 buckets — already over that
+ * limit BEFORE sharding — and because the order is ascending, the documents dropped are the NEWEST
+ * ones. The longest view was silently missing its most recent hours, which is the opposite of what a
+ * monitor is for. Sharding would have multiplied that by 8. PURE.
+ */
+export function readLimitFor(fromMs: number, toMs: number, bucket: number, shards: number): number {
+  if (!(bucket > 0) || !Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs < fromMs) return 1;
+  const buckets = Math.floor((toMs - fromMs) / bucket) + 2;
+  const n = Math.max(1, Math.floor(shards));
+  // Bounded so a nonsense window can never ask Firestore for an unlimited read.
+  return Math.min(30_000, Math.max(1, buckets * n));
+}
+
 export function emptyCounters(): TimelineCounters {
   return {
     builds: 0, buildsOk: 0, buildsFailed: 0, buildMs: 0, previewOk: 0,
@@ -163,10 +228,21 @@ export function fillSeries(
   // An INVERTED window is the invalid case. A window where from === to is legitimate — it asks for the
   // single bucket containing that instant — and must yield one point, not nothing.
   if (!(bucket > 0) || !Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs < fromMs) return [];
-  const byBucket = new Map<number, Partial<TimelineCounters>>();
+  /**
+   * 🔒 SUMMED, NOT OVERWRITTEN. This used to `set(t, d)`, so the LAST document for a bucket won and the
+   * others were discarded. That was invisible while one bucket meant one document; the moment buckets
+   * are sharded (§12 #4) it would have silently thrown away 7 of every 8 shards — a Monitor reporting a
+   * confident fraction of the truth. Summing is also simply what the function should always have done:
+   * these counters are additive by construction, which is the same property that makes the
+   * cross-instance `increment` write correct.
+   */
+  const byBucket = new Map<number, TimelineCounters>();
   for (const d of docs || []) {
     const t = bucketStartMs(num(d?.bucketStart), bucket);
-    if (t > 0) byBucket.set(t, d);
+    if (t <= 0) continue;
+    let acc = byBucket.get(t);
+    if (!acc) { acc = emptyCounters(); byBucket.set(t, acc); }
+    for (const k of COUNTER_KEYS) acc[k] += num(d[k]);
   }
   const points: TimelinePoint[] = [];
   const start = bucketStartMs(fromMs, bucket);
@@ -175,9 +251,7 @@ export function fillSeries(
   const maxPoints = 2000;
   for (let t = start, i = 0; t <= end && i < maxPoints; t += bucket, i++) {
     const found = byBucket.get(t);
-    const counters = emptyCounters();
-    if (found) for (const k of COUNTER_KEYS) counters[k] = num(found[k]);
-    points.push({ t, observed: !!found, ...counters });
+    points.push({ t, observed: !!found, ...(found ?? emptyCounters()) });
   }
   return points;
 }
@@ -324,7 +398,10 @@ class MetricsTimeline {
           };
         }
         if (Object.keys(providers).length > 0) update.providers = providers;
-        return db.collection(TIMELINE_COLLECTION).doc(String(t)).set(update, { merge: true });
+        // §12 #4 — one bucket is spread across `shardCount()` documents, so N instances flushing into
+        // the same five minutes never converge on one document's ~1 write/second limit. The reader
+        // sums them back together.
+        return db.collection(TIMELINE_COLLECTION).doc(bucketDocId(t, shardIndex())).set(update, { merge: true });
       }));
     } catch {
       // The write failed — put the deltas back so the next flush retries them rather than losing the
@@ -354,9 +431,11 @@ class MetricsTimeline {
     if (!db) return;
     try {
       const cutoff = now - retentionMs();
+      // Scaled with the shard count: at 200 a sharded collection would be swept 8x slower than it
+      // grows, so retention would quietly stop keeping up with its own window.
       const stale = await db.collection(TIMELINE_COLLECTION)
         .where('bucketStart', '<', cutoff)
-        .limit(200)
+        .limit(Math.min(2000, 200 * shardCount()))
         .get();
       if (stale.empty) return;
       const batch = db.batch();
@@ -383,12 +462,17 @@ class MetricsTimeline {
     const db = this.getDb();
     if (!db) return emptyResult(false);
     try {
+      const limit = readLimitFor(from, to, bucket, shardCount());
       const snap = await db.collection(TIMELINE_COLLECTION)
         .where('bucketStart', '>=', bucketStartMs(from, bucket))
         .orderBy('bucketStart', 'asc')
-        .limit(2000)
+        .limit(limit)
         .get();
       const docs = snap.docs.map((d) => d.data() as Record<string, unknown>);
+      // 🔒 SAY SO IF THE WINDOW WAS CUT SHORT. The order is ascending, so a truncated read loses the
+      // NEWEST buckets — the ones a monitor exists to show. Under-reporting in silence is the failure
+      // this module's own header forbids.
+      const truncated = snap.size >= limit;
       const points = fillSeries(docs as any, from, to, bucket);
       const providers: Record<string, ProviderCounters> = {};
       for (const d of docs) {
@@ -410,6 +494,7 @@ class MetricsTimeline {
         points,
         summary: summarize(points),
         providers,
+        truncated,
       };
     } catch {
       // Storage is there but unreadable — say so rather than drawing a zero line.

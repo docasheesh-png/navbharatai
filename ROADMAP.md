@@ -1100,8 +1100,16 @@ Creating a GCP project is console work. Slice 1 cannot deploy anywhere until the
 4. **Cross-project IAM** — grant the PLATFORM's Cloud Run service account `run.admin` +
    `cloudbuild.builds.editor` + `iam.serviceAccountUser` **in the apps project only**, so the platform
    can deploy there and nowhere else.
-5. **Set `NAVBHARAT_APPS_PROJECT`** in the platform's Cloud Run env to that project id, and record it
-   in `CLAUDE.md`'s registry per the hand-to-hand rule.
+5. **Set the env keys** in the platform's Cloud Run env, and record them in `CLAUDE.md`'s registry per
+   the hand-to-hand rule:
+   | Key | What it does | Default |
+   |---|---|---|
+   | `NAVBHARAT_APPS_PROJECT` | The separate project user apps run in. **Required** — hosting is off without it, and it is REFUSED if it names the platform project. | unset ⇒ off |
+   | `NAVBHARAT_CLOUD` | Master switch. Off ⇒ the route 404s and nothing else changes. | off |
+   | `NAVBHARAT_CLOUD_PUBLIC` | Off ⇒ hosting is ADMIN-ONLY even with the master on. Do not set it before slice 2 (metering) exists. | off |
+   | `NAVBHARAT_APPS_REGION` | Where apps run. | `asia-south1` (Mumbai) |
+   | `NAVBHARAT_APPS_IMAGE_REPO` | Artifact Registry repo for app images. | `nbai-apps` |
+   | `NAVBHARAT_APPS_BUILD_BUCKET` | Source staging. | `<project>_cloudbuild` |
 
 🔒 **The code must FAIL CLOSED on this**: with `NAVBHARAT_APPS_PROJECT` unset, hosting is simply
 unavailable and says so. It must never fall back to the platform's own project — that fallback would
@@ -1128,6 +1136,287 @@ silently undo the entire decision, and nothing would fail to reveal it.
 - Hosting revenue ≥ hosting cost, read off the same Monitor tiles §💰 relies on.
 - Time from Publish to live, and the share of fullstack apps that ever reach live — today that share is
   effectively zero, which is the whole point.
+
+## 12 · 🔭 THE MILLION-USER MAP — every ceiling, where it is, and the cheapest way past it
+
+**Admin, 2026-09-07:** *"jab user badh kar millions me honge, tab mujhe kya kya problem ayegi aur kaha
+kaha? jisse mai pahle se tayar rahu."* They named three — hosting, server load, storage — and asked for
+the rest. This section is a REAL code audit done that day, not a list from memory. **The three they
+named are all real. Five more were found, and one of those is more urgent than any of them.**
+
+⛔ **NOTHING HERE IS TO BE BUILT ON SIGHT.** Every row has a TRIGGER. CLAUDE.md's scale plan already
+states the rule and the reason: capacity nobody needs yet is a monthly bill forever. A session that
+proposes work from this section without naming the trigger that fired is proposing a bill, not an
+improvement. **Two exceptions are marked 🟢 DO NOW — they are free, and they get harder later.**
+
+### The ceilings, in the order they will actually bite
+
+| # | Ceiling | Where | Bites at | Cost to fix |
+|---|---|---|---|---|
+| 1 | ✅ **Scheduled jobs run on EVERY instance** — FIXED 2026-09-08 (`lib/jobLease.ts`) | `lib/ScheduledJobs.ts` | **2 instances** | free |
+| 2 | ✅ **Platform capped at 10 Cloud Run instances** — RAISED to 100, 2026-09-08 | `cloudbuild.yaml` | ~1,000 concurrent requests | free (a number) |
+| 3 | ✅ **No retention on ~8 growing collections** — POLICIES WRITTEN 2026-09-08 (purge flag = admin's call) | `lib/DataRetentionManager.ts` | months, silently | free |
+| 4 | ✅ **Hot Firestore document** — SHARDED 2026-09-08 | `lib/metricsTimeline.ts` | ~30-60 instances | free (sharding) |
+| 5 | 🟡 **1,000 hosted apps per project** | Cloud Run quota | 1,000 hosted apps | one config change |
+| 6 | 🟡 **Publish channel ceiling** | Firebase Hosting | ~50 per site | already solved, §10.3 |
+| 7 | 🟡 **E2B sandbox concurrency + bill** | E2B plan | concurrent builds | commercial |
+| 8 | 🟢 **AI provider rate limits** | providers | already handled | more keys |
+
+---
+
+### 1 · 🔴 EVERY INSTANCE RUNS EVERY SCHEDULED JOB — ✅ **BUILT 2026-09-08**, and it was free
+
+`ScheduledJobs.ts` says plainly what it is: *"this runs while a Cloud Run instance is ALIVE"*. There was
+**no leader election, no lock, no claim** — a grep for all three found nothing. Every instance starts its
+own 60-second tick loop and runs every registered job.
+
+⚠️ **A CORRECTION TO THIS ENTRY'S FIRST DRAFT, recorded rather than quietly edited away.** It used to
+read: *"from that moment every scheduled sweep, top-up and purge runs twice — then five times, then
+ten."* That was **overstated**, and verifying it before building is what showed why. Only TWO jobs are
+registered today: `monitor-alerts`, which **already protects itself** — its state write is a Firestore
+transaction, with the comment saying exactly why ("so several instances sweeping at the same moment send
+ONE notification between them") — and `retention-purge`, which is **currently switched off**. So there
+was **no live duplicate-work bug**, and this section should not have implied one. The lesson is
+safeguard #1 applied to a defect claim: a missing mechanism is not the same as an active failure, and
+the difference is one grep away.
+
+**What made it worth building anyway, honestly stated.** The *engine* offers no protection, so every
+FUTURE job is unprotected by default, and the very next job this section recommends switching on
+(#3, retention) is the one that **DELETES**. Its deletes are idempotent, so N instances would not
+destroy anything they should not — they would simply do the whole purge N times, paying N times the
+Firestore reads and writes on a schedule. A safety net that must be remembered per job is not a safety
+net; this makes it a property of the scheduler.
+
+**What shipped (free, no new infrastructure):** `lib/jobLease.ts` — a Firestore lease. Before running,
+a job claims `{ owner, expiresAt }` on one document per job id **in a transaction**; the winner runs,
+the losers skip. Wired into `ScheduledJobs.tick()` behind a per-job `exclusive: true` flag, and
+`retention-purge` carries it.
+
+Four properties that matter more than the mechanism, each test-locked in `tests/jobLease.test.ts`:
+- **An unreachable store RUNS the job.** Failing closed would let one database hiccup silently cancel
+  every scheduled job on the platform. Duplication is waste; a purge that never runs is a bill that
+  never stops.
+- **An expired lease is claimable**, so one crashed instance cannot cancel a job forever — and a
+  corrupt expiry counts as expired for the same reason.
+- **A lease the instance already holds is claimable**, so a job that overruns its TTL does not lock
+  itself out of its own next run.
+- **A loser still reschedules.** Otherwise it would retry on every tick and hammer the lease document
+  once a minute — a deduplication mechanism that becomes its own load.
+- **Nothing changes until a job opts in**, and with no claim wired every job runs exactly as before, so
+  the unsafe direction of this change is unreachable.
+
+**Still open here:** the other jobs are not marked `exclusive` yet — deliberately, since flipping jobs
+nobody has re-examined is how a job quietly stops running. Each opts in when somebody has thought about
+it, and the scheduler's status now reports a `skipped` count so "this job never runs on this instance"
+reads as coordination rather than as a fault.
+
+### 2 · 🔴 THE PLATFORM'S OWN CEILING WAS 10 INSTANCES — ✅ **RAISED TO 100, 2026-09-08**
+
+`cloudbuild.yaml` deployed with `--max-instances 10` and `--concurrency 100`. That is a hard ceiling of
+**~1,000 concurrent in-flight requests**, after which Cloud Run queues and then sheds.
+
+This is the honest answer to "server load": Cloud Run scales itself, **but only up to the number we told
+it.** The intuition that the server "just scales" is right about the mechanism and wrong about that
+config.
+
+**What shipped:**
+- `--max-instances` is now the substitution **`_MAX_INSTANCES`, default 100** (~10,000 concurrent
+  requests), so the admin can retune it in the Cloud Build trigger with no code change and no PR.
+- **The running server is handed the SAME number** as `PLATFORM_MAX_INSTANCES`, via the same
+  substitution on `--update-env-vars`. This is the part that matters beyond the number itself: the
+  Load board's "Server load" tile now reports the ceiling Cloud Run actually enforces, so the drift
+  this file keeps recording — a doc or a constant saying one thing while the deployment does another —
+  is **unrepresentable** here rather than merely discouraged.
+- `lib/platformInstances.ts` measures the live count from **Cloud Monitoring**, because no process can
+  count its siblings: instances share no memory, and `metricsTimeline` deliberately sums with
+  `FieldValue.increment` rather than recording who wrote what, so there is no instance identity in our
+  own data to count. Aligned by **MAX, not mean** — an average over the window hides exactly the spike
+  that hit the ceiling. A failed read reports **null (unmeasured), never zero**, and the cap is still
+  reported so the admin can see the ceiling even when the count is unavailable.
+
+**What it costs: nothing while idle.** `--min-instances` stays **0** and Cloud Run bills instances that
+actually run. What a higher ceiling does buy is **exposure** — a spike, including an abusive one, can
+now scale to 100 × 2 vCPU before anything stops it. That is why it stays a bound rather than becoming
+unlimited, and why it is one trigger setting to lower.
+
+`--min-instances 1` would cost real money continuously and buy away cold starts. Still **not** taken —
+a deliberate trade, not a default.
+
+**Sequencing, honoured:** item 1 (the scheduled-job lease) shipped FIRST, because more instances
+multiply anything that runs per-instance. ⚠️ **Item 4 (the hot metrics document) is now the one to
+watch** as this headroom is actually used — it bites around 30-60 instances, which this ceiling
+newly permits.
+
+### 3 · 🟠 STORAGE GROWS FOREVER — ✅ **POLICIES WRITTEN 2026-09-08**, purge still the admin's switch
+
+`RETENTION_POLICIES` contained exactly one entry: `build_jobs`, 90 days. And the purge flag
+`DATA_RETENTION_PURGE_ENABLED` is **OFF**, so even that had never run.
+
+**Why this is dangerous rather than merely untidy:** storage cost never spikes. It ratchets, invisibly,
+and the bill arrives long after the decision that caused it. There is no moment where anything breaks
+and tells you.
+
+#### 🔴 The defect found while doing it — retention that could not have worked
+
+The purge built its bound as **`new Date(cutoffMs)` unconditionally**, which is correct only for a field
+stored as a Date. Reading the real write paths showed the collections use **three different types**:
+`build_jobs.updatedAt` is a `Date`, `server_logs.ts` / `metrics_snapshots.updatedAt` /
+`build_sessions.savedAt` are `Date.now()` **numbers**, and `session_error_hints.updatedAt` is an
+**ISO string**.
+
+Firestore orders values **by type first** — every number sorts before every timestamp — so a policy on a
+numeric field would have matched **nothing, forever, with no error**, while reporting itself configured.
+Retention that looks done and deletes nothing, and invisible by nature: a purge that deletes nothing
+looks exactly like a purge with nothing to delete.
+
+⚠️ **This also CORRECTS what this section previously claimed.** It said a mismatched bound "deletes
+RECENT records". That is wrong in the dangerous direction — it made the risk sound like over-deletion
+when the real behaviour is silent under-deletion. The fix keeps the safe direction as a property: a
+policy with the WRONG type deletes **nothing**, never something recent, and there is a test asserting
+exactly that.
+
+**The fix:** `timestampKind` is now a **required** field on every policy (`'date' | 'epochMs' | 'iso'`)
+and the bound is built in that type. Required rather than optional-with-a-default, because a default is
+precisely how the wrong guess would ship silently again.
+
+#### 🔒 "Every growing collection needs retention" is wrong, and acting on it would delete users' work
+
+A collection grows for two very different reasons: the platform keeps writing about **itself**, or
+**users keep creating things** — and the second is not garbage to sweep, it is the product.
+`workspace_files_v3` holds **every file of every app anyone has ever built**. A clock must never touch
+it.
+
+So the registry is now split, and both halves ship:
+- **`RETENTION_POLICIES`** — five operational collections, each verified for field AND type:
+  `build_jobs` (90d), `server_logs` (30d), `metrics_snapshots` (400d — one document per day, so a long
+  window is cheap), `build_sessions` (90d), `session_error_hints` (30d).
+- **`RETAINED_INDEFINITELY`** — twelve collections kept on purpose, each with its **reason recorded
+  next to it**: the user's source, assets, checkpoints, memory, manual edits, embeddings, plans, build
+  record, history, and `user_costs` ("money — a billing record deleted on a timer cannot be reconciled
+  or disputed"). The right mechanism for these is deletion on **account** deletion, which
+  `deleteUserData` already does, or a per-user cap — never age.
+
+The Load board now counts only `collectionsNeedingRetention` — growing, no policy, and no documented
+reason. Counting the deliberate ones would leave the tile warning about something correct forever, and
+a warning nobody can clear is a warning nobody reads.
+
+**One more bound added:** the purge had **no limit at all**. The first run against a collection with
+months of backlog would have been one query returning everything plus a delete per document. It is now
+`maxPerRun` (default 500), so a backlog drains over successive runs instead — slower, and unable to
+spike anything.
+
+**🟢 WHAT IS LEFT, AND IT IS THE ADMIN'S CALL:** `DATA_RETENTION_PURGE_ENABLED` is still **off**,
+so nothing is deleted yet. Setting it to `true` in Cloud Run starts the daily 03:00 UTC sweep — which,
+with §12 #1, now runs on exactly one instance. Recommended, and deliberately not something a session
+switches on by itself: it is the one change here that destroys data.
+
+### 4 · 🟠 THE HOT DOCUMENT — ✅ **SHARDED 2026-09-08**, immediately after raising the ceiling
+
+Firestore allows roughly **one sustained write per second to a single document**. `metricsTimeline`
+wrote every instance's counters into ONE document per 5-minute bucket.
+
+**The good news, verified by reading it:** it uses `FieldValue.increment`, so N instances writing the
+same bucket **add up correctly** — this was never a correctness bug. And the flush is batched to once
+per `MONITOR_FLUSH_SECONDS` per instance, which is what kept it under the limit.
+
+**Why it moved to the front of the queue.** The arithmetic is the point: each instance flushes once a
+minute, so the write rate on that one document is *instances ÷ 60* per second. At ten instances that is
+0.17/s and comfortable — at the **100** item 2 now permits, it is **1.67/s**, past the limit. Raising
+the ceiling without this would have created the contention rather than merely permitting it. And the
+failure is SILENT: `doFlush` catches, restores the deltas and retries, so the Monitor would quietly
+under-count rather than break.
+
+**What shipped (free, no new infrastructure):** one bucket is now spread over `MONITOR_SHARDS`
+documents (**default 8**, env-tunable, clamped 1-64), each instance picking one shard **once per
+process** and keeping it. A hundred instances then write ~**0.2/s per document** — an order of
+magnitude of headroom — while dashboard reads grow only 8x. Legacy unsharded buckets are still read and
+summed, because the query filters on the `bucketStart` **field**, not on ids: no migration, and no seam
+in the graph across the deploy.
+
+**🔴 TWO SIBLING BUGS FOUND WHILE DOING IT (rule 3), both fixed in the same change:**
+- **`fillSeries` OVERWROTE on a repeated bucket** (`byBucket.set(t, d)` — last document wins). Invisible
+  while one bucket meant one document; the instant buckets are sharded it would have silently discarded
+  **7 of every 8 shards** and drawn a confident graph of a fraction of the truth. It now sums, which is
+  what it should always have done — these counters are additive by construction, the same property that
+  makes the `increment` write correct.
+- **The read was a flat `limit(2000)` ordered `bucketStart asc`.** A 7-day window at 5-minute buckets is
+  **2,016 buckets — already over that limit before sharding existed**, and because the order is
+  ascending what it dropped was the **NEWEST** data. The longest view was silently missing its most
+  recent hours. The limit is now computed from the window and the shard count (`readLimitFor`, bounded
+  at 30,000), and a read that still hits its limit reports `truncated: true` instead of looking like a
+  quiet stretch of nothing.
+
+The retention sweep was scaled with the shard count too — at a flat 200 it would have swept a sharded
+collection 8x slower than it grows, so retention would have quietly stopped keeping up with its own
+window.
+
+**Still open here:** `monitor_alert_state` has the same one-document shape at much lower volume (one
+transactional write per sweep, not per instance per minute), so it is nowhere near the limit and is
+deliberately left alone. **TRIGGER for revisiting it: any Firestore contention error naming it.**
+
+### 5 · 🟡 HOSTED APPS: 1,000 per project per region — Google does not raise it
+
+Covered in §11. The delete-on-unpublish and the capacity board shipped 2026-09-07, which is what keeps
+the cap counting LIVE apps rather than abandoned ones.
+
+**The economical fix:** a second apps project. D4's separate-project decision already made this a config
+change rather than an architecture change. **TRIGGER: the Load board's hosting tile reaching warn (80%).**
+
+### 6 · 🟡 PUBLISH CHANNELS — already solved, do not re-solve
+
+§10.3's bucket-only publish takes no channel at all. **TRIGGER: none — it is done.**
+
+### 7 · 🟡 E2B: a COST wall, not a server wall
+
+Builds run on E2B VMs, so a flood of builds does not hang Cloud Run — it produces a bill and, past the
+account's concurrency limit, a queue. The 5-minute idle reaper, the build-aware sweep and real
+per-second billing already bound it. `BuildConcurrency` additionally caps builds per user.
+
+**The economical fix is commercial** (a bigger plan, or a warm pool), not architectural.
+**TRIGGER: users waiting in a build queue, or the E2B bill outrunning revenue.**
+
+### 8 · 🟢 AI PROVIDERS — already handled
+
+Proactive pacer, adaptive concurrency, circuit breaker, key-pool rotation and a graduated model ladder
+all ship. At scale this needs more KEYS, not more code. **TRIGGER: 429 rates rising after the pacer.**
+
+---
+
+### What is ALREADY right, so nobody rebuilds it
+
+Worth stating, because three of these look like gaps until the code is read:
+
+- **Rate limiting is already cross-instance.** `authMiddleware` runs TWO layers: an in-memory bucket per
+  instance AND a durable Firestore bucket. The per-instance layer is a cheap fast path, not the limit.
+- **The metrics timeline is already cross-instance CORRECT** (`FieldValue.increment`) — it has a
+  throughput ceiling, not a correctness bug.
+- **Build concurrency is already enforced per user**, and the sandbox reaper already reads the DURABLE
+  record so it works across instances.
+- **The wallet is per user**, so it has no global contention point.
+
+### The order to actually do this in
+
+1. 🟢 **Now, free:** scheduled-job leases (#1), retention purge on (#3).
+2. **When the Load board says so:** raise max-instances (#2), shard the hot document (#4).
+3. **When a tile hits warn:** second apps project (#5).
+4. **Commercial, when users wait:** E2B plan, provider keys (#7, #8).
+
+### 🔭 THE LOAD BOARD — the screen that makes every trigger above visible
+
+The admin asked for this directly: *"admin panel ke home page par to load dikhna chahiye — server load,
+user load, storage load, hosting load… sabhi load likhne hai"*. Every ceiling above needs one number a
+person can look at, or the triggers are theoretical.
+
+The board shows, on the admin home page: **server load** (instances vs the max-instances ceiling,
+queueing, CPU, memory), **user load** (requests and active users), **build load** (builds in flight,
+queued, per-user lock hits), **sandbox load** (live E2B sandboxes, idle vs building), **storage load**
+(documents per collection, growth per week, and which have no retention), **hosting load** (services vs
+the 1,000 cap, reclaimable), **publish load** (channels, or bucket-only), **AI load** (429 rate, pacer
+concurrency, keys in rotation) and **money load** (spend vs recovered).
+
+🔒 **Every tile obeys the rule the Monitor already follows: an unreadable number is reported as
+UNKNOWN, never as zero.** A dashboard that says "0" when it means "I could not tell" is worse than one
+that says nothing, because it manufactures confidence at exactly the moment attention is needed.
 
 ## How to use this file
 

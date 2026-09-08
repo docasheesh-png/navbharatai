@@ -766,7 +766,11 @@ setInterval(() => {
               })
               .then((r) => { if (r && r.totalDeleted) console.log(`[P-DATA.4] retention purge removed ${r.totalDeleted} expired record(s)`); })
               .catch(() => { /* best-effort — purge must never affect the server */ });
-            scheduler.register({ id: 'retention-purge', schedule: { kind: 'dailyAtUtc', hour: 3, minute: 0 }, handler: runPurge });
+            // `exclusive`: this DELETES, and every instance runs its own tick loop. The deletes are
+            // idempotent, so N instances would not destroy anything they should not — they would
+            // simply do the whole purge N times, paying N times the Firestore reads and writes on a
+            // schedule. See ROADMAP §12 #1 and lib/jobLease.ts.
+            scheduler.register({ id: 'retention-purge', exclusive: true, schedule: { kind: 'dailyAtUtc', hour: 3, minute: 0 }, handler: runPurge });
             runPurge(); // once at boot
           }
           // MONITOR ALERTS — the admin is TOLD when build success, preview rate or build time leaves
@@ -782,6 +786,21 @@ setInterval(() => {
                 .catch(() => { /* monitoring must never affect the server */ });
             },
           });
+          /**
+           * ONE INSTANCE RUNS AN EXCLUSIVE JOB (ROADMAP §12 #1). Wired here rather than inside the
+           * scheduler so that module stays free of Firestore and fully testable.
+           *
+           * 🔒 If the lease store cannot be reached, `claimJobRun` returns TRUE and the job runs. A
+           * database hiccup silently cancelling every scheduled job on the platform is a far worse
+           * outcome than running a purge twice.
+           */
+          void import('./src/server/lib/jobLease')
+            .then(({ claimJobRun }) => import('./src/server/lib/serverDb').then(({ getServerDb }) => {
+              // Resolved per CALL, not at wiring time: the db may not be set yet at boot, and a null
+              // store means the job runs — never that it is silently cancelled.
+              scheduler.setClaim((jobId) => claimJobRun(getServerDb() as any, { jobId }));
+            }))
+            .catch(() => { /* no claim wired ⇒ every job runs, exactly as before */ });
           scheduler.start();
         })
         .catch(() => { /* best-effort — the scheduler must never affect boot */ });

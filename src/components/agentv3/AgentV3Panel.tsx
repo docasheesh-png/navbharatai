@@ -5560,7 +5560,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               // user who never opens this door never downloads it.
               userId
                 ? <Suspense fallback={<div className="px-4 py-6 text-xs text-zinc-500">Loading your keys…</div>}>
-                    <VaultManager userId={userId} embedded defaultAppId={state.workspaceId ?? null} />
+                    <VaultManager
+                      userId={userId}
+                      embedded
+                      defaultAppId={state.workspaceId ?? null}
+                      // Named from what this panel already displays in its own header, so the
+                      // sheet says the app's name even if the app-list request fails.
+                      defaultAppName={appName}
+                    />
                   </Suspense>
                 : <div className="px-4 py-6 text-xs text-zinc-500">Sign in to manage your keys.</div>
             ) : (

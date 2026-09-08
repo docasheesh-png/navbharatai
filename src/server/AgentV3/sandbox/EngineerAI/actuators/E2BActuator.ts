@@ -20,6 +20,7 @@ import { postgresWatchdogCommand, mergeEnvVar } from '../../../postgresProvision
 import { resolveTemplateId } from './fullstackRouting';
 import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
 import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
+import { sandboxLifecycle } from '../../../previewWake';
 import { idleLimitMs, reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, shouldMarkPausedAfterFailure } from '../../../sandboxReaper';
 
 /**
@@ -489,10 +490,22 @@ export class E2BActuator implements IEngineerActuator {
    *  otherwise resolveTemplateId falls back to the exact default behaviour (doubly env-gated no-op).
    *  SandboxOpts.template is ignored by Sandbox.connect (which reattaches by id), so sharing this
    *  across create+connect is harmless. */
-  private _opts(extra?: Record<string, unknown>, framework?: string): { timeoutMs: number; apiKey?: string; template?: string } {
+  private _opts(extra?: Record<string, unknown>, framework?: string): { timeoutMs: number; apiKey?: string; template?: string; lifecycle: { onTimeout: 'pause' } } {
     const template = resolveTemplateId(framework);
     return {
       timeoutMs: SANDBOX_TIMEOUT_MS,
+      // 🔒 PAUSE, NEVER KILL, WHEN THE HOUR RUNS OUT (admin 2026-09-08: "2-3 din bad preview band ho
+      // jana. kitna bhi wake up karo, wapas preview nahi chalna").
+      //
+      // E2B's default action at `timeoutMs` is to DELETE the sandbox. Our two sweeps pause an idle
+      // machine long before that — but a machine both of them miss (a deploy-orphan whose pause was
+      // refused three times and then marked paused so the reaper stopped looking) reached the hour
+      // and was destroyed. The durable record still named it, so the next wake tried a dead id,
+      // fell back to an EMPTY machine, and had to reinstall everything from scratch inside a budget
+      // that could not hold it (see previewWake.ts). With `pause`, the missed case costs nothing and
+      // resumes by id with its files and node_modules exactly as the sweeps' own pause does.
+      // Ignored by Sandbox.connect like `template` is — a lifecycle is set at creation.
+      lifecycle: sandboxLifecycle(),
       ...(this.apiKey ? { apiKey: this.apiKey } : {}),
       ...(template ? { template } : {}),
       ...extra,
@@ -718,6 +731,54 @@ export class E2BActuator implements IEngineerActuator {
   private _pauseFailures = new Map<string, number>();
 
   /**
+   * Sandbox OPERATIONS in flight per workspace — a command, an install, a dev-server launch.
+   *
+   * 🔒 THE TORN node_modules (admin 2026-09-08: "kitna bhi wake up karo, wapas preview nahi chalna").
+   * Idle is measured from the last sandbox operation's START, and a single `npm install` on a cold
+   * machine runs longer than the five-minute idle window. The build path was protected by the build
+   * flag; the WAKE path held that flag only for as long as its own 90-second wait, then released it
+   * while the install it had started kept running. The sweep then saw a workspace with no build and
+   * no recent activity, paused the machine mid-install, and left a half-written tree that no later
+   * boot could import. Every wake after that failed identically.
+   *
+   * The class, not the instance: ANY operation still running on a sandbox is proof it is not idle, so
+   * the hold lives in the actuator around the operation itself — not in whichever caller remembered
+   * to raise a flag, and not for the caller's wait but for the work's real duration. A count, because
+   * operations overlap (a health probe during a launch). Released in `finally`, so a thrown command
+   * cannot pin a machine; and the idle clock is re-stamped at RELEASE, so the five minutes start when
+   * the work ends rather than when it began.
+   */
+  private _opsInFlight = new Map<string, number>();
+
+  /** Hold the sandbox for one operation. Returns the release; call it exactly once, in `finally`. */
+  private _holdSandboxOp(workspaceId: string): () => void {
+    this._opsInFlight.set(workspaceId, (this._opsInFlight.get(workspaceId) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const n = (this._opsInFlight.get(workspaceId) ?? 1) - 1;
+      if (n <= 0) this._opsInFlight.delete(workspaceId);
+      else this._opsInFlight.set(workspaceId, n);
+      this._lastActivity.set(workspaceId, Date.now());
+    };
+  }
+
+  /** True while any sandbox operation is still running for this workspace. */
+  private _opInFlight(workspaceId: string): boolean {
+    return (this._opsInFlight.get(workspaceId) ?? 0) > 0;
+  }
+
+  /**
+   * The dev-server launch in flight per workspace, so a second request JOINS it instead of starting
+   * another. A person pressing Wake up while the preview watchdog's own auto-heal is already
+   * installing used to run two `npm install`s into one node_modules at once — the other way a tree
+   * ends up torn. One launch per workspace at a time is the only shape in which that cannot happen;
+   * both callers receive the same result, because both asked the same question ("is it up?").
+   */
+  private _devLaunches = new Map<string, Promise<{ exitCode: number; stdout: string; stderr: string }>>();
+
+  /**
    * Forget a workspace's live sandbox AND everything derived from it.
    *
    * ⚠️ WHY THIS IS ONE FUNCTION (found 2026-08-24, auditing two same-day changes against each other).
@@ -756,7 +817,8 @@ export class E2BActuator implements IEngineerActuator {
     const now = Date.now();
     const limit = idleLimitMs();
     for (const [workspaceId, sandbox] of [...this.sandboxes]) {
-      if (this._buildInFlight(workspaceId, now)) continue;
+      // A build in flight OR an operation still running (see `_opsInFlight`) — never a candidate.
+      if (this._buildInFlight(workspaceId, now) || this._opInFlight(workspaceId)) continue;
       const last = this._lastActivity.get(workspaceId) ?? now;
       if (now - last > limit) {
         // LAST CHECK BEFORE A PAUSE THAT CAN BREAK A RUNNING APP. A keep-alive ping from the user's
@@ -1212,6 +1274,9 @@ export class E2BActuator implements IEngineerActuator {
    * `ran: false`. Never throws — the caller decides what to do with an honest failure.
    */
   async ensureDependencies(workspaceId: string): Promise<{ ok: boolean; ran: boolean; log: string }> {
+    // Held for the install's real duration — an install is the longest single sandbox operation
+    // there is, and the one the idle sweep must never interrupt (see `_opsInFlight`).
+    const release = this._holdSandboxOp(workspaceId);
     try {
       const sandbox = await this.getSandbox(workspaceId);
       const hasPkg = await sandbox.files.exists(`${WORKSPACE_ROOT}/package.json`).catch(() => false);
@@ -1226,10 +1291,36 @@ export class E2BActuator implements IEngineerActuator {
       return { ok: res.success, ran: true, log: res.log };
     } catch (err: any) {
       return { ok: false, ran: false, log: err?.message ? String(err.message) : String(err) };
+    } finally {
+      release();
     }
   }
 
+  /**
+   * Run a command in the workspace — held against the idle sweep for its whole duration, and with
+   * dev-server launches COALESCED per workspace (see `_opsInFlight` and `_devLaunches` for the two
+   * failures this shape closes). The work itself is `_runCommandInner`; this wrapper exists so that
+   * no call site can run a command on a sandbox without the hold, and no two callers can install into
+   * the same node_modules at the same time.
+   */
   async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    const release = this._holdSandboxOp(workspaceId);
+    try {
+      if (isLongRunningCommand(command)) {
+        const inFlight = this._devLaunches.get(workspaceId);
+        if (inFlight) return await inFlight;
+        const tracked: Promise<{ exitCode: number; stdout: string; stderr: string }> = this._runCommandInner(workspaceId, command)
+          .finally(() => { if (this._devLaunches.get(workspaceId) === tracked) this._devLaunches.delete(workspaceId); });
+        this._devLaunches.set(workspaceId, tracked);
+        return await tracked;
+      }
+      return await this._runCommandInner(workspaceId, command);
+    } finally {
+      release();
+    }
+  }
+
+  private async _runCommandInner(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const sandbox = await this.getSandbox(workspaceId);
     usageTracker.record(workspaceId, 'command');
 

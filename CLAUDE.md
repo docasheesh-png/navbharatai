@@ -277,10 +277,66 @@ best. Both layers — reactive autopsy AND proactive world-best suggestions — 
    trust a truncated `tail`) + a manual/boot smoke check for server changes.
    This gate is non-negotiable, even under time or credit pressure.
 
+   🔴 **RUN IT AT THE END, ON THE FINAL STATE OF THE CHANGE — NEVER MID-WAY.**
+   A gate run before the last file was written proves nothing about what is
+   being pushed, and it is worse than no gate at all, because it produces a
+   green result you will honestly report and honestly believe.
+
+   **The real incident (2026-09-08, PR #2778).** I ran `tsc --noEmit`, it passed,
+   and I then ADDED a test file and ran only `vitest`. CI failed with ~60 type
+   errors in `serverDb.ts`, `logStore.ts`, `Deployment.ts` — files the change
+   never touched — and my first three theories (another session broke `main`, a
+   dependency drifted, the lockfile changed) were all wrong. `main` was green;
+   the new test file was the cause. **Both typechecks and the suite go last, in
+   one pass, after the final edit.** Re-running a check you already ran costs a
+   minute; a wrong green costs a red CI and a false diagnosis.
+
+   ⚠️ **`vitest` exiting 0 does NOT mean the suite passed.** A run can print
+   `Tests 1 failed | 19736 passed` and still exit 0 (seen 2026-09-07). Read the
+   `Tests` line itself, and when capturing to a file, `tee` the whole log and
+   grep it for `FAIL` — a `tail -7` shows the summary but hides which test broke.
+
 6. **Redundant-work check before starting anything new.** Before building a
    new feature or fix, grep/search the current `main` to confirm it doesn't
    already exist. This is not optional housekeeping — it is what would have
    prevented PR #1 and PR #4 from being built at all.
+
+   🔴 **"MY SEARCH FOUND NOTHING" IS NOT "IT DOES NOT EXIST." IT USUALLY MEANS
+   I GUESSED THE WRONG WORD.** This is the single most expensive mistake in this
+   repo's history, and it is nearly always a vocabulary failure rather than a
+   missing feature.
+
+   **Four real incidents, three of them in ONE session (2026-09-07/08):**
+   - Searched `mentionFile`, `contextPicker`, `attachFile` → concluded @-mentions
+     did not exist. The real name was **`parseFileMentions`**. I then **overwrote
+     `fileMentions.ts`, destroying a working, tested, wired feature.** Only a
+     TypeScript error on a stale import revealed it. Restored, nothing lost — by
+     luck, not by process.
+   - Searched `acceptHunk`, `diffReview`, `approveChange` → reported "no diff
+     review at all" to the admin. **`DiffViewer.tsx`** had existed all along, 538
+     lines, wired to the Diff tab.
+   - Searched `runMonitorAlertSweep` under `src/` → told the admin the whole
+     alerting path was dead code. It is wired in **`server.ts`**, which sits at
+     the repo ROOT, not under `src/`.
+   - Told the admin the published-app count needed building. The **Publish
+     Capacity** card had shown it on the admin Overview since 2026-08-21.
+
+   **THE METHOD, and all four steps are required:**
+   1. **Search by FILENAME first** — `find src -iname "*mention*"` finds what a
+      content grep for the wrong verb never will. Do this BEFORE concluding.
+   2. **Use at least three different names** for the concept: what a user calls
+      it, what a developer would call it, and what this repo's existing
+      vocabulary would call it.
+   3. **Search the WHOLE repo, not just `src/`.** `server.ts`, `scripts/`,
+      `infra/` and the workflow files are all live code. A scoped search answers
+      a scoped question.
+   4. **Treat "Write" reporting `updated` rather than `created` as a STOP.**
+      That one word is the last warning before a working file is destroyed, and
+      it is the warning I missed.
+
+   And when the search really does come back empty, say **"I could not find it"**
+   to the admin — never "it does not exist". The two are different claims and
+   only one of them is verified.
 
 7. **If you find lost/uncommitted work from a previous session: audit, don't
    restart.** When resuming after an interruption (e.g. a credit cutoff that

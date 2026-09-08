@@ -45890,3 +45890,51 @@ fraction of one that is obvious**, and "it exists" is not the same as "it works 
 needs it".
 
 **Gate:** `tsc --noEmit` clean; 7 new tests; full suite green — 19758 passed, 0 failed.
+
+---
+
+## 2026-09-08 — the two lessons from this session written into CLAUDE.md, where the next session will read them
+
+Admin: *"yeh do cheeze claude.md me hi acche se likh do! apko (claude) hi to yad rakhi nahi"* — and
+that is exactly right. A lesson stated in chat dies with the session; the next one reads `CLAUDE.md`.
+
+Both went into the **safeguard they belong to**, rather than a new section — a session reading
+safeguards #5 and #6 is precisely the session about to make these mistakes.
+
+### Safeguard #5 — run the gate at the END, on the final state
+
+`tsc --noEmit` passed, I then ADDED a test file and ran only `vitest`. CI failed with ~60 type errors
+in files the change never touched, and my first three theories were all wrong (another session broke
+`main`; a dependency drifted; the lockfile changed). `main` was green — the new test file was the
+cause: it sat in `src/components` and imported a server module whose graph reaches axios and
+firebase-admin, dragging the whole server program into the FRONTEND tsconfig.
+
+**A gate run before the last edit is worse than no gate**, because it produces a green result that
+gets honestly reported and honestly believed.
+
+Also recorded there: **`vitest` exiting 0 does not mean the suite passed** — a run printed
+`Tests 1 failed | 19736 passed` and still exited 0 on 2026-09-07. `tee` the whole log and grep it for
+`FAIL`; a `tail -7` shows the summary and hides which test broke.
+
+### Safeguard #6 — "my search found nothing" is not "it does not exist"
+
+Four real incidents are now named in the file, three from this one session:
+
+- Searched `mentionFile` / `contextPicker` / `attachFile`, concluded @-mentions did not exist, and
+  **overwrote `fileMentions.ts` — a working, tested, wired feature.** The real name was
+  `parseFileMentions`. A stale-import TypeScript error is the only thing that revealed it.
+- Searched `acceptHunk` / `diffReview` / `approveChange` and told the admin there was no diff review.
+  `DiffViewer.tsx` had existed all along.
+- Searched `runMonitorAlertSweep` under `src/` and reported the alerting path as dead code. It is
+  wired in `server.ts`, which is at the repo ROOT.
+- Told the admin the published-app count needed building; the Publish Capacity card had shown it
+  since August.
+
+The method is now four required steps: **filename search first**, at least **three different names**,
+search the **whole repo** rather than `src/`, and treat **Write reporting `updated` instead of
+`created` as a STOP** — that one word was the last warning before a working file was destroyed.
+
+And when a search genuinely comes back empty, say *"I could not find it"* to the admin — never *"it
+does not exist"*. Only one of those is a verified claim.
+
+**Gate:** both typechecks clean; full suite green. Documentation only.

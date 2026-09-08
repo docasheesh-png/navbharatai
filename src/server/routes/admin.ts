@@ -61,9 +61,12 @@ import { logStore } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
 import { rotateAllSecrets, getLatestKeyVersion, encrypt, decrypt } from '../lib/secrets';
 import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp';
-import { deploymentStore, type DeploymentStatus } from '../AgentV3/DeploymentStore';
+import { deploymentStore, isLiveDeployment, type DeploymentStatus } from '../AgentV3/DeploymentStore';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
 import { classifyChannels, channelCeilingVerdict, channelCap } from '../AgentV3/channelInventory';
+import { GoogleAuth } from 'google-auth-library';
+import { classifyHostedServices, hostingCapacity } from '../AgentV3/hostedServiceInventory';
+import { appsProject, appsRegion, buildListServicesRequest, parseServiceList } from '../AgentV3/cloudRunHosting';
 import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
 
 /**
@@ -1417,6 +1420,76 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       serviceId: APPLE_SERVICE_ID,
       returnUrl: APPLE_WEB_RETURN_URL,
     });
+  });
+
+  /**
+   * THE NAVBHARAT CLOUD CEILING, made visible (ROADMAP §11) — the sibling of the channel inventory
+   * directly below, and built to the same rules for the same reason.
+   *
+   * 🔴 Cloud Run allows **1,000 services per project per region, and Google does not raise it**. The
+   * admin asked the right question — "aisa to nahi kuch user ke bad hosting band ho jaye" — and §10's
+   * answer applies again: a cap like this is not reached by working apps, it is reached by DEAD ones
+   * nobody deleted. Unpublish now removes the service, and this is where whatever still leaks becomes
+   * visible instead of silently eating the ceiling.
+   *
+   * 🔒 COMPLETENESS GATES RECLAIM, exactly as it does for channels. A service with no record is only
+   * an orphan if the registry was genuinely read in full; otherwise it is 'indeterminate' and nothing
+   * is offered. That distinction is not theoretical — treating it as an orphan is what once listed
+   * every live app as reclaimable waste after one Firestore hiccup.
+   */
+  app.get('/api/admin/hosting/services', verifyAdminToken, async (_req: Request, res: Response) => {
+    try {
+      const project = appsProject();
+      if (!project.projectId) {
+        // Hosting is not switched on. That is not an error, and it is not "zero used" either.
+        res.json({ available: false, reason: project.problem, message: project.message });
+        return;
+      }
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const token = await auth.getAccessToken();
+      if (!token) throw new Error('Could not obtain a Google auth token for the apps project.');
+
+      const region = appsRegion();
+      const names: string[] = [];
+      let pageToken = '';
+      let servicesComplete = true;
+      // Paged, and bounded: the cap is 1,000, so more than a dozen pages means something is wrong
+      // with the loop rather than with the account.
+      for (let page = 0; page < 15; page++) {
+        const req2 = buildListServicesRequest(String(token), project.projectId, region, 100, pageToken);
+        const r = await fetch(req2.url, { method: req2.method, headers: req2.headers });
+        if (!r.ok) { servicesComplete = false; break; }
+        const parsed = parseServiceList(await r.json().catch(() => null));
+        names.push(...parsed.names);
+        pageToken = parsed.nextPageToken;
+        if (!pageToken) break;
+        if (page === 14) servicesComplete = false;   // more pages than the cap can justify
+      }
+
+      const reg = await deploymentStore.listWithCompleteness({ limit: 500 });
+      const records = reg.records
+        .map((d: any) => ({ workspaceId: String(d?.workspaceId ?? ''), live: isLiveDeployment(d) }))
+        .filter((r) => r.workspaceId);
+      const classified = classifyHostedServices(names, records, reg.complete && servicesComplete);
+      res.json({
+        available: true,
+        project: project.projectId,
+        region,
+        capacity: hostingCapacity(classified),
+        services: classified,
+        registryComplete: reg.complete,
+        servicesComplete,
+        ...(reg.complete && servicesComplete ? {} : {
+          warning: 'This inventory is INCOMPLETE, so nothing is offered for reclaim: a service missing '
+            + 'a record here may simply be a record we could not read. Reload before acting.',
+        }),
+      });
+    } catch (e: any) {
+      // An unreadable list is NOT "zero services in use" — reporting a made-up all-clear on the one
+      // number this endpoint exists for would be worse than reporting nothing.
+      console.error('[ADMIN] Hosted service inventory error:', e?.message);
+      res.status(502).json({ error: 'The hosting inventory could not be read, so no capacity figure is available.' });
+    }
   });
 
   app.get('/api/admin/hosting/channels', verifyAdminToken, async (_req: Request, res: Response) => {

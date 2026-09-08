@@ -130,8 +130,30 @@ function shortHash(input: string, len = 8): string {
  * with one, 63 characters. The readable half is a courtesy to whoever opens the console; the hash is
  * what guarantees uniqueness. PURE.
  */
+/**
+ * The workspace's fingerprint inside its service name — the half that never changes.
+ *
+ * 🔴 WHY THIS IS EXPORTED, and it is a real defect it prevents. A service name is `<app-slug>-<hash>`,
+ * and the slug comes from the app's NAME, which the user can change. Matching a service to a workspace
+ * by its full name therefore breaks the moment somebody renames their app: the live service stops
+ * matching any record, the inventory calls it an ORPHAN, and an orphan is offered for reclaim — which
+ * deletes it. A rename would take the app off the internet.
+ *
+ * The hash is derived from the workspace id alone, so it survives every rename. Matching on it is what
+ * makes the inventory safe. PURE.
+ */
+export function workspaceServiceTag(workspaceId: string): string {
+  return shortHash(String(workspaceId ?? ''));
+}
+
+/** Does this Cloud Run service belong to this workspace? Rename-proof — see workspaceServiceTag. PURE. */
+export function serviceBelongsTo(service: string, workspaceId: string): boolean {
+  const tag = workspaceServiceTag(workspaceId);
+  return !!tag && String(service ?? '').endsWith(`-${tag}`);
+}
+
 export function serviceNameFor(workspaceId: string, appName?: string | null): string {
-  const hash = shortHash(String(workspaceId ?? ''));
+  const hash = workspaceServiceTag(workspaceId);
   const slug = String(appName ?? '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -250,6 +272,82 @@ export function buildMakePublicRequest(
     headers: runHeaders(token),
     body: JSON.stringify({ policy: { bindings: [{ role: 'roles/run.invoker', members: ['allUsers'] }] } }),
   };
+}
+
+/**
+ * 🔴 THE CEILING THIS EXISTS FOR: **1,000 Cloud Run services per project per region, and Google does
+ * not raise it** (verified 2026-09-07). It is a hard cap, not a quota request.
+ *
+ * That is the same shape as the Firebase channel ceiling in ROADMAP §10, and §10's lesson is the one
+ * that matters here: the cap was not reached by working apps, it was reached by DEAD ones nobody
+ * deleted. A hosted app that is unpublished must give its slot back, or the ceiling arrives early and
+ * for a stupid reason.
+ */
+export const SERVICES_PER_PROJECT_CAP = 1000;
+
+/** Remove a hosted app's service, giving its slot back. */
+export function buildDeleteServiceRequest(
+  token: string, projectId: string, region: string, service: string,
+): RunRequest {
+  return {
+    url: `${RUN_API}/${servicePath(projectId, region, service)}`,
+    method: 'DELETE',
+    headers: runHeaders(token),
+  };
+}
+
+/** List the services that EXIST — the only count the cap actually applies to. */
+export function buildListServicesRequest(
+  token: string, projectId: string, region: string, pageSize = 100, pageToken = '',
+): RunRequest {
+  const params = new URLSearchParams({ pageSize: String(Math.max(1, Math.min(1000, pageSize))) });
+  if (pageToken) params.set('pageToken', pageToken);
+  return {
+    url: `${RUN_API}/projects/${projectId}/locations/${region}/services?${params.toString()}`,
+    method: 'GET',
+    headers: runHeaders(token),
+  };
+}
+
+/** The service ids in a list response, plus the token for the next page. PURE. */
+export function parseServiceList(raw: unknown): { names: string[]; nextPageToken: string } {
+  const r = raw && typeof raw === 'object' ? raw as Record<string, any> : null;
+  const rows = Array.isArray(r?.services) ? r!.services : [];
+  const names: string[] = [];
+  for (const s of rows) {
+    const full = typeof s?.name === 'string' ? s.name : '';
+    const leaf = full.split('/').pop() ?? '';
+    if (leaf) names.push(leaf);
+  }
+  return { names, nextPageToken: typeof r?.nextPageToken === 'string' ? r.nextPageToken : '' };
+}
+
+/**
+ * Delete a hosted app's service. NEVER throws.
+ *
+ * 🔒 A 404 IS SUCCESS. Unpublishing an app whose service is already gone must not report a failure —
+ * the caller's goal is "this app is not hosted any more", and it is already true. Idempotent by
+ * construction, so a retried takedown can never fail on its second attempt.
+ */
+export async function deleteHostedService(
+  opts: { token: string; projectId: string; region: string; service: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: boolean; alreadyGone: boolean; message: string }> {
+  try {
+    const req = buildDeleteServiceRequest(opts.token, opts.projectId, opts.region, opts.service);
+    const res = await fetchImpl(req.url, { method: req.method, headers: req.headers });
+    if (res.status === 404) return { ok: true, alreadyGone: true, message: '' };
+    if (!res.ok) {
+      return { ok: false, alreadyGone: false, message: hostingFailureMessage(res.status, opts.projectId) };
+    }
+    return { ok: true, alreadyGone: false, message: '' };
+  } catch (e) {
+    return {
+      ok: false,
+      alreadyGone: false,
+      message: `Could not reach Google Cloud to remove this app: ${e instanceof Error ? e.message : String(e)}.`,
+    };
+  }
 }
 
 /** A Cloud Run service, narrowed to what we use. */

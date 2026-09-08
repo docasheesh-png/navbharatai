@@ -222,7 +222,7 @@ import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } fr
 import { repoAvailableForDeploy, resolveDeployRepo } from '../AgentV3/deployRepoMemory';
 import { decidePushBranch } from '../AgentV3/pushAppTarget';
 import { hostingAvailability, hostAppOnNavBharatCloud } from '../AgentV3/hostApp';
-import { appsProject, serviceNameFor } from '../AgentV3/cloudRunHosting';
+import { appsProject, appsRegion, serviceNameFor, deleteHostedService } from '../AgentV3/cloudRunHosting';
 import { readHostingUsage, usageGapNote } from '../AgentV3/hostingUsage';
 import {
   hostingCostUsd, hostingBillableUsd, hostingBillingEnabled, hostingMarkupPct, hostingCostNote,
@@ -6989,8 +6989,44 @@ async function noteBuildOutcome(
       return;
     }
 
+    /**
+     * 🔴 GIVE THE HOSTING SLOT BACK (ROADMAP §11, after the admin asked "aisa to nahi kuch user ke bad
+     * hosting band ho jaye").
+     *
+     * Cloud Run allows **1,000 services per project per region and Google does not raise it**. §10's
+     * lesson about the Firebase channel ceiling applies exactly: the cap is not reached by working
+     * apps, it is reached by DEAD ones nobody deleted. An unpublished app whose service survives costs
+     * nothing to run (it scales to zero) and still holds a slot forever — so the ceiling would arrive
+     * early, and for the stupidest possible reason.
+     *
+     * 🔒 BEST-EFFORT ON PURPOSE, AND ONLY IN THIS DIRECTION. The static site is already down by the
+     * time we get here, which is what the user asked for; failing their takedown because a Cloud Run
+     * delete did not answer would be refusing to do the thing that already succeeded. A service that
+     * survives is waste, and `hostedServiceInventory` classifies exactly that as reclaimable — it is
+     * visible rather than lost. The reverse order would not be safe, which is why the channel delete
+     * above still gates the response.
+     */
+    let hostedSlotFreed: boolean | null = null;
+    try {
+      const project = appsProject();
+      if (project.projectId) {
+        const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+        const token = await auth.getAccessToken().catch(() => null);
+        if (token) {
+          const convo = await getConversationStore().get(workspaceId).catch(() => null);
+          const del = await deleteHostedService({
+            token: String(token),
+            projectId: project.projectId,
+            region: appsRegion(),
+            service: serviceNameFor(workspaceId, convo?.appName || convo?.title || null),
+          });
+          hostedSlotFreed = del.ok;
+        }
+      }
+    } catch { /* the takedown the user asked for has already happened — never fail it on this */ }
+
     const marked = await deploymentStore.setStatus(workspaceId, 'unpublished').catch(() => false);
-    try { audit('APP_UNPUBLISHED_BY_OWNER', { workspaceId, userId: userId ?? 'anon', registryUpdated: marked }); }
+    try { audit('APP_UNPUBLISHED_BY_OWNER', { workspaceId, userId: userId ?? 'anon', registryUpdated: marked, hostedSlotFreed }); }
     catch { /* audit never blocks */ }
     res.json({
       ok: true,

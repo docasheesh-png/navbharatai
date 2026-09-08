@@ -45855,3 +45855,38 @@ rather than trusting the icon gallery.
 
 **Gate:** both typechecks clean; 64 MCP tests (46 + 13 + the dead-code guard); full suite green —
 **19751 passed, 0 failed**. AppKnowledgeBase gains `connected_services`.
+
+---
+
+## 2026-09-08 — "Published apps X of Y" as a tile, because the number existed and nobody saw it
+
+The admin asked for the published-app count against the limit on the admin home page. **It was already
+there** — the Publish Capacity card has shown `"N of about 50 hosting channels in use"`, colour-coded,
+on the Overview tab since 2026-08-21.
+
+**That the admin did not know it existed IS the finding.** A ceiling that stops publishing for EVERY
+user at once was sitting under four rows of tiles, in a card that only appears once the channel list
+loads. Correct, honest, and effectively invisible.
+
+So the number moved to where numbers are read: a **Published Apps** tile in the stat row, showing
+`used / cap` with the slots remaining and how many are reclaimable.
+
+Three things it deliberately does:
+
+- **Reads the SAME verdict the card below it reads.** Not `channels.channels.length` — two
+  independently-derived numbers on one screen is how an admin stops trusting either.
+- **Shows "—", never "0", when the list cannot be read**, with the sub-line "not a count of zero".
+  Reporting a failed read as "no apps published" is the exact dishonesty
+  `/api/admin/hosting/channels` already refuses ("the ceiling is UNKNOWN, not clear") — the tile holds
+  the same line.
+- **Same colour thresholds** as the card: amber at 70%, red at 90%, early enough to still act.
+
+### Why this was worth doing rather than answering "it's already there"
+
+It is the fourth time in two days that something already built was hard to find — three of them cost
+me real work (`DiffViewer`, `fileMentions`, the alert sweep), and one nearly destroyed a working file.
+The pattern is the same in the product as in the codebase: **a capability nobody can find is worth a
+fraction of one that is obvious**, and "it exists" is not the same as "it works for the person who
+needs it".
+
+**Gate:** `tsc --noEmit` clean; 7 new tests; full suite green — 19758 passed, 0 failed.

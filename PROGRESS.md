@@ -45985,3 +45985,81 @@ the test.
 **Gate:** `tsc --noEmit` (frontend + server) clean; FULL suite **1459 files / 19430 tests green**.
 Verified to bite: reverting the catch to the old comment-only body fails the two rewritten tests by
 name.
+
+---
+
+## 2026-09-08 — the preview that dies after 2-3 days and never wakes again: four links, one chain (admin: "kitna bhi wake up karo, wapas preview nahi chalna")
+
+**The report (admin, verbatim).** *"v5 dwara app bana, e2b live preview chalana. aur 2-3 din bad preview
+band ho jana. kitna bhi wake up karo, wapas preview nahi chalna. pure flow ko 0 se investigat karo … user
+chahe 1 sal baad preview chalaye, preview chalna hi chalna chahiye."* Plus a second question: what does
+NavBharatAI do when a GitHub app is on port 3000 and we try 5000?
+
+**Investigated from zero: build → sandbox → idle sweep → durable record → orphan reaper → E2B lifetime →
+wake (`preview-diagnose`) → install → dev server → recipe → door.** The preview did not die of one bug; it
+died of a CHAIN, each link individually "handled" and together fatal:
+
+1. **E2B KILLS, not pauses, at the hour mark — and we never told it otherwise.** `_opts()` passed
+   `timeoutMs` but no `lifecycle`; E2B's default `onTimeout` is `kill`. Both sweeps pause an idle machine
+   long before that — but a machine both miss (a deploy-orphan whose pause was refused three times, then
+   marked `pausedAt` so the reaper stopped looking) reached the hour and was DELETED. The durable record
+   still named it, so the next wake tried a dead id, fell back to a fresh EMPTY machine, and had to
+   reinstall from scratch. **Fix:** `previewWake.ts` `sandboxLifecycle()` = `{ onTimeout: 'pause' }`,
+   applied in `_opts` (before `...extra`). Deliberately NO `autoResume` — resuming stays OUR capped,
+   build-aware decision (door + wake), never a stale tab's.
+2. **The wake gave that cold revive 90 seconds.** The one `runCommand` inside it contains the deps-stale
+   check + `npm install` (60-180 s cold, own 5-min bound) + 25 s port wait + up to two recovery rounds (a
+   Postgres re-provision is 120 s alone). The race lost every time on a fresh machine and reported "could
+   not reach the sandbox." **Worse:** on timeout the route's `finally` released `setBuildActive` while the
+   install it started kept running, so the 5-minute idle sweep paused the machine MID-INSTALL and left a
+   torn `node_modules` that no later wake could boot — the exact "kitna bhi wake karo" shape. Sibling: the
+   build's own `preview-server-revive` had the same 90 s. **Fix, two halves:** (a) `previewWakeBudgetMs()`
+   — default 10 min, env `AGENTV3_PREVIEW_WAKE_SECONDS`, clamped [90 s, 30 min], inside Cloud Run's 3600 s
+   request timeout; the stream's 5 s heartbeat keeps the client honest for the whole window. (b) The CLASS
+   fix: `E2BActuator._opsInFlight` — `runCommand` and `ensureDependencies` hold the sandbox for the
+   operation's REAL duration (released in `finally`, idle clock re-stamped at release), and the idle sweep
+   skips any workspace with an operation in flight, on the same guard as the build flag. No caller has to
+   remember a flag any more; the hold lives around the work.
+3. **Two wakes at once = two installs into one tree.** A person pressing Wake up while the preview
+   watchdog's auto-heal was already installing ran parallel `npm install`s — no guard existed. **Fix:**
+   `_devLaunches` — a long-running (dev-server) launch in flight per workspace is JOINED by a second
+   caller, not duplicated; both get the same result. Only long-running commands are coalesced. `runCommand`
+   is now a holding+coalescing wrapper over `_runCommandInner` (the untouched body), so no path can run a
+   command without the hold.
+4. **A wake that re-provisions the database gets an EMPTY one.** The boot's recovery starts a fresh
+   Postgres; the app's migrations ran ONLY on the import path (`detectMigrationCommand`, ~9385). Server up,
+   every data page dead on `relation "x" does not exist`. **Fix:** the wake replays the migrations after
+   the boot, using the SAME pure detector over the same durable files — gated by `shouldMigrateOnWake`,
+   which refuses unless DATABASE_URL is the sandbox's OWN loopback Postgres (`isSandboxLocalDatabaseUrl`).
+   🔒 A user's real Supabase/Neon is never the target of a schema push on a wake. Recorded honestly in the
+   result payload (`dbMigration: applied | failed | not-needed`) and in the boot log the verdict reads.
+
+**Checked and found already correct (no change):** durable files in Firestore carry no TTL (the 1-year
+case rests on them + the recipe); a failed resume already REPLACES the dead id (`touch()` writes the new
+one immediately, so `sandboxStore.clear()` having no callers is not a bug); the door 302s only to a port
+it just saw serving.
+
+**Problem 2 — GitHub app on 3000, we try 5000: answered, no bug found.** Port precedence is script flag →
+`vite.config` → `.env PORT` → `app.listen()` code → framework guess (`declaredAppPort`); Node servers are
+pinned with `PORT=`, Vite with `--port --strictPort`; the real bound port is read from the boot log; if
+the page does not render, the OS is asked which ports are genuinely LISTENING and each is visited (FLIP);
+`EADDRINUSE` frees the named conflicting port and retries. The one soft spot — the wake route's
+`effectivePort` and the actuator's `extractDevPort` derive independently — reads the same sources and was
+left alone.
+
+**Honest open item (rule 6):** E2B's retention of a PAUSED sandbox is not stated in the SDK; docs suggest
+~30 days. So "1 saal baad" does NOT rely on the paused VM surviving — it relies on the durable files +
+recipe + a wake that can rebuild a fresh machine end to end, which is exactly what links 2-4 make work.
+A paused VM surviving is the fast path, not the guarantee.
+
+**Tests:** `tests/previewWakeLifecycle.test.ts` (17) — pure decisions for the lifecycle, the budget
+(default/env/clamp), the loopback-only DB rule, the `.env` reader (prefix keys must not match), the
+three-way migration gate; source pins for `_opts` lifecycle, the sweep guard order, hold+release in
+`finally` on both methods, the coalesced launch, and the route wiring/order. Pre-existing
+`sandboxIdleBuildAware`, `sandboxPauseFailure`, `sandboxDropState`, `ImportPreview` suites untouched and
+green.
+
+**Gate (final state):** `tsc --noEmit` (frontend) + `tsc -p tsconfig.server.json` clean; FULL suite
+**1491 files / 20012 tests green, 1 skipped** (first run caught one pre-existing source-pin test,
+`previewKeepAliveWiring` #4, whose 1800-char window my 3-line sweep comment had pushed `pauseSandbox`
+out of — the comment was shortened to one line, the guard is unchanged; re-run green).

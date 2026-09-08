@@ -167,6 +167,7 @@ import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
+import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
 import { decideGreenGuard, restorePlan, greenGuardMessage, greenGuardUnverifiedMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
@@ -4657,12 +4658,16 @@ async function noteBuildOutcome(
       // exactly like the chat build path (deriveWorkspaceId → ensureWorkspace(resumeSandboxId) → hydrate).
       // Best-effort: on any failure we fall through to the structure check — never worse than today.
       sendStage('Restoring your project into the sandbox', 6);
+      // The durable files, loaded ONCE for this wake and reused by the port resolver and the migration
+      // decision below — three reads of the same Firestore index would be three chances to disagree.
+      let durableFiles: Record<string, string> | null = null;
       try {
         const resumeSandboxId = sandboxResumeEnabled()
           ? (await sandboxStore.get(workspaceId).catch(() => null)) ?? undefined
           : undefined;
         await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
         const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+        durableFiles = saved;
         // SELF-HEAL the recurring "No package.json found" (admin, 2026-07-21). A hydrated vite-react
         // project that has real source files but LOST its package.json (a scaffold gap, or a save that
         // dropped it) is RUNNABLE the moment the foundation is synthesized — so heal it here instead of
@@ -4739,7 +4744,7 @@ async function noteBuildOutcome(
        */
       let codePort: number | null = null;
       if (scriptPort === null) {
-        const src = await loadWorkspaceFiles(workspaceId).catch(() => null);
+        const src = durableFiles ?? await loadWorkspaceFiles(workspaceId).catch(() => null);
         if (src) codePort = declaredAppPort(src, pkgRaw)?.port ?? null;
       }
       const effectivePort = scriptPort ?? codePort ?? expectedPort;
@@ -4756,9 +4761,20 @@ async function noteBuildOutcome(
         finish({ ok: false, portListening: false, reason, detail: '' });
         return;
       }
-      // 90s — matches the SimpleBuilder fastPreview default (deps install + start + port-wait +
-      // one retry can legitimately take that long on a cold sandbox; a shorter cap would report a
-      // false "could not reach the sandbox" for an install that's simply still running).
+      // 🔒 A BUDGET DERIVED FROM THE WORK, NOT A 90-SECOND WALL (admin 2026-09-08: "2-3 din bad
+      // preview band ho jana. kitna bhi wake up karo, wapas preview nahi chalna").
+      //
+      // This used to be `90_000`, with a comment saying a cold install "can legitimately take that
+      // long". It cannot. On a fresh machine — which is what a wake meets after E2B has killed the old
+      // one — the one runCommand below contains: a deps-stale check, `npm install` (60-180 s cold, its
+      // own 5-minute bound), a 25-second port wait, and up to two recovery rounds of which a Postgres
+      // re-provision alone is 120 s. The 90-second race lost EVERY time on a cold machine, reported
+      // "could not reach the sandbox" for an install that was still running — and then, far worse,
+      // the `finally` below released the sandbox hold while that install continued, so the idle sweep
+      // paused the machine mid-install and left a torn node_modules that no later wake could boot.
+      // The actuator now holds the machine for the operation's real duration (E2BActuator
+      // `_opsInFlight`), and the wait here is sized to the work (previewWake.ts). The stream's
+      // heartbeat keeps the client honest for the whole window.
       sendStage('Installing dependencies & starting the dev server', 35);
       const bootStartedAt = Date.now();
       if (streaming) {
@@ -4800,10 +4816,41 @@ async function noteBuildOutcome(
         const note = bootEnvNote(envResult);
         if (note) sendStage(note, 70);
       } catch { /* the app boots as it would have — this can only add keys, never remove them */ }
-      const result = await withTimeout(actuator.runCommand(workspaceId, devRunCommand), 90_000, 'preview-diagnose');
+      const result = await withTimeout(actuator.runCommand(workspaceId, devRunCommand), previewWakeBudgetMs(), 'preview-diagnose');
+      let combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+      // 🔒 THE TABLES, NOT JUST THE SERVER (admin 2026-09-08, the third link in the dead-preview chain).
+      //
+      // When the wake meets a fresh machine, the boot's own recovery re-provisions Postgres — a NEW,
+      // EMPTY database. The app's migrations ran only on the IMPORT path (detectMigrationCommand,
+      // ~9385), never here, so the server came up and every page that reads data died on
+      // `relation "x" does not exist`. Replaying them is the same step the import runs, decided by
+      // the same pure detector over the same durable files, and it runs only when ALL of: the app
+      // needs a database, it ships its own migration mechanism, and DATABASE_URL points at the
+      // sandbox's OWN loopback Postgres. A user's real Supabase/Neon is never the target of a schema
+      // push on a wake — that is a decision only they may make. Bounded, best-effort, recorded
+      // honestly in the result; a failure changes nothing about the boot verdict below.
+      let dbMigration: 'applied' | 'failed' | 'not-needed' = 'not-needed';
+      try {
+        const migration = durableFiles ? detectMigrationCommand(durableFiles) : null;
+        if (migration && durableFiles && detectNeedsDatabase(durableFiles)) {
+          const envText = await actuator.readFile(workspaceId, '.env').catch(() => '');
+          const databaseUrl = envFileValue(envText, 'DATABASE_URL');
+          if (shouldMigrateOnWake({ needsDb: true, hasMigration: true, databaseUrl })) {
+            sendStage(`Creating your app's database tables (${migration.label})`, 80);
+            const mres = await withTimeout(
+              actuator.runCommand(workspaceId, `${shellEnvAssignment('DATABASE_URL', databaseUrl!)} ${migration.command}`),
+              150_000, 'preview-diagnose-migrate',
+            );
+            dbMigration = mres.exitCode === 0 ? 'applied' : 'failed';
+            combined += `\n[wake] ${migration.label} → ${dbMigration}${dbMigration === 'failed' ? `\n${(mres.stdout + mres.stderr).split('\n').slice(-12).join('\n')}` : ''}`;
+          }
+        }
+      } catch (e) {
+        dbMigration = 'failed';
+        combined += `\n[wake] database migrations did not finish: ${e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200)}`;
+      }
       if (heartbeat) clearInterval(heartbeat);
       sendStage('Running the health check', 85);
-      const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
       const { up, port } = parseDevServerHealthCheck(combined);
       // A port that ONCE genuinely rendered THIS app outranks any guess about it — the health check's
       // own reading still wins, because that is a live observation rather than a memory.
@@ -4856,6 +4903,7 @@ async function noteBuildOutcome(
         finish({
           ok: served.rendered,
           recipeSaved,
+          dbMigration,
           portListening: true,
           port: winnerPort,
           previewUrl,
@@ -15056,7 +15104,10 @@ async function noteBuildOutcome(
             try {
               // The health-check wrapper in devServerHost recognises this command, installs stale deps
               // and waits for the port, so this one call is the whole restart.
-              await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 90_000, 'preview-server-revive');
+              // Sized to the work, not to a wall — the same budget the wake route uses, for the same
+              // reason (previewWake.ts): a restart that has to reinstall cannot finish in 90 s, and a
+              // timeout here never stops the install it started.
+              await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), previewWakeBudgetMs(), 'preview-server-revive');
             } catch { /* the re-check below is the real verdict — a failed restart just means another try */ }
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',

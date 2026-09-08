@@ -1047,6 +1047,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Direct provider cost', 'bg-orange-500', Cpu)}
               </div>
 
+              {/* PUBLISHED APPS, as a NUMBER among the numbers.
+                  The full Publish Capacity card below has carried this figure since 2026-08-21 — but it
+                  sits under four rows of tiles, and the admin did not know it existed. A ceiling that
+                  stops publishing for EVERY user at once has to be readable at a glance, next to the
+                  other counts, not found by scrolling.
+
+                  Same source as that card, so the two can never disagree. The colour follows the same
+                  verdict: amber at 70%, red at 90%. An unreadable list shows "—", never "0" — reporting
+                  a failed read as "no apps published" would be the exact dishonesty the endpoint itself
+                  refuses. */}
+              <div className="grid grid-cols-1 gap-4">
+                {statCard(
+                  'Published Apps',
+                  channelsError || !channels ? '—' : `${channels.verdict.used} / ${channels.verdict.cap}`,
+                  channelsError || !channels
+                    ? 'Could not read the list — not a count of zero'
+                    : `${channels.verdict.remaining} more can be published${channels.verdict.reclaimable > 0 ? ` · ${channels.verdict.reclaimable} reclaimable` : ''}`,
+                  channelsError || !channels ? 'bg-white/20'
+                    : channels.verdict.level === 'critical' ? 'bg-red-500'
+                    : channels.verdict.level === 'warn' ? 'bg-amber-500'
+                    : 'bg-emerald-500',
+                  Globe,
+                )}
+              </div>
+
               {/* ── THE PUBLISH CEILING (ROADMAP §10) ────────────────────────────────────────
                   Every published app holds one Firebase Hosting channel, and the pool is capped per
                   site. Past the cap, publishing stops for EVERY user at once. This is the only place

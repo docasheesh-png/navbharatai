@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE,
+  snapshotStillCurrent, SNAPSHOT_WAKING_NOTE,
 } from './previewSnapshot';
 import { makeChannelId } from './Deployment';
 import { packageJson } from './sandbox/AppMakerLab/generator/templates/ViteReactProviderContents';
@@ -56,17 +57,55 @@ describe('snapshotSuitable — a static copy must not pretend to be a server', (
   });
 });
 
-describe('shouldServeSnapshot — only when the machine is genuinely gone', () => {
+describe('shouldServeSnapshot — always when the machine is gone, and while it STARTS only on proof', () => {
   const url = 'https://site--sn-abc-123.web.app';
+  const TAKEN = 1_700_000_000_000;
 
   it('serves it when there is no sandbox at all', () => {
     expect(shouldServeSnapshot({ enabled: true, doorState: 'asleep', snapshotUrl: url })).toBe(true);
   });
 
-  it('does NOT serve it while a sandbox is still starting', () => {
-    // That machine is usually seconds from answering. Replacing a live app that is still booting with
-    // a STALE copy of itself would lose the very edits the user is waiting to see.
+  it('a starting machine with NO evidence still gets the waiting page — unchanged, and why', () => {
+    // REPOINTED, NOT RELAXED (2026-09-08). This case used to be a blanket refusal of 'starting', on the
+    // reasoning that such a machine "is usually seconds from answering" so a stale copy would lose the
+    // edits the user is waiting to see. The first half stopped being true when the wake budget went
+    // from 90 seconds to ten minutes for a cold install (previewWake.ts); the second half is real, and
+    // is now answered with EVIDENCE instead of a refusal. With no stamps to check there is no evidence,
+    // so the original outcome stands exactly — which is what this line still pins.
     expect(shouldServeSnapshot({ enabled: true, doorState: 'starting', snapshotUrl: url })).toBe(false);
+  });
+
+  it('serves it while starting when nothing has changed since it was taken', () => {
+    expect(shouldServeSnapshot({
+      enabled: true, doorState: 'starting', snapshotUrl: url, snapshotAt: TAKEN, lastChangeAt: TAKEN - 60_000,
+    })).toBe(true);
+    // The boundary: a write in the same millisecond as the snapshot is not a later app.
+    expect(shouldServeSnapshot({
+      enabled: true, doorState: 'starting', snapshotUrl: url, snapshotAt: TAKEN, lastChangeAt: TAKEN,
+    })).toBe(true);
+  });
+
+  it('🔒 refuses the moment anything was written after it — the edits the user is waiting for', () => {
+    expect(shouldServeSnapshot({
+      enabled: true, doorState: 'starting', snapshotUrl: url, snapshotAt: TAKEN, lastChangeAt: TAKEN + 1,
+    })).toBe(false);
+  });
+
+  it('🔒 an unknown stamp is NOT proof — either one missing means the waiting page', () => {
+    for (const bad of [null, undefined, 0, -1, NaN, 'yesterday' as unknown as number]) {
+      expect(shouldServeSnapshot({
+        enabled: true, doorState: 'starting', snapshotUrl: url, snapshotAt: TAKEN, lastChangeAt: bad,
+      }), `lastChangeAt=${String(bad)}`).toBe(false);
+      expect(shouldServeSnapshot({
+        enabled: true, doorState: 'starting', snapshotUrl: url, snapshotAt: bad, lastChangeAt: TAKEN,
+      }), `snapshotAt=${String(bad)}`).toBe(false);
+    }
+  });
+
+  it('the stamps never affect the ASLEEP case — a gone machine has no live app to lose edits to', () => {
+    expect(shouldServeSnapshot({
+      enabled: true, doorState: 'asleep', snapshotUrl: url, snapshotAt: TAKEN, lastChangeAt: TAKEN + 999_999,
+    })).toBe(true);
   });
 
   it('does nothing without a snapshot, or with a junk one', () => {
@@ -74,10 +113,35 @@ describe('shouldServeSnapshot — only when the machine is genuinely gone', () =
     expect(shouldServeSnapshot({ enabled: true, doorState: 'asleep', snapshotUrl: '' })).toBe(false);
     expect(shouldServeSnapshot({ enabled: true, doorState: 'asleep', snapshotUrl: 'not-a-url' })).toBe(false);
     expect(shouldServeSnapshot({ enabled: true, doorState: 'asleep', snapshotUrl: 'javascript:alert(1)' })).toBe(false);
+    // …and a junk url is refused on the starting path too, however good the evidence.
+    expect(shouldServeSnapshot({
+      enabled: true, doorState: 'starting', snapshotUrl: 'javascript:alert(1)', snapshotAt: TAKEN, lastChangeAt: TAKEN - 1,
+    })).toBe(false);
   });
 
-  it('the kill switch restores the retry page', () => {
+  it('the kill switch restores the retry page — on BOTH paths', () => {
     expect(shouldServeSnapshot({ enabled: false, doorState: 'asleep', snapshotUrl: url })).toBe(false);
+    expect(shouldServeSnapshot({
+      enabled: false, doorState: 'starting', snapshotUrl: url, snapshotAt: TAKEN, lastChangeAt: TAKEN - 1,
+    })).toBe(false);
+  });
+});
+
+describe('snapshotStillCurrent — the evidence the starting case rests on', () => {
+  const TAKEN = 1_700_000_000_000;
+
+  it('true only when the last write is not newer than the snapshot', () => {
+    expect(snapshotStillCurrent(TAKEN, TAKEN - 1)).toBe(true);
+    expect(snapshotStillCurrent(TAKEN, TAKEN)).toBe(true);
+    expect(snapshotStillCurrent(TAKEN, TAKEN + 1)).toBe(false);
+  });
+
+  it('🔒 unknown is never proof — the direction that costs a spinner, never a wrong app', () => {
+    expect(snapshotStillCurrent(TAKEN, null)).toBe(false);
+    expect(snapshotStillCurrent(null, TAKEN)).toBe(false);
+    expect(snapshotStillCurrent(undefined, undefined)).toBe(false);
+    expect(snapshotStillCurrent(0, 0)).toBe(false);
+    expect(snapshotStillCurrent(NaN, NaN)).toBe(false);
   });
 });
 
@@ -90,6 +154,25 @@ describe('what the user is told', () => {
   it('never implies the app is broken, and names no vendor or machine', () => {
     expect(SNAPSHOT_NOTE).not.toMatch(/error|broken|failed|crash/i);
     expect(SNAPSHOT_NOTE).not.toMatch(/e2b|sandbox|firebase|hosting|vm|container/i);
+  });
+
+  it('the WAKING note says the copy is current and that the live one arrives by itself', () => {
+    // It is only ever shown when nothing changed since the snapshot, so calling it "the last built
+    // version" here would invent a worry the evidence has already ruled out. And the user must not be
+    // asked to do anything: the swap is automatic.
+    expect(SNAPSHOT_WAKING_NOTE).toContain('current app');
+    expect(SNAPSHOT_WAKING_NOTE).toMatch(/by itself/i);
+    expect(SNAPSHOT_WAKING_NOTE).not.toContain('last built version');
+    expect(SNAPSHOT_WAKING_NOTE).not.toMatch(/expired|Send a message/i);
+  });
+
+  it('the two notes are genuinely different — one for a gone machine, one for a starting one', () => {
+    expect(SNAPSHOT_WAKING_NOTE).not.toBe(SNAPSHOT_NOTE);
+  });
+
+  it('the waking note never implies a fault, and names no vendor or machine', () => {
+    expect(SNAPSHOT_WAKING_NOTE).not.toMatch(/error|broken|failed|crash/i);
+    expect(SNAPSHOT_WAKING_NOTE).not.toMatch(/e2b|sandbox|firebase|hosting|vm|container/i);
   });
 });
 

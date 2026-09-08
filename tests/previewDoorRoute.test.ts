@@ -50,7 +50,10 @@ describe('the door route', () => {
     const redirectAt = door.indexOf('res.redirect(302, target)');
     expect(sweepAt).toBeGreaterThan(-1);
     expect(redirectAt).toBeGreaterThan(sweepAt);
-    expect(door).toContain("if (found === null) return page(200, 'starting')");
+    // REPOINTED (2026-09-08): a sweep that finds nothing now goes through `starting()`, which offers
+    // the saved copy before the waiting page. The guarantee this line protects is unchanged — a miss
+    // never falls through to the port redirect — and is now asserted against the helper it calls.
+    expect(door).toContain('if (found === null) return starting();');
   });
 
   it('the PROVEN port leads the sweep — the revival recipe outranks every guess', () => {
@@ -71,15 +74,45 @@ describe('the door route', () => {
     expect(bounded).toBe(awaits);
   });
 
-  it('the snapshot fallback fires only when there is NO sandbox, and never to a probed port', () => {
-    // It is reached inside `if (!sandboxId)`, i.e. the machine is gone rather than starting — and it
-    // redirects to a stored permanent url, not to anything the port sweep produced.
+  it('the GONE-machine snapshot is decided inside `if (!sandboxId)`, before a port is ever probed', () => {
+    // Unchanged since #2613 and still the first thing tried: the machine is gone, so retrying against
+    // it can never work, and it redirects to a stored permanent url rather than to anything the port
+    // sweep produced.
     const gone = door.indexOf('if (!sandboxId) {');
     const snap = door.indexOf('shouldServeSnapshot({');
     const sweep = door.indexOf('buildPortSweepCommand(');
     expect(gone).toBeGreaterThan(-1);
     expect(snap).toBeGreaterThan(gone);
     expect(snap).toBeLessThan(sweep); // decided before a port is ever probed
+  });
+
+  it('🔒 EVERY starting exit offers the saved copy first — one helper, never two copies of the rule', () => {
+    // WIDENED (2026-09-08): a machine that exists but is not answering is now a minutes-long state,
+    // so the saved copy is offered there too — on proof it is still this app (previewSnapshot.ts).
+    // There are TWO such exits in the sweep path, and the reason this is asserted rather than trusted
+    // is that a later edit fixing one and leaving the other would put half the users back on the
+    // spinner with nothing failing to show it.
+    expect(door).toContain('const starting = (): void => {');
+    expect(door).toContain('if (startingSnapshot?.()) return;');
+    expect(door).toContain('if (found === null) return starting();');
+    expect(door).toContain('if (!live) return starting();');
+    // No sweep-path exit may still hand back the raw waiting page. Bounded at the `catch`, which
+    // deliberately DOES answer with the plain page: a request that threw has no trustworthy record to
+    // decide a snapshot from, so the honest fallback there is the waiting page, not a copy we cannot
+    // vouch for. (My first version of this assertion swept the catch in with the rest and failed —
+    // the test was wrong, not the route.)
+    const sweepStart = door.indexOf('buildPortSweepCommand(');
+    const sweepPath = door.slice(sweepStart, door.indexOf('} catch {', sweepStart));
+    expect(sweepPath).not.toContain("return page(200, 'starting')");
+  });
+
+  it('🔒 the starting fallback demands the evidence, and the read that produces it is bounded', () => {
+    // The whole safety of the widening is that a snapshot is only served when nothing has been
+    // written since it was taken. If the stamp stopped being passed, `shouldServeSnapshot` would see
+    // `undefined` and refuse — safe, but silently dead. Pinned so it stays wired.
+    expect(door).toContain('workspaceFilesSavedAt(ws)');
+    expect(door).toContain("'doorLastChange'");
+    expect(door).toMatch(/doorState: 'starting',[\s\S]{0,200}lastChangeAt,/);
   });
 
   it('the branded redirect target goes through applyPreviewDomain like every other preview url', () => {

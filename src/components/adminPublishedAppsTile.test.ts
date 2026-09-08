@@ -2,18 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { channelCeilingVerdict, type ClassifiedChannel } from '../server/AgentV3/channelInventory';
-
 const dash = readFileSync(resolve(__dirname, 'AdminDashboard.tsx'), 'utf8');
 const tile = (() => {
   const at = dash.indexOf("statCard(\n                  'Published Apps'");
   return dash.slice(at, at + 1400);
 })();
-
-const chan = (reclaimable: boolean): ClassifiedChannel => ({
-  channelId: 'v3-x', url: '', updateTime: null, state: reclaimable ? 'unknown' : 'live',
-  workspaceId: reclaimable ? null : 'ws', reclaimable,
-});
 
 describe('Published Apps tile — the ceiling, readable at a glance', () => {
   it('exists on the Overview page', () => {
@@ -43,24 +36,24 @@ describe('Published Apps tile — the ceiling, readable at a glance', () => {
   });
 });
 
-describe('the verdict behind the tile', () => {
-  it('counts used against the cap and reports what is left', () => {
-    const v = channelCeilingVerdict([chan(false), chan(false)], 50);
-    expect(v.used).toBe(2);
-    expect(v.cap).toBe(50);
-    expect(v.remaining).toBe(48);
-    expect(v.level).toBe('ok');
-  });
-
-  it('turns amber at 70% and red at 90% — early enough to still act', () => {
-    const many = (n: number) => Array.from({ length: n }, () => chan(false));
-    expect(channelCeilingVerdict(many(34), 50).level).toBe('ok');
-    expect(channelCeilingVerdict(many(35), 50).level).toBe('warn');
-    expect(channelCeilingVerdict(many(45), 50).level).toBe('critical');
-  });
-
-  it('surfaces how many slots are reclaimable, which is the admin’s way out', () => {
-    const v = channelCeilingVerdict([chan(false), chan(true), chan(true)], 50);
-    expect(v.reclaimable).toBe(2);
-  });
-});
+/**
+ * NOTE ON SCOPE — why this file does NOT import channelCeilingVerdict.
+ *
+ * It did, and that broke CI in a way local checks missed. This file lives under src/components, so
+ * importing a SERVER module pulled the whole server dependency graph (firebase-admin, axios) into the
+ * FRONTEND tsconfig's program, where those node types are not configured — 60 type errors in files
+ * nobody had touched.
+ *
+ * The behaviour of the verdict is already covered by src/server/AgentV3/channelInventory.test.ts,
+ * which runs under the server config where those types resolve. This file's job is the TILE, and it
+ * does that by reading the rendered source — no import needed.
+ *
+ * ⚠️ THE RULE IS NOT "frontend must never import server code" — it does, in eight places, and those
+ * are fine: reportTriage, appId, terminalQuota, AppKnowledgeBase and the rest are PURE. The line is
+ * whether the module's transitive graph reaches a node-only dependency. `channelInventory` does, via
+ * Deployment.ts → axios + firebase-admin. A blanket ban would break the eight legitimate ones.
+ *
+ * No guard was added for this, deliberately: `tsc --noEmit` IS the guard and it caught it exactly as
+ * designed. What failed was the process — the typecheck was run BEFORE this file was written and not
+ * after. Both typechecks belong at the END of a change, not in the middle.
+ */

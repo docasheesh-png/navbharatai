@@ -45938,3 +45938,50 @@ And when a search genuinely comes back empty, say *"I could not find it"* to the
 does not exist"*. Only one of those is a verified claim.
 
 **Gate:** both typechecks clean; full suite green. Documentation only.
+
+---
+
+## 2026-09-08 — the preview "starting" page can spin for an hour, and the bug hid inside its own safety net
+
+**The report.** Admin screenshot, NavBharatAI's native app (Capacitor WebView): the Preview panel's
+own "Your app is starting… this page retries by itself" message, stuck for **one full hour** with no
+escalation to "press Wake up."
+
+**First, a real false lead I ruled out with evidence, not assumption.** The screenshot looked
+identical to the "Closed Port Error" vendor-page class this repo has fixed three times before
+(2026-08-13, 2026-08-22, 2026-08-24, 2026-09-03 — `previewFraming.ts`). Reading that guard's logic
+line by line proved it was NOT the cause here: it correctly kept the raw vendor page off screen this
+time — the "starting" text on screen was genuinely OUR OWN branded page (`previewDoor.ts`'s
+`doorPage('starting')`), not a vendor leak. The fix for that class is working. The bug was one layer
+deeper, inside the safety net that page's own retry logic is supposed to provide.
+
+**Root cause.** `doorPage()`'s retry script has an explicit money-motivated cap — 20 retries × 6s
+(~2 minutes) — because an uncapped self-refresh in an abandoned tab would resume a paused, billed E2B
+VM forever, fighting the idle reaper. Past the cap it shows "Still waiting on your app — press Wake
+up." The counter lives in `sessionStorage`, read inside a `try`. The `catch` existed for exactly one
+reason — a browser that blocks `sessionStorage` (private browsing, Safari ITP, and — the shape that
+actually fired here — a cross-origin iframe nested inside a Capacitor WebView, a well-known storage-
+partitioning trap). Its entire body was a **comment** claiming the page then "retries once per load,
+which is exactly the safe direction." It was not: the throw fires reading `sessionStorage.getItem`,
+before any timer is armed and before the `else` branch that shows the give-up UI is ever reached — so
+NOTHING further happens. No reload, no escalation, no click that could move the page. The two
+*designed* outcomes (auto-retry, or an honest give-up) both require code the throw skips past;
+what the user actually got was a third, undesigned outcome — a permanently frozen spinner — and it
+was silent, because nothing here threw past the `catch` to reveal itself.
+
+**The fix.** Extracted the give-up DOM-swap into one `giveUp()` function and call it from BOTH the
+retry-cap `else` (unchanged behaviour) and the `catch` (the actual fix) — so a storage-blocked context
+gets the SAME escape hatch a maxed-out counter gets, immediately, rather than silence. This is rule 5's
+50/50 law applied literally: a self-heal (the auto-retry) that cannot run its normal path must still
+terminate somewhere a person can act, not nowhere.
+
+**The pre-existing test that pinned the bug, rewritten rather than deleted.** `previewDoor.test.ts` had
+a test titled *"a browser that blocks storage degrades to retrying once per load — the SAFE
+direction"* that asserted the OLD comment text verbatim — i.e., it pinned the exact defect as intended
+behaviour. Rewritten to assert the corrected property (the catch calls `giveUp()`, both trigger paths
+share one function, the escape hatch is genuinely reachable) with the report's own evidence recorded in
+the test.
+
+**Gate:** `tsc --noEmit` (frontend + server) clean; FULL suite **1459 files / 19430 tests green**.
+Verified to bite: reverting the catch to the old comment-only body fails the two rewritten tests by
+name.

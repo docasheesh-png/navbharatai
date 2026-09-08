@@ -581,6 +581,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'connected_services',
+    name: 'Connect your own tools (Notion, Linear, your company\'s service) to the builder',
+    path: 'NavBharatAI Pro v5.0 → More (the … button) → Connected services',
+    description: 'NavBharatAI comes with hundreds of its own tools. This is how you add the ones it does not have — your Notion workspace, your Linear board, your company\'s own internal service, or any service that speaks MCP. Once connected, NavBharatAI can use those tools while building your app: reading your real data, creating real records, working with the systems you already use.\n\nYou give it three things: a short name, the service\'s https address, and a key if the service needs one. NavBharatAI then CHECKS the address and asks the service what it can do BEFORE saving anything — so a service that cannot be reached, or that offers no tools, is never listed as connected. When it works, you are told exactly how many tools were added.\n\nYour key is never shown back to you once saved, and never appears on screen again — to change it, remove the service and add it again. Your keys are yours: a connected service never receives anything belonging to NavBharatAI.\n\nYou can connect up to 5 services per app, and remove any of them at any time with the bin icon.',
+    howToUse: 'Open NavBharatAI Pro v5.0 with an app open, tap More (the … button at the bottom) → Connected services → "Connect a service". Type a short name (like "notion"), paste the service\'s https address, add its key if it needs one, and tap Connect. If it fails, the message says exactly why — a name already used, an address that cannot be reached, or a service that offered no tools. To stop using one, tap the bin icon next to it.',
+    relatedFeatures: ['agentv3_builder', 'settings_secrets', 'api_keys'],
+    keywords: ['mcp', 'connect tool', 'connect service', 'notion', 'linear', 'integration', 'apna tool', 'tool jodo', 'external tool', 'third party tool', 'connect my api', 'company tool', 'mcp server', 'connect notion', 'add integration', 'apne tools', 'bahar ka tool', 'connected services'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'publish_rollback',
     name: 'Undo the last publish — put the previous live version back',
     path: 'NavBharatAI Pro v5.0 → Publish → "Undo last publish — put the previous version back"',

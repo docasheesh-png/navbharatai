@@ -45816,3 +45816,42 @@ Both are the same lesson as the searches that went wrong earlier today: **an ass
 precise as what it actually looks at.**
 
 **Gate:** both typechecks clean; 45 new tests; full suite green.
+
+### Completed the same day — the guard was right, and the feature is whole
+
+The slice above shipped unwired, and `tests/deadCodeGuard.test.ts` refused it by name:
+
+> *Unreachable from src/main.tsx, server.ts and every tooling script … Either wire it up, delete it,
+> or add it to KNOWN_UNREACHABLE with the reason it stays.*
+
+That guard is the second absolute rule made automatic, and it was correct: "built but not wired" is
+exactly the state this project says cannot exist. The allowlist was NOT used — its own comment says
+*"the allowlist is meant to shrink"*, so putting a brand-new file in it to silence a guard would be
+the dishonesty the guard exists to catch. The remaining four pieces were built instead.
+
+- **`McpServerStore.ts`** — one document per workspace (the cap is 5; a document-per-server would cost
+  a query where an array costs a read). 🔒 `listFull` and `listForDisplay` are **two functions, not one
+  optional flag**: the display path never returns the user's key, and a call site cannot leak one by
+  forgetting an argument. The cap is enforced here as well as in `canConnectServer`, because this is
+  the last point before the write and a check that lives only in a route is one a second route misses.
+- **`ToolDispatcher`** — external tools are matched in `default:`, i.e. **after every built-in case**.
+  That is a second, independent defence: the `ext__` prefix keeps the namespaces apart, and reaching
+  `default` last means a built-in always wins even if that guard were somehow bypassed. The tool is
+  resolved against what a server **really advertised** this build, never against the string the model
+  produced — so an invented `ext__x__y` reaches nothing. It never throws: a stranger's server being
+  down must not fail a build that was otherwise fine.
+- **Build wiring** — tools are fetched ONCE before the loop, so a server cannot swap a tool out from
+  under a call the model has already decided to make. Built-ins are concatenated FIRST. Wholly
+  best-effort: a slow, down or hostile service yields no tools and the build proceeds as today.
+- **Three routes** (`mcp/list`, `mcp/connect`, `mcp/remove`) — all owner-verified. Connect runs the
+  shared SSRF guard **before** saving, then **proves** the connection by asking the service for its
+  tools; a service that answers nothing is refused rather than stored as connected-but-useless.
+- **`ConnectedServices.tsx`** in v5's More menu, opening IN PLACE like Keys & Secrets — sending
+  someone to Settings mid-build loses the build, the preview and the chat.
+
+**One thing worth recording for the next session:** `lucide-react`'s installed *types* lag its runtime.
+`Plug` and `Undo2` both exist at runtime and both fail `tsc`. Check the `.d.ts` before picking an icon
+rather than trusting the icon gallery.
+
+**Gate:** both typechecks clean; 64 MCP tests (46 + 13 + the dead-code guard); full suite green —
+**19751 passed, 0 failed**. AppKnowledgeBase gains `connected_services`.

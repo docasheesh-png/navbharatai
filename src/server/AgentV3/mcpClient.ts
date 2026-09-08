@@ -273,3 +273,36 @@ export function formatToolResult(toolName: string, raw: unknown): string {
     clipped ? '[…truncated — the service returned more than can be shown]' : '',
   ].filter(Boolean).join('\n');
 }
+
+/**
+ * The tool definitions handed to the model, in the shape `ClaudeToolDef` requires.
+ *
+ * Kept HERE rather than in ToolCatalog so that everything a stranger's server contributes passes
+ * through one file — the sanitising, the namespacing and the definition are the same decision, and
+ * splitting them across modules is how one of them eventually gets skipped.
+ *
+ * A tool with no description gets a plain factual one rather than an empty string: an empty
+ * description makes the model guess what the tool does, and a guess is what this whole file exists to
+ * prevent.
+ */
+export function externalToolDefs(tools: readonly SafeMcpTool[]): Array<{
+  name: string;
+  description: string;
+  input_schema: { type: 'object'; properties: Record<string, unknown>; required?: string[] };
+}> {
+  return (tools ?? []).map((t) => {
+    const schema = t.inputSchema as { properties?: unknown; required?: unknown };
+    return {
+      name: t.name,
+      description: t.description
+        || `A tool provided by the connected service "${t.serverId}". It gave no description.`,
+      input_schema: {
+        type: 'object' as const,
+        properties: (schema?.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties)
+          ? schema.properties as Record<string, unknown>
+          : {}),
+        ...(Array.isArray(schema?.required) ? { required: (schema.required as unknown[]).filter((r): r is string => typeof r === 'string') } : {}),
+      },
+    };
+  });
+}

@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import {
   MCP_TOOL_PREFIX, MAX_TOOLS_PER_SERVER, MAX_SERVERS_PER_WORKSPACE,
   MAX_DESCRIPTION_CHARS, MAX_RESULT_CHARS,
   isUsableToolName, namespaceToolName, isExternalToolName, parseToolName,
   sanitizeDescription, sanitizeSchema, toSafeTools, externalToolsPreamble,
-  canConnectServer, formatToolResult,
+  canConnectServer, formatToolResult, externalToolDefs,
 } from './mcpClient';
 
 describe('tool names — a connected server can never shadow one of ours', () => {
@@ -242,5 +244,114 @@ describe('limits are real numbers, not aspirations', () => {
     expect(MAX_TOOLS_PER_SERVER).toBeGreaterThan(0);
     expect(MAX_DESCRIPTION_CHARS).toBeGreaterThan(0);
     expect(MAX_RESULT_CHARS).toBeGreaterThan(0);
+  });
+});
+
+describe('externalToolDefs — the shape handed to the model', () => {
+  it('carries the namespaced name and a real schema', () => {
+    const [d] = externalToolDefs(toSafeTools('notion', [
+      { name: 'search', description: 'Find pages', inputSchema: { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] } },
+    ]));
+    expect(d.name).toBe('ext__notion__search');
+    expect(d.description).toBe('Find pages');
+    expect(d.input_schema.properties).toEqual({ q: { type: 'string' } });
+    expect(d.input_schema.required).toEqual(['q']);
+  });
+
+  it('🔒 gives a factual description when the server supplied none', () => {
+    // An empty description makes the model guess what a tool does — and a guess is the thing this
+    // whole module exists to prevent.
+    const [d] = externalToolDefs(toSafeTools('s', [{ name: 'go' }]));
+    expect(d.description.length).toBeGreaterThan(10);
+    expect(d.description).toContain('s');
+  });
+
+  it('never emits a malformed schema, whatever the server sent', () => {
+    for (const bad of [null, 'x', 42, [], { type: 'array' }, { type: 'object', properties: 'nope' }]) {
+      const [d] = externalToolDefs(toSafeTools('s', [{ name: 'go', inputSchema: bad }]));
+      expect(d.input_schema.type).toBe('object');
+      expect(typeof d.input_schema.properties).toBe('object');
+      expect(Array.isArray(d.input_schema.properties)).toBe(false);
+    }
+  });
+
+  it('drops a non-string entry from required rather than passing it through', () => {
+    const [d] = externalToolDefs(toSafeTools('s', [
+      { name: 'go', inputSchema: { type: 'object', properties: {}, required: ['a', 42, null] } },
+    ]));
+    expect(d.input_schema.required).toEqual(['a']);
+  });
+
+  it('is empty for an empty list', () => {
+    expect(externalToolDefs([])).toEqual([]);
+  });
+});
+
+describe('the wiring stays safe (locked against the real source)', () => {
+  const dispatcher = readFileSync(resolve(__dirname, 'ToolDispatcher.ts'), 'utf8');
+  const routes = readFileSync(resolve(__dirname, '../routes/agentv3.ts'), 'utf8');
+
+  it('🔒 external tools are checked AFTER every built-in case, so one can never take over', () => {
+    // Two independent defences rather than one: the ext__ prefix keeps the namespaces apart, and the
+    // switch reaching `default` first means a built-in always wins even if that guard were bypassed.
+    const def = dispatcher.indexOf('default:');
+    const ext = dispatcher.indexOf('isExternalToolName(call.name)');
+    expect(ext).toBeGreaterThan(-1);
+    expect(ext).toBeGreaterThan(def);
+  });
+
+  it('🔒 a tool is resolved against what a server REALLY advertised, not against the model’s string', () => {
+    // Otherwise a model that invents `ext__x__y` would reach an arbitrary call.
+    expect(dispatcher).toContain('this.mcpTools.find((t) => t.name === call.name)');
+    expect(dispatcher).toContain('this.mcpServers.find((sv) => sv.id === parsed.serverId)');
+  });
+
+  it('🔒 an external tool NEVER throws — a stranger being down must not fail a build', () => {
+    const start = dispatcher.indexOf('private async runExternalTool(');
+    const body = dispatcher.slice(start, start + 1600);
+    expect(body).not.toMatch(/\bthrow\b/);
+  });
+
+  it('🔒 built-in tools come FIRST in the list handed to the model', () => {
+    expect(routes).toContain("...catalogForTools(roleConfig('architect').tools), ...externalToolDefs(mcpTools)");
+  });
+
+  it('🔒 the connect route runs the shared SSRF guard before saving anything', () => {
+    const start = routes.indexOf("app.post('/api/agentv3/mcp/connect'");
+    const body = routes.slice(start, start + 2600);
+    const guard = body.indexOf('assertPublicHttpUrl(url)');
+    const save = body.indexOf('mcpServerStore.add(');
+    expect(guard).toBeGreaterThan(-1);
+    expect(save).toBeGreaterThan(guard);
+  });
+
+  it('🔒 every MCP route verifies workspace ownership', () => {
+    for (const r of ['mcp/list', 'mcp/connect', 'mcp/remove']) {
+      const start = routes.indexOf(`app.post('/api/agentv3/${r}'`);
+      expect(start).toBeGreaterThan(-1);
+      expect(routes.slice(start, start + 2600)).toContain('assertVerifiedWorkspaceOwner(req, workspaceId)');
+    }
+  });
+
+  it('🔒 the LIST route returns display records, never the stored credentials', () => {
+    const start = routes.indexOf("app.post('/api/agentv3/mcp/list'");
+    const body = routes.slice(start, start + 1200);
+    expect(body).toContain('listForDisplay');
+    expect(body).not.toContain('listFull');
+  });
+
+  it('a connection is PROVEN before it is saved', () => {
+    // Storing an unverified connection leaves the user with a service listed as connected that
+    // silently contributes nothing.
+    const start = routes.indexOf("app.post('/api/agentv3/mcp/connect'");
+    const body = routes.slice(start, start + 2600);
+    expect(body).toContain('listRemoteTools({ id, url, headers })');
+    expect(body).toContain('probe.tools.length === 0');
+  });
+
+  it('🔒 connected services can never fail a build', () => {
+    const start = routes.indexOf('mcpServerStore.listFull(workspaceId)');
+    const body = routes.slice(Math.max(0, start - 700), start + 900);
+    expect(body).toMatch(/catch \{[^}]*never a reason a build fails/);
   });
 });

@@ -46248,3 +46248,35 @@ used `+6000` from the boot command, landed ~250 lines short, and failed every as
 that never contained the code. Recorded as a rule rather than as two anecdotes: **a source-pin test must
 bound its window with ANCHORS that belong to the structure it is testing, never with a character count.**
 The count reads as precision and is really a countdown.
+
+---
+
+## 2026-09-09 — CI went red on a dependency advisory, and the red was on `main` too
+
+**What happened.** The dispatched CI run for #2785 failed in **56 seconds** — far too fast for the suite,
+which is the tell that it died in an early step. It did: `npm run audit:gate` rejected a **new** high
+advisory against `js-yaml` (GHSA-2883-xcg3-v3hh, `maxTotalMergeKeys` does not limit CPU use for empty
+merge sources — CWE-400/407).
+
+**Established it was not this PR's, before touching anything.** The change touched no dependency, and
+`main`'s own run at 11:53 today (run 34347862339, PR #2783's merge) failed the same way in 52 seconds.
+So every merge in the repository was blocked, not just this branch.
+
+**The fix is the real one, not the allowlist.** The gate offers two exits — fix the dependency, or
+allowlist it with a reason — and allowlisting here would have been the forbidden surface patch: `npm
+audit` reported `fixAvailable: true`, i.e. a non-breaking fix existed. `js-yaml` was already pinned in
+`overrides` at `^4.3.1`, one version behind the patched `4.3.2`; `npm ci` installs the lockfile exactly,
+so the caret never picked it up. Bumped the override to `^4.3.2` and refreshed the lockfile: the diff
+moves **only** `js-yaml`, nothing else.
+
+**Honest scope of the risk:** `js-yaml` arrives via `firebase-tools`, a **devDependency**, so it never
+shipped to a user — the exposure was our own CI and dev machines. Worth fixing regardless, because it
+was blocking every merge including `main`'s deploys.
+
+**And the thing that nearly hid all of this.** GitHub created **no CI run at all** for this PR's head
+SHA — the `pull_request` event silently produced nothing, the exact incident shape `ci.yml`'s own
+`workflow_dispatch` comment was added for on 2026-08-15. `get_check_runs` returned an empty list, which
+reads as "pending" rather than as "broken". Had the empty checks tab been taken at face value, the
+js-yaml breakage would have gone unnoticed until someone wondered why nothing was deploying.
+**An empty check list is not a green one, and it is not a pending one either — it is an unanswered
+question.** The manual dispatch is what turned it into an answer.

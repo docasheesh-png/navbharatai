@@ -6,6 +6,7 @@ import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
 import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildReportAnalytics';
 import { firstPassHeadline, FIRST_PASS_TARGET, type FirstPassMetaStats } from '../lib/firstPassQuality';
+import { type ExposureRow } from '../lib/licenceExposure';
 import { copyTextToClipboard } from '../lib/copyText';
 import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts';
 import { MonitorPanels } from './admin/MonitorPanels';
@@ -278,6 +279,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
   const firstPass = firstPassData;
+  /**
+   * LICENCE EXPOSURE — third-party services whose terms do not cover a commercial product.
+   * Admin-only and read-only: it reports whether each source is running, never any credential value.
+   */
+  const [licenceRows, setLicenceRows] = useState<ExposureRow[] | null>(null);
+  const [licenceHeadline, setLicenceHeadline] = useState('');
+  const fetchLicenceExposure = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/licence-exposure', { headers });
+      const d = await r.json();
+      setLicenceRows(Array.isArray(d?.rows) ? d.rows : null);
+      setLicenceHeadline(typeof d?.headline === 'string' ? d.headline : '');
+    } catch (e) { console.error(e); setLicenceRows(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
   // M6-S6.1 — the speed signal: average / median / slowest build time across all reports.
   const buildTimeSummary = useMemo(() => summarizeBuildTimes(buildReports), [buildReports]);
   const fmtDuration = (ms: number): string => (ms >= 60_000 ? `${(ms / 60_000).toFixed(1)}m` : `${Math.round(ms / 1000)}s`);
@@ -855,7 +871,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) { console.error(e); setMfaStatus(null); }
   }, [adminToken]);
 
-  useEffect(() => { if (activeTab === 'security') fetchMfaStatus(); }, [activeTab, fetchMfaStatus]);
+  useEffect(() => { if (activeTab === 'security') { fetchMfaStatus(); fetchLicenceExposure(); } }, [activeTab, fetchMfaStatus, fetchLicenceExposure]);
 
   const startMfaEnroll = async () => {
     setMfaBusy(true);
@@ -2863,6 +2879,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── SECURITY TAB ── */}
           {activeTab === 'security' && (
             <div className="space-y-6">
+              {/* LICENCE EXPOSURE — the risks that were only ever written in a document.
+                  Two runtime services run on free tiers their own terms reserve for NON-COMMERCIAL
+                  use, while NavBharatAI charges money. Switching one off is a PAUSE; the fix is a
+                  commercial plan, so every row says so in the admin's own words. */}
+              {licenceRows && licenceRows.length > 0 && (
+                <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Shield className="w-4 h-4 text-amber-400" />
+                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Licence exposure</h3>
+                    <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${
+                      licenceRows.some((r) => r.state === 'active') ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-400'
+                    }`}>
+                      {licenceRows.filter((r) => r.state === 'active').length} running
+                    </span>
+                  </div>
+                  {licenceHeadline && <p className="text-[11px] text-[#8b949e] font-medium leading-snug">{licenceHeadline}</p>}
+                  <div className="space-y-3">
+                    {licenceRows.map((row) => (
+                      <div key={row.id} className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-xs font-black text-white">{row.name}</p>
+                          <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${
+                            row.state === 'active' ? 'bg-amber-500/20 text-amber-300'
+                              : row.state === 'switched-off' ? 'bg-white/5 text-[#8b949e]'
+                              : 'bg-white/5 text-[#6e7681]'
+                          }`}>
+                            {row.state === 'active' ? 'Running' : row.state === 'switched-off' ? 'Switched off' : 'Not configured'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#8b949e] leading-snug">{row.restriction}</p>
+                        <p className="text-[11px] text-[#8b949e] leading-snug"><span className="text-[#6e7681]">Powers:</span> {row.powers}</p>
+                        <p className="text-[11px] text-emerald-300/90 leading-snug"><span className="text-[#6e7681]">The real fix:</span> {row.honestFix}</p>
+                        <p className="text-[11px] text-[#8b949e] leading-snug"><span className="text-[#6e7681]">If switched off:</span> {row.whenOff}</p>
+                        <p className="text-[10px] text-[#6e7681] font-mono">
+                          {row.killSwitch ? `Switch: set ${row.killSwitch}=off in Cloud Run` : `Switch: remove ${row.requires ?? 'its key'} — publishing then blocks, by design`}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* ── P-SEC.3 — Two-Factor Authentication (TOTP) ── */}
               <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
                 <div className="flex items-center justify-between">

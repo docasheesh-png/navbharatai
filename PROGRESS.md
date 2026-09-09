@@ -46199,3 +46199,33 @@ non-commercial. Both remain OPEN root causes (rule 6): **the real fix is a purch
 must make, not something a session can write.** What IS buildable — and is being built next — is making
 the exposure visible and switchable from the admin panel instead of buried in a document, so it can be
 acted on the day it matters rather than discovered in a letter.
+
+### ✅ Item 2 shipped as far as code honestly can — the exposure is now VISIBLE and SWITCHABLE
+
+`src/lib/licenceExposure.ts` (new, pure) is the register of runtime SERVICES whose terms conflict with
+being a commercial product — deliberately not an npm licence scanner, which is a different problem the
+dependency-health gate already covers; these are HTTP calls a package scanner cannot see.
+
+**The load-bearing design decision:** the register does not *describe* whether a source is running — it
+reads the SAME function the source obeys. `liveWeatherSourceEnabled` is imported by BOTH
+`liveDataSources.ts` and the admin panel, so the panel can never report "off" while the calls keep going
+out. A register with its own opinion would be worse than none: a false assurance about a legal exposure.
+
+- **`LIVE_WEATHER_SOURCE=off`** now stops both Open-Meteo callers (weather AND air quality — switching
+  off only the obvious one would have left the exposure open). Degradation is honest and already-built:
+  those questions fall through to web search, exactly as gold rates and showtimes do.
+- **VirusTotal gets NO new switch, on purpose.** Its credential already IS the switch and its absence
+  already fails closed (no scan ⇒ nothing publishes). A second switch would be a second way to say the
+  same thing, and one of them would eventually drift.
+- **Admin surface:** `GET /api/admin/licence-exposure` behind `verifyAdminToken`, rendered on the
+  Security tab. **Read-only by design** — a one-click toggle would let a mis-tap stop App Store
+  publishing for every user with no audit trail, so the card names the exact Cloud Run setting instead.
+  It reports whether each key is PRESENT, never a value; test-locked.
+
+**🔴 AND THE HALF CODE CANNOT DO (rule 6), stated on the card itself rather than in a file nobody reads:**
+switching a source off is a PAUSE, not a fix. The fix is a commercial plan or a differently-licensed
+replacement — the admin's purchase decision. A test asserts every row's `honestFix` says so in words, and
+that the zero-running headline reads "not currently exposed" rather than "solved", because an admin who
+believes it is solved will never buy the plan and the risk returns the day someone switches it back on.
+
+**Gate:** frontend + server `tsc` clean; full suite green (numbers in the PR).

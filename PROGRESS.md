@@ -46280,3 +46280,64 @@ reads as "pending" rather than as "broken". Had the empty checks tab been taken 
 js-yaml breakage would have gone unnoticed until someone wondered why nothing was deploying.
 **An empty check list is not a green one, and it is not a pending one either — it is an unanswered
 question.** The manual dispatch is what turned it into an answer.
+
+---
+
+## 2026-09-09 — CI was red for two reasons, and NEITHER was the change under test
+
+PR #2785's CI failed twice. Both failures were real, both blocked every merge in the repo, and both
+were established as **not this branch's** before anything was touched — the discipline that matters
+here, because the reflex on a red gate is to change your own diff until the light goes green.
+
+### 🔴 First, and the more urgent: GitHub stopped creating CI runs at all
+
+The `pull_request` event produced no run for the pushed head — not on `opened`, not on `synchronize`.
+`get_check_runs` returned an EMPTY list, which is the dangerous shape: an empty check list is not
+green and not pending, it is **an unanswered question**, and it reads exactly like "nothing to worry
+about". `ci.yml` already carries a documented `workflow_dispatch` escape hatch from a 2026-08-15
+incident of the same kind; that is what was used, and every result below came from a dispatched run.
+
+**Had the empty list been read as "fine", both failures below would have merged unnoticed.**
+
+### 🔴 A new js-yaml advisory — red on `main` too, so nothing could merge
+
+The first dispatched run died in **56 seconds**, far too fast for the suite, which is itself the tell
+that it failed early. The audit gate had rejected a new high advisory against `js-yaml`
+(GHSA-2883-xcg3-v3hh, CWE-400/407). Confirmed not ours: the branch touches no dependency, and `main`'s
+own run that morning failed identically in 52 seconds.
+
+The gate offers "fix it" or "allowlist it with a reason". **Allowlisting would have been the forbidden
+surface patch** — `npm audit` reported `fixAvailable: true`. `js-yaml` was already pinned in
+`overrides` at `^4.3.1`, exactly one version behind the patched `4.3.2`, and `npm ci` installs the
+lockfile verbatim, so the caret never picked it up. Bumped the override; **the lockfile diff moves only
+js-yaml**. Honest scope: it arrives via `firebase-tools`, a devDependency, so it never shipped to a
+user — the exposure was CI and dev machines. Fixed anyway, because it was blocking main's deploys.
+
+### 🔴 Then the bundle budget — and the measurement is the point
+
+The next run got **8.5 minutes** in (past the audit gate) and failed on total JS: **1600.4 KB against a
+1600 KB ceiling**. Over by 0.4 KB — 0.025%.
+
+`bundleBudget.mjs` warns about exactly this in its own comments (2026-08-11): a ceiling set flush
+against reality "no longer says *no unchecked bloat*, it says *no further features*, and the next
+legitimate PR fails for existing growth it did not cause." That is what happened, and it was
+**measured rather than assumed** before the number was touched:
+
+| build | total JS |
+|---|---|
+| with this PR's UI | 1600.2 KB local / **1600.4 KB** on the runner |
+| with this PR's UI reverted | **1599.7 KB** |
+
+So this PR contributed **0.5 KB**; the other **113.6 KB** of drift since the 2026-08-24 measurement
+(1486.1) was already on main. And the first question that file says to answer — *what did I just put on
+the first-paint path?* — answers itself: the largest chunk did not move at all (250.3 KB against 400),
+because the added surface is an admin-only card inside the already-`lazy()` AdminDashboard route.
+
+Raised to **1720** = the runner's measurement + ~7.5% headroom, the same proportion the previous
+1486.1 → 1600 bump used. `LAST_MEASURED` updated in the SAME edit (the file demands this; a stale copy
+had already broken that test once) and dated.
+
+**Recorded, deliberately NOT acted on:** the entry chunk has shrunk 354.9 → 250.3 KB as more routes
+were split, so the 400 ceiling now permits ~150 KB of silent first-paint drift. Tightening it would
+lock that win in — but it is a judgement call with its own risk of failing somebody else's PR, and this
+change existed to unblock a gate, not to re-tune every ceiling while passing through.

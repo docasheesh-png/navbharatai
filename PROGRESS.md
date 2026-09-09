@@ -46229,3 +46229,22 @@ that the zero-running headline reads "not currently exposed" rather than "solved
 believes it is solved will never buy the plan and the risk returns the day someone switches it back on.
 
 **Gate:** frontend + server `tsc` clean; full suite green (numbers in the PR).
+
+### The full gate caught one failure, and it was the SAME brittleness twice in one day
+
+`tests/importPreviewWiring.test.ts` — *"'checking the live preview' is exited on the normal path and the
+throw path"* — went red. Nothing was broken: both `exitPhase` calls were still present and still correctly
+paired (route lines 9797 and 9814). The test sliced a **12,000-character** window from the `enterPhase`
+call, and the import lane learning to remember its preview pushed the throw path's exit to offset ~12,876
+— out of the window. A window measured in characters silently stops covering the code it was written
+about, and the failure it then produces points at the wrong thing entirely.
+
+Repointed to a structural anchor (`IMPORT_PREVIEW_BOOT_CUT_OFF`, the `finally` that closes that exact
+IIFE), so insertions inside the region cannot move the boundary. Verified to bite: removing either
+`exitPhase` fails it by name.
+
+**This is the second time the same defect appeared today** — my own new test in `ImportPreview.test.ts`
+used `+6000` from the boot command, landed ~250 lines short, and failed every assertion against a slice
+that never contained the code. Recorded as a rule rather than as two anecdotes: **a source-pin test must
+bound its window with ANCHORS that belong to the structure it is testing, never with a character count.**
+The count reads as precision and is really a countdown.

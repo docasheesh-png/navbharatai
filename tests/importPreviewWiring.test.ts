@@ -47,9 +47,23 @@ describe('🔒 the phase that lied for five minutes', () => {
     // while the build ran model calls. Count the exits AFTER the enterPhase.
     const enterAt = route.indexOf("enterPhase?.('checking the live preview')");
     expect(enterAt).toBeGreaterThan(-1);
-    // Within the remainder of the import IIFE (bounded window), at least two exitPhase calls —
-    // one after the if/else verdict, one on the catch path.
-    const window = route.slice(enterAt, enterAt + 12_000);
+    /**
+     * BOUNDED BY AN ANCHOR, NOT BY A CHARACTER COUNT (repointed 2026-09-09).
+     *
+     * This window was `enterAt + 12_000`. It failed the day the import block legitimately GREW — the
+     * lane learned to remember the preview it had just proved (`saveRecipe`/`saveDeclaredPort`), which
+     * pushed the throw path's exit to offset ~12,876 and out of view. Nothing was broken: both exits
+     * were still there, still correctly paired, and CI went red anyway.
+     *
+     * A window measured in characters silently stops covering the code it was written about, and the
+     * failure it then produces points at the wrong thing entirely. `IMPORT_PREVIEW_BOOT_CUT_OFF` is the
+     * `finally` that closes this exact IIFE, so the region is now bounded by the structure it is about
+     * and insertions inside it cannot move the boundary. (The same mistake, and the same fix, as in
+     * ImportPreview.test.ts's own new window on the same day.)
+     */
+    const endAt = route.indexOf("'IMPORT_PREVIEW_BOOT_CUT_OFF'", enterAt);
+    expect(endAt, 'the import IIFE end anchor must exist').toBeGreaterThan(enterAt);
+    const window = route.slice(enterAt, endAt);
     const exits = window.match(/opts\.diag\?\.exitPhase\?\.\(\)/g) ?? [];
     expect(exits.length).toBeGreaterThanOrEqual(2);
   });

@@ -46125,3 +46125,77 @@ wrong on the first run (it swept the `catch` block in and demanded no plain wait
 the sweep; the catch answers with the plain page deliberately, because a request that threw has no
 trustworthy record to decide a snapshot from) — the test was fixed, not the route.
 `AppKnowledgeBase.ts` updated in the same change, per the sync rule.
+
+---
+
+## 2026-09-09 — the import lane proved its preview and forgot it (and one of my own three suggestions was already built)
+
+**Where this came from.** The admin asked me to build three items I had listed as *"chhoti hain abhi, baad
+me mehngi"*. Investigating them first changed two of the three, which is the useful part of this entry.
+
+### ❌ Item 1 was ALREADY BUILT — my source was a stale line in this very file
+
+I listed *"the Android SDK has no consent gate"* from the 2026-09-03 entry, which reads **"Still open
+(unchanged)"**. It is not open. `android/app/src/main/java/com/navbharatai/app/MetaConsentPlugin.java`
+exists, `MainActivity.registerPlugin(MetaConsentPlugin.class)` registers it, the three collection flags
+(`AutoInitEnabled` / `AutoLogAppEventsEnabled` / `AdvertiserIDCollectionEnabled`) ship hard-wired
+**false** in `AndroidManifest.xml`, and `src/lib/metaNativeConsent.ts` opens them at runtime only after
+consent — wired from `src/main.tsx`. Recorded as a NEW note rather than by editing the old line, per the
+append-only rule.
+
+**The lesson, which is safeguard #1 pointed at this file instead of at `main`:** an "open item" line is a
+claim with a timestamp, and it goes stale exactly like a `PROGRESS.md` status does. I proposed work to the
+admin on the strength of one, without grepping first. **Anything this file calls OPEN must be re-verified
+against current `main` before it is proposed, quoted, or acted on** — the same discipline the file already
+demands for defaults and for the roadmap.
+
+### ✅ Item 3 turned out to be a REAL, root-cause-shaped bug — and it is the admin's own port question
+
+I had listed *"full-stack apps get no preview fallback"*. Investigating it found something better, and
+much worse: **the import lane records nothing durable about a preview it has just PROVEN.**
+
+**The evidence.** The import preview block (`routes/agentv3.ts`, from `'import-preview-boot'` to its
+verdict) contained **zero `sandboxStore.` calls** — verified by scanning the whole block. That lane
+resolves the port from every declaration site (`declaredAppPort`), VISITS the page, and confirms it
+renders — the strongest evidence any lane in this codebase ever holds — and then dropped all of it.
+
+Every other lane records what it proved, at the moment it proves it:
+- the build path saves the **recipe** the instant a real browser renders the app (~15019),
+- the build path saves the **declared port** on every successful build (~15625),
+- the wake path saves the **recipe** the same way (~4900).
+
+And the build path's declared-port capture is gated on `expectsArtifacts`, which is literally defined as
+`(intent === 'new_build' || intent === 'edit_existing') && !isImportTurn` — so an import could not pick it
+up on the way past, either. The import lane was not merely missing a call; it was excluded by construction.
+
+**Why it stayed invisible.** The damage lands DAYS later. While the sandbox lives, the preview works and
+nothing looks wrong. Once it is gone, the door asks for a recipe and a declared port, finds **neither**,
+and falls through to the common-ports guess starting at 3000 — for an imported GitHub repo, the class of
+app most likely to be serving on 5000. **That is the admin's own question from 2026-09-08** (*"agar github
+par app port 3000 par hai, aur navbharatai us app ko port 5000 par ya kisi aur port try kare…"*), and
+answering it by reading the port-resolution code alone missed it, because the resolution is excellent and
+the MEMORY of it was the hole.
+
+**The fix.** Two writes at the moment of proof, with deliberately different conditions, mirroring the
+existing precedent exactly:
+- the **recipe** only when the page genuinely RENDERED (a recipe is a port we have SEEN serving; a
+  bound-but-blank port must never be promoted to one — the "earn it" rule);
+- the **declared port** whenever the app states one, render or not — precisely because a preview that
+  never came up has no recipe at all, and that is when the door has nothing else to lead with.
+Best-effort and silent: an import that worked must never fail over a memory write.
+
+**Tests** (`ImportPreview.test.ts`): the block writes both facts; the recipe is inside the
+`served.rendered` guard and carries the port that WON the visit and the command that booted it; the
+declared port is written OUTSIDE that guard (asserted by index order, since that is the whole point); the
+whole thing is wrapped so it cannot fail the import. The test window is bounded by two ANCHORS rather than
+a character count — my first version used `+6000` from the boot command, landed ~250 lines short of the
+code, and failed every assertion against a slice that never contained it. The test was wrong, not the
+route; fixed and recorded here because a window measured in characters rots silently as the route grows.
+
+### 🟡 Item 2 (licensing) — genuinely open, and the honest half is not code
+
+VirusTotal's free API forbids commercial use and NavBharatAI is commercial; Open-Meteo's no-key tier is
+non-commercial. Both remain OPEN root causes (rule 6): **the real fix is a purchase decision the admin
+must make, not something a session can write.** What IS buildable — and is being built next — is making
+the exposure visible and switchable from the admin panel instead of buried in a document, so it can be
+acted on the day it matters rather than discovered in a letter.

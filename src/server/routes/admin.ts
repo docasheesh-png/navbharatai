@@ -72,6 +72,7 @@ import {
 } from '../AgentV3/cloudRunHosting';
 import { loadBoard, worstLevel, type LoadReadings } from '../lib/loadBoard';
 import { readPlatformInstances, platformProjectId } from '../lib/platformInstances';
+import { runHostingPreflight } from '../AgentV3/hostingPreflight';
 import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
 
 /**
@@ -1487,6 +1488,36 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
    * is offered. That distinction is not theoretical — treating it as an orphan is what once listed
    * every live app as reclaimable waste after one Firestore hiccup.
    */
+  /**
+   * IS THE APPS PROJECT SET UP CORRECTLY? — run the same calls a real publish makes, and name what is
+   * missing.
+   *
+   * Switching on app hosting means a new Google Cloud project, four APIs, an Artifact Registry
+   * repository, six IAM roles and one env var — none of which this codebase can see or set. Without
+   * this route the first evidence of a wrong step is a 403 inside a Cloud Build log on a user's
+   * publish. With it, the admin gets the exact missing step while they are still in the console.
+   */
+  app.get('/api/admin/hosting/preflight', verifyAdminToken, async (_req: Request, res: Response) => {
+    try {
+      // The SAME scope the hosting engine itself uses, so a permission this check passes is genuinely
+      // the permission a publish will have.
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const token = await auth.getAccessToken().catch(() => null);
+      res.json(await runHostingPreflight({ token: token ? String(token) : null }));
+    } catch (e) {
+      // A checker that 500s tells the admin nothing. Report the failure AS a failed check.
+      res.json({
+        verdict: 'incomplete', projectId: null, region: '',
+        checks: [{
+          id: 'preflight', label: 'Setup check', state: 'unknown',
+          detail: e instanceof Error ? e.message : String(e),
+          remedy: 'Re-run the check.',
+        }],
+        nextAction: 'Re-run the check.',
+      });
+    }
+  });
+
   app.get('/api/admin/hosting/services', verifyAdminToken, async (_req: Request, res: Response) => {
     try {
       const project = appsProject();

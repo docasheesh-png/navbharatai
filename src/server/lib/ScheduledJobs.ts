@@ -115,32 +115,57 @@ export class Scheduler {
   async tick(nowMs: number = Date.now()): Promise<void> {
     for (const st of this.jobs.values()) {
       if (!(st.job.enabled ?? true) || st.nextRun > nowMs) continue;
+      await this.runOnce(st, nowMs);
       /**
        * 🔒 RESCHEDULED WHETHER OR NOT THIS INSTANCE WON THE CLAIM — and the order matters. A losing
        * instance that did not advance `nextRun` would retry on every single tick, hammering the lease
        * document once a minute forever: a deduplication mechanism that becomes its own load. It lost
        * this cycle; it is due again at the next one, like everybody else.
        */
-      let mayRun = true;
-      if (st.job.exclusive && this.claim) {
-        // A claim that throws must not stop the job — see claimJobRun: a database hiccup silently
-        // cancelling every scheduled job is far worse than one duplicated run.
-        mayRun = await this.claim(st.job.id).catch(() => true);
-      }
-      if (mayRun) {
-        try {
-          await st.job.handler();
-          st.lastError = undefined;
-        } catch (e) {
-          st.lastError = e instanceof Error ? e.message : String(e);
-        }
-        st.lastRun = nowMs;
-        st.runs++;
-      } else {
-        st.skipped = (st.skipped ?? 0) + 1;
-      }
       st.nextRun = computeNextRun(st.job.schedule, nowMs);
     }
+  }
+
+  /**
+   * Run ONE registered job right now, honouring its claim — the entry point for a run that is not on
+   * the schedule, such as a job that should also fire once at boot.
+   *
+   * 🔴 WHY THIS EXISTS. `server.ts` called the retention purge's handler DIRECTLY at boot, straight
+   * past the scheduler. Marking the job `exclusive` therefore protected its 03:00 run and did nothing
+   * at all for the boot run — so every instance still purged on startup, and with the instance ceiling
+   * newly raised to 100 (§12 #2) a single deploy could mean a hundred simultaneous purges. Nothing
+   * would break (the deletes are idempotent and bounded), but it is exactly the duplicated scheduled
+   * work `exclusive` was built to prevent, arriving through the one door that did not check.
+   *
+   * Unknown job id ⇒ false, so a typo cannot silently look like a completed run.
+   */
+  async runNow(id: string, nowMs: number = Date.now()): Promise<boolean> {
+    const st = this.jobs.get(id);
+    if (!st || !(st.job.enabled ?? true)) return false;
+    return this.runOnce(st, nowMs);
+  }
+
+  /** Claim, run, record. Returns whether THIS instance actually ran the handler. */
+  private async runOnce(st: JobState, nowMs: number): Promise<boolean> {
+    let mayRun = true;
+    if (st.job.exclusive && this.claim) {
+      // A claim that throws must not stop the job — see claimJobRun: a database hiccup silently
+      // cancelling every scheduled job is far worse than one duplicated run.
+      mayRun = await this.claim(st.job.id).catch(() => true);
+    }
+    if (!mayRun) {
+      st.skipped = (st.skipped ?? 0) + 1;
+      return false;
+    }
+    try {
+      await st.job.handler();
+      st.lastError = undefined;
+    } catch (e) {
+      st.lastError = e instanceof Error ? e.message : String(e);
+    }
+    st.lastRun = nowMs;
+    st.runs++;
+    return true;
   }
 
   /** Start the background tick loop (default every 60s). Idempotent; unref'd so it never blocks exit. */

@@ -756,6 +756,8 @@ setInterval(() => {
       // cron surviving scale-to-0 needs Cloud Scheduler (honest follow-up).
       import('./src/server/lib/ScheduledJobs')
         .then(({ scheduler }) => {
+          /** Set only when the purge is enabled; fired once the cross-instance claim is in place. */
+          let bootRun: (() => void) | null = null;
           // P-DATA.4 — TTL retention purge, OPT-IN (DATA_RETENTION_PURGE_ENABLED=true) so no automated
           // deletion runs in production without explicit admin sign-off. Daily @ 03:00 UTC + once at boot.
           if (process.env.DATA_RETENTION_PURGE_ENABLED === 'true') {
@@ -771,7 +773,20 @@ setInterval(() => {
             // simply do the whole purge N times, paying N times the Firestore reads and writes on a
             // schedule. See ROADMAP §12 #1 and lib/jobLease.ts.
             scheduler.register({ id: 'retention-purge', exclusive: true, schedule: { kind: 'dailyAtUtc', hour: 3, minute: 0 }, handler: runPurge });
-            runPurge(); // once at boot
+            /**
+             * 🔒 THE BOOT RUN GOES THROUGH THE SCHEDULER TOO, and it waits for the claim to be wired.
+             *
+             * This used to be a bare `runPurge()` — the handler called directly, straight past the
+             * scheduler — so marking the job `exclusive` protected its 03:00 run and did nothing for
+             * this one. With the instance ceiling raised to 100 (§12 #2), a single deploy could mean a
+             * hundred simultaneous purges. Nothing would break (the deletes are idempotent and capped
+             * at `maxPerRun`), but it is precisely the duplicated scheduled work `exclusive` exists to
+             * prevent, arriving through the one door that did not check.
+             *
+             * The wait matters as much as the routing: `setClaim` is wired by an async import below, so
+             * a boot run fired before it lands would find no claim and run on every instance anyway.
+             */
+            bootRun = () => { void scheduler.runNow('retention-purge'); };
           }
           // MONITOR ALERTS — the admin is TOLD when build success, preview rate or build time leaves
           // its normal range, instead of finding out by happening to open the panel. Every 15 minutes;
@@ -800,7 +815,10 @@ setInterval(() => {
               // store means the job runs — never that it is silently cancelled.
               scheduler.setClaim((jobId) => claimJobRun(getServerDb() as any, { jobId }));
             }))
-            .catch(() => { /* no claim wired ⇒ every job runs, exactly as before */ });
+            .catch(() => { /* no claim wired ⇒ every job runs, exactly as before */ })
+            // Either way the boot run happens — a claim that could not be wired must delay the purge,
+            // never cancel it.
+            .finally(() => { bootRun?.(); });
           scheduler.start();
         })
         .catch(() => { /* best-effort — the scheduler must never affect boot */ });

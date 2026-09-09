@@ -162,6 +162,41 @@ describe('Scheduler — exclusive jobs, and everything else unchanged', () => {
     expect(ran).toEqual(['a']);
   });
 
+  it('runNow honours the claim, so an off-schedule run is deduplicated too', async () => {
+    const ran: string[] = [];
+    const s = new Scheduler();
+    s.setClaim(async () => false);
+    s.register(job('a', ran, true), 0);
+    expect(await s.runNow('a')).toBe(false);
+    expect(ran).toEqual([]);
+    expect(s.list()[0].skipped).toBe(1);
+  });
+
+  it('runNow runs the winner, and reports that it ran', async () => {
+    const ran: string[] = [];
+    const s = new Scheduler();
+    s.setClaim(async () => true);
+    s.register(job('a', ran, true), 0);
+    expect(await s.runNow('a')).toBe(true);
+    expect(ran).toEqual(['a']);
+    expect(s.list()[0].runs).toBe(1);
+  });
+
+  it('🔒 runNow on an unknown or disabled job is FALSE — a typo never looks like a completed run', async () => {
+    const s = new Scheduler();
+    expect(await s.runNow('nope')).toBe(false);
+    s.register({ ...job('off', []), enabled: false }, 0);
+    expect(await s.runNow('off')).toBe(false);
+  });
+
+  it('runNow does NOT reschedule — an off-schedule run must not move the next due time', async () => {
+    const s = new Scheduler();
+    s.register(job('a', [], true), 0);
+    const before = s.list()[0].nextRun;
+    await s.runNow('a', 500);
+    expect(s.list()[0].nextRun).toBe(before);
+  });
+
   it('one job losing its claim never stops the others', async () => {
     const ran: string[] = [];
     const s = new Scheduler();
@@ -182,6 +217,20 @@ describe('🔒 the wiring — the job that DELETES is the one made exclusive', (
 
   it('the claim is wired from the real lease store', () => {
     expect(server).toContain('scheduler.setClaim((jobId) => claimJobRun(getServerDb() as any, { jobId }))');
+  });
+
+  it('🔒 THE BOOT RUN GOES THROUGH THE SCHEDULER — not straight to the handler', () => {
+    // It used to be a bare `runPurge()`, which walked past the scheduler entirely: `exclusive`
+    // protected the 03:00 run and did nothing for the boot run, so every instance purged on startup.
+    expect(server).toContain("void scheduler.runNow('retention-purge')");
+    expect(server).not.toMatch(/^\s*runPurge\(\); \/\/ once at boot/m);
+  });
+
+  it('🔒 the boot run WAITS for the claim to be wired, and happens even if wiring fails', () => {
+    // Fired before setClaim lands, it would find no claim and run on every instance regardless — the
+    // bug by another route. And a claim that cannot be wired must DELAY the purge, never cancel it.
+    const at = server.indexOf("import('./src/server/lib/jobLease')");
+    expect(server.slice(at, at + 1200)).toContain('.finally(() => { bootRun?.(); })');
   });
 
   it('🔒 a failure to wire the claim leaves every job running, rather than none', () => {

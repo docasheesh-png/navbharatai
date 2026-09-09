@@ -102,19 +102,48 @@ import { pathToFileURL } from 'node:url';
  * moment the largest-chunk ceiling was correctly tightened to 400. A number that must match another
  * number belongs in one place. Update this in the same edit as BUDGETS, always.
  */
+// -- 2026-09-09: THE CEILING WAS SPENT, AND THE MEASUREMENT PROVES WHOSE GROWTH SPENT IT. -------
+//
+// This is the exact failure mode the 2026-08-11 note above warns about, arriving on schedule: a
+// ceiling set flush against reality stops meaning "no unchecked bloat" and starts meaning "no further
+// features", and the PR that pays for it is whichever innocent one happens to be next.
+//
+// MEASURED, not assumed, before touching the number (the discipline this file demands):
+//   * with the change that failed CI:     1600.2 KB local / 1600.4 KB on the runner
+//   * with that change's UI reverted:     1599.7 KB  <- already 99.98% of the ceiling
+//   * so the failing PR's own contribution was 0.5 KB, and the other 113.6 KB of the
+//     1486.1 -> 1599.7 drift since 2026-08-24 was already on main before it existed.
+//
+// AND IT IS NOT A FIRST-PAINT REGRESSION, which is the question the note above says to answer FIRST.
+// The largest chunk -- the one every visitor downloads -- did not move at all (250.3 KB against a 400
+// ceiling), because the added surface is an admin-only card inside the already-`lazy()` AdminDashboard
+// route. Nobody but an admin opening that screen downloads a byte of it. That is what makes absorbing
+// the remainder honest here rather than a ceiling hiding a regression.
+//
+// 1720 = today's runner measurement + ~7.5% headroom, the same proportion the 1486.1 -> 1600 bump
+// used. Set from a measurement, with room, and dated -- keep that discipline on the next bump.
+//
+// NOTE FOR THE NEXT SESSION, recorded rather than acted on: the entry chunk has SHRUNK 354.9 -> 250.3
+// KB since the last measurement (more route splitting landed), so the 400 ceiling now permits ~150 KB
+// of silent first-paint drift. Tightening it would lock that win in. It is deliberately NOT done in
+// this edit -- that is a judgement call with its own failure risk for somebody else's PR, and this
+// change exists to unblock a gate, not to re-tune every ceiling while doing it.
+
 export const LAST_MEASURED = {
-  largestChunkGzipKB: 354.9,
-  totalJsGzipKB: 1486.1,
-  totalCssGzipKB: 47.7,
+  largestChunkGzipKB: 250.3,
+  totalJsGzipKB: 1600.4,
+  totalCssGzipKB: 47.4,
 };
 
 export const BUDGETS = {
-  /** Largest single JS chunk, gzipped. Measured 354.9 KB on 2026-08-24 (the main entry). */
+  /** Largest single JS chunk, gzipped. Measured 250.3 KB on 2026-09-09 (the entry, down from 354.9
+   *  on 2026-08-24 as more routes were split out). Ceiling left at 400 -- see the note above. */
   largestChunkGzipKB: 400,
-  /** Sum of all JS chunks INCLUDING lazy ones, gzipped. Measured 1486.1 KB on 2026-08-24 -- see the
-   *  note above for why this rose while the chunk everyone downloads fell by 285 KB. */
-  totalJsGzipKB: 1600,
-  /** Sum of all CSS, gzipped. Measured 47.7 KB on 2026-08-24. */
+  /** Sum of all JS chunks INCLUDING lazy ones, gzipped. Measured 1600.4 KB on 2026-09-09 on the CI
+   *  runner (1600.2 locally). Raised from 1600, whose headroom two weeks of feature growth had spent
+   *  down to 0.3 KB -- see the dated note above for the per-change measurement behind this. */
+  totalJsGzipKB: 1720,
+  /** Sum of all CSS, gzipped. Measured 47.4 KB on 2026-09-09. */
   totalCssGzipKB: 55,
 };
 

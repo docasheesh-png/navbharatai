@@ -9699,6 +9699,42 @@ async function noteBuildOutcome(
               // each of the branches beneath, so a future branch cannot forget it and be misreported as
               // a boot that was cut off.
               bootVerdictRecorded = true;
+              /**
+               * 🔒 THE IMPORT LANE PROVED ITS PREVIEW AND THEN FORGOT IT (admin 2026-09-08, and it is
+               * the second half of their own question: *"agar github par app port 3000 par hai, aur
+               * navbharatai us app ko port 5000 par ya kisi aur port try kare…"*).
+               *
+               * Every OTHER lane records what it proved at the moment it proves it — the build path
+               * saves the recipe the instant a browser renders the app (~15019) and the declared port
+               * on every successful build (~15625); the wake path saves the recipe the same way
+               * (~4900). This block did neither: it resolves the port from every declaration site,
+               * VISITS the page, confirms it renders — the strongest evidence any lane ever holds —
+               * and then dropped all of it on the floor.
+               *
+               * The consequence lands days later, which is why it was invisible: the sandbox is
+               * eventually gone, the door looks for a recipe and a declared port, finds NEITHER, and
+               * falls through to the common-ports guess starting at 3000 — for an imported repo, the
+               * one class of app most likely to serve on 5000. The user then sees a preview that will
+               * not come back for an app that booted perfectly the day they imported it.
+               *
+               * Two writes, deliberately with different conditions, mirroring the precedent exactly:
+               *  • the RECIPE only when the page genuinely RENDERED — a recipe is a port we have SEEN
+               *    serving, and a bound-but-blank port must never be promoted to one (the "earn it"
+               *    rule every other lane follows).
+               *  • the DECLARED PORT whenever the app states one, render or not — precisely because a
+               *    preview that never came up has no recipe at all, and that is the case where the
+               *    door has nothing else to lead with.
+               * Best-effort and silent: an import that worked must never fail over a memory write.
+               */
+              try {
+                if (Number.isInteger(declared) && declared! > 0) {
+                  await sandboxStore.saveDeclaredPort(workspaceId, declared!).catch(() => {});
+                }
+                if (served.rendered) {
+                  const importCheck = buildRecipe({ devCommand: bootCommand, port: bootPort, framework, now: Date.now() });
+                  if (importCheck.ok && importCheck.recipe) await sandboxStore.saveRecipe(workspaceId, importCheck.recipe);
+                }
+              } catch { /* remembering is insurance for the NEXT view — never this import's problem */ }
               if (bootUrl) emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
               // BOOT LOG DIAGNOSER (admin task 2, 2026-08-05 — Mitrify build d5f0a2bc): the boot log
               // is IN HAND here, and on that build it named the exact cause (`ECONNREFUSED …:5432` at

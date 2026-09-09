@@ -34,6 +34,7 @@ import { sandboxStore } from '../AgentV3/SandboxStore';
 import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from '../AgentV3/sandboxHandover';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
+import { licenceExposures, licenceExposureHeadline, activeExposureCount } from '../../lib/licenceExposure';
 import { builderScorecard, scorecardHeadline } from '../../lib/builderMetrics';
 import { selectStaleDevices, canBroadcast, cohortSummary, updateBroadcastPayload } from '../lib/updateBroadcast';
 import { deviceTokenStore } from '../lib/DeviceTokenStore';
@@ -703,6 +704,30 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to compute first-pass quality.' });
+    }
+  });
+
+  /**
+   * LICENCE EXPOSURE — the third-party services whose terms do not cover a COMMERCIAL product.
+   *
+   * Two of them run on free tiers reserved for non-commercial use, and NavBharatAI charges money, so
+   * the exposure is live today rather than at some future scale. Both were recorded as open items in
+   * CLAUDE.md and PROGRESS.md for weeks — which is the problem this route exists to fix: a legal risk
+   * written in a 46,000-line document is a risk nobody can act on, and the admin does not read source.
+   *
+   * Reads the SAME switch the sources themselves obey (licenceExposure.ts), so this panel can never
+   * report a source as off while its calls keep going out. Admin-only, no user surface, and it
+   * discloses no credential — only whether each key is PRESENT.
+   */
+  app.get('/api/admin/licence-exposure', verifyAdminToken, async (_req: Request, res: Response) => {
+    try {
+      res.json({
+        rows: licenceExposures(),
+        active: activeExposureCount(),
+        headline: licenceExposureHeadline(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to read the licence register.' });
     }
   });
 

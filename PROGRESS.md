@@ -46125,3 +46125,219 @@ wrong on the first run (it swept the `catch` block in and demanded no plain wait
 the sweep; the catch answers with the plain page deliberately, because a request that threw has no
 trustworthy record to decide a snapshot from) — the test was fixed, not the route.
 `AppKnowledgeBase.ts` updated in the same change, per the sync rule.
+
+---
+
+## 2026-09-09 — the import lane proved its preview and forgot it (and one of my own three suggestions was already built)
+
+**Where this came from.** The admin asked me to build three items I had listed as *"chhoti hain abhi, baad
+me mehngi"*. Investigating them first changed two of the three, which is the useful part of this entry.
+
+### ❌ Item 1 was ALREADY BUILT — my source was a stale line in this very file
+
+I listed *"the Android SDK has no consent gate"* from the 2026-09-03 entry, which reads **"Still open
+(unchanged)"**. It is not open. `android/app/src/main/java/com/navbharatai/app/MetaConsentPlugin.java`
+exists, `MainActivity.registerPlugin(MetaConsentPlugin.class)` registers it, the three collection flags
+(`AutoInitEnabled` / `AutoLogAppEventsEnabled` / `AdvertiserIDCollectionEnabled`) ship hard-wired
+**false** in `AndroidManifest.xml`, and `src/lib/metaNativeConsent.ts` opens them at runtime only after
+consent — wired from `src/main.tsx`. Recorded as a NEW note rather than by editing the old line, per the
+append-only rule.
+
+**The lesson, which is safeguard #1 pointed at this file instead of at `main`:** an "open item" line is a
+claim with a timestamp, and it goes stale exactly like a `PROGRESS.md` status does. I proposed work to the
+admin on the strength of one, without grepping first. **Anything this file calls OPEN must be re-verified
+against current `main` before it is proposed, quoted, or acted on** — the same discipline the file already
+demands for defaults and for the roadmap.
+
+### ✅ Item 3 turned out to be a REAL, root-cause-shaped bug — and it is the admin's own port question
+
+I had listed *"full-stack apps get no preview fallback"*. Investigating it found something better, and
+much worse: **the import lane records nothing durable about a preview it has just PROVEN.**
+
+**The evidence.** The import preview block (`routes/agentv3.ts`, from `'import-preview-boot'` to its
+verdict) contained **zero `sandboxStore.` calls** — verified by scanning the whole block. That lane
+resolves the port from every declaration site (`declaredAppPort`), VISITS the page, and confirms it
+renders — the strongest evidence any lane in this codebase ever holds — and then dropped all of it.
+
+Every other lane records what it proved, at the moment it proves it:
+- the build path saves the **recipe** the instant a real browser renders the app (~15019),
+- the build path saves the **declared port** on every successful build (~15625),
+- the wake path saves the **recipe** the same way (~4900).
+
+And the build path's declared-port capture is gated on `expectsArtifacts`, which is literally defined as
+`(intent === 'new_build' || intent === 'edit_existing') && !isImportTurn` — so an import could not pick it
+up on the way past, either. The import lane was not merely missing a call; it was excluded by construction.
+
+**Why it stayed invisible.** The damage lands DAYS later. While the sandbox lives, the preview works and
+nothing looks wrong. Once it is gone, the door asks for a recipe and a declared port, finds **neither**,
+and falls through to the common-ports guess starting at 3000 — for an imported GitHub repo, the class of
+app most likely to be serving on 5000. **That is the admin's own question from 2026-09-08** (*"agar github
+par app port 3000 par hai, aur navbharatai us app ko port 5000 par ya kisi aur port try kare…"*), and
+answering it by reading the port-resolution code alone missed it, because the resolution is excellent and
+the MEMORY of it was the hole.
+
+**The fix.** Two writes at the moment of proof, with deliberately different conditions, mirroring the
+existing precedent exactly:
+- the **recipe** only when the page genuinely RENDERED (a recipe is a port we have SEEN serving; a
+  bound-but-blank port must never be promoted to one — the "earn it" rule);
+- the **declared port** whenever the app states one, render or not — precisely because a preview that
+  never came up has no recipe at all, and that is when the door has nothing else to lead with.
+Best-effort and silent: an import that worked must never fail over a memory write.
+
+**Tests** (`ImportPreview.test.ts`): the block writes both facts; the recipe is inside the
+`served.rendered` guard and carries the port that WON the visit and the command that booted it; the
+declared port is written OUTSIDE that guard (asserted by index order, since that is the whole point); the
+whole thing is wrapped so it cannot fail the import. The test window is bounded by two ANCHORS rather than
+a character count — my first version used `+6000` from the boot command, landed ~250 lines short of the
+code, and failed every assertion against a slice that never contained it. The test was wrong, not the
+route; fixed and recorded here because a window measured in characters rots silently as the route grows.
+
+### 🟡 Item 2 (licensing) — genuinely open, and the honest half is not code
+
+VirusTotal's free API forbids commercial use and NavBharatAI is commercial; Open-Meteo's no-key tier is
+non-commercial. Both remain OPEN root causes (rule 6): **the real fix is a purchase decision the admin
+must make, not something a session can write.** What IS buildable — and is being built next — is making
+the exposure visible and switchable from the admin panel instead of buried in a document, so it can be
+acted on the day it matters rather than discovered in a letter.
+
+### ✅ Item 2 shipped as far as code honestly can — the exposure is now VISIBLE and SWITCHABLE
+
+`src/lib/licenceExposure.ts` (new, pure) is the register of runtime SERVICES whose terms conflict with
+being a commercial product — deliberately not an npm licence scanner, which is a different problem the
+dependency-health gate already covers; these are HTTP calls a package scanner cannot see.
+
+**The load-bearing design decision:** the register does not *describe* whether a source is running — it
+reads the SAME function the source obeys. `liveWeatherSourceEnabled` is imported by BOTH
+`liveDataSources.ts` and the admin panel, so the panel can never report "off" while the calls keep going
+out. A register with its own opinion would be worse than none: a false assurance about a legal exposure.
+
+- **`LIVE_WEATHER_SOURCE=off`** now stops both Open-Meteo callers (weather AND air quality — switching
+  off only the obvious one would have left the exposure open). Degradation is honest and already-built:
+  those questions fall through to web search, exactly as gold rates and showtimes do.
+- **VirusTotal gets NO new switch, on purpose.** Its credential already IS the switch and its absence
+  already fails closed (no scan ⇒ nothing publishes). A second switch would be a second way to say the
+  same thing, and one of them would eventually drift.
+- **Admin surface:** `GET /api/admin/licence-exposure` behind `verifyAdminToken`, rendered on the
+  Security tab. **Read-only by design** — a one-click toggle would let a mis-tap stop App Store
+  publishing for every user with no audit trail, so the card names the exact Cloud Run setting instead.
+  It reports whether each key is PRESENT, never a value; test-locked.
+
+**🔴 AND THE HALF CODE CANNOT DO (rule 6), stated on the card itself rather than in a file nobody reads:**
+switching a source off is a PAUSE, not a fix. The fix is a commercial plan or a differently-licensed
+replacement — the admin's purchase decision. A test asserts every row's `honestFix` says so in words, and
+that the zero-running headline reads "not currently exposed" rather than "solved", because an admin who
+believes it is solved will never buy the plan and the risk returns the day someone switches it back on.
+
+**Gate:** frontend + server `tsc` clean; full suite green (numbers in the PR).
+
+### The full gate caught one failure, and it was the SAME brittleness twice in one day
+
+`tests/importPreviewWiring.test.ts` — *"'checking the live preview' is exited on the normal path and the
+throw path"* — went red. Nothing was broken: both `exitPhase` calls were still present and still correctly
+paired (route lines 9797 and 9814). The test sliced a **12,000-character** window from the `enterPhase`
+call, and the import lane learning to remember its preview pushed the throw path's exit to offset ~12,876
+— out of the window. A window measured in characters silently stops covering the code it was written
+about, and the failure it then produces points at the wrong thing entirely.
+
+Repointed to a structural anchor (`IMPORT_PREVIEW_BOOT_CUT_OFF`, the `finally` that closes that exact
+IIFE), so insertions inside the region cannot move the boundary. Verified to bite: removing either
+`exitPhase` fails it by name.
+
+**This is the second time the same defect appeared today** — my own new test in `ImportPreview.test.ts`
+used `+6000` from the boot command, landed ~250 lines short, and failed every assertion against a slice
+that never contained the code. Recorded as a rule rather than as two anecdotes: **a source-pin test must
+bound its window with ANCHORS that belong to the structure it is testing, never with a character count.**
+The count reads as precision and is really a countdown.
+
+---
+
+## 2026-09-09 — CI went red on a dependency advisory, and the red was on `main` too
+
+**What happened.** The dispatched CI run for #2785 failed in **56 seconds** — far too fast for the suite,
+which is the tell that it died in an early step. It did: `npm run audit:gate` rejected a **new** high
+advisory against `js-yaml` (GHSA-2883-xcg3-v3hh, `maxTotalMergeKeys` does not limit CPU use for empty
+merge sources — CWE-400/407).
+
+**Established it was not this PR's, before touching anything.** The change touched no dependency, and
+`main`'s own run at 11:53 today (run 34347862339, PR #2783's merge) failed the same way in 52 seconds.
+So every merge in the repository was blocked, not just this branch.
+
+**The fix is the real one, not the allowlist.** The gate offers two exits — fix the dependency, or
+allowlist it with a reason — and allowlisting here would have been the forbidden surface patch: `npm
+audit` reported `fixAvailable: true`, i.e. a non-breaking fix existed. `js-yaml` was already pinned in
+`overrides` at `^4.3.1`, one version behind the patched `4.3.2`; `npm ci` installs the lockfile exactly,
+so the caret never picked it up. Bumped the override to `^4.3.2` and refreshed the lockfile: the diff
+moves **only** `js-yaml`, nothing else.
+
+**Honest scope of the risk:** `js-yaml` arrives via `firebase-tools`, a **devDependency**, so it never
+shipped to a user — the exposure was our own CI and dev machines. Worth fixing regardless, because it
+was blocking every merge including `main`'s deploys.
+
+**And the thing that nearly hid all of this.** GitHub created **no CI run at all** for this PR's head
+SHA — the `pull_request` event silently produced nothing, the exact incident shape `ci.yml`'s own
+`workflow_dispatch` comment was added for on 2026-08-15. `get_check_runs` returned an empty list, which
+reads as "pending" rather than as "broken". Had the empty checks tab been taken at face value, the
+js-yaml breakage would have gone unnoticed until someone wondered why nothing was deploying.
+**An empty check list is not a green one, and it is not a pending one either — it is an unanswered
+question.** The manual dispatch is what turned it into an answer.
+
+---
+
+## 2026-09-09 — CI was red for two reasons, and NEITHER was the change under test
+
+PR #2785's CI failed twice. Both failures were real, both blocked every merge in the repo, and both
+were established as **not this branch's** before anything was touched — the discipline that matters
+here, because the reflex on a red gate is to change your own diff until the light goes green.
+
+### 🔴 First, and the more urgent: GitHub stopped creating CI runs at all
+
+The `pull_request` event produced no run for the pushed head — not on `opened`, not on `synchronize`.
+`get_check_runs` returned an EMPTY list, which is the dangerous shape: an empty check list is not
+green and not pending, it is **an unanswered question**, and it reads exactly like "nothing to worry
+about". `ci.yml` already carries a documented `workflow_dispatch` escape hatch from a 2026-08-15
+incident of the same kind; that is what was used, and every result below came from a dispatched run.
+
+**Had the empty list been read as "fine", both failures below would have merged unnoticed.**
+
+### 🔴 A new js-yaml advisory — red on `main` too, so nothing could merge
+
+The first dispatched run died in **56 seconds**, far too fast for the suite, which is itself the tell
+that it failed early. The audit gate had rejected a new high advisory against `js-yaml`
+(GHSA-2883-xcg3-v3hh, CWE-400/407). Confirmed not ours: the branch touches no dependency, and `main`'s
+own run that morning failed identically in 52 seconds.
+
+The gate offers "fix it" or "allowlist it with a reason". **Allowlisting would have been the forbidden
+surface patch** — `npm audit` reported `fixAvailable: true`. `js-yaml` was already pinned in
+`overrides` at `^4.3.1`, exactly one version behind the patched `4.3.2`, and `npm ci` installs the
+lockfile verbatim, so the caret never picked it up. Bumped the override; **the lockfile diff moves only
+js-yaml**. Honest scope: it arrives via `firebase-tools`, a devDependency, so it never shipped to a
+user — the exposure was CI and dev machines. Fixed anyway, because it was blocking main's deploys.
+
+### 🔴 Then the bundle budget — and the measurement is the point
+
+The next run got **8.5 minutes** in (past the audit gate) and failed on total JS: **1600.4 KB against a
+1600 KB ceiling**. Over by 0.4 KB — 0.025%.
+
+`bundleBudget.mjs` warns about exactly this in its own comments (2026-08-11): a ceiling set flush
+against reality "no longer says *no unchecked bloat*, it says *no further features*, and the next
+legitimate PR fails for existing growth it did not cause." That is what happened, and it was
+**measured rather than assumed** before the number was touched:
+
+| build | total JS |
+|---|---|
+| with this PR's UI | 1600.2 KB local / **1600.4 KB** on the runner |
+| with this PR's UI reverted | **1599.7 KB** |
+
+So this PR contributed **0.5 KB**; the other **113.6 KB** of drift since the 2026-08-24 measurement
+(1486.1) was already on main. And the first question that file says to answer — *what did I just put on
+the first-paint path?* — answers itself: the largest chunk did not move at all (250.3 KB against 400),
+because the added surface is an admin-only card inside the already-`lazy()` AdminDashboard route.
+
+Raised to **1720** = the runner's measurement + ~7.5% headroom, the same proportion the previous
+1486.1 → 1600 bump used. `LAST_MEASURED` updated in the SAME edit (the file demands this; a stale copy
+had already broken that test once) and dated.
+
+**Recorded, deliberately NOT acted on:** the entry chunk has shrunk 354.9 → 250.3 KB as more routes
+were split, so the 400 ceiling now permits ~150 KB of silent first-paint drift. Tightening it would
+lock that win in — but it is a judgement call with its own risk of failing somebody else's PR, and this
+change existed to unblock a gate, not to re-tune every ceiling while passing through.

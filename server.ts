@@ -808,6 +808,33 @@ setInterval(() => {
                 .catch(() => { /* best-effort — the sweep must never affect the server */ });
             },
           });
+          /**
+           * LIVE USD→INR — the rate every build's bill is converted at.
+           *
+           * 🔴 THE BUG THIS CLOSES (revenue audit 2026-09-10). `refreshUsdInrRate()` has existed, and
+           * been unit-tested, since the billing model was written — and it was NEVER CALLED anywhere
+           * outside its own test file. So `usdInrRate()` returned its 85 fallback forever, while the
+           * real rate sat around 87-88. Every single build was billed roughly 3% under its real cost,
+           * silently, with nothing failing to reveal it. Nothing was broken; a wire was simply missing.
+           *
+           * ⚠️ DELIBERATELY NOT `exclusive`. The rate is an IN-MEMORY cache per instance, so an
+           * exclusive job would refresh exactly one instance and leave every other one billing at 85 —
+           * which is the current bug with extra steps. Every instance must refresh its own copy. The
+           * cost of that is one tiny HTTP call per instance every six hours.
+           *
+           * Failure is already handled inside the module: it keeps the last good value and never
+           * throws, so a dead FX source means yesterday's rate rather than a broken bill.
+           */
+          const refreshFx = async () => {
+            await import('./src/server/lib/UsdInrRate')
+              .then(({ refreshUsdInrRate }) => refreshUsdInrRate())
+              .then((rate) => console.log(`[fx] USD→INR = ${rate}`))
+              .catch(() => { /* best-effort — billing must never break on FX */ });
+          };
+          scheduler.register({ id: 'usd-inr-refresh', schedule: { kind: 'everyMs', ms: 6 * 60 * 60_000 }, handler: refreshFx });
+          // AND ONCE AT BOOT. Without this the first six hours of a fresh instance — which includes
+          // every build right after a deploy — would still bill at the fallback.
+          void refreshFx();
           scheduler.register({
             id: 'monitor-alerts',
             schedule: { kind: 'everyMs', ms: 15 * 60_000 },

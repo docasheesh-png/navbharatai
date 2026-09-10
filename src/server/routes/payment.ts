@@ -19,6 +19,7 @@ import { verifyStorePurchase } from '../lib/storeVerify';
 import {
   isAcceptablePassPayment, professionalPassPriceInr, professionalPassDays,
 } from '../professionals/professionalPaid';
+import { couponValueInr } from '../lib/promoCoupons';
 
 /**
  * Verify a Cashfree webhook signature. CRITICAL: the HMAC MUST be computed over the EXACT raw bytes
@@ -434,19 +435,16 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     }
 
     const code = couponCode.trim().toUpperCase();
-    const couponValues: Record<string, number> = {
-      'NAVBHARAT50': 50,
-      'WELCOME100': 100,
-      'FESTIVE2026': 200,
-      'SAKUNI25': 25,
-      'FREE100': 100
-    };
-
-    if (!(code in couponValues)) {
+    // THE PRICE LIST MOVED OUT OF THE SOURCE (revenue audit 2026-09-10). Five codes used to be written
+    // here — FREE100, WELCOME100, NAVBHARAT50, FESTIVE2026, SAKUNI25 — each minting ₹25 to ₹200 of real
+    // credit, with no expiry and no total cap. The first two are the first two things anyone would type
+    // into a promo box, so they were not distributed so much as left to be found, and only a deploy
+    // could ever have stopped one. The table now lives in PROMO_COUPONS, and an UNSET value means no
+    // coupon is redeemable at all — see promoCoupons.ts for why that default is the safe one.
+    const value = couponValueInr(code);
+    if (value === null) {
       return res.status(400).json({ error: 'Invalid or expired promoter voucher card.' });
     }
-
-    const value = couponValues[code];
     const redemptionId = `coupon_${code}_${userId}`;
 
     try {

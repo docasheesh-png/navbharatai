@@ -128,6 +128,30 @@ export async function firebaseDomainsForWorkspace(workspaceId: string): Promise<
   return (await firebaseDomainsForWorkspaceStrict(workspaceId)) ?? [];
 }
 
+/**
+ * Every domain currently SERVING through NavBharatAI hosting — the set the uptime sweep probes
+ * (ROADMAP §13, 1.8). Skips suspended links (a paused plan has no site to be down) and `www` twins
+ * (they redirect to the canonical, which is what is probed). Bounded; fail-open to [].
+ */
+export async function activeDomainLinks(limit = 500): Promise<DomainLinkRecord[]> {
+  try {
+    const db = getDb() as any;
+    if (!db) return [];
+    const snap = await getDocs(query(collection(db, COLLECTION), where('provider', '==', 'firebase')));
+    const out: DomainLinkRecord[] = [];
+    snap.forEach((d: any) => {
+      if (out.length >= Math.max(1, limit)) return;
+      const data = d.data() as DomainLinkRecord;
+      if (!data || typeof data.domain !== 'string' || !data.domain || typeof data.workspaceId !== 'string') return;
+      if (data.suspended || data.alternateOf) return;
+      out.push(data);
+    });
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /** True when the workspace has at least one Firebase-connected custom domain (fail-open → false). */
 export async function workspaceHasFirebaseDomain(workspaceId: string): Promise<boolean> {
   return (await firebaseDomainsForWorkspace(workspaceId)).length > 0;

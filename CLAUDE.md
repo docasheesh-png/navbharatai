@@ -846,13 +846,35 @@ the code (it is actually read somewhere) on 2026-07-11.
   in the Privacy Policy §12 and pinned by `tests/privacyPolicyTruth.test.ts` — adding a field to the
   beacon fails CI until the policy discloses it.
 
+- **Outbound alert email — NOW LIVE (admin SET in Cloud Run 2026-09-10):** ✅ **`ALERT_EMAIL_API_KEY`**
+  (a Resend key) and ✅ **`ALERT_EMAIL_FROM`** = `alerts@send.navbharatai.com`. Read by
+  `src/server/lib/alertEmail.ts`; the endpoint defaults to Resend's (`ALERT_EMAIL_ENDPOINT` overrides it
+  for a provider with a compatible shape). **This is what finally turns email on for BOTH alert paths**
+  — the admin Monitor's own alerts (`monitorAlerts.ts`) and, more importantly, the per-user "your site
+  is down" mail from the uptime sweep, which until today could only ring the in-app bell.
+  **`ALERT_EMAIL_TO` is deliberately NOT set** — it falls back to the admin list, and user alerts pass an
+  explicit recipient (the owner's own verified address) anyway, so setting it would only risk sending a
+  user's outage mail to the admin list.
+  📌 **The sender lives on a SUBDOMAIN, `send.navbharatai.com`, and that was the point.** Verifying the
+  root domain would have put Resend's records beside the live site's own DNS; the subdomain keeps every
+  record under `send.` so `navbharatai.com` itself was never touched (verified during setup: the root A
+  records still answered with Google's IPs throughout). DNS is at **Hostinger**, sending region Tokyo
+  (`ap-northeast-1`). The FROM address is recorded here because it is public by construction — it appears
+  in the header of every mail we send — unlike the key, which is not written down anywhere.
+  ⚠️ **A MALFORMED sender used to read as CONFIGURED, and it nearly shipped that way.** During this very
+  setup `ALERT_EMAIL_FROM` was first entered as `NavBharatAI = alerts@send.…` (an `=` where `<` and `>`
+  belong); `resolveEmailConfig` only checked that the value was non-empty, so the Monitor would have
+  shown a green "Alerts reach you by app and email" while the provider rejected every send. Fixed the
+  same day — the sender's SHAPE is now validated (`senderAddress`, both `a@b.c` and `Name <a@b.c>`
+  accepted) and anything else is refused by name. Test-locked in `alertEmail.test.ts`.
 - **Site uptime alerts for connected domains (shipped 2026-09-10, ROADMAP §13 item 1.8):**
   `SITE_UPTIME_SWEEP` (kill switch — **default ON**; `off` stops the 15-minute probe of every connected
   custom domain), `SITE_UPTIME_COOLDOWN_HOURS` (default 6, clamped 1–72 — one "down" message per outage,
   then quiet while it stays down), `SITE_UPTIME_MAX_DOMAINS` (default 500, clamped ≤ 5000 — domains per
   sweep). Read by `src/server/lib/siteUptime.ts` / `siteUptimeSweep.ts`; registered in `server.ts` as the
   `site-uptime` scheduled job, **exclusive** (one instance probes). Email to the OWNER rides the existing
-  `ALERT_EMAIL_*` mailer — unconfigured ⇒ the in-app bell only, never a silent nothing. A probe that could
+  `ALERT_EMAIL_*` mailer — ✅ **configured since 2026-09-10, so the email really sends now**; unconfigured
+  ⇒ the in-app bell only, never a silent nothing. A probe that could
   not complete from our side is "unknown" and never counts as the user's site being down.
 
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)

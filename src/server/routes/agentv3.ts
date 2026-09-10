@@ -13535,6 +13535,32 @@ async function noteBuildOutcome(
       // result is always set here (OneShot, escalation, or the loop above).
       if (!result) result = await runner.run(buildPrompt);
 
+      /**
+       * 🔒 THE WALL-CLOCK CAP GETS ITS OWN HONEST OUTCOME CODE (admin diagnostics report, 2026-09-10).
+       *
+       * A build died at 29m59s — one second under `AGENTV3_MAX_BUILD_SECONDS`'s 1800s default — and the
+       * report gave no way to tell: every OTHER recognised outcome (`OUTCOME_BUILD_SUCCESS`,
+       * `OUTCOME_STOPPED`, `OUTCOME_SYNTAX_ERROR`, `OUTCOME_PREVIEW_FAILED`, …) gets a code here, but
+       * `AgentRunner` never touches `buildDiag` itself — only the route does, from `result` — so hitting
+       * the timeout silently looked like an ordinary finish. A reader was left to infer a timeout purely
+       * from the coincidence of the duration, which is the "wrong verdict" the honesty rule forbids.
+       *
+       * `severity` follows which of `buildTimedOut`'s two branches fired: `warning` when files were
+       * genuinely produced and saved (the common, resumable case — the user just sends another message),
+       * `error` when nothing was built at all (the build never got moving, worth real attention).
+       */
+      if (result.timedOut === true) {
+        try {
+          buildDiag.record({
+            phase: 'build', severity: result.ok ? 'warning' : 'error', code: 'OUTCOME_BUILD_TIMEOUT',
+            message: result.ok
+              ? `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (AGENTV3_MAX_BUILD_SECONDS) with real work saved — resumable, not a crash.`
+              : `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (AGENTV3_MAX_BUILD_SECONDS) before producing anything.`,
+            autoResolved: false,
+          });
+        } catch { /* diagnostics best-effort */ }
+      }
+
       // PLAN SYNC: reconcile the plan list with the real outcome — a successful build means the
       // plan is accomplished, so mark every item done (green ticks); a failed/partial build keeps
       // the progress reached. Best-effort — never affects the build result.

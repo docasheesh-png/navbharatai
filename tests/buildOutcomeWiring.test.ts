@@ -124,3 +124,34 @@ describe('the runtime auto-fix net asks "is it better", not just "does it paint"
     expect(route).toContain("code: 'RUNTIME_FIX_REGRESSED'");
   });
 });
+
+describe('🔒 the wall-clock cap gets its own honest outcome code (admin diagnostics report, 2026-09-10)', () => {
+  /**
+   * A real build hit AGENTV3_MAX_BUILD_SECONDS's default at 29m59s and the diagnostics report gave no
+   * way to tell — every OTHER recognised outcome (OUTCOME_BUILD_SUCCESS, OUTCOME_STOPPED,
+   * OUTCOME_SYNTAX_ERROR, OUTCOME_PREVIEW_FAILED, …) is recorded here, but AgentRunner never touches
+   * buildDiag itself; only the route does, from `result`. A reader was left to infer a timeout purely
+   * from the coincidence of the duration, which is the "wrong verdict" the honesty rule forbids.
+   */
+  it('is recorded right where every build path converges on one `result`', () => {
+    const i = route.indexOf('// result is always set here (OneShot, escalation, or the loop above).');
+    expect(i).toBeGreaterThan(-1);
+    const body = route.slice(i, i + 2200);
+    expect(body).toContain('if (result.timedOut === true)');
+    expect(body).toContain("code: 'OUTCOME_BUILD_TIMEOUT'");
+    expect(body).toContain('buildDiag.record(');
+  });
+
+  it('severity follows which of the two buildTimedOut branches fired', () => {
+    const i = route.indexOf('if (result.timedOut === true)');
+    const body = route.slice(i, i + 900);
+    // warning: files were genuinely saved (the common, resumable case) — error: nothing was built at all.
+    expect(body).toContain("severity: result.ok ? 'warning' : 'error'");
+  });
+
+  it('never throws into the build — diagnostics recording is best-effort, like every sibling OUTCOME_* call', () => {
+    const i = route.indexOf('if (result.timedOut === true)');
+    const body = route.slice(i, i + 900);
+    expect(body).toMatch(/try\s*\{[\s\S]*buildDiag\.record[\s\S]*\}\s*catch/);
+  });
+});

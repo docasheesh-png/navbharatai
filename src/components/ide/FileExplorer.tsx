@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { FolderOpen, FileCode, FilePlus, FolderPlus, ChevronRight, ChevronDown, Trash2, HardDrive, Search, SortAsc, Github, Lock, Image, CheckSquare, Square, AlertTriangle } from 'lucide-react';
+import { FolderOpen, FileCode, FilePlus, FolderPlus, ChevronRight, ChevronDown, Trash2, HardDrive, Search, SortAsc, Lock, Image, CheckSquare, Square, AlertTriangle } from 'lucide-react';
+import { Github } from '../ui/BrandIcons';
 import { cn } from '../../lib/utils';
 import { svgPreviewSrc } from '../../lib/svgPreview';
 import { motion, AnimatePresence } from 'motion/react';

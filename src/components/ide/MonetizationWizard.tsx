@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  IndianRupee, Loader2, Check, AlertTriangle, ArrowLeft, ExternalLink, Copy, ShieldCheck,
-  Github, Sparkles, ChevronRight,
-} from 'lucide-react';
+import { IndianRupee, Loader2, Check, AlertTriangle, ArrowLeft, ExternalLink, Copy, ShieldCheck, Sparkles, ChevronRight } from 'lucide-react';
+import { Github } from '../ui/BrandIcons';
 import {
   PAY_METHODS, methodSpec, generatePayment, paymentEnvKeys, isValidUpiId,
   missingRequiredFields, candidatePages,

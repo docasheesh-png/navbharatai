@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Settings, X, ChevronRight, ChevronLeft, Monitor, LayoutDashboard, Lock, Database, GitFork, Activity, GitBranch, Bot, Globe, Smartphone, BarChart2, Cpu, Github, List, LogOut, GitBranch as GitBranchIcon, Folder, Check, Search, RefreshCw, Box, Zap, Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail, Scale, FileText } from 'lucide-react';
+import { Settings, X, ChevronRight, ChevronLeft, Monitor, LayoutDashboard, Lock, Database, GitFork, Activity, GitBranch, Bot, Globe, Smartphone, BarChart2, Cpu, List, LogOut, GitBranch as GitBranchIcon, Folder, Check, Search, RefreshCw, Box, Zap, Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail, Scale, FileText } from 'lucide-react';
+import { Github } from '../ui/BrandIcons';
 import { cn } from '../../lib/utils';
 import { authedHeaders } from '../../lib/authHeaders';
 // META only — the ~45 KB of document bodies must never enter the main chunk (bundle budget);

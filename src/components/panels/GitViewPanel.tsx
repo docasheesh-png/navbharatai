@@ -5,7 +5,8 @@
  * Wraps the GitPanel component in the DevOps Engine header + layout shell.
  * Phase 2.1 (git-native versioning) will modify this file, not App.tsx.
  */
-import { Rocket, List, Github, Search } from 'lucide-react';
+import { Rocket, List, Search } from 'lucide-react';
+import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { GitPanel } from '../ide/GitPanel';
 

@@ -47317,3 +47317,35 @@ name (`indexOf('auto-dns/start')`), and the new shared helper's doc comment ment
 names — so they began reading PROSE instead of a handler. They now anchor on the registration
 (`app.post('/api/domains/nbai/auto-dns/start'`). Same lesson this file already records twice: a
 conclusion drawn from the wrong slice is not a weaker test, it is a different one.
+
+### Self-audit of the demotion, the same day it shipped — one real hole found and closed
+
+Asked "sare error/bugs/holes fix ho gaye?", the honest move was to go back over the money paths just
+shipped rather than answer from memory. Four seams were checked; three were already sound, one was not.
+
+**✅ Republish really un-pauses.** `withDeploymentPersistence` writes `status: 'active'` on every
+publish, so opening a `plan_paused` app and pressing Publish restores it fully — the instruction the
+lapse notice gives is a real one.
+
+**✅ Every Cashfree credit path carries the fee.** Redirect, webhook and reconcile-on-sign-in all go
+through `verifyPaymentInternal` → `computeCreditedWallet` with the transaction doc that holds
+`platformFeeInr`. There is no fourth path. Store purchases pass their own txData with no fee (correct),
+and a coupon writes the wallet directly with `amountPaid: 0` (correct — a gift is not a payment).
+
+**✅ No stale advertised price.** Every remaining `hostingPlanPriceInr()` call site is a "start a plan"
+pitch aimed at someone who has none, which is exactly what that function is for.
+
+**🔴 THE HOLE: renewal would have pointed a domain at a deleted channel.** The lapse now does two
+things — suspends domains AND pauses apps above the free allowance — but `reattachSuspendedDomains`
+reattached unconditionally. A domain whose app had been paused would come back pointing at nothing,
+right after the lapse notice promised "your domain reconnects on its own". A false promise, which is
+worse than the outage it replaced. Reachable when `AGENTV3_USER_PUBLISHED_APP_CAP` is set below the
+number of domains a user holds, or when the domain-count gate failed OPEN during an outage.
+
+**And the first fix for it was itself wrong, which is the more useful lesson.** It collected the LIVE
+workspaces and skipped any domain missing from that set — so a user whose apps predate the deployment
+registry, or a read returning an empty page rather than throwing, would have had EVERY domain refused
+immediately after paying. An existing test that stubbed no registry at all is what caught it. The rule
+is now: **skip only what we positively know is down** (a record that exists and is not active);
+absent, empty or unreadable all mean "cannot tell", and cannot-tell reattaches. The skipped domains are
+named in their own message with the one step that fixes them, because a silent skip looks like failure.

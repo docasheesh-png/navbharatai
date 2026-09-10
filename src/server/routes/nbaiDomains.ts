@@ -8,6 +8,7 @@ import {
   firebaseCustomDomainsEnabled,
   firebaseHostingConfigured,
   attachCustomDomain,
+  deleteCustomDomain,
   customDomainStatusLive,
   customDomainErrorMessage,
   sanitizeDomainErrorDetail,
@@ -15,7 +16,7 @@ import {
   type CustomDomainStatus,
 } from '../lib/firebaseCustomDomain';
 import {
-  linkWorkspaceDomain, firebaseDomainsForWorkspace, firebaseDomainLinksForUser,
+  linkWorkspaceDomain, firebaseDomainsForWorkspace, firebaseDomainLinksForUser, linkForDomain,
   rememberDomainDnsRecords, getStoredDomainDnsRecords,
 } from '../lib/firebaseDomainLink';
 import { mergeStableRecords, dropForeignSiteTokens, recordsStillPending, type StableDnsRecord } from '../lib/domainDnsRecords';
@@ -24,6 +25,7 @@ import {
   listZoneRecords, missingFromZone,
 } from '../lib/cloudflareManagedDns';
 import { canonicalHost, alternateHost } from '../lib/domainPair';
+import { decideDomainMove } from '../lib/domainMove';
 import { checkDomainConnect, domainConnectEnabled } from '../lib/domainConnect';
 import { hostingerDnsEnabled, applyHostingerRecords } from '../lib/hostingerDns';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
@@ -325,6 +327,30 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       res.status(503).json({ error: 'Custom-domain hosting is not configured on the server yet. Please try again later.' });
       return;
     }
+    /**
+     * "MOVE THIS DOMAIN TO THIS APP" — one tap (ROADMAP §13, 1.3; admin screenshots 2026-09-02 and
+     * 2026-09-10). If the domain is already held by ANOTHER app of the SAME user, pressing Connect
+     * here is the instruction: it is taken off that app's site first (both spellings), so the
+     * hosting service does not refuse this attach as "already connected elsewhere", and the screen
+     * says it moved. Held by a different account ⇒ refused, naming nobody. Decided by a pure
+     * function; the link read fails open to "nobody", which can only mean an ordinary attach — the
+     * hosting service still refuses a genuinely held domain, exactly as before.
+     */
+    const holder = await linkForDomain(host);
+    const move = decideDomainMove(holder, workspaceId, verifiedUid);
+    if (move.action === 'refuse') {
+      res.status(409).json({ error: move.message });
+      return;
+    }
+    let movedFrom: string | null = null;
+    if (move.action === 'move') {
+      for (const spelling of [host, alternateHost(host)].filter((h): h is string => !!h)) {
+        try { await deleteCustomDomain(move.from, spelling); } catch (detachErr) {
+          console.warn(`[nbai domains] could not detach ${spelling} from ${move.from} before moving: ${detachErr instanceof Error ? detachErr.message : String(detachErr)}`);
+        }
+      }
+      movedFrom = move.from;
+    }
     try {
       const status = await attachCustomDomain(workspaceId, host);
       // Persist the link so the deploy path publishes future builds to this workspace's dedicated site.
@@ -351,6 +377,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       // Pressing Connect on an already-connected domain used to answer without `serving` / `publishBlocked`
       // / `dnsCheck`, and the screen rendered that as a second, contradictory verdict. See formDomainVerdict.
       const verdict = await formDomainVerdict(workspaceId, host, status);
+      if (movedFrom) (verdict as Record<string, unknown>).movedFrom = movedFrom;
       // autoDns tells the client whether the zero-copy-paste path (nameserver delegation) exists on
       // this server — the UI offers it only when a tap can actually deliver it.
       res.json({ ...verdict, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() });

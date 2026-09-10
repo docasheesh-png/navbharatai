@@ -156,6 +156,24 @@ export async function rememberDomainDnsRecords(domain: string, records: readonly
   } catch { /* best-effort — the live pending set is still shown if this fails */ }
 }
 
+/**
+ * Who holds this domain right now — the workspace and user its link names — or null when nobody
+ * does or we could not ask (ROADMAP §13, 1.3). Fail-open to null: an unreadable link must never be
+ * mistaken for "held by someone else" (a refusal) nor for "held by you" (a move).
+ */
+export async function linkForDomain(domain: string): Promise<DomainLinkRecord | null> {
+  try {
+    const db = getDb() as any;
+    if (!db || !domain) return null;
+    const snap = await getDoc(doc(db, COLLECTION, docId(domain)));
+    if (!snap.exists()) return null;
+    const data = snap.data() as DomainLinkRecord;
+    return typeof data?.workspaceId === 'string' && data.workspaceId ? data : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The records ever shown for a domain (empty on any error — fail-open to the live set). */
 export async function getStoredDomainDnsRecords(domain: string): Promise<RememberedDnsRecord[]> {
   try {

@@ -611,7 +611,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       paneVisible,
       documentHidden: typeof document !== 'undefined' && document.visibilityState === 'hidden',
     })) return;
-    const hasUrl = !!(url || foundUrl);
+    const hasUrl = !!effectiveUrl;
     if (!hasUrl || sandbox?.livePreviewAvailable !== true) return;
     if (healRef.current.ws !== workspaceId) healRef.current = { ws: workspaceId, streak: 0, total: 0, lastAt: null };
     probeInFlight.current = true;
@@ -621,9 +621,29 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         const res = await fetch('/api/agentv3/preview-health', {
           method: 'POST',
           headers: await authJsonHeaders(),
-          // Send the URL we are ACTUALLY displaying: the server used to probe a port guessed from the
-          // framework name (vite-react ⇒ 5173) while a full-stack app serves on its own port.
-          body: JSON.stringify({ workspaceId, userId, email, framework, previewUrl: url || foundUrl || '' }),
+          /**
+           * Send the URL we are ACTUALLY DISPLAYING — `effectiveUrl`, the exact value the address bar
+           * and the iframe render.
+           *
+           * 🔴 THIS LINE USED TO SEND `url || foundUrl`, THE OPPOSITE ORDER TO `effectiveUrl`
+           * (`foundUrl || url`), while the comment above it already claimed it sent what was displayed
+           * (admin report 2026-09-10 — a preview stuck on E2B's "Closed Port Error … port 3000" after
+           * the build had verified port 5000 twenty minutes earlier).
+           *
+           * The two orders only agree when one of the values is empty. When BOTH exist and differ —
+           * exactly the case a failover creates — the user SEES `foundUrl` while the server was asked
+           * to judge `url`, so the freshness check compared the wrong machine, answered "same", and
+           * returned no correction. The frame then sat on a dead port permanently, with the watchdog
+           * reporting everything as fine on every 150-second tick. Not a transient: nothing in the
+           * loop could ever break out of it, because the one question that would have was never asked.
+           *
+           * This is precisely what `previewUrlFreshness.ts` exists to prevent — its own doc comment
+           * says the measurement "refuses to describe an app the user is not actually looking at" —
+           * and the sibling probe below (the error-failover one) already had it right, which is what
+           * makes this a drift between two call sites rather than a missing idea. Both now send the
+           * same derived value, so they cannot disagree again.
+           */
+          body: JSON.stringify({ workspaceId, userId, email, framework, previewUrl: effectiveUrl }),
         });
         const health = await res.json().catch(() => null) as {
           status?: unknown; serving?: unknown; servingProblems?: unknown;

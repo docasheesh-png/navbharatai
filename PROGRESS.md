@@ -46447,8 +46447,58 @@ event stream itself dropped earlier (around the repeated tool-call failures at m
 client's local `previewUrl` state was already behind the server's by the time anything tried to correct
 it. **Trigger for revisiting:** a reproducible case, or a second admin report of the same symptom.
 
-### 🟡 Open root cause #2 — the diagnostics EXPORT SCHEMA has no field for the build's final outcome
+### ⚠️ CORRECTION — open root cause #2 as first written was WRONG, and the truth was worse
 
+It said "the diagnostics export schema has no field for the build's final outcome". **False.**
+`BuildDiagnosticsReport` has carried `ok?: boolean` and `summary?: string` all along, and
+`BuildDiagnostics` sets both from the `done` event (`case 'done': this.ok = e.ok; this.summary = e.summary`).
+I inferred "no field" from the exported JSON's KEY LIST — `JSON.stringify` drops `undefined`, so absent
+keys meant absent VALUES, not an absent schema. The same class of mistake safeguard #6 records about
+searches: an empty result is not proof of non-existence.
+
+**What the absence actually proved, and it is the real finding:** `ok`, `summary` AND `endedAt` were all
+undefined together, which means **no terminal event of any kind was ever recorded into that report** —
+no `done`, no `finish()`, no `OUTCOME_*`. The build did not exit through any of its honest endings.
+
+### 🔴 …and that is why the report blamed an innocent command
+
+With no `OUTCOME_*` present, `deriveRootCause` fell through to "pick the most severe unresolved issue"
+and named **`$ npx vitest run → exit 1`** as the root cause — a test failure the build had ALREADY fixed
+and re-run green four times before it stopped. A resolved command was blamed for ending a build it did
+not end.
+
+This is the SAME false attribution `finalizeOnDeadline` already exists to prevent — its own comment cites
+"a 35.8-minute build that had actually hit the 30-minute cap" being blamed on `npm audit fix`. That fix
+records `OUTCOME_STOPPED` from the deadline timer; it did not fire here (the report contains no
+`OUTCOME_*` at all). Which is the point: **the hole is not in any one ending path — it is in relying on
+every ending path to remember.** `endBuild()` sets `rb.ended = true` and `finalizeOnDeadline` bails on
+exactly that flag, so any path that ends a build without recording an outcome silently disarms the one
+thing that would have.
+
+**Fixed at the choke point instead (PR #2789).** `deriveRootCause` gains `endedWithoutOutcome`, set ONLY
+by the serializer — the one caller that can tell "this build never reported an ending" apart from "the
+caller did not pass `ok`" (many do not, and five existing tests caught that distinction the first time I
+got it wrong). When set, the report says plainly that the reason it stopped is not known, and demotes the
+worst recorded issue to what it actually is — the worst thing SEEN, not the reason. The issue is still
+named, because it is the most useful line available; only the causation claim is withdrawn.
+
+### ✅ Open root cause #1 SOLVED — and it was a one-token ordering drift
+
+The stale-port preview is no longer open. The frame renders `effectiveUrl = foundUrl || url`, while the
+150-second health probe sent **`url || foundUrl` — the opposite order** — under a comment that already
+claimed it sent "the URL we are ACTUALLY displaying". The sibling probe (the error-failover one, same
+file) had it right, which is what makes this a drift between two call sites rather than a missing idea.
+
+The two orders agree only when one value is empty. When both exist and differ — exactly what a failover
+creates — the user SEES `foundUrl` while the server is asked to judge `url`; the freshness check compares
+the wrong machine, answers "same", and returns no correction. **Not a transient: nothing in the loop can
+break out, because the one question that would have was never asked**, and the 150-second watchdog
+reports everything as fine forever. That matches the screenshot exactly, including why "Your preview
+moved to a new server — reconnecting you to it now." was showing ABOVE a frame that never moved.
+
+Both probes now send `effectiveUrl`, and `previewLiveFailover.test.ts` grep-locks that neither can drift
+back — a source assertion rather than a rendered one, because the bug WAS a one-token ordering
+difference between two call sites.
 While investigating #1, found that `BuildDiagnosticsReport`'s top-level keys (`schema, buildId,
 promptHash, sessionId, workspaceId, prompt, model, plannedModel, framework, startedAt, counts, issues,
 problems, rootCause, commands, llmCalls, providerDelivery, builtBy, priorFailedBuilds`) carry no
@@ -47170,6 +47220,41 @@ by `tests/hostingTiers.test.ts` so removing that line the day the meter goes liv
 rather than a silent one, and `AppKnowledgeBase.ts` tells every AI to never claim a traffic charge a
 user's ledger does not actually show.
 
+## 2026-09-10 — TWO SESSIONS FIXED ONE FLAKY TEST; the merge kept the better half (PR #2789 conflict resolution)
+
+**Session:** claude/upgrade-md-review-vxbdy0, resolving PR #2789 (branch
+`claude/preview-stale-port-and-root-cause`, opened by an earlier session) after it had sat open long
+enough for `main` to move 16 commits past its base.
+
+### What happened, and why it is worth recording rather than just merging
+PR #2789's three root-cause fixes (a port being UP is not proof of IDENTITY; the preview-health probe
+sending `url || foundUrl` while the frame renders `foundUrl || url`; a report blaming a command the
+build had already fixed) merged into today's `main` cleanly — **one file conflicted**, and the conflict
+was two sessions independently fixing the SAME flaky test in `AgentRunner.test.ts`:
+
+- **#2789's answer:** DELETE the end-to-end timeout test, keep only a source-grep assertion, on the
+  reasoning that "a flaky test is worse than no test."
+- **#2804's answer (already merged to `main`):** keep the end-to-end test AND fix the flake at its real
+  cause — the test's own arithmetic. The watchdog is checked at the TOP of the loop while
+  `totalToolUses` increments at the BOTTOM, so the ok:true branch needs
+  `turnDelayMs > maxBuildMs > time-to-first-check`; `maxBuildMs: 800` with `turnDelayMs: 1500` makes
+  that window real instead of hoping the machine is idle.
+
+**`main`'s version was kept in full.** It is strictly stronger: it holds the behavioural coverage
+#2789 was giving up AND the source-grep test, and it fixed the flake rather than removing the
+evidence of it. Nothing from #2789's actual subject matter was lost — its nine-file change touched this
+test file only to replace the flaky one, and every other file merged automatically.
+
+⚠️ **The PR body of #2789 still says it "replaces a test from #2788 that was flaky by construction".
+That sentence is no longer true of what shipped** — recorded here because a later session reading that
+description alone would look for a deletion that did not happen.
+
+### The wider lesson (safeguard #1, in a shape this file had not yet recorded)
+A finished, CI-GREEN PR is not safe just because it is green. #2789's green was earned on a base 16
+commits old; it proved nothing about today's `main`, and the one thing it could not have seen was
+another session solving the same problem better. **A PR left open drifts from green to unknown without
+any event marking the moment.** The rule that follows: re-verify a PR against current `main` before
+merging it, and treat an old green as a claim about a tree that no longer exists.
 ---
 
 ## 2026-09-10 — Renewal reminders: 5 / 3 / 1 days, plus the grace-window warning that was missing

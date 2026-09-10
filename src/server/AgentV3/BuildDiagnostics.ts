@@ -1376,7 +1376,12 @@ export class BuildDiagnostics {
       },
       issues: [...this.issues],
       problems: capProblems(this.issues.filter((i) => i.severity !== 'info')),
-      rootCause: deriveRootCause({ issues: this.issues, errors: this.errors, review: this.reviewText, ok: this.ok, commands: this.commands }),
+      rootCause: deriveRootCause({
+        issues: this.issues, errors: this.errors, review: this.reviewText, ok: this.ok, commands: this.commands,
+        // The serializer is the ONLY caller that can distinguish "this build never reported an
+        // ending" from "the caller did not pass ok" — see the field's own comment.
+        endedWithoutOutcome: this.ok === undefined,
+      }),
       commands: this.commands.length ? [...this.commands] : undefined,
       llmCalls: this.llmCalls.length ? [...this.llmCalls] : undefined,
       errors: this.errors.length ? [...this.errors] : undefined,
@@ -1834,6 +1839,12 @@ export function deriveRootCause(input: {
   ok?: boolean;
   /** The run's recorded commands — evidence for whether a failed one later succeeded. Optional. */
   commands?: ReadonlyArray<{ command: string; exitCode: number | null }>;
+  /**
+   * The report is being finalised and NO terminal event was ever recorded into it — no `done`, no
+   * `finish()`, no `OUTCOME_*`. Set only by the serializer, which is the one caller that can tell this
+   * apart from "the caller simply did not pass `ok`" (many do not, and they must keep today's answer).
+   */
+  endedWithoutOutcome?: boolean;
 }): string | undefined {
   const { issues, errors, review, ok } = input;
   const outcome = [...issues].reverse().find((i) => i.code.startsWith('OUTCOME_'));
@@ -1885,6 +1896,30 @@ export function deriveRootCause(input: {
     // succeed; a successful build must never report a recovered/auto-resolved item as its root cause.
     ?? (ok === true ? undefined : (issues.find((i) => i.severity === 'error' && !excluded(i))
       ?? issues.find((i) => i.severity !== 'info' && !excluded(i))));
+  /**
+   * 🔴 A BUILD THAT NEVER RECORDED AN ENDING MUST NOT HAVE ONE INVENTED FOR IT (admin report 2026-09-10).
+   *
+   * `ok === undefined` means no terminal event ever reached this report — no `done`, no `finish()`, no
+   * `OUTCOME_*`. The reported build ran 29m59s against a 30-minute cap and was exported with `ok`,
+   * `summary` AND `endedAt` all absent, so the pick above named `$ npx vitest run → exit 1` as its root
+   * cause: a test command that had ALREADY been fixed and re-run green four times, blamed for a build
+   * it did not end.
+   *
+   * That is the same false attribution `finalizeOnDeadline` was written to stop (its own comment cites a
+   * 35.8-minute build blamed on `npm audit fix`) — proving the hole is not in any one ending path but in
+   * relying on EVERY ending path to remember. So the honesty is enforced here instead, at the one place
+   * every report passes through: when nothing recorded an ending, say so, and demote the most severe
+   * recorded issue to what it actually is — the worst thing SEEN, not the reason it stopped.
+   *
+   * The issue is still named, because it is the most useful thing we have; only the claim that it CAUSED
+   * the ending is withdrawn. A build genuinely still running reads the same way, which is correct: we do
+   * not know how it ends either.
+   */
+  if (input.endedWithoutOutcome === true) {
+    return problem
+      ? `This build ended without recording an outcome (cut off before it could report one) — so the reason it stopped is NOT known. The most severe issue recorded before it stopped, which may or may not be related: ${problem.message}`
+      : 'This build ended without recording an outcome (cut off before it could report one) — the reason it stopped is not known, and no unresolved issue was recorded either.';
+  }
   if (problem) return problem.message;
   if (ok === true) return 'Build completed successfully with no problems recorded.';
   // No app-level problem was captured, but the sandbox went away mid-build → name the infra honestly

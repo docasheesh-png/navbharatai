@@ -12,6 +12,7 @@ const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ d
 import { Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Github, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
+import type { SiteAnalyticsView } from './HostingChooser';
 import { PublishCelebration } from './PublishCelebration';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 import { auth as firebaseAuth } from '../../lib/firebase';
@@ -2805,6 +2806,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
   // server so it survives a reconnect/new session, not just the current build stream.
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
+  const [siteAnalytics, setSiteAnalytics] = useState<SiteAnalyticsView | null>(null);
   // The first-ever-publish celebration. Null until the server says this user has never published
   // before AND we have looked at the link (see deployLive).
   const [celebration, setCelebration] = useState<{ kind: CelebrationKind; url: string; firstPublish: boolean } | null>(null);
@@ -2843,6 +2845,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     const wsId = state.workspaceId;
     if (!wsId) return;
     let cancelled = false;
+    // The previous app's visitor counts must not sit under the new app's name for even the length of
+    // this request — same leak class as the live URL (#2658). Cleared here, synchronously, so no new
+    // per-workspace effect is added to the census in appIdentityGuard.test.ts.
+    setSiteAnalytics(null);
     void (async () => {
       try {
         const params = new URLSearchParams({ workspaceId: wsId });
@@ -3033,6 +3039,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
    * one version, served from storage which keeps no history, or simply unreadable right now) — a
    * greyed-out button with no explanation reads as broken rather than as "there is nothing to undo".
    */
+  /**
+   * Visitor counts for the live app (ROADMAP §13, 1.1). A failed request is reported as
+   * `available: false` so the tile says "could not read" — never a zero it did not measure.
+   */
+  const loadSiteAnalytics = async (days: 7 | 30 = 7): Promise<void> => {
+    if (!state.workspaceId) return;
+    try {
+      const res = await fetch('/api/agentv3/site-analytics', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, days }),
+      });
+      const data = await res.json().catch(() => null);
+      setSiteAnalytics(res.ok && data && typeof data.available === 'boolean' ? data : { available: false, reason: 'request-failed' });
+    } catch {
+      setSiteAnalytics({ available: false, reason: 'request-failed' });
+    }
+  };
+
   const rollbackLive = async (): Promise<void> => {
     if (!state.workspaceId) return;
     setPublishMsg('Bringing back the previous version…');
@@ -3679,6 +3704,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           liveUrl={liveUrl}
           onUnpublish={unpublishLive}
           onRollback={rollbackLive}
+          siteAnalytics={siteAnalytics}
+          onLoadSiteAnalytics={loadSiteAnalytics}
           onLoadMyApps={loadMyPublishedApps}
           onUnpublishApp={unpublishByWorkspace}
           customDomainsEnabled={customDomainsEnabled}

@@ -46558,3 +46558,57 @@ touch another module's test is how an unrelated regression gets attributed to a 
 the elapsed time REAL rather than relaxing the assertion — have the scripted client await a couple of
 milliseconds so the second check genuinely happens after `maxBuildMs`. The assertion itself must stay
 exactly as it is; changing it to match the flake would be changing a test to match broken behaviour.
+
+## 2026-09-10 — Visitor analytics for published apps (ROADMAP §13 item 1.1) + the §13 plan itself
+
+**Session:** claude/upgrade-md-review-vxbdy0. PRs #2792 (domain screen contradiction), #2793 (ROADMAP §13),
+and this one.
+
+### Why this first
+The admin asked for NavBharatAI's import → publish → domain flow to be compared with 7-8 AI app builders
+and for an improvement plan. The plan is `ROADMAP.md` §13. Its first code item is this one, chosen because
+it is the cheapest thing that changes what a user FEELS after publishing — "kitne log aaye?" — and needs no
+admin decision. Every competitor with hosting answers that question; we could not.
+
+### What shipped
+- **`src/server/lib/siteAnalytics.ts`** (pure): the beacon stamped into every published HTML page, the
+  validation of what comes back (`parseHit` accepts exactly the beacon's shape and nothing else), the daily
+  rotating HMAC visitor hash, the sharded document layout, and `summarize()`.
+- **`src/server/lib/siteAnalyticsStore.ts`**: hits buffered in memory and flushed every 20s as
+  `FieldValue.increment` merges into `site_analytics/<appId>_<day>_s<shard>` — `metricsTimeline`'s
+  pattern, so N Cloud Run instances add up by construction. A visitor's shard is a function of their hash,
+  so "unique per day" is EXACT across instances, not approximate. Every document is bounded (200 distinct
+  paths/referrers, the rest fold into `_other`); a failed flush puts the counts back; a failed read returns
+  `available: false`, never zeros.
+- **Stamped at publish** in `DeploymentStore.withDeploymentPersistence`, right after the badge and for the
+  same reason (downstream of every edit, never in the user's source, never in a preview). First-party
+  publishes only. The public app id is `siteIdForWorkspace` — already in the site's URL, so nothing new is
+  disclosed. Kill switch `AGENTV3_SITE_ANALYTICS=off`.
+- **Routes** (`routes/agentv3.ts`): `POST /api/site-analytics/hit` — public, cross-origin by design
+  (`text/plain` simple request, no preflight), answers 204 BEFORE any work, honours DNT/GPC server-side
+  too, rate-limited in memory; `POST /api/agentv3/site-analytics` — owner-checked like rollback-status,
+  app id derived from the workspace, never taken from the client.
+- **Publish sheet** (`HostingChooser.tsx`): a "Visitors" tile under the live link — people / views / today,
+  a 7- or 30-day bar strip, top pages, "came from". Three honest states: counting, numbers, or
+  "unavailable — this is not a zero".
+- **Privacy Policy §12** discloses exactly what is collected; `tests/privacyPolicyTruth.test.ts` imports
+  `POLICY_PHRASES` from the code, so adding a collected field fails CI until the policy names it — the
+  guard that was missing when the pixel drifted on 2026-09-02. `AppKnowledgeBase` + `CLAUDE.md` registry
+  updated in the same change.
+
+### Two things the tests taught, kept
+- `fieldKey` first shipped with a lossy encoding (`%`→`_` collided with real underscores; `/__proto__`
+  did not round-trip). Now `_u`/`_p` escapes with a single-pass decode, test-locked with the very keys
+  that broke it.
+- The per-workspace reset could not go into the `[state.workspaceId]` effect: two source-locks pin that
+  line verbatim and a census caps such effects at 3. It sits inside the existing live-URL fetch effect
+  instead, synchronously before the request — same leak class as #2658, closed the same way.
+
+### Gate
+`tsc --noEmit` 0 · `tsc -p tsconfig.server.json` 0 · `vitest run` **1505 files / 20,262 passed, 0 failed**.
+
+### Open, honestly
+- Countries are not collected (the beacon posts to Cloud Run, which carries no geo header); they arrive
+  free once published apps are served through the Cloudflare Worker (§13 Phase 0.3) — `cf-ipcountry`.
+- Retention: documents are read for 30 days; a deletion sweep for older ones is not written yet — at
+  today's publish volume the growth is negligible, and it belongs with the cron runner (§13 2.7).

@@ -1,5 +1,9 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
+import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
+import express from 'express';
+import { HIT_PATH, parseHit, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
+import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
+import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
 import { recordPlatformBuild } from '../lib/platformBuildMetrics';
@@ -7057,6 +7061,62 @@ async function noteBuildOutcome(
     }
     const ok = await mcpServerStore.remove(workspaceId, id);
     res.json(ok ? { ok: true } : { ok: false, error: 'Could not remove that service right now.' });
+  });
+
+  // ═══ SITE ANALYTICS — "kitne log aaye?" (ROADMAP §13, 1.1) ═══
+  //
+  // THE HIT ENDPOINT IS PUBLIC AND CROSS-ORIGIN BY DESIGN: the caller is a visitor's browser on a
+  // published app's own origin, and it has no session with us. The beacon sends `text/plain`, which
+  // is a CORS "simple request" (no preflight), and reads nothing back — the headers below exist so a
+  // `fetch` fallback is never blocked either. Defences are exactly what a public endpoint can have:
+  // accept nothing that is not the beacon's shape (parseHit), honour DNT/GPC here as well as in the
+  // page, a rate limit, and a store that buffers, bounds every document and never throws.
+  // The response goes out BEFORE any work — a counter must never slow a visitor down.
+  const hitCors = (res: Response) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  };
+  app.options(HIT_PATH, (_req: Request, res: Response) => { hitCors(res); res.status(204).end(); });
+  // Per-IP 1,200/h is ~20 page views a minute from one address — generous for a person, cheap to
+  // exhaust for a script. In-memory only (`durable: false`): a lost count on a cold start costs
+  // nothing here, and a Firestore read per page view would cost more than the feature.
+  const hitLimiter = rateLimiter({ name: 'site-hit', authed: 3000, anon: 1200, noun: 'hits', durable: false, anonGlobalPerHour: 500_000 });
+  app.post(HIT_PATH, express.text({ type: '*/*', limit: '4kb' }), hitLimiter, (req: Request, res: Response) => {
+    hitCors(res);
+    res.status(204).end();
+    if (!siteAnalyticsEnabled() || requestOptsOut(req.headers as Record<string, unknown>)) return;
+    const hit = parseHit(req.body);
+    if (!hit) return;
+    siteAnalyticsStore.record({
+      ...hit,
+      ip: req.ip || '',
+      userAgent: String(req.headers['user-agent'] || ''),
+      nowMs: Date.now(),
+    });
+  });
+
+  /**
+   * The builder's own numbers. Owner-checked like rollback-status: a visitor count discloses how an
+   * app is doing, which is the owner's business and nobody else's. The app id is derived here from
+   * the workspace, never taken from the client — the same reason rollback re-derives its target.
+   */
+  app.post('/api/agentv3/site-analytics', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    if (!siteAnalyticsEnabled()) { res.json({ available: false, reason: 'disabled' }); return; }
+    const days = Math.min(30, Math.max(1, Math.floor(Number(req.body?.days) || 7)));
+    res.json(await siteAnalyticsStore.summary(siteIdForWorkspace(workspaceId), days));
   });
 
   app.post('/api/agentv3/rollback-status', workspaceRateLimiter(), async (req: Request, res: Response) => {

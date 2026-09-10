@@ -226,3 +226,43 @@ describe('webFetchUrl — a server-side fetcher of a user-chosen URL is the text
     expect(Object.keys(opts.headers as object)).not.toContain('cookie');
   });
 });
+
+// 🔒 `keepHtml` — the Website → App importer's opt-in. Off by default so the tool path is byte-identical.
+describe('webFetchUrl keepHtml — raw markup only when asked, and only for HTML', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  const PUBLIC = 'https://93.184.216.34/';
+  const serve = (body: string, type: string) => vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200, headers: { 'content-type': type } })));
+
+  it('is absent without the option', async () => {
+    serve('<html><body><p>Hi</p></body></html>', 'text/html');
+    const r = await webFetchUrl(PUBLIC);
+    expect(r.ok).toBe(true);
+    expect(r.html).toBeUndefined();
+  });
+
+  it('returns the raw HTML with the option, alongside the extracted text', async () => {
+    serve('<html><head><title>T</title></head><body><p>Hi</p></body></html>', 'text/html');
+    const r = await webFetchUrl(PUBLIC, { keepHtml: true });
+    expect(r.ok).toBe(true);
+    expect(r.text).toContain('Hi');
+    expect(r.html).toContain('<title>T</title>');
+  });
+
+  it('does NOT attach html for non-HTML text (JSON is data, not a page)', async () => {
+    serve('{"a":1}', 'application/json');
+    const r = await webFetchUrl(PUBLIC, { keepHtml: true });
+    expect(r.ok).toBe(true);
+    expect(r.html).toBeUndefined();
+  });
+
+  it('a page that is ALL script still hands back its head on the honest failure, so the importer can say "JavaScript-drawn"', async () => {
+    // No <title> on purpose — a title IS readable text, and the point is a page with none at all.
+    serve('<html><head><meta name="theme-color" content="#abc"></head><body><div id="root"></div><script>x()</script></body></html>', 'text/html');
+    const r = await webFetchUrl(PUBLIC, { keepHtml: true });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/JavaScript/);
+    expect(r.html).toContain('theme-color');
+    const plain = await webFetchUrl(PUBLIC);
+    expect(plain.html).toBeUndefined();
+  });
+});

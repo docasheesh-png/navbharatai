@@ -98,6 +98,8 @@ export function alertSubject(message: string): string {
 export interface SendDeps {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** The sign-off under the message. Defaults to the Monitor's; a user-facing alert passes its own. */
+  footer?: string;
 }
 
 /**
@@ -126,7 +128,7 @@ export async function sendAlertEmail(
         from: cfg.from,
         to: cfg.to,
         subject: alertSubject(message),
-        text: `${message}\n\n— NavBharatAI Monitor\nOpen Admin → Monitor for the live charts.`,
+        text: `${message}\n\n${deps.footer ?? '— NavBharatAI Monitor\nOpen Admin → Monitor for the live charts.'}`,
       }),
       signal: controller.signal,
     });

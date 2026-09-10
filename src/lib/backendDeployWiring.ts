@@ -132,7 +132,7 @@ export function managedDeployRequest(
   };
 }
 
-export type ManagedDeployKind = 'deployed' | 'not-configured' | 'needs-connect' | 'failed';
+export type ManagedDeployKind = 'deployed' | 'not-configured' | 'needs-connect' | 'create-refused' | 'failed';
 
 /**
  * Turn the route's response into an honest outcome + printable lines.
@@ -145,16 +145,46 @@ export type ManagedDeployKind = 'deployed' | 'not-configured' | 'needs-connect' 
  */
 export function managedDeployOutcome(
   status: number,
-  body: { ok?: boolean; url?: string; serviceName?: string; reason?: string; error?: string; message?: string } | null,
+  body: {
+    ok?: boolean; url?: string; serviceName?: string; reason?: string; error?: string; message?: string;
+    /**
+     * 🔴 THESE THREE WERE SENT BY THE SERVER AND READ BY NOBODY (found by audit 2026-09-05).
+     *
+     * The deploy route already returned `domainPointed` / `domainNote` — the whole point of the
+     * custom-domain work — and this function's body type did not mention them, so every one of those
+     * sentences was parsed and thrown away. A user whose domain could NOT be pointed was told
+     * "Deploy triggered" and nothing else, which is the same silent-success failure the domain work
+     * existed to end, reappearing one layer up. `envNote` would have arrived the same way.
+     *
+     * The lesson worth keeping: a server that returns an honest field has not communicated anything
+     * until a client renders it.
+     */
+    domainPointed?: { domain?: string; records?: number } | null;
+    domainNote?: string;
+    envNote?: string;
+    /** Set only when the service was just created, so its plan is a fact and not a guess. */
+    planNote?: string;
+  } | null,
 ): { kind: ManagedDeployKind; lines: string[] } {
   const serverSaid = String(body?.error ?? body?.message ?? '').trim();
   if (status >= 200 && status < 300 && body?.ok && body.url) {
+    const domain = String(body?.domainPointed?.domain ?? '').trim();
     return {
       kind: 'deployed',
       lines: [
         `🚀 Deploy triggered on your own Render account${body.serviceName ? ` for "${body.serviceName}"` : ''}.`,
         `🔗 ${body.url}`,
         'ℹ️ Render is building it now — the URL goes live when that finishes. Your account, your billing.',
+        // Only ever ONE of these two: the route sets `domainPointed` when it really wrote the records,
+        // and `domainNote` when it could not — so they cannot both describe the same domain.
+        ...(domain ? [`🌐 ${domain} now points at this app — it starts working once the build finishes.`] : []),
+        ...(String(body?.domainNote ?? '').trim() ? [`ℹ️ ${String(body.domainNote).trim()}`] : []),
+        // Said LAST because it is about settings, not about whether the deploy happened — leading with
+        // it would read as a failure of the thing the user just pressed.
+        ...(String(body?.envNote ?? '').trim() ? [`⚠️ ${String(body.envNote).trim()}`] : []),
+        // Not a warning: a true fact about a plan the user can change, and far better heard here than
+        // discovered as a mysteriously slow first visit.
+        ...(String(body?.planNote ?? '').trim() ? [`💤 ${String(body.planNote).trim()}`] : []),
       ],
     };
   }
@@ -166,6 +196,24 @@ export function managedDeployOutcome(
         serverSaid || 'Deploy from your Render dashboard instead; your render.yaml is already in the project.',
       ],
     };
+  }
+  /**
+   * 🔒 THE REASON OUTRANKS THE STATUS (audit 2026-09-07). Every failure used to arrive as 409, and
+   * this branch turned a rejected key, a host outage and a refused creation alike into "connect your
+   * repo in Render → Blueprint" plus numbered steps — a walkthrough for a problem the user did not
+   * have. A refused creation names its own real step; an API error is a failure, not a to-do.
+   */
+  if (body?.reason === 'create-refused' || status === 422) {
+    return {
+      kind: 'create-refused',
+      lines: [
+        '❌ We could not create the backend service in your account.',
+        serverSaid || 'Nothing was created. Fix what the message names, then press Deploy backend again.',
+      ],
+    };
+  }
+  if (body?.reason === 'api-error') {
+    return { kind: 'failed', lines: ['❌ The Render deploy could not be started.', serverSaid || 'Please try again in a moment, or deploy from your Render dashboard.'] };
   }
   if (body?.reason === 'no-service' || status === 409) {
     return {

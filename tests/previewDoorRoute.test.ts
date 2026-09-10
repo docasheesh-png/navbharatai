@@ -8,6 +8,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { shouldShowNotServingSurface, type FramingState } from '../src/components/agentv3/previewFraming';
+
+/** A healthy, checked, idle preview — the baseline each case below varies one field of. */
+const FRAMING_OK: FramingState = { unreachable: false, portDown: false, diagnosing: false, hasDoorUrl: false, hasSnapshotUrl: false, framingUnchecked: false };
 
 const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
 // Ends at the route registered immediately AFTER the door. It used to end at `preview-health`, which
@@ -46,7 +50,10 @@ describe('the door route', () => {
     const redirectAt = door.indexOf('res.redirect(302, target)');
     expect(sweepAt).toBeGreaterThan(-1);
     expect(redirectAt).toBeGreaterThan(sweepAt);
-    expect(door).toContain("if (found === null) return page(200, 'starting')");
+    // REPOINTED (2026-09-08): a sweep that finds nothing now goes through `starting()`, which offers
+    // the saved copy before the waiting page. The guarantee this line protects is unchanged — a miss
+    // never falls through to the port redirect — and is now asserted against the helper it calls.
+    expect(door).toContain('if (found === null) return starting();');
   });
 
   it('the PROVEN port leads the sweep — the revival recipe outranks every guess', () => {
@@ -67,15 +74,45 @@ describe('the door route', () => {
     expect(bounded).toBe(awaits);
   });
 
-  it('the snapshot fallback fires only when there is NO sandbox, and never to a probed port', () => {
-    // It is reached inside `if (!sandboxId)`, i.e. the machine is gone rather than starting — and it
-    // redirects to a stored permanent url, not to anything the port sweep produced.
+  it('the GONE-machine snapshot is decided inside `if (!sandboxId)`, before a port is ever probed', () => {
+    // Unchanged since #2613 and still the first thing tried: the machine is gone, so retrying against
+    // it can never work, and it redirects to a stored permanent url rather than to anything the port
+    // sweep produced.
     const gone = door.indexOf('if (!sandboxId) {');
     const snap = door.indexOf('shouldServeSnapshot({');
     const sweep = door.indexOf('buildPortSweepCommand(');
     expect(gone).toBeGreaterThan(-1);
     expect(snap).toBeGreaterThan(gone);
     expect(snap).toBeLessThan(sweep); // decided before a port is ever probed
+  });
+
+  it('🔒 EVERY starting exit offers the saved copy first — one helper, never two copies of the rule', () => {
+    // WIDENED (2026-09-08): a machine that exists but is not answering is now a minutes-long state,
+    // so the saved copy is offered there too — on proof it is still this app (previewSnapshot.ts).
+    // There are TWO such exits in the sweep path, and the reason this is asserted rather than trusted
+    // is that a later edit fixing one and leaving the other would put half the users back on the
+    // spinner with nothing failing to show it.
+    expect(door).toContain('const starting = (): void => {');
+    expect(door).toContain('if (startingSnapshot?.()) return;');
+    expect(door).toContain('if (found === null) return starting();');
+    expect(door).toContain('if (!live) return starting();');
+    // No sweep-path exit may still hand back the raw waiting page. Bounded at the `catch`, which
+    // deliberately DOES answer with the plain page: a request that threw has no trustworthy record to
+    // decide a snapshot from, so the honest fallback there is the waiting page, not a copy we cannot
+    // vouch for. (My first version of this assertion swept the catch in with the rest and failed —
+    // the test was wrong, not the route.)
+    const sweepStart = door.indexOf('buildPortSweepCommand(');
+    const sweepPath = door.slice(sweepStart, door.indexOf('} catch {', sweepStart));
+    expect(sweepPath).not.toContain("return page(200, 'starting')");
+  });
+
+  it('🔒 the starting fallback demands the evidence, and the read that produces it is bounded', () => {
+    // The whole safety of the widening is that a snapshot is only served when nothing has been
+    // written since it was taken. If the stamp stopped being passed, `shouldServeSnapshot` would see
+    // `undefined` and refuse — safe, but silently dead. Pinned so it stays wired.
+    expect(door).toContain('workspaceFilesSavedAt(ws)');
+    expect(door).toContain("'doorLastChange'");
+    expect(door).toMatch(/doorState: 'starting',[\s\S]{0,200}lastChangeAt,/);
   });
 
   it('the branded redirect target goes through applyPreviewDomain like every other preview url', () => {
@@ -159,16 +196,29 @@ describe('a host with nothing on its port is never framed', () => {
     // An older server sends no field; `=== false` keeps that case on today's behaviour rather than
     // blanking the preview for everyone the moment the field is missing.
     expect(surface).toContain('setPortDown(res.ok && health?.livePortUp === false);');
-    // Same repoint as previewUnreachable's: assert that portDown shares the refuse-to-frame branch,
-    // not the branch's exact literal. That literal has since grown a third term (framingUnchecked,
-    // 2026-08-24) which changes nothing about this guarantee.
-    expect(surface).toMatch(/\{unreachable \|\| \(portDown && !diagnosing\)[^?]*\? \(/);
+    // ANCHOR MOVED, GUARANTEE UNCHANGED (2026-09-03). The branch condition grew a fourth term and was
+    // extracted to a pure function so it could finally be EXERCISED rather than pattern-matched — the
+    // decision had been patched three times for three reports of one symptom while living inline in a
+    // 1,700-line component. The source check now proves the component asks that function; what the
+    // function ANSWERS is asserted for real in previewFraming.test.ts, which is strictly stronger than
+    // the literal this replaces.
+    expect(surface).toMatch(/shouldShowNotServingSurface\(\{[^}]*portDown[^}]*\}\) \? \(/);
+    expect(shouldShowNotServingSurface({ ...FRAMING_OK, portDown: true })).toBe(true);
   });
 
-  it('it stands down while a wake/diagnose is in flight — that is when the port is MEANT to be down', () => {
-    // Without the guard, pressing Wake up would replace the app with the not-serving panel for the
-    // whole reboot, which reads as "it broke" at exactly the moment it is being fixed.
-    expect(surface).toContain('portDown && !diagnosing');
+  it('it stands down while a wake/diagnose is in flight — but ONLY when the door is there to frame', () => {
+    // THE ORIGINAL INTENT, KEPT: pressing Wake up must not replace the app with a static panel for the
+    // whole reboot — that reads as "it broke" at exactly the moment it is being fixed. True of the
+    // door, which shows our own reconnecting page and walks back into the app by itself.
+    expect(shouldShowNotServingSurface({ ...FRAMING_OK, portDown: true, diagnosing: true, hasDoorUrl: true })).toBe(false);
+
+    // THE HALF THAT WAS NEVER TRUE, AND IS NOW CORRECTED (admin screenshot 2026-09-03). This guard was
+    // written 2026-08-13, nine days before the door existed, so with no door the only thing it could
+    // keep on screen was a RAW machine address — and a machine mid-wake is not serving by definition.
+    // What it actually preserved was the vendor's "Closed Port Error" page: the exact screenshot in
+    // this describe block's header, which is why standing down there re-opened the hole this whole
+    // guarantee was created to close.
+    expect(shouldShowNotServingSurface({ ...FRAMING_OK, portDown: true, diagnosing: true })).toBe(true);
   });
 
   it('a reading from ANOTHER machine can never trigger it', () => {

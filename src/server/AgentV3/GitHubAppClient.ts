@@ -26,6 +26,13 @@ export interface GitHubConfig {
   org: string;
 }
 
+/**
+ * The description stamped on every repository NavBharatAI creates — in the user's account or the
+ * platform org. It is also EVIDENCE: `pushAppTarget.ts` reads it back to tell a mirror NavBharatAI made
+ * from a repository the user made, and only the former may ever be force-pushed on its default branch.
+ */
+export const PLATFORM_REPO_DESCRIPTION = 'Built with NavBharatAI Pro v5.0';
+
 export interface RepoInfo {
   fullName: string;
   cloneUrl: string;
@@ -33,6 +40,8 @@ export interface RepoInfo {
   defaultBranch: string;
   /** True when this call created the repo (vs reused an existing one). */
   created: boolean;
+  /** The repository's description as GitHub reports it — absent when GitHub sent none. */
+  description?: string;
 }
 
 interface ClientDeps {
@@ -223,7 +232,7 @@ export class GitHubAppClient {
       throw new Error(`ensureRepo: unexpected GET /repos response (HTTP ${got.status}).`);
     }
     const created = await this.request<RepoApi>('POST', `/orgs/${this.cfg.org}/repos`, `token ${token}`, {
-      name, private: true, auto_init: true, description: 'Built with NavBharatAI Pro v5.0',
+      name, private: true, auto_init: true, description: PLATFORM_REPO_DESCRIPTION,
     });
     if (!created.ok || !created.body) {
       throw new Error(`ensureRepo: could not create repo "${name}" (HTTP ${created.status}).`);
@@ -234,6 +243,24 @@ export class GitHubAppClient {
   /** A clone/push URL that carries the installation token as the git credential. */
   authedCloneUrl(name: string, token: string): string {
     return `https://x-access-token:${token}@github.com/${this.cfg.org}/${name}.git`;
+  }
+
+  /**
+   * Rename the org repo `<org>/<from>` to `<to>` (admin 2026-09-04, the app-name feature). The
+   * platform-org twin of `UserGitHubClient.renameRepo` — same contract, same reasoning: GitHub moves
+   * the repo WITH its history, where `ensureRepo` under a new name would only ever make an empty one.
+   * Never throws; `ok:false` carries the status so the caller can be honest about what happened.
+   */
+  async renameRepo(from: string, to: string): Promise<{ ok: boolean; status: number; name: string }> {
+    if (!from || !to || from === to) return { ok: false, status: 0, name: from };
+    try {
+      const token = await this.getInstallationToken();
+      const res = await this.request<RepoApi>('PATCH', `/repos/${this.cfg.org}/${encodeURIComponent(from)}`, `token ${token}`, { name: to });
+      const actual = (res.body?.full_name || '').split('/')[1] || to;
+      return { ok: res.ok, status: res.status, name: res.ok ? actual : from };
+    } catch {
+      return { ok: false, status: 0, name: from };
+    }
   }
 
   /**
@@ -358,6 +385,7 @@ interface RepoApi {
   clone_url?: string;
   html_url?: string;
   default_branch?: string;
+  description?: string | null;
 }
 
 function toRepoInfo(r: RepoApi, created: boolean): RepoInfo {
@@ -367,6 +395,7 @@ function toRepoInfo(r: RepoApi, created: boolean): RepoInfo {
     htmlUrl: r.html_url ?? '',
     defaultBranch: r.default_branch ?? 'main',
     created,
+    ...(typeof r.description === 'string' ? { description: r.description } : {}),
   };
 }
 

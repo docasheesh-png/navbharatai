@@ -29,12 +29,13 @@
  */
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
-import { evaluateAlerts, type MetricAlert } from './metricsAlerts';
+import { evaluateAlerts, type MetricAlert, type AlertSeverity } from './metricsAlerts';
 import type { MetricsSnapshot } from './metrics';
 import { metricsTimeline, summarize, type TimelineSummary } from './metricsTimeline';
 import { saveNotification } from './AdminNotificationStore';
 import { adminEmailList } from './adminEmails';
 import { resolveEmailConfig, sendAlertEmail } from './alertEmail';
+import { capacityExtraAlerts } from './publishCapacityAlerts';
 
 export const ALERT_STATE_COLLECTION = 'monitor_alert_state';
 export const ALERT_STATE_DOC = 'current';
@@ -60,6 +61,19 @@ export function alertsEnabled(): boolean {
 export interface AlertStateEntry {
   firstSeenAt: number;
   lastNotifiedAt: number;
+  /**
+   * The HIGHEST severity announced so far for this firing episode — not the severity last observed.
+   *
+   * That distinction is the whole reason the field exists. Storing "what we saw last time" would let
+   * an alert flap across a threshold (11 min → critical → 9 min → warning → 11 min) and notify on
+   * every crossing, which is the noise this module was built to prevent. Storing "the worst we have
+   * already said out loud" means an episode announces its escalation exactly once.
+   *
+   * Optional because state written before this field existed does not have it. A legacy entry that is
+   * currently critical therefore announces its escalation once, on the first sweep after deploy — a
+   * single notification about a genuinely critical condition, which is the right side to err on.
+   */
+  severity?: AlertSeverity;
 }
 
 export type AlertState = Record<string, AlertStateEntry>;
@@ -92,17 +106,43 @@ export function decideAlertActions(
     if (!seen) {
       // Brand new — announce it.
       notify.push(alert);
-      nextState[id] = { firstSeenAt: nowMs, lastNotifiedAt: nowMs };
+      nextState[id] = { firstSeenAt: nowMs, lastNotifiedAt: nowMs, severity: alert.severity };
       continue;
     }
-    if (nowMs - seen.lastNotifiedAt >= cooldownMs) {
+    // 🔒 AN ESCALATION BREAKS THE COOLDOWN. Without this, an alert that was announced as a warning and
+    // then became CRITICAL stayed silent for the rest of the quiet period — six hours by default. That
+    // is the exact window in which the admin most needs to hear from us, and the silence was invisible:
+    // the condition WAS firing, we had simply already mentioned a milder version of it. `slow-builds`
+    // has had both severities since it was written (10 min warning / 20 min critical), so builds could
+    // go from 11 minutes to half an hour with nothing said.
+    //
+    // Only UPWARD, and only once per episode. Announcing a de-escalation ("still bad, slightly less
+    // bad") is not news worth interrupting for, and re-announcing every crossing would reintroduce the
+    // flapping this module exists to prevent.
+    //
+    // A state entry written before this field existed has NO recorded severity, and that is read as
+    // "whatever is firing now is what we announced" — never as an escalation. Reading it the other way
+    // would have every currently-critical alert announce itself once more on the first sweep after
+    // deploy: a burst of notifications caused by shipping, about nothing that changed. The quiet branch
+    // below backfills the field, so a genuine escalation is still caught from the next sweep onwards.
+    const escalated = alert.severity === 'critical' && seen.severity === 'warning';
+    if (escalated || nowMs - seen.lastNotifiedAt >= cooldownMs) {
       // Still firing well after we last said so — worth repeating, but only this rarely.
       notify.push(alert);
-      nextState[id] = { firstSeenAt: seen.firstSeenAt, lastNotifiedAt: nowMs };
+      nextState[id] = {
+        firstSeenAt: seen.firstSeenAt,
+        lastNotifiedAt: nowMs,
+        // Never downgrade the recorded high-water mark: an episode that has already announced
+        // 'critical' must not be able to announce it again by dipping to 'warning' and back.
+        severity: seen.severity === 'critical' ? 'critical' : alert.severity,
+      };
       continue;
     }
-    // Firing, already announced, still inside the quiet period.
-    nextState[id] = seen;
+    // Firing, already announced, still inside the quiet period. The recorded severity is deliberately
+    // left ALONE — it records what was announced, and staying quiet announced nothing. The ONE
+    // exception is backfilling a legacy entry that has no severity at all, which costs nothing and is
+    // what lets the escalation check work for alerts that were already firing at deploy time.
+    nextState[id] = seen.severity ? seen : { ...seen, severity: alert.severity };
   }
 
   const resolved = Object.keys(prev).filter((id) => !firing.has(id));
@@ -290,7 +330,13 @@ export async function runMonitorAlertSweep(): Promise<AlertSweepResult> {
         multiple: sandboxSpikeMultiple(),
         minUsd: sandboxSpikeMinUsd(),
       });
-      return spike ? [spike] : [];
+      // PUBLISH CAPACITY joins here rather than getting its own delivery path, for the reason stated
+      // on extraAlerts: a second notifier would mean a second set of dedupe bugs. It probes on its own
+      // much slower cadence (the inventory costs a Hosting API call plus a 500-record Firestore read)
+      // and re-emits what it last MEASURED in between — see publishCapacityAlerts.ts for why a skipped
+      // probe must never look like a recovery.
+      const capacity = await capacityExtraAlerts().catch(() => [] as MetricAlert[]);
+      return [...(spike ? [spike] : []), ...capacity];
     },
     readAndWriteState: async (mutate) => {
       const db = getDb();

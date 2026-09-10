@@ -20,6 +20,7 @@ import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
+import { parseTscErrors, endgameDeterministicPass, endgameRepairEnabled } from './EndgameRepair';
 import { fileBudgetForPrompt, fileBudgetInstruction } from './fileBudget';
 import { generateMissingCssModules } from './CssModuleGenerator';
 import { missingViteEnvTypes } from './viteEnvTypes';
@@ -1009,6 +1010,49 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           verdict = await deps.verify().catch(() => ({ ok: true, errors: '', ran: false }));
         }
       } catch { /* a free restore is best-effort — fall through to the model repair below */ }
+    }
+    /**
+     * STOP PAYING A MODEL TO DO GREP'S JOB — on THIS lane too (2026-09-04).
+     *
+     * `EndgameRepair` was built for exactly this ("the admin's mandate: stop paying an LLM to do grep's
+     * job") after a build ground its last ten tsc errors one round-trip each until the step limit, when
+     * almost all of them were mechanical — an unused import, a missing import, an export-name mismatch.
+     * Its deterministic layer is reachable only through `runEndgameRepair`, which only `AgentRunner`
+     * calls. **This lane — the one most builds take — went from the scaffold restore straight to a model
+     * call**, so on the fast lane a build failing purely on `TS6133: 'X' is declared but never read` paid
+     * a full repair pass for a pure string edit.
+     *
+     * That is the SAME drift the scaffold-restore comment twenty lines above describes ("the agentic lane
+     * has done this since 2026-08-12; THIS lane never did, and the two verify paths drifted apart in
+     * silence") — the restore was ported then, the deterministic tsc layer was not.
+     *
+     * Calls the SHARED pass rather than copying its pieces: a third variant of this logic is precisely
+     * what produced the drift being fixed. Re-running the reconcilers here is not redundant with the
+     * generation-time pass above — the files have CHANGED since (later writes, an earlier repair
+     * attempt), so drift introduced after generation is catchable now, for free.
+     *
+     * Costs nothing on a healthy build: it is gated on `!verdict.ok`, and re-verifies only when
+     * something was genuinely changed. Every fix is honest — the reconcilers act on unique owners only
+     * and `removeUnusedImports` leaves anything it cannot match confidently to the model.
+     */
+    if (!verdict.ok && endgameRepairEnabled()) {
+      try {
+        const errs = parseTscErrors(verdict.errors);
+        if (errs.length > 0) {
+          const before = Object.fromEntries([...byPath].map(([path, f]) => [path, f.content]));
+          const det = await endgameDeterministicPass(before, errs);
+          if (det.changedPaths.length > 0) {
+            const detFiles = det.changedPaths.map((path) => ({ path, content: det.files[path] }));
+            await deps.writeFiles(detFiles);
+            for (const f of detFiles) {
+              const prev = byPath.get(f.path);
+              byPath.set(f.path, prev ? { ...prev, content: f.content } : (f as OneShotFile));
+            }
+            deps.log?.(`Fixed ${det.fixes.length} mechanical error(s) directly — no repair pass needed for those: ${det.fixes.slice(0, 3).join('; ')}${det.fixes.length > 3 ? '; …' : ''}`);
+            verdict = await deps.verify().catch(() => ({ ok: true, errors: '', ran: false }));
+          }
+        }
+      } catch { /* a free fix is best-effort — fall through to the model repair below */ }
     }
     let promptingErrors = verdict.errors;
     while (!verdict.ok && attempt < maxRepairs && deps.repair) {

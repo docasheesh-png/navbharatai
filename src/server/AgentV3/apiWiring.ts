@@ -54,6 +54,38 @@ const RELATIVE_CALL = /(?:fetch|axios(?:\.\w+)?)\s*\(\s*[`'"]\/(?:api|graphql)\b
 const LOCALHOST_CALL = /[`'"]https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?/;
 
 /**
+ * WOULD THE BACKEND EVEN ACCEPT A CROSS-ORIGIN CALL? (admin 2026-09-05)
+ *
+ * 🔴 THE SECOND WAY A SPLIT BREAKS AN APP SILENTLY, and it took the same shape as the first. The
+ * module above establishes that splitting a relative-path app breaks every button. But an app that
+ * DOES read an env base — one written to be split — still breaks if its server never allowed another
+ * origin to call it: once the website is on a CDN and the API is elsewhere, every request is
+ * cross-origin, and a server without CORS refuses them all. The page loads, looks right, and nothing
+ * works. Exactly the failure this file exists to prevent, arriving through the door it left open.
+ *
+ * 🔒 SO THE ABSENCE OF EVIDENCE IS TREATED AS ABSENCE, deliberately. Under-detecting means shipping
+ * WHOLE — the same app the user already runs, working — and costs some CDN speed. Over-detecting
+ * means shipping split into a wall of blocked requests. Only one of those is a bug, so the check
+ * requires positive evidence and nothing else counts.
+ *
+ * Recognised because these are what the frameworks actually document: Express/Koa `cors()`, a
+ * hand-written `Access-Control-Allow-Origin` header, Flask-CORS, and Starlette/FastAPI's
+ * `CORSMiddleware`. PURE.
+ */
+export function backendAllowsCrossOrigin(files: Record<string, string>): boolean {
+  for (const [path, content] of Object.entries(files ?? {})) {
+    if (typeof content !== 'string') continue;
+    if (!/\.(t|j)sx?$|\.py$/.test(path)) continue;
+    if (/(^|[\\/])(tests?|__tests__)([\\/]|$)|\.test\.|\.spec\./i.test(path)) continue;
+    if (/\bcors\s*\(/.test(content)) return true;                       // express/koa cors middleware
+    if (/Access-Control-Allow-Origin/i.test(content)) return true;      // set by hand
+    if (/\bCORS\s*\(/.test(content) || /flask_cors/.test(content)) return true;
+    if (/CORSMiddleware/.test(content)) return true;                    // starlette / fastapi
+  }
+  return false;
+}
+
+/**
  * Decide how this app should be deployed, from how its frontend addresses its API. PURE.
  *
  * 🔒 ORDER IS THE DESIGN. An env base is checked FIRST and wins outright, because an app that reads
@@ -80,6 +112,27 @@ export function analyzeApiWiring(files: Record<string, string>): ApiWiringReport
     if (!CODE.test(path) || typeof content !== 'string') continue;
     const env = content.match(ENV_BASE);
     if (env) {
+      /**
+       * 🔒 BUILT TO BE SPLIT IS NOT THE SAME AS SAFE TO SPLIT. Reading an env base says the author
+       * anticipated a separate API; it does not say their server will ACCEPT one. Once the website is
+       * on a CDN every call is cross-origin, and a server with no CORS refuses all of them — the page
+       * loads, looks right, and nothing works.
+       *
+       * The `envVar` is kept either way, because a whole deploy still has to answer it: shipped in one
+       * piece the API lives at the app's own origin, so the caller sets it EMPTY and the calls become
+       * relative — see buildEnvForWhole.
+       */
+      if (!backendAllowsCrossOrigin(files)) {
+        return {
+          wiring: 'env',
+          strategy: 'whole',
+          envVar: env[1],
+          evidenceFile: path,
+          summary: 'Your app can point its website at a separate server, but that server does not yet accept '
+            + 'requests from another address — so split apart, every request would be refused. We will deploy '
+            + 'them together, which works exactly as it does now.',
+        };
+      }
       return {
         wiring: 'env',
         strategy: 'split',
@@ -127,6 +180,22 @@ export function analyzeApiWiring(files: Record<string, string>): ApiWiringReport
 export function buildEnvForSplit(report: ApiWiringReport, backendUrl: string): Record<string, string> {
   if (report.strategy !== 'split' || !report.envVar || !backendUrl.trim()) return {};
   return { [report.envVar]: backendUrl.trim().replace(/\/+$/, '') };
+}
+
+/**
+ * The build-time setting for an app shipped in ONE piece that nonetheless reads an API base.
+ *
+ * 🔒 WITHOUT THIS, DOWNGRADING A SPLIT TO A WHOLE DEPLOY WOULD BREAK THE APP — which would make the
+ * CORS gate above a cure worse than the disease. An env-based frontend builds `${base}/api/x`; with
+ * no value that becomes the literal string `undefined/api/x` and every call 404s. Shipped whole the
+ * API lives at the app's OWN origin, so the honest value is the EMPTY string: `${''}/api/x` is
+ * `/api/x`, which is exactly the relative call that works when one server serves both halves.
+ *
+ * Returns {} for anything else — a variable the code does not read must never be invented. PURE.
+ */
+export function buildEnvForWhole(report: ApiWiringReport): Record<string, string> {
+  if (report.strategy !== 'whole' || !report.envVar) return {};
+  return { [report.envVar]: '' };
 }
 
 /**

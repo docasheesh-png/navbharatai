@@ -16,6 +16,7 @@
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
+import { isModelUnavailableError } from '../providerErrorClass';
 
 export interface NamedRunner {
   /** Bench/identity name, e.g. 'GROK', 'CLAUDE'. UNIQUE per rung — the timeout/429 bench keys on it,
@@ -28,6 +29,15 @@ export interface NamedRunner {
    *  rung still reports as the base provider ('GLM') — so deliveredVia, the per-provider token ledger,
    *  and the no-Claude honesty detector keep their clean single label. Defaults to `name`. */
   reportAs?: string;
+  /**
+   * The exact model id this rung calls, when the rung is pinned to one (the GLM/KIMI ladders are).
+   *
+   * Used for ONE purpose: keying the permanent "this model can never answer" memory, so a dead rung
+   * is retired WITHOUT benching its provider's healthy rungs. It deliberately does NOT touch the
+   * transient benches (timeout / 429 / cooldown), which stay keyed on `name` — see the dead-rung
+   * block in the run loop for why those two scopes are genuinely different.
+   */
+  modelId?: string;
 }
 
 export interface MultiProviderOptions {
@@ -496,7 +506,19 @@ export function makeMultiProviderTurnRunner(
   // life (one runner instance = one build). A transient failure (overload/timeout/5xx) is NOT
   // remembered — EXCEPT the timeout BENCH (admin design 2026-07-07): 2 CONSECUTIVE timeouts bench
   // the provider for the rest of the run, so a degraded GLM/KIMI evening can't grind every turn.
-  const deadForRun = new Map<string, string>(); // name → the fatal reason
+  const deadForRun = new Map<string, string>(); // dead-key → the fatal reason
+  /**
+   * The key a rung is retired under once it fails PERMANENTLY.
+   *
+   * An account-level fatal (no credit, revoked key) is a property of the PROVIDER, so it retires the
+   * whole bench name. A model-not-found is a property of ONE MODEL, so it must retire only that rung —
+   * keying it on the bench name would take a real, working ladder down: in the report that prompted
+   * this (faa98da9), the dead `kimi-k2.5` and the `kimi-k2.6` that successfully delivered all five
+   * turns share the single bench name 'KIMI'. Retiring 'KIMI' would have turned one wasted round-trip
+   * per call into a build with no Kimi at all.
+   */
+  const deadKeyFor = (entry: NamedRunner, err: unknown): string =>
+    (isModelUnavailableError(err) && entry.modelId) ? `${entry.name}::${entry.modelId}` : entry.name;
   const timeoutStreak = new Map<string, number>(); // name → consecutive timeout count
   const rateLimitStreak = new Map<string, number>(); // name → consecutive 429 count
   const TIMEOUT_BENCH_AFTER = 2;
@@ -542,7 +564,11 @@ export function makeMultiProviderTurnRunner(
           fellBackFrom.push(name); // POOL cooldown — the provider SERVICE is saturated; every key skips
           continue;
         }
-        const fatalReason = deadForRun.get(name);
+        // Retired earlier this run — either the whole provider (account fatal) or just this one model
+        // (a rung whose id this account cannot reach). Checked in that order; both mean "do not spend
+        // another round-trip re-proving an answer that cannot change".
+        const fatalReason = deadForRun.get(name)
+          ?? (chain[i].modelId ? deadForRun.get(`${name}::${chain[i].modelId}`) : undefined);
         if (fatalReason !== undefined) {
           // Known-fatal from an earlier turn — skipping saves the whole re-grind (the report's build
           // burned 8+ minutes re-discovering the same "credit balance too low" answer).
@@ -575,8 +601,17 @@ export function makeMultiProviderTurnRunner(
           lastError = err;
           fellBackFrom.push(reportName);
           opts.onProviderError?.(reportName, err);
-          if (isFatalProviderError(err)) {
-            deadForRun.set(name, err instanceof Error ? err.message : String(err));
+          if (isFatalProviderError(err) || isModelUnavailableError(err)) {
+            // A MODEL-NOT-FOUND is as deterministic as a revoked key and was, until this report, the one
+            // permanent failure with no memory anywhere in the chain: it is neither a timeout nor a 429,
+            // so it hit no bench and fell through to the next rung on EVERY call, forever. Build faa98da9
+            // paid that toll five times out of five; an earlier 40-call build paid it 57 times. Retiring
+            // it here is what turns a per-call tax into a single wasted request per build.
+            //
+            // ⚠️ It must NEVER empty the chain: only the rung that actually threw is retired, the rest of
+            // the ladder and the Claude/Haiku backstop are untouched, and a run in which every rung dies
+            // still ends at the honest "all providers unavailable" throw below rather than silently.
+            deadForRun.set(deadKeyFor(chain[i], err), err instanceof Error ? err.message : String(err));
           } else if (isTimeoutProviderError(err)) {
             timeoutStreak.set(name, (timeoutStreak.get(name) ?? 0) + 1); // bench after 2 in a row
             // TaskFlow autopsy 2026-07-17: 212 GLM TIMEOUTS in one build — the same cross-instance

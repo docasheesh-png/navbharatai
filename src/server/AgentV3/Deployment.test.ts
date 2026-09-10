@@ -20,8 +20,54 @@ class DistActuator extends BareActuator {
 }
 
 const okDeploy: DeployFn = async (ws) => `https://gen-lang-client-0866594388--v3-${ws}.web.app`;
-const dispatcher = (act: ActuatorPort, deploy?: DeployFn) =>
+/**
+ * A dispatcher that MAY publish — the same grant the real Publish button makes (admin 2026-09-01).
+ *
+ * `deploy` now denies by default, because the agent used to publish a user's app on its own after a
+ * bare "continue". These tests exercise what deploy DOES once it is allowed to run, so they grant
+ * consent exactly as `routes/agentv3.ts` does at the Publish route. The gate's own behaviour — that an
+ * UNGRANTED dispatcher publishes nothing — is asserted separately below, so widening the harness here
+ * cannot hide it.
+ */
+const dispatcher = (act: ActuatorPort, deploy?: DeployFn) => {
+  const d = new ToolDispatcher(act, 'ws-1', undefined, undefined, undefined, undefined, undefined, undefined, undefined, deploy);
+  d.setPublishConsent(true);
+  return d;
+};
+
+/** Deliberately NOT granted — for the gate's own tests. */
+const ungrantedDispatcher = (act: ActuatorPort, deploy?: DeployFn) =>
   new ToolDispatcher(act, 'ws-1', undefined, undefined, undefined, undefined, undefined, undefined, undefined, deploy);
+
+describe('deploy is gated on the USER asking — the agent cannot publish by itself', () => {
+  it('publishes NOTHING without consent, and never calls the deploy function', async () => {
+    // The real failure: a user typed "continue", the build finished, and the agent decided on its own
+    // to put their app on a public URL. A working deploy path plus a willing model was all it took.
+    const deployFn = vi.fn(okDeploy);
+    const files = new Map([['index.html', Buffer.from('<html>real app</html>')]]);
+    const r = await ungrantedDispatcher(new DistActuator(files), deployFn).dispatch(call());
+    expect(deployFn).not.toHaveBeenCalled();
+    expect(r.content).toMatch(/not requested/i);
+    expect(r.content).not.toMatch(/https?:\/\//); // no URL can leak out of a refusal
+  });
+
+  it('refuses as a normal result the model can relay, NOT an error', async () => {
+    // An error would read to the model as "this app cannot be published", which is false and would be
+    // relayed to the user as a failure. The truth is simply that nobody asked yet.
+    const r = await ungrantedDispatcher(new DistActuator(new Map([['index.html', Buffer.from('x')]])), okDeploy).dispatch(call());
+    expect(r.is_error).toBeFalsy();
+    expect(r.content).toMatch(/Publish button/);
+  });
+
+  it('the same dispatcher publishes once consent is granted', async () => {
+    // Proves the refusal is the GATE and not some unrelated failure in the harness.
+    const act = new DistActuator(new Map([['index.html', Buffer.from('<html>real app</html>')]]));
+    const d = ungrantedDispatcher(act, okDeploy);
+    expect((await d.dispatch(call())).content).toMatch(/not requested/i);
+    d.setPublishConsent(true);
+    expect((await d.dispatch(call())).content).toContain('https://');
+  });
+});
 
 describe('publishedAppUrl — brand Firebase\'s OWN host, never a rebuilt one', () => {
   const SITE = 'gen-lang-client-0866594388';

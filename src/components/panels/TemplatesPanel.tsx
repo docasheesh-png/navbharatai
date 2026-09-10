@@ -11,6 +11,7 @@ import {
   Sparkles, Activity, Cpu, Clock, Smartphone, Globe, ShieldCheck, LayoutDashboard,
   Package, Plus, X, IndianRupee, Languages, FileText, Building2, Gamepad2, Rocket,
 } from 'lucide-react';
+import { templateMeta, CATEGORY_ORDER, type TemplateCategory } from './curatedTemplateMeta';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -348,15 +349,44 @@ export function TemplatesPanel({
   onDeleteSavedTemplate,
   onLoadSavedTemplate,
 }: TemplatesPanelProps) {
+  const [activeCategory, setActiveCategory] = React.useState<'All' | TemplateCategory>('All');
+
+  // Only show filter tabs for categories that actually have templates (never an empty tab).
+  const presentCategories = CATEGORY_ORDER.filter((c) => templates.some((t) => templateMeta(t.id).category === c));
+  const visibleTemplates = activeCategory === 'All'
+    ? templates
+    : templates.filter((t) => templateMeta(t.id).category === activeCategory);
+
   return (
     <div className="flex-1 p-8 bg-[#0d1117] overflow-y-auto custom-scrollbar">
       <div className="max-w-6xl mx-auto">
-        <div className="flex flex-col mb-10">
+        <div className="flex flex-col mb-6">
           <h3 className="text-2xl font-bold text-white mb-2">Project Blueprints</h3>
           <p className="text-sm text-[#8b949e]">Accelerate your development with AI-optimized templates</p>
         </div>
+
+        {/* Category filter — jump straight to the kind of app you want to build */}
+        <div className="flex flex-wrap gap-2 mb-8">
+          {(['All', ...presentCategories] as const).map((cat) => {
+            const active = activeCategory === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => setActiveCategory(cat)}
+                className={`px-3.5 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-widest transition-all ${
+                  active
+                    ? 'bg-indigo-600 text-white shadow-lg'
+                    : 'bg-[#161b22] border border-white/5 text-[#8b949e] hover:border-indigo-500/40 hover:text-white'
+                }`}
+              >
+                {cat}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {templates.map(t => {
+          {visibleTemplates.map(t => {
             const isLocked = t.isPro && !user;
             return (
               <motion.button
@@ -379,7 +409,7 @@ export function TemplatesPanel({
                   <t.icon className={`w-6 h-6 ${isLocked ? 'text-amber-400 group-hover:text-white' : 'text-indigo-400 group-hover:text-white'}`} />
                 </div>
                 <h4 className="font-bold text-white mb-2">{t.name}</h4>
-                <p className="text-[11px] text-[#8b949e] leading-relaxed mb-6 opacity-70">Pre-configured scaffolding for modern responsive web applications.</p>
+                <p className="text-[11px] text-[#8b949e] leading-relaxed mb-6 opacity-70">{templateMeta(t.id).description}</p>
                 <div className="mt-auto w-full flex items-center justify-between">
                   <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${isLocked ? 'text-amber-400 bg-amber-500/10' : 'text-indigo-400 bg-indigo-500/10'}`}>
                     {isLocked ? 'Sign In to Use' : 'Fast Build'}

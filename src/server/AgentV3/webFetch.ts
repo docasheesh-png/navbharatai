@@ -29,6 +29,17 @@ export interface WebFetchResult {
   contentType?: string;
   /** True when the page was longer than WEB_FETCH_MAX_CHARS and the tail was dropped. */
   truncated?: boolean;
+  /**
+   * The page's RAW HTML (already capped at WEB_FETCH_MAX_BYTES), only when the caller asked for it with
+   * `keepHtml` AND the body looked like HTML. The Website → App importer reads structure (nav, headings,
+   * forms, colours) that `htmlToText` deliberately throws away; nothing else should need this.
+   */
+  html?: string;
+}
+
+export interface WebFetchOptions {
+  /** Also return the raw HTML (see WebFetchResult.html). Off by default — the model wants words. */
+  keepHtml?: boolean;
 }
 
 /**
@@ -93,7 +104,7 @@ export function capText(text: string, maxChars = WEB_FETCH_MAX_CHARS): { text: s
  * address). The timeout, the redirect refusal and the response cap bound the damage; a full fix is a
  * separate, larger change and should not be claimed here.
  */
-export async function webFetchUrl(rawUrl: string): Promise<WebFetchResult> {
+export async function webFetchUrl(rawUrl: string, opts: WebFetchOptions = {}): Promise<WebFetchResult> {
   const check = await assertPublicHttpUrl(rawUrl);
   if (!check.ok) return { ok: false, text: '', reason: check.reason ?? 'This URL is not allowed.' };
 
@@ -119,10 +130,17 @@ export async function webFetchUrl(rawUrl: string): Promise<WebFetchResult> {
     const looksHtml = /html|xml/i.test(String(contentType ?? '')) || /^\s*<(?:!doctype|html)\b/i.test(raw);
     const extracted = looksHtml ? htmlToText(raw) : raw.trim();
     if (!extracted) {
-      return { ok: false, text: '', status: res.status, contentType: contentType ?? undefined, reason: 'The page loaded but contained no readable text (it may render entirely with JavaScript — try the screenshot tool).' };
+      // A page that is all <script> still has a <head> (title, theme colour, fonts) — a `keepHtml` caller
+      // gets it alongside the honest failure, so the importer can say "this site draws itself with
+      // JavaScript" instead of "nothing there".
+      const fail: WebFetchResult = { ok: false, text: '', status: res.status, contentType: contentType ?? undefined, reason: 'The page loaded but contained no readable text (it may render entirely with JavaScript — try the screenshot tool).' };
+      if (opts.keepHtml && looksHtml && raw.trim()) fail.html = raw;
+      return fail;
     }
     const { text, truncated } = capText(extracted);
-    return { ok: true, text, status: res.status, contentType: contentType ?? undefined, truncated };
+    const out: WebFetchResult = { ok: true, text, status: res.status, contentType: contentType ?? undefined, truncated };
+    if (opts.keepHtml && looksHtml) out.html = raw;
+    return out;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/abort/i.test(msg)) return { ok: false, text: '', reason: `The site did not respond within ${Math.round(WEB_FETCH_TIMEOUT_MS / 1000)}s.` };

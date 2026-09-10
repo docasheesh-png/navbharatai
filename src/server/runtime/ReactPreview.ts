@@ -27,6 +27,7 @@ import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE, PROCESS_SHIM_SOURCE, NAVDATA
 import { proveBackendRunnable } from './browserBackend/capability';
 import { EXPRESS_SHIM_SOURCE, BACKEND_BRIDGE_SOURCE, EXPRESS_SHIM_PATH, BACKEND_BRIDGE_PATH } from './browserBackend/expressShim';
 import { pgShimSource, pgliteDataDir, PG_SHIM_PATH, PGLITE_VERSION } from './browserBackend/pgShim';
+import { previewBridgeSource } from '../AgentV3/previewBridge';
 
 // Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
@@ -613,35 +614,13 @@ ${babelTag}
     // (cross-origin srcdoc → postMessage is the only channel). Best-effort; the iframe still shows it.
     try { (window.parent || window.top).postMessage({ __nbaiPreviewError: true, source: 'in-browser', message: String(msg) }, '*'); } catch (e) {}
   }
-  // CONSOLE MIRROR (world-best-preview, 2026-08-06): every console line + runtime error is streamed
-  // up to the host so the panel can show a REAL console drawer (what Replit gives via devtools and
-  // Bolt's users dig out of F12 — here it is one tap, and each error carries a "Fix with AI"). The
-  // app's own console still works untouched; this only mirrors. Bounded per message; best-effort.
-  (function () {
-    function mirror(level, args) {
-      try {
-        var parts = [];
-        for (var i = 0; i < args.length; i++) {
-          var a = args[i];
-          if (typeof a === 'string') parts.push(a);
-          else if (a instanceof Error) parts.push(a.message + (a.stack ? '\\n' + String(a.stack).split('\\n').slice(0, 4).join('\\n') : ''));
-          else { try { parts.push(JSON.stringify(a)); } catch (e2) { parts.push(String(a)); } }
-        }
-        (window.parent || window.top).postMessage({ __nbaiPreviewConsole: true, level: level, text: parts.join(' ').slice(0, 600) }, '*');
-      } catch (e) { /* mirroring must never break the app */ }
-    }
-    var orig = { log: console.log, info: console.info, warn: console.warn, error: console.error };
-    ['log', 'info', 'warn', 'error'].forEach(function (level) {
-      console[level] = function () { mirror(level, arguments); return orig[level].apply(console, arguments); };
-    });
-    window.addEventListener('error', function (e) {
-      mirror('error', [String(e.message || 'Script error') + (e.filename ? ' (' + e.filename + ':' + e.lineno + ')' : '')]);
-    });
-    window.addEventListener('unhandledrejection', function (e) {
-      var r = e && e.reason;
-      mirror('error', ['Unhandled promise rejection: ' + (r instanceof Error ? r.message : String(r))]);
-    });
-  })();
+  // CONSOLE MIRROR + FAILED-NETWORK MIRROR — the shared bridge (see AgentV3/previewBridge.ts).
+  //
+  // This used to be ~28 lines written INLINE here, which is precisely why the LIVE preview had no
+  // console: the mirror existed only in the document THIS module builds. It now lives in one module
+  // that both previews interpolate, so the live sandbox and the in-browser render can never drift —
+  // the same class of bug as the four copies of safeRelPath this repo already paid for once.
+${previewBridgeSource('in-browser')}
   // PROCESS SHIM (Phase 1b) — the same bug class as import.meta, one layer along. "process" is a Node
   // global; in a browser it does not exist, so a module reading process.env.NODE_ENV throws
   // "ReferenceError: process is not defined" and dies, taking the preview with it. That line is one of

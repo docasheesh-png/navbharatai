@@ -9,9 +9,10 @@ const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ defaul
 // A2 — the REAL shell. LAZY on purpose: it pulls xterm (~70 KB gz), which must never land on the
 // first-paint path for the many users who never open a terminal.
 const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
-import { Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Github, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key } from 'lucide-react';
+import { Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Github, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
+import type { SiteAnalyticsView, RollbackChoiceView, SiteConfigView } from './HostingChooser';
 import { PublishCelebration } from './PublishCelebration';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 import { auth as firebaseAuth } from '../../lib/firebase';
@@ -21,6 +22,7 @@ import { needsPublishDot } from '../../lib/publishFreshness';
 import { getStoredMotionMode, resolveReduceMotion, systemPrefersReducedMotion } from '../../lib/a11y';
 import {  } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
+const ConnectedServices = lazy(() => import('./ConnectedServices').then((m) => ({ default: m.ConnectedServices })));
 import { importProjectArchive, importProjectFolder, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
 import { resolveImportWorkspaceId, importTargetUnavailableMessage } from './zipImportTarget';
 import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
@@ -34,6 +36,7 @@ import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview 
 import { saveLastReport, readLastReport } from './reportCache';
 import type { ReportPickerItem } from '../../lib/reportPicker';
 import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
+import { ReportNoteDialog } from './ReportNoteDialog';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { SplitDivider } from './SplitDivider';
 import { loadSplit, saveSplit, clampSplit, paneSplitVars } from './splitPane';
@@ -113,7 +116,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -836,6 +839,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   /** Which checkpoint is currently being opened — the button says so rather than looking dead. */
   const [previewingSha, setPreviewingSha] = useState<string>('');
   /**
+   * AN OLDER VERSION, SHOWN INSIDE THE PANEL RATHER THAN IN A NEW TAB.
+   *
+   * 🔴 THE SIBLING THE TOOLBAR FIX MISSED (found 2026-09-10 while closing the preview gaps). The Live
+   * toolbar stopped printing the sandbox's address because forwarding it puts a stranger's traffic on
+   * a machine billed by the minute — and this path handed the user the SAME KIND of address, in their
+   * own address bar, ready to copy, by opening it with window.open. Worse than the toolbar: a second
+   * dev server is running behind that one.
+   *
+   * The door route cannot be the answer here. It resolves the port by sweeping, with the MAIN app's
+   * proven port first, so a door minted for a version's port would very likely redirect to today's
+   * app while the banner said "an older version" — a wrong answer dressed as a right one, which is
+   * worse than the leak. So the url stays internal to an iframe, exactly as the live preview's does.
+   */
+  const [versionView, setVersionView] = useState<{ sha: string; url: string } | null>(null);
+  /**
    * Look at an old checkpoint WITHOUT restoring it.
    *
    * Restore is destructive: until this existed, comparing against an older version meant overwriting
@@ -848,9 +866,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     try {
       const { ok, url, message } = await previewVersion(sha);
       setRestoreNote(`${ok ? '✅' : '⚠️'} ${message}`);
-      // Opened only on a URL the server proved answers — never optimistically, or the user lands on a
-      // browser error page and blames their app.
-      if (ok && url) window.open(url, '_blank', 'noopener,noreferrer');
+      // Shown only on a URL the server proved answers — never optimistically, or the user lands on a
+      // browser error page and blames their app. Shown IN the panel, never handed over as a link: see
+      // versionView above for why this is the same billable-address leak the toolbar fix closed.
+      if (ok && url) setVersionView({ sha, url });
     } finally {
       setPreviewingSha('');
     }
@@ -1995,6 +2014,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // resulting no-op as "click hi nahi ho raha"). Any failed open sets this and a dismissible toast
   // shows the real reason.
   const [openChatError, setOpenChatError] = useState<string | null>(null);
+  // THE APP'S NAME (admin 2026-09-04) — a dedicated card at the top of the thread, with an edit
+  // button that opens the rename popup. `appName` is the EFFECTIVE name the server resolved (the
+  // user's choice if they made one, else the auto-derived title), so the card always shows what the
+  // rest of the app shows. null = not loaded/no app yet, and the card stays hidden rather than
+  // rendering an empty or invented name.
+  const [appName, setAppName] = useState<string | null>(null);
+  const [nameModalOpen, setNameModalOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  // A rename that moved the GitHub repo too says so once, quietly. It is genuinely different news
+  // from "renamed", because it is the half that could have failed.
+  const [nameNote, setNameNote] = useState<string | null>(null);
   // TAP TRACER (diagnostic, admin-only via ?tapdebug=1 or localStorage nbai_tapdebug=1): the history
   // menu taps are reported dead on iPhone even after the rows became real <button>s, so hypotheses are
   // exhausted — this captures ground truth from the device itself. While the menu is open it listens
@@ -2106,6 +2138,86 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setHistoryOpen(next);
     if (next) await loadHistory();
   };
+
+  /**
+   * Read this session's EFFECTIVE app name from the server (admin 2026-09-04).
+   *
+   * Deliberately asks the server rather than deriving anything locally: the server already resolves
+   * "the user's chosen name, else the derived title", and a second implementation here is exactly how
+   * two surfaces start disagreeing about what an app is called. Silent on failure — a name we could
+   * not read leaves the card hidden, which is honest; inventing one would not be.
+   */
+  const loadAppName = async (): Promise<void> => {
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    try {
+      const qs = new URLSearchParams();
+      if (userId) qs.set('userId', userId);
+      if (email) qs.set('email', email);
+      const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}?${qs.toString()}`, {
+        headers: await authJsonHeaders(),
+      });
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      const rec = data?.conversation;
+      const name = (rec?.appName || rec?.title || '').trim();
+      if (name) setAppName(name);
+    } catch { /* the card simply stays hidden — never a guessed name */ }
+  };
+
+  /**
+   * Save the name the user typed in the popup.
+   *
+   * THE BUILD IS NOT TOUCHED. This calls one endpoint that writes a single field; it never stops,
+   * pauses or restarts a build, and it stays enabled while one is running — which is the point of
+   * the admin's *"app ka naam / app building — dono smooth rahe"*. The server applies the display
+   * name first and only then attempts the GitHub repo rename, so a repo that could not be moved
+   * leaves both the name and the running build intact, and says so.
+   */
+  const saveAppName = async (): Promise<void> => {
+    const sid = sessionIdRef.current;
+    if (!sid || nameSaving) return;
+    const desired = nameDraft.replace(/\s+/g, ' ').trim();
+    if (!desired) { setNameError('Give your app a name.'); return; }
+    if (desired === (appName ?? '')) { setNameModalOpen(false); return; }
+    setNameSaving(true);
+    setNameError(null);
+    try {
+      const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}/name`, {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ name: desired, userId, email, githubToken: ghToken() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // The server's own sentence — it knows whether this was a duplicate, too long, or not yours.
+        setNameError(data?.error || 'Could not save the name. Try again.');
+        return;
+      }
+      setAppName(data?.name || desired);
+      setNameModalOpen(false);
+      setNameNote(data?.repoRenamed ? 'Renamed — your saved code moved with it.' : null);
+      // Keep the history list honest in the same breath, so the new name is already there when the
+      // user opens it rather than a refresh later.
+      setHistoryItems((prev) => prev.map((c) => (c.id === sid || c.workspaceId === expectedWorkspaceId()
+        ? { ...c, title: data?.name || desired } : c)));
+    } catch {
+      setNameError('Could not reach the server. Your app is untouched — try again.');
+    } finally {
+      setNameSaving(false);
+    }
+  };
+
+  // WHEN THE NAME IS (RE)READ. A build's title is written server-side as the record is created, so
+  // the honest moments to ask are: this session has a thread at all, and a build just finished (the
+  // record now exists, or its name may have been derived from the first prompt). Keyed on `running`
+  // falling rather than on a timer — nothing polls, and a session with no app never asks.
+  useEffect(() => {
+    if (running) return;            // mid-build the record is still being written; ask once it settles
+    if (convo.length === 0) return; // no app in this session yet — the card must stay hidden
+    void loadAppName();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, convo.length === 0, sessionIdRef.current]);
   // Open a specific saved conversation: load its thread + plan, and adopt its sessionId so a
   // follow-up continues THAT exact workspace/memory (same as the auto-restore of the most recent).
   // Allowed even while a build is actively streaming HERE — loadConversation() detaches from it (the
@@ -2305,6 +2417,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Delete a saved session from the history list. Confirms first (destructive + irreversible —
   // the Firestore record and its transcript are gone). If the deleted session is the one currently
   // open, starts a fresh session so the panel never keeps showing a chat that no longer exists.
+  // DUPLICATE (ROADMAP §13, 3.6): a copy of the files + chat under a new name, opened at once so
+  // the user is looking at the thing they just made. The server refuses to copy what points at the
+  // world (repo, deployment, domain, secrets); the note says so.
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const handleDuplicateConversation = async (e: React.MouseEvent, c: { id: string }) => {
+    e.stopPropagation();
+    if (duplicatingId) return;
+    setDuplicatingId(c.id);
+    try {
+      const r = await duplicateConversation(c.id);
+      if ('error' in r) { setOpenChatError(r.error); return; }
+      setPublishMsg(`Made a copy: "${r.name}". It starts unpublished, with no domain, repo or secrets — those stay with the original.`);
+      await openConversation(r.id);
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
   const handleDeleteConversation = async (e: React.MouseEvent, c: ConversationMeta) => {
     e.stopPropagation();
     if (deletingHistoryId) return;
@@ -2372,7 +2501,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // ── Mobile footer (admin 2026-07-07): v5.0 owns the app's bottom nav while it is the active view.
   // One sheet at a time: the footer's History and More items open bottom sheets anchored above the
   // nav; any footer navigation action closes them.
-  const [mobileSheet, setMobileSheet] = useState<null | 'history' | 'more' | 'report' | 'secrets'>(null);
+  const [mobileSheet, setMobileSheet] = useState<null | 'history' | 'more' | 'report' | 'secrets' | 'services'>(null);
   // How many keys the vault already holds, for the More-menu label. Fetched only when that menu is
   // opened — a count nobody is looking at is not worth a request on every panel mount.
   const [savedKeyCount, setSavedKeyCount] = useState<number | null>(null);
@@ -2580,12 +2709,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // the header button keeps telling the truth about the current build.
   const countKeyFor = (picked?: ReportPickerItem): string =>
     reportKey(state.workspaceId, picked ? (picked.buildId || picked.id) : state.buildId);
-  const sendReportToAdmin = useCallback(async (picked?: ReportPickerItem) => {
+  const sendReportToAdmin = useCallback(async (picked?: ReportPickerItem, note?: string) => {
     if (reportSending) return;
     setReportSending(true);
     try {
       const body: Record<string, string> = {};
       if (state.workspaceId) body.workspaceId = state.workspaceId;
+      // The user's own description of the problem (admin 2026-08-28). Optional — an empty box sends
+      // exactly what Report always sent. The server sanitises and caps it; we send it as typed.
+      if (note && note.trim()) body.note = note;
       // A picked past build resolves to exactly that report; without one the server falls back to the
       // latest, guarded by the active build's identity so it can't be a different app's report.
       if (picked) body.buildId = picked.id;
@@ -2599,6 +2731,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       const data = await res.json().catch(() => ({}));
       if (res.ok && data?.ok) {
         setReportPickerOpen(false);
+        setNoteDialogOpen(false);
         // Count ONLY a genuinely accepted submission — a failed send must never inflate the tally
         // (the whole point of the number is that the user can trust it).
         const bumped = bumpReportSendCount(countKeyFor(picked));
@@ -2615,6 +2748,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setReportSending(false);
     }
   }, [reportSending, state.workspaceId, state.buildId, state.promptHash]);
+
+  // ── ASK "WHAT WENT WRONG?" BEFORE SENDING (admin 2026-08-28) ────────────────────────────────────
+  //
+  // 🔒 ONE FUNNEL, ON PURPOSE. Report can be reached three ways: straight through (a chat with a
+  // single build), the desktop popover, and the mobile sheet. Adding the prompt at each call site
+  // would mean three places to keep in step, and the one that got missed would silently send reports
+  // with no description while looking completely fine. Every path now stages its pick here and the
+  // POST happens in exactly one place.
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const [notePick, setNotePick] = useState<ReportPickerItem | undefined>(undefined);
+  const askForReportNote = useCallback((picked?: ReportPickerItem) => {
+    setNotePick(picked);
+    setReportPickerOpen(false);
+    setNoteDialogOpen(true);
+  }, []);
 
   // Open the picker. One build in this chat means there is nothing to choose — sending straight away
   // keeps the common case a single click, which is what it has always been.
@@ -2638,10 +2786,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // Fewer than two choices (including a history that hasn't landed yet, or a failed fetch) → send
     // the current build, exactly as the button did before. The picker must never become a wall
     // between the user and reporting a problem.
-    if (builds.length < 2) { void sendReportToAdmin(); return; }
+    if (builds.length < 2) { askForReportNote(); return; }
     if (surface === 'sheet') setMobileSheet('report');
     else setReportPickerOpen(true);
-  }, [reportSending, reportPickerLoading, state.workspaceId, userId, email, sendReportToAdmin]);
+  }, [reportSending, reportPickerLoading, state.workspaceId, userId, email, askForReportNote]);
 
   // One list, rendered by both surfaces — so the desktop popover and the mobile sheet can never drift
   // into showing different things (the drift that lets a field leak on one surface only).
@@ -2675,6 +2823,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
   // server so it survives a reconnect/new session, not just the current build stream.
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
+  const [siteAnalytics, setSiteAnalytics] = useState<SiteAnalyticsView | null>(null);
   // The first-ever-publish celebration. Null until the server says this user has never published
   // before AND we have looked at the link (see deployLive).
   const [celebration, setCelebration] = useState<{ kind: CelebrationKind; url: string; firstPublish: boolean } | null>(null);
@@ -2713,6 +2862,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     const wsId = state.workspaceId;
     if (!wsId) return;
     let cancelled = false;
+    // The previous app's visitor counts must not sit under the new app's name for even the length of
+    // this request — same leak class as the live URL (#2658). Cleared here, synchronously, so no new
+    // per-workspace effect is added to the census in appIdentityGuard.test.ts.
+    setSiteAnalytics(null);
     void (async () => {
       try {
         const params = new URLSearchParams({ workspaceId: wsId });
@@ -2784,6 +2937,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
    * beside the message and handed to the chooser, which turns it into the real button.
    */
   const [publishRefusal, setPublishRefusal] = useState<{ code: string; keySource: 'user' | 'server' | null }>({ code: '', keySource: null });
+  // A repo created by "Put this app in my GitHub" during THIS visit. See deployRepo for why the build
+  // event alone is not enough.
+  const [pushedRepo, setPushedRepo] = useState<{ owner: string; repo: string } | null>(null);
   /**
    * Sibling of the live-URL leak above, found by asking what ELSE on this panel describes ONE app
    * while living for the whole session. `publishMsg` holds the last publish's own words — "Your app
@@ -2863,7 +3019,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (!res.ok) return null;
     const data = await res.json().catch(() => null);
     if (!data || !Array.isArray(data.apps)) return null;
-    return { apps: data.apps, used: Number(data.used ?? data.apps.length), cap: Number(data.cap ?? 0) };
+    return {
+      apps: data.apps,
+      used: Number(data.used ?? data.apps.length),
+      cap: Number(data.cap ?? 0),
+      paused: Array.isArray(data.paused) ? data.paused : [],
+      freeCap: Number(data.freeCap ?? 0) || undefined,
+      planName: typeof data.planName === 'string' ? data.planName : null,
+    };
   };
 
   /**
@@ -2884,6 +3047,95 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       return '';
     } catch {
       return 'Could not reach NavBharatAI. Check your connection and try again.';
+    }
+  };
+
+  /**
+   * PUT THE LIVE APP BACK to the version before this one.
+   *
+   * The reason this exists at all: publishing was the only action in the platform with no undo, and
+   * it is the one action the user's OWN users can see. Before this, a bad publish meant restoring
+   * files from History and republishing — minutes of work, and a different operation with different
+   * risks, at exactly the moment the user is panicking about a broken live app.
+   *
+   * Nothing is deleted server-side: the previous version is re-released, so this is itself undoable.
+   * The message shown is the SERVER's, including every reason it might refuse (never published, only
+   * one version, served from storage which keeps no history, or simply unreadable right now) — a
+   * greyed-out button with no explanation reads as broken rather than as "there is nothing to undo".
+   */
+  /**
+   * Visitor counts for the live app (ROADMAP §13, 1.1). A failed request is reported as
+   * `available: false` so the tile says "could not read" — never a zero it did not measure.
+   */
+  const loadSiteAnalytics = async (days: 7 | 30 = 7): Promise<void> => {
+    if (!state.workspaceId) return;
+    try {
+      const res = await fetch('/api/agentv3/site-analytics', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, days }),
+      });
+      const data = await res.json().catch(() => null);
+      setSiteAnalytics(res.ok && data && typeof data.available === 'boolean' ? data : { available: false, reason: 'request-failed' });
+    } catch {
+      setSiteAnalytics({ available: false, reason: 'request-failed' });
+    }
+  };
+
+  /**
+   * The publish history for the picker (ROADMAP §13, 1.4). Null when it could not be read — the
+   * chooser says so rather than rendering an unreadable history as an empty one.
+   */
+  const loadRollbackChoices = async (): Promise<RollbackChoiceView[] | null> => {
+    if (!state.workspaceId) return null;
+    try {
+      const res = await fetch('/api/agentv3/rollback-status', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email }),
+      });
+      const data = await res.json().catch(() => null);
+      return res.ok && Array.isArray(data?.choices) ? data.choices : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** Site settings (ROADMAP §13, 1.6): read and save through the owner-checked routes. */
+  const loadSiteConfig = async (): Promise<SiteConfigView | null> => {
+    if (!state.workspaceId) return null;
+    try {
+      const res = await fetch('/api/agentv3/site-config', { method: 'POST', headers: await authJsonHeaders(), body: JSON.stringify({ workspaceId: state.workspaceId, userId, email }) });
+      const data = await res.json().catch(() => null);
+      return res.ok && data?.config ? data.config : null;
+    } catch { return null; }
+  };
+  const saveSiteConfig = async (config: SiteConfigView): Promise<{ errors: string[]; message?: string }> => {
+    if (!state.workspaceId) return { errors: ['No app selected.'] };
+    try {
+      const res = await fetch('/api/agentv3/site-config/save', { method: 'POST', headers: await authJsonHeaders(), body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, config }) });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) return { errors: Array.isArray(data?.errors) ? data.errors : [data?.error || 'Could not save the settings.'] };
+      return { errors: [], message: typeof data?.message === 'string' ? data.message : undefined };
+    } catch { return { errors: ['Could not reach NavBharatAI. Check your connection and try again.'] }; }
+  };
+
+  const rollbackLive = async (versionName?: string): Promise<void> => {
+    if (!state.workspaceId) return;
+    setPublishMsg(versionName ? 'Bringing that version back…' : 'Bringing back the previous version…');
+    try {
+      const res = await fetch('/api/agentv3/rollback', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, ...(versionName ? { versionName } : {}) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      // A refusal here is NOT a failure to hide — it names something the user can act on, so it is
+      // shown verbatim rather than replaced with a generic error.
+      if (!res.ok) { setPublishMsg(data?.error || 'Could not bring back the previous version. Your app is unchanged.'); return; }
+      setPublishMsg(data?.message || 'Your live app is back to the previous published version.');
+    } catch {
+      setPublishMsg('Could not reach NavBharatAI. Check your connection and try again.');
     }
   };
 
@@ -2923,6 +3175,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
    * backend-deploy offer exists to remove.
    */
   const deployRepo = (() => {
+    // A repo we JUST created for this app wins: the `repo` build event that would otherwise carry
+    // this fact only fires during a build, so without it the panel would keep showing "put this app
+    // in my GitHub" for a repo the user had just made (admin 2026-09-04).
+    if (pushedRepo) return pushedRepo;
     if (state.ownRepo) return { owner: state.ownRepo.owner, repo: state.ownRepo.repo };
     if (!state.repoOwnedByUser) return null;
     const [owner, repo] = String(state.repoFullName ?? '').split('/');
@@ -2951,7 +3207,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         const res = await fetch('/api/agentv3/publish', {
           method: 'POST',
           headers: await authJsonHeaders(),
-          body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, deployProvider: prov0, githubToken }),
+          // `hasRepo` is the SAME fact the backend-deploy panel renders (see deployRepo above), sent so
+          // the server's refusal cannot claim "a real deploy can run" while the panel beneath it says
+          // the app needs a repo first — one screen contradicting itself, admin 2026-09-04.
+          body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, deployProvider: prov0, githubToken, hasRepo: !!deployRepo }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -3372,6 +3631,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           </button>
           <button
             type="button"
+            onClick={(e) => void handleDuplicateConversation(e, c)}
+            disabled={running || isDeleting || duplicatingId === c.id}
+            title="Make a copy of this app"
+            aria-label="Make a copy of this app"
+            className="p-1 rounded touch-manipulation text-zinc-500 hover:text-indigo-400 hover:bg-indigo-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+          >
+            {duplicatingId === c.id ? <TirangaLoader className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
+          </button>
+          <button
+            type="button"
             onClick={(e) => handleDeleteConversation(e, c)}
             disabled={running || isDeleting}
             title="Delete this session"
@@ -3499,12 +3768,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           publishStatus={publishMsg}
           publishRefusalCode={publishRefusal.code}
           deployRepo={deployRepo}
+          onRepoPushed={(r) => { if (r.owner && r.repo) setPushedRepo(r); }}
           backendKeySource={publishRefusal.keySource}
           workspaceId={state.workspaceId}
           // Gates the Unpublish control: null unless this app is genuinely live (the server returns a
           // URL only for an ACTIVE deployment), so it never offers to remove something that is not there.
           liveUrl={liveUrl}
           onUnpublish={unpublishLive}
+          onRollback={rollbackLive}
+          onLoadRollbackChoices={loadRollbackChoices}
+          onLoadSiteConfig={loadSiteConfig}
+          onSaveSiteConfig={saveSiteConfig}
+          siteAnalytics={siteAnalytics}
+          onLoadSiteAnalytics={loadSiteAnalytics}
           onLoadMyApps={loadMyPublishedApps}
           onUnpublishApp={unpublishByWorkspace}
           customDomainsEnabled={customDomainsEnabled}
@@ -3689,6 +3965,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               {reportSending || reportPickerLoading ? <TirangaLoader className="w-3.5 h-3.5" /> : reportSent || reportCount > 0 ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
               {reportButtonLabel({ sending: reportSending, justSent: reportSent, count: reportCount })}
             </button>
+            {/* "What went wrong?" — asked on EVERY path to Report (see askForReportNote). The build
+                details are already attached; this is the half only the user can supply. */}
+            {noteDialogOpen && (
+              <ReportNoteDialog
+                buildLabel={notePick?.label || undefined}
+                sending={reportSending}
+                onCancel={() => { setNoteDialogOpen(false); setNotePick(undefined); }}
+                onSend={(note) => { void sendReportToAdmin(notePick, note); }}
+              />
+            )}
             {reportPickerOpen && (
               <>
                 {/* Click-away layer, so the list closes the way every other popover here does. */}
@@ -3697,7 +3983,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <div className="px-3 py-2 text-[11px] text-zinc-400 border-b border-zinc-800">
                     Which build had the problem?
                   </div>
-                  {reportPickerRows((b) => void sendReportToAdmin(b), false)}
+                  {reportPickerRows((b) => askForReportNote(b), false)}
                 </div>
               </>
             )}
@@ -3882,6 +4168,38 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 })()}
               </div>
             )}
+            {/* THE APP-NAME MESSAGE (admin 2026-09-04): *"chat box me hi ek dedicated message sirf
+                'name' ke liye ho, aur us message ke aage edit button ho"*. A message of its own at the
+                head of the thread — not a header control — so it reads as part of the conversation and
+                is never scrolled away from the app it names. Shown only once the session HAS an app
+                and the server has told us its real name: a card with a guessed name would be worse
+                than no card. It stays interactive during a build on purpose — naming and building are
+                independent, which is the whole ask. */}
+            {appName && (
+              <div className="mx-auto my-3 w-full max-w-[92%] rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 shrink-0 text-indigo-400" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-black uppercase tracking-widest text-indigo-300/70">App name</div>
+                    <div className="truncate text-sm font-semibold text-zinc-100" title={appName}>{appName}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setNameDraft(appName); setNameError(null); setNameModalOpen(true); }}
+                    title="Change your app's name"
+                    aria-label="Change your app's name"
+                    className="shrink-0 flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 hover:text-white hover:bg-white/10 transition-colors touch-manipulation"
+                  >
+                    <Pencil className="w-3 h-3" /> Edit
+                  </button>
+                </div>
+                {nameNote && (
+                  <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-emerald-300">
+                    <span aria-hidden>✓</span>{nameNote}
+                  </div>
+                )}
+              </div>
+            )}
             {chatBlocks.map((b) => {
               if (b.kind !== 'msg') return <ActionGroupRow key={b.key} block={b} />;
               const isLastUser = lastUserTs !== null && b.msg.role === 'user' && b.msg.ts === lastUserTs && !unsending;
@@ -3951,6 +4269,39 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {(running || state.activity.length > 0) && (
               <WorkingIndicator activity={state.activity} running={running} />
             )}
+            {/* THE PROOF THAT WE ACTUALLY CHECKED (gap analysis 2026-09-10). After a build,
+                NavBharatAI drives a real browser through the app's own forms — fills them in,
+                submits, RELOADS, and confirms the entry survived. That reload is the only thing
+                separating an app that really saves data from one that looks like it does, and it is
+                the most valuable check the platform performs.
+
+                The user was never told any of it: the result went into the ADMIN diagnostics report,
+                which they cannot open, while the chat said "your app is ready" in exactly the same
+                words it uses when nothing was verified at all. Showing the work is the whole of
+                Antigravity's pitch, and we were doing the harder half of it in private.
+
+                A FAILURE IS AS VISIBLE AS A PASS, in the same card and the same place — the wording
+                comes from the server (journeyUserSummary) so it cannot be softened here, and a check
+                that could not run says so rather than being rounded up. */}
+            {state.verification && state.verification.steps.length > 0 && (
+              <div className={`mx-auto my-3 max-w-[92%] rounded-xl border px-3 py-2.5 text-sm ${
+                state.verification.ok
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
+                  : 'border-amber-500/40 bg-amber-500/10 text-amber-100'}`}>
+                <div className="flex items-start gap-2">
+                  <span className="mt-0.5 shrink-0" aria-hidden="true">{state.verification.ok ? '✅' : '⚠️'}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium">{state.verification.headline}</div>
+                    <ul className="mt-1 space-y-0.5 text-xs opacity-90">
+                      {state.verification.steps.map((line, i) => (
+                        <li key={i} className="flex gap-1.5"><span aria-hidden="true">•</span><span className="flex-1">{line}</span></li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ASK-USER (opt-in) — a NON-BLOCKING clarify card. The engine is already building with
                 sensible defaults for these; the user MAY refine any of them with a follow-up message, or
                 dismiss. It never pauses the build (honours "text reply > build app"). */}
@@ -4980,6 +5331,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           {previewMounted(previewEverOpened, showWorkspace, tab, previewPrewarm) && (
             <div className={previewWrapClass(showWorkspace, tab)}>
               <PreviewSurface
+                versionUrl={versionView?.url}
+                versionSha={versionView?.sha}
+                onExitVersion={() => setVersionView(null)}
                 url={state.previewUrl}
                 // Prefer the live build's workspace, but FALL BACK to this session's derived id when a
                 // restored/idle session has no live workspace in state (the "preview gaya" half of the
@@ -5328,11 +5682,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                that tracks the visible height; the `vh` value stays as the fallback for engines without
                it, exactly as App.tsx does for the shell. */
             className="fixed inset-x-0 z-[145] lg:hidden max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-t-2xl border-t border-zinc-700 bg-zinc-900 shadow-2xl pb-2"
-            style={{ bottom: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))' }}
+            /* Clears the app's tab bar by reading the SHARED height, never a hand-typed copy of it —
+               this line used to spell out `calc(3.5rem + env(safe-area-inset-bottom, 0px))`, which is
+               the fourth place that number had been written out and the reason lib/mobileNav.ts
+               exists. `var(--nb-bottom-nav)` is better than the constant here because it also
+               collapses to 0 on any screen where the bar is not rendered. */
+            style={{ bottom: 'var(--nb-bottom-nav, 0px)' }}
           >
             <div className="sticky top-0 z-10 bg-zinc-900 flex items-center justify-between px-4 pt-3 pb-2 border-b border-zinc-800">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                {mobileSheet === 'history' ? 'Session history' : mobileSheet === 'report' ? 'Which build had the problem?' : mobileSheet === 'secrets' ? 'Keys & Secrets' : 'More'}
+                {mobileSheet === 'history' ? 'Session history' : mobileSheet === 'report' ? 'Which build had the problem?' : mobileSheet === 'secrets' ? 'Keys & Secrets' : mobileSheet === 'services' ? 'Connected services' : 'More'}
               </span>
               <button onClick={() => setMobileSheet(null)} aria-label="Close" className="p-1 rounded text-zinc-400 hover:text-white touch-manipulation">
                 <X className="w-4 h-4" />
@@ -5341,13 +5700,28 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {mobileSheet === 'history' ? (
               <div className="py-1.5">{historyListBody}</div>
             ) : mobileSheet === 'report' ? (
-              <div>{reportPickerRows((b) => { setMobileSheet(null); void sendReportToAdmin(b); }, true)}</div>
+              <div>{reportPickerRows((b) => { setMobileSheet(null); askForReportNote(b); }, true)}</div>
+            ) : mobileSheet === 'services' ? (
+              // Opens IN PLACE, like Keys & Secrets — sending someone away mid-build loses the build,
+              // the preview and the chat. Lazy, so a user who never connects anything never downloads it.
+              state.workspaceId
+                ? <Suspense fallback={<div className="px-4 py-6 text-xs text-zinc-500">Loading…</div>}>
+                    <ConnectedServices workspaceId={state.workspaceId} authedFetch={authedFetch} />
+                  </Suspense>
+                : <div className="px-4 py-6 text-xs text-zinc-500">Start or open an app first, then connect your tools to it.</div>
             ) : mobileSheet === 'secrets' ? (
               // The SAME vault component the Settings screen renders — not a copy of it. Lazy, so a
               // user who never opens this door never downloads it.
               userId
                 ? <Suspense fallback={<div className="px-4 py-6 text-xs text-zinc-500">Loading your keys…</div>}>
-                    <VaultManager userId={userId} embedded defaultAppId={state.workspaceId ?? null} />
+                    <VaultManager
+                      userId={userId}
+                      embedded
+                      defaultAppId={state.workspaceId ?? null}
+                      // Named from what this panel already displays in its own header, so the
+                      // sheet says the app's name even if the app-list request fails.
+                      defaultAppName={appName}
+                    />
                   </Suspense>
                 : <div className="px-4 py-6 text-xs text-zinc-500">Sign in to manage your keys.</div>
             ) : (
@@ -5392,6 +5766,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   {savedKeyCount !== null && savedKeyCount > 0 && (
                     <span className="text-xs text-zinc-500">{savedKeyCount} saved</span>
                   )}
+                </button>
+                {/* CONNECTED SERVICES — the user's own tools (MCP). Same in-place pattern as the vault
+                    above: this is a build-time capability, so leaving the build to configure it would
+                    be the wrong shape. */}
+                <button
+                  onClick={() => setMobileSheet('services')}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
+                >
+                  <Puzzle className="w-4 h-4 shrink-0 text-zinc-400" />
+                  <span className="flex-1 text-left">Connected services</span>
                 </button>
                 <button onClick={() => openSurfaceFromFooter('history')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
                   <History className="w-4 h-4 shrink-0 text-zinc-400" />
@@ -5476,6 +5860,64 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           >
             <X className="w-3.5 h-3.5" />
           </button>
+        </div>
+      )}
+
+      {/* RENAME-THE-APP POPUP (admin 2026-09-04) — opened by the name message's Edit button.
+          Deliberately NOT disabled while a build runs: the name and the build are independent, and
+          blocking one on the other is exactly the friction the admin asked to avoid. Saving writes a
+          name; it never interrupts, pauses or restarts anything the engine is doing. */}
+      {nameModalOpen && (
+        <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => { if (!nameSaving) setNameModalOpen(false); }} />
+          <div className="nb-sheet relative z-10 w-full max-w-sm overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-widest">App name</h3>
+                <p className="text-[10px] text-[#8b949e] mt-0.5">This name is used everywhere, including where your code is saved.</p>
+              </div>
+              <button onClick={() => { if (!nameSaving) setNameModalOpen(false); }} className="text-zinc-500 hover:text-white" aria-label="Close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <input
+              autoFocus
+              value={nameDraft}
+              onChange={(e) => { setNameDraft(e.target.value); if (nameError) setNameError(null); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !nameSaving) { e.preventDefault(); void saveAppName(); }
+                if (e.key === 'Escape' && !nameSaving) setNameModalOpen(false);
+              }}
+              maxLength={60}
+              placeholder="My Shop"
+              aria-label="Your app's name"
+              className="w-full bg-white/5 border border-indigo-500/30 rounded-xl px-3 py-2.5 text-sm text-white placeholder-[#484f58] outline-none focus:border-indigo-500"
+            />
+            {nameError && (
+              <p className="text-[11px] text-red-300 bg-red-900/20 border border-red-500/20 rounded-lg px-2.5 py-2">{nameError}</p>
+            )}
+            {running && (
+              // Said out loud because the opposite is what users expect from a builder, and a person
+              // who assumes renaming might break their build simply will not use this.
+              <p className="text-[11px] text-[#8b949e]">Your build keeps running — renaming does not interrupt it.</p>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { void saveAppName(); }}
+                disabled={nameSaving || !nameDraft.trim()}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-all"
+              >
+                {nameSaving ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                onClick={() => { if (!nameSaving) setNameModalOpen(false); }}
+                disabled={nameSaving}
+                className="px-4 py-2.5 border border-white/10 text-sm font-semibold text-zinc-300 hover:text-white hover:bg-white/5 rounded-xl transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

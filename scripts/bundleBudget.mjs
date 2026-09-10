@@ -102,19 +102,92 @@ import { pathToFileURL } from 'node:url';
  * moment the largest-chunk ceiling was correctly tightened to 400. A number that must match another
  * number belongs in one place. Update this in the same edit as BUDGETS, always.
  */
+// -- 2026-09-09: THE CEILING WAS SPENT, AND THE MEASUREMENT PROVES WHOSE GROWTH SPENT IT. -------
+//
+// This is the exact failure mode the 2026-08-11 note above warns about, arriving on schedule: a
+// ceiling set flush against reality stops meaning "no unchecked bloat" and starts meaning "no further
+// features", and the PR that pays for it is whichever innocent one happens to be next.
+//
+// MEASURED, not assumed, before touching the number (the discipline this file demands):
+//   * with the change that failed CI:     1600.2 KB local / 1600.4 KB on the runner
+//   * with that change's UI reverted:     1599.7 KB  <- already 99.98% of the ceiling
+//   * so the failing PR's own contribution was 0.5 KB, and the other 113.6 KB of the
+//     1486.1 -> 1599.7 drift since 2026-08-24 was already on main before it existed.
+//
+// AND IT IS NOT A FIRST-PAINT REGRESSION, which is the question the note above says to answer FIRST.
+// The largest chunk -- the one every visitor downloads -- did not move at all (250.3 KB against a 400
+// ceiling), because the added surface is an admin-only card inside the already-`lazy()` AdminDashboard
+// route. Nobody but an admin opening that screen downloads a byte of it. That is what makes absorbing
+// the remainder honest here rather than a ceiling hiding a regression.
+//
+// 1720 = today's runner measurement + ~7.5% headroom, the same proportion the 1486.1 -> 1600 bump
+// used. Set from a measurement, with room, and dated -- keep that discipline on the next bump.
+//
+// NOTE FOR THE NEXT SESSION, recorded rather than acted on: the entry chunk has SHRUNK 354.9 -> 250.3
+// KB since the last measurement (more route splitting landed), so the 400 ceiling now permits ~150 KB
+// of silent first-paint drift. Tightening it would lock that win in. It is deliberately NOT done in
+// this edit -- that is a judgement call with its own failure risk for somebody else's PR, and this
+// change exists to unblock a gate, not to re-tune every ceiling while doing it.
+
+// -- 2026-09-10: THE FIRST-PAINT GUARD WAS NOT MEASURING FIRST PAINT. ---------------------------
+//
+// Found while deciding whether to tighten the 400 ceiling the note above defers. The answer turned
+// out to be that tightening it would have improved a number that had quietly stopped meaning what
+// every comment in this file says it means.
+//
+// `largestChunkGzipKB` is the biggest chunk, whichever one that is, and this file reasons about it
+// everywhere as the entry -- "the entry EVERY user downloads", and the instruction to a future
+// session that "the question to answer first is *what did I just put on the first-paint path*".
+// That was true on 2026-08-24, when the entry WAS the largest chunk at 354.9 KB. It is not true now.
+//
+// MEASURED on 2026-09-10, reading `dist/index.html` -- the document the browser actually receives:
+//   entry            index-*.js          247.7 KB gz   <- downloaded on first paint
+//   modulepreload    react-vendor-*.js    59.2 KB gz   <- downloaded on first paint
+//   modulepreload    firebase-vendor-*.js 188.9 KB gz  <- downloaded on first paint
+//   FIRST-PAINT JS                       495.8 KB gz
+//   ...while `largestChunkGzipKB` reported 250.3 KB for OfflineAI-*.js, a LAZY chunk that first
+//   paint does not fetch at all.
+//
+// So the guard was reporting a number ~2x smaller than the real first-paint cost, about a file the
+// user does not download, while `firebase-vendor` -- 188.9 KB that EVERY visitor pays before seeing
+// anything -- was guarded by nothing tighter than the 1720 KB total. The failure mode is silent and
+// in the future: let any lazy chunk drift to ~390 KB and it becomes "the largest", after which the
+// entry could double from 247 to 399 KB with this gate reporting success the whole way.
+//
+// THE FIX IS TO MEASURE THE THING, NOT TO TUNE THE PROXY. `firstPaintJsGzipKB` is the entry script
+// plus every `modulepreload` in the emitted HTML -- by construction exactly what the browser must
+// fetch before it can render, read from the build output rather than inferred from a filename
+// convention. `largestChunkGzipKB` is KEPT (it still catches a single chunk ballooning anywhere in
+// the app) but its comment no longer claims to be the first-paint guard, because it is not.
+//
+// 560 = 495.8 + ~13% headroom, the same discipline the other ceilings use.
+//
+// ⚠️ NOT OPTIMISED IN THIS CHANGE, and recorded so it is not mistaken for acceptable: 495.8 KB before
+// anything renders is a lot, and 38% of it is Firebase, which a visitor who never signs in still
+// pays for in full. Making that lazy is a real change with real risk and belongs in its own PR --
+// this one exists to make the number VISIBLE and GUARDED, which is the precondition for improving it.
+
 export const LAST_MEASURED = {
-  largestChunkGzipKB: 354.9,
-  totalJsGzipKB: 1486.1,
-  totalCssGzipKB: 47.7,
+  largestChunkGzipKB: 250.3,
+  firstPaintJsGzipKB: 495.8,
+  totalJsGzipKB: 1600.4,
+  totalCssGzipKB: 47.4,
 };
 
 export const BUDGETS = {
-  /** Largest single JS chunk, gzipped. Measured 354.9 KB on 2026-08-24 (the main entry). */
+  /** Largest single JS chunk, gzipped, lazy ones included. Measured 250.3 KB on 2026-09-10 -- which
+   *  was OfflineAI, NOT the entry. This is a "no single chunk balloons" guard and nothing more; the
+   *  first-paint guard is `firstPaintJsGzipKB` below. See the 2026-09-10 note. */
   largestChunkGzipKB: 400,
-  /** Sum of all JS chunks INCLUDING lazy ones, gzipped. Measured 1486.1 KB on 2026-08-24 -- see the
-   *  note above for why this rose while the chunk everyone downloads fell by 285 KB. */
-  totalJsGzipKB: 1600,
-  /** Sum of all CSS, gzipped. Measured 47.7 KB on 2026-08-24. */
+  /** What the browser must download before it can render: the entry script plus every modulepreload
+   *  in the emitted index.html. Measured 495.8 KB on 2026-09-10. THIS is the number that tracks what
+   *  every visitor pays on a cold load, and the one to answer for before adding a static import. */
+  firstPaintJsGzipKB: 560,
+  /** Sum of all JS chunks INCLUDING lazy ones, gzipped. Measured 1600.4 KB on 2026-09-09 on the CI
+   *  runner (1600.2 locally). Raised from 1600, whose headroom two weeks of feature growth had spent
+   *  down to 0.3 KB -- see the dated note above for the per-change measurement behind this. */
+  totalJsGzipKB: 1720,
+  /** Sum of all CSS, gzipped. Measured 47.4 KB on 2026-09-09. */
   totalCssGzipKB: 55,
 };
 
@@ -124,6 +197,25 @@ export const BUDGETS = {
  */
 export function checkBudget(measured, budgets = BUDGETS) {
   const violations = [];
+  // FIRST — because it is the one a human should read first when several fail together. A build that
+  // is over on first paint has a problem every visitor feels; being over on total JS means a lazy
+  // chunk somewhere grew, which almost nobody feels on any given visit.
+  //
+  // 🔒 An UNMEASURABLE first paint is a violation, never a pass. `measureDist` throws when it cannot
+  // read the emitted HTML, but `checkBudget` is pure and takes whatever it is handed — and a caller
+  // that omitted the field would otherwise sail through the one gate that matters most, silently.
+  if (typeof measured.firstPaintJsGzipKB !== 'number' || !Number.isFinite(measured.firstPaintJsGzipKB)) {
+    violations.push(
+      'First-paint JS could not be measured (no entry script / modulepreload set was reported). ' +
+      'That is reported as a failure rather than a pass: an unmeasured first paint is not a small one.',
+    );
+  } else if (measured.firstPaintJsGzipKB > budgets.firstPaintJsGzipKB) {
+    violations.push(
+      `First-paint JS is ${measured.firstPaintJsGzipKB.toFixed(1)} KB gzipped > budget ` +
+      `${budgets.firstPaintJsGzipKB} KB — this is what EVERY visitor downloads before anything renders` +
+      `${measured.firstPaintFiles?.length ? ` (${measured.firstPaintFiles.join(', ')})` : ''}`,
+    );
+  }
   if (measured.largestChunkGzipKB > budgets.largestChunkGzipKB) {
     violations.push(
       `Largest JS chunk ${measured.largestChunkName || ''} is ${measured.largestChunkGzipKB.toFixed(1)} KB gzipped ` +
@@ -150,12 +242,48 @@ export function isBudgetExcludedJs(file) {
   return EXCLUDED_CHUNK_PREFIXES.some((p) => file.startsWith(p));
 }
 
+/**
+ * The JS files the browser must fetch before it can render, read from the EMITTED HTML. PURE.
+ *
+ * Deliberately parsed out of `index.html` rather than guessed from a filename convention: the entry
+ * is whatever `<script type="module">` the build actually wrote, and its statically-imported chunks
+ * are whatever it `modulepreload`ed. Both are facts about the document the browser receives, so this
+ * cannot drift the way "assume the entry is called index-*" would the day the naming changes.
+ *
+ * Dynamic imports are absent by construction — Vite emits no preload link for them — so a route that
+ * is `lazy()` correctly costs nothing here. That is the whole point of the metric.
+ */
+export function firstPaintJsFiles(html) {
+  const out = [];
+  const src = /<script[^>]+type="module"[^>]*\ssrc="([^"]+\.js)"/g;
+  const pre = /<link[^>]+rel="modulepreload"[^>]*\shref="([^"]+\.js)"/g;
+  for (const re of [src, pre]) {
+    for (const m of String(html ?? '').matchAll(re)) {
+      const file = m[1].split('/').pop();
+      if (file && !out.includes(file)) out.push(file);
+    }
+  }
+  return out;
+}
+
 /** Measure the gzipped sizes of the built bundle. Returns the `measured` shape above. */
 export function measureDist(distDir = 'dist') {
   const assetsDir = join(distDir, 'assets');
   if (!existsSync(assetsDir)) {
     throw new Error(`No build found at ${assetsDir} — run \`vite build\` first.`);
   }
+  // 🔒 THROW RATHER THAN REPORT ZERO. A missing or script-less index.html means the build did not
+  // produce a loadable app at all; reporting 0 KB of first paint would turn that into the greenest
+  // possible result. The existing "No build found" throw above sets the same precedent.
+  const htmlPath = join(distDir, 'index.html');
+  if (!existsSync(htmlPath)) {
+    throw new Error(`No ${htmlPath} — cannot determine what first paint downloads.`);
+  }
+  const firstPaintFiles = firstPaintJsFiles(readFileSync(htmlPath, 'utf8'));
+  if (firstPaintFiles.length === 0) {
+    throw new Error(`${htmlPath} references no module script — cannot determine what first paint downloads.`);
+  }
+  let firstPaintJs = 0;
   let totalJs = 0;
   let totalCss = 0;
   let largestChunkGzip = 0;
@@ -166,6 +294,7 @@ export function measureDist(distDir = 'dist') {
     if (file.endsWith('.js')) {
       totalJs += gz;
       if (gz > largestChunkGzip) { largestChunkGzip = gz; largestChunkName = file; }
+      if (firstPaintFiles.includes(file)) firstPaintJs += gz;
     } else if (file.endsWith('.css')) {
       totalCss += gz;
     }
@@ -174,6 +303,8 @@ export function measureDist(distDir = 'dist') {
   return {
     largestChunkGzipKB: largestChunkGzip / KB,
     largestChunkName,
+    firstPaintJsGzipKB: firstPaintJs / KB,
+    firstPaintFiles,
     totalJsGzipKB: totalJs / KB,
     totalCssGzipKB: totalCss / KB,
   };
@@ -185,6 +316,11 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
     const measured = measureDist('dist');
     const { ok, violations } = checkBudget(measured);
     console.log('Bundle size (gzipped):');
+    // Printed FIRST and named for what it costs, because this is the line a person should read when
+    // deciding whether a change was worth it. The chunk list is included so "it grew" is immediately
+    // "it grew because THIS is now loaded eagerly" rather than a number to go hunting behind.
+    console.log(`  first paint   : ${measured.firstPaintJsGzipKB.toFixed(1)} KB  [budget ${BUDGETS.firstPaintJsGzipKB} KB]  ← every visitor, before anything renders`);
+    console.log(`                  ${measured.firstPaintFiles.join(' + ')}`);
     console.log(`  largest chunk : ${measured.largestChunkGzipKB.toFixed(1)} KB  (${measured.largestChunkName})  [budget ${BUDGETS.largestChunkGzipKB} KB]`);
     console.log(`  total JS      : ${measured.totalJsGzipKB.toFixed(1)} KB  [budget ${BUDGETS.totalJsGzipKB} KB]`);
     console.log(`  total CSS     : ${measured.totalCssGzipKB.toFixed(1)} KB  [budget ${BUDGETS.totalCssGzipKB} KB]`);

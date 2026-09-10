@@ -15,7 +15,7 @@
 // The search box proposes, THE TAP DECIDES: typing (misspelt included, same bounded editDistance as
 // chat) only ranks suggestions; nothing computes until the doctor taps one. Free text alone can never
 // select a medicine, which is what keeps "Google jaisa" compatible with "never the wrong drug".
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { X, Pill, Trash2, Plus, Pencil, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
@@ -122,9 +122,17 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
   const label = 'text-[9px] font-black uppercase tracking-widest text-[#484f58]';
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center" onClick={onClose}>
+    // `nb-sheet-overlay-flush` (admin 2026-09-06): z-50 is BELOW the global tab bar's z-150, so the
+    // bar covered this sheet's bottom — and because the sheet IS the scroll container, scrolling to
+    // its end still left those controls underneath the bar. The shared overlay reserves the bar's real
+    // height, and reserves nothing where the bar is not rendered.
+    <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center" onClick={onClose}>
       <div
-        className="w-full sm:max-w-lg max-h-[92vh] supports-[height:100dvh]:max-h-[92dvh] overflow-y-auto bg-[#0d1520] border border-emerald-900/40 rounded-t-2xl sm:rounded-2xl shadow-2xl"
+        // 92% is the DESIGN's height; `nb-sheet-partial` clamps it to what is actually left once the
+        // tab bar and insets are reserved. Unclamped, 92dvh exceeds the remaining room on any phone
+        // under ~700px tall, and a bottom-anchored sheet loses that overflow off the TOP.
+        style={{ '--nb-sheet-cap': '92dvh' } as CSSProperties}
+        className="w-full sm:max-w-lg nb-sheet-partial overflow-y-auto bg-[#0d1520] border border-emerald-900/40 rounded-t-2xl sm:rounded-2xl shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

@@ -58,6 +58,17 @@ interface ConversationMeta {
   framework?: string;
   /** User pinned this build to the top of their history list (absent/false = normal). */
   pinned?: boolean;
+  /** The name the USER chose for this app (admin 2026-09-04). Absent until someone renames. */
+  appName?: string;
+  /** The GitHub repo this app's code lives in — persisted so a rename cannot strand the app. */
+  repoName?: string;
+  /** Which account that repo is under, and whether the user owns it (see ConversationRecord). */
+  repoOwner?: string;
+  repoOwnedByUser?: boolean;
+  /** See ConversationRecord.deployBranch. */
+  deployBranch?: string;
+  /** See ConversationRecord.backendDomain. */
+  backendDomain?: string;
 }
 
 export class FirestoreConversationStore implements ConversationStore {
@@ -291,6 +302,12 @@ export class FirestoreConversationStore implements ConversationStore {
       ...(meta.finalState ? { finalState: meta.finalState } : {}),
       ...(meta.framework ? { framework: meta.framework } : {}),
       ...(meta.pinned ? { pinned: true } : {}),
+      ...(meta.appName ? { appName: meta.appName } : {}),
+      ...(meta.repoName ? { repoName: meta.repoName } : {}),
+      ...(meta.repoOwner ? { repoOwner: meta.repoOwner } : {}),
+      ...(meta.repoOwnedByUser ? { repoOwnedByUser: true } : {}),
+      ...(meta.deployBranch ? { deployBranch: meta.deployBranch } : {}),
+      ...(meta.backendDomain ? { backendDomain: meta.backendDomain } : {}),
     };
   }
 
@@ -303,6 +320,12 @@ export class FirestoreConversationStore implements ConversationStore {
     if (patch.finalState !== undefined) out.finalState = { ...patch.finalState };
     if (patch.framework !== undefined) out.framework = patch.framework;
     if (patch.pinned !== undefined) out.pinned = patch.pinned;
+    if (patch.appName !== undefined) out.appName = patch.appName;
+    if (patch.repoName !== undefined) out.repoName = patch.repoName;
+    if (patch.repoOwner !== undefined) out.repoOwner = patch.repoOwner;
+    if (patch.repoOwnedByUser !== undefined) out.repoOwnedByUser = patch.repoOwnedByUser;
+    if (patch.deployBranch !== undefined) out.deployBranch = patch.deployBranch;
+    if (patch.backendDomain !== undefined) out.backendDomain = patch.backendDomain;
     return out;
   }
 }

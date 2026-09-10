@@ -38,13 +38,14 @@ android {
         def fbAppId = (System.getenv("FACEBOOK_APP_ID") ?: "").trim()
         def fbClientToken = (System.getenv("FACEBOOK_CLIENT_TOKEN") ?: "").trim()
         // BOTH are required: an app id with no client token cannot initialise, and half-configured is
-        // exactly the "built but not really working" state that is not allowed to exist.
-        def fbEnabled = !fbAppId.isEmpty() && !fbClientToken.isEmpty()
+        // exactly the "built but not really working" state that is not allowed to exist. The
+        // dependency block below re-tests the same pair — an id without a token adds no SDK.
         resValue "string", "facebook_app_id", fbAppId
         resValue "string", "facebook_client_token", fbClientToken
-        // `+=` rather than `=`: Capacitor's generated capacitor.build.gradle may contribute its own
-        // placeholders, and replacing the map would silently drop them.
-        manifestPlaceholders += [facebookEnabled: fbEnabled ? "true" : "false"]
+        // NOTE: there is deliberately NO manifest placeholder switching the SDK's three collection
+        // flags. They are hard-wired OFF in AndroidManifest.xml and opened at runtime only after the
+        // user grants consent (MetaConsentPlugin.java) — a build-time "true" would start collecting
+        // before the banner was even drawn.
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -94,6 +95,22 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+
+    // GOOGLE PLAY BILLING — the in-app token top-up rail (PlayBillingPlugin.java).
+    //
+    // UNCONDITIONAL, unlike the Meta SDK below: Play Billing needs no credential, so there is no
+    // half-configured state to guard against, and a direct dependency keeps the plugin readable
+    // instead of reflective. The FEATURE is gated at runtime by the server's STORE_BILLING flag —
+    // with it off, this library ships but nothing in the app ever opens a purchase sheet.
+    //
+    // v8 is Google's hard floor for any new app/update from 31 Aug 2026 ("By Aug 31, 2026, all new
+    // apps and updates to existing apps must use Billing Library version 8 or later" — Play Console
+    // refused this release on 7.1.1 with exactly that message). 9.1.0 is the latest stable as of this
+    // writing, so it is used directly rather than pinning the bare floor and needing this bump again
+    // on the next upload. PlayBillingPlugin is written against v8's ProductDetailsResponseListener
+    // shape (QueryProductDetailsResult, not a bare List<ProductDetails> — a real, checked breaking
+    // change from v7), so a downgrade below 8.0.0 would not compile, which is the failure mode wanted.
+    implementation 'com.android.billingclient:billing:9.1.0'
 
     // Meta app events — added ONLY when both credentials are configured (see defaultConfig above).
     // `facebook-core` is the minimal artifact: install + app-event reporting, WITHOUT Facebook Login,

@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { isStoreAdmin } from './navStore';
+import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
+import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import {
   preparePublishBundle,
   exclusionSummary,
@@ -144,6 +146,30 @@ export function registerGalleryRoutes(app: Express): void {
     if (!who?.uid) return res.status(401).json({ error: 'Sign in to remix an app.' });
     const found = await getGalleryApp(String(req.params.id));
     if (!found || found.status !== 'approved') return res.status(404).json({ error: 'That app is not available.' });
+
+    /**
+     * PLAN GATE (admin 2026-09-10: "app remix only woh user kar sakta hai, jo user ₹149/mahina par
+     * hai … agar woh app remix button press kare, to purchase ₹149/mahina ka popup a jaye").
+     *
+     * Taking another creator's finished app as the starting point for your own is the single most
+     * valuable thing the gallery gives away, and it is what the hosting plans list as an included
+     * benefit. Any active tier unlocks it — the entitlement is the plan, not a particular tier.
+     *
+     * Shaped exactly like the custom-domain gate so the two cannot drift: free-list (admin/tester)
+     * accounts are exempt, and a store outage FAILS OPEN (`known` false ⇒ allow), because rule #1
+     * says an outage must never block a legitimate user. `needsPlan` + `priceInr` are what the
+     * client opens the purchase panel with — a plain 402 would be a dead button.
+     */
+    if (hostingPlansEnabled() && !isAgentV3FreeUser(who.uid, who.email ?? null)) {
+      const plan = await probeHostingPlan(who.uid);
+      if (plan.known && !plan.active) {
+        return res.status(402).json({
+          error: `Remixing another creator's app is part of a hosting plan (from ₹${hostingPlanPriceInr()}/month, paid from your wallet). Open Billing → Plans to start one, then remix.`,
+          needsPlan: true,
+          priceInr: hostingPlanPriceInr(),
+        });
+      }
+    }
 
     await incrementRemixCount(found.id);
     res.json({

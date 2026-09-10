@@ -52,11 +52,22 @@ describe('2 — App Mart publish must not hang', () => {
   });
 
   it('the button can never spin forever, whatever the server does', () => {
-    expect(chooser).toContain('AbortController');
-    expect(chooser).toContain('90_000');
-    expect(chooser).toContain('AbortError');
+    // ⚠️ RE-ANCHORED 2026-09-07. This used to pin a private AbortController + `90_000` + an
+    // `AbortError` check inside the chooser — and that timer NEVER APPLIED: `authedFetch` overwrote
+    // the caller's `signal` with its own 20-second controller, and the abort then arrived as
+    // authedFetch's plain Error, not an AbortError, so the timed-out branch never ran either. The
+    // anchor was green over a fix that did not execute. The property is unchanged — a bounded wait
+    // with an honest timed-out message — but the ceiling now lives in ONE place (lib/longRequest.ts)
+    // and is handed to authedFetch, whose typed timeout is what the catch checks for.
+    const longRequest = read('src/lib/longRequest.ts');
+    const authed = read('src/lib/authedFetch.ts');
+    expect(longRequest).toContain('storePublish: 90_000');
+    expect(chooser).toContain('}, LONG_REQUEST_TIMEOUT_MS.storePublish);');
+    expect(chooser).toContain('const timedOut = isFetchTimeout(e);');
+    // The chooser must not grow a private controller back — that is the exact shape of the regression.
+    expect(chooser).not.toContain('new AbortController()');
     // …and the timer is always cleared, so a fast publish leaves nothing pending.
-    expect(chooser).toContain('clearTimeout(timer)');
+    expect(authed).toContain('clearTimeout(timer)');
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { PixelInstaller } from './metaPixel';
+import { pixelBootSequence } from './metaPixel';
 import {
   isValidPixelId,
   shouldLoadPixel,
@@ -54,6 +55,12 @@ describe('shouldLoadPixel — every reason not to load lives in one place', () =
 describe('pixelEventFor — allowlist, and never an invented value', () => {
   it('maps a signup to the standard CompleteRegistration', () => {
     expect(pixelEventFor('signup')).toEqual({ name: 'CompleteRegistration', standard: true });
+  });
+
+  it('forwards nothing for an event no code fires — the allowlist carries no dead entries', () => {
+    // A mapping for an event nothing emits would let the code send something the published Privacy
+    // Policy does not list. See tests/privacyPolicyTruth.test.ts.
+    expect(pixelEventFor('checkout_started')).toBeNull();
   });
 
   it('maps a purchase with a REAL amount to Purchase carrying that amount in INR', () => {
@@ -233,5 +240,35 @@ describe('forwardToMetaPixel — silent until the pixel is genuinely ready', () 
       install: () => () => { throw new Error('blocked by an ad blocker'); },
     });
     expect(() => forwardToMetaPixel('signup')).not.toThrow();
+  });
+});
+
+describe('pixelBootSequence — the policy promise is code, not a dashboard setting', () => {
+  const ID = '1234567890123456';
+  const seq = pixelBootSequence(ID);
+  const method = (i: number) => seq[i][0];
+
+  it('refuses automatic advanced matching BEFORE init — the order is the whole point', () => {
+    // Sent after init, Meta's Automatic Advanced Matching has already scraped the page's form fields
+    // (email, phone, name) and the "never shared" promise is broken before anything can stop it.
+    expect(method(0)).toBe('set');
+    expect(seq[0]).toEqual(['set', 'autoConfig', false, ID]);
+    expect(method(1)).toBe('init');
+  });
+
+  it('also refuses auto-matching on init, so a future Meta default cannot re-enable it', () => {
+    expect(seq[1]).toEqual(['init', ID, {}, { withAutoMatching: false }]);
+  });
+
+  it('sends PageView last, and sends nothing else at boot', () => {
+    expect(seq[seq.length - 1]).toEqual(['track', 'PageView']);
+    expect(seq).toHaveLength(3);
+  });
+
+  it('never enables autoConfig — that would turn on automatic event detection too', () => {
+    // autoConfig also lets Meta invent "events" from button text and page metadata, which is exactly
+    // the firehose pixelEventFor's allowlist exists to prevent.
+    const enabling = seq.filter((c) => c[0] === 'set' && c[1] === 'autoConfig' && c[2] === true);
+    expect(enabling).toEqual([]);
   });
 });

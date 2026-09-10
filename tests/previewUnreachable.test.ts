@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { shouldShowNotServingSurface, type FramingState } from '../src/components/agentv3/previewFraming';
+
+/** A healthy, checked, idle preview — the baseline each case varies one field of. */
+const FRAMING_OK: FramingState = { unreachable: false, portDown: false, diagnosing: false, hasDoorUrl: false, hasSnapshotUrl: false, framingUnchecked: false };
 
 /**
  * ADMIN REPORT 2026-08-13 — the mitrify port change.
@@ -41,7 +45,10 @@ function unreachableJsx(): string {
   // provider's "no service running on port N" page — so the anchor is the branch's opening rather than
   // one exact expression. Both triggers mean the same thing: whatever that host returns is not the
   // user's app, so it must not be framed.
-  const at = surface.indexOf('{unreachable ||');
+  // ANCHOR MOVED 2026-09-03: the condition grew a fourth term and was extracted to a pure function
+  // (previewFraming.ts) so it could be exercised instead of pattern-matched. The branch it opens — and
+  // every guarantee about the PANEL's content asserted below — is unchanged.
+  const at = surface.indexOf('{shouldShowNotServingSurface(');
   expect(at, 'the refuse-to-frame branch must exist').toBeGreaterThan(0);
   // Bounded at the ELSE arm, not by a character count. A fixed window overshot into the reachable
   // branch, whose iframe carries a literal `sandbox="allow-scripts …"` attribute — an ordinary HTML
@@ -120,18 +127,26 @@ describe('a host that answers with nothing serving is refused too', () => {
     // Asserts the two share ONE branch, not the branch's exact literal text — that literal has since
     // grown a third term (framingUnchecked) without changing anything about this guarantee, and a test
     // that breaks on an addition it does not care about is a test that gets weakened to shut it up.
-    const branch = surface.match(/\{unreachable \|\| \(portDown && !diagnosing\)[^?]*\? \(/);
+    const branch = surface.match(/\{shouldShowNotServingSurface\(\{[^}]*unreachable[^}]*portDown[^}]*\}\) \? \(/);
     expect(branch, 'unreachable and portDown must share one refuse-to-frame branch').not.toBeNull();
+    // …and now asserted for real, not only in the source's shape.
+    expect(shouldShowNotServingSurface({ ...FRAMING_OK, unreachable: true })).toBe(true);
+    expect(shouldShowNotServingSurface({ ...FRAMING_OK, portDown: true })).toBe(true);
   });
 
   it('it fires only on an EXPLICIT false, so an older server changes nothing', () => {
     expect(surface).toContain("setPortDown(res.ok && health?.livePortUp === false);");
   });
 
-  it('it stands down during a wake — the port is MEANT to be down while the server reboots', () => {
-    // Without this, pressing Wake up would swap the app for the not-serving panel for the whole
-    // reboot, which reads as "it just broke" at precisely the moment it is being repaired.
-    expect(surface).toContain('portDown && !diagnosing');
+  it('it stands down during a wake ONLY when the door can be framed instead', () => {
+    // ORIGINAL INTENT, KEPT: pressing Wake up must not swap the app for the not-serving panel for the
+    // whole reboot — that reads as "it just broke" at precisely the moment it is being repaired. That
+    // holds for the door, which resolves the machine server-side and shows our own reconnecting page.
+    expect(shouldShowNotServingSurface({ ...FRAMING_OK, portDown: true, diagnosing: true, hasDoorUrl: true })).toBe(false);
+    // CORRECTED (admin screenshot 2026-09-03): with NO door there is no app to preserve — a machine
+    // mid-wake is not serving by definition, so standing down framed the vendor's "Closed Port Error"
+    // page, which is the very thing this file exists to keep off the screen.
+    expect(shouldShowNotServingSurface({ ...FRAMING_OK, portDown: true, diagnosing: true })).toBe(true);
   });
 });
 
@@ -149,7 +164,8 @@ describe('never frame a machine address nobody has checked yet (admin screenshot
   const surface = readFileSync(join(process.cwd(), 'src/components/agentv3/PreviewSurface.tsx'), 'utf8');
 
   it('the refuse-to-frame condition covers the unchecked window', () => {
-    expect(surface).toContain('{unreachable || (portDown && !diagnosing) || framingUnchecked ? (');
+    expect(surface).toMatch(/\{shouldShowNotServingSurface\(\{[^}]*framingUnchecked[^}]*\}\) \? \(/);
+    expect(shouldShowNotServingSurface({ ...FRAMING_OK, framingUnchecked: true })).toBe(true);
   });
 
   it('a known door url clears it — the door is our own route and can only return our own page', () => {

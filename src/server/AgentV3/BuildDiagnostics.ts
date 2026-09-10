@@ -18,6 +18,7 @@ import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI
 import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
+import { isModelUnavailableError } from './providerErrorClass';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -1655,9 +1656,10 @@ export function classifyProviderFailure(reason: unknown): string {
   //
   // Separating it is what lets a caller do the only correct thing with a permanent failure: stop
   // retrying that rung and tell the admin the LADDER is wrong, rather than the provider being flaky.
-  if (/\bmodel[_ ]?not[_ ]?found\b|not found the model|\bno such model\b|does not exist|unknown model|model.{0,20}(?:unavailable|deprecated|retired)|permission denied/.test(t)) {
-    return 'model-unavailable';
-  }
+  // ONE predicate, shared with the provider chain (providerErrorClass). It used to be spelled out
+  // here only, which is precisely how the platform ended up able to NAME this defect in a report while
+  // the runner that could have acted on it had never heard of the class.
+  if (isModelUnavailableError(text)) return 'model-unavailable';
   if (/\b429\b|rate.?limit|too many requests|quota/.test(t)) return 'rate-limit';
   if (/timeout|timed out|etimedout|deadline/.test(t)) return 'timeout';
   if (/\b401\b|\b403\b|unauthor|forbidden|invalid api key|authentication/.test(t)) return 'auth';

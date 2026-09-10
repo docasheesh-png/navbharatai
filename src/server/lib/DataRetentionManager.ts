@@ -24,6 +24,12 @@ export interface RetentionDocRef {
 }
 export interface RetentionQuery {
   get(): Promise<{ docs: Array<{ ref: { delete(): Promise<unknown> } }> }>;
+  /**
+   * Bound one purge run. Optional so an existing caller or mock without it still works, but the purge
+   * always ASKS — see `maxPerRun`: the first run against a collection with months of backlog would
+   * otherwise be an unbounded read-and-delete of everything at once.
+   */
+  limit?(n: number): RetentionQuery;
 }
 export interface RetentionCollection {
   doc(id: string): RetentionDocRef;
@@ -54,15 +60,124 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
 ];
 
 // ── TTL retention policies ────────────────────────────────────────────────────────────────────────
-export interface RetentionPolicy { collection: string; ttlDays: number; timestampField: string; }
+
 /**
- * Only VERIFIED-safe policies are enabled by default. `build_jobs.updatedAt` is a real Date, so a
- * `< cutoff` bound deletes only genuinely-old jobs (never recent ones). More collections are added as
- * each one's timestamp field + type is verified — additions are pure config, no code change.
+ * How a collection's timestamp is actually STORED. Required on every policy, deliberately.
+ *
+ * 🔴 THIS IS THE DEFECT THAT MADE THE FIELD REQUIRED (ROADMAP §12 #3). The purge used to build its
+ * bound as `new Date(cutoffMs)` unconditionally, which is correct ONLY for a field stored as a Date.
+ * Firestore orders values BY TYPE FIRST — every number sorts before every timestamp — so a policy on a
+ * numeric `Date.now()` field would match **nothing, forever**, while reporting itself configured and
+ * deleting zero documents with no error. That is the "built but not really working" state the second
+ * absolute rule forbids, and it would have been invisible: a purge that deletes nothing looks exactly
+ * like a purge with nothing to delete.
+ *
+ * An OPTIONAL field with a default would reintroduce it — the wrong guess would ship silently. So every
+ * policy states the type, and every type below was read off the collection's real write path.
+ */
+export type TimestampKind =
+  /** `new Date()` / a Firestore Timestamp. */
+  | 'date'
+  /** `Date.now()` — epoch milliseconds as a plain number. */
+  | 'epochMs'
+  /** `new Date().toISOString()` — sorts lexicographically in time order, so `<` is correct. */
+  | 'iso';
+
+export interface RetentionPolicy {
+  collection: string;
+  ttlDays: number;
+  timestampField: string;
+  /** How the field is stored. See TimestampKind — a wrong value silently deletes nothing. */
+  timestampKind: TimestampKind;
+  /** Documents deleted per run. Defaults to DEFAULT_MAX_PER_RUN; the purge is never unbounded. */
+  maxPerRun?: number;
+}
+
+/**
+ * How many documents one policy may delete in a single run.
+ *
+ * The purge had no bound at all. On the first run against a collection carrying months of backlog that
+ * is one query returning everything and then a delete per document — a spike of reads, writes and
+ * memory on a schedule. Bounded, a backlog drains over successive runs instead, which is slower and
+ * cannot hurt anything.
+ */
+export const DEFAULT_MAX_PER_RUN = 500;
+
+/**
+ * The bound to compare against, in the type the field is actually stored in. PURE.
+ */
+export function retentionBound(cutoffMs: number, kind: TimestampKind): Date | number | string {
+  if (kind === 'epochMs') return cutoffMs;
+  if (kind === 'iso') return new Date(cutoffMs).toISOString();
+  return new Date(cutoffMs);
+}
+
+/**
+ * ⚠️ ONLY OPERATIONAL DATA IS ON A CLOCK. Every policy here was verified against its write path for
+ * BOTH the field name and the stored type, and every one of these collections is data NavBharatAI
+ * generated about itself — logs, metrics, transient session scratch — never a user's own property.
+ * See RETAINED_INDEFINITELY below for the collections that must never be on a timer, and why.
  */
 export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
-  { collection: 'build_jobs', ttlDays: 90, timestampField: 'updatedAt' },
+  // `updatedAt: new Date()` — BuildJobManager. The original policy; its type is now stated rather
+  // than assumed by the purge.
+  { collection: 'build_jobs', ttlDays: 90, timestampField: 'updatedAt', timestampKind: 'date' },
+  // `ts: Date.now()` — logStore. Server logs, the fastest-growing operational collection.
+  { collection: 'server_logs', ttlDays: 30, timestampField: 'ts', timestampKind: 'epochMs' },
+  // `updatedAt: Date.now()` — metricsStore. ONE document per calendar day, so a long window is cheap
+  // and keeps year-over-year comparison possible.
+  { collection: 'metrics_snapshots', ttlDays: 400, timestampField: 'updatedAt', timestampKind: 'epochMs' },
+  // `savedAt: Date.now()` — ProBuildSession. A finished build's transient session result.
+  { collection: 'build_sessions', ttlDays: 90, timestampField: 'savedAt', timestampKind: 'epochMs' },
+  // `updatedAt: new Date().toISOString()` — ErrorPatternStore. Per-session hints, regenerated freely.
+  { collection: 'session_error_hints', ttlDays: 30, timestampField: 'updatedAt', timestampKind: 'iso' },
 ];
+
+/**
+ * 🔒 COLLECTIONS THAT MUST NEVER BE PURGED ON A CLOCK, with the reason recorded next to each.
+ *
+ * This exists because "every growing collection needs retention" is wrong, and acting on it would
+ * delete users' work. A collection grows for two very different reasons: because the platform keeps
+ * writing about itself (bounded by a clock, above), or because USERS keep creating things — and the
+ * second is not garbage to be swept, it is the product. The right mechanism for these is deletion on
+ * ACCOUNT deletion (`deleteUserData`, which already covers the user-scoped ones) or a per-user cap —
+ * never age.
+ *
+ * It is also what stops the Load board warning forever about collections that are correct as they are:
+ * a warning nobody can ever clear is a warning nobody reads.
+ */
+export const RETAINED_INDEFINITELY: readonly { collection: string; reason: string }[] = [
+  { collection: 'workspace_files_v3', reason: "the user's actual app source code" },
+  { collection: 'workspace_assets_v3', reason: "the user's uploaded images and files" },
+  { collection: 'workspace_checkpoints_v3', reason: 'the restore points a user rolls back to' },
+  { collection: 'workspace_memory_v3', reason: "what the engine has learned about the user's app" },
+  { collection: 'workspace_manual_edits_v3', reason: "the user's own hand edits, which must not be overwritten" },
+  { collection: 'workspace_embeddings_v3', reason: "a derived index of the user's code — deleting it degrades their builds" },
+  { collection: 'workspace_diagnostics_v3', reason: 'one report per workspace, replaced in place — it does not grow with time' },
+  { collection: 'project_plans_v3', reason: "the plan the user's app is being built against" },
+  { collection: 'app_builds', reason: "the user's own build record" },
+  { collection: 'user_build_history', reason: "the user's own history; removed with their account, not with age" },
+  { collection: 'user_costs', reason: 'money. A billing record deleted on a timer cannot be reconciled or disputed' },
+  { collection: 'hosting_usage', reason: 'per-user metering that the bill is derived from' },
+];
+
+/** Is this collection deliberately kept forever, rather than merely missing a policy? PURE. */
+export function isRetainedIndefinitely(collection: string): boolean {
+  return RETAINED_INDEFINITELY.some((r) => r.collection === collection);
+}
+
+/**
+ * Collections that GROW and have neither a policy nor a documented reason to keep forever — i.e. the
+ * ones a human still has to decide about. This is the number the Load board should show. PURE.
+ */
+export function collectionsNeedingRetention(
+  growing: readonly string[],
+  policies: readonly RetentionPolicy[] = RETENTION_POLICIES,
+): string[] {
+  return (growing || []).filter(
+    (c) => !policies.some((p) => p.collection === c) && !isRetainedIndefinitely(c),
+  );
+}
 
 // ── Pure policy math (no I/O) ──────────────────────────────────────────────────────────────────────
 export function retentionCutoffMs(nowMs: number, ttlDays: number): number {
@@ -124,8 +239,14 @@ export async function purgeExpired(
     const cutoffMs = retentionCutoffMs(nowMs, policy.ttlDays);
     let deleted = 0;
     try {
-      const q = await db.collection(policy.collection).where(policy.timestampField, '<', new Date(cutoffMs)).get();
-      for (const d of q.docs) { await d.ref.delete(); deleted++; }
+      // The bound is built in the type the field is STORED in — see TimestampKind. A Date bound against
+      // a numeric field matches nothing in Firestore, silently.
+      let q = db.collection(policy.collection)
+        .where(policy.timestampField, '<', retentionBound(cutoffMs, policy.timestampKind));
+      const cap = Math.max(1, Math.floor(policy.maxPerRun ?? DEFAULT_MAX_PER_RUN));
+      if (typeof q.limit === 'function') q = q.limit(cap);
+      const snap = await q.get();
+      for (const d of snap.docs) { await d.ref.delete(); deleted++; }
       collections.push({ collection: policy.collection, deleted, cutoffMs });
     } catch (e) {
       collections.push({ collection: policy.collection, deleted, cutoffMs, error: e instanceof Error ? e.message : String(e) });

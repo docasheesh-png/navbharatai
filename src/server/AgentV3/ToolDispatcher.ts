@@ -86,6 +86,10 @@ import { redactCredentialLogs } from './credentialLogRedaction';
 import type { DependencyIssue } from './DependencyAnalysis';
 import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
+import { isExternalToolName, parseToolName } from './mcpClient';
+import { callRemoteTool } from './mcpTransport';
+import type { SafeMcpTool } from './mcpClient';
+import type { McpServerConfig } from './mcpTransport';
 import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
@@ -148,6 +152,7 @@ import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
+import { addDependency, removeDependency as removeOneDependency, listDependencies } from './packageEdit';
 import { planE2eScaffold, e2eScaffoldSummary } from './e2eScaffold';
 import { pickDevScript, parsePackageJson } from './devScript';
 import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
@@ -194,6 +199,9 @@ import { generatePharmacyIntegration } from '../lib/PharmacyGenerator';
 import { generateRecruitmentIntegration } from '../lib/RecruitmentGenerator';
 import { generateInvoicingIntegration } from '../lib/InvoicingGenerator';
 import { generateHelpdeskIntegration } from '../lib/HelpdeskGenerator';
+import { generateSocietyIntegration } from '../lib/SocietyGenerator';
+import { generateNgoIntegration } from '../lib/NgoGenerator';
+import { generateFieldServiceIntegration } from '../lib/FieldServiceGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
@@ -218,6 +226,7 @@ import { generateExperimentsIntegration } from '../lib/ExperimentsGenerator';
 import { generateShortLinksIntegration } from '../lib/ShortLinksGenerator';
 import { generateFeedbackIntegration } from '../lib/FeedbackGenerator';
 import { generateConsentIntegration } from '../lib/ConsentGenerator';
+import { generateConsentBannerIntegration, type ConsentBannerOptions } from '../lib/ConsentBannerGenerator';
 import { generateActivityFeedIntegration } from '../lib/ActivityFeedGenerator';
 import { generateCartIntegration } from '../lib/CartGenerator';
 import { generateReactionsIntegration } from '../lib/ReactionsGenerator';
@@ -318,6 +327,7 @@ import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { lintDesign, designSummary } from '../AppMakerLab/intelligence/DesignLinter';
 import { publishableVerdict, entryPagesOf } from './publishablePayload';
 import { detectServerNeed } from './staticPublishGuard';
+import { PUBLISH_NOT_REQUESTED } from './publishConsent';
 import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
@@ -348,6 +358,7 @@ import { formatUiFindings, type ScannedElement } from './UiElementFinder';
 import { envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
+import { stripPreviewBridge, isHtmlDocumentPath } from './previewBridge';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -442,6 +453,16 @@ const MAX_SUMMARY = 200;
  * fake success), so the model can see and recover from it.
  */
 export class ToolDispatcher {
+  /**
+   * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
+   * Not a constructor parameter on purpose: the constructor is already 14 positional arguments deep,
+   * and a 15th optional boolean is exactly the kind of thing a later call site gets wrong by silence.
+   */
+  private _publishConsent = false;
+
+  /** Grant permission to publish for this dispatcher's lifetime (one turn). */
+  setPublishConsent(granted: boolean): void { this._publishConsent = granted === true; }
+
   constructor(
     private readonly actuator: ActuatorPort,
     private readonly workspaceId: string,
@@ -623,6 +644,21 @@ export class ToolDispatcher {
   }
 
   /** Set by the composition root from the user's decrypted vault (Settings → Secrets & API Keys). */
+  /**
+   * The services this workspace has connected, and the tools they offered.
+   *
+   * Empty by default, so a build with nothing connected behaves exactly as it did before — no extra
+   * branch is even reachable.
+   */
+  private mcpServers: McpServerConfig[] = [];
+  private mcpTools: SafeMcpTool[] = [];
+
+  /** Wire in the connected services for this build. Called once, before the loop starts. */
+  setMcpServers(servers: McpServerConfig[], tools: SafeMcpTool[]): void {
+    this.mcpServers = Array.isArray(servers) ? servers : [];
+    this.mcpTools = Array.isArray(tools) ? tools : [];
+  }
+
   setUserSecrets(env: Record<string, string>): void {
     this.secretsEnvWritten = false; // a fresh secret set must be able to reach disk even if a write already ran
     this.userSecretsEnv = env && typeof env === 'object' ? env : {};
@@ -1953,6 +1989,30 @@ export class ToolDispatcher {
    * the model can SEE the page. Requires a real sandbox with a browser; degrades to an honest
    * "not available" message on Local/Docker actuators (or any actuator that lacks the method).
    */
+  /**
+   * Run a tool that belongs to a service the user connected.
+   *
+   * Every refusal returns TEXT rather than throwing. A throw here becomes a build failure, and a
+   * stranger's server being down must never fail a build that was otherwise fine — the model reads
+   * the sentence, learns the tool is unavailable, and carries on with what the user actually asked.
+   */
+  private async runExternalTool(call: ToolUse): Promise<string> {
+    const parsed = parseToolName(call.name);
+    if (!parsed) return `The connected tool ${call.name} could not be identified, so it was not run.`;
+    // Resolve against the tools we ACTUALLY fetched and sanitised at the start of this build — never
+    // against the name the model produced. A model that invents `ext__x__y` therefore reaches nothing:
+    // the only callable tools are ones a connected server really advertised.
+    const tool = this.mcpTools.find((t) => t.name === call.name);
+    const server = this.mcpServers.find((sv) => sv.id === parsed.serverId);
+    if (!tool || !server) {
+      return `There is no connected tool called ${call.name}. Use one of the tools listed for this build.`;
+    }
+    const args = (call.input && typeof call.input === 'object' && !Array.isArray(call.input))
+      ? call.input as Record<string, unknown>
+      : {};
+    return await callRemoteTool(server, tool, args);
+  }
+
   private async runVisual(call: ToolUse): Promise<{ content: string; image?: { base64: string; mimeType: string } }> {
     const input = call.input;
     if (call.name === 'find_ui_element') {
@@ -2127,6 +2187,14 @@ export class ToolDispatcher {
         let full: string;
         try {
           full = await this.actuator.readFile(this.workspaceId, reqPath);
+          // THE PREVIEW BRIDGE IS OURS, NOT THE APP'S (see AgentV3/previewBridge.ts). The dev-server
+          // launch injects a console/network mirror into the SANDBOX's entry document so the Live
+          // preview can report what the app prints. `readFile` reads the sandbox, so without this the
+          // model would find a script it never wrote sitting in the user's index.html — and models
+          // preserve the script tags they find when they rewrite an HTML file, which is precisely how
+          // a development-only bridge ends up published inside somebody's finished app. It is removed
+          // here so the model only ever sees the file it actually authored.
+          if (isHtmlDocumentPath(reqPath)) full = stripPreviewBridge(full);
         } catch (err) {
           // PATH-MISS RECOVERY (build-report autopsy 2026-08-01): a bare "does not exist" made the builder
           // loop 12 times guessing the same wrong root (created src/components/ui/X.tsx, read
@@ -2196,6 +2264,13 @@ export class ToolDispatcher {
         // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
         this.assertWritable(path); // C2 — checked AFTER any relocation, so the REAL destination is judged
         let content = guardConfigContent(path, this.applyPostgresProviderLock(path, reqStr(input, 'content')));
+        // THE OTHER END OF THE SAME GUARD (see read_file above). The model is not supposed to be able
+        // to see the preview bridge at all — but "cannot see it" and "cannot store it" are different
+        // guarantees, and only the second one is a guarantee. A write that carries the marker anyway
+        // (a model reproducing an older document from memory, a paste, a future read path that
+        // forgets to strip) has it removed before it reaches durable storage, so the bridge can never
+        // be published inside a user's app. Both ends, deliberately: unlikely is not impossible.
+        if (isHtmlDocumentPath(path)) content = stripPreviewBridge(content);
         // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
         // to their known-good major IN the written package.json, so a later plain `npm install` (which
         // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking
@@ -4569,6 +4644,95 @@ export class ToolDispatcher {
         return `Wired a Helpdesk / ticketing backend:\n${hdWritten.join('\n')}\nAdd the dependencies: ${hdDeps}\n\n${hdcfg.instructions}`;
       }
 
+      case 'generate_society': {
+        // Breadth recipe (domain vertical) — Housing-society / RWA (server/society/): a real SocietyService
+        // with an EXACT maintenance-dues ledger (a payment can never exceed the balance; no negative), a
+        // complaint STATE-MACHINE (invalid jumps → 409), and an append-only visitor log + notice board,
+        // plus an Express router. Pure gen in SocietyGenerator.ts.
+        const socCfg = generateSocietyIntegration();
+        const socWritten: string[] = [];
+        for (const [path, content] of Object.entries(socCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          socWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('society starter');
+        const socDeps = socCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a housing-society / RWA backend:\n${socWritten.join('\n')}\nAdd the dependencies: ${socDeps}\n\n${socCfg.instructions}`;
+      }
+
+      case 'generate_ngo': {
+        // Breadth recipe (domain vertical) — NGO / donations (server/ngo/): a real NgoService with GAPLESS,
+        // unique 80G-style receipt numbers per Indian financial year, campaign totals DERIVED from
+        // donations (a closed campaign takes none), and an append-only ledger. Pure gen in NgoGenerator.ts.
+        const ngoCfg = generateNgoIntegration();
+        const ngoWritten: string[] = [];
+        for (const [path, content] of Object.entries(ngoCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ngoWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('ngo starter');
+        const ngoDeps = ngoCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an NGO / donation backend:\n${ngoWritten.join('\n')}\nAdd the dependencies: ${ngoDeps}\n\n${ngoCfg.instructions}`;
+      }
+
+      case 'generate_field_service': {
+        // Breadth recipe (domain vertical) — Field-service / dispatch (server/fieldservice/): a real
+        // FieldServiceService with a job STATE-MACHINE (assigned only via assign()), a ONE-ACTIVE-JOB-per-
+        // technician guarantee (busy assign → 409), and an append-only history. Pure gen in FieldServiceGenerator.ts.
+        const fsCfg = generateFieldServiceIntegration();
+        const fsWritten: string[] = [];
+        for (const [path, content] of Object.entries(fsCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          fsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('field-service starter');
+        const fsDeps = fsCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a field-service / dispatch backend:\n${fsWritten.join('\n')}\nAdd the dependencies: ${fsDeps}\n\n${fsCfg.instructions}`;
+      }
+
+      case 'manage_dependency': {
+        // Add / remove / list a package in the project's package.json (ROADMAP §8C / minor 30). All the
+        // logic that can go wrong — a bad name reaching the manifest, malformed package.json, a duplicate
+        // across sections — lives in the pure, unit-tested packageEdit.ts. This only edits the manifest;
+        // the existing build/preview `npm install` picks the change up, so nothing is left half-installed.
+        const mdAction = typeof input.action === 'string' ? input.action : 'add';
+        const mdName = typeof input.name === 'string' ? input.name : '';
+        const mdVersion = typeof input.version === 'string' ? input.version : '';
+        let mdPkg: string;
+        try { mdPkg = await this.actuator.readFile(this.workspaceId, 'package.json'); }
+        catch { return 'manage_dependency: this project has no package.json yet — build the app first.'; }
+        if (mdAction === 'list') {
+          const deps = listDependencies(mdPkg);
+          return deps.length
+            ? `Dependencies (${deps.length}):\n${deps.map((d) => `  ${d.name}@${d.version} (${d.section})`).join('\n')}`
+            : 'No dependencies are declared in package.json yet.';
+        }
+        if (mdAction !== 'add' && mdAction !== 'remove') {
+          return 'manage_dependency: action must be "add", "remove" or "list".';
+        }
+        const mdResult = mdAction === 'remove' ? removeOneDependency(mdPkg, mdName) : addDependency(mdPkg, mdName, mdVersion);
+        if (!mdResult.ok) return `manage_dependency: ${mdResult.message}`;
+        if (mdResult.changed) {
+          await this.actuator.writeFile(this.workspaceId, 'package.json', mdResult.text);
+          this.state?.recordFileChange({ path: 'package.json', kind: 'modify' }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile('package.json', mdResult.text);
+          this.scheduleCheckpoint(`${mdAction} dependency ${mdName}`);
+        }
+        return mdResult.note;
+      }
+
       case 'generate_events': {
         // Breadth recipe (domain vertical) — events/RSVP (server/events/): a real EventService with CAPACITY
         // enforcement + a waitlist (auto-promote on cancel) + an Express router. Pure gen in EventsGenerator.ts.
@@ -5002,6 +5166,34 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('consent starter');
         const csDeps = cscfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a GDPR consent-log backend:\n${csWritten.join('\n')}\nAdd the dependencies: ${csDeps}\n\n${cscfg.instructions}`;
+      }
+
+      case 'generate_consent_banner': {
+        // ROADMAP §13 4.4 — the DPDP (India) + GDPR consent BANNER (public/consent-banner.js): nothing non-essential
+        // loads before consent, no pre-ticked boxes, reject = accept prominence, withdraw any time, re-consent on
+        // policy version change, English + Hindi. Pure generator in ConsentBannerGenerator.ts (it sanitises every
+        // option itself, so a hostile appName cannot break out of the emitted script).
+        const cbIn = (input ?? {}) as Record<string, unknown>;
+        const cbOpts: ConsentBannerOptions = {
+          appName: typeof cbIn.appName === 'string' ? cbIn.appName : undefined,
+          policyUrl: typeof cbIn.policyUrl === 'string' ? cbIn.policyUrl : undefined,
+          grievanceEmail: typeof cbIn.grievanceEmail === 'string' ? cbIn.grievanceEmail : undefined,
+          language: cbIn.language === 'en' || cbIn.language === 'hi' || cbIn.language === 'both' ? cbIn.language : undefined,
+          purposes: Array.isArray(cbIn.purposes) ? (cbIn.purposes as ConsentBannerOptions['purposes']) : undefined,
+          policyVersion: typeof cbIn.policyVersion === 'string' ? cbIn.policyVersion : undefined,
+        };
+        const cbcfg = generateConsentBannerIntegration(cbOpts);
+        const cbWritten: string[] = [];
+        for (const [path, content] of Object.entries(cbcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cbWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('consent banner');
+        return `Wired a DPDP + GDPR consent banner:\n${cbWritten.join('\n')}\n\n${cbcfg.instructions}`;
       }
 
       case 'generate_activity_feed': {
@@ -6107,7 +6299,7 @@ export class ToolDispatcher {
         // (order/session + signature verification) + a client checkout helper. The user pastes their keys
         // into .env (NavBharatAI never stores them). Pure generator in PaymentGenerator.ts.
         const pProvider = optStr(input, 'provider');
-        if (!isPaymentProvider(pProvider)) return 'generate_payment: pass provider = "razorpay" | "stripe".';
+        if (!isPaymentProvider(pProvider)) return 'generate_payment: pass provider = "cashfree" | "razorpay" | "stripe".';
         const pcfg = generatePaymentIntegration(pProvider);
         const payWritten: string[] = [];
         for (const [path, content] of Object.entries(pcfg.files)) {
@@ -6122,7 +6314,8 @@ export class ToolDispatcher {
           payWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
         }
         this.scheduleCheckpoint('payment integration');
-        return `Wired ${pProvider} payments:\n${payWritten.join('\n')}\nAdd the dependency: ${pcfg.dependency.name}@${pcfg.dependency.version}\n\n${pcfg.instructions}`;
+        const payDep = pcfg.dependency ? `\nAdd the dependency: ${pcfg.dependency.name}@${pcfg.dependency.version}` : '\nNo dependency needed (uses the platform fetch + node:crypto).';
+        return `Wired ${pProvider} payments:\n${payWritten.join('\n')}${payDep}\n\n${pcfg.instructions}`;
       }
 
       case 'generate_email': {
@@ -7687,7 +7880,12 @@ export class ToolDispatcher {
         // best-effort so it can never break/block a working preview.
         await this.injectAppSignatureIntoIndexHtml();
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
-        return `Live preview published at ${url} (port ${port} verified UP)`;
+        // The url is handed to you (not withheld) because your OWN next steps need it — screenshot,
+        // curl, a browser check. It must never appear in your reply to the person: they already see
+        // the running app in their own Preview panel, and a copied sandbox address is a free, unmetered
+        // ticket onto NavBharatAI's bill for anyone it's forwarded to (see redactPreviewUrls, which
+        // strips it from your visible text as a backstop — but do not rely on that; do not print it).
+        return `Live preview published (port ${port} verified UP). Internal url for your own tool calls only, NEVER to be quoted in your reply to the user: ${url}`;
       }
 
       case 'task': {
@@ -7740,6 +7938,23 @@ export class ToolDispatcher {
       }
 
       case 'deploy': {
+        // PUBLISHING IS THE USER'S DECISION (admin 2026-09-01).
+        //
+        // A user typed "continue". The build finished and the agent decided by itself — "Build
+        // successful! Ab deploy karta hoon." — and their app went onto a public URL. The only thing
+        // between a private app and the open internet was a SENTENCE in this tool's description
+        // ("use when the user asks to deploy/publish/go live"), and the model did not follow it. A
+        // permission enforced by asking the model nicely is not a permission.
+        //
+        // So it is a gate now, and it DENIES by default: the composition root grants it only for the
+        // explicit Publish button or a turn where the user actually asked. The asymmetry is what sets
+        // that default — refusing someone who wanted it live costs one sentence and the button is
+        // right there, while allowing it wrongly puts unfinished work in public.
+        //
+        // Refused as a normal tool result, not a throw: the model should RELAY this ("your app is
+        // ready, press Publish"), and an error would read to it as the app being unfit to publish.
+        if (!this._publishConsent) return PUBLISH_NOT_REQUESTED;
+
         // A DEPLOY THAT DID NOT DEPLOY MUST NOT REPORT SUCCESS (autopsy build aed2906d, 2026-08-09).
         //
         // Every branch below used to RETURN a sentence. A returned string is a SUCCESSFUL tool result, so
@@ -8019,6 +8234,10 @@ export class ToolDispatcher {
       }
 
       default:
+        // A CONNECTED SERVICE'S TOOL (MCP). Checked here, at the END, on purpose: a built-in `case`
+        // always wins, so a connected server can never take over a platform tool even if the prefix
+        // guard were somehow bypassed. Two independent defences, not one.
+        if (isExternalToolName(call.name)) return await this.runExternalTool(call);
         throw new Error(`Unknown tool: ${call.name}`);
     }
   }

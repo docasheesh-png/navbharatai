@@ -43273,3 +43273,4047 @@ Gate: both `tsc` clean; FULL suite **1425 files / 18768 tests green**. Both key 
   `continue` cost ₹152. The gift funds ~1.6 builds, not a whole app. A business decision, not a bug —
   but the documented figure is not the real one.
 - **`CLAIM_UNSUPPORTED` did not fire** on a summary the platform's own evidence contradicted.
+
+---
+
+## 2026-09-02 — The Privacy Policy said we do NOT do what we had just built (#2732)
+
+**How it surfaced.** While setting up the Meta app the admin asked whether the privacy policy should be
+updated or written fresh — "sayad bani huyi hai". I had told them, and written into `CLAUDE.md` in a
+merged PR, that NavBharatAI had **no** privacy policy. They were right and I was wrong.
+
+**My error, recorded because the lesson generalises.** The claim came from a grep piped through
+`head -20`. The legal files sat below the cut, so "no hits shown" was read as "does not exist" — and
+that non-fact was then written into a durable doc as "verified by grep". **A conclusion drawn from a
+capped result set is not a verified fact.** For an existence question, search by FILENAME as well as
+content, and never cap the output you intend to conclude from.
+
+**What the mistake was hiding — considerably worse than a missing page.** A full policy has existed
+since 2026-08-08 (186 lines, grounded in real data flows), and it stated in THREE places that we do
+not do what PR #2729 had just shipped:
+
+- "we do not show third-party advertising"
+- "We never share your data with advertisers or data brokers."
+- "We do not use third-party advertising cookies."
+
+Setting `META_PIXEL_ID`, or rolling out the SDK `.aab`, would have put the live product in breach of
+its own published policy — and a Play **Data safety** declaration that contradicts the policy is a
+violation, not a mismatch. **Nothing was ever collected under the old wording**: the pixel id is still
+unset and the bundle is not uploaded. Caught with hours to spare, by the admin's question rather than
+by anything we built.
+
+**Fixed — content, reach, and the recurrence:**
+
+1. **The policy is UPDATED, not replaced.** The existing document is good; rewriting it would have
+   thrown away work and lost the parts that are still exactly right. The three false statements are
+   corrected and a new **Section 3.1** states precisely what reaches Meta: four web events, the
+   Android advertising ID, and an explicit list of what is NEVER shared (chats, files, clinical data,
+   built apps, name/email/phone).
+2. **The policy now has a PUBLIC URL** — `/privacy` and `/terms`, **server-rendered HTML**
+   (`routes/legal.ts` + `lib/legalMarkdown.ts`). It already existed in Settings, but Meta requires a
+   Privacy Policy URL to take an app Live and Play requires one for Data safety, and both are checked
+   by tools that may not run JavaScript — an in-app screen behind a menu and a sign-in is not a URL
+   anyone can check. Content is NOT duplicated: the routes read the same `src/content/legal` registry
+   the in-app pages use, so the two can never diverge. Both paths added to `spaFallback.ts`, without
+   which the catch-all returns index.html with a 200 — the exact silent failure this repo has had
+   twice before (live preview, deployed PWA).
+3. **A dead allowlist entry removed.** `pixelEventFor` mapped `checkout_started`, which nothing in the
+   app emits. Harmless-looking, but it meant the code *could* send an event the policy does not list.
+4. **The recurrence is what actually got fixed.** `tests/privacyPolicyTruth.test.ts` asserts the
+   pixel's real allowlist against what Section 3.1 discloses, so **adding an event to `pixelEventFor`
+   fails CI until the policy is updated too**. Verified to bite: injecting an undisclosed event failed
+   two assertions; removing it went green. The first drift produced no failure of any kind, which is
+   precisely why a guard was needed rather than a more careful reading.
+
+**Also in this change:** a small server-side Markdown renderer (no new dependency — react-markdown is
+a React component and cannot run in an Express response) that HTML-escapes first and refuses
+`javascript:` / `data:` hrefs, since these pages are served to reviewers.
+
+**Verified:** `tsc` frontend + server clean · `vitest run` **1430 files / 18,856 passed** · build green
+· bundle within budget · unused-imports clean · boot:check PASS · and the routes exercised against a
+REAL booted server: `/privacy` and `/terms` return 200 with the policy text in the first response and
+no SPA shell, while `/store` still returns the app.
+
+**Open (rule 6):** the policy is drafted to be reviewed by a lawyer before being relied on in a
+dispute — that has still not happened, and this change does not alter it.
+
+---
+
+## 2026-09-02 (later) — Meta's automatic matching could have broken the promise we had just written (#TBD)
+
+**Trigger.** The admin ran a privacy audit brief through ChatGPT and — correctly, per the
+external-suggestion rule — asked for it to be judged rather than obeyed. Most of it was inapplicable
+(it guessed at integrations we do not have, asked us to name AI providers in a way the white-label
+law forbids, and wanted an invented "compliance score /100"). One item was sharp and real, and one
+was fair.
+
+**THE REAL ONE — a promise that rested on someone else's dashboard.** Section 3.1, written hours
+earlier, says a user's name, email address and phone number are never shared with Meta. The allowlist
+does not deliver that on its own: **Meta's Automatic Advanced Matching** reads form fields on the page,
+hashes email/phone and attaches them to every event. It is a toggle in Events Manager, frequently ON
+by default for a new pixel, and it needs no code from us to start working. Our installer called a bare
+`fbq('init', pixelId)` — so the promise was true only for as long as a switch we do not control stayed
+off.
+
+That is the same class as the morning's finding, one layer down: a published statement whose truth was
+not enforced by anything we own.
+
+**Fix.** The boot sequence now sends `['set','autoConfig',false,pixelId]` **before** init, and
+`{ withAutoMatching: false }` on init as a second refusal. `autoConfig` also governs Meta's automatic
+event detection (inventing "events" from button text and page metadata), which is precisely the
+firehose `pixelEventFor`'s allowlist exists to prevent — so one call closes both.
+
+**Why it became a pure function.** `pixelBootSequence()` is extracted and exported because **the ORDER
+is the security property**: sent after init, advanced matching has already read the page. A pure,
+ordered value can be asserted; a side-effecting installer cannot. Verified to bite — moving the `set`
+after the `init` fails three assertions across two files.
+
+**THE FAIR ONE.** The Hosting bullet asserted "Singapore is not a jurisdiction restricted by the Indian
+government for such transfers as of the date above" — a legal conclusion about a government list that
+can change without us noticing, leaving the policy false with nothing to flag it. Replaced with what
+we actually control: "we transfer it only where permitted by applicable law." Test-locked so the
+specific version cannot come back.
+
+**WHERE THE SUGGESTION WAS WRONG, and following it would have hurt.** It called our Nav App Store
+sentence an unsafe absolute and proposed softer wording. Our line already reads "*nothing publishes
+without passing review — a failed or unavailable scan blocks publication rather than being skipped*",
+and the code genuinely is fail-closed. Its "safer" version would have understated a guarantee we
+actually keep. Recorded because it is the clearest example this month of why external advice is raw
+material, not instruction.
+
+**Still open (unchanged):** the Android SDK has **no consent gate** — it initialises on app start. The
+policy scopes the consent promise to the web, so nothing is false, but this is a genuine DPDP weakness
+and a decision the admin has not yet made. And the policy still awaits review by Indian privacy
+counsel.
+
+**Verified:** tsc frontend + server clean · audit + license gates clean · unused-imports clean ·
+`vitest run` **1430 files / 18,864 passed** · build green · bundle within budget · boot:check PASS.
+
+---
+
+## 2026-09-03 — The Play deletion URL, and two things the Data safety form exposed (#TBD)
+
+**Context.** Filling Play Console → App content → **Data safety** for the advertising-ID declaration
+surfaced two problems that had nothing to do with Meta.
+
+**1. The existing Data safety declaration said the app collects NO user data.** It has said that since
+release 91. The app collects name, email, phone, chats, uploaded files, purchase records, crash logs
+and device IDs. A false Data safety declaration is "deceptive behaviour" under Play policy, whose
+consequence is account-level, not a rejected update. Corrected by the admin in the console (No → Yes);
+recorded here because it was never a code bug and would not have been found by any test.
+
+**2. There is no in-app account deletion, and no deletion URL.** Declaring that accounts can be created
+triggers Play's requirement for a published deletion URL. Verified rather than assumed:
+`DELETE /api/profile` genuinely exists (identity from the verified Firebase token, explicit
+`{confirm:'DELETE'}` body) and erases the seven collections in `USER_SCOPED_COLLECTIONS` — but **no UI
+anywhere calls it**, confirmed by searching both file names and component text.
+
+**Shipped: `/delete-account`**, server-rendered like `/privacy` and `/terms`, with the three things Play
+actually checks for — the app named, the steps prominent, and what is deleted / kept / for how long.
+
+**Every claim on it is code-anchored, and the test enforces that.** `accountDeletionPage.test.ts`
+iterates `USER_SCOPED_COLLECTIONS` and fails if a collection the eraser wipes has no plain-words
+description on the page — so adding a collection to the eraser cannot silently leave the page
+understating what happens to someone's data. It also pins the honest carve-outs: tax records retained,
+backups cycling on their own schedule, GitHub disconnection **not** touching the user's own repos, and
+the unused token balance not being refundable.
+
+**Why it is NOT one of the five legal documents:** the registry's contract requires 4,000+ characters
+per document, and padding the one page whose whole job is to be quickly actionable would make it worse
+at that job.
+
+**OPEN root causes (rule 6) — stated, not hidden:**
+- **The automated eraser does not cover everything the page promises.** It wipes seven Firestore
+  collections; it does **not** delete the Firebase **Auth** record itself, nor built-app files outside
+  those collections. The page therefore describes the EMAIL request path, which a human completes — so
+  the promise is true only for as long as the admin actually performs the manual part. Closing this
+  means extending `deleteUserData` and wiring an in-app button to it.
+- **There is still no in-app "Delete account" control**, which Play requires in addition to the URL.
+  The server half is built and safe; only the button and a confirmation screen are missing.
+
+**Verified:** tsc frontend + server clean · unused-imports clean · `vitest run` **1431 files / 18,872
+passed** · build green · bundle within budget · and the route exercised against a REAL booted server:
+`/delete-account` returns 200 with the steps in the first response and no SPA shell.
+
+---
+
+## 2026-09-03 (later) — In-app account deletion, and the endpoint that was not deleting the account (#TBD)
+
+**The admin's ask, in their own framing:** *"github me danger zone me delete button hota hai — waise hi
+ham bhi setting me dangerous zone bana dena to?"* A good instinct: it is exactly the pattern for an
+irreversible control, and it is the half of Play's account-deletion rule that `/delete-account` does
+not satisfy (Play wants the URL **and** an in-app control).
+
+**THE ROOT CAUSE FOUND WHILE BUILDING IT.** `DELETE /api/profile` erased the seven Firestore
+collections in `USER_SCOPED_COLLECTIONS` and stopped there — the **Firebase Auth record survived**. So
+a person who asked to be deleted could sign straight back in and find a blank account waiting. That is
+not what "delete my account" means to anyone who taps it, and not what Play's requirement means. A
+button shipped on top of that endpoint would have been the built-but-not-really-working state the
+second absolute rule forbids, wearing a red border.
+
+Fixed first: `deleteAuthAccount()` in `authMiddleware.ts` deletes the Auth record, and the route calls
+it **after** the data erase — deleting the credential first would strand any data whose deletion then
+failed, with the owner no longer able to sign in and retry. It returns a four-way outcome
+(`deleted` / `not-found` / `unavailable` / `failed`) rather than throwing, and `not-found` counts as
+success because it is the same end state.
+
+**THE HONESTY THAT MATTERS MOST HERE:** the data wipe and the credential removal can genuinely diverge
+(Firestore succeeds, the Auth SDK is unreachable). The response and the UI report which one happened.
+A green tick over a partial deletion would leave someone believing they are gone while they can still
+sign in — `deletionOutcomeMessage()` is a pure function precisely so that rule is test-locked, and the
+tests assert the partial case says "sign-in could not be removed" and names the support address.
+
+**The UI** is `settings/DangerZone.tsx`, last on the Settings root by deliberate placement: a control
+that irreversibly deletes an account must not sit where a thumb lands. It will not fire until the user
+types the word, reusing the SHARED `deleteConfirm.ts` rule that bulk file deletes already use rather
+than a second copy that could drift. On success it signs out and reloads — a session must not outlive
+its account, and staying on screens backed by deleted data would surface errors that look like fresh
+bugs.
+
+**Also:** `AppKnowledgeBase.ts` gained the entry (mandatory for a new user-facing control — without it
+every AI in the product is blind to a feature users will ask about, in both English and Hinglish), and
+`/delete-account` now leads with the in-app route and keeps email as the fallback for someone who
+cannot reach the app.
+
+**Verified:** tsc frontend + server clean · unused-imports clean · `vitest run` **1432 files / 18,879
+passed** · build green · bundle within budget · boot:check PASS.
+
+**STILL OPEN (rule 6):** built-app files stored outside those seven collections are not covered by the
+automated erase. The public page and the in-app copy both describe what IS removed rather than
+promising a total wipe, so nothing overstates — but closing this properly means extending
+`USER_SCOPED_COLLECTIONS`, and the page's drift test will then require the wording to grow with it.
+## 2026-09-01 — Apps were publishing themselves; publishing is now the user's decision
+
+Admin: *"jab ham koi app banwate hai, to bina kuch kiye automatic woh app publish on navbharatai ho
+jata hai — jab user publish kare tab hi ho."*
+
+**Confirmed from the build report they sent.** The user typed **"continue"**. The agent finished, then
+decided by itself — *"Build successful! Ab deploy karta hoon."* — `TOOL_CALL ▶ deploy` →
+`TOOL_DONE ✓ deploy (14s)` → the app went onto a permanent public URL. Nobody asked.
+
+**Root cause: consent was enforced by asking the model nicely.** The only thing between a private app
+and the open internet was a SENTENCE in the tool's own description — *"use when the user asks to
+deploy/publish/go live"* — and the model did not follow it. A prompt is guidance, not a gate. Same
+lesson as every other guard here that had to become structural after a comment failed to hold it.
+
+**Now it is a gate, and it DENIES by default** (`publishConsent.ts` + `ToolDispatcher._publishConsent`):
+- the **Publish button** grants it explicitly, immediately above its own dispatch so the two cannot drift;
+- a **build turn** grants it only when the user asked *in that message*;
+- a call site that forgets grants nothing, because the default is false;
+- a failure while deciding leaves it DENIED.
+
+**Why deny-by-default:** refusing someone who wanted their app live costs one sentence and the Publish
+button is right there. Allowing it wrongly puts unfinished work in public. Those are not comparable.
+
+**Consent is read from the CURRENT message only** — consent that carries forward is precisely how one
+"publish it" becomes an app that republishes on every later "continue".
+
+**Refused as a normal tool result, never a throw.** An error would read to the model as *this app
+cannot be published*, which is false and would reach the user as a failure. The truth is that nobody
+asked yet, so the message tells it to say the app is ready and point at the Publish button.
+
+⚠️ **A real bug my own test caught, worth remembering for every Hinglish pattern in this repo:** the
+first version ended the verb patterns with `\b` after `kar`, which matched "publish kar do" and
+**missed "publish karo"** — the most common way an Indian user asks — because "karo" is one word with
+no boundary inside it. Negations win over the ask (`abhi publish mat karna`, `deploy later`,
+`build it without deploying`), since publishing on a sentence that said *not* to would be worse than
+having no guard at all.
+
+`Deployment.test.ts`'s five deploy tests began failing and were RIGHT to: they exercise what deploy
+DOES once allowed, so the harness now grants consent exactly as the Publish route does — and three new
+tests assert the gate itself, including that an ungranted dispatcher never calls the deploy function
+and never leaks a URL.
+
+Gate: both `tsc` clean; FULL suite **1429 files / 18833 tests green**. Deny-by-default verified to bite.
+
+## 2026-09-01 — App Mart offered where it is earned; and the half of the ask that was refused
+
+Admin: *"koi user apni app publish on navbharatai kare, tabhi usko ek tick ✅ dikhe — post in app mart.
+Aur app mart me wahi app dikhe jo navbharatai par publish hai, ham host kar rahe hai. Isse loading
+jaldi ho?"*
+
+**Checked before building anything (safeguard #6) — most of this already exists.** `navStoreWeb.ts` is
+a complete, well-designed web-app store: publish = immutable snapshot, a key-scan gate that refuses a
+snapshot carrying a real-format secret with its file:line, a prover whose default answer is "no", and
+private apps gated server-side. The publish sheet already has a "Put it on App Mart" card.
+
+### Built — the tick
+
+The sheet's four paths (hosting, own domain, APK Builder, App Mart) are **siblings**, so App Mart sat
+beside the hosting card as one more option a user had to notice by themselves. The moment someone HAS
+just published is the moment showing it to people makes sense to them, so the prompt now appears then.
+
+Gated on **`liveUrl`** — the durable deployment record, the same signal the Unpublish control trusts,
+set only for a genuinely live app. It is a **prompt, not an automatic listing**: publishing your app
+and showing it to strangers are two different decisions, and the second stays the user's — the same
+principle as the publish-consent gate shipped the same day. The card still works **without** a live
+URL, because App Mart never required hosting and must not start to.
+
+### ⚠️ REFUSED, with reasons — "App Mart me sirf hosted apps dikhein"
+
+It would not be faster, and it would cost real capacity.
+
+**The store does not serve the hosted copy at all.** It runs an immutable snapshot in each viewer's
+OWN browser — `navStoreWeb.ts`: *"the viewer brings their own CPU, so 1 viewer or 10,000 cost us the
+same"*. So requiring a NavBharatAI publish first would make **every** store app consume a Firebase
+Hosting channel — and channels are finite per site (CLAUDE.md scale plan §3, tracked by the Publish
+Capacity panel, with ROADMAP §10.3 as the eventual fix) — **for a copy nobody ever reads.**
+
+The speed the admin wanted is already how it works. The honest framing given back: the store's LISTING
+was never the slow part (`listApps('approved', 100)` is metadata); the slow part in the **APK** store is
+getting to USE an app — a 5–50 MB download, an "unknown sources" warning and an install, Android-only.
+The web path is a tap. That is the win, and it is already built.
+
+### Recommended instead (not built — admin's call)
+
+Keep APKs, but as an **action on a listed web app** ("Download as Android app", via the existing APK
+Builder) rather than as an upload path. One pipeline, and the APK is built from code we hosted instead
+of a stranger's binary — which also removes the open licensing item in CLAUDE.md, where the FREE
+VirusTotal API is used to scan uploads in what is a commercial product.
+
+Gate: both `tsc` clean; FULL suite **1430 files / 18840 tests green**.
+
+## 2026-09-02 — Cloudflare 525 on a connected domain: we knew the answer and did not say it
+
+Admin connected their own domain, deployed, and got Cloudflare's **error 525 "SSL handshake failed"**
+— browser ✅, Cloudflare ✅, host ❌.
+
+**The cause is documented in our own code.** `cloudflareManagedDns.ts` header: *"Records are written
+PROXIED OFF (grey cloud). Firebase must see its own A records directly to validate ownership and issue
+the certificate; proxying through Cloudflare would break the attach. **This is a correctness
+constraint, not a style choice.**"* A 525 is only ever emitted by Cloudflare's EDGE, so seeing one
+proves the record is on the **orange cloud** — and while it is, the certificate can never be issued,
+so the connection can never succeed.
+
+**Why the user was stranded:** `checkDomainServing` recognises Firebase's empty-site page as its own
+state (`nothing_published`) but had nothing for Cloudflare. A 525 fell into the generic bucket and
+reported *"answered with an error (HTTP 525)"* — true, useless, and it left the user on Cloudflare's
+page being told to check *"the SSL configuration used"*, which means nothing to someone who did not
+know they had one. **The system knew the answer and did not say it** — the honesty half of the fifth
+rule.
+
+### Fixed
+- New serving state **`proxy_blocked`**, from `isCloudflareOriginError` (521–526). Cloudflare-only
+  codes, so matching the status alone cannot mislabel a user's own error page.
+- An actionable note instead of a status: names the **orange cloud**, the exact path
+  (Cloudflare → DNS → Records), what to click, and that the certificate then arrives by itself within
+  a few hours. It ends with **"Nothing about your app is broken"** — because it is not, and a message
+  implying otherwise sends someone rebuilding a working app.
+- It deliberately does **not** repeat Cloudflare's own advice about cipher suites and SSL
+  configuration; a test asserts that wording never appears.
+- ⚠️ **`canClaimLive` now excludes it.** Without that, adding the state would have made a 525 domain
+  claim **"Live"** — the exact fake success that function exists to prevent, with the user staring at
+  an error page while we said it was fine. `unknown` still does not withdraw the claim, because that
+  means OUR check failed and downgrading a working domain for that is the same dishonesty reversed.
+
+12 tests, including the admin's exact 525 and every neighbouring status that must NOT match.
+
+Gate: both `tsc` clean; FULL suite **1431 files / 18852 tests green**.
+
+### For the admin — the 30-second fix on the live domain
+Cloudflare → DNS → Records → click the **orange cloud** next to the domain so it turns **grey (DNS
+only)**. The certificate is normally issued within a few hours and the site starts working by itself.
+The proxy can be turned back on later, but only once HTTPS works, and then SSL/TLS mode must be
+**Full (strict)**.
+
+⚠️ Note for this domain specifically: CLAUDE.md records that `mitrify.xyz`'s branded-preview proxy VM
+(`e2b-custom-domain-proxy`) was **deleted for cost on 2026-08-02**. If any A record still points at
+that VM's old address, it must be removed as well — a record aimed at a released IP is its own failure
+and would survive fixing the orange cloud.
+
+## 2026-09-02 — Account switching: nothing was broken, the PROMISE was
+
+Admin: *"2 account login theek se nahi chal rahe — 2nd account add karo, wapas 1st par jao to login
+manta hai. Ya to fix kar do, ya hata do, ek single login hi rahne do."*
+
+**Investigated before changing anything, and the re-auth is correct, deliberate and documented:**
+
+- `accountRoster.ts` stores metadata and **never a token** — a refresh token in localStorage is a
+  permanent account takeover for anyone who reaches that storage (an XSS, a shared machine, an
+  extension). Not tradeable for one saved tap.
+- The **Firebase SDK holds ONE live session per app instance**, so a switch must re-authenticate. The
+  roster's own header says exactly this, and even warns *"the UI must not overstate it"*.
+- The Google path deliberately keeps `prompt: 'select_account'` because *"a login_hint alone can
+  silently sign them straight back into the WRONG account when only one session is live"* — in an app
+  with wallets, that is not a trade worth making for one tap.
+
+**Then the menu said "Switch account" and "Add account" — Gmail's exact words for a mechanism that DOES
+hold sessions live at once.** The user was promised Gmail and handed a re-auth, so a correct design
+read as a bug. The mechanism is right; **the promise was wrong**, and the header had predicted it.
+
+**Fix: one honest line in the menu** — *"Switching signs you in again — one tap with Google, your
+password for email accounts."* The two cases are stated separately because they genuinely differ: with
+Google the provider session is usually live, so it is a tap; an email/password account has no provider
+session to lean on and the password is genuinely required. Saying "one tap" for both would be the same
+overstatement in smaller print. Same tap as before — no longer a surprise.
+
+7 tests pin the promise AND the three security decisions behind it, including a real check that
+nothing token-shaped ever reaches the stored roster.
+
+### What was deliberately NOT done
+**True simultaneous sessions** are possible in principle (a separate named Firebase app per account),
+but every authenticated call in the codebase resolves ONE `auth` from `lib/firebase` — including the
+wallet, billing and build paths. Rewiring them all to a switchable instance risks one missed call site
+using the **wrong account's token on a money path**, which is far worse than an extra tap. Not
+attempted, and not recommended without a specific reason to take that risk.
+
+**Removal remains a small, safe option** if the admin prefers it: the roster is metadata-only, so
+deleting the menu loses nothing but the menu. Offered rather than assumed.
+
+Gate: both `tsc` clean; FULL suite **1432 files / 18859 tests green**.
+
+### 2026-09-02 (cont.) — the third way, completed: the switch screen now knows who it was asked for
+
+The honest line in the menu was half of it. The other half was what happened AFTER the tap: the switch
+opened the ordinary sign-in screen — the same one a stranger sees. Someone who had just pointed at
+their own face and email landed on **"Sign in"**, every method offered as if we had never met them,
+and reasonably concluded the switch had failed. Nothing about the flow was wrong; it forgot, one
+screen later, what it had just been told.
+
+Now the screen says it: **"Switching to a@gmail.com — continue with Google below."** The provider
+travels with the email hint (`SIGN_IN_PROVIDER_KEY`), written and cleared **together** with it so a
+provider left over from an earlier switch can never name the wrong method on the next one.
+
+**Two things it deliberately does NOT do, both test-locked:**
+
+- **It does not consume the email hint.** `handleGoogleSignIn` removes that key when it passes it to
+  Google as a `login_hint`; reading it for the banner as well would clear it first and quietly put the
+  account chooser back to a full list — the display competing with the use of one key.
+- **It does not auto-launch the provider.** Firing the popup from an effect loses the click's user
+  gesture and browsers block it; a blocked popup is worse than the tap it saves. The fix is to make
+  the right button obvious, not to press it for the user.
+
+**Why the sign-in flow itself was not touched:** calling the Google path directly from the menu (which
+would genuinely remove a tap) means extracting ~200 lines tangled with force-logout, native-vs-web
+branching, the Capacitor plugin and popup/redirect strategy — out of the most dangerous surface in the
+app, one CLAUDE.md records as having silently broken every login before (the `FIREBASE_PROJECT_ID`
+incident, where every user became 'anon'). One tap is not worth that.
+
+15 tests now cover the promise, the three security decisions, and the banner's two boundaries.
+
+Gate: both `tsc` clean; FULL suite **1432 files / 18867 tests green**. Display-only guard verified to bite.
+
+## 2026-09-02 — "ownership: mismatch" answered with "nothing left for you to do"
+
+Admin: *"website connect nahi ho rahi hai. Isko seriously theek karo."* — `mitrify.com` serving
+Firebase's **Site Not Found**, while the connect screen showed, at the same time:
+
+```
+ownership: mismatch · host: active · SSL: active
+Done — all 1 record are now in place (we added 2). Nothing left for you to do;
+your domain connects on its own from here.
+```
+
+A green completion claim printed two lines under a red refusal. **Two separate defects.**
+
+### 1 · Records in the zone is not the host accepting them
+
+`autoDnsSummary` claimed completion from **`missing.length === 0` alone** — and `missing` only means
+"the records WE manage are present in the zone". It says nothing about whether the hosting service has
+**accepted** them. It now takes `ownershipState`, and while ownership is unsettled it says the records
+are in place and the host has not confirmed yet, instead of announcing the domain is finished.
+
+This file had already learned the same lesson **mirrored**: the "Verified" badge was once computed from
+what the service was *asking for* rather than from evidence a record existed. Same confusion of two
+different facts, in the other direction.
+
+### 2 · `OWNERSHIP_MISMATCH` had no branch — and `CONFLICT` did
+
+The CONFLICT branch exists because the admin once lost **three days** to *"Waiting for your DNS records
+to spread across the internet"* on a state that could never resolve by waiting. Its own comment says
+it: *"Telling someone to wait for a thing that will never happen is the most expensive kind of
+dishonest message this codebase can produce: it is not a wrong label, it is wasted days."*
+
+**MISMATCH is its sibling** — a `hosting-site=` token that exists but names a **different site** — and
+it fell through to that very same message. The fix had been made for one word and the sibling was
+missed, which is precisely the "hunt the siblings" step of the fourth rule.
+
+It now says the value is wrong, that waiting will not change it, and points at **Check & apply
+records** — and that button genuinely fixes it: verified in `cloudflareManagedDns.ts` before the
+message was written that the sweep adds the wanted token and deletes every other `hosting-site=` one.
+Pointing someone at a button that would not help is how the three days happened the first time.
+
+### The admin's own domain, right now
+`host: active · SSL: active` means the DNS and certificate halves are already done. Only the ownership
+token is wrong — almost certainly because `mitrify.com` was connected from an earlier app, whose token
+is still there. **Tapping "Check & apply records" replaces it.** Before this change the screen told
+them there was nothing left to do.
+
+⚠️ Also seen in the screenshot and NOT fixed here: **"all 1 record are now in place (we added 2)"** —
+`desired` and `applied` are counting different things, and the sentence is ungrammatical for 1. Cosmetic
+beside a false completion claim, but it is a number that contradicts itself in the admin's primary
+diagnostic, so it is recorded rather than left unnoticed.
+
+8 tests; the completion guard verified to bite. One of them first failed on the new branch's **own doc
+comment**, which quotes the waiting message it replaced — the ordering assertion now scans code only,
+the same trap this session hit twice before.
+
+Gate: both `tsc` clean; FULL suite **1435 files / 18909 tests green**.
+
+## 2026-09-02 — FULL AUDIT: can NavBharatAI genuinely connect a domain and host a real website?
+
+Admin: *"0 se scan kar ke audit karo — kya ham sach me app domain se connect kar ke real website host
+kar bhi sakte hai, ya nahi?"*
+
+**Answer: YES. The capability is genuinely built, and the architecture is right.** Every link traced
+against the code, not assumed:
+
+| Link | Verdict | Evidence |
+|---|---|---|
+| Firebase API | ✅ modern | `projects/*/sites/*/customDomains` v1beta1, verified against Google's own discovery doc — **not** the deprecated `sites/*/domains` |
+| A dedicated Hosting site per domain | ✅ | `siteIdForWorkspace()` → `nbai-<hash>` |
+| Deployed to the **LIVE** channel | ✅ | `deployToSite` → `sites/{id}/releases` (no channel segment) |
+| Domain and deploy target the **same** site | ✅ | both resolve through `ensureSite`/`siteIdForWorkspace` |
+| The live deploy actually RUNS when a domain is connected | ✅ | `customDomainPublish` → `deployToSite`, with one retry on retryable errors |
+| Managed DNS (one nameserver change, we write the rest) | ✅ | `cloudflareManagedDns.ts`, records written **DNS-only** |
+| Stale/wrong ownership tokens removed | ✅ | TXT sweep deletes every `hosting-site=` that is not the wanted one, and touches nothing else (SPF/DKIM safe) |
+| Firebase's own failure reasons surfaced | ✅ | `issues[]` + `cert.issues` merged and rendered |
+| Records for manual setup | ✅ | `requiredDnsUpdates` **and** the ACME `cert.verification.dns` challenge |
+
+**THE ONE THING WORTH KNOWING** — and it is right, not a bug: a custom domain **cannot** attach to a
+preview channel. The ordinary publish goes to a preview channel; a domain-connected workspace gets a
+dedicated site released to LIVE. `Deployment.ts` says so in the code, and both paths derive the site id
+from the same function, so they cannot drift apart. Had that not been true, every custom domain would
+have served Firebase's "Site Not Found" forever — which is exactly what the admin's first screenshot
+looked like, and why it was checked first.
+
+**So what was actually broken was never the hosting. It was the REPORTING** — and that is what the two
+fixes above address.
+
+### Rock-solid pass on today's own fix
+
+The MISMATCH branch I added earlier today **broke this file's own rule.** `firebaseCustomDomain.ts`
+states it, written after `ownership: missing` once reached the admin as a single unexplained word:
+
+> *"Never diagnose from a status enum when the API also shipped the reason."*
+
+My branch read the enum and **asserted** a cause — "connected from another app before". That is the
+likeliest cause; it is not evidence. Firebase ships `issues[]` explaining exactly why a domain is
+stuck, and it outranks anything we infer.
+
+Now both MISMATCH and CONFLICT lead with **Firebase's own sentence** when it sent one
+(`hostingReason()`), and fall back to our explanation only when it did not. `hostingReason` uses the
+**first** reason only (a stack of provider messages in a user-facing note turns a real explanation into
+noise), collapses newlines (these arrive multi-line from `google.rpc.Status`), caps at 220 chars, and
+does not double a punctuation mark the message already has.
+
+**The tests are now behavioural, not textual.** They call `connectStage` and `hostingReason` directly
+and assert the produced note — the earlier ones only grepped the source, which proves shape and not
+behaviour. 18 tests; verified to bite by dropping `hostingReason` from the branch again.
+
+Gate: both `tsc` clean; FULL suite **1439 files / 18956 tests green**.
+
+### Still open, honestly
+- **`"all 1 record are now in place (we added 2)"`** — `desired` and `applied` count different things
+  and the sentence is ungrammatical at 1. A self-contradicting number in the admin's primary
+  diagnostic; not fixed today.
+- **Firebase may send no `issues[]` for MISMATCH** (none was visible in the admin's screenshot), in
+  which case our inferred sentence is all the user gets. It is labelled as the likely cause rather
+  than stated as fact, which is the honest limit of what we know from an enum.
+
+## 2026-09-03 — the last open item closed: "we added 2" can no longer sit beside "all 1 record"
+
+Closes the one item the 2026-09-02 audit left open: *"'all 1 record are now in place (we added 2)' —
+`desired` and `applied` count different things, and the sentence is ungrammatical for 1."*
+
+**Root cause, traced to the exact line.** `applyRecords` (`cloudflareManagedDns.ts`) returned ONE
+combined `changed` count for two operations that have nothing in common except both calling the
+Cloudflare API: a DESIRED record being written, and a FOREIGN `hosting-site=` ownership token (another
+app's leftover) being deleted as cleanup. Writing one desired TXT record while cleaning up one stale
+token from a different app produced `changed: 2` — printed next to "all 1 record", the exact
+self-contradiction in the admin's screenshot.
+
+**Fix: split the count at the source, not at the message.** `applyRecords` now returns
+`{ added, removed }`. `added` counts only records that now hold a value that was actually asked for
+(so it can **never exceed** the desired count — the property that ends the contradiction, by
+construction, not by a display-side patch). `removed` counts cleanup deletes — a foreign ownership
+token, or a genuine excess value beyond what a converged type+name set needs — and is reported
+**separately**, so cleanup activity explains itself instead of silently inflating "added".
+
+Threaded end to end: the sync route (`/api/domains/nbai/auto-dns/sync`) returns `added`/`removed`
+instead of `applied`; the client (`autoAdded`/`autoRemoved` state, replacing `autoApplied`) reads them;
+`autoDnsSummary` builds an honest sentence via a new pure helper, `appliedCountsPhrase`, e.g. *"Done —
+all 1 record is now in place (we added 1 and removed 1 unrelated record that belonged to a different
+app)."* Grammar now agrees with the count ("record is" vs "records are" — the ungrammatical half of
+the same complaint), and a null/absent desired count says "your records" instead of the old
+double-space-collapse hack (`"all  record are…".replace('  ', ' ')`).
+
+**Verified to bite:** reintroduced the exact original bug (counting a foreign-token delete as `added`)
+and confirmed the regression test fails; restored, and it passes. 10 new tests across
+`tests/managedDns.test.ts` and `tests/autoDnsSummary.test.ts`, including the admin's literal scenario
+(1 desired record, 1 foreign token removed) and a check that `added` can never print a number the
+desired count did not license.
+
+### The zero-based audit's verdict stands, now fully closed out
+Both items the 2026-09-02 audit recorded as open are done: the honesty fix (leading with Firebase's own
+`issues[]` reason) shipped same-day in `6051888`; this closes the counting fix. Nothing else from that
+audit is outstanding — the custom-domain pipeline (Firebase API, dedicated-site deploy, managed DNS,
+foreign-token cleanup, live-serving verification, publish-to-domain on every build) was independently
+traced against the code and confirmed real, not assumed.
+
+Gate: both `tsc` clean; FULL suite **1439 files / 18966 tests green**.
+
+---
+
+## 2026-09-03 — Autopsy: build report faa98da9 (Mitrify import + survey, weak/KIMI)
+
+**The turn.** "Import this app from my GitHub repository and give me a short survey of what it is and
+how it is structured. **Do not change any files yet.**" 327 archive entries → 175 source files landed,
+a local Postgres provisioned, `npm run db:push` clean, dev server up on port 3000, an accurate survey
+written. `ok: true`, 196s, ₹19.63 (free-list, so not actually charged). The app was fine; almost
+everything wrong here was the platform describing it.
+
+### Step 1 — the five-bucket ledger (78 events, every item counted)
+
+| Bucket | Count | Items |
+|---|---|---|
+| ✅ Self-healed | 5 | the 5 KIMI→KIMI fallbacks that rescued each dead-rung 404 — **every one of them a red flag, not a win** (Step 5) |
+| 🔀 Worked around | 3 | `kimi-k2.5` 404 routed around on all 5 calls · 34 unprovisionable env values set to empty placeholders · `plannedModel: claude-sonnet-4-6` vs 5/5 turns on `kimi-k2.6` (correct for weak, but the plan and the run still disagree in the record) |
+| ⏭️ Skipped | 5 | render check, route smoke, page check, journey, typecheck — **all five for the same reason**, see ❌2 |
+| ❌ Still broken | 3 | ①the dead rung burns a request on every call ②RELEASE_GATE UNKNOWN on false evidence ③"I changed 2 files" on a "don't change anything" turn |
+| 🥵 Struggle | 2 | 113s `TIME_TO_FIRST_CALL` (85s of it the GitHub zipball import; longest silent stretch 40s) · the final call 35.6s for 1,283 output tokens |
+
+Honest tally to the admin: **v3.0 self-healed 5, worked around 3, skipped 5, 3 survived, and struggled
+at import setup.** The five skips and one ❌ are the same defect counted twice, which is itself the
+finding — a single ordering mistake presented as five independent "not checked" lines.
+
+### Step 2 — the MISSING subsystem
+
+**The engine had no memory of a permanent failure.** It has excellent memory of transient ones — a
+429 cooldown, a timeout bench, an escalating circuit breaker, key-pool rotation. It had none at all
+for "this answer can never change", so the one failure class where retrying is *provably* pointless
+was the only one re-tried forever. `classifyProviderFailure` had even NAMED the class on 2026-09-01 —
+in the reporting layer, where nothing could act on it.
+
+### Step 3 — DNA-level fixes (all shipped, PR from `claude/build-report-autopsy-tmn3ov`)
+
+1. **`providerErrorClass.ts`** — one shared predicate, imported by both BuildDiagnostics and the
+   provider chain, so the report layer and the runner can no longer disagree about what a permanent
+   failure is. A rung that answers "no such model / permission denied" is retired after ONE attempt.
+   **Keyed on the MODEL, not the bench name** — the dead `kimi-k2.5` and the `kimi-k2.6` that delivered
+   all five turns share the bench name 'KIMI', so the obvious name-keyed fix would have replaced one
+   wasted round-trip per call with a build that had no Kimi at all. Transient benches stay name-keyed:
+   a 429 belongs to the key, a missing model belongs to the model.
+2. **The import's preview boot is awaited before anything judges it.** It was awaited only in
+   `finally`, ~2,700 lines below the post-build checks, every one of which is gated on
+   `lastPreviewUrl` — so on the import path they were structurally unreachable, not unlucky. Costs no
+   wall-clock: the identical bounded await already ran before the response could end, so the user was
+   already paying for it *after* the verdict instead of before it. New `IMPORT_PREVIEW_BOOT_AWAITED`
+   records the wait so a slow import is never mistaken for a slow build.
+3. **Engine setup files no longer read as the user's.** `.gitignore` joins `.env` in
+   `ENGINE_CONFIG_PATH`; `devSecretsBoot` writes both in one act, the `.gitignore` only because the
+   `.env` exists.
+
+### Step 4 — what the bar demands, stated honestly
+
+- **The `kimi-k2.5` ID ITSELF IS STILL AN OPEN ROOT CAUSE (rule 6).** Moonshot folds "no such model"
+  and "your key may not use it" into one sentence, and I cannot query their live model list from here,
+  so I cannot tell whether the fix is to drop the rung or to enable it on the account. **What changed
+  is the cost of being wrong**: the misconfiguration now costs one request per build instead of one
+  per call. **The admin's call, and it is worth taking** — the free ladder's first rung is currently
+  dead weight for every free build. Options: drop `kimi-k2.5` from `AGENTV3_FREE_KIMI_MODEL`, or
+  enable it on the Moonshot key.
+- **Second time this list has drifted.** The 2026-08-04 autopsy fixed exactly this "I changed N files"
+  complaint, for exactly this app, with an allowlist of the literal names that turn happened to write.
+  One extra file and it went false. **A fix that enumerates the instances it has seen is not a class
+  fix**, and this one lasted precisely until the change-set grew.
+
+### Step 5 — the 50/50 law
+
+**All five "self-heals" were one misconfiguration wearing a green checkmark.** A fallback that fires
+on every single call is not resilience. The upstream half is the retirement above; the ID decision
+that would stop it firing at all is the admin's open item.
+
+**The five skips were never a coverage gap.** They read as five separate "we could not check", which
+would send someone hunting five causes. They are one `await` in the wrong place.
+
+**The gate said something stronger than "unproven" — it said "never".** The 2026-08-27 fix taught it
+to distinguish "never came up" from "we never checked". Neither was true here: the preview was still
+starting. A verdict taken before its evidence arrives is not a coverage limit, it is a false statement,
+and it is the kind that teaches a reader to distrust the true parts of the same report.
+
+### Not touched (recorded, not silently dropped)
+- **113s before the first model call**, 85s of it the GitHub zipball import. A real struggle point,
+  outside this change's blast radius.
+- **`plannedModel` vs delivered model** still disagree in the manifest on weak builds. Correct
+  behaviour, misleading record.
+
+Gate: both `tsc` clean; FULL suite **1440 files / 18979 tests green**. All three guards verified to
+bite, including the mirror-image case that a genuine source edit is still reported as a real change.
+## 2026-09-03 — admin build-report modal: the header buttons were cropped on mobile
+
+Report: *"header ke right side ke button mobile me show nahi hote, crop ho ja rahe hai. header ke
+button ko horizontal swip karne layak banwao!"*
+
+**Root cause.** The report-detail modal's header (`AdminDashboard.tsx`, the popup Copy JSON /
+Download JSON / Mark fixed / Delete / Close row) laid the title and the button group out with plain
+`flex justify-between`, and the button group carried `shrink-0` — so on a phone the row was wider
+than the screen, and the modal's own `overflow-hidden` (there for its rounded corners) simply clipped
+whatever button ran past the edge. `overflow-x-auto` on its own would not have fixed this: a flex
+child only becomes scrollable once something caps its width to less than its content — otherwise the
+box just grows to fit its content and overflows the parent instead.
+
+**Fix.** Capped the button row at `max-w-[68vw]` (lifted to `sm:max-w-none` once the screen is wide
+enough that the row already fits) and added `overflow-x-auto`, so the row now scrolls/swipes
+internally instead of relying on the parent's clip. Every item inside the row (part picker, Copy
+JSON, Download JSON, Mark fixed, Delete, Close, the "history unreadable" warning) got `shrink-0` (and
+`whitespace-nowrap` where relevant) too — without it, the browser's default flex-shrink would squeeze
+and wrap the button text before the scrollbar ever engaged, which is the same failure in a different
+shape.
+
+**Locked** in `tests/adminReportParts.test.ts` — a new describe block scans the live source for the
+width cap + `overflow-x-auto` pairing and for `shrink-0` on every button in the row. Verified to bite:
+reintroduced both halves of the original bug (dropped the cap; dropped `shrink-0` from Copy JSON) and
+confirmed the new tests fail with the expected message, then restored.
+
+Gate: both `tsc` clean; FULL suite **1439 files / 18968 tests green**.
+
+## 2026-09-03 — Pro v5.0 Files panel: the per-row icon strip is desktop-only now
+
+Report (with a phone screenshot of the whole right-hand column ringed in red): *"jab koi app banata
+hai, aur user file wala button se jab file kholta hai, to yaha bahut se button dikhte hai … uske
+andar woh sare button hatao."*
+
+**Root cause — it was never one row of buttons, it was TWO SETS OF THE SAME ACTIONS.** `FilesPanel`
+renders a hover-revealed icon strip per file (View · Copy path · Duplicate · Rename · Delete) AND,
+when `tapActions` is on (every non-desktop device mode), a tap menu of real labelled buttons under
+the row. On a phone both were live at once: hover cannot reveal anything on touch, so the strip fell
+back to `opacity-60` and sat on screen permanently — five 10px icons duplicating a menu that was
+easier to hit, while stealing the width that made filenames truncate mid-name (visible in the
+admin's own screenshot: `src/components/DoseCalculat…`, `src/components/MedicineCard…`).
+
+**Fix.** The strip is now gated on `!tapActions`, so the strip and the tap menu are MUTUALLY
+EXCLUSIVE — every action reachable exactly once, on both device classes.
+
+**The other half, which is what makes this a fix and not a deletion.** The strip held two actions the
+tap menu did not: **Rename** and **Duplicate**. Hiding the strip alone would have silently removed
+two working capabilities from every phone user. Both were added to the tap menu in the same change,
+wired to the same handlers, behind the same `onRenameFile` / `onDuplicateFile` capability guards, and
+each closes the menu after acting.
+
+Deliberately NOT changed: the strip's `opacity-60 sm:opacity-0 sm:group-hover:opacity-100` classes.
+With `tapActions` false on a narrow viewport (a phone forced into desktop mode) there is no hover to
+reveal anything, so that `opacity-60` is the only thing keeping the icons reachable at all.
+
+**Locked** in `tests/filesPanelTouchActions.test.ts` — the strip's gate, all five icons living inside
+it, and every one of the tap menu's seven actions being present, wired and guarded. Verified to bite:
+reintroduced both failure modes separately (removed the `!tapActions` gate; removed Rename from the
+menu) and confirmed the matching tests fail each time, then restored.
+
+Gate: both `tsc` clean; FULL suite **1442 files / 18996 tests green**.
+---
+
+## 2026-09-04 — The review that ran out of time no longer throws its findings away (admin: build what's best)
+
+**The admin's brief:** read the code and `CLAUDE.md`, and build whatever best serves — in order —
+(1) world-best / error-free, (2) fast, (3) low admin cost.
+
+**Why THIS.** Rather than pick from my own list, I took the item the repo itself already records as
+unfixed: the 2026-09-01 autopsy's **STILL OPEN** line — *"291s of post-build work that produced
+nothing — the review timed out on 46 files and its findings were discarded. The user paid for it in
+time and money. Not touched here."* It is the rare item that serves all three priorities at once:
+findings that today vanish are real bugs shipping (1), 38% of a build spent for nothing (2), and
+tokens already bought and then binned (3).
+
+### The arithmetic, checked rather than assumed
+
+`reviewerBudgetMs(46 files)` = **194s**, `reviewGraceMs` = **30s**. So that build spent its full
+budget AND the entire grace window and still lost everything. I also probed whether the `Math.max(MIN,…)`
+floor could start a review with no headroom (it returns 45s even for NEGATIVE headroom) — **it cannot**,
+because the `reviewHeadroomOk` entry gate needs 120s first. Recorded because it looks like a bug and is
+not one; the next person to read that line deserves the answer without re-deriving it.
+
+### Root cause — the class, not the instance
+
+Two previous fixes both moved the CLIFF rather than removing it: 2026-07-07 made the budget
+size-scaled, 2026-08-12 added the grace window after a review landed 1.5s late. Neither could help
+here, because **the budget is a guess about how long a review takes, so some review will always land
+past it.** Raising the numbers again buys a slower build and a further-away cliff.
+
+**What nobody had used: the reviewer narrates its findings AS IT WORKS.** It is a sub-agent on the
+shared event stream, and the 2026-08-12 report's own timeline shows the complete review text arriving
+as an `AGENT_STEP` one millisecond before `agent_done`. The work was never unobservable — it was
+unobserved. So the timeout keeps its real job (stop WAITING) and loses the one it should never have
+had (throw away what was already said).
+
+### Shipped
+
+- **`partialReview.ts`** (pure) — `salvageReview()` rebuilds a verdict from the reviewer's own
+  narration. **Costs nothing: no extra call, no extra token** — this is money already spent, collected
+  instead of binned.
+- **Three honesty rules, each one something this codebase has already paid to learn:**
+  1. **A partial review can NEVER fail a build.** The reviewer is instructed to self-dismiss false
+     positives *in the same finding*, so a truncated stream may hold a `[CRITICAL]` it was about to
+     withdraw. Deep-test 66ec5c1e is the price of acting on a phantom one — a working, render-verified
+     app failed and the auto-fix chased it to the wall-clock cap. For the same reason it deliberately
+     does **not** feed the C9 auto-fix: leads, not a verdict.
+  2. **A score is never invented.** `reviewBuild` may infer 85/40 for a COMPLETE review that omitted
+     the number; doing that here would be scoring an unfinished inspection. Only a score the reviewer
+     actually printed is carried.
+  3. **It labels itself partial** in its own summary, so no surface can present it as complete.
+- **`formatPartialReview()`** rather than `formatReview()`, which returns `''` at score 0 — precisely
+  when a salvaged review has findings worth showing. Reusing it would have silently dropped the very
+  findings this rescues.
+- New report code **`REVIEW_PARTIAL`** (warning, `autoResolved: false`).
+- Subscription is `replay: false` and always detached in a `finally` — with replay on, a second build
+  in one session would salvage the PREVIOUS turn's findings and report them against new code.
+
+### Verification
+Both `tsc` clean; FULL suite **1443 files / 19006 tests green**. Both guards verified to bite.
+⚠️ Worth recording: when I neutered `partialReview.ts` to prove its guard bites, `git checkout` did
+**not** restore it — the file was still untracked, so the neutered version survived and the next gate
+would have been green against broken code. Caught by re-reading the file rather than trusting the
+restore. **An untracked file has no version to check out; verify the restore, don't assume it.**
+
+## 2026-09-04 — Name your app, and rename it any time (admin-requested)
+
+**The ask:** *"jab jab bhi app bane to chat box me hi ek dedicated message sirf 'name' ke liye ho, aur
+us message ke aage edit button ho … jab user save kare to har jagah wahi name ho jo user ne dala hai
+(duplicate not allowed) aur sath me ai ka app building disturb bhi na ho. app ka naam / app building —
+dono smooth rahe."*
+
+### What was in the way — a rename was not a small change, and the reason matters
+
+The GitHub repo name was **never stored**. It was RECOMPUTED on every build turn from the
+conversation's `title` + `createdAt`, and `ensureRepo(name)` means *"find the repo with this name,
+else CREATE it"*. Those two facts make a naive rename destructive: change the input to that
+computation and the next turn computes a name GitHub does not have, so it creates a **brand-new empty
+repo** and pushes there — leaving the real app and its whole history stranded in the old one. That is
+precisely the repo sprawl `GitStorageTarget`'s own header says the design exists to prevent.
+
+So the fix had to make the name **stored data instead of a derivation**.
+
+### What shipped
+
+- **`appName.ts`** (new, pure): normalize / validate / slug / `effectiveAppName` / `findDuplicate`.
+  `effectiveAppName` is the ONE resolver every surface calls — that is what "har jagah" actually is.
+- **`appName` + `repoName` persisted** on the conversation record, through both the in-memory and
+  Firestore stores (following the existing `pinned` precedent, including the list view).
+- **`POST /api/agentv3/conversations/:id/name`** — ownership-checked, validated, duplicate-refused
+  (409) *before* anything is written. It writes the display name FIRST and only then attempts the
+  GitHub repo rename.
+- **`renameRepo`** on both GitHub clients — a real rename, so the repo **moves with its history**
+  rather than a new empty one appearing. Never throws.
+- **Chat name card + rename popup** in `AgentV3Panel`, deliberately usable *while a build runs*.
+
+### Why the build genuinely cannot be disturbed — a property, not a promise
+
+Because `repoName` is persisted, a build pushes to the **stored** name. If GitHub refuses the rename,
+that stored name is unchanged and the build keeps pushing exactly where it already was; the only
+casualty is the repo keeping its old name, which we then say out loud. The rename cannot half-apply
+either: `repoName` is written ONLY after GitHub confirms the move.
+
+**The derivation deliberately ignores `appName`** and reads only the immutable `title`. This is
+load-bearing and was found by tracing the ordering rather than assuming it: the conversation record is
+created *late in the first build request*, well after the repo name is computed — so turn one's pin
+write is a **no-op by construction**, and a rename right after the first build (the most likely
+moment) would otherwise have orphaned the app. Deriving from `title` means turn two recomputes the
+same name, finds the same repo, and pins it then.
+
+The rename endpoint closes the remaining gap by reconstructing the derived name from the record's own
+immutable identity when nothing is pinned yet, and pins the chosen name on a 404 so an app that has
+never been pushed is simply **born** with the user's name.
+
+**Locked** in `tests/appName.test.ts` (29) + store round-trip tests. Three guards verified to bite:
+feeding `appName` into the derivation, dropping the persisted-name preference, and disabling Save
+while a build runs — each fails its own test, then restored.
+
+`AppKnowledgeBase.ts` updated (mandatory for a user-facing capability).
+
+Gate: both `tsc` clean; FULL suite **1445 files / 19045 tests green**.
+---
+
+## 2026-09-04 (later) — Solution #1 "stop the model writing boilerplate": mostly ALREADY BUILT, so the gap got built instead
+
+**The admin approved solution #1** from the 12 I proposed (stop paying a model to write boilerplate).
+Investigating before writing code — safeguard #6 — showed **most of it already exists**, and saying so
+is worth more than looking busy:
+
+- `ViteReactProviderContents` already ships `package.json`, `vite.config.ts`, all three tsconfigs,
+  `index.html`, `main.tsx`, `ErrorBoundary.tsx` and `index.css` **deterministically**.
+- `goldenScaffolds/` holds 20+ compile-tested starter apps that pre-seed a matching prompt.
+- `ScaffoldGuard` blocks `create-*` generators; `scaffoldBoilerplate` restores a broken ErrorBoundary;
+  `protectBoilerplateInRepair` stops a repair pass landing a change to it; SimpleBuilder drops these
+  paths from the parsed manifest.
+
+**So the honest answer to "build #1" is: it is built.** The remaining gap is not more scaffolding —
+it is that **the guard protecting the scaffolds swept 2 of the 25 providers the registry serves.**
+
+### Why that gap is the dangerous one
+
+The 2026-08-23 "Make an VPN App" build: `ViteReactProvider`'s package.json ran `tsc -p
+tsconfig.build.json`, the module EXPORTED that config and never wrote it, so `npm run build` died with
+TS5058 on **every app that provider had ever made**. The builder then "repaired" it by copying a
+different config — **96,610 characters** of fresh type errors on an app whose preview was already
+rendering. An 18-minute avalanche from a one-line omission.
+
+**Nothing caught it because `npm run dev` never reads those files.** It is invisible in every preview
+and appears only at publish — the "worst kind of green". `scaffoldScriptsResolve.test.ts` was written
+that day and covered the provider it happened in. **The other 24 had no such guard**, and the identical
+mistake in any of them would have reached users unseen.
+
+### Shipped
+
+- **The sweep now reads `TemplateRegistry` itself** instead of a hand-written list, so a provider added
+  tomorrow is covered the day it lands. 6 tests → **106**.
+- **Three sibling doors to the same failure**, all checked per provider: a tsconfig that `extends` a
+  file we do not write (TS5083), an `index.html` whose entry `<script src>` is missing (blank page in
+  dev AND in the built app), and a `package.json` `main`/`module` pointing nowhere.
+- **A false positive fixed before it could do harm.** Widening the sweep made it report a missing file
+  called **"3000"** — the static scaffold serves with `… -p 3000`, and `-p` is not a tsc-only flag. The
+  matcher now only looks inside commands that actually run `tsc`. This mattered more than a stray
+  failure: *the first thing anyone does with a guard that cries wolf is weaken it*, which is precisely
+  how the real bug would get back in.
+
+### Honest scope
+**All 25 scaffolds pass today — this is prevention, not a bug fix.** No user-visible defect was found or
+repaired. What changed is that the class can no longer be reintroduced unnoticed. Proven, not assumed:
+reintroducing the exact 2026-08-23 bug into `node-express` — a provider that was previously **unswept** —
+now fails the suite; before this change it passed.
+
+### ⚠️ A process lesson, learned twice in one session in OPPOSITE directions
+Verifying "does this guard bite?" means temporarily breaking the code, and **`git checkout` is the wrong
+way back both times**:
+- an **untracked** file (`partialReview.ts`): checkout does nothing, so the *broken* version survives and
+  the next gate goes green against it;
+- a **tracked** file (`scaffoldScriptsResolve.test.ts`): checkout reverts **everything**, silently
+  discarding the session's work on that file — which is what happened here, and the whole extension had
+  to be rewritten.
+
+**Back up to the scratchpad before the temporary break, and restore from that backup.** Then re-run the
+suite and confirm the count is what it was.
+
+Gate: both `tsc` clean; FULL suite **1444 files / 19112 tests green**. Both guards verified to bite.
+
+---
+
+## 2026-09-04 (later still) — an import's quiet minutes now have names
+
+**Priority 2 (fast), and it began as an investigation rather than a fix.** My own faa98da9 autopsy
+recorded, and did not touch, a struggle point: **113s before the first model call, 85s of it the GitHub
+import**, with a **40-second stretch where nothing at all was recorded**.
+
+### What the investigation actually found — including two dead ends worth recording
+
+Chasing the 71s between `IMPORT_LANDING` and `IMPORT_DIAGNOSTIC`, the obvious suspects were already
+fixed, and finding that out is the useful part:
+
+- **`materializeAssets` is already pooled.** The mitrify autopsy of 2026-08-04 measured this exact
+  thing — 129 assets + 22 large images as ~151 sequential round-trips, 100s of a 624s build — and fixed
+  it. Its comment calls it "the FOURTH instance of one bug class in this repo — serial awaits over a
+  network".
+- **The durable Firestore merge** is named in that same comment as already fixed.
+
+So the cause is NOT the obvious one, and I could not reproduce a real GitHub import from here to find
+it. **Guessing at an optimisation on the import path would risk the one absolute rule for a saving I
+cannot demonstrate**, so I built the thing that makes the next report answer the question instead.
+
+### The real gap: the mechanism existed and this path never called it
+
+`BuildDiagnostics.enterPhase()/exitPhase()` records `⏳ <name> took Ns` and — the half that matters to
+users — supplies the HEARTBEAT's label. Every PREVIEW stretch uses it, which is why that report could
+say *"creating the database tables took 50s"* and *"installing dependencies and starting your app took
+28s"*.
+
+**The import's own stretches never entered a phase.** Hence the 40-second hole, and hence minute 1's
+heartbeat reading *"⏱ minute 1 — still working (last: 🔗 Connected to https://github.com/…)"* — a
+stale echo, because the heartbeat had no active phase to name.
+
+Three stretches are now named: **importing your project's files**, **adding your project's images and
+fonts**, **saving your project so it survives a restart**.
+
+### Why this is safe by construction
+Purely additive: every call is optional-chained, wrapped in try/catch, and closed in a `finally` so a
+throwing import still releases its label — and `enterPhase` supersedes an unclosed phase by design, so
+even a missed exit cannot strand one. A diagnostics slip must never turn a reporting improvement into
+an import failure; that would be a worse bug than the one being fixed.
+
+### What it buys
+- the ADMIN report gets `⏳ … took Ns` lines for the import, so the next person chasing a slow import
+  **reads** the answer instead of guessing at a gap;
+- the USER stops seeing a stale narration echoed for a minute, and sees what is actually happening.
+
+**Honest scope: this does not make the import faster. It makes the next report able to say why it is
+slow** — which is the precondition for fixing it without guessing.
+
+### Method note (admin instruction, 2026-09-04)
+The admin asked that source code never be broken to prove a guard bites. Adopted, and it costs nothing:
+a guard is proven with **fabricated bad input inside the test** (as `scaffoldScriptsResolve` already
+did) rather than by mutating a real file. Same proof, no risk, and none of the `git checkout` hazards
+recorded above.
+
+Gate: both `tsc` clean; FULL suite **1445 files / 19120 tests green**.
+
+---
+
+## 2026-09-04 (cont.) — the FIFTH instance of a bug class this repo had declared closed
+
+**Found while investigating the import's 71s, and worth more than the investigation itself.**
+
+`materializeAssets` closed the "serial awaits over a network" class on 2026-08-04. Its comment names
+the four instances found by then — the sandbox landing (a 648s incident), the Firestore merge,
+`collectWorkspaceFiles` (a 13-minute per-turn stall), and the asset writes — and says: *"same fix, same
+shared helper, so the class is closed here rather than patched again."*
+
+**It was not closed.** `landImportedProject` still wrote `sandboxOnly` files in a serial awaited loop,
+**ten lines above** one of the four it fixed:
+
+```ts
+for (const [p, c] of Object.entries(opts.sandboxOnly ?? {})) {
+  try { await actuator.writeFile(workspaceId, p, c); } catch { /* … */ }
+}
+```
+
+**Small today, and that is exactly the point.** `sandboxOnly` holds oversized text files the durable
+store cannot take — usually ONE lockfile, so typically one round-trip. But a repo carrying several
+(package-lock + yarn.lock + pnpm-lock, or a monorepo's per-package locks) pays a full sandbox
+round-trip each, in series, before the build can start — and **nothing in the loop bounded that**,
+which is precisely how the other four grew from harmless to a 648-second incident.
+
+Now `pool(…, SANDBOX_ONLY_WRITE_CONCURRENCY, …)`, sharing the asset path's helper, clamp and env key so
+the two network-write paths of one import behave identically. Semantics preserved and test-locked: the
+per-file catch stays per-file (one unwritable lockfile must never fail an import — npm resolves fresh),
+ordering between independent writes carries no meaning, an empty set is a no-op.
+
+**Rule-3 lesson (hunt the siblings):** a comment declaring a class closed is a claim, not a guarantee.
+The sibling here was in the same file, in the same function, a few lines from the fix.
+
+### Four areas investigated and deliberately NOT changed — recorded so nobody redoes the work
+- **`read_file` returning full content** — looks like an obvious cost lever; the code explains why it is
+  the wrong trade (*"if the model's context has been trimmed, 'you already have this' leaves it unable
+  to proceed at all"*), and a transcript ceiling already exists.
+- **Grounding size** — already budgeted (`contextBudget.ts`, 4k tokens); the faa98da9 report measured
+  **~186 tokens against that budget**, so grounding was never the cost driver on that build.
+- **`honestModelLabel`** — the `plannedModel: claude-sonnet-4-6` vs `model: kimi-k2.6` split I flagged in
+  the autopsy is CORRECT by design: the report leads with what actually delivered and keeps the planned
+  label beside it for comparison. Not a bug.
+- **Account-deletion coverage** (a standing open root cause) — real and worth closing, but it is
+  irreversible data deletion where a wrong collection name would erase the wrong user's work. **Left for
+  explicit admin sign-off** rather than taken on initiative (safeguard #3).
+
+Gate: both `tsc` clean; FULL suite **1446 files / 19126 tests green**.
+
+---
+
+## 2026-09-04 — Deleting an account now deletes the apps too (the OPEN root cause, closed)
+
+**Admin:** *"jab user app banata hai, to woh app agar github me store hai, to ham usko delete kar sakte hai? agar han to karo, nahi to rahne do. hamare firebase me hai woh ham delete kar sakte hai karwa do."*
+
+### GitHub — the answer is NO, and it should stay no
+
+`GITHUB_SCOPE = 'repo workflow read:user user:email'` (`routes/githubAuth.ts`). GitHub requires the
+separate **`delete_repo`** scope to remove a repository; `repo` alone cannot. So we cannot delete it —
+**and that is the right outcome, not a limitation to route around**:
+
+- the repo lives in the **user's own GitHub account** (`aashishcpmt093-ui/mitrify-…` in the report), so
+  it is their property, not ours;
+- adding `delete_repo` would force **every** user to re-authorise with a scope letting us delete **any**
+  repo they own, forever, to serve account deletion — a large trust downgrade for everyone;
+- the user can delete it themselves in seconds.
+
+The deletion page already says exactly this and now has a test keeping it: *"It does not delete anything
+in your own GitHub account — that stays yours."* Promising a deletion we cannot perform would be the
+worse failure. **Left alone, per the admin's own "nahi to rahne do".**
+
+### Firestore — built apps are now erased automatically
+
+`deleteUserData` covers the platform's own user records and says so in its header (*"not generated
+apps"*). `PROGRESS.md` carried the consequence as an OPEN root cause **twice**: a user could delete
+their account and leave every app they ever built in our Firestore.
+
+`workspaceDataErase.ts` closes it, under the retention manager's own rule — **nothing added on a
+guess.** Every collection was read at its own store first:
+
+| collection | doc id | subcollection |
+|---|---|---|
+| `workspace_files_v3` | workspaceId | `files` ← the source code |
+| `workspace_assets_v3` | workspaceId | `assets` ← images/fonts |
+| `workspace_checkpoints_v3` | workspaceId | `items` |
+| `workspace_embeddings_v3` | workspaceId | `files` |
+| `workspace_memory_v3` · `workspace_diagnostics_v3` · `workspace_manual_edits_v3` · `project_plans_v3` | workspaceId | — |
+
+### The three things that make it safe
+
+1. **⚠️ FIRESTORE DOES NOT CASCADE.** Deleting a document leaves its subcollections intact and now
+   unreachable. Four of these keep the actual bytes one level down, so a parent-only delete would
+   report success while the user's source code and images stayed on disk — an erase that LOOKS
+   complete. Subcollection first, **then** the parent: reversed, a mid-failure would orphan the payload
+   with its parent gone; this order leaves a still-findable parent so a re-run finishes the job.
+2. **A hyphenated uid is REFUSED, not guessed at.** `agentv3-abc-` correctly cannot match
+   `agentv3-abcd-…` (the trailing `-`), but it DOES match `agentv3-abc-d-…` — the workspaces of a
+   different user whose uid is `abc-d`, which `WORKSPACE_UID_RE` permits. Real Firebase uids are 28
+   chars of `[A-Za-z0-9]`, so this cannot arise — **a reason to be confident, not a reason to skip the
+   check**, because the action is irreversible. Such a uid is refused and reported honestly so a human
+   can finish it. Deleting a stranger's apps to satisfy a compliance box would be far worse.
+3. **Every id is re-checked with the platform's own strictest ownership policy** (`ownedByVerifiedUid`)
+   before deletion, over and above the range. If the range and the policy ever disagreed, the
+   disagreement is the bug and the policy wins.
+
+Best-effort per collection (matching `deleteUserData`), never thrown — a failure here can never block
+the account deletion the user asked for — and reported **separately** in the response so someone
+checking whether their work is really gone can see that line on its own.
+
+### The page needed no correction
+It already promised *"your projects and built apps, including their files"* — a promise kept until now
+only by a human completing the emailed request. This makes the AUTOMATED path match it, and the drift
+test now pins both halves, so a collection added to the eraser must stay described.
+
+Gate: both `tsc` clean; FULL suite **1447 files / 19141 tests green**.
+
+---
+
+## 2026-09-04 — `kimi-k2.5` removed from the free ladder (admin-approved: *"jo theek hai NavBharatAI ke liye woh karo. hata do."*)
+
+**The open root cause from the faa98da9 autopsy, closed.** Two build reports proved the rung is
+unreachable on this account — *"404 Not found the model kimi-k2.5 or Permission denied"* — while
+sitting **first** in the free Kimi ladder: **5 wasted requests out of 5 calls** in one report, **57 out
+of 40** in an earlier one. PR #2741 cut that to one per build by retiring a dead rung after its first
+failure; this ends it.
+
+Free ladder: `kimi-k2.5 → kimi-k2.6 → kimi-k2.7-code` **becomes** `kimi-k2.6 → kimi-k2.7-code`.
+
+### Why REMOVE rather than re-enable it on the Moonshot account
+
+The decision turned on one fact from the rate card, not on a preference:
+
+- **`providerRates` prices k2.5 and k2.6 identically** — `/k2[.\-]?[56]/` → `$0.60` in / `$2.50` out.
+  So the rung that now leads is **exactly as cheap** as the one removed, and it is the rung that has
+  been delivering every turn anyway. **Removing costs nothing.**
+- **Re-enabling would have been strictly worse.** k2.5 is the OLDEST rung and sits FIRST, so a free
+  build's quality floor would drop to it — for no saving. One extra heal pass costs far more than any
+  per-token difference our rate card cannot even see.
+- Removing is one line and instantly reversible; re-enabling depended on a Moonshot-side change that
+  may not even be possible if the id is retired.
+
+### Two things deliberately NOT changed
+- **The rate-card entry for k2.5 STAYS.** An older build's telemetry still names it and must keep
+  pricing correctly. This is a routing change, not a billing one — and the test says so.
+- **The PAID ladder is untouched.** This was a free-tier decision; dropping a rung there would
+  silently downgrade paying users' repairs.
+
+### The test that had to change, and why that is not weakening it
+`agentv3.test.ts` asserted the free floor keeps "3 GLM + 3 KIMI rungs". Its guarantee is *"every
+configured rung survives when `flagshipOnly` is off"* — that is intact; only Kimi's ladder got shorter
+**by design**. The count is updated to 2 with the reason recorded inline, rather than loosened into a
+range that would stop catching an accidental drop.
+
+`tests/freeKimiLadder.test.ts` pins the new ladder, that the paid one is untouched, that the rate card
+still prices k2.5, and — the one worth keeping — **that the two rungs are priced equally**: if they ever
+diverge, the trade-off that settled this changes and the decision deserves revisiting.
+
+Gate: both `tsc` clean; FULL suite **1448 files / 19147 tests green**.
+
+## 2026-09-04 — mitrify.com: why a month of DNS fixes could never have worked
+
+**Report:** *"yeh error abhi bhi aa rahi hai! 1 month se aap isko fix kar rahe ho"* — with screenshots
+showing `mitrify.com` serving Firebase's **"Site Not Found"**, while the connect screen right beside it
+read `ownership: active · host: active · SSL: active`, *"3 records you added are verified"*, and
+**"Connected — one last step: press Publish."**
+
+### The diagnosis, traced through the code rather than guessed
+
+Every fix over the past month was on the DNS / ownership / SSL side — and that side is now genuinely,
+verifiably **finished**: the screenshot shows all three ACTIVE and every record verified. None of it
+could ever have made the site appear, because the blocker is somewhere else entirely:
+
+1. mitrify is a **fullstack ship-whole** app (its own refusal text says so: *"your website and your
+   server … share one address, so they belong together"*).
+2. `POST /api/agentv3/publish` **refuses such an app with 422** (`routes/agentv3.ts`, the
+   "IS THIS EVEN A WEBSITE?" block) — correctly, since uploading an Express app to a static CDN is
+   what produced the broken site in the first place.
+3. So the workspace's Firebase Hosting site **never receives a release**.
+4. The custom domain is attached to **that** site (`siteIdForWorkspace`), and Firebase serves
+   "Site Not Found" for a site with no release. ← exactly the screenshot.
+5. `renderDeploy.ts` contains **no custom-domain code at all** — so even a perfect "Deploy backend"
+   never points mitrify.com at the Render service where the app can actually run.
+
+**⇒ The domain is attached to a place that structurally cannot serve this app, and nothing in the
+product can move it to the place that can.** That is why the loop survived every fix.
+
+### Shipped now — the screen stops sending the user at a button that answers 422
+
+`domainPublishBlockNote` was written (2026-08-24) for exactly this class, but stayed **deliberately
+silent for `fullstack`** because a *splittable* fullstack app really can publish. That reasoning was
+sound and incomplete: the publish route's only fullstack path is `wiredToBackend`, which requires
+`strategy === 'split'`. For **ship-whole** the refusal is as certain as for a bare server. It now says
+so, and only on a real `analyzeApiWiring` verdict of `false` — never on a guess.
+
+### And the sibling bug that made it worse (rule 3 — hunt the class)
+
+The status route formed its verdict from **the manifests alone**. That is the very defect the publish
+route fixed on 2026-08-25: `planDeployment`'s file-based half — does the source actually IMPORT a
+server framework — can never fire when only four manifests are handed to it. So the two halves of one
+product could reach **opposite conclusions about the same app**: publish refusing it as a server while
+this screen cheerfully said "one last step: press Publish". The route now uses the same two-stage
+escalation, with the same cost profile (an ordinary static app pays exactly what it paid before).
+
+⚠️ A test asserting `not.toContain('loadWorkspaceFiles(...)')` was **rewritten, not deleted** — it had
+pinned the single-stage read that WAS the bug. The cost guarantee it protected is real and is kept,
+now asserted as *where* the read lives rather than as a blanket ban, which is strictly stronger.
+
+### 🔴 OPEN ROOT CAUSE (rule 6) — mitrify.com still will not serve until this is built
+
+Telling the truth is not the same as making the site work. For a ship-whole fullstack app the domain
+must point at the host that can RUN it (Render), not at Firebase static hosting. That capability does
+not exist: no Render custom-domain call, and no path that writes the DNS records Render requires.
+**Recorded as open rather than papered over.** The next step is a `renderCustomDomain` module plus a
+branch in the connect flow that attaches such an app's domain to its Render service, with the records
+written through the Cloudflare-managed zone we already run.
+
+Gate: both `tsc` clean; FULL suite **1449 files / 19184 tests green**. Both guards verified to bite.
+
+### Same day, second screenshot, same app — two more, and one was a hole in the fix above
+
+The admin sent a second pair (*"ye screenshot bhi same app ke hai"*) within the hour. It caught two
+things, and the first is a defect in the fix recorded immediately above.
+
+**1. 🔴 THE FIX ABOVE DID NOT FIRE IN THE STATE THEY WERE LOOKING AT.** The status route computed
+`publishBlocked` only when `serving.state === 'nothing_published'` — chosen because that is where the
+screen says *"one last step: press Publish"*. But that is not the only state that says it: `error`
+says *"Publishing again usually fixes this"*, and `unknown` — our probe could not reach the domain —
+says *"If it shows an error page, press Publish once."* The new screenshot shows exactly `unknown`
+("We could not open your domain from here to confirm…"), so the fix written to end this loop was
+silent precisely where the admin was standing. **The right gate was never a state name**: it is *is
+this screen about to tell the user to press Publish?*, and every non-serving state does. Now gated on
+`serving.state !== 'serving'`. Cost is unchanged where it matters — a serving domain asks nothing.
+
+**2. ONE SCREEN CONTRADICTING ITSELF about the same deploy.** The refusal read *"Render is configured
+— a real deploy can run"* and told the user to use "Deploy backend", while the panel directly beneath
+it said *"Your code has to live in a GitHub repository first"* — and no Deploy backend button existed
+anywhere, because `backendDeployOffer` had correctly withheld it for having no repo. Root cause:
+`renderRequirement` announced the capability from **half the facts** (a key resolved), while a Render
+deploy reads code FROM a repo and needs both. It now takes `hasRepo`, and a key without a repo says
+the honest thing instead. `undefined` keeps the old wording, so a caller that does not know says
+nothing new, and a missing KEY still reports the missing key rather than hiding it behind the repo.
+
+The fact is taken from the client's own `deployRepo` — the very value the panel renders — so the two
+agree **by construction** rather than by two implementations staying in step. It shapes a sentence
+only, never an authorisation.
+
+⚠️ Two assertions from the fix above were re-anchored, not deleted: they pinned the narrow gate that
+WAS the hole.
+
+Gate: both `tsc` clean; FULL suite **1449 files / 19191 tests green**. Both new guards verified to
+bite (narrowing the gate back; claiming a deploy can run with no repo).
+
+### The open root cause above is now CLOSED — the domain follows the app to Render
+
+Recorded above as an open root cause: *"a ship-whole fullstack app's domain must point at the host that
+can RUN it (Render), not at Firebase static hosting. That capability does not exist."* Built now.
+
+**`renderCustomDomain.ts`** (new, pure + 23 tests): attach a domain to the Render service and plan the
+DNS that makes it resolve. Idempotent — a domain already attached, or a 409 from the host, is SUCCESS,
+because pressing Connect twice must never turn a working setup into a failure.
+
+**🔒 A CNAME AT THE APEX, DELIBERATELY NOT AN A RECORD.** Render's documented apex recipe is an A record
+to their anycast IP. Writing that would bake a third-party address into our source, and the day they
+renumber, every domain we ever wrote goes dark together with nothing failing on our side to reveal it —
+the exact stale-hardcoded-value class this repo has already been burned by (retired model ids in five
+files). We only reach here for zones WE manage in Cloudflare, which flattens an apex CNAME on every
+lookup, so there is no address to go stale and Render can renumber freely. Test-locked, including an
+assertion that the planned records contain no IP literal at all.
+
+**Wired at the moment a service first exists — `POST /api/agentv3/deploy-backend`.** Not on the connect
+screen: a domain can only point at a service that exists, and a successful backend deploy is the exact
+instant one starts to. So there is no new button and no new step — deploying the backend simply takes
+the connected domain with it, attaching it at Render and writing the CNAME through the managed zone.
+
+**🔒 Strictly additive, and it cannot lie about the deploy.** Every domain failure is reported in
+`domainNote` and none can turn a successful deploy into a failed request — the deploy already happened,
+and reporting it as failed because a DNS write did would send the user to redo work that succeeded.
+`firebaseDomainsForWorkspaceStrict`'s `null` ("could not ask") is deliberately NOT read as "no domain",
+which would have silently skipped pointing a domain the user really has. With no managed zone we print
+the exact CNAME rather than implying it was done.
+
+**Honest about what is still required of the user:** mitrify has no repo and no deployed service yet, so
+the first two steps remain theirs — connect GitHub and push the app, then deploy the backend. This
+change removes the third, which was missing entirely and which no amount of user effort could supply.
+
+Gate: both `tsc` clean; FULL suite **1450 files / 19214 tests green**. Guards verified to bite (a DNS
+failure failing the deploy; treating "could not ask" as "no domain").
+
+## 2026-09-04 — GitHub import: "kis port par run karna hai yeh confuse ho jata hai"
+
+**Root cause was a SCATTERED check, not a missing one.** Three readers already existed, each seeing a
+different narrow slice, and each caller picked its own subset:
+
+| reader | sees | used by |
+|---|---|---|
+| `devScriptPort` | package.json scripts only (`--port`, `-p`, `PORT=`) | preview + import |
+| `serverPortFromFiles` | a FIXED list of server entry paths | preview only |
+| `clientVitePort` | `vite.config` `server.port` — **module-private** | nothing outside its own file |
+
+An app WE scaffold declares its port in a script, so the narrow readers sufficed and the gap never
+showed. An **imported repo is the opposite**: it pins its port in `vite.config.*`, in a `.env`, or in a
+server entry outside that fixed list (`backend/server.js`, `api/index.js`, `src/main.ts`) — none of
+which the preview path could see, and the IMPORT path had the narrowest reader of all (scripts, then a
+framework GUESS). So discovery fell through to the guess, we visited the wrong port, and reported "no
+service running" about an app that was serving perfectly somewhere else.
+
+The `.env` case is the sharpest: an imported Express app says `app.listen(process.env.PORT)` with **no
+literal fallback**, so the code reader finds nothing and the real number lives in `.env`, which nothing
+read at all.
+
+**Fix — the class, not a third instance.** New pure `lib/declaredAppPort.ts`: ONE resolver over every
+declaration site, with documented precedence (an explicit script flag → dev-server config → `.env` →
+the server's own `listen`), each step only ever filling the silence above it. Both callers now use it,
+so a fourth caller cannot invent a fourth subset. Same centralisation pattern as `safeRelPath` (4
+drifted copies → one module) and the retired model ids.
+
+**Kept deliberately unchanged:** the boot log's own testimony still outranks everything — it is the app
+saying where it *landed*, and an app that MOVED (port already in use) is only correct there. And
+`declaredAppPort` returns **null** when nothing is declared, which must stay a real answer: the caller
+then keeps the evidence-first listening-port sweep, strictly better than any guess. An infrastructure
+port (a provisioned Postgres on 5432) is never returned as the app's.
+
+⚠️ One assertion in `serverPortFromCode.test.ts` was re-anchored, not deleted — it pinned the narrow
+reader. The property it protected (the preview path reads the port from the project's own files rather
+than guessing) is unchanged and now strictly stronger.
+
+Gate: both `tsc` clean; FULL suite **1451 files / 19234 tests green**. Guards verified to bite
+(reverting the import path to the script-only reader; dropping the `.env` reader).
+---
+
+## 2026-09-04 — Solution #6: the FAST lane now fixes mechanical tsc errors itself
+
+**Admin approved #6** (deterministic repair before model repair). Investigating first showed the
+deterministic layer already exists and is good — the gap was **which lane can reach it.**
+
+### The gap
+
+`EndgameRepair` was built for exactly this, and states the mandate verbatim: *"stop paying an LLM to do
+grep's job."* It followed a build that ground its last ten tsc errors one round-trip each until the
+step limit, when almost all were mechanical — an unused import, a missing `FormEvent` import, an
+export-name mismatch.
+
+Its deterministic layer is reachable only through `runEndgameRepair`, and **only `AgentRunner` calls
+that.** `SimpleBuilder` — which its own comments call *"the lane most builds take"* — went from the
+scaffold restore **straight to a model call**. So on the fast lane a build failing purely on
+`TS6133: 'X' is declared but its value is never read` paid a full repair pass for a pure string edit.
+
+**This is the SAME drift the scaffold-restore comment twenty lines above already describes:** *"the
+agentic lane has done this since 2026-08-12; THIS lane never did, and the two verify paths drifted
+apart in silence."* The restore was ported then; the deterministic tsc layer was not.
+
+### Shipped
+
+`SimpleBuilder`'s repair loop now calls the **shared** `endgameDeterministicPass` before the model —
+deliberately the shared function, not a copy of its pieces, because **a third variant of this logic is
+precisely what produced the drift being fixed.**
+
+Re-running the reconcilers there is not redundant with the generation-time pass: the files have
+**changed** since (later writes, an earlier repair attempt), so drift introduced after generation is
+catchable now, for free.
+
+Serves all three priorities at once: a deterministic fix **always** works where a model repair is a
+hypothesis (the same file records a repair that took a build from 4 errors to 41); it removes a model
+round-trip; and it removes the tokens entirely — which on a free build is money NavBharatAI pays.
+
+### Safe by construction
+Gated on `!verdict.ok`, so a healthy build costs nothing — asserted. Re-verifies only when something
+genuinely changed, so the model only ever sees what is left. Wrapped best-effort: a failure falls
+through to the model repair exactly as before. Kill switch `AGENTV3_ENDGAME_REPAIR=off`, the same one
+that governs the layer elsewhere.
+
+### Method note (admin instruction)
+The guard is proven **without breaking any source**: a test flips the documented kill switch and shows
+the same error DOES reach the model with the pass disabled. That proves the pass is what saved the
+call, and exercises the kill switch as real behaviour at the same time.
+
+⚠️ Also worth recording: my first four tests failed with `r.ok === false` and **zero** verifies — the
+build never reached verification, because my generator stub returned a one-file manifest while the
+working harness returns three. **The feature was fine; the harness was wrong.** Worth checking which
+of the two is broken before touching the code under test.
+
+Gate: both `tsc` clean; FULL suite **1449 files / 19185 tests green**.
+
+## 2026-09-04 — "abhi bhi fix nahi hua bro" — the real dead end, found in the screenshot
+
+The admin's next screenshot showed the previous fix WORKING: the blue box no longer claims *"Render is
+configured — a real deploy can run"*; it correctly says the app needs a GitHub repository first. The
+contradiction is gone. **And the app still could not be shipped** — so the honest reading is that the
+message fixes were necessary and were never sufficient.
+
+### What the screenshot actually proves
+
+The panel renders numbered steps: *"Your code has to live in a GitHub repository first… **Connect
+GitHub, then push this app to a repo of your own**… Come back here and press Publish again."*
+
+**There is no Connect GitHub button in the screenshot.** That is not a rendering fault — it is
+`backendDeployOffer` returning `cta: 'none'` because `githubConnected` is TRUE. So:
+
+* GitHub was already connected. Step 2's first half was asking for something already done.
+* Step 2's second half — *push this app to a repo of your own* — **had no control anywhere in the
+  product.** Every `pushAll` in `routes/agentv3.ts` lives inside the BUILD route, so the only way to
+  get an app into your own GitHub repo was to run a build while a token happened to be attached.
+
+⇒ **The user had done everything the screen asked, and the screen had nothing left to offer.** A test
+even pinned it: `'does not re-offer GitHub to someone already connected'` asserted `cta === 'none'` —
+the right property (don't re-offer a pointless Connect) with the wrong conclusion (offer *nothing*).
+
+### Shipped
+
+**`POST /api/agentv3/github/push-app`** — the capability the steps had always described, exposed as an
+action. Ownership-checked; uses the USER'S token so the repo is theirs and their own host can read it
+(the platform-org mirror is invisible to their Render account and is never substituted); seeds the
+sandbox first, because after the idle sweep it comes back empty and a push then would replace their
+code with nothing; pushes to the PERSISTED repo name so it can never create an empty twin beside the
+real app; and a push that did not happen is reported as a failure, never as success.
+
+**The panel now offers it.** A connected user gets a real "Put this app in my GitHub" button and steps
+that describe that button, instead of steps describing an action that did not exist.
+
+**And the screen no longer depends on catching a build event.** `repoOwner` + `repoOwnedByUser` join
+the persisted `repoName`, and a repo created during this visit is reflected immediately — the `repo`
+event that carried this fact fires ONLY during a build, so reopening an app and going straight to
+Publish showed "push this to a repo of your own" for an app that already had one.
+
+⚠️ Two assertions rewritten, neither weakened: the `cta === 'none'` one above (its property kept, its
+conclusion corrected) and a new invariant that **no path may leave steps with nothing to press** —
+which is the whole failure class, stated once so it cannot come back in a new costume.
+
+Gate: both `tsc` clean; FULL suite **1451 files / 19250 tests green**. Verified to bite by restoring
+the dead end.
+### The same gate, wrong a THIRD time — and why guessing states kept failing
+
+Admin: *"same to same error abhi bhi hai"*, with the connect screen reading *"We could not open your
+domain from here to confirm it is showing your app — **If it shows an error page, press Publish
+once**"* and mitrify.com still on Firebase's "Site Not Found".
+
+**The two conditions had drifted, and I wrote both:**
+
+| | condition |
+|---|---|
+| client (`NbaiDomainConnect`) | `s.serving?.state !== 'serving'` |
+| server (`nbaiDomains`) | `serving && serving.state !== 'serving'` |
+
+`checkDomainServing` returns **null** when our probe cannot reach the domain — a normal outcome, and
+exactly the state in the screenshot. The client's `?.` makes its branch TRUE for null, so it printed
+"press Publish once"; the server's `serving &&` makes the gate FALSE for null, so `publishBlocked` was
+never computed. **The screen sent the user at a button that always refuses, and the server said
+nothing** — after two earlier rounds on this same line.
+
+**The lesson, recorded because it is the actual defect:** each round I picked which STATES deserve the
+verdict. The answer was never a list of states — it is *"whatever makes the screen say press
+Publish"*, and only the client knows that. Two independently-written conditions for one question will
+drift, and did, three times.
+
+**Fix:** the server's gate is now character-for-character the client's, and
+`publishGateMatchesClient` pins BOTH source lines — editing either side alone fails CI. Verified to
+bite from both directions.
+
+Gate: both `tsc` clean; FULL suite **1451 files / 19240 tests green**.
+
+### And the green line right beside it was promising an impossible outcome
+
+The same screenshot carried a third false statement, in the auto-DNS summary:
+
+> *"Done — every record is already in place. **Nothing left for you to do; your domain connects on its
+> own from here.**"*
+
+Every record genuinely WAS in place and ownership genuinely WAS active — and the promise was still
+false. There was a great deal left to do, and the domain would never connect on its own, because it
+points at a site that can never receive a fullstack ship-whole app.
+
+**This is the SAME lesson `autoDnsSummary` already learned once, one level up.** It takes
+`ownershipState` precisely because "records exist" says nothing about "the host accepted them". It now
+also takes `publishBlocked`, because "the host accepted them" says nothing about whether the app can
+ever be SERVED. Each layer's success was being reported as the whole outcome.
+
+The DNS half is still reported as finished — it is, and understating it would send the user back to
+re-check records that are already perfect — but the "connects on its own" promise is withdrawn and the
+real blocker named in its place. Both completion branches are covered; fixing one would have left the
+other lying.
+
+Gate: both `tsc` clean; FULL suite **1451 files / 19255 tests green**. Verified to bite.
+
+## 2026-09-04 — the last manual step: NavBharatAI now creates the backend service itself
+
+After the "Put this app in my GitHub" action landed, one wall remained. `deployBackendToRender` MATCHES
+an existing Render service and, finding none, returned an honest instruction: *"One-time step: in
+Render → New → Blueprint, pick your repo."* True — and still a hand-off. The user leaves NavBharatAI,
+works in someone else's dashboard, and comes back. **That was the only manual step left between an app
+and a live site**, and it was ours, not Render's: their API can create the service.
+
+New pure `renderCreateService.ts` (19 tests) + a branch in `deploy-backend`.
+
+**🔒 THE START COMMAND IS READ, NEVER INVENTED.** `deriveServiceCommands` returns **null** when the
+project has no `start` script, and null STOPS the creation. A guessed start command produces a service
+that builds, crashes, and bills the user for a dead site our own UI would report as deployed — worse
+than not creating one. A `build` script is optional (plenty of Node servers need none, and demanding
+one would refuse perfectly deployable apps); `start` is not, because it IS the service.
+
+**Defaults chosen for someone else's account:** `plan: free` (a default that cannot surprise them with
+a bill) and `autoDeploy: yes` (what makes every later NavBharatAI change reach their site without
+another button).
+
+**🔒 It fires ONLY on `no-service`, and only with a repo.** Creating a service in answer to a bad key
+or an API error would be guessing with the user's account and would bury the message that actually
+explains the failure. A creation Render REFUSES leaves an honest failure — never a silent success.
+
+**A refusal a retry cannot fix becomes the step that fixes it.** The likeliest one is GitHub access:
+Render can only build a repo its GitHub app can read, and the raw 403 means nothing to a user. That
+case now names the one-time authorisation, with their repository in the sentence. 401 → the key. 402 →
+the account's free-service limit. Anything else says plainly that nothing was created.
+
+**A 2xx we cannot parse is NOT a success** — claiming one would leave the caller pointing a domain at a
+service whose address we never learned.
+
+**The path is now:** *Put this app in my GitHub* → *Deploy backend* → the service is created, deployed,
+and the connected domain points itself at it.
+
+Gate: both `tsc` clean; FULL suite **1452 files / 19274 tests green**. Verified to bite (inventing a
+start command; creating on any failure rather than only `no-service`).
+
+## 2026-09-05 — the backend-deploy path, audited to zero (admin: "koi bhi single dot missing na rahe")
+
+The admin forwarded an external suggestion (ChatGPT) proposing a frontend/`api.domain.com` split
+architecture, and asked for an audit before any code. Per the external-suggestion rule the suggestion
+was treated as raw material: the real code was read, the parts that fit were built, and the part that
+would have HARMED the app was refused with reasons.
+
+**What the audit found — and the ONE cause behind all of it.** Every defect below is the same shape:
+
+> **each layer reported its own narrow success as the whole outcome**, or the platform could NAME a
+> situation correctly and then act as if it had not.
+
+**1. The deployed backend booted with NO environment (PR #2751).** The PREVIEW app is handed the
+user's saved keys — the build writes the scoped vault into the sandbox `.env` before anything runs.
+The DEPLOYED service was handed nothing: `buildCreateServiceRequest` had no `envVars` field at all. An
+app reading `DATABASE_URL` worked on screen, built on Render, **crashed on boot**, and the UI said
+"deployed". The second absolute rule's exact failure mode.
+The source is the VAULT, not the sandbox `.env`, and that is the whole design: the build prefers the
+sandbox's own Postgres, so `DATABASE_URL` there points at an address that dies with the sandbox.
+Copying it is WORSE than a missing variable — a service that boots, connects to nothing, and fails at
+the first request with a value that LOOKS configured. Such addresses are withheld and NAMED. The test
+is on the VALUE, never the name: a real hosted Postgres is also called `DATABASE_URL`.
+An EXISTING service is only READ — Render's env API replaces the whole set, so writing ours in would
+delete what the user configured themselves. An unreadable answer is `unknown`, never clean.
+
+**2. Nobody ever checked whether the app came up.** "Deploy triggered" is the host accepting a
+request; it was the last thing we ever said. New `renderDeployStatus.ts` + `POST /api/agentv3/deploy-status`.
+A host status is a claim about the host's pipeline; an HTTP reply from the real address is the app
+answering for itself — so **the probe outranks the status**, and a service the host calls `live` that
+refuses every connection is NOT reported live. Answering is the test, not a 200 (a backend that only
+serves `/api` 404s at its root and is healthy). An unfamiliar status is `unknown`. The client polls
+with backoff, bounded at five minutes, and EVERY exit says something true, including the timeout.
+
+**3. The free plan sleeps, and the user learned it from their own slow site.** Said only in the branch
+that CREATED the service, because we chose that plan and therefore know it; an existing service may be
+on any plan. Test-pinned to exactly one such claim.
+
+**4. Python apps could be NAMED but never HOSTED.** `deployPlan.ts` has always recognised Flask,
+FastAPI and Django — and the create request hardcoded `env: 'node'`. New `pythonStart.ts` reads the
+start command from the project: a Procfile `web:` line first (a declaration beats every derivation),
+then Django's own wsgi entry, then the app object — whose MODULE **and VARIABLE** both come from the
+file, because assuming the variable is called `app` is the near-always-right guess that produces a
+service which builds and cannot start. Without gunicorn/uvicorn declared the answer is null with the
+fix named. It always binds `$PORT`.
+
+**5. Splitting an app that cannot be split.** `apiWiring.ts` established that splitting a
+relative-path app breaks every button — and left a door open: an app that DOES read an env base still
+breaks if its server never allowed another origin, because on a CDN every request is cross-origin.
+The page loads, looks right, nothing works. A split now requires positive evidence of CORS; absence of
+evidence is treated as absence, because under-detecting ships the app WHOLE (working) while
+over-detecting ships it into a wall of blocked requests.
+**And the half that makes that gate safe rather than a cure worse than the disease:** an env-based
+frontend shipped whole builds `${base}/api/x`, which with no value is literally `undefined/api/x`.
+Shipped whole the API is at the app's own origin, so `buildEnvForWhole` sets the base EMPTY and the
+calls become relative. A value the user saved always wins over that default.
+
+**6. A hole in the 2026-09-04 custom-domain work.** The route already returned `domainPointed` /
+`domainNote` — the entire point of that work — and the client's outcome parser did not mention them in
+its body type, so every one of those sentences was parsed and DISCARDED. A user whose domain could not
+be pointed saw "Deploy triggered" and nothing else. **A server that returns an honest field has not
+communicated anything until a client renders it.**
+
+**7. A cost guard on my own new feature (PR #2750).** Found while answering the admin's question about
+how backend hosting works, i.e. by re-reading what I had just built. `resolveRenderKey` falls back to
+the SERVER's key — safe for TRIGGERING a deploy of a service someone deliberately created, NOT safe
+for CREATING one: every fullstack user without their own account would have had a service made inside
+NAVBHARATAI'S Render account, on its plan limits and bill. Creation now requires the user's own key;
+triggering is deliberately ungated, since restricting it would remove a working path for no cost
+saving.
+
+**8. A "coming soon" that had been false for weeks.** `staticHostingRefusal` told users "Backend
+hosting is coming to NavBharatAI" while `renderDeploy.ts` had been a real, wired deploy the whole time.
+`deployDecision` was written in August to stop that sentence reaching users — and covered only the
+branch where a key IS available, leaving this branch teaching every user WITHOUT a key that a feature
+they already have does not exist. Its own test enforced the falsehood (`toContain('Backend hosting is
+coming')`). Worse, it withheld the one fact that unlocks the feature (save your own key) which the
+panel beside it was already showing, so the screen contradicted itself — the same defect class as
+2026-09-04. Now corrected, with a sweep over EVERY shape rather than the reported one.
+**Standing lesson: a "coming soon" line in this codebase is a thing to distrust — re-check it against
+what the product actually does before leaving it standing.**
+
+**REFUSED, with reasons (external-suggestion rule).** The suggestion's centrepiece —
+`api.mitrify.com` for every app — is wrong as a DEFAULT for our apps and would be a regression:
+`apiWiring.ts` already documents that most fullstack apps call relative `/api/…` and that splitting
+them breaks every button silently. The split path is comparatively rare; a branded API subdomain adds
+a CNAME, a certificate wait and a CORS origin (three new failure points) and fixes nothing a user
+feels, since a split app already works on its host address. The CORS gate (#5) was the real
+correctness win in that area and was built instead. Recorded as a deliberate deferral, not an
+oversight — it can be built if the admin wants branded API addresses.
+
+**AppKnowledgeBase updated** (CLAUDE.md's mandatory rule, missed on the first pass and caught in this
+sweep): the hosting entry no longer says full-stack hosting is "coming soon", and now describes the
+push-to-GitHub button, automatic service creation, Python hosting, settings carried to the deployed
+backend, the come-up check, the free-plan sleep and the automatic domain pointing.
+
+Gate on every push: both `tsc` clean; FULL suite **1455 files / 19363 tests green**. Verified to bite
+(removing the probe's precedence over the host status makes the mismatch test fail). Five test anchors
+that pinned pre-change behaviour were REWRITTEN, never deleted, each keeping the property it protected
+with the reason recorded in place.
+
+## 2026-09-05 — Publish now deploys the server half by itself (admin: "bana do!")
+
+The admin asked whether the backend hosts itself or needs a click. Honest answer: three things the
+first time (save your own key once, "Put this app in my GitHub", "Deploy backend"), then ZERO clicks
+forever after, because the service is created with `autoDeploy: yes`. Full automation is deliberately
+impossible: the service is created in the USER'S OWN hosting account on their own bill, and making one
+without asking would be the same overreach the 2026-09-05 cost guard exists to prevent.
+
+But ONE of those three presses was ours to ask for, not theirs to make. To a user "Publish" means
+*make my app live*; for an app with a server half that means BOTH halves. What happened instead was:
+press Publish → honest refusal → find the "Deploy backend" button → press that. The refusal was true
+and the button worked, and the second press was still friction we invented.
+
+**Now:** pressing Publish on such an app starts the server deploy itself, says on screen that it is
+doing so and why, and runs the SAME path as the button — so the come-up verification added earlier
+today still applies.
+
+**The two guards, and why each exists:**
+- It fires only on a TRANSITION into `backend-deploy-available`. The publish attempt clears the
+  refusal code before it runs, so that transition can only mean "someone just pressed Publish and this
+  is why it could not proceed". Reacting to the code merely BEING set would deploy on reopening the
+  panel — an action nobody asked for, in somebody's own hosting account.
+- It fires only when `canDeploy` is already true — the repository and the key are both present, so
+  nothing new is consented to and no question is skipped. With either missing the screen shows the
+  prerequisites and their own buttons, exactly as before.
+
+The rule is a PURE function (`shouldAutoDeployBackend`) rather than a condition buried in a component,
+so it is tested directly; verified to bite by removing the transition guard and watching the standing
+-code test fail. `deployBackend` remains the single implementation — a second one would have drifted
+from the verification built the same day, and a test pins that there is only one.
+
+Deliberately NOT extended to the domain-connect screen in this change: that screen's job is to get the
+domain connected, and deploying is what the Publish surface does — the domain then points itself
+during that deploy. Recorded as a choice, not an oversight.
+
+Gate: both `tsc` clean; FULL suite **1455 files / 19373 tests green**. AppKnowledgeBase updated in the
+same change (CLAUDE.md's rule), since this changes what a user has to do.
+
+## 2026-09-06 — the DNS setup that would not stop showing itself, and the repo memory that never stuck (admin: "build karo!!")
+
+Two real defects, both diagnosed from the admin's own screenshots + a UX lesson they drew from Google
+Workspace's own domain-connect flow, both implemented + tested + shipped (not just discussed).
+
+**1. THE DNS SETUP BLOCK NEVER TUCKED ITSELF AWAY.** Screenshot: an ALREADY-connected domain
+("Connected, with HTTPS" in green, ownership/host/SSL all active) still showing the FULL "Set these
+two nameservers… Check & apply records… Where did you buy this domain?" block directly underneath —
+inviting exactly what the admin reported: users re-reading finished setup instructions and
+re-pressing "Check & apply" believing something is still pending.
+
+New pure `shouldShowDnsSetup(active, sectionOpen)` in `NbaiDomainConnect.tsx`: while still connecting,
+ALWAYS visible (hiding it behind a button someone has to discover would make finishing setup HARDER —
+the opposite of the point). Once genuinely active, collapsed by DEFAULT behind a "DNS records" button
+— but a manual re-open always wins, because the values are still needed occasionally (re-copy a
+record, re-check a nameserver after a registrar reset). The Google Workspace lesson the admin drew
+("leave this page open, we process in background") was checked against the actual code rather than
+copied: NavBharatAI has NO background poller — every DNS check is a manual button press, server or
+client. Claiming otherwise would have been the exact fake-progress dishonesty the absolute rules
+forbid. The honest version of that lesson is in the closing reassurance instead: DNS propagation takes
+its own time regardless of the tab, which is true and was already partly said — now said more plainly
+while pending.
+
+**2. THE REPO MEMORY GAP — "GitHub se import ki hai, matlab connect hai!" (the admin was RIGHT).**
+The admin disputed my earlier claim that an imported app had "no repo" — and was correct. An import
+CAN genuinely land code in the user's own GitHub (their real repo on a working branch, or a fresh repo
+NavBharatAI creates in their account). The actual bug, found by tracing the code rather than assuming:
+that fact reached the CLIENT only as a live stream event during the import turn, scoped to that one
+browser tab. `deployRepo` (the Publish/Deploy-backend screen's own signal) is built from React state
+that starts EMPTY on every reload — so a workspace whose import genuinely succeeded would, on the very
+next visit, be told to "push this app to a repo of your own": a true fact about that SESSION's memory,
+delivered as if it were a fact about the app. Confirmed by grep: `repoOwner`/`repoOwnedByUser` were
+durably written in exactly ONE place in the whole server (the "Put this app in my GitHub" endpoint) —
+never by the import flow's own-repo or user-account-mirror storage modes, even though both genuinely
+deposit code in the user's own account.
+
+Root-caused end to end, not patched at one layer:
+- `ConversationRecord`/`ConversationPatch` (both stores) gained `deployBranch` — the app's SHIPPED
+  branch, so a deploy never silently targets `main` when a repo's real base branch differs, and never
+  targets `navbharatai/work` (which can hold unreviewed, mid-session edits — deploying it would be
+  worse than deploying nothing).
+- BOTH import storage modes (own-repo AND user-account-mirror) now durably persist `repoOwner` +
+  `repoOwnedByUser: true` + `deployBranch` the moment they establish where code lives — not only the
+  push-app endpoint, which gained `deployBranch` too for consistency.
+- New pure `deployRepoMemory.ts`: `repoAvailableForDeploy` is an OR (client claim OR durable record) —
+  never an override, because an empty client claim only ever means "nothing happened THIS session",
+  never "this has never happened". `resolveDeployRepo` picks the freshest usable signal (client first,
+  durable memory as fallback) and carries the BRANCH with it. Staleness (revoked access, deleted repo)
+  is deliberately NOT guarded against by withholding the offer — the real deploy attempt is the ground
+  truth and already reports the honest reason when access has gone away; a wrong upfront refusal is a
+  worse failure than an honest deploy-time error.
+- `/publish`'s refusal message and `/deploy-backend`'s actual repo resolution (matching AND creation
+  AND the branch passed to `createRenderService`, which previously received no branch at all and
+  silently defaulted to `main`) both now consult durable memory as a fallback — closing the gap on the
+  SERVER side.
+- `agentV3History.ts`'s `conversationToEvents` now synthesizes the SAME `repo` stream event a live
+  import would have emitted, from the durably-persisted fields — replayed through the SAME
+  `agentV3Reducer` used for live streams, no new client logic. This is what closes the loop on the
+  CLIENT side too: session resume (auto-restore AND opening from History) now hydrates
+  `state.repoOwnedByUser`/`repoFullName`, so the "Deploy backend" button and the auto-deploy-on-Publish
+  trigger (#2753) both work on a RETURNING visit, not only within the one live session that happened to
+  do the import.
+
+Deliberately deferred: an "unshipped edits on your work branch" warning at deploy time. Detecting it
+correctly needs a live diff between the work and base branches — a real extra API call, extra latency,
+and extra failure surface on every deploy — for a case the branch-correctness fix already makes SAFE
+(deploying `main` never exposes in-progress code; the fallback is a real known state, never mid-edit
+code). Recorded as a deliberate scoping choice, not an oversight.
+
+Verified to bite: removing the repo-replay block from `conversationToEvents` was confirmed to fail the
+new tests, then restored. Verified to bite (Step 1, earlier in the day): removing the probe's
+precedence over the host status in `deployVerdict` was confirmed to fail its test, then restored — same
+discipline applied again here.
+
+One pre-existing test anchor (`renderCreateService.test.ts`, "fires ONLY on no-service, and only with a
+repo") pinned the raw `repoUrl` variable name literally; re-anchored to `effectiveRepoUrl` with the
+reason recorded in place — the PROPERTY it protects (no-service AND a repo, nothing else) is unchanged.
+
+Gate: both `tsc` clean; FULL suite **1457 files / 19402 tests green**. AppKnowledgeBase updated in the
+same change (CLAUDE.md's rule) — both the DNS-collapse behaviour and the durable repo memory are new
+user-facing facts.
+---
+
+## 2026-09-06 — THE APP'S OWN TAB BAR WAS COVERING THE BOTTOM OF EVERY DIALOG (admin screenshot)
+
+**The report.** Building an app with v5, then Publish → connect a domain: the sheet "niche tak scroll
+nahi hota hai, vertical scroll ke bad bhi niche page crop ho raha hai, jisse button chupp jate hain."
+Plus the standing instruction: find every other place with the same problem and fix them all.
+
+**Root cause — the THIRD subtraction nobody had made.** The global mobile tab bar is `fixed bottom-0`
+at **z-150**. Every modal in the app declares a LOWER z-index, so the bar paints **over** them. The
+shared sheet geometry (`nb-sheet-overlay`, added 2026-08-23 for the *browser toolbar* version of this
+bug) subtracted the two things CSS can see for itself — the browser toolbar via `dvh`, the device
+home-indicator via `env()` — and stopped there. It never subtracted **our own bar**.
+
+Measured on the reported screen: overlay height `100dvh`, bottom padding `max(1rem, 0) = 16px`, card
+`max-height: 100%` → the card's bottom edge lands at `100dvh − 16px`, while the bar's top edge is at
+`100dvh − 56px`. **40px of the card sits under the bar on web/Android, ~56px on iOS.**
+
+**Why "just scroll down" could not save the user, which is the part that made it a functional bug
+rather than a cosmetic one:** the scroll container ends under the bar too. Scrolling to the very
+bottom of the sheet leaves those rows still covered, with no scroll left to give. The buttons were
+*unreachable*, not merely off-screen — exactly what the admin reported.
+
+**Why the stylesheet could not fix itself.** Whether the bar exists is a RUNTIME fact
+(`showsGlobalMobileNav` — device mode, focus mode, Code Studio, BotBuilder), not a media query. CSS
+cannot detect it, which is why the original author reached for `dvh`/`env()` and stopped. React now
+publishes it: `publishMobileNavHeight()` writes `--nb-bottom-nav` onto `<html>` from the **same
+boolean that renders the bar**, so the two cannot disagree. Written to `<html>`, not the app root,
+because dialogs that portal to `document.body` would not inherit it there.
+
+**The 50/50 half — why the problem was POSSIBLE at all.** This is the FOURTH drift of this one
+number: focus mode (a strip reserved for an absent bar), Code Studio (same), the iPhone home indicator
+(`pb-14` reserving the 3.5rem but not the inset), and now modal sheets. Each was fixed by hand at the
+site that broke. The class fix is that all four consumers now read ONE source — the boolean, the
+height constant, and the CSS variable derived from both — and the pairing is **machine-checked**
+rather than remembered:
+
+- `tests/sheetOverlayGeometry.test.ts` walks every `nb-sheet-overlay` in `src/`, parses the z-index
+  out of the same className, and asserts the invariant in both directions: **z < 150 ⟹ reserves**,
+  **z ≥ 150 ⟹ opts out** (`nb-sheet-over-nav`). A new dialog cannot get this wrong silently.
+- The same file forbids the hand-typed `calc(3.5rem + env(safe-area-inset-bottom, 0px))` anywhere in
+  `src/` — a rule `tests/ideMobile.test.ts` already enforced for `App.tsx` only. **It immediately
+  found a copy I had missed** (AgentV3Panel's mobile More sheet), which is the sibling hunt working.
+- **Reserving is the DEFAULT, opting out is explicit**, deliberately: a dialog that reserves when it
+  needn't loses 56px — visible and harmless; one that fails to reserve hides its own buttons — the
+  bug itself. The safe state is the one you get by doing nothing.
+
+**The sweep (every `fixed` anchored overlay in `src/`, audited by z-index):**
+- **11 dialogs on the shared geometry** fixed by the one CSS change — HostingChooser (the reported
+  one), AdminDashboard ×3, AgentV3Panel ×3, NavAppStore ×2, BotBuilder ×2.
+- **2 dialogs that paint ABOVE the bar** got the opt-out so they do not hold a dead strip:
+  AppModals' Vishwakarma modal (z-9999) and PublishCelebration (z-300, portaled).
+- **2 hand-rolled bottom sheets** never on the shared geometry, migrated: `HistoryPopup` (z-130) and
+  `DoseCalculator` (z-50). Their design heights (80% / 92%) are preserved but now pass through
+  `nb-sheet-partial`, which clamps them with `min(cap, 100%)` — unclamped, 92dvh exceeds the room
+  left on any phone under ~700px and, because these are bottom-anchored, the overflow was cut off
+  the **top**.
+- **1 hand-typed nav height** centralised (AgentV3Panel's More sheet, found by the new test).
+- Verified NOT at risk, so deliberately untouched: click-catchers and anchored popovers (they are not
+  bottom-reaching), every dialog at z ≥ 150 (the bar does not cover them), and all IDE dialogs
+  (Code Studio hides the bar, so the variable is `0px` there and the change is a no-op by
+  construction).
+
+**Gate:** `tsc --noEmit` clean; production build clean and the four CSS rules verified present in the
+emitted bundle; FULL suite **1456 files / 19380 tests green**. Verified to bite twice — reverting the
+padding fails the geometry test, and removing one opt-out fails the z-index pairing test by name.
+**Two pre-existing tests that pinned the OLD geometry were REWRITTEN, never deleted**, each keeping
+the property it protected (`HistoryPopup` still proves it never grows into a full page; the
+celebration test still proves the card scrolls and is capped) with the reason recorded in place.
+
+---
+
+## 2026-09-06 — Apple sign-in, reported "fir" (again): the reason was being read, but never USED
+
+**The report.** Admin screenshot, Safari on navbharatai.com: the Apple sign-in toast, filling the
+entire phone screen, ending in `error=invalid_client`.
+
+**First, the honest headline, unchanged from 2026-08-22: THIS SESSION CANNOT FIX APPLE LOGIN.** The
+four values live in Firebase Console → Authentication → Sign-in method → Apple, which no session can
+read or write. That remains an OPEN root cause (rule 6). What follows is the half that IS in our
+hands, and it is not nothing — it is the reason a second round of "check all four" was never going to
+end this either.
+
+**What the screenshot proves, and what it rules out.** Reaching Apple's `/auth/token` at all means
+every earlier leg works: Apple accepted the login, the return landed on our handler, a code came back.
+`invalid_client` is Apple's documented answer for *the client authentication failed* — the Services ID
+plus the client-secret JWT signed from Team ID / Key ID / .p8. A wrong Return URL or a spent code
+produces `invalid_grant` instead, a different portal entirely. So the Return URL, the
+domain-association file and the browser are all RULED OUT by this one token.
+
+**The defect in our code.** Since #2579 the detail has carried Apple's own reason. **Nothing read it**
+— verified by grep: `invalid_client` appeared nowhere in `src/` outside tests. The message therefore
+gave the same "check ALL of: Services ID, Team ID, Key ID, .p8" for every cause at that step, which
+is (a) not narrowed by evidence we already had, and (b) demonstrably insufficient, since that exact
+advice has now been followed and reported as still-failing twice.
+
+**Fixed three things, all inside `socialSignInPolicy.ts`:**
+
+1. **The reason now narrows the advice.** `appleTokenExchangeFault()` classifies Apple's own error:
+   `invalid_client` → the credential quartet, and say what that rules out; `invalid_grant` → the
+   Apple Developer portal's Return URLs, explicitly NOT the four values; anything unrecognised → the
+   original unnarrowed advice, because guessing a portal is the failure being prevented. It only
+   claims to know when the detail genuinely names `appleid.apple.com`.
+
+2. **The two traps that re-reading four values cannot reveal**, now named — this is the actual new
+   information after two failed rounds: a **.p8 downloads only ONCE**, so a re-created key leaves the
+   old file no longer matching its Key ID while all four fields still *look* right; and the key and
+   the Services ID must be in the **same Apple team**, with the Services ID grouped under the key's
+   primary App ID.
+
+3. **The toast is readable again.** The raw reason arrived with ~700 characters of
+   `httpMetadata{status, cachePolicy, staleWhileRevalidate, crossOriginEmbedderPolicy, varyHeaderNames,
+   cookieList…}` — byte-identical on every failure, carrying no information, and it had pushed the one
+   line that matters out of a message that already overflowed the screen. `condenseProviderDetail()`
+   TRUNCATES at that boundary and never rewords, so what is shown is still Apple's own text and cannot
+   become a paraphrase that says something the server did not. Net message length **1230 → 984 chars**,
+   with the signal now visible.
+
+**Also corrected: who this message is written for.** It is rendered by a `addToast` for a **signed-out**
+visitor, so it cannot be gated on admin identity — every user who tries Apple sign-in was reading a
+Java-shaped debug dump and a Firebase Console instruction they cannot act on. The user's half now
+leads, is short, and says the two things they need: it is our fault, not theirs, and Google or email
+works right now. The admin's half follows, because a phone has no console and this toast is
+deliberately the only readable surface for that reason (2026-08-21) — undoing that would reverse a
+decision made from a real debugging session.
+
+**Gate:** `tsc --noEmit` clean; FULL suite **1456 files / 19391 tests green**. Verified to bite
+(removing the `invalid_client` branch fails two tests by name). Truncation is locked as a **prefix**
+of the original, so it can never gain words the server did not send.
+
+---
+
+## 2026-09-07 — 🎯 THE PUBLISH CEILING IS REMOVED, not merely visible (ROADMAP §10.3 step 4)
+
+**The admin's instruction was exact, and it named the gap I had just admitted:** *"Bucket ON karne se
+channel-cap ceiling nahi hatta — wo abhi bhi ~50 channels/site pe atkega, chahe bucket ho ya na ho.
+isko fix karo! channel-cap ceilling badhao!!"*
+
+**How that gap came to be stated at all is the honest part of this entry.** While writing the §10.3
+activation guide I told the admin that switching the bucket on "activates the scaling fix". Verifying
+it against `Deployment.ts` before the guide shipped showed the opposite: `deployStatic` calls
+`ensureChannel` unconditionally and the mirror runs AFTER the release, so a mirrored publish consumes a
+channel exactly like an unmirrored one. I corrected it to the admin in the same session rather than
+letting a wrong premise reach the console — and that correction is what produced this task.
+
+### What was actually wrong
+
+Steps 2 and 3 of §10.3 (server mirror + Worker bucket-first) made published apps **cheaper and faster
+to serve**. Neither made them **roomier**. The channel POOL is the finite thing, and serving a channel
+from a nearer origin does not un-consume it. The pool exhausted at the same app count either way.
+
+### The fix: stop asking Firebase for a channel
+
+`PUBLISHED_APPS_BUCKET_ONLY=on` makes `deployStatic` mirror to Cloud Storage FIRST and return the bucket
+URL — Firebase is never called, no channel exists, and there is no per-site cap to reach. The ceiling
+does not move up; it stops existing, because an object store has no channel concept.
+
+- **`src/server/AgentV3/bucketOnlyPublish.ts`** (new, pure) — subdomain derivation, the three-way
+  enable predicate, URL construction, and the mirror-completeness bar. 14 tests.
+- **`Deployment.ts`** — the branch sits BEFORE `authHeaders()`, i.e. before any Firebase call. A
+  source-lock test pins that ordering, because if it ever moved after `ensureChannel` the app would
+  still serve from the bucket while quietly holding a slot: the exact "looks fixed, is not" state §10.3
+  already had once.
+
+### Four decisions worth not re-deriving
+
+1. **Three preconditions, ANDed, not warned about.** `PUBLISHED_APPS_BUCKET` + `PUBLISHED_APP_DOMAIN` +
+   the explicit opt-in. The middle one is the one that is easy to miss and fatal to skip: the default
+   published host is Firebase's own `<site>--<sub>.web.app`, which resolves **because** the channel
+   exists. Skipping the channel with no branded domain configured hands the user a link to a host that
+   was never created — and the server cannot detect that, because the publish reports success either
+   way. Refusing the path is the only outcome that cannot mislead.
+2. **Our own subdomain namespace, disjoint by construction.** `a-<sha256(workspaceId)[:24]>`. Every
+   channel id this platform makes starts with `v3-`, so a collision with a Firebase-derived `<sub>` is
+   structurally impossible rather than unlikely — one app can never be served another's files. A
+   contract test imports the REAL `makeChannelId` rather than restating the rule.
+3. **A partial mirror falls back to Firebase.** With the channel skipped there is no second origin to
+   cover for a missing chunk, and a missing chunk is a blank page. Falling through costs a slot; handing
+   the user a broken app costs the user.
+4. **A takedown bug was found and fixed before it could ship.** A bucket-only app has no channel, so the
+   existing cleanup — which keys off the channel's host — could never find it: unpublish would have
+   reported success while the app stayed LIVE. `deleteChannel` now removes the bucket objects
+   unconditionally, NOT behind the flag, so an app published while the flag was on stays removable after
+   it is turned off. This is exactly the "reports removed, is not removed" class §10.4(b) already cost
+   us once.
+
+Bucket-only apps are correctly invisible to the Publish Capacity panel — `classifyChannels` iterates
+Firebase's channel list, and these have no channel. No change needed there, verified rather than assumed.
+
+**Activation order (in `CLAUDE.md`, because getting it wrong hands users dead links):** bucket
+public-readable → Worker `APPS_BUCKET` set and deployed → `PUBLISHED_APP_DOMAIN` set and a test app
+confirmed loading → **only then** `PUBLISHED_APPS_BUCKET_ONLY=on`. Unset ⇒ byte-identical to today;
+reverting is one key.
+
+---
+
+## 2026-09-07 — the publish ceiling now ALERTS, and a six-hour silence in the alerting itself is fixed
+
+ROADMAP §10.3 step 1 named its own follow-on: *"the dashboard is only seen when the admin looks. A
+push/email alert at 'warn' … is the cheap follow-on that makes it genuinely unmissable."* Done — and it
+turned up a bug in the alerting machinery that was costing every alert, not just this one.
+
+### 1 · The capacity alert
+
+`publishCapacityAlert()` turns the existing Publish Capacity verdict into a `MetricAlert` that rides the
+EXISTING `monitor-alerts` sweep (registered in `server.ts`, every 15 minutes) into the admin's
+notification bell and email. No second delivery path — the sweep's own header explains why that would
+mean a second set of dedupe bugs.
+
+**A skipped or failed probe must never look like a recovery — that is the whole design.** Reading the
+inventory costs a Hosting API call plus a 500-record Firestore read, so probing on every 15-minute sweep
+in every live instance was not acceptable. But in this alerting model an alert ABSENT from a sweep is
+treated as RESOLVED and sends a green all-clear, so simply skipping the probe would announce "publish
+capacity is back within its normal range" without measuring anything — at the moment the number is least
+trustworthy. So `publishCapacityAlerts.ts` caches the last **successful** probe and re-emits it unchanged
+until another probe succeeds. Only a measurement that actually saw the ceiling clear can clear the alert.
+A failed probe does not even reset the cache's timestamp — it is not a measurement, so it must not buy
+itself another quiet hour.
+
+The accepted cost, stated rather than left to be discovered: if probes fail indefinitely after a warning,
+the warning persists. That is the correct side to fail on — a stuck warning is visibly wrong and prompts
+a look; a false all-clear is invisibly wrong and stops anyone looking.
+
+### 2 · 🔴 The bug this uncovered: an escalation was silent for six hours
+
+`decideAlertActions` keyed purely on the alert **id**. So an alert announced as a `warning` that then
+became `critical` was "already announced, still inside the quiet period" and said nothing for the rest of
+the cooldown — **six hours by default**, in exactly the window where the admin most needs to hear from
+us. Nothing failed and nothing looked wrong; the condition WAS firing, we had simply already mentioned a
+milder version of it.
+
+This was not hypothetical or specific to capacity: **`slow-builds` has had both severities since it was
+written** (10-minute warning, 20-minute critical), so builds could go from 11 minutes to half an hour
+with the admin hearing nothing.
+
+Fixed at the class level, in the shared decision function rather than at one call site:
+
+- An **upward** severity change breaks the cooldown and notifies immediately.
+- **Once per episode.** `AlertStateEntry.severity` records the highest severity *announced*, not the last
+  one *observed* — so a condition sitting on the threshold cannot notify on every crossing, which is the
+  flapping noise this module exists to prevent.
+- A **de-escalation** stays quiet. "Still bad, slightly less bad" is not worth interrupting for.
+- **A legacy entry with no recorded severity is not read as an escalation.** Reading "unknown" as "was a
+  warning" would have made every currently-critical alert re-announce itself on the first sweep after
+  deploy — a notification burst caused by shipping, about nothing that changed. The quiet branch
+  backfills the field instead, so genuine escalations are caught from the next sweep onwards.
+
+### 3 · A correction worth recording, because I stated it before checking properly
+
+Mid-task I concluded — and said so — that `runMonitorAlertSweep` had **no caller anywhere** and the whole
+alert delivery path was dead code. That was wrong. It is registered in **`server.ts`**, which sits at the
+repo root, not under `src/`, and my grep was scoped to `src/`. The sweep has been running all along.
+
+The lesson is the one this repo already records about capped search output, in a second form: **a
+conclusion is only as wide as the search that produced it, and "I searched the code" is not the same as
+"I searched all of it".** For an existence question about wiring, the entry point must be in scope.
+
+**Gate:** `tsc --noEmit` clean · `tsc -p tsconfig.server.json` clean · full suite green.
+
+## 2026-09-07 — the cross-type DNS conflict: why the domain could never have moved to the backend
+
+Asked "ab kuch bacha hai?" — and re-reading the newly-wired domain-pointing path found a defect that
+would have made every one of yesterday's fixes stop one step short of a live site.
+
+**THE BUG.** `applyRecords` groups desired records by `type|name` and reads the zone back with
+`?type=<type>&name=<name>` — so it can only ever SEE records of the same type. That is the correct
+invariant WITHIN a type and the wrong one ACROSS types: DNS (RFC 1034) forbids a CNAME from coexisting
+with other data at the same name.
+
+mitrify.com's apex carries an **A record** (our static host — visible as "A @ Verified" in the admin's
+own screenshot). Pointing that domain at the backend service writes a **CNAME** at the same apex. The
+provider refuses that write for as long as the A record survives, and nothing above that line could
+see the A record to remove it. So: backend deploys successfully, `domainNote` honestly reports it
+could not point the domain, and mitrify.com keeps serving the old host's error page — forever.
+
+Same shape as the ownership-TXT conflict fixed in this file on 2026-08-22: **not a slow state that
+eventually resolves, a permanent refusal.**
+
+**THE FIX.** New pure `conflictingTypesFor(desiredType)` + a sweep that runs BEFORE the write (ordering
+is the whole point — deleting after the create would leave the create already rejected):
+- CNAME ⇒ remove A / AAAA at that name
+- A / AAAA ⇒ remove CNAME at that name
+
+**🔒 A AND AAAA ONLY — NEVER TXT, MX OR NS.** Strict RFC says a CNAME excludes everything, but our
+zones are Cloudflare's, whose apex CNAME flattening deliberately permits TXT and MX alongside. Those
+records carry the user's EMAIL (SPF/DKIM/MX) and other services' verifications; sweeping them to
+satisfy a rule the provider does not enforce would silently break mail to fix a problem that is not
+there. The sweep is scoped to the types that genuinely block the write and nothing else — the same
+reasoning that keeps the TXT branch add-only.
+
+**Two safety additions the existing tests forced out, and both are real.** The pre-existing suite went
+red in ways that were fake artefacts on the surface and genuine hardening underneath:
+- an unexpected non-array response was iterated (`Array.isArray` guard now);
+- a returned record whose type differs from the one we asked to sweep would have been deleted. The
+  query already filters by type, so that can only happen if the provider answers with something else —
+  and a DELETE is irreversible. Re-checking what came back costs nothing and makes an unexpected
+  response impossible to act on destructively.
+
+Two test anchors re-pointed, neither deleted: one pre-existing fake treated every unmatched request as
+a WRITE (fine while the only reads were the two it matched; the new conflict read shifted its write
+indices), and one of my own new fakes collided on the substring `type=A` inside `type=AAAA`. Both
+reasons recorded in place; the properties under test are unchanged.
+
+Verified to bite: neutering the sweep loop was confirmed to fail both new tests, then restored.
+
+Gate: both `tsc` clean; FULL suite **1467 files / 19553 tests green**.
+
+## 2026-09-07 (2) — the screen would have offered a button that took the live site down
+
+Asked "ab app publish me koi problem bachi hai?" — traced the publish path end to end rather than
+answering from memory, and found one. It is the sharpest defect of the whole sequence, and the
+cross-type DNS sweep shipped hours earlier is what gave it teeth.
+
+**THE TRAP.** A backend deploy moves a fullstack app's domain OFF static hosting and onto the running
+service: it attaches the domain there and writes a CNAME at the apex, removing the static host's A
+record first (DNS forbids both at one name). From that moment the STATIC host's view of the domain is,
+correctly, "my records are gone" — its ownership/host states go non-active. And every screen and route
+here read exactly that view:
+
+- the connect screen concluded the domain was "still connecting", so it re-opened the setup block;
+- that block offers **"Check & apply records"**, which applies the STATIC host's records — an A record
+  at the apex;
+- and the new cross-type sweep would then **delete the service's CNAME**, because an A and a CNAME
+  cannot share a name.
+
+So a domain that was genuinely live would be taken down **by the button the screen put in front of the
+user** — handed back to a host which, for a fullstack app, can only ever answer "Site Not Found". The
+UI led them out of a working state.
+
+**THE FIX IS A RECORDED FACT, NOT A HEURISTIC.** Nothing infers where a domain points by inspecting
+DNS: the deploy that moved it now records `backendDomain` on the workspace, and every decision reads
+that record. A guess would be wrong in exactly the case that matters (a domain mid-move), and a wrong
+guess here deletes a working site.
+
+- **`domainPointing.ts`** (new, pure): `isBackendPointed` (host-specific — a second domain on the same
+  workspace is a different question), `backendPointedRefusal` (names what would be LOST, and how to
+  move the domain back — a refusal without a way forward is a dead end), `backendPointedStage` (the
+  verdict from whether the domain ANSWERS).
+- **The sync route refuses**, and the guard sits UPSTREAM of `applyRecords`, not beside it — a test
+  pins that ordering, because a guard that runs after the write guards nothing.
+- **The status route stops treating the static host as the verdict.** `status.active` answers "are MY
+  records in place?" while the user is asking "does my domain work?" — once the domain has moved those
+  are different questions with legitimately different answers. For a backend-pointed domain the answer
+  now comes from a real probe.
+- **`connectStage` checks it FIRST**, before every branch that reads static-host states, and returns
+  `action: 'none'` — there is nothing left to do here, and the one thing this screen could offer is
+  the thing that must not be pressed.
+- **The DNS setup block stays shut** for such a domain (the toggle still offers it, so the records
+  stay reachable for reference).
+
+**One conversation store, not two.** The domains route needed the durable record, and the store was a
+module-private singleton in `agentv3.ts`. It is now EXPORTED rather than reconstructed: two instances
+would each hold their own client and their own in-memory fallback, so a fact written through one would
+be invisible through the other — the exact drift this codebase keeps unlearning. Test-pinned.
+
+Verified to bite: removing the `connectStage` branch was confirmed to fail both its tests, then
+restored. Two of my OWN anchors from yesterday re-pointed (the gate's arguments changed; the property —
+ONE pure rule gates the block, never a second ad-hoc condition — is unchanged and now also asserts
+there is exactly one gate).
+
+Gate: both `tsc` clean; FULL suite **1468 files / 19568 tests green**. AppKnowledgeBase updated.
+---
+
+## 2026-09-07 — `AGENTV3_REDTEAM=on` is live, and the ROADMAP line that argued against it was wrong
+
+The admin set `AGENTV3_REDTEAM=on` in Cloud Run. Recorded in `CLAUDE.md`'s env registry per the
+hand-to-hand rule. What is worth keeping is *why* the recommendation went the way it did.
+
+### The correction
+
+`ROADMAP.md` §0 described this flag as **"an extra LLM pass on every successful build — a money
+decision"**, and grouped it with `AGENTV3_REVIEW_FASTLANE` as *"both better quality for one more LLM
+pass per build"*. Checked against the code while answering the admin, both statements are false for
+this flag:
+
+- **`FuzzProbe.ts` imports exactly one thing — `envFlag`.** There is no model client in it.
+- The red-team loop in `routes/agentv3.ts` is browser automation end to end: `browseUrl`,
+  `browserAction` (navigate / type / press), `getConsoleErrors`, then the deterministic
+  `interpretFuzzErrors`. **A clean build pays nothing extra.**
+- The one LLM call (`rtRunner.run(fuzzRepairPrompt(findings))`) is guarded by **two** conditions:
+  `findings.length > 0` — a crash was genuinely reproduced — **and** `featureHealEnabled(workspaceId)`,
+  the 20% cohort. That is rare and self-limiting, not per-build.
+
+`REVIEW_FASTLANE`, by contrast, really does add 3-6 model calls and 30-90s to **every** simple build,
+which is exactly why the fast lane skips the reviewer today. So the two flags are opposites, and the
+table said they were the same shape.
+
+### Why this mattered rather than being a tidy-up
+
+The admin had just asked to reduce spend. Quoting that row from memory would have argued against the
+one flag that is free and for treating both as equivalent — **a wrong cost estimate does not fail
+loudly; it quietly prevents a good change.** The flag went on because the code was read instead.
+
+Both the row and the summary paragraph are corrected, and the general lesson is written next to them:
+**a trade-off column is a claim about code and decays exactly like a flag list.** This is the second
+time this table has misled (the first, in August, told a session to redo finished work).
+
+### What the flag buys
+
+The happy-path preview check only proves an app renders on GOOD input. The red-team types hostile
+values into the app's own inputs — empty, oversized, injection-shaped, malformed numbers — and watches
+for a crash. It is the only post-build gate that tries to break the app rather than reading its code
+or checking that it loads. Findings appear as `FUZZ_ROBUSTNESS`; the ~20% heal cohort also gets them
+hardened, and the rest get an honest finding.
+
+Bounded by construction: 12 cases, 90-second wall clock, successful builds only, needs ≥2 minutes of
+remaining budget, abortable. It can never block, fail or hang a build. Reverting is unsetting the key.
+
+**Also merged today:** #2764 (the D-U-N-S conversion recorded as started, with the critical-path order
+and who holds each step).
+
+## 2026-09-07 (3) — "Put this app in my GitHub" said nothing was changed over a push that landed, and could have force-pushed a user's own repository
+
+Admin screenshot: the Publish screen of an app "already on GitHub" still showed the three setup
+steps, and pressing **Put this app in my GitHub** answered *"Could not reach NavBharatAI — nothing
+was changed."* after ~20 seconds. Traced end to end rather than answered from the message.
+
+**THREE ROOT CAUSES, one report.**
+
+**A. A 20-second client ceiling on a minutes-long request — and a catch that lied about it.**
+`authedFetch` defaults to 20 s. `pushAppToGitHub` passed no timeout, and the route behind it resumes
+(or re-seeds) a sandbox and then runs a full `git push` of every file — deterministically longer than
+20 s for a real app. The client aborted, its `catch` printed "nothing was changed", and the server kept
+going and (most likely) finished. **The message was false in exactly the case it is shown for**, and it
+invited the user to press again on top of a push still landing.
+- *Siblings, all confirmed:* `deploy-backend` and `supabase/provision` inherited the same default with
+  the same "nothing was deployed / try again" catch. Worse: the App-Mart publish had been given its OWN
+  90-second `AbortController` on 2026-08-27 — and `authedFetch` **overwrote** `init.signal` with its
+  own controller, so the 90 s never applied AND the abort arrived as a plain Error rather than an
+  `AbortError`, so that handler's timed-out branch never ran either. A fix that shipped, was
+  test-anchored on its wording, and never once executed.
+- *Fix (class, not instance):* `lib/longRequest.ts` — `FetchTimeoutError` (typed, so "we stopped
+  waiting" is distinguishable from "the network failed"), `LONG_REQUEST_TIMEOUT_MS` per action (5 min
+  push / 2 min deploy / 3 min database / 90 s store, all under Cloud Run's 3600 s), and
+  `fetchFailureLine`, which is the ONLY way a long-action catch may word a failure: a timeout says
+  "still running, nothing lost", never "nothing happened". `authedFetch` now HONOURS a caller's signal
+  (either aborts; a caller's own abort is rethrown untouched) instead of replacing it.
+- *Honesty closed:* after a push timeout the screen **polls the durable record** (`awaitRepoFact`,
+  bounded 3 min, read-only) — the route writes `repoOwner/repoName/repoOwnedByUser` the moment the
+  push lands, so the record, not the lost response, is the proof. The repo appears the moment it is
+  real; if it never does, the line says "could not confirm" — not success, not failure.
+
+**B. 🔴 `ensureRepo` + `git push --force` onto the default branch, with no idea whose repository it was.**
+`ensureRepo` is get-or-create; `pushAll` is `--force HEAD:<default>`. Correct for a mirror NavBharatAI
+created (its only prior commit is GitHub's auto-init, and the build path already force-pushes mirrors
+every build). Irreversible destruction for a repository the USER created whose default branch holds
+their history — reachable when the derived/renamed app name coincides with one of their real repos.
+- *Fix:* pure `pushAppTarget.ts` — `decidePushBranch` from EVIDENCE: created just now → default
+  branch; carries `PLATFORM_REPO_DESCRIPTION` (now one exported constant, stamped by both GitHub
+  clients, read back through a new `RepoInfo.description`) → default branch; anything else →
+  **`navbharatai/work` only**, default branch untouched, and the screen names the branch. The pushed
+  branch is also the recorded `deployBranch` — it is the branch that holds THIS app, and their default
+  branch is theirs. Sibling fixed the same way: the large-ZIP GitHub backstop (same two calls), which
+  now also records the repo durably (it never did — the 2026-09-06 memory rule missed it).
+- *Verified not a wider hole:* `repoNameForProject` derives `<app>-<stamp>-<uniq>`, so an ordinary
+  import never resolves to the user's real repository name; the build path's mirror push is safe.
+
+**C. Apps imported before 2026-09-06 have no durable repo record** (`repoOwner/repoName/repoOwnedByUser`
+were all introduced in #2749), so the screen genuinely does not know — which is why the button appeared
+for an app that was "already on GitHub". With A and B fixed the button IS the backfill: it finds the
+existing repo, pushes safely, records it, and the Deploy-backend button appears. A read-time discovery
+(ask GitHub with the user's token whether `<login>/<recorded name>` exists) would remove even that
+press; recorded here as a follow-up, not built — it needs the token on the publish request.
+
+**Tests:** `tests/pushAppTarget.test.ts` (decision table incl. the near-miss description; wiring pins
+the decision UPSTREAM of `pushAll`, the deploy branch = pushed branch, both clients carrying the
+description, the ZIP sibling) and `tests/longRequest.test.ts` (typed timeout, `fetchFailureLine`, every
+wording, ceilings > 20 s and < 3600 s, `pushSavedLine` naming the untouched branch, `repoFactOf`
+requiring the same three fields as the server; wiring pins each call's ceiling, no private
+`AbortController` in the chooser, catches routed through `fetchFailureLine`, the post-timeout poll, and
+`authedFetch` honouring an outer signal). `AppKnowledgeBase` updated for the two user-visible facts.
+
+**Still on the user's side for mitrify.com (platform cannot check):** their own `RENDER_API_KEY` in
+Settings → Secrets & API Keys, a `start` script, and real backend keys in Settings.
+
+## 2026-09-07 (4) — the domain screen told two truths a minute apart, re-checked a record nobody needs, and painted "Visit" green over "Site Not Found"
+
+Admin, three screenshots of mitrify.com within one minute: (1) amber *"Connected — but this app needs
+its server part deployed first"* with, above it, *"Not visible on the internet yet: TXT
+_acme-challenge.mitrify.com … Nothing is wrong"* beside `SSL: active`; (2) green *"Connected, with
+HTTPS … If it shows an error page, press Publish once"* plus a Publish button, for an app whose Publish
+is refused; (3) the domain itself answering Firebase's "Site Not Found" — under a bright green
+**Visit mitrify.com**. The true state (backend not deployed) was correct in exactly one of the three.
+
+**Four root causes, none of them "deploy the backend":**
+
+1. **Two routes, two verdict shapes, one screen trusting both.** `POST /connect` answered with the
+   BARE hosting status — no `serving`, `publishBlocked`, `dnsCheck`, `publish` — and the client did
+   `setResult(data)` with it. Pressing Connect on an already-connected domain (the admin did; the
+   button is lit in screenshot 2) therefore REPLACED the honest verdict with a bare one, and
+   `connectStage` fell through to *"Connected, with HTTPS … press Publish once"*. The next poll flipped
+   it back. → All enrichment now lives in ONE `formDomainVerdict(workspaceId, host, status)` and
+   BOTH routes return it. Test-pinned: exactly one `checkDomainServing(host)` and one
+   `verifyRecordsLive(` in the file, and the old connect shape is asserted gone.
+2. **The live DNS check verified records the host had already accepted.** The stable record view
+   remembers every record ever shown (by design), and the check ran over ALL of them — so an ACME
+   challenge TXT, dropped once the certificate was issued, was reported "not visible yet" on a
+   domain with nothing left to do. → `recordsStillPending()` (pure): only `done: false` records are
+   checked; a finished domain shows no sentence at all; a record the host re-lists is checked again.
+3. **"Visit" was green whenever `active` was true.** `active` describes DNS and a certificate, not
+   what the domain shows. → `visitTone()` (pure): green "Visit" only when the probe SAW the app
+   serving (or the backend verdict is ok); a server app with nothing deployed, an error page, or no
+   probe gets a plain "Open" link. The link is never withheld — only the colour is earned.
+4. **The server-app verdict was an instruction with no control** — *"deploy the whole app to a host
+   that can run a server"* two screens deep, while the buttons live on the Publish sheet's server-half
+   card. → `connectStage` returns `action: 'deploy-backend'`, the screen renders **Go to Deploy
+   backend**, and HostingChooser wires it to the `choose` view. Two anchors re-pointed from `'none'`
+   to `'deploy-backend'`; the property (never `'publish'`) is unchanged and now asserted explicitly.
+
+Two `domainPublishBlock` slices re-anchored from `res.json({ ...status` to `return { ...status` — the
+same block, now returned to two callers instead of sent from one.
+
+**Tests:** `tests/domainVerdictOneSource.test.ts` (one-source wiring, `recordsStillPending`,
+`visitTone`, the deploy-backend action and its wiring). `AppKnowledgeBase` updated.
+
+**What the admin should now see on mitrify.com's screen, consistently:** amber "needs its server part
+deployed first" + **Go to Deploy backend** + a plain "Open mitrify.com" — and no DNS-record note.
+The backend deploy itself is still theirs to run: repo (the button), their own `RENDER_API_KEY`.
+
+## 2026-09-07 (5) — the deploy flow audited from zero; four P0 defects fixed in one change
+
+Admin: *"ek bar wapas se pure deploy flow ka audit karo, ek dam 0 se"*. The whole path — build →
+Publish → shape verdict → refusal/offer → Put-in-GitHub → Deploy backend → create/trigger → env →
+verify → domain pointing → domain screen — read end to end. Full ledger in the session; the four
+P0 items are fixed here, the P1/P2 ones recorded below as open.
+
+**P0-1 — the split-app publish could never find its backend.** `findBackendUrl({ appName:
+workspaceId })`: no service is ever named after a workspace id, so the lookup never matched, the
+address stayed empty, `buildEnvForSplit` returned `{}`, and every split app was refused on every
+publish while the message said "deploy the server first, then publish". → the lookup uses the
+durable repository (`resolveDeployRepo`) with the repo name as fallback; one durable read serves
+both the lookup and the refusal wording (test-pinned).
+
+**P0-2 — 🔴 every vault key, the deploy key included, was forwarded into the deployed app.**
+`planBackendEnv` filtered only the DB marker and sandbox-local values, so `RENDER_API_KEY` landed in
+the user's service environment — readable by the app, its logs and the host dashboard. → the plan
+sends ONLY names the app's own code reads (`process.env.X`, and Python `os.environ` / `getenv`),
+NEVER a platform-control key (`PLATFORM_CONTROL_ENV_KEYS`, pinned against `backendDeployConfig`'s
+`tokenEnv`s), and when no code can be read it sends nothing and says so (`codeUnreadable`) rather
+than everything. Two `backendEnvVars` anchors re-pointed (the fixture now names the key it expects).
+
+**P0-3 — a split app's domain was pointed at its API.** deploy-backend attached the domain to the
+service on every success; correct shipped-whole, wrong when the website is published separately. →
+gated on the same `analyzeApiWiring` verdict the publish route uses (files read once, one verdict for
+env, creation and domain); a split app's domain stays on the website and the note says where the
+server runs.
+
+**P0-4 — every failure was HTTP 409, and 409 means "connect your repo in Render".** A rejected key,
+a host outage and a refused creation all arrived as the Blueprint walkthrough. → one status per
+reason (`no-service` 409 · `not-configured` 503 · new `create-refused` 422 · `api-error` 502) and the
+client answers the REASON first (`create-refused` has its own kind, `api-error` is a failure even on
+an old 409).
+
+**Tests:** `tests/deployFlowAudit.test.ts`. `AppKnowledgeBase` updated (keys-only-what-code-reads,
+split domain stays on the website).
+
+**Open from the audit (not fixed here — recorded, rule 6):**
+- P1 no durable deploy record (serviceId/url/live-state) → after reload the Publish screen shows
+  "Deploy backend" again and never "live at …". Proposed: a server-side "make it live" job with its
+  verdict stored on the workspace.
+- P1 an EXISTING service's env is never updated, yet the note says "save it under Settings" —
+  Render's per-key `PUT /env-vars/{key}` would make that true without replacing the whole set.
+- P1 manual-DNS apex users are told to add a CNAME most registrars cannot hold at the apex; the A
+  record / nameserver-delegation path should be offered, and the static host's A records named.
+- P1 an existing service's BRANCH is not checked against `deployBranch` on trigger; name-only
+  matching can pick an unrelated same-named service.
+- P2 no timeout on Render API calls; Python ship-whole static serving unverified; Render apex
+  verification over a flattened CNAME unverified live; 5-minute verify window vs 3–8 min first builds.
+
+---
+
+## 2026-09-07 — the phone keyboard's four "AI CODING SHORTCUTS" were dead buttons (rule 2)
+
+Found while auditing NavBharatAI against Cursor and Claude Code at the admin's request. It is not a
+competitive gap — it is the second absolute rule broken in its plainest form.
+
+### What was wrong
+
+`VirtualKeyboard.tsx` offered four buttons under **🤖 AI CODING SHORTCUTS**: Tab "Accept AI
+Suggestion", Esc "Reject AI Suggestion", Alt+] / Alt+[ for next and previous. They dispatch Monaco's
+real `editor.action.inlineSuggest.*` commands, so nothing errors and nothing warns.
+
+But an inline suggestion only exists while an inline-completions provider is registered, and
+**nothing in this codebase has ever called `registerInlineCompletionsProvider`** — verified twice, on
+that name and on `provideInlineCompletions`, zero hits either way. Monaco was being asked to accept a
+suggestion it had never been offered, and did exactly the right thing: nothing.
+
+**A user tapped a button labelled "Accept AI Suggestion" and got silence.** That is the worst shape a
+defect can take, because there is no error to notice and no log to find — the feature just looks shy.
+
+### The audit that came with it, since a symptom is not a class
+
+Rather than delete four lines, every shortcut was checked against its real handler:
+
+- **86 shortcuts total.** 50 forwarded to Monaco, 36 handled by a `switch` case in `CodeStudio.tsx`.
+- **0 have no handler at all.** So the `workbench.*` half is genuinely wired — the dead set is
+  exactly the four that need a *provider* rather than a *command*.
+
+That distinction is the finding worth keeping: `handleShortcut` forwards anything starting with
+`editor.` straight to `editorInstance.trigger(...)`, which silently succeeds whether or not the
+capability behind the command exists. The same blind spot the `workbench.view.debug` comment already
+records — "the shortcut was handled and still went nowhere" — in a second form.
+
+### The fix: capability declared, not assumed
+
+`src/components/ide/editorCapabilities.ts` — a shortcut (or menu item, or palette entry) may name a
+capability it `requires`, and `availableItems()` drops anything whose capability is absent. The four
+AI shortcuts now declare `requires: 'inlineAiSuggestions'`, which is `false`.
+
+**Why a flag rather than deleting the buttons.** Deleting fixes today and teaches nothing. The class
+of bug is *a control that advertises a capability nobody checked was present*, and this makes the
+check the only way to add one. It is generic over the item type on purpose, so the keyboard, palette
+and menu bar can share ONE gate — two copies of this rule would eventually disagree about which
+controls are honest.
+
+**Why the check could not be automatic.** Monaco's `editor.getAction(id)` catches a command that does
+not exist — but all four of these DO exist as real built-in Monaco actions. What is missing is the
+provider behind them, and Monaco offers no way to ask "does anything provide inline completions right
+now?". A capability that cannot be detected has to be declared.
+
+**The flag cannot drift ahead of the code.** `editorCapabilities.test.ts` greps the real source for
+`registerInlineCompletionsProvider` and asserts the flag equals what it finds — so setting it `true`
+without building the engine fails CI by name. Verified to bite: flipping it produces exactly two
+named failures. The gate is also applied BEFORE the search filter, so a hidden shortcut cannot be
+reached through keyboard navigation or `handleRun` either.
+
+When the AI autocomplete engine ships, one flag flips and the four buttons return on their own.
+
+**Gate:** `tsc --noEmit` clean; 8 new tests; full suite green.
+
+---
+
+## 2026-09-07 — the Diff view can now UNDO a change, not only show it (gap #2 from the Cursor audit)
+
+### First, a correction to my own audit
+
+The gap report I gave the admin said NavBharatAI had **no diff review** at all, on the strength of a
+grep for `acceptHunk` / `diffReview` / `approveChange` that returned nothing.
+
+That was wrong, and wrong in a way this file has now recorded twice in one day: **a conclusion is only
+as wide as the search that produced it.** `DiffViewer.tsx` has existed all along — 538 lines,
+LCS-based, side-by-side and unified, merge-conflict resolution — wired into the Diff tab, with
+`App.tsx` snapshotting `previousFiles` in `onBeforeBuild` so there is a real before/after to compare.
+I never grepped for the obvious word: `DiffViewer`.
+
+The real gap was much narrower, and much more buildable: **the view was read-only.** Verified — no
+Revert, Reject, Undo, discard or restore control anywhere in the file; its only buttons were compare,
+view-toggle, copy, close and resolve-conflicts.
+
+### Why the narrow gap still mattered
+
+A user could see the AI had rewritten a function they liked and had exactly two options: keep it, or
+restore the whole project from History and lose everything else the build did too.
+
+That is worse for a non-technical user than for a developer. A developer reads the diff and fixes it
+by hand. Someone who does not write code has no way back at all — so "the AI changed something I did
+not want" becomes "I have to rebuild and hope". The fear that the AI has quietly broken your work is
+the most common reason people stop trusting a builder, and a visible per-change undo is the honest
+answer to it.
+
+### What shipped
+
+**`src/lib/fileDiff.ts`** — the diff maths moved OUT of the component (rule 4: centralize rather than
+duplicate) and gained the revert half. The reason it had to move: revert needs the SAME line
+classification the view is displaying. Two copies would eventually disagree, and the user would click
+revert on one hunk and get another.
+
+- `revertHunk(old, new, i)` — one rule, and it is the whole feature: inside the reverted hunk take the
+  OLD side of the diff, everywhere else take the NEW side. So a removed line comes back, an added line
+  goes away, and nothing outside that hunk moves.
+- `revertFile(previous)` — returns the previous text verbatim rather than reverting every hunk in turn.
+  For the whole-file case the answer is not an approximation of the old file, it IS the old file, and
+  going through the diff could only introduce a way to get it wrong.
+
+**Three things that would have been bugs, caught in the design:**
+
+1. **`Hunk` carries `indices`.** The view shows hunks with context, so a hunk is a WINDOW onto the
+   diff, not a slice of the file. Matching a hunk back by comparing line contents breaks the instant a
+   file repeats a line — and every `}` in a file looks identical.
+2. **`splitLines` treats the trailing newline as the end of the file, not an empty last line.**
+   `"a\nb\n".split('\n')` is `['a','b','']`; diffing that phantom element shows a spurious blank-line
+   change AND reassembles the file with the newline dropped or doubled. The view now uses the same
+   splitter, so what the user reverts is what they were shown.
+3. **An out-of-range hunk returns `null`, and the UI honours the refusal.** A stale click (the file
+   moved under the view) gets nothing rather than a corrupted file.
+
+**UI:** "Revert file" in the header, and a small "Revert" on each `@@ hunk N @@`. Both appear only when
+there is genuinely something to go back to — a file the build CREATED has no previous version, and
+offering revert there would promise a restore that cannot happen (deleting it is a different action
+with different consequences). Persisting goes through the SAME path the conflict resolver already
+uses, so a revert lands where a resolve does and the preview follows both.
+
+**AppKnowledgeBase:** the Diff view had no entry at all — now `diff_review`, covering both halves.
+
+**Gate:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean; 21 new tests in `fileDiff.test.ts`
+including "revert one hunk, the other change survives" and the full round-trip back to the original.
+
+---
+
+## 2026-09-07 — publishing finally has an undo (gap #3 from the Cursor audit)
+
+Publishing was the ONLY action in this platform with no way back — and it is the one action the
+user's own users can see. A bad publish left exactly one route: restore files from History and
+publish again. That is minutes of work, and a *different* operation with different risks, at the
+moment the user is panicking about a broken live app.
+
+### The design decision worth keeping: this costs nothing to store
+
+The obvious implementation is to snapshot every published bundle so there is something to restore —
+storage on every publish, forever, for a feature most people never use.
+
+It is also unnecessary. The host already keeps every VERSION we have finalized, and the channel's
+release history says which one was live when. So a rollback is not a restore at all: it is one API
+call pointing the channel at a version already being held. No snapshot, no storage, no new failure
+mode, and atomic on the host's side — the switch either happens or it does not, and nobody ever sees
+half an app.
+
+Nothing is deleted, either. A rollback CREATES a release on an older version, so the history keeps
+growing and the undo is itself undoable.
+
+### `pickRollbackTarget` — why it is not "index 1"
+
+The rule is "the most recent release whose version is not the one live now". Three real cases break
+the naive version:
+
+- **A re-publish of identical files** makes a new release on a NEW version. Rolling back to it would
+  appear to do nothing at all.
+- **A previous rollback** appends a release pointing at an OLDER version. Index-based logic would
+  then bounce between the same two versions forever; walking by version identity keeps going back,
+  which is what pressing undo twice means.
+- **An expired version.** The host garbage-collects old versions and a release can outlive the
+  version it points at. Re-releasing a non-FINALIZED one would fail at the API — at exactly the worst
+  moment — so those are skipped in the decision rather than discovered as an error the user sees.
+
+### Honest limits, stated rather than discovered
+
+- **A bucket-only app has no version history at all.** The channel-ceiling fix serves straight from
+  storage and each publish overwrites the last. The refusal says so and points at History, instead of
+  offering a button that cannot work. Making that path reversible needs object versioning on the
+  bucket — a deliberate infrastructure decision with its own bill, recorded as an open item.
+- **An unreadable history is "unknown", never "nothing to roll back to."** Same rule the channel
+  inventory already holds: a failed read is not evidence of absence.
+- Four distinct refusal reasons, each with words a person can act on. A greyed-out button explains
+  none of them and reads as broken.
+- **The refusal messages name no vendor** — test-locked, because the white-label law applies to this
+  surface like every other.
+
+### Security
+
+The rollback target is re-derived on the SERVER and never taken from the request. A version name
+accepted from the browser is an instruction to serve arbitrary content at the user's published URL,
+so the check that it is genuinely this app's previous version has to happen where it cannot be
+edited. Both routes verify workspace ownership, exactly like publish and unpublish. Test-locked
+against the real route source.
+
+The deployment registry is deliberately NOT rewritten: its fields describe WHICH app is published and
+where, and a rollback changes none of them — only which version that url serves. Bumping `updatedAt`
+would make the record claim a publish that did not happen, and the Publish Capacity screen reads
+these records.
+
+### UI
+
+"Undo last publish — put the previous version back" sits ABOVE Unpublish on purpose: a user whose new
+version broke wants the old one back, not the app taken offline, and the destructive control should
+never be the first one they reach for. Two-step, like Unpublish, because it changes what the public
+sees this second.
+
+**Gate:** both typechecks clean; 21 new tests; full suite green (1477 files / 19692 tests).
+AppKnowledgeBase gains `publish_rollback`.
+
+---
+
+## 2026-09-07 — MCP CLIENT, slice 1: the safety layer (gap #4 from the Cursor audit)
+
+NavBharatAI could already GENERATE an MCP server for an app it builds (`McpServerGenerator.ts`). What
+it could not do is the other direction: **use** one. So a user with Notion, Linear, an internal
+company API — or any of the hundreds of published MCP servers — had no way to let the builder reach
+it. Every integration had to be written by us, one at a time, forever.
+
+That is why this was the top of the gap list: it turns 211 built-in tools into 211 **plus whatever the
+user already has**, without us writing another integration.
+
+### This slice is the part that must be right
+
+Two files, both landed with tests and NOT yet wired into the build loop — the dispatcher and UI come
+next. Shipping the decision layer first is deliberate: this is a feature where a stranger's code
+describes tools our AI then decides to call, so the security model is the product, not a section of it.
+
+**`mcpClient.ts` (pure, 32 tests)** — three distinct attacks, each closed structurally:
+
+1. **SSRF.** A URL the user supplies that OUR SERVER fetches. `http://169.254.169.254/` is the cloud
+   metadata endpoint; `localhost` is whatever runs beside us. **No new check was written** — the
+   existing `assertPublicHttpUrl` (what `web_fetch` uses) resolves DNS before deciding, which is what
+   catches a hostname pointing at a private address. One implementation to keep correct.
+2. **Prompt injection through tool descriptions.** A description goes straight into the model's
+   context, so a hostile server can ship an "instruction" disguised as documentation. Descriptions are
+   treated as untrusted data: newlines collapsed (almost every injection needs a line break to start a
+   fake block), fence/tag characters stripped, hard length cap. The stronger half is
+   `externalToolsPreamble`, which TELLS the model these came from an outside service and carry no
+   authority — sanitising makes an injection look odd, labelling makes it powerless.
+3. **Name shadowing.** A server offering `write_file` or `deploy` could be called by the model
+   believing it was the platform's own. Every external tool is prefixed `ext__<server>__<tool>`, so a
+   collision is **structurally impossible** rather than unlikely — the same namespace-separation
+   reasoning as the `a-` / `v3-` published-subdomain split.
+
+**`mcpTransport.ts` (13 tests)** — the thin guarded layer:
+
+- 🔒 **HTTP only; stdio is refused on purpose.** The spec's stdio transport launches a LOCAL PROCESS
+  from a user-supplied string, which on a server is remote code execution dressed as a feature. Locked
+  by a test that asserts nothing in the file can spawn. (If local servers are ever wanted, the honest
+  place is the user's OWN sandbox — a separate feature, not a flag on this one.)
+- **The SSRF check runs on EVERY call, not once at connect time.** A host that resolved publicly when
+  the user added it can resolve elsewhere later.
+- **The response is capped BEFORE parsing** — `resp.text()` with a byte limit, never `resp.json()`,
+  because a size limit applied after parsing is applied too late to stop a memory exhaustion.
+- Timeout + abort + `clearTimeout` in a `finally`; every path returns a result object rather than
+  throwing. A build must never hang because somebody's server had a bad afternoon.
+- **Only the user's own headers are sent.** A connected service is theirs, and so is its
+  authentication; NavBharatAI's secrets are never in scope. Test-locked against `process.env.*KEY`.
+
+### Two test bugs worth recording, because both were MY error and not the code's
+
+- `indexOf('MCP_MAX_RESPONSE_BYTES')` found the `export const` declaration at the top of the file
+  rather than the usage inside `rpc()`, so an ordering assertion compared the wrong positions. Fixed
+  by slicing the function body first.
+- A raw substring check for `resp.json()` failed on the COMMENT that explains why `resp.json()` is
+  avoided. Fixed by stripping comments before asserting — the test should read code, not prose.
+
+Both are the same lesson as the searches that went wrong earlier today: **an assertion is only as
+precise as what it actually looks at.**
+
+**Gate:** both typechecks clean; 45 new tests; full suite green.
+
+### Completed the same day — the guard was right, and the feature is whole
+
+The slice above shipped unwired, and `tests/deadCodeGuard.test.ts` refused it by name:
+
+> *Unreachable from src/main.tsx, server.ts and every tooling script … Either wire it up, delete it,
+> or add it to KNOWN_UNREACHABLE with the reason it stays.*
+
+That guard is the second absolute rule made automatic, and it was correct: "built but not wired" is
+exactly the state this project says cannot exist. The allowlist was NOT used — its own comment says
+*"the allowlist is meant to shrink"*, so putting a brand-new file in it to silence a guard would be
+the dishonesty the guard exists to catch. The remaining four pieces were built instead.
+
+- **`McpServerStore.ts`** — one document per workspace (the cap is 5; a document-per-server would cost
+  a query where an array costs a read). 🔒 `listFull` and `listForDisplay` are **two functions, not one
+  optional flag**: the display path never returns the user's key, and a call site cannot leak one by
+  forgetting an argument. The cap is enforced here as well as in `canConnectServer`, because this is
+  the last point before the write and a check that lives only in a route is one a second route misses.
+- **`ToolDispatcher`** — external tools are matched in `default:`, i.e. **after every built-in case**.
+  That is a second, independent defence: the `ext__` prefix keeps the namespaces apart, and reaching
+  `default` last means a built-in always wins even if that guard were somehow bypassed. The tool is
+  resolved against what a server **really advertised** this build, never against the string the model
+  produced — so an invented `ext__x__y` reaches nothing. It never throws: a stranger's server being
+  down must not fail a build that was otherwise fine.
+- **Build wiring** — tools are fetched ONCE before the loop, so a server cannot swap a tool out from
+  under a call the model has already decided to make. Built-ins are concatenated FIRST. Wholly
+  best-effort: a slow, down or hostile service yields no tools and the build proceeds as today.
+- **Three routes** (`mcp/list`, `mcp/connect`, `mcp/remove`) — all owner-verified. Connect runs the
+  shared SSRF guard **before** saving, then **proves** the connection by asking the service for its
+  tools; a service that answers nothing is refused rather than stored as connected-but-useless.
+- **`ConnectedServices.tsx`** in v5's More menu, opening IN PLACE like Keys & Secrets — sending
+  someone to Settings mid-build loses the build, the preview and the chat.
+
+**One thing worth recording for the next session:** `lucide-react`'s installed *types* lag its runtime.
+`Plug` and `Undo2` both exist at runtime and both fail `tsc`. Check the `.d.ts` before picking an icon
+rather than trusting the icon gallery.
+
+**Gate:** both typechecks clean; 64 MCP tests (46 + 13 + the dead-code guard); full suite green —
+**19751 passed, 0 failed**. AppKnowledgeBase gains `connected_services`.
+
+---
+
+## 2026-09-08 — "Published apps X of Y" as a tile, because the number existed and nobody saw it
+
+The admin asked for the published-app count against the limit on the admin home page. **It was already
+there** — the Publish Capacity card has shown `"N of about 50 hosting channels in use"`, colour-coded,
+on the Overview tab since 2026-08-21.
+
+**That the admin did not know it existed IS the finding.** A ceiling that stops publishing for EVERY
+user at once was sitting under four rows of tiles, in a card that only appears once the channel list
+loads. Correct, honest, and effectively invisible.
+
+So the number moved to where numbers are read: a **Published Apps** tile in the stat row, showing
+`used / cap` with the slots remaining and how many are reclaimable.
+
+Three things it deliberately does:
+
+- **Reads the SAME verdict the card below it reads.** Not `channels.channels.length` — two
+  independently-derived numbers on one screen is how an admin stops trusting either.
+- **Shows "—", never "0", when the list cannot be read**, with the sub-line "not a count of zero".
+  Reporting a failed read as "no apps published" is the exact dishonesty
+  `/api/admin/hosting/channels` already refuses ("the ceiling is UNKNOWN, not clear") — the tile holds
+  the same line.
+- **Same colour thresholds** as the card: amber at 70%, red at 90%, early enough to still act.
+
+### Why this was worth doing rather than answering "it's already there"
+
+It is the fourth time in two days that something already built was hard to find — three of them cost
+me real work (`DiffViewer`, `fileMentions`, the alert sweep), and one nearly destroyed a working file.
+The pattern is the same in the product as in the codebase: **a capability nobody can find is worth a
+fraction of one that is obvious**, and "it exists" is not the same as "it works for the person who
+needs it".
+
+**Gate:** `tsc --noEmit` clean; 7 new tests; full suite green — 19758 passed, 0 failed.
+
+---
+
+## 2026-09-08 — the two lessons from this session written into CLAUDE.md, where the next session will read them
+
+Admin: *"yeh do cheeze claude.md me hi acche se likh do! apko (claude) hi to yad rakhi nahi"* — and
+that is exactly right. A lesson stated in chat dies with the session; the next one reads `CLAUDE.md`.
+
+Both went into the **safeguard they belong to**, rather than a new section — a session reading
+safeguards #5 and #6 is precisely the session about to make these mistakes.
+
+### Safeguard #5 — run the gate at the END, on the final state
+
+`tsc --noEmit` passed, I then ADDED a test file and ran only `vitest`. CI failed with ~60 type errors
+in files the change never touched, and my first three theories were all wrong (another session broke
+`main`; a dependency drifted; the lockfile changed). `main` was green — the new test file was the
+cause: it sat in `src/components` and imported a server module whose graph reaches axios and
+firebase-admin, dragging the whole server program into the FRONTEND tsconfig.
+
+**A gate run before the last edit is worse than no gate**, because it produces a green result that
+gets honestly reported and honestly believed.
+
+Also recorded there: **`vitest` exiting 0 does not mean the suite passed** — a run printed
+`Tests 1 failed | 19736 passed` and still exited 0 on 2026-09-07. `tee` the whole log and grep it for
+`FAIL`; a `tail -7` shows the summary and hides which test broke.
+
+### Safeguard #6 — "my search found nothing" is not "it does not exist"
+
+Four real incidents are now named in the file, three from this one session:
+
+- Searched `mentionFile` / `contextPicker` / `attachFile`, concluded @-mentions did not exist, and
+  **overwrote `fileMentions.ts` — a working, tested, wired feature.** The real name was
+  `parseFileMentions`. A stale-import TypeScript error is the only thing that revealed it.
+- Searched `acceptHunk` / `diffReview` / `approveChange` and told the admin there was no diff review.
+  `DiffViewer.tsx` had existed all along.
+- Searched `runMonitorAlertSweep` under `src/` and reported the alerting path as dead code. It is
+  wired in `server.ts`, which is at the repo ROOT.
+- Told the admin the published-app count needed building; the Publish Capacity card had shown it
+  since August.
+
+The method is now four required steps: **filename search first**, at least **three different names**,
+search the **whole repo** rather than `src/`, and treat **Write reporting `updated` instead of
+`created` as a STOP** — that one word was the last warning before a working file was destroyed.
+
+And when a search genuinely comes back empty, say *"I could not find it"* to the admin — never *"it
+does not exist"*. Only one of those is a verified claim.
+
+**Gate:** both typechecks clean; full suite green. Documentation only.
+
+---
+
+## 2026-09-08 — the preview "starting" page can spin for an hour, and the bug hid inside its own safety net
+
+**The report.** Admin screenshot, NavBharatAI's native app (Capacitor WebView): the Preview panel's
+own "Your app is starting… this page retries by itself" message, stuck for **one full hour** with no
+escalation to "press Wake up."
+
+**First, a real false lead I ruled out with evidence, not assumption.** The screenshot looked
+identical to the "Closed Port Error" vendor-page class this repo has fixed three times before
+(2026-08-13, 2026-08-22, 2026-08-24, 2026-09-03 — `previewFraming.ts`). Reading that guard's logic
+line by line proved it was NOT the cause here: it correctly kept the raw vendor page off screen this
+time — the "starting" text on screen was genuinely OUR OWN branded page (`previewDoor.ts`'s
+`doorPage('starting')`), not a vendor leak. The fix for that class is working. The bug was one layer
+deeper, inside the safety net that page's own retry logic is supposed to provide.
+
+**Root cause.** `doorPage()`'s retry script has an explicit money-motivated cap — 20 retries × 6s
+(~2 minutes) — because an uncapped self-refresh in an abandoned tab would resume a paused, billed E2B
+VM forever, fighting the idle reaper. Past the cap it shows "Still waiting on your app — press Wake
+up." The counter lives in `sessionStorage`, read inside a `try`. The `catch` existed for exactly one
+reason — a browser that blocks `sessionStorage` (private browsing, Safari ITP, and — the shape that
+actually fired here — a cross-origin iframe nested inside a Capacitor WebView, a well-known storage-
+partitioning trap). Its entire body was a **comment** claiming the page then "retries once per load,
+which is exactly the safe direction." It was not: the throw fires reading `sessionStorage.getItem`,
+before any timer is armed and before the `else` branch that shows the give-up UI is ever reached — so
+NOTHING further happens. No reload, no escalation, no click that could move the page. The two
+*designed* outcomes (auto-retry, or an honest give-up) both require code the throw skips past;
+what the user actually got was a third, undesigned outcome — a permanently frozen spinner — and it
+was silent, because nothing here threw past the `catch` to reveal itself.
+
+**The fix.** Extracted the give-up DOM-swap into one `giveUp()` function and call it from BOTH the
+retry-cap `else` (unchanged behaviour) and the `catch` (the actual fix) — so a storage-blocked context
+gets the SAME escape hatch a maxed-out counter gets, immediately, rather than silence. This is rule 5's
+50/50 law applied literally: a self-heal (the auto-retry) that cannot run its normal path must still
+terminate somewhere a person can act, not nowhere.
+
+**The pre-existing test that pinned the bug, rewritten rather than deleted.** `previewDoor.test.ts` had
+a test titled *"a browser that blocks storage degrades to retrying once per load — the SAFE
+direction"* that asserted the OLD comment text verbatim — i.e., it pinned the exact defect as intended
+behaviour. Rewritten to assert the corrected property (the catch calls `giveUp()`, both trigger paths
+share one function, the escape hatch is genuinely reachable) with the report's own evidence recorded in
+the test.
+
+**Gate:** `tsc --noEmit` (frontend + server) clean; FULL suite **1459 files / 19430 tests green**.
+Verified to bite: reverting the catch to the old comment-only body fails the two rewritten tests by
+name.
+
+---
+
+## 2026-09-08 — the preview that dies after 2-3 days and never wakes again: four links, one chain (admin: "kitna bhi wake up karo, wapas preview nahi chalna")
+
+**The report (admin, verbatim).** *"v5 dwara app bana, e2b live preview chalana. aur 2-3 din bad preview
+band ho jana. kitna bhi wake up karo, wapas preview nahi chalna. pure flow ko 0 se investigat karo … user
+chahe 1 sal baad preview chalaye, preview chalna hi chalna chahiye."* Plus a second question: what does
+NavBharatAI do when a GitHub app is on port 3000 and we try 5000?
+
+**Investigated from zero: build → sandbox → idle sweep → durable record → orphan reaper → E2B lifetime →
+wake (`preview-diagnose`) → install → dev server → recipe → door.** The preview did not die of one bug; it
+died of a CHAIN, each link individually "handled" and together fatal:
+
+1. **E2B KILLS, not pauses, at the hour mark — and we never told it otherwise.** `_opts()` passed
+   `timeoutMs` but no `lifecycle`; E2B's default `onTimeout` is `kill`. Both sweeps pause an idle machine
+   long before that — but a machine both miss (a deploy-orphan whose pause was refused three times, then
+   marked `pausedAt` so the reaper stopped looking) reached the hour and was DELETED. The durable record
+   still named it, so the next wake tried a dead id, fell back to a fresh EMPTY machine, and had to
+   reinstall from scratch. **Fix:** `previewWake.ts` `sandboxLifecycle()` = `{ onTimeout: 'pause' }`,
+   applied in `_opts` (before `...extra`). Deliberately NO `autoResume` — resuming stays OUR capped,
+   build-aware decision (door + wake), never a stale tab's.
+2. **The wake gave that cold revive 90 seconds.** The one `runCommand` inside it contains the deps-stale
+   check + `npm install` (60-180 s cold, own 5-min bound) + 25 s port wait + up to two recovery rounds (a
+   Postgres re-provision is 120 s alone). The race lost every time on a fresh machine and reported "could
+   not reach the sandbox." **Worse:** on timeout the route's `finally` released `setBuildActive` while the
+   install it started kept running, so the 5-minute idle sweep paused the machine MID-INSTALL and left a
+   torn `node_modules` that no later wake could boot — the exact "kitna bhi wake karo" shape. Sibling: the
+   build's own `preview-server-revive` had the same 90 s. **Fix, two halves:** (a) `previewWakeBudgetMs()`
+   — default 10 min, env `AGENTV3_PREVIEW_WAKE_SECONDS`, clamped [90 s, 30 min], inside Cloud Run's 3600 s
+   request timeout; the stream's 5 s heartbeat keeps the client honest for the whole window. (b) The CLASS
+   fix: `E2BActuator._opsInFlight` — `runCommand` and `ensureDependencies` hold the sandbox for the
+   operation's REAL duration (released in `finally`, idle clock re-stamped at release), and the idle sweep
+   skips any workspace with an operation in flight, on the same guard as the build flag. No caller has to
+   remember a flag any more; the hold lives around the work.
+3. **Two wakes at once = two installs into one tree.** A person pressing Wake up while the preview
+   watchdog's auto-heal was already installing ran parallel `npm install`s — no guard existed. **Fix:**
+   `_devLaunches` — a long-running (dev-server) launch in flight per workspace is JOINED by a second
+   caller, not duplicated; both get the same result. Only long-running commands are coalesced. `runCommand`
+   is now a holding+coalescing wrapper over `_runCommandInner` (the untouched body), so no path can run a
+   command without the hold.
+4. **A wake that re-provisions the database gets an EMPTY one.** The boot's recovery starts a fresh
+   Postgres; the app's migrations ran ONLY on the import path (`detectMigrationCommand`, ~9385). Server up,
+   every data page dead on `relation "x" does not exist`. **Fix:** the wake replays the migrations after
+   the boot, using the SAME pure detector over the same durable files — gated by `shouldMigrateOnWake`,
+   which refuses unless DATABASE_URL is the sandbox's OWN loopback Postgres (`isSandboxLocalDatabaseUrl`).
+   🔒 A user's real Supabase/Neon is never the target of a schema push on a wake. Recorded honestly in the
+   result payload (`dbMigration: applied | failed | not-needed`) and in the boot log the verdict reads.
+
+**Checked and found already correct (no change):** durable files in Firestore carry no TTL (the 1-year
+case rests on them + the recipe); a failed resume already REPLACES the dead id (`touch()` writes the new
+one immediately, so `sandboxStore.clear()` having no callers is not a bug); the door 302s only to a port
+it just saw serving.
+
+**Problem 2 — GitHub app on 3000, we try 5000: answered, no bug found.** Port precedence is script flag →
+`vite.config` → `.env PORT` → `app.listen()` code → framework guess (`declaredAppPort`); Node servers are
+pinned with `PORT=`, Vite with `--port --strictPort`; the real bound port is read from the boot log; if
+the page does not render, the OS is asked which ports are genuinely LISTENING and each is visited (FLIP);
+`EADDRINUSE` frees the named conflicting port and retries. The one soft spot — the wake route's
+`effectivePort` and the actuator's `extractDevPort` derive independently — reads the same sources and was
+left alone.
+
+**Honest open item (rule 6):** E2B's retention of a PAUSED sandbox is not stated in the SDK; docs suggest
+~30 days. So "1 saal baad" does NOT rely on the paused VM surviving — it relies on the durable files +
+recipe + a wake that can rebuild a fresh machine end to end, which is exactly what links 2-4 make work.
+A paused VM surviving is the fast path, not the guarantee.
+
+**Tests:** `tests/previewWakeLifecycle.test.ts` (17) — pure decisions for the lifecycle, the budget
+(default/env/clamp), the loopback-only DB rule, the `.env` reader (prefix keys must not match), the
+three-way migration gate; source pins for `_opts` lifecycle, the sweep guard order, hold+release in
+`finally` on both methods, the coalesced launch, and the route wiring/order. Pre-existing
+`sandboxIdleBuildAware`, `sandboxPauseFailure`, `sandboxDropState`, `ImportPreview` suites untouched and
+green.
+
+**Gate (final state):** `tsc --noEmit` (frontend) + `tsc -p tsconfig.server.json` clean; FULL suite
+**1491 files / 20012 tests green, 1 skipped** (first run caught one pre-existing source-pin test,
+`previewKeepAliveWiring` #4, whose 1800-char window my 3-line sweep comment had pushed `pauseSandbox`
+out of — the comment was shortened to one line, the guard is unchanged; re-run green).
+
+---
+
+## 2026-09-08 — while the preview wakes, show the user their app instead of a spinner (and the guard I had to argue with first)
+
+**Where this came from.** After the dead-preview chain was fixed (#2782), I proposed to the admin that
+the door should show the saved copy while a machine wakes, so nobody watches an empty spinner for the
+new ten-minute budget. The admin said build it.
+
+**FIRST FINDING — MY OWN SUGGESTION WAS HALF WRONG, and the code said so before I wrote a line.**
+`shouldServeSnapshot` already refused the 'starting' state ON PURPOSE, with the reason written above it:
+*"a sandbox that exists but whose port has not come up yet is usually seconds from serving, and replacing
+a live app that is still starting with a STALE copy of itself would be a regression dressed as a
+feature — the user would silently lose the edits they were waiting to see."* That is a real harm and the
+refusal was right. Building what I proposed, as I proposed it, would have re-introduced exactly the bug
+that comment exists to prevent (rule 3: the codebase gets to disagree with me, and here it was correct).
+
+**WHAT ACTUALLY CHANGED, AND WHY THE WIDENING IS NOW LEGITIMATE.** Two things, and one of them is our
+own doing:
+1. *"Usually seconds" stopped being true.* #2782 raised the wake budget from 90 s to ten minutes so a
+   cold install can finish. Ten minutes of spinner over an app whose copy we are holding is not caution.
+2. *The fear is answerable with EVIDENCE rather than by refusing.* What the old rule protects against is
+   a snapshot that is no longer this app. That is a checkable fact — and the check already existed:
+   `canServeFromSnapshot` has carried a `lastChangeAt` rule since it was written, and **it was wired to
+   nothing** (grep: one test, zero production callers). This is that idea finally reaching the door.
+
+**The fix.** `snapshotStillCurrent(snapshotAt, lastChangeAt)` — true only when both stamps are real and
+nothing has been written since the snapshot; an unknown stamp is NOT proof and answers false, so an
+unreadable store yields today's waiting page rather than a guess. `shouldServeSnapshot` keeps 'asleep'
+exactly as it was and allows 'starting' only on that proof. The door reads the stamp once
+(`workspaceFilesSavedAt`, bounded, best-effort) and BOTH of its starting exits go through one `starting()`
+helper — two exits were two chances for a later edit to fix one and leave the other on the spinner.
+
+**THE TWO HALVES THAT MAKE IT HONEST RATHER THAN A SILENT SUBSTITUTION — both shipped in the same change,
+because either one alone would be the regression the old guard feared:**
+- **The user is told.** `preview-health` now applies THE DOOR'S OWN rule (same function, same record,
+  'asleep' vs 'starting' chosen from whether a sandbox exists) instead of answering only for a gone
+  machine. Without this the panel would have framed a saved copy under no note at all. Two situations get
+  two notes: `SNAPSHOT_NOTE` for an expired machine (the user may want it back) and the new
+  `SNAPSHOT_WAKING_NOTE` for one that is starting (nothing is wrong, nothing to press, and the copy is
+  current — so it must NOT say "last built version").
+- **The frame returns by itself.** Once the door 302s to the copy, the iframe has left our origin and
+  nothing in it is watching for the live app; the copy would have stayed up until something else happened
+  to reload the frame, which for a self-healing wake could be never. `snapshotFramedRef` remounts the
+  frame exactly once, on the EDGE where the server stops reporting `snapshotServing` — the server's own
+  statement that the live app is answering. On the level it would remount the framed app every 150 s,
+  which is the bug the door-url adoption rule already exists to avoid.
+
+**Honest limits, stated rather than papered over:** a full-stack app still gets NO snapshot at all
+(`snapshotSuitable` excludes it, correctly — a static copy of an app whose server lives in the sandbox
+renders the shell and fails every request), so this does not help the class of app in the original report.
+Cost is unchanged: the port sweep already ran before either exit, so no extra sandbox work is done, and
+serving the copy actually stops the waiting page's 6-second self-retries.
+
+**Tests:** `previewSnapshot.test.ts` extended (boundary equality, an edit one millisecond later, every
+unknown-stamp shape, asleep unaffected, kill switch on both paths, both notes' wording and distinctness);
+`previewDoorRoute.test.ts` and `previewSnapshotWiring.test.ts` had assertions pinning the old literals —
+rewritten to the new rule with the reasoning recorded, never deleted. One of my OWN new assertions was
+wrong on the first run (it swept the `catch` block in and demanded no plain waiting page anywhere after
+the sweep; the catch answers with the plain page deliberately, because a request that threw has no
+trustworthy record to decide a snapshot from) — the test was fixed, not the route.
+`AppKnowledgeBase.ts` updated in the same change, per the sync rule.
+
+---
+
+## 2026-09-09 — the import lane proved its preview and forgot it (and one of my own three suggestions was already built)
+
+**Where this came from.** The admin asked me to build three items I had listed as *"chhoti hain abhi, baad
+me mehngi"*. Investigating them first changed two of the three, which is the useful part of this entry.
+
+### ❌ Item 1 was ALREADY BUILT — my source was a stale line in this very file
+
+I listed *"the Android SDK has no consent gate"* from the 2026-09-03 entry, which reads **"Still open
+(unchanged)"**. It is not open. `android/app/src/main/java/com/navbharatai/app/MetaConsentPlugin.java`
+exists, `MainActivity.registerPlugin(MetaConsentPlugin.class)` registers it, the three collection flags
+(`AutoInitEnabled` / `AutoLogAppEventsEnabled` / `AdvertiserIDCollectionEnabled`) ship hard-wired
+**false** in `AndroidManifest.xml`, and `src/lib/metaNativeConsent.ts` opens them at runtime only after
+consent — wired from `src/main.tsx`. Recorded as a NEW note rather than by editing the old line, per the
+append-only rule.
+
+**The lesson, which is safeguard #1 pointed at this file instead of at `main`:** an "open item" line is a
+claim with a timestamp, and it goes stale exactly like a `PROGRESS.md` status does. I proposed work to the
+admin on the strength of one, without grepping first. **Anything this file calls OPEN must be re-verified
+against current `main` before it is proposed, quoted, or acted on** — the same discipline the file already
+demands for defaults and for the roadmap.
+
+### ✅ Item 3 turned out to be a REAL, root-cause-shaped bug — and it is the admin's own port question
+
+I had listed *"full-stack apps get no preview fallback"*. Investigating it found something better, and
+much worse: **the import lane records nothing durable about a preview it has just PROVEN.**
+
+**The evidence.** The import preview block (`routes/agentv3.ts`, from `'import-preview-boot'` to its
+verdict) contained **zero `sandboxStore.` calls** — verified by scanning the whole block. That lane
+resolves the port from every declaration site (`declaredAppPort`), VISITS the page, and confirms it
+renders — the strongest evidence any lane in this codebase ever holds — and then dropped all of it.
+
+Every other lane records what it proved, at the moment it proves it:
+- the build path saves the **recipe** the instant a real browser renders the app (~15019),
+- the build path saves the **declared port** on every successful build (~15625),
+- the wake path saves the **recipe** the same way (~4900).
+
+And the build path's declared-port capture is gated on `expectsArtifacts`, which is literally defined as
+`(intent === 'new_build' || intent === 'edit_existing') && !isImportTurn` — so an import could not pick it
+up on the way past, either. The import lane was not merely missing a call; it was excluded by construction.
+
+**Why it stayed invisible.** The damage lands DAYS later. While the sandbox lives, the preview works and
+nothing looks wrong. Once it is gone, the door asks for a recipe and a declared port, finds **neither**,
+and falls through to the common-ports guess starting at 3000 — for an imported GitHub repo, the class of
+app most likely to be serving on 5000. **That is the admin's own question from 2026-09-08** (*"agar github
+par app port 3000 par hai, aur navbharatai us app ko port 5000 par ya kisi aur port try kare…"*), and
+answering it by reading the port-resolution code alone missed it, because the resolution is excellent and
+the MEMORY of it was the hole.
+
+**The fix.** Two writes at the moment of proof, with deliberately different conditions, mirroring the
+existing precedent exactly:
+- the **recipe** only when the page genuinely RENDERED (a recipe is a port we have SEEN serving; a
+  bound-but-blank port must never be promoted to one — the "earn it" rule);
+- the **declared port** whenever the app states one, render or not — precisely because a preview that
+  never came up has no recipe at all, and that is when the door has nothing else to lead with.
+Best-effort and silent: an import that worked must never fail over a memory write.
+
+**Tests** (`ImportPreview.test.ts`): the block writes both facts; the recipe is inside the
+`served.rendered` guard and carries the port that WON the visit and the command that booted it; the
+declared port is written OUTSIDE that guard (asserted by index order, since that is the whole point); the
+whole thing is wrapped so it cannot fail the import. The test window is bounded by two ANCHORS rather than
+a character count — my first version used `+6000` from the boot command, landed ~250 lines short of the
+code, and failed every assertion against a slice that never contained it. The test was wrong, not the
+route; fixed and recorded here because a window measured in characters rots silently as the route grows.
+
+### 🟡 Item 2 (licensing) — genuinely open, and the honest half is not code
+
+VirusTotal's free API forbids commercial use and NavBharatAI is commercial; Open-Meteo's no-key tier is
+non-commercial. Both remain OPEN root causes (rule 6): **the real fix is a purchase decision the admin
+must make, not something a session can write.** What IS buildable — and is being built next — is making
+the exposure visible and switchable from the admin panel instead of buried in a document, so it can be
+acted on the day it matters rather than discovered in a letter.
+
+### ✅ Item 2 shipped as far as code honestly can — the exposure is now VISIBLE and SWITCHABLE
+
+`src/lib/licenceExposure.ts` (new, pure) is the register of runtime SERVICES whose terms conflict with
+being a commercial product — deliberately not an npm licence scanner, which is a different problem the
+dependency-health gate already covers; these are HTTP calls a package scanner cannot see.
+
+**The load-bearing design decision:** the register does not *describe* whether a source is running — it
+reads the SAME function the source obeys. `liveWeatherSourceEnabled` is imported by BOTH
+`liveDataSources.ts` and the admin panel, so the panel can never report "off" while the calls keep going
+out. A register with its own opinion would be worse than none: a false assurance about a legal exposure.
+
+- **`LIVE_WEATHER_SOURCE=off`** now stops both Open-Meteo callers (weather AND air quality — switching
+  off only the obvious one would have left the exposure open). Degradation is honest and already-built:
+  those questions fall through to web search, exactly as gold rates and showtimes do.
+- **VirusTotal gets NO new switch, on purpose.** Its credential already IS the switch and its absence
+  already fails closed (no scan ⇒ nothing publishes). A second switch would be a second way to say the
+  same thing, and one of them would eventually drift.
+- **Admin surface:** `GET /api/admin/licence-exposure` behind `verifyAdminToken`, rendered on the
+  Security tab. **Read-only by design** — a one-click toggle would let a mis-tap stop App Store
+  publishing for every user with no audit trail, so the card names the exact Cloud Run setting instead.
+  It reports whether each key is PRESENT, never a value; test-locked.
+
+**🔴 AND THE HALF CODE CANNOT DO (rule 6), stated on the card itself rather than in a file nobody reads:**
+switching a source off is a PAUSE, not a fix. The fix is a commercial plan or a differently-licensed
+replacement — the admin's purchase decision. A test asserts every row's `honestFix` says so in words, and
+that the zero-running headline reads "not currently exposed" rather than "solved", because an admin who
+believes it is solved will never buy the plan and the risk returns the day someone switches it back on.
+
+**Gate:** frontend + server `tsc` clean; full suite green (numbers in the PR).
+
+### The full gate caught one failure, and it was the SAME brittleness twice in one day
+
+`tests/importPreviewWiring.test.ts` — *"'checking the live preview' is exited on the normal path and the
+throw path"* — went red. Nothing was broken: both `exitPhase` calls were still present and still correctly
+paired (route lines 9797 and 9814). The test sliced a **12,000-character** window from the `enterPhase`
+call, and the import lane learning to remember its preview pushed the throw path's exit to offset ~12,876
+— out of the window. A window measured in characters silently stops covering the code it was written
+about, and the failure it then produces points at the wrong thing entirely.
+
+Repointed to a structural anchor (`IMPORT_PREVIEW_BOOT_CUT_OFF`, the `finally` that closes that exact
+IIFE), so insertions inside the region cannot move the boundary. Verified to bite: removing either
+`exitPhase` fails it by name.
+
+**This is the second time the same defect appeared today** — my own new test in `ImportPreview.test.ts`
+used `+6000` from the boot command, landed ~250 lines short, and failed every assertion against a slice
+that never contained the code. Recorded as a rule rather than as two anecdotes: **a source-pin test must
+bound its window with ANCHORS that belong to the structure it is testing, never with a character count.**
+The count reads as precision and is really a countdown.
+
+---
+
+## 2026-09-09 — CI went red on a dependency advisory, and the red was on `main` too
+
+**What happened.** The dispatched CI run for #2785 failed in **56 seconds** — far too fast for the suite,
+which is the tell that it died in an early step. It did: `npm run audit:gate` rejected a **new** high
+advisory against `js-yaml` (GHSA-2883-xcg3-v3hh, `maxTotalMergeKeys` does not limit CPU use for empty
+merge sources — CWE-400/407).
+
+**Established it was not this PR's, before touching anything.** The change touched no dependency, and
+`main`'s own run at 11:53 today (run 34347862339, PR #2783's merge) failed the same way in 52 seconds.
+So every merge in the repository was blocked, not just this branch.
+
+**The fix is the real one, not the allowlist.** The gate offers two exits — fix the dependency, or
+allowlist it with a reason — and allowlisting here would have been the forbidden surface patch: `npm
+audit` reported `fixAvailable: true`, i.e. a non-breaking fix existed. `js-yaml` was already pinned in
+`overrides` at `^4.3.1`, one version behind the patched `4.3.2`; `npm ci` installs the lockfile exactly,
+so the caret never picked it up. Bumped the override to `^4.3.2` and refreshed the lockfile: the diff
+moves **only** `js-yaml`, nothing else.
+
+**Honest scope of the risk:** `js-yaml` arrives via `firebase-tools`, a **devDependency**, so it never
+shipped to a user — the exposure was our own CI and dev machines. Worth fixing regardless, because it
+was blocking every merge including `main`'s deploys.
+
+**And the thing that nearly hid all of this.** GitHub created **no CI run at all** for this PR's head
+SHA — the `pull_request` event silently produced nothing, the exact incident shape `ci.yml`'s own
+`workflow_dispatch` comment was added for on 2026-08-15. `get_check_runs` returned an empty list, which
+reads as "pending" rather than as "broken". Had the empty checks tab been taken at face value, the
+js-yaml breakage would have gone unnoticed until someone wondered why nothing was deploying.
+**An empty check list is not a green one, and it is not a pending one either — it is an unanswered
+question.** The manual dispatch is what turned it into an answer.
+
+---
+
+## 2026-09-09 — CI was red for two reasons, and NEITHER was the change under test
+
+PR #2785's CI failed twice. Both failures were real, both blocked every merge in the repo, and both
+were established as **not this branch's** before anything was touched — the discipline that matters
+here, because the reflex on a red gate is to change your own diff until the light goes green.
+
+### 🔴 First, and the more urgent: GitHub stopped creating CI runs at all
+
+The `pull_request` event produced no run for the pushed head — not on `opened`, not on `synchronize`.
+`get_check_runs` returned an EMPTY list, which is the dangerous shape: an empty check list is not
+green and not pending, it is **an unanswered question**, and it reads exactly like "nothing to worry
+about". `ci.yml` already carries a documented `workflow_dispatch` escape hatch from a 2026-08-15
+incident of the same kind; that is what was used, and every result below came from a dispatched run.
+
+**Had the empty list been read as "fine", both failures below would have merged unnoticed.**
+
+### 🔴 A new js-yaml advisory — red on `main` too, so nothing could merge
+
+The first dispatched run died in **56 seconds**, far too fast for the suite, which is itself the tell
+that it failed early. The audit gate had rejected a new high advisory against `js-yaml`
+(GHSA-2883-xcg3-v3hh, CWE-400/407). Confirmed not ours: the branch touches no dependency, and `main`'s
+own run that morning failed identically in 52 seconds.
+
+The gate offers "fix it" or "allowlist it with a reason". **Allowlisting would have been the forbidden
+surface patch** — `npm audit` reported `fixAvailable: true`. `js-yaml` was already pinned in
+`overrides` at `^4.3.1`, exactly one version behind the patched `4.3.2`, and `npm ci` installs the
+lockfile verbatim, so the caret never picked it up. Bumped the override; **the lockfile diff moves only
+js-yaml**. Honest scope: it arrives via `firebase-tools`, a devDependency, so it never shipped to a
+user — the exposure was CI and dev machines. Fixed anyway, because it was blocking main's deploys.
+
+### 🔴 Then the bundle budget — and the measurement is the point
+
+The next run got **8.5 minutes** in (past the audit gate) and failed on total JS: **1600.4 KB against a
+1600 KB ceiling**. Over by 0.4 KB — 0.025%.
+
+`bundleBudget.mjs` warns about exactly this in its own comments (2026-08-11): a ceiling set flush
+against reality "no longer says *no unchecked bloat*, it says *no further features*, and the next
+legitimate PR fails for existing growth it did not cause." That is what happened, and it was
+**measured rather than assumed** before the number was touched:
+
+| build | total JS |
+|---|---|
+| with this PR's UI | 1600.2 KB local / **1600.4 KB** on the runner |
+| with this PR's UI reverted | **1599.7 KB** |
+
+So this PR contributed **0.5 KB**; the other **113.6 KB** of drift since the 2026-08-24 measurement
+(1486.1) was already on main. And the first question that file says to answer — *what did I just put on
+the first-paint path?* — answers itself: the largest chunk did not move at all (250.3 KB against 400),
+because the added surface is an admin-only card inside the already-`lazy()` AdminDashboard route.
+
+Raised to **1720** = the runner's measurement + ~7.5% headroom, the same proportion the previous
+1486.1 → 1600 bump used. `LAST_MEASURED` updated in the SAME edit (the file demands this; a stale copy
+had already broken that test once) and dated.
+
+**Recorded, deliberately NOT acted on:** the entry chunk has shrunk 354.9 → 250.3 KB as more routes
+were split, so the 400 ceiling now permits ~150 KB of silent first-paint drift. Tightening it would
+lock that win in — but it is a judgement call with its own risk of failing somebody else's PR, and this
+change existed to unblock a gate, not to re-tune every ceiling while passing through.
+
+---
+
+## 2026-09-10 — the first-paint guard was not measuring first paint
+
+**How this was found.** Yesterday's bundle-budget entry closed with a deferred follow-up: the entry
+chunk had shrunk 354.9 → 250.3 KB, so the 400 KB ceiling permitted ~150 KB of silent drift, and
+tightening it would lock the win in. Picking that up today produced a different answer — **tightening
+it would have improved a number that had quietly stopped meaning what every comment in the file says
+it means.**
+
+**What `largestChunkGzipKB` actually is:** the biggest chunk, whichever one that happens to be.
+`bundleBudget.mjs` reasons about it everywhere as the entry — *"the entry EVERY user downloads"*, and
+the standing instruction to a future session that *"the question to answer first is 'what did I just
+put on the first-paint path'"*. That was true on 2026-08-24, when the entry WAS the largest chunk.
+
+**Measured today, from `dist/index.html` — the document the browser actually receives:**
+
+| what | file | gz |
+|---|---|---|
+| entry | `index-*.js` | 247.7 KB |
+| modulepreload | `react-vendor-*.js` | 59.2 KB |
+| modulepreload | `firebase-vendor-*.js` | 188.9 KB |
+| **first-paint JS** | | **495.8 KB** |
+| what the gate reported as "largest chunk" | `OfflineAI-*.js` — **a lazy chunk first paint never fetches** | 250.3 KB |
+
+So the guard was reporting a number roughly **half** the real first-paint cost, about a file the user
+does not download, while `firebase-vendor`'s 188.9 KB — paid by every visitor before anything renders —
+was guarded by nothing tighter than the 1720 KB total.
+
+**The failure mode is silent and in the future**, which is why nothing had caught it: let any lazy
+chunk drift to ~390 KB and it becomes "the largest", after which the entry could double from 247 to
+399 KB with this gate reporting success the whole way. Proven by bite test: with only the old metrics,
+a 700 KB first paint passes every budget; the new one is the only thing that fails it.
+
+**The fix is to measure the thing, not to tune the proxy.** `firstPaintJsGzipKB` is the entry script
+plus every `modulepreload` in the emitted HTML — by construction exactly what the browser must fetch
+before it can render, read from build output rather than inferred from a filename convention (which
+would drift again the day the naming changes). A `lazy()` route contributes nothing, because Vite emits
+no preload link for a dynamic import — so splitting a route still reduces the number it exists to
+reduce. `largestChunkGzipKB` is KEPT (it still catches any single chunk ballooning) but its comment no
+longer claims to be the first-paint guard, because it is not.
+
+Budget **560** = 495.8 + ~13% headroom, the same discipline as the other ceilings. Reported FIRST in
+the CLI output and listed with its file names, so "it grew" is immediately "it grew because THIS is now
+eager". `LAST_MEASURED` gains the same field, per this file's own rule about updating both together.
+
+🔒 **An unmeasurable first paint is a VIOLATION, not a pass.** `measureDist` throws when `index.html`
+is missing or references no module script (a build that produced no loadable app would otherwise score
+0 KB — the greenest possible result), and the pure `checkBudget` independently rejects a missing or
+non-finite value, because a caller that omitted the field would sail through the one gate that matters
+most. Test-locked in both directions.
+
+**⚠️ NOT optimised here, and recorded so it is not mistaken for acceptable:** 495.8 KB before anything
+renders is a lot, and **38% of it is Firebase**, which a visitor who never signs in still pays in full.
+Making that lazy is a real change with real risk and belongs in its own PR. This one exists to make the
+number visible and guarded — which is the precondition for improving it, and the reason the deferred
+"tighten 400" follow-up is now moot rather than done.
+
+## 2026-09-10 — a stuck v5 build's diagnostics report: one fix shipped, two open root causes recorded honestly
+
+Admin sent a real diagnostics JSON + screenshot: a 184-file edit build ("Continue from where you left
+off and finish/fix the build") ran 30 minutes, its own tool loop reported repeated `screenshot` /
+`browser_action` failures ("exit status 1") and two "noticed a repeated step… nudging a change of
+approach" nudges, then the record simply STOPPED — no terminal entry at all — and the client showed the
+generic "The build stopped responding" banner. The Live-preview tab, meanwhile, showed E2B's own
+"Closed Port Error" on port 3000, even though the build's own log had moved the verified preview to
+port 5000 twenty minutes earlier.
+
+### ✅ Fix shipped (PR #2788): the wall-clock timeout gets its own honest outcome code
+
+Math first, not a guess: `1789011461847 - 1789009662530 = 1799317ms` — **29m 59s**, one second under
+`AGENTV3_MAX_BUILD_SECONDS`'s 1800s default. Not a coincidence. Confirmed in code: `AgentRunner.ts`'s
+`buildTimedOut()` check sits exactly where the log stops, but `AgentRunner` never touches `buildDiag` —
+only `routes/agentv3.ts` does, from the run's return value — and NO `OUTCOME_*` code existed for hitting
+the cap, unlike every other recognised outcome (`OUTCOME_BUILD_SUCCESS`, `OUTCOME_STOPPED`,
+`OUTCOME_SYNTAX_ERROR`, `OUTCOME_PREVIEW_FAILED`, `OUTCOME_REVIEW_CRITICAL`, …). So a report like this
+one had literally no way to say why it ended — a reader had to infer a timeout from a timing coincidence,
+which is the "wrong verdict" the fifth absolute rule's honesty step exists to forbid.
+
+`AgentRunResult` gained `timedOut?: boolean` (mirrors the existing `budgetReached` field); the route now
+records `OUTCOME_BUILD_TIMEOUT` (severity `warning` when files were saved, `error` when nothing was
+built) at the one point every build path converges on `result`. `deriveRootCause()` already promotes any
+`OUTCOME_*` message to the report's root cause, so this needed no further wiring. Tested: 2 cases in
+`AgentRunner.test.ts`, a 3-case wiring `describe` in the existing `tests/buildOutcomeWiring.test.ts`.
+
+### 🟡 Open root cause #1 — the Live preview can be left on a stale/dead port with no explanation
+
+Traced deep into `PreviewSurface.tsx`, `previewKeepAlive.ts` and `previewUrlFreshness.ts`. The healing
+machinery for exactly this class of bug already exists and is real — built after two prior admin reports
+(2026-08-22 "Sandbox Not Found" shown as the user's app, 2026-08-23 "Closed Port Error" as the user's
+app) — `probeAndMaybeHeal()` compares the displayed host against the server's `currentPreviewUrl` and
+re-points the frame (`setFoundUrl`) with an honest "Your preview moved to a new server" note the moment
+it detects staleness. The server-side port switch itself DID fire correctly in this build (`ToolDispatcher.ts`'s
+supersede block ran, `sandboxStore.supersedeRecipe(workspaceId, 5000)` was called, matching the exact
+narration in the log). The watchdog that would re-probe is gated on `shouldWatchLivePreview()`
+(`autoResume=!running`, `mode==='live'`, `paneVisible`, `!documentHidden`) AND `sandbox?.livePreviewAvailable===true`
+— every one of those gates is PLAUSIBLY satisfied moments after the client's own stall-watchdog flips
+`running` to `false`, which would fire an immediate probe (the effect's dependency array includes
+`autoResume`). I could not, without live reproduction, pin down which single condition failed —
+candidates in order of likelihood: (a) a benign race where the screenshot was taken in the few-hundred-ms
+window between "stopped responding" appearing and the immediate re-probe actually landing, or (b) the
+event stream itself dropped earlier (around the repeated tool-call failures at minute 27), so the
+client's local `previewUrl` state was already behind the server's by the time anything tried to correct
+it. **Trigger for revisiting:** a reproducible case, or a second admin report of the same symptom.
+
+### 🟡 Open root cause #2 — the diagnostics EXPORT SCHEMA has no field for the build's final outcome
+
+While investigating #1, found that `BuildDiagnosticsReport`'s top-level keys (`schema, buildId,
+promptHash, sessionId, workspaceId, prompt, model, plannedModel, framework, startedAt, counts, issues,
+problems, rootCause, commands, llmCalls, providerDelivery, builtBy, priorFailedBuilds`) carry no
+`ok`/`summary`/`outcome` field at all — the terminal result text a build actually returns to the client
+is not part of the exported report. This is WHY confirming or ruling out root cause #1's hypotheses from
+the diagnostics JSON alone was impossible: even a perfectly honest server-side finish leaves no trace of
+its own summary in this artifact. `rootCause` (derived from the LAST `OUTCOME_*`-coded issue, per PR
+#2788 above) is the closest proxy but is not the same thing — it is inferred, not the actual returned
+`result.summary`. **The economical fix, not done here:** add `outcome: { ok: boolean; summary: string;
+timedOut?: boolean; budgetReached?: boolean }` to the schema, filled from the same `result` the route
+already has in hand at the merge point PR #2788 touches. Free, small, and would have made root cause #1
+answerable from this exact report instead of requiring a live-code investigation.
+
+---
+
+## 2026-09-10 — PREVIEW GAP ANALYSIS + CLOSURE (admin: "navbharatai ka in-browser preview aur vsc/cursor/antigravity ka preview … sabhi chote bade gaps dhundo", then "sabhi gaps ko khatam karo")
+
+The admin asked for an exhaustive comparison of NavBharatAI's two previews (In-browser and Live)
+against VS Code's Live Preview / Simple Browser, Cursor's browser tab and Antigravity's agent-driven
+browser, then for every gap found to be closed. 22 gaps were found. What shipped, and what did not.
+
+### Shipped — PR #2790 (merged) and the follow-up PR
+
+**The billable-address leak, in TWO places.** The Live toolbar rendered `{effectiveUrl}` verbatim —
+`https://<port>-<sandboxId>.e2b.app` — permanently and selectably on every Live preview. PR #2739 had
+removed that address from the AI's chat replies for exactly this reason ("yah link dena band karo …
+mera kharcha badta hai"); the toolbar was the sibling that fix never touched, and it was the worse of
+the two because the chat mentions a link in passing while the toolbar displayed it always. It also
+named a vendor, which the white-label law forbids on any user-facing surface. Now
+`previewAddressLabel()` keeps the PORT (a process, not a machine) and drops everything that addresses
+one. **A SECOND sibling was found later in the same session:** Checkpoints → Preview opened the same
+kind of address with `window.open`, with a second dev server running behind it. That now renders
+inside the preview panel instead. ⚠️ Recorded for whoever revisits it: the door route CANNOT be the
+vehicle for a version preview — `portCandidates` puts the main app's proven port ahead of any hint, so
+a door minted for a version's port would redirect to TODAY's app under a banner saying "an older
+version", which is worse than the leak.
+
+**The Live preview had no console at all.** The mirror was written inline inside `ReactPreview.ts`, so
+the drawer, the error badge and "Fix with AI" existed only for the in-browser render — while the mode
+where the app is most real reported nothing. Extracted to `AgentV3/previewBridge.ts`, shared by both,
+and injected into the sandbox's entry document at dev-server launch beside the block that already
+patches the Vite config there. Kill switch `AGENTV3_PREVIEW_BRIDGE=off`. It also reports FAILED network
+calls, which the browser hides in a Network tab the user cannot open. 🔒 The bridge is stripped from
+what the model READS and again from what it WRITES: models preserve script tags they find when
+rewriting HTML, which is how a development-only bridge would have been published inside a user's app.
+
+**A real address bar.** Neither preview had one. It could not be built from the panel — a cross-origin
+frame's history cannot be read or stepped, which is why the Code Studio chevrons were removed as fake
+in August rather than wired. The bridge reports the route from inside the app instead, wrapping
+`pushState`/`replaceState` as well as `popstate`/`hashchange` because a SPA route change fires no event
+at all. Back/Forward call the app's own history; Enter performs a real navigation.
+
+**Honesty about what the in-browser preview cannot reproduce** (`previewFidelity.ts`): CSS Modules,
+Sass/Less, a customised Tailwind theme, workers, `import.meta.glob`, `public/` assets. The toolbar said
+only "In-browser preview (react)", so a user whose layout collapsed could not tell whether their app
+was broken or the preview was approximate — and the answer, which we knew and did not say, was the
+second.
+
+**Point & Ask on Live**, camera/mic/location delegation on all preview iframes, zoom, a dark-theme
+toggle gated on the app actually having dark styling, "Fix with AI" on React warnings that are really
+bugs, console filter/search/repeat-collapsing, `sourceURL` so a preview error names its file, a
+dependency retry, and a MutationObserver so "Preview is empty" is evidence rather than a stopwatch.
+
+**The verification proof reaches the user** (`journeyUserSummary.ts`). After a build the platform
+already drives a real browser through the app's forms — fills, submits, RELOADS, confirms the entry
+survived. That result went only into the ADMIN diagnostics report while the chat said "your app is
+ready" in the same words it uses when nothing was verified. It is now a card in the chat, and a
+FAILURE is as visible as a pass.
+
+### 🟡 Open item #1 — the in-browser preview still runs on the PLATFORM's origin
+
+`cloudbuild.yaml` sets `_VITE_PREVIEW_ORIGIN: ''`, so `configuredPreviewSandboxUrl()` returns null and
+the preview keeps the same-origin `srcDoc` path with `allow-same-origin`. The code comment in
+`previewOrigin.ts` says this is "safe because the allowlist keeps the app to trusted admins" — that
+premise EXPIRED when the app went public. Generated app code can read `navbharatai.com`'s localStorage,
+which holds the Firebase auth token. **The code for the fix has been ready since July**; it needs an
+admin action, not a commit: point a subdomain at the app and set the `_VITE_PREVIEW_ORIGIN` trigger
+substitution. Recorded as an open root cause rather than silently left.
+
+### 🔴 Deliberately NOT built — viewing your own app on your own phone
+
+Listed as a gap in the analysis (competitors offer a QR code). It is **declined**, and the reasoning is
+recorded so it is not re-proposed as an oversight: a QR is a shareable link by construction, and the
+door route's refusal of top-level navigation — the thing that makes a leaked preview URL worthless — is
+exactly what would have to be weakened to make it work. Building it would re-open the cost hole the
+admin closed by hand. The existing answer is Publish: static hosting that costs nothing per visitor.
+
+### 🟡 Open item #2 — the two preview surfaces are still different products
+
+`components/agentv3/PreviewSurface.tsx` (Pro) now has the console, address bar, picker, zoom and theme
+toggle; `components/ide/PreviewPanel.tsx` (Code Studio) has print, fullscreen and preview history that
+the Pro surface does not. Only the capability delegation was brought to parity here. Full convergence
+is a real refactor of an 843-line component and was not attempted in this pass — a user moving between
+the two still meets two different previews.
+
+### 🟡 Known flake, unrelated to the preview work — `AgentRunner.test.ts` "timedOut is true when work was saved"
+
+Went red once in a full-suite run on 2026-09-10 and passed immediately when run alone, in a session
+that changed nothing AgentRunner imports. **The cause is in the test, not the code:** it builds the
+runner with `maxBuildMs: 1` and relies on at least one real millisecond of wall clock elapsing between
+the run's start and the second loop check. Under a heavily parallel suite that interval can round to
+zero, `buildTimedOut()` correctly returns false, and the assertion fails — the production behaviour is
+right in both cases.
+
+**The fix, deliberately NOT taken here** because it is unrelated to this PR's diff and widening it to
+touch another module's test is how an unrelated regression gets attributed to a preview change: make
+the elapsed time REAL rather than relaxing the assertion — have the scripted client await a couple of
+milliseconds so the second check genuinely happens after `maxBuildMs`. The assertion itself must stay
+exactly as it is; changing it to match the flake would be changing a test to match broken behaviour.
+
+## 2026-09-10 — Visitor analytics for published apps (ROADMAP §13 item 1.1) + the §13 plan itself
+
+**Session:** claude/upgrade-md-review-vxbdy0. PRs #2792 (domain screen contradiction), #2793 (ROADMAP §13),
+and this one.
+
+### Why this first
+The admin asked for NavBharatAI's import → publish → domain flow to be compared with 7-8 AI app builders
+and for an improvement plan. The plan is `ROADMAP.md` §13. Its first code item is this one, chosen because
+it is the cheapest thing that changes what a user FEELS after publishing — "kitne log aaye?" — and needs no
+admin decision. Every competitor with hosting answers that question; we could not.
+
+### What shipped
+- **`src/server/lib/siteAnalytics.ts`** (pure): the beacon stamped into every published HTML page, the
+  validation of what comes back (`parseHit` accepts exactly the beacon's shape and nothing else), the daily
+  rotating HMAC visitor hash, the sharded document layout, and `summarize()`.
+- **`src/server/lib/siteAnalyticsStore.ts`**: hits buffered in memory and flushed every 20s as
+  `FieldValue.increment` merges into `site_analytics/<appId>_<day>_s<shard>` — `metricsTimeline`'s
+  pattern, so N Cloud Run instances add up by construction. A visitor's shard is a function of their hash,
+  so "unique per day" is EXACT across instances, not approximate. Every document is bounded (200 distinct
+  paths/referrers, the rest fold into `_other`); a failed flush puts the counts back; a failed read returns
+  `available: false`, never zeros.
+- **Stamped at publish** in `DeploymentStore.withDeploymentPersistence`, right after the badge and for the
+  same reason (downstream of every edit, never in the user's source, never in a preview). First-party
+  publishes only. The public app id is `siteIdForWorkspace` — already in the site's URL, so nothing new is
+  disclosed. Kill switch `AGENTV3_SITE_ANALYTICS=off`.
+- **Routes** (`routes/agentv3.ts`): `POST /api/site-analytics/hit` — public, cross-origin by design
+  (`text/plain` simple request, no preflight), answers 204 BEFORE any work, honours DNT/GPC server-side
+  too, rate-limited in memory; `POST /api/agentv3/site-analytics` — owner-checked like rollback-status,
+  app id derived from the workspace, never taken from the client.
+- **Publish sheet** (`HostingChooser.tsx`): a "Visitors" tile under the live link — people / views / today,
+  a 7- or 30-day bar strip, top pages, "came from". Three honest states: counting, numbers, or
+  "unavailable — this is not a zero".
+- **Privacy Policy §12** discloses exactly what is collected; `tests/privacyPolicyTruth.test.ts` imports
+  `POLICY_PHRASES` from the code, so adding a collected field fails CI until the policy names it — the
+  guard that was missing when the pixel drifted on 2026-09-02. `AppKnowledgeBase` + `CLAUDE.md` registry
+  updated in the same change.
+
+### Two things the tests taught, kept
+- `fieldKey` first shipped with a lossy encoding (`%`→`_` collided with real underscores; `/__proto__`
+  did not round-trip). Now `_u`/`_p` escapes with a single-pass decode, test-locked with the very keys
+  that broke it.
+- The per-workspace reset could not go into the `[state.workspaceId]` effect: two source-locks pin that
+  line verbatim and a census caps such effects at 3. It sits inside the existing live-URL fetch effect
+  instead, synchronously before the request — same leak class as #2658, closed the same way.
+
+### Gate
+`tsc --noEmit` 0 · `tsc -p tsconfig.server.json` 0 · `vitest run` **1505 files / 20,262 passed, 0 failed**.
+
+### Open, honestly
+- Countries are not collected (the beacon posts to Cloud Run, which carries no geo header); they arrive
+  free once published apps are served through the Cloudflare Worker (§13 Phase 0.3) — `cf-ipcountry`.
+- Retention: documents are read for 30 days; a deletion sweep for older ones is not written yet — at
+  today's publish volume the growth is negligible, and it belongs with the cron runner (§13 2.7).
+
+## 2026-09-10 — `www` ↔ apex: both spellings of a connected domain work (ROADMAP §13 item 1.2)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2794).
+
+### The defect
+Every host handles `www.x.com` ↔ `x.com`; we attached exactly the one the user typed. Connect
+`mitrify.com`, have a friend type `www.mitrify.com`, and they got a hosting error — two unrelated
+domains to the hosting service, one of them attached. It was in the 8-builder audit as the one gap
+**every** competitor had closed.
+
+### What shipped
+- **`src/server/lib/domainPair.ts`** (pure): the canonical is ALWAYS the apex (`www.x.com` → `x.com`),
+  because the managed-DNS zone must be the registrable domain; only a two-label host gets a `www`
+  twin (`blog.x.com` does not become `www.blog.x.com`). The honest limit — a three-label apex such as
+  `shop.co.in` gets no twin, since without a public-suffix list it is indistinguishable from a
+  subdomain — is written in the header so nobody "fixes" it with a heuristic.
+- **The redirect is real, not assumed.** `redirectTarget` was verified against Google's own v1beta1
+  discovery document before a line was written ("A domain name that this CustomDomain should direct
+  traffic towards"). `attachCustomDomain` sends it on create and PATCHes (`updateMask=redirectTarget`)
+  an existing twin that lacks it — an older connect or a plan re-attach must not leave `www` serving a
+  second copy of the site.
+- **Connect** attaches the twin with the redirect and links it as `alternateOf` the canonical;
+  best-effort, so a twin that cannot be attached never turns a connected canonical into a 500.
+- **ONE verdict, ONE record list.** The twin's records are merged into `displayRecords` before the
+  single `verifyRecordsLive` call, and its own states ride BESIDE the verdict as `alternate` — never
+  inside it, so a twin still waiting for its record cannot make a finished domain read as unfinished.
+  The one-source locks (`domainVerdictOneSource.test.ts`: exactly one serving probe, one DNS check)
+  stand untouched.
+- **Every applier writes both spellings in one pass** — managed DNS (`applyRecords`, `missingFromZone`,
+  `desired` count), Domain Connect's template, Hostinger's token flow — and the saved-state and sync
+  responses carry the twin's records so a reload or a "Check & apply" never makes the www record vanish.
+- **The link store knows a twin is a spelling, not a second domain**: `firebaseDomainsForWorkspaceStrict`
+  and the `/links` badge skip `alternateOf`; the plan sweep still sees twins (detached on lapse) and
+  re-attaches them WITH the redirect.
+- **Every route canonicalises the host it is handed** — a zone named `www.x.com` is not something a
+  registrar delegates. The screen adopts the spelling the server actually connected, and shows one
+  line under the verdict: "✓ www.x.com works too — it sends visitors here" / "⏳ being set up too" /
+  "could not check just now".
+- `AppKnowledgeBase` updated. Locked by `domainPair.test.ts` (pure) and `tests/domainWwwApex.test.ts`
+  (source-locks across the route, link store, sweep, client, and the API field).
+
+### Gate
+`tsc --noEmit` 0 · `tsc -p tsconfig.server.json` 0 · `vitest run` **1507 files / 20,281 passed, 0 failed**.
+One existing lock (`domainPointing.test.ts`, "the sync route refuses BEFORE it can write") named the old
+write literal; it now names the merged one — the guarded property (guard upstream of the ONE write) is
+unchanged and still asserted.
+
+## 2026-09-10 — "Move this domain to this app" in one tap (ROADMAP §13 item 1.3)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2795).
+
+### The defect
+A domain connected to app A, then Connect pressed on app B (the admin's `mitrify.com` screenshots of
+2026-09-02 and 2026-09-10). Two things stood in the way and the user was left to find both: the hosting
+service still held the domain on A's site (so B's attach could be refused as "already connected to
+another site"), and the ownership TXT named A's site. #2792 made the second fixable by the button the
+verdict names; this closes the first.
+
+### What shipped
+- **`src/server/lib/domainMove.ts`** (pure): `decideDomainMove(holder, workspaceId, verifiedUid)` —
+  no holder or the same app ⇒ nothing; **same user, another app ⇒ move**; **a different account ⇒
+  refuse**, with a message that names nobody (whose it is, is not this caller's business). A holder
+  with no recorded user is never treated as ours — moving it would be acting on a guess.
+- **`linkForDomain(domain)`** in the link store: who holds a domain right now, fail-open to `null` so an
+  unreadable link is never mistaken for "held by someone else" (a refusal) nor "held by you" (a move).
+- **Connect** reads the holder and decides BEFORE the attach; on a move it detaches BOTH spellings
+  from the old app's site (best-effort each), then attaches here and carries `movedFrom` on the
+  response without touching the one-source `res.json` line. A different account gets a 409.
+- **The screen** says, under the verdict, that the domain was moved from another app of yours and how
+  to move it back. `AppKnowledgeBase` updated.
+- Locked by `domainMove.test.ts` (pure) and `tests/domainMoveWiring.test.ts` (decided-before-attach
+  ordering, both spellings detached, the 409, the response field, the screen line).
+
+### Deliberately NOT done
+Auto-running "Check & apply records" inside Connect when the managed zone is active. It would make
+the move a single tap end-to-end, but it adds a second `applyRecords` write path outside the sync
+route's guard (`domainPointing.test.ts`: the guard is upstream of the ONE write). After #2792 the
+button is always reachable, so the honest sequence today is Connect → Check & apply. Recorded as the
+follow-up rather than shipped as a second write.
+
+### Gate (the CI-equivalent one, per the 2026-09-10 safeguard-5 correction)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1509 files / 20,294 passed, 0 failed**.
+
+## 2026-09-10 — Publish history picker: go back to ANY earlier version (ROADMAP §13 item 1.4)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2796).
+
+### What shipped
+"Undo last publish" went one step back. Now, under it, **"Go back to an earlier version…"** lists every
+version the app has published — date and time, the live one marked — and puts any of them back live in
+two taps. Zero storage cost, for the same reason the one-step undo was free: the host already holds every
+finalized version; a rollback is one release call pointing the channel at one of them.
+
+- **`listRollbackChoices(releases, max=20)`** (pure, `publishRollback.ts`): same filters as
+  `pickRollbackTarget` (FINALIZED only, sorted by release time, never the API's order), **one entry per
+  VERSION** — after a rollback the same version sits in several releases, and listing it three times would
+  misdescribe the history — each keeping the time it was most recently live; bounded.
+- **`pickRollbackTargetByVersion(releases, versionName)`** (pure): the request's version is only ever a
+  KEY into the history the server itself read — unknown ⇒ null, the live one ⇒ null — and yields the same
+  target shape the one-step undo uses, so the route's hosting call is identical for both.
+- **Routes:** `rollback-status` now returns `choices`; `rollback` accepts an optional `versionName`
+  resolved through that function and refuses (409, `unknown-version`) anything not in the history.
+- **The screen:** a collapsed link under Undo; on open, the list with the same two-step confirm; an
+  unreadable history is said in words, never rendered as an empty one; "nothing is deleted — going back
+  adds a new entry, so you can come forward again." `AppKnowledgeBase` updated.
+
+### The lock that evolved, and why that was the honest move
+`publishRollback.test.ts` pinned "the rollback target is re-derived on the SERVER, never taken from the
+request" with a literal `not.toMatch(/req.body.versionName/)`. The picker needs the request to NAME a
+version, so the lock now asserts the actual property: the raw string reaches the hosting call only
+through `pickRollbackTargetByVersion(releases ?? [], requested)`, and never appears inside
+`rollbackChannel(…)` or a `versionName=` URL. The guarded invariant is unchanged and asserted more
+precisely than before.
+
+### Gate (CI-equivalent)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1509 files / 20,298 passed, 0 failed**.
+
+## 2026-09-10 — Site settings: redirects, a real 404, safe headers on every publish (ROADMAP §13 item 1.6)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2796; PR for 1.4 in CI alongside).
+
+### The defect
+The hosting version every first-party publish was created with carried ONE hardcoded config — a
+catch-all rewrite to index.html and a cache header — in TWO places (the v5 deployer and Engineer AI's,
+a sibling that had drifted into an identical copy). Right for the single-page app most builds are;
+wrong for everything a site needs once it has been live a week: a page that moved, a multi-page site
+whose missing pages should say so, and the response headers every serious host sets by default.
+
+### What shipped
+- **`src/server/AgentV3/siteConfig.ts`** (pure): `validateSiteConfig` refuses what cannot be safe — a
+  redirect target is a path on this site or an https URL the user typed (no `//evil`, no `javascript:`,
+  no http:), no loops, no duplicate sources, at most 50; `customNotFoundApplies(files)` drops the SPA
+  catch-all ONLY for a site that is visibly multi-page AND ships its own `404.html` — decided from the
+  files, not a checkbox, because dropping it for an SPA would 404 every deep link; `hostingVersionConfig`
+  forms the ONE config: asset cache, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and
+  `X-Frame-Options: SAMEORIGIN` unless the user allows embedding (HSTS is already set by the host).
+- **`siteConfigStore`** (`site_configs/<workspaceId>`), re-validated on read so a hand-edited document
+  cannot smuggle a bad rule; an unreadable store yields the defaults, never a broken site.
+- **`Deployment.createVersion` takes the formed config**; both first-party paths (channel + dedicated
+  site) pass `versionConfigFor(workspaceId, files)`. **Engineer AI's deployer** uses the same form with
+  the user half null — the sibling closed in the same change (rule 3).
+- **Routes** `site-config` / `site-config/save`: owner-checked; save validates through the pure module
+  and stores only the validated config; the response says *"Publish again for these settings to reach
+  your live site"* — the settings do not change the live site until then, and the screen must not imply
+  otherwise.
+- **Publish sheet:** "Site settings — redirects, embedding, 404" on the Host-on-NavBharatAI card: a
+  redirects editor (from → to, 301/302, up to 50), the embedding checkbox with the reason it is off by
+  default, and the 404 note. `AppKnowledgeBase` updated.
+
+### Honest limits
+- Bucket-only publishes (`PUBLISHED_APPS_BUCKET_ONLY=on`) are served by the Cloudflare Worker, which
+  does not read these settings yet; redirects/headers apply to Firebase-served apps until the Worker
+  learns a per-app `_nbai/site.json` (ROADMAP §13 Phase 0.3 / 1.5 territory). Stated here, not hidden.
+- `customNotFoundApplies` cannot tell a JS-routed multi-page bundle from a static one; it errs toward
+  keeping the catch-all (deep links keep working), which is the safe wrong.
+
+### Gate (CI-equivalent)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1511 files / 20,310 passed, 0 failed**. The first run of the new pure test caught a real hole —
+`//evil.com` passed the path check (protocol-relative = another host) — fixed before anything shipped.
+
+## 2026-09-10 — Site uptime: "your site is down" reaches the OWNER (ROADMAP §13 item 1.8)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2797; PR for 1.6 in CI alongside).
+
+### The defect
+The platform has watched itself since 2026-08-23 (`monitorAlerts`). Nothing watched the apps our users
+PUBLISHED: a connected domain could answer errors for a day and the first person to notice would be a
+customer. Every host with a paid tier sends an "it's down" mail; we did not.
+
+### What shipped
+- **`src/server/lib/siteUptime.ts`** (pure): `decideUptime` — TWO consecutive failures before an alert
+  (a deploy in progress or a blip must not wake anyone); `unknown` (WE could not reach it) neither counts
+  nor resets — it is not their site's failure; ONE alert per outage, then quiet for a cooldown (6h) while
+  it stays down; a recovery announced once, only after an alert was sent. Messages name the domain and the
+  next step ("press Publish once"), never a vendor or a probe internal.
+- **`siteUptimeSweep.ts`**: probes every connected custom domain (the paid plan by construction, so probe
+  cost scales with revenue, not signups; `www` twins skipped — they redirect to the canonical) through the
+  SSRF-guarded `checkDomainServing`; bounded concurrency; one domain's failure never stops the rest. Two
+  channels, both best-effort: the in-app bell (`saveNotification`) and email via the existing
+  `ALERT_EMAIL_*` mailer — to the OWNER's verified address, never the admin list (a `footer` dep added to
+  `sendAlertEmail` so a user mail does not sign off "Open Admin → Monitor").
+- **`siteUptimeStore`** (`site_uptime/<domain>`); an unreadable record reads as fresh, which can only
+  DELAY an alert by one sweep, never invent one.
+- **Registered in `server.ts`** as the `site-uptime` scheduled job, **exclusive**, every 15 minutes.
+  Kill switch `SITE_UPTIME_SWEEP=off`. `CLAUDE.md` registry + `AppKnowledgeBase` updated.
+- Locked by `siteUptime.test.ts` (the rule) and `siteUptimeSweep.test.ts` (the orchestration with
+  injected deps, the exclusive registration, owner-only email, no raw fetch).
+
+### Honest limits
+- Email needs the mailer configured (`ALERT_EMAIL_API_KEY` + `ALERT_EMAIL_FROM`, not set today per the
+  registry); until then the bell alone fires, and the AppKnowledgeBase says "and an email, when the mailer
+  is set up" rather than promising one.
+- The probe is one HTTP GET from our region; a site down only for some visitors would read "up". The
+  Worker path (0.3) could add edge-side evidence later.
+
+### Gate (CI-equivalent)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1513 files / 20,325 passed, 0 failed**.
+
+## 2026-09-10 — "Make a copy of this app" (ROADMAP §13 item 3.6)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2798; PR for 1.8 alongside).
+
+### The defect
+A user who wanted a variant — the same shop with a different catalogue, a second client's site from
+the first — could only rebuild from scratch or hand-edit the original in place. Every builder has a
+copy; a safeguard-6 search (five names, filename-first) found none here.
+
+### What shipped
+- **`src/server/AgentV3/duplicateApp.ts`** (pure): `copyName` — "X (copy)", then "X (copy 2)"…, never a
+  name the user already has, and copying a copy does not stack suffixes; `copyStatus` — a copy is never
+  "running" (the store's statuses are running | complete | stopped | error; the first draft returned a
+  status that does not exist, caught by reading the union before the route was written).
+- **`POST /api/agentv3/conversations/:id/duplicate`**: identity from the verified token, anon refused,
+  the source reached only through `conversationAccess`; files copied with `saveWorkspaceFiles` into a
+  workspace minted for the SAME user (`workspaceIdFor`), the chat carried so the next edit understands
+  the app, the name from `copyName` against the user's own list. **Copies nothing that points at a
+  place in the world** — repo, deploy branch, domain, site settings, deployment, pin; the secrets vault
+  is per-app by construction. A copy starts unpublished and unconnected, which is the only honest state.
+  "No files yet" is a 409 that says so, not an empty copy.
+- **Client:** a copy button beside pin/delete in History; the copy is opened at once; the note says what
+  stayed with the original. `AppKnowledgeBase` updated.
+- Locked by `duplicateApp.test.ts` (pure) and `tests/duplicateAppWiring.test.ts` (verified identity,
+  conversationAccess, same-user workspace, and — the one that matters — that the create/update calls carry
+  none of the world-pointing fields).
+
+### Gate (CI-equivalent)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1515 files / 20,335 passed, 0 failed**.
+
+## 2026-09-10 — Website → App: clone a site's DESIGN from its address (ROADMAP §13 item 4.2)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2800).
+
+### The gap
+Lovable, Bolt, v0 and Replit take a URL and hand back an editable app that looks like it. We took a
+SCREENSHOT (`/api/screenshot/to-prompt`) and a GitHub repo (`importUrl` — the safeguard-6 check confirmed
+it is the repo import only), never a live site. A user who wanted "my shop, laid out like this one"
+screenshotted it page by page.
+
+### The design, and why it is NOT the screenshot path again
+The roadmap row suggested "snapshot with the pre-baked browser, feed the design-contract path". Adapted
+(external-suggestion rule): that would spin a sandbox (₹7/hr) and a vision call just to READ a page, for a
+result that varies run to run. Instead:
+- **One fetch through `webFetchUrl`** — the SSRF-guarded reader every URL feature uses (public IPs only,
+  no redirects, 2 MB, 15 s). It gained an opt-in `keepHtml` (off by default, so the tool path is
+  byte-identical); a page that is all `<script>` hands back its `<head>` on the honest failure so the
+  importer can say "this site draws itself with JavaScript" instead of "nothing there".
+- **`src/server/lib/siteImport.ts`** (pure, regex, no DOM, same discipline as `htmlToText`):
+  `extractSiteDesign` reads title, description, language, navigation (in order, de-duplicated), headings
+  with level, CTAs (buttons + button-styled links), form fields (label > placeholder > aria-label > name;
+  hidden/submit skipped; submit text), colours (hex, normalised, most-used first, the declared
+  `theme-color` outranking frequency), fonts (Google Fonts link families + `font-family`), image ALT
+  texts, counts, login/payment/search flags, a capped text sample, and `thin`. `<script>`/`<style>`/`<svg>`
+  bodies are removed first, so a bundle's fake heading or colour never surfaces. **No model call** — the
+  same page always yields the same spec, in about a second, for ₹0.
+- **The VISUAL half is delegated to the builder**: `buildSiteImportPrompt` tells v5.0 to open the live
+  page in its own browser first (proportions, spacing, imagery, the real colours) and to fall back to the
+  summary if it will not open. Markup gives the words and the skeleton; the browser gives the look.
+- **`POST /api/site-import/to-prompt`** (`routes/siteImport.ts`, registered in `server.ts`): sign-in
+  required (our server fetching a visitor's address — an IP-keyed anonymous allowance is unbounded in
+  total), 30/hour, `anon: 0`; no `inAiSpendZone`, no `gateToolAction`, no charge — a deterministic tool
+  is free by the one-wallet law. A refused or unreadable address is a 422 in the guard's own words; a
+  non-HTML answer says "not a web page". The intent-aware design & anti-phishing policy
+  (`cloneGuardrailsBlock`) is hard-appended server-side, exactly as the screenshot path does.
+- **🔒 Copyright by construction:** no image URL, logo, icon, font file or stylesheet enters the spec —
+  an `<img>` contributes its alt text and nothing else — and the spec says in words: do not download,
+  hot-link or reproduce the site's assets; placeholders of the same size, the user's own assets.
+- **Client** (`ScreenshotToCode.tsx`): a "From a website address" box above the drop zone. "Read website"
+  shows WHAT was read (title, nav chips, counts, fonts, colour swatches, the JavaScript-drawn note) BEFORE
+  a second, explicit "Build from this website" hands the spec to Pro v5.0. `AppKnowledgeBase` entry
+  `website_to_app`.
+- Locked by `siteImport.test.ts` (extraction, caps, script-body exclusion, alt-text-only, thin, prompt
+  wording, white-label), the `keepHtml` block in `webFetch.test.ts`, and `tests/siteImportWiring.test.ts`
+  (SSRF reader only, no raw fetch, sign-in, no model/spend calls, policy appended, honest 422, second
+  press to build, knowledge base).
+
+### Honest limits
+- A site that renders entirely with JavaScript gives a thin summary; the spec says so and leans on the
+  live browser look. A redirecting address must be pasted in its final form (the guard refuses redirects,
+  for the reason recorded in `webFetch.ts`).
+- The structure is read from ONE page. Multi-page cloning = paste each page, or ask v5.0 to browse.
+
+### ✅ 2026-09-10 (later the same day) — that AgentRunner flake was FIXED, not left
+
+The entry above says the fix was "deliberately NOT taken here" because it was unrelated to the preview
+diff. It went red **twice more** the same day — once under the full parallel suite and once **running
+entirely on its own**, which killed the "parallel load" theory: the test was simply marginal. A gate
+that fails at random is a gate nobody can read, so it was fixed at its cause.
+
+**What was wrong, and what was NOT changed.** The scripted client answered synchronously, so a whole
+turn could complete inside the same millisecond the run started in; `buildTimedOut` then correctly
+returned false and the assertion failed on a run where the production code behaved perfectly. The fix
+gives the scripted client an explicit `turnDelayMs` so a test that depends on wall-clock elapsing says
+so, instead of hoping today's event loop is slow enough. **The assertion itself is untouched** — the
+precondition it always relied on is now guaranteed, rather than what it proves being relaxed. Verified
+by three consecutive clean runs.
+
+### 2026-09-10 — REVENUE AUDIT: the first two leaks closed
+
+**Coupons.** Five codes lived in `routes/payment.ts` — FREE100, WELCOME100, NAVBHARAT50, FESTIVE2026,
+SAKUNI25 — each minting ₹25-₹200 of real credit, with no expiry, no total cap, and names that are the
+first thing anyone would type into a promo box. The redemption logic was always sound (atomic, one per
+user); the leak was that the PRICE LIST sat in the source, where the admin could not reach it and an
+attacker could guess it. It now reads `PROMO_COUPONS`, and **an unset value redeems nothing** — so the
+default is off and re-opening the door is a deliberate, visible act in Cloud Run rather than a deploy.
+A value above ₹5,000 is refused outright: `DIWALI:10000` where ₹100 was meant is one missing decimal
+whose cost is unbounded.
+
+**The live exchange rate was never switched on.** `refreshUsdInrRate()` had existed and been unit-tested
+since the billing model was written, and was **never called anywhere outside its own test file**. So
+`usdInrRate()` returned its 85 fallback forever while the real rate sat near 87-88: **every build was
+billed roughly 3% under its real cost, silently, for months, with nothing failing to reveal it.**
+Nothing was broken — a wire was missing. Now refreshed at boot and every six hours.
+
+⚠️ **Registered NON-exclusive on purpose.** The rate is an in-memory cache per instance, so an
+exclusive job would refresh exactly one instance and leave every other one billing at 85 — the same
+bug with extra steps. Every instance refreshes its own copy; the cost is one small HTTP call per
+instance per six hours.
+
+---
+
+## 2026-09-10 — Revenue, slice A: the platform fee on a wallet recharge (branch `feat/platform-fee`)
+
+Admin, confirmed: **"2% flat theek hai"** (after asking for "cashfree/google/apple ka charge + 1%").
+
+**Why flat, and why it is not called a gateway fee.** India's real cost of taking a payment is not one
+number: UPI carries ZERO merchant discount rate by regulation, cards and netbanking cost roughly 2%
+plus GST. Deducting the ACTUAL cost would mean the same ₹500 credits a different amount depending on a
+method the user only picks on the NEXT screen — three prices for one product, none showable in advance.
+A flat rate can be stated before payment, which is the only version a user can agree to. And it is
+named a **platform fee**, never "Cashfree's charge": the gateway's real charge on a given payment is a
+number no statement of ours will ever match, so naming it after them would be a claim we cannot support
+even when it flatters us. (Same reasoning CLAUDE.md already records for the Play Store fee label.)
+
+**What was actually wrong.** `routes/payment.ts` credited `balanceAdded: orderAmount` with the comment
+"₹1 = ₹1 balance added to wallet". The gateway's charge therefore came out of NavBharatAI's side of
+every card payment and appeared **nowhere in the books** — there was no gateway-fee line anywhere in
+the codebase. On a ₹500 card recharge we credited ₹500 and received about ₹490.
+
+**Where the fee is applied, and the three places it deliberately is NOT.**
+- ✅ Cashfree create-order stores `balanceAdded = paid − fee`, plus `platformFeeInr` / `platformFeePct`
+  on the transaction so the admin's revenue reporting can total it without re-deriving a rate that may
+  since have changed.
+- ❌ **Google Play / Apple packs.** Already priced with their fee inside (₹119 buys ₹99), and the
+  billing panel promises "your wallet is credited the full credit amount shown, never less". Charging
+  here would bill one thing twice AND make that sentence a lie.
+- ❌ **Coupons and referral gifts.** No gateway, no money arriving — a fee on a gift is taking money in
+  order to give money.
+- ❌ **Transactions created before this shipped.** No `platformFeeInr` field means zero, so a pending
+  order sold at rupee-for-rupee still credits in full, exactly as it was sold.
+
+**The sibling that would have leaked the fee straight past it.** `computeCreditedWallet` has TWO
+branches. The standard one credits `balanceAdded`, so setting that net at create-order was enough. The
+**vishwakarma** one — which is also the branch Play packs are credited through — derives its tokens
+from `amountPaid` on purpose (security fix C4: never trust a client-supplied token count), so a fee
+applied only to `balanceAdded` would have been invisible to it. It now mints from the NET. The fee is
+read from the transaction rather than re-computed from the current rate, so an order that sits pending
+while the admin changes the rate still credits what its buyer was shown.
+
+**🔴 A REAL MONEY BUG FOUND ON THE WAY, unrelated to the fee and worse than it.** The Vishwakarma
+chooser modal printed its entry-pass price as `vkMode === 'pro' ? 100 : 50` — in the price badge, the
+totals box and the buy button — while `createVishwakarmaOrder` hardcoded ₹100 and the server credited
+`(paid − 100) × 100` tokens. **`setVkMode` is never called anywhere in the codebase**, so `vkMode` was
+permanently `'basic'`: every single pass buyer was shown **₹50 + tokens** and charged **₹100 + tokens**,
+receiving the tokens they expected and ₹50 less than the screen promised. Root cause was not the wrong
+literal — it was a money constant with three homes, free to drift between them. It now has one:
+`src/lib/walletPricing.ts`, which the server re-exports from rather than keeping its own copy.
+
+**One implementation of the split, shared.** The arithmetic lives in `src/lib/platformFee.ts`; the
+server wraps it with the env rate, the browser wraps it with the rate it reads from
+`/api/public-config`. The user is shown the exact split the server will apply — "₹500.00 paid −
+₹10.00 platform fee = ₹490.00 credited" — before paying, and the fee is named again in their ledger
+line afterwards. `fee + credit === paid` exactly at every amount, because the fee is rounded and the
+credit is the remainder: a wallet whose two halves disagree with the payment is the drift the
+debit-carry fix was written to end.
+
+**Config.** `PLATFORM_FEE_PCT` in Cloud Run, unset ⇒ 2. An EMPTY value falls back to the default
+rather than meaning "no fee" (`Number('')` is 0 — the trap `hostingCost.ts` already records); an
+out-of-range or unreadable value is refused, never obeyed; an explicit `0` IS honoured, because
+switching the fee off must be possible and visible. Capped at 20%.
+
+**Open, deliberately not built in this slice:** the two hosting tiers (₹149 / ₹499), the hosting
+meter and its overage billing, and the remix gate. Paid remix (Cashfree split settlement) and the TDS
+admin card stay deferred at the admin's instruction — "isko chor do! last ke liye."
+## 2026-09-10 — DPDP + GDPR consent banner, one click, for USER apps (ROADMAP §13 item 4.4)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2801).
+
+### The gap
+`generate_consent` (shipped earlier) is the BACKEND consent LOG. Nothing produced the banner a visitor
+actually sees, or kept third-party scripts off until they agreed — and the platform's own
+`ComplianceAnalysis` flags exactly that ("third-party trackers running with no cookie-consent surface").
+Every competitor ships a generic GDPR widget; none ships one written for India's DPDP Act. Safeguard-6:
+`ConsentBanner.tsx` is NavBharatAI's OWN banner; `publishConsent.ts` is "did the user ask to publish" —
+unrelated names, same word, checked before writing.
+
+### What shipped
+- **`src/server/lib/ConsentBannerGenerator.ts`** (pure builder → files): `public/consent-banner.js`
+  (dependency-free, plain HTML and React alike) + `CONSENT_BANNER.md`. The testable heart sits between
+  `NAVCONSENT-CORE` markers as plain JS with no DOM — the test executes the REAL emitted code — and the
+  DOM shell is string-locked. Every option is sanitised inside the generator (quotes, angle brackets,
+  backticks and `$` stripped before `JSON.stringify`; a bad URL → `/privacy`; a bad email → omitted; an
+  unknown purpose → the default list), so a hostile app name cannot break out of the emitted script.
+- **The rules the banner enforces (legal requirements, not style):** nothing non-essential loads before
+  consent — a third-party script is written `<script type="text/plain" data-consent="analytics"
+  data-src="…">` and activated once, only when every purpose it names is granted; no pre-ticked boxes;
+  "Reject all" beside "Accept all"; a persistent "Privacy choices" control (or the app's own
+  `data-consent-open` link) reopens it — withdrawal as easy as consent (DPDP §6(4)); the stored choice
+  carries the policy VERSION, so a changed policy asks again; Global Privacy Control = no consent and no
+  nag, opt-in still possible; notice in English AND Hindi by default; Privacy Policy link and the DPDP
+  grievance contact on the banner itself. `window.NavConsent.has/granted/open/onChange` +
+  `nbconsent:change`.
+- **Tool `generate_consent_banner`** (catalog def with a real input schema — appName, policyUrl,
+  grievanceEmail, language, purposes, policyVersion; allow-list entry; dispatcher case that writes the
+  files and returns the three wiring steps: include once in `<head>`, convert every third-party script,
+  add the footer link). `AppKnowledgeBase` bullet beside the consent-log one.
+- Locked by `ConsentBannerGenerator.test.ts`: fresh visitor asked with nothing granted; stored choice
+  honoured only for its policy version; GPC; every-purpose gating; the three answers; sanitisation;
+  no pre-ticked boxes; reopen control; bilingual defaults; white-label; emitted JS parses.
+  `ToolWiring.test.ts` proves the advertised tool routes to a real handler.
+
+### Honest limits
+- A script already running in the current page session cannot be unloaded by anyone; withdrawal stops
+  the next load and fires the change event so the app stops sending. The README says so.
+- A tool, not legal advice: the Privacy Policy must still name every recipient of visitors' data. The
+  instructions tell the model to make sure that page exists.
+
+## 2026-09-10 — Payments, UPI first: Cashfree added, verified webhooks on both Indian recipes (ROADMAP §13 item 3.2)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after 4.4).
+
+### The gap
+`generate_payment` wired Razorpay or Stripe: an order route, a client-side verify, no webhook — so a
+buyer who closed the tab after paying was never recorded as paid. Cashfree, the gateway NavBharatAI
+itself runs on, was not offered at all, while every competitor is Stripe-only. UPI is the moat for an
+Indian shop, and the roadmap row says so.
+
+### What shipped (PaymentGenerator.ts, pure; catalog + dispatcher + knowledge base)
+- **Cashfree provider** — dependency-free (platform `fetch` + `node:crypto`): `POST /order` creates the
+  order against the REAL PG API (`/pg/orders`, `x-client-id` / `x-client-secret` / `x-api-version
+  2023-08-01`, the same shape the platform's own `routes/payment.ts` uses) and returns the
+  `payment_session_id`; `POST /verify` asks CASHFREE whether the order is `PAID` — never the browser;
+  `paymentWebhook` checks Cashfree's documented signature — base64 HMAC-SHA256(timestamp + rawBody,
+  client secret) — with `timingSafeEqual`, on the RAW body. Client: the official SDK modal
+  (`sdk.cashfree.com/js/v3`, UPI / cards / net banking / wallets), then server verification. Env:
+  `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY`, `CASHFREE_ENV` (sandbox default; keys must match).
+- **Razorpay gains the webhook** (`X-Razorpay-Signature` = hex HMAC-SHA256(rawBody, webhook secret),
+  constant-time) and `RAZORPAY_WEBHOOK_SECRET`. `PaymentConfig.dependency` is now optional; the
+  dispatcher says "no dependency needed" instead of printing `undefined@undefined`.
+- **Honest about keys and money:** the instructions say the keys go in the app's OWN env — `.env`, or
+  Settings → App Settings → Secrets & API Keys (merged into `.env` at build) — and that the money lands
+  in the USER's merchant account. NavBharatAI's own Cashfree account is never used for a user's app
+  (standing rule). The webhook URL must be registered in the provider's dashboard; the instructions
+  name the exact screen rather than pretending we can register it with someone else's keys.
+- Catalog: `provider` enum gains `cashfree`; the description tells the model when to pick which, and
+  that both Indian gateways show UPI. Knowledge-base PAYMENTS bullet rewritten around UPI.
+- Locked in `PaymentGenerator.test.ts`: real API hosts/headers, PAID-only verification, both signature
+  schemes verbatim + `timingSafeEqual`, SDK checkout, blank env values, white-label, no stubs.
+
+### Honest limits
+- The ₹1 UPI test the roadmap names as "done when" needs a real merchant's sandbox keys in a real app —
+  a session cannot run it. The code paths mirror the platform's own live Cashfree integration.
+
+---
+
+## 2026-09-10 — Revenue, slice B: two hosting tiers with a real agreement (branch `feat/platform-fee`)
+
+Admin: **"do tier banao, credit bundle karo, 20 GB theek hai"**, and earlier **"yeh bat clear likhi ho
+jab user 149₹ ka purchage kare, agreement type aa jaye, 'ok' tick karne ko aye"**, and **"app remix
+only woh user kar sakta hai, jo user ₹149/mahina par hai … purchase ₹149/mahina ka popup a jaye"**.
+
+**Starter ₹149** — 1 domain, 5 GB traffic, badge-free, gallery remix, ad-free.
+**Growth ₹499** — 3 domains, 20 GB, **₹150 of build credit every month**, everything in Starter.
+**₹2,999 Business is deliberately NOT built.** A purchasable plan with nobody on it is a promise about
+capacity, support and limits that no code keeps. It is "write to us" until a real customer defines it —
+which is also the honest way to find out what it should contain.
+
+**The catalogue is one file, shared.** `src/lib/hostingTiers.ts` holds prices, limits, entitlements AND
+the agreement text, and both the browser and the server read it. The consent text is **generated from
+the tier**, never written beside it — an agreement that quotes one number while the meter enforces
+another is worse than no agreement.
+
+**The tick is enforced on the SERVER.** `computePlanPurchase` refuses without `agreedToTerms`, so a
+plan record with no `agreedAt` cannot be created. That matters beyond the ceremony: **overage may only
+ever be billed against a plan whose terms were actually accepted**, which is exactly why the accepted
+terms are frozen onto the record rather than a version number — and exactly why a legacy ₹99 plan,
+which carries no agreement, can never be billed for it.
+
+**Going over the limit does not switch the app off.** The agreement says so in capitals. Overage is
+₹20/GB from the wallet (measured cost is ~₹14/GB — an overage rate at or under cost turns a popular
+app into a loss that grows with its success). The meter itself is slice C.
+
+**Upgrading mid-month loses nothing:** the unused days are valued at the old plan's own daily rate,
+returned to the wallet as credit, and the new tier starts a full period from that day. Downgrading
+while a bigger plan is live is refused rather than silently shortening what was paid for.
+
+**🔒 THE LEGACY ₹99 PLAN IS GRANDFATHERED, AND THAT IS A DECISION.** Those users agreed to ₹99. Moving
+them to ₹149 because a catalogue was introduced would be raising a price on a live subscription without
+asking, which no amount of "the new plan is better" makes honest. They keep ₹99 and receive Starter's
+entitlements — strictly more than they bought.
+
+**Three siblings that would each have silently broken the new tiers**, all found by grepping for the
+one-constant comparison the old single-plan design licensed:
+- `hostingPlanActive` tested `p.id !== HOSTING_PLAN_ID` — every Starter and Growth plan would have read
+  as INACTIVE. A paying customer with no entitlements and nothing failing anywhere.
+- `sweepHostingPlans` filtered the same way — no reminders, no renewals, no lapses for the new tiers.
+- Every sweep message hardcoded "Custom Domain" and the ADVERTISED price, so a Growth customer would
+  have been told their ₹499 plan renews at ₹149.
+
+**Entitlements are enforced, not printed.** Gallery remix now needs an active plan (402 + `needsPlan`,
+and the panel shows a real offer with a route to Billing — a refusal with no way to act on it is the
+dead button rule 2 forbids). The per-tier domain count is counted against active links. Both gates
+exempt the admin/tester list and **fail OPEN** on a store outage, the same shape as the existing
+domain gate, so the two cannot drift.
+
+**⚠️ ONE THING I DID NOT GATE, and the admin should overrule me if they disagree.** The Nav App Store's
+"make it yours" remix (`/api/nav-store/web/app/:id/remix`) supports SIGNED-OUT users by design — it is
+the store's whole conversion loop, viewer to creator in one tap. Gating that behind ₹149 would break
+signed-out remix entirely and remove the store's reason to exist. The GALLERY remix — taking another
+creator's published app as your starting point — is what the plan now covers.
+
+### Slice C (hosting traffic meter + overage) — OPEN ROOT CAUSE, honestly recorded (rule 6)
+
+**It cannot be built honestly today, and pretending otherwise would break the billing law.**
+
+The tiers include 5 GB / 20 GB of visitor traffic and quote ₹20/GB beyond it. Charging that needs a
+**per-app byte measurement**, and there is no honest source for one right now:
+
+- **Firebase Hosting** serves today's published apps as channels on ONE site. Its usage figures are
+  per-SITE, so the bytes of one user's app cannot be separated from everyone else's. Splitting them
+  would be inventing a number, which `hostingCost.ts`'s inherited law forbids outright.
+- **Cloud Run** metrics (`hostingUsage.ts`) measure NavBharatAI's own service, not a user's app.
+- **The site-analytics beacon** counts page VIEWS, not bytes. Multiplying views by an assumed page
+  weight would produce a figure that looks like a measurement and would land on a real person's bill.
+
+**The real path, when the admin wants it:** the Cloudflare Worker (`infra/cloudflare/mitrify-apps-worker.js`)
+is the one place every bucket-served app's response actually passes through, so it can count real
+response bytes per app and report them the way the analytics beacon already reports hits. That path
+only carries traffic once the bucket-only publishing sequence in CLAUDE.md is switched on — bucket
+public-readable → Worker `APPS_BUCKET` deployed → `PUBLISHED_APP_DOMAIN` set → `PUBLISHED_APPS_BUCKET_ONLY=on`.
+Until then the Worker would measure zero apps, so building the meter first would be building nothing.
+
+**What ships instead, and why it is safe:** no meter ⇒ no overage ⇒ the user is charged the plan price
+and nothing more. The error is entirely in their favour. The agreement SAYS SO in its own line, pinned
+by `tests/hostingTiers.test.ts` so removing that line the day the meter goes live is a deliberate act
+rather than a silent one, and `AppKnowledgeBase.ts` tells every AI to never claim a traffic charge a
+user's ledger does not actually show.
+
+---
+
+## 2026-09-10 — Renewal reminders: 5 / 3 / 1 days, plus the grace-window warning that was missing
+
+Admin: **"user ko 5-3-1 day me reminder notification show hona chahiye"**.
+
+Two changes, and the second is the one that mattered more than the ask:
+
+1. `HOSTING_PLAN_REMINDER_DAYS` widened from `[5, 1]` to `[5, 3, 1]`. One warning five days out and
+   then silence until the last day is easy to miss entirely; the middle one is the useful one.
+
+2. **🔴 THE THREE-DAY SILENCE AFTER EXPIRY, WHICH NOBODY HAD NOTICED.** The pre-expiry reminders only
+   fire while `exp > now`, and the lapse message only fires *past* the grace window. So for the entire
+   3-day grace period — the single most useful moment to reach someone, when the plan has genuinely
+   ended and one recharge still fixes it with nothing interrupted — the user heard **nothing at all**.
+   That was the exact opposite of the reminder feature's purpose. There is now ONE grace message,
+   keyed on the expiry so a new period resets it and a daily sweep cannot nag.
+
+The grace message says three things, in this order because that is the order the user needs them:
+the plan HAS ended; there are N days before the domain pauses; and the app stays live on its free
+NavBharatAI link either way. It names the exact shortfall when the wallet cannot cover the renewal —
+"recharge" is not actionable without an amount.
+
+One existing test asserted SILENCE through the grace window and now asserts the message; what it
+really guarded — that no domain is detached inside grace — is unchanged and still asserted.
+
+### ⏸️ OPEN QUESTION PUT TO THE ADMIN — "plan khatam, app offline honi chahiye"
+
+The admin's instinct (a lapse with no bite means nobody recharges) is right, but the literal fix has a
+hole worth naming before it ships, so it is asked rather than assumed:
+
+**Free hosting is a real product here.** `HostingQuota` gives EVERY user — paid or not — 5 published
+apps, 200 MB total, 50 MB each, on NavBharatAI's bill, with the badge. If a lapsed PAYING user's app
+goes fully offline while someone who never paid a rupee keeps 5 apps live, then paying once makes you
+strictly worse off than never paying.
+
+**And the real hole the admin is sensing is a different one:** `publishedAppCap()` is NOT plan-aware.
+A ₹499 Growth customer gets the same 5-app cap as a free user, so the plan today grants domains, badge
+removal, remix and ad-free — and **no hosting allowance at all**. "Hosting plan" is currently a
+misnomer, which is precisely why losing it feels toothless.
+
+Recommendation put to the admin: make the plans grant real hosting headroom, and make a lapse a
+**demotion to the free tier** rather than a blackout — apps above the free 5 go offline (files kept,
+one tap to restore on renewal), the domain pauses, the badge returns. A Growth user holding 20 live
+apps then loses 15 on lapse, which is real pressure; a one-app user keeps their app but loses the
+domain, which is fair. Awaiting the admin's call before building either.
+
+---
+
+## 2026-09-10 — The lapse now bites: demotion to the free tier (branch `feat/renewal-reminders`)
+
+Admin: **"user ka month complete ho gaya, tab to app offline honi chahiye, nahi to user recharge hi
+nahi karega"** — and, asked to choose, they picked **demote to the free tier** over a full blackout.
+
+**The hole underneath the complaint, which was worse than the complaint.** `publishedAppCap()` gave
+EVERY account 5 published apps whether they paid or not, so a ₹499 Growth customer had exactly the
+hosting headroom of someone who had never paid a rupee. The plan granted domains, badge removal, remix
+and ad-free — and **no hosting at all**. "Hosting plan" was a misnomer, and that is the real reason
+losing one felt like it cost nothing. Fixed first: Starter now grants **15** published apps, Growth
+**50**, free stays **5**, and the publish gate reads the user's plan (bounded, and failing open to the
+FREE cap in both directions — never more room than was bought, never a refusal we cannot justify).
+
+**Why demotion and not a blackout, stated plainly because the admin's literal instruction was the
+blackout.** Free hosting is a real product here. Switching a lapsed PAYER all the way off while
+someone who never paid keeps 5 apps live would make paying once leave you strictly worse than never
+paying — a user notices that immediately — and the site's own visitors, who did nothing, pay for it
+too. Demotion keeps the pressure where it belongs: a user holding 20 live apps loses 15 the moment
+they stop paying. A one-app user keeps their app and loses their domain, which is fair.
+
+**Which apps survive, using the only two real signals we have.** `appsToPauseOnLapse` keeps the free
+slots for (1) apps with a **custom domain** pointed at them — somebody bought a domain for it, the
+strongest evidence a site has real visitors — then (2) the **most recently updated**. Guessing is
+unavoidable; guessing with the user's own evidence beats "take the first five", which is what document
+order would silently be. A cap of 0 pauses **nothing** — a misconfiguration must never black out an
+account.
+
+**The pause is real, and cannot lie.** `pauseApp` deletes the live Hosting channel FIRST and only then
+marks the record `plan_paused`; a throw leaves the app live AND active so the next sweep retries it.
+A record saying "paused" over a still-serving site would be the fake status the unpublish route already
+warns about, and here it would be worse — the user would be told to renew to get back something that
+never went away.
+
+**`plan_paused` is a THIRD status on purpose.** Not `taken_down` (a punishment whose republish block
+must never apply here) and not `unpublished` (the owner's choice, which this was not). It is non-active,
+so it correctly reads as not live and frees the slot — which is exactly right, since the slot is what
+they stopped paying for.
+
+**🔴 THE RESTORE IS DESCRIBED EXACTLY AS IT WORKS, after two drafts that were not.** Republishing
+re-runs a real sandbox build, so there is no instant restore: the user renews, opens the app, presses
+Publish. The first draft said "everything comes back when you renew" (implying an automatic restore
+nothing performs); the second said "in one tap" (implying a Restore button that does not exist). Both
+would have been discovered at the worst possible moment — just after paying to get their apps back.
+Auto-restoring a dozen apps inside a sweep would spend real money on our own bill and fail often, which
+is why it is manual rather than hidden.
+
+**Paused apps stay VISIBLE** under "Your published apps" — separate from the live list, because that
+list's count must equal what the cap enforces. An app that vanished from every screen would look
+deleted and could never be found again.
+
+**Also in this branch:** reminders at **5 / 3 / 1** days, and the grace-window message that closed a
+three-day silence nobody had noticed (the pre-expiry reminders stop at expiry and the lapse fires only
+after grace, so the most useful moment to reach someone produced nothing at all).
+
+### Free vs paid, spelled out — and the gate that was missing from the step BEFORE connect
+
+Admin, 2026-09-10: **"free user apni website connect nahi kar sakta hai … paid user app connect kar ke
+apni website par app chalata hai … plan ka month pura ho jaye to live website offline ho jani chahiye,
+host on navbharatai chalti rahe."**
+
+Three statements. Two were already true and are now pinned by tests so a refactor cannot quietly undo
+them. The third found a real hole.
+
+**✅ Already true — a lapse kills the DOMAIN, not the hosting.** `decidePlanSweepStep`'s lapse detaches
+every custom domain and marks it suspended, while the app keeps serving on its free NavBharatAI link.
+And the demotion built earlier the same day deliberately hands the free slots to **domain-holding apps
+first**, so the site the user cared most about is the last thing to pause. Both halves are now asserted
+directly (`hostingTiers.test.ts`), because an invariant that merely *happens* to hold is one refactor
+from breaking.
+
+**🔴 THE HOLE: `/api/domains/nbai/auto-dns/start` HAD NO PLAN GATE, and it runs BEFORE connect.**
+`/connect` has been gated since 2026-08-06 — but start is the step a user reaches first: it calls
+`ensureZone(host)`, which **creates a real DNS zone on NavBharatAI's own Cloudflare account**, and
+hands back nameservers for the user to set at their registrar. So a free account could:
+
+1. start automatic setup (a zone on our bill, every time),
+2. repoint their domain's nameservers — slow, disruptive and awkward to undo on their side,
+3. and only THEN be told at connect that the whole thing needs a plan.
+
+That is the dead end the second absolute rule forbids, and it cost us a zone each time somebody hit it.
+
+**The fix is one shared gate, not a second copy.** `refusedForNoPlan(res, uid, email)` now serves both
+routes, so they cannot drift apart again — the exact class of bug the fourth rule's step 2 names. Both
+exemptions are preserved deliberately: the admin/tester free-list, and a plan store that cannot answer
+(`known` false ⇒ allow), because rule #1 says an outage must never block a legitimate paying user.
+`auto-dns/sync` and `hostinger/apply` need an already-connected domain and refuse without one, so
+gating connect and start covers the whole path.
+
+**The refusal now names what the free user still HAS.** "Your app is still published and live on its
+NavBharatAI link" — a refusal that only says no reads as the product being broken, when the free tier
+genuinely gives them a working, hosted site. The auto-DNS screen renders it as the amber upgrade note
+rather than a red error, which it previously did only for connect.
+
+**Three guard tests were re-anchored, not weakened.** They sliced `nbaiDomains.ts` from a bare route
+name (`indexOf('auto-dns/start')`), and the new shared helper's doc comment mentions both endpoint
+names — so they began reading PROSE instead of a handler. They now anchor on the registration
+(`app.post('/api/domains/nbai/auto-dns/start'`). Same lesson this file already records twice: a
+conclusion drawn from the wrong slice is not a weaker test, it is a different one.

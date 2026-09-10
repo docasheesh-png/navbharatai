@@ -20,6 +20,7 @@ import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerSecretsRoutes } from './src/server/routes/secrets';
 import { registerPushRoutes } from './src/server/routes/push';
 import { registerSbomRoutes } from './src/server/routes/sbom';
+import { registerLegalRoutes } from './src/server/routes/legal';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
 import { registerSupabaseIntegrationRoutes } from './src/server/routes/supabaseIntegration';
 import { verifyFirebaseToken as verifyFirebaseTokenForIntegrations } from './src/server/lib/authMiddleware';
@@ -47,6 +48,7 @@ import { registerAppDebugRoutes } from './src/server/routes/appDebug';
 import { registerImageGenRoutes } from './src/server/routes/imageGen';
 import { registerDevtoolsProxyRoutes } from './src/server/routes/devtoolsProxy';
 import { registerScreenshotToPromptRoutes } from './src/server/routes/screenshotToPrompt';
+import { registerSiteImportRoutes } from './src/server/routes/siteImport';
 import { registerFigmaProxyRoutes } from './src/server/routes/figmaProxy';
 import { registerCodeReviewRoutes } from './src/server/routes/codeReview';
 import { registerPaymentRoutes } from './src/server/routes/payment';
@@ -655,6 +657,11 @@ setInterval(() => {
   registerSecretsRoutes(app);
   registerPushRoutes(app); // Push-notification device-token registration (native mobile app)
   registerSbomRoutes(app);
+  // PUBLIC legal pages (/privacy, /terms) — server-rendered HTML, no auth, no JavaScript required.
+  // Meta needs the Privacy Policy URL to take the app Live and Play needs it for Data safety, and
+  // both are checked by tools that may not run JS. Both paths are declared in spaFallback.ts, so the
+  // SPA catch-all defers to these handlers instead of returning index.html.
+  registerLegalRoutes(app);
   registerBuildAnalyticsRoutes(app);
   // ROADMAP #1 Phase 1 — one-click database (connect the user's OWN Supabase account).
   registerSupabaseIntegrationRoutes(app, verifyFirebaseTokenForIntegrations);
@@ -683,6 +690,7 @@ setInterval(() => {
   registerImageGenRoutes(app); // AI Image Gen — real image generation on our own key (POST /api/image/generate)
   registerDevtoolsProxyRoutes(app); // API Tester — SSRF-guarded server proxy (POST /api/devtools/proxy)
   registerScreenshotToPromptRoutes(app); // Screenshot→Code — vision → build prompt (POST /api/screenshot/to-prompt)
+  registerSiteImportRoutes(app); // Website→App — SSRF-guarded fetch → deterministic build prompt (POST /api/site-import/to-prompt)
   registerFigmaProxyRoutes(app); // Figma Import — server-side Figma fetch (POST /api/figma/proxy)
   registerCodeReviewRoutes(app); // P-DEV.11 — inline code review comments (/api/workspace/:workspaceId/review)
   registerZipRoutes(app, chatLimiter);
@@ -750,6 +758,8 @@ setInterval(() => {
       // cron surviving scale-to-0 needs Cloud Scheduler (honest follow-up).
       import('./src/server/lib/ScheduledJobs')
         .then(({ scheduler }) => {
+          /** Set only when the purge is enabled; fired once the cross-instance claim is in place. */
+          let bootRun: (() => void) | null = null;
           // P-DATA.4 — TTL retention purge, OPT-IN (DATA_RETENTION_PURGE_ENABLED=true) so no automated
           // deletion runs in production without explicit admin sign-off. Daily @ 03:00 UTC + once at boot.
           if (process.env.DATA_RETENTION_PURGE_ENABLED === 'true') {
@@ -760,13 +770,71 @@ setInterval(() => {
               })
               .then((r) => { if (r && r.totalDeleted) console.log(`[P-DATA.4] retention purge removed ${r.totalDeleted} expired record(s)`); })
               .catch(() => { /* best-effort — purge must never affect the server */ });
-            scheduler.register({ id: 'retention-purge', schedule: { kind: 'dailyAtUtc', hour: 3, minute: 0 }, handler: runPurge });
-            runPurge(); // once at boot
+            // `exclusive`: this DELETES, and every instance runs its own tick loop. The deletes are
+            // idempotent, so N instances would not destroy anything they should not — they would
+            // simply do the whole purge N times, paying N times the Firestore reads and writes on a
+            // schedule. See ROADMAP §12 #1 and lib/jobLease.ts.
+            scheduler.register({ id: 'retention-purge', exclusive: true, schedule: { kind: 'dailyAtUtc', hour: 3, minute: 0 }, handler: runPurge });
+            /**
+             * 🔒 THE BOOT RUN GOES THROUGH THE SCHEDULER TOO, and it waits for the claim to be wired.
+             *
+             * This used to be a bare `runPurge()` — the handler called directly, straight past the
+             * scheduler — so marking the job `exclusive` protected its 03:00 run and did nothing for
+             * this one. With the instance ceiling raised to 100 (§12 #2), a single deploy could mean a
+             * hundred simultaneous purges. Nothing would break (the deletes are idempotent and capped
+             * at `maxPerRun`), but it is precisely the duplicated scheduled work `exclusive` exists to
+             * prevent, arriving through the one door that did not check.
+             *
+             * The wait matters as much as the routing: `setClaim` is wired by an async import below, so
+             * a boot run fired before it lands would find no claim and run on every instance anyway.
+             */
+            bootRun = () => { void scheduler.runNow('retention-purge'); };
           }
           // MONITOR ALERTS — the admin is TOLD when build success, preview rate or build time leaves
           // its normal range, instead of finding out by happening to open the panel. Every 15 minutes;
           // the sweep itself decides what is worth saying (new / still-firing-after-a-cooldown /
           // recovered) and says NOTHING when the window cannot be judged. Kill switch: MONITOR_ALERTS=off.
+          // SITE UPTIME (ROADMAP §13, 1.8): probe every connected custom domain and tell its OWNER
+          // when it is down — exclusive, so one instance probes rather than every instance. Kill
+          // switch SITE_UPTIME_SWEEP=off. Never throws; a domain that cannot be probed is "unknown".
+          scheduler.register({
+            id: 'site-uptime',
+            exclusive: true,
+            schedule: { kind: 'everyMs', ms: 15 * 60_000 },
+            handler: async () => {
+              await import('./src/server/lib/siteUptimeSweep')
+                .then(({ runSiteUptimeSweep }) => runSiteUptimeSweep())
+                .then((r) => { if (r.alertedDown || r.alertedUp) console.log(`[site-uptime] probed ${r.probed}, down alerts ${r.alertedDown}, recoveries ${r.alertedUp}`); })
+                .catch(() => { /* best-effort — the sweep must never affect the server */ });
+            },
+          });
+          /**
+           * LIVE USD→INR — the rate every build's bill is converted at.
+           *
+           * 🔴 THE BUG THIS CLOSES (revenue audit 2026-09-10). `refreshUsdInrRate()` has existed, and
+           * been unit-tested, since the billing model was written — and it was NEVER CALLED anywhere
+           * outside its own test file. So `usdInrRate()` returned its 85 fallback forever, while the
+           * real rate sat around 87-88. Every single build was billed roughly 3% under its real cost,
+           * silently, with nothing failing to reveal it. Nothing was broken; a wire was simply missing.
+           *
+           * ⚠️ DELIBERATELY NOT `exclusive`. The rate is an IN-MEMORY cache per instance, so an
+           * exclusive job would refresh exactly one instance and leave every other one billing at 85 —
+           * which is the current bug with extra steps. Every instance must refresh its own copy. The
+           * cost of that is one tiny HTTP call per instance every six hours.
+           *
+           * Failure is already handled inside the module: it keeps the last good value and never
+           * throws, so a dead FX source means yesterday's rate rather than a broken bill.
+           */
+          const refreshFx = async () => {
+            await import('./src/server/lib/UsdInrRate')
+              .then(({ refreshUsdInrRate }) => refreshUsdInrRate())
+              .then((rate) => console.log(`[fx] USD→INR = ${rate}`))
+              .catch(() => { /* best-effort — billing must never break on FX */ });
+          };
+          scheduler.register({ id: 'usd-inr-refresh', schedule: { kind: 'everyMs', ms: 6 * 60 * 60_000 }, handler: refreshFx });
+          // AND ONCE AT BOOT. Without this the first six hours of a fresh instance — which includes
+          // every build right after a deploy — would still bill at the fallback.
+          void refreshFx();
           scheduler.register({
             id: 'monitor-alerts',
             schedule: { kind: 'everyMs', ms: 15 * 60_000 },
@@ -776,6 +844,24 @@ setInterval(() => {
                 .catch(() => { /* monitoring must never affect the server */ });
             },
           });
+          /**
+           * ONE INSTANCE RUNS AN EXCLUSIVE JOB (ROADMAP §12 #1). Wired here rather than inside the
+           * scheduler so that module stays free of Firestore and fully testable.
+           *
+           * 🔒 If the lease store cannot be reached, `claimJobRun` returns TRUE and the job runs. A
+           * database hiccup silently cancelling every scheduled job on the platform is a far worse
+           * outcome than running a purge twice.
+           */
+          void import('./src/server/lib/jobLease')
+            .then(({ claimJobRun }) => import('./src/server/lib/serverDb').then(({ getServerDb }) => {
+              // Resolved per CALL, not at wiring time: the db may not be set yet at boot, and a null
+              // store means the job runs — never that it is silently cancelled.
+              scheduler.setClaim((jobId) => claimJobRun(getServerDb() as any, { jobId }));
+            }))
+            .catch(() => { /* no claim wired ⇒ every job runs, exactly as before */ })
+            // Either way the boot run happens — a claim that could not be wired must delay the purge,
+            // never cancel it.
+            .finally(() => { bootRun?.(); });
           scheduler.start();
         })
         .catch(() => { /* best-effort — the scheduler must never affect boot */ });

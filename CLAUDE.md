@@ -277,10 +277,82 @@ best. Both layers — reactive autopsy AND proactive world-best suggestions — 
    trust a truncated `tail`) + a manual/boot smoke check for server changes.
    This gate is non-negotiable, even under time or credit pressure.
 
+   ⚠️ **THE GATE ABOVE IS NARROWER THAN CI, AND THAT GAP HAS COST A RED BUILD
+   (2026-09-10).** A session ran tsc and the full 20,000-test suite, got green
+   on both, pushed — and CI failed in 87 seconds on `scripts/noUnusedImports.mjs`
+   over a single import left behind by a refactor. Neither tsc nor vitest can
+   see an unused import, so a gate made only of those two is structurally
+   incapable of catching that class at all. **`.github/workflows/ci.yml` is the
+   real gate; the list above is a subset of it.** Before a push, run the steps
+   CI runs that the list omits:
+   `npm run typecheck` · `node scripts/noUnusedImports.mjs` ·
+   `npm run typecheck:server` · `npm run build` · `npm run test:bundle` ·
+   `npm run boot:check` (and `npm run audit:gate` / `license:gate` when
+   dependencies changed). They take about two minutes together — far less than
+   a red CI round trip, and they catch what the two-command gate cannot.
+   **Re-read the workflow rather than trusting this list**: CI gains steps, and
+   a list in a doc goes stale exactly the way this one did.
+
+   🔴 **RUN IT AT THE END, ON THE FINAL STATE OF THE CHANGE — NEVER MID-WAY.**
+   A gate run before the last file was written proves nothing about what is
+   being pushed, and it is worse than no gate at all, because it produces a
+   green result you will honestly report and honestly believe.
+
+   **The real incident (2026-09-08, PR #2778).** I ran `tsc --noEmit`, it passed,
+   and I then ADDED a test file and ran only `vitest`. CI failed with ~60 type
+   errors in `serverDb.ts`, `logStore.ts`, `Deployment.ts` — files the change
+   never touched — and my first three theories (another session broke `main`, a
+   dependency drifted, the lockfile changed) were all wrong. `main` was green;
+   the new test file was the cause. **Both typechecks and the suite go last, in
+   one pass, after the final edit.** Re-running a check you already ran costs a
+   minute; a wrong green costs a red CI and a false diagnosis.
+
+   ⚠️ **`vitest` exiting 0 does NOT mean the suite passed.** A run can print
+   `Tests 1 failed | 19736 passed` and still exit 0 (seen 2026-09-07). Read the
+   `Tests` line itself, and when capturing to a file, `tee` the whole log and
+   grep it for `FAIL` — a `tail -7` shows the summary but hides which test broke.
+
 6. **Redundant-work check before starting anything new.** Before building a
    new feature or fix, grep/search the current `main` to confirm it doesn't
    already exist. This is not optional housekeeping — it is what would have
    prevented PR #1 and PR #4 from being built at all.
+
+   🔴 **"MY SEARCH FOUND NOTHING" IS NOT "IT DOES NOT EXIST." IT USUALLY MEANS
+   I GUESSED THE WRONG WORD.** This is the single most expensive mistake in this
+   repo's history, and it is nearly always a vocabulary failure rather than a
+   missing feature.
+
+   **Four real incidents, three of them in ONE session (2026-09-07/08):**
+   - Searched `mentionFile`, `contextPicker`, `attachFile` → concluded @-mentions
+     did not exist. The real name was **`parseFileMentions`**. I then **overwrote
+     `fileMentions.ts`, destroying a working, tested, wired feature.** Only a
+     TypeScript error on a stale import revealed it. Restored, nothing lost — by
+     luck, not by process.
+   - Searched `acceptHunk`, `diffReview`, `approveChange` → reported "no diff
+     review at all" to the admin. **`DiffViewer.tsx`** had existed all along, 538
+     lines, wired to the Diff tab.
+   - Searched `runMonitorAlertSweep` under `src/` → told the admin the whole
+     alerting path was dead code. It is wired in **`server.ts`**, which sits at
+     the repo ROOT, not under `src/`.
+   - Told the admin the published-app count needed building. The **Publish
+     Capacity** card had shown it on the admin Overview since 2026-08-21.
+
+   **THE METHOD, and all four steps are required:**
+   1. **Search by FILENAME first** — `find src -iname "*mention*"` finds what a
+      content grep for the wrong verb never will. Do this BEFORE concluding.
+   2. **Use at least three different names** for the concept: what a user calls
+      it, what a developer would call it, and what this repo's existing
+      vocabulary would call it.
+   3. **Search the WHOLE repo, not just `src/`.** `server.ts`, `scripts/`,
+      `infra/` and the workflow files are all live code. A scoped search answers
+      a scoped question.
+   4. **Treat "Write" reporting `updated` rather than `created` as a STOP.**
+      That one word is the last warning before a working file is destroyed, and
+      it is the warning I missed.
+
+   And when the search really does come back empty, say **"I could not find it"**
+   to the admin — never "it does not exist". The two are different claims and
+   only one of them is verified.
 
 7. **If you find lost/uncommitted work from a previous session: audit, don't
    restart.** When resuming after an interruption (e.g. a credit cutoff that
@@ -478,6 +550,28 @@ the code (it is actually read somewhere) on 2026-07-11.
   change how the app behaves. This directly addresses the "1 vulnerable dep(s)" advisory seen on real game
   builds. When OFF (default), a build that ships with high/critical vulns says so honestly and points at
   this flag; when ON, the compatible fixes are applied automatically before ship. Never blocks a build.
+- **Adversarial robustness testing — NOW LIVE (admin SET in Cloud Run 2026-09-07):** ✅
+  **`AGENTV3_REDTEAM=on`** turns on the RED-TEAM pass (`FuzzProbe.ts`; Immune System Phase 3 / GA-17).
+  After a build renders, it drives a real browser to type HOSTILE values into the app's OWN inputs —
+  empty, oversized, injection-shaped, malformed numbers — and watches for a CRASH (uncaught error,
+  React error boundary, unhandled rejection), recorded as a `FUZZ_ROBUSTNESS` finding.
+  **WHY IT WAS WORTH TURNING ON: the happy-path preview check only ever proves the app renders on GOOD
+  input.** A crash on hostile input is a real bug that reaches the user and that no other gate looks
+  for. The rest of the post-build suite reads code or checks that the app loads; this is the only one
+  that tries to break it.
+  **It costs no model call.** The fuzzing is browser automation, so a clean build pays nothing extra —
+  which is why it was the one flag recommended while the admin was asking to REDUCE spend, and why
+  `AGENTV3_REVIEW_FASTLANE` was recommended AGAINST in the same breath (that one adds 3-6 model calls
+  and 30-90s to every simple build, for a reviewer that already runs on the complex ones where it earns
+  its keep). Bounded by construction: **12 cases max, 90-second wall clock**, abortable, and skipped
+  entirely unless ≥2 minutes of build budget remain. It can never block, fail or hang a build.
+  ⚠️ **REPAIR IS A SEPARATE, ALREADY-ON SWITCH.** The red-team only RECORDS findings on its own; the
+  bounded repair pass that hardens them rides `AGENTV3_FEATURE_HEAL`, which is `on` at
+  `AGENTV3_FEATURE_HEAL_PCT=20`. So today ~20% of builds get the fix and the rest get an honest
+  finding. Widening the heal percentage therefore widens this too — one number, two behaviours, same
+  as the vaccine repair budget noted in that flag's own entry.
+  **What to watch:** `FUZZ_ROBUSTNESS` findings in the admin build report. A build that suddenly takes
+  ~90s longer at the very end is this pass; unset the key to revert instantly.
 - **Payment recovery (shipped 2026-08-04):** `PAYMENT_RECONCILE_MIN_AGE_MINUTES` (2),
   `PAYMENT_RECONCILE_MAX_AGE_DAYS` (7), `PAYMENT_RECONCILE_MAX_ORDERS` (5). On sign-in the server settles
   the user's own unfinished orders against Cashfree. ⚠️ CORRECTION 2026-08-10: this entry used to say
@@ -631,7 +725,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   here as an open item rather than left silent.
 
 - **Ad conversion measurement — Meta / Facebook + Instagram (added 2026-08-31, admin asked to run
-  "Download NavBharatAI" ads):** `META_PIXEL_ID` — the WEB pixel id, **NOT set yet**. Served to the
+  "Download NavBharatAI" ads):** `META_PIXEL_ID` — the WEB pixel id. ✅ **SET in Cloud Run by the admin
+  2026-09-03: `1836196930883481`** (the "navbharatai web" dataset in Events Manager — do not confuse
+  it with the separate Meta **App ID** `860811063666554` recorded above, which is the Android SDK's
+  id, a different credential entirely). Served to the
   browser at runtime by `GET /api/public-config` (`routes/health.ts`) and consumed by
   `src/lib/metaPixel.ts`. UNSET ⇒ the route answers `null` and the pixel never loads; a MALFORMED
   value is treated exactly like unset, so a typo disables measurement honestly instead of injecting
@@ -651,6 +748,44 @@ the code (it is actually read somewhere) on 2026-07-11.
   the old "privacy-friendly analytics" wording would have been consent on a false description. The
   white-label law forbids naming the AI PROVIDERS behind a build; it does not licence hiding who
   receives a user's data.
+- **Google Play in-app purchases — the Android token top-up rail (built 2026-09-06, NOT live yet):**
+  `STORE_BILLING` (the master switch — **unset today, and unset means today's behaviour exactly**),
+  `GOOGLE_PLAY_SA_JSON` (the WHOLE service-account JSON as one string — a Google Cloud service
+  account with the Play Developer API enabled and granted access in Play Console → Setup → API
+  access), `GOOGLE_PLAY_PACKAGE_NAME` (= `com.navbharat.ai`). Optional: `STORE_FEE_PCT` (default 15
+  — Google's commission on the first $1M/yr; retune it the day the first real payout report shows
+  the true rate, GST included) and `STORE_PACKS` (JSON override of the catalogue).
+  **WHY THIS EXISTS:** Google Play policy requires digital goods consumed inside a Play-distributed
+  app to be sold through Play's own billing. NavBharatAI's wallet top-up is exactly that, and the
+  Android app currently sells it through the Cashfree web rail — a real, standing policy exposure
+  that this rail closes.
+  🔒 **THE FLAG IS THE MIGRATION, AND IT FAILS SAFE BY CONSTRUCTION.** With `STORE_BILLING` unset,
+  `purchaseRail()` returns `web-gateway` on every device and the app is byte-identical to today.
+  Turning it on switches ONLY the native Android shell to Play packs — and only when the server also
+  confirms Google is configured AND the installed build carries the native plugin. A user on an
+  older `.aab`, or a device with no Play Store, silently keeps the working web rail rather than
+  losing the ability to top up. Test-locked in `tests/storePurchase.test.ts`.
+  ⚠️ **BEFORE FLIPPING IT ON, four things must be true or a user will hit a dead button:**
+  (1) the four products exist and are **ACTIVE** in Play Console → Monetise → In-app products with
+  the EXACT ids `nbai.tokens.99` / `.249` / `.499` / `.999` and prices **₹119 / ₹299 / ₹599 /
+  ₹1199** (they must match `DEFAULT_STORE_PACKS` in `storeBilling.ts` exactly — Google is the
+  authority on price, our catalogue on credit); (2) both env keys above are set in Cloud Run;
+  (3) a build carrying `PlayBillingPlugin` is LIVE on Play (the plugin shipped in this change, so
+  release 103 and earlier do NOT have it); (4) Play Console → Monetisation setup has a payments
+  profile. The plugin names a missing/inactive product explicitly in its failure message, so the
+  first real tap says which of these is wrong instead of "failed".
+  💰 **WHAT IT COSTS THE USER, AND WHY THAT IS SHOWN.** A pack is priced above the credit it gives so
+  our net after Google's cut is unchanged (₹119 → ₹99 of credit). The admin's instruction was
+  "google ka charge add kar ke clear dikhao", so each pack card shows the split — `₹99 + ₹20 fee`
+  beside the ₹119 total. It is labelled **"fee"/"Play Store fee", never "Google's fee"**: Google's
+  actual commission on ₹119 is ₹17.85, and the rest is rounding to a price point Play's tier table
+  carries — printing "Google's fee: ₹20" would be a number no payout report will ever match, which
+  the billing law above forbids even when it flatters us. The internal split stays admin-only; the
+  server records `storeFeePct` and `storeNetInr` on every store transaction for reconciliation.
+  ⚠️ **ANTI-STEERING — do NOT add "cheaper on the web" copy to the app.** Google's Payments policy
+  restricts steering users to an external purchase path from inside the app, and this account has
+  already taken one policy strike (the medical-features rejection). The pack card explains the fee
+  factually and stops there, deliberately.
 - **`FACEBOOK_APP_ID` + `FACEBOOK_CLIENT_TOKEN` — GitHub REPO SECRETS, *not* Cloud Run keys.** Recorded
   here anyway so nobody searches Cloud Run for them and concludes they are missing. They are read at
   **build** time by `android/app/build.gradle` (via `.github/workflows/android-aab.yml`) and are what
@@ -675,11 +810,50 @@ the code (it is actually read somewhere) on 2026-07-11.
   **Development** as of this date — it must be switched to **Live** before App Install ads can run.
   Android platform values to enter in App settings → Basic: package `com.navbharat.ai`, class
   `com.navbharatai.app.MainActivity`, Google Play package `com.navbharat.ai`.
-  🔴 **BLOCKED ON A MISSING PRIVACY POLICY.** NavBharatAI has no privacy-policy page of its own —
-  verified by grep, the only hits are the AI builder checking USER apps for one. Meta requires the
-  URL to take the app Live, and Play requires it for the Data-safety declaration an advertising-ID
-  build needs. So the privacy policy is a genuine prerequisite for the Android half, not paperwork
-  to do afterwards.
+  ⚠️ **CORRECTION 2026-09-02, SAME DAY: the line that stood here was WRONG.** It read "NavBharatAI
+  has no privacy-policy page of its own — verified by grep". There has been a full one since
+  2026-08-08 (`src/content/legal/privacyPolicy.ts`, 186 lines, plus Terms, DPA, Security and NDA),
+  reachable in Settings → Legal & Trust. The claim came from a grep whose output was TRUNCATED at
+  20 lines; the legal files sat below the cut, and "no hits shown" was read as "does not exist".
+  **The lesson is the one this file already teaches about `main` drifting, applied to a search: a
+  conclusion drawn from a capped result set is not a verified fact.** Cap the noise, not the answer —
+  and for an existence question, search by FILENAME as well as content.
+  🔴 **WHAT WAS ACTUALLY WRONG — and it was worse.** The policy said, in three places, that we do
+  NOT do the thing PR #2729 had just built: "we do not show third-party advertising", "We never
+  share your data with advertisers or data brokers", "We do not use third-party advertising
+  cookies". Shipping the pixel with `META_PIXEL_ID` set, or that `.aab`, would have put the live
+  site in breach of its own published policy — and a Play Data-safety declaration that contradicts
+  the policy is a violation, not a mismatch. Caught before either was switched on; nothing was ever
+  collected under the old wording. Fixed in PR #2732: the three statements corrected, a new
+  **Section 3.1** stating exactly which events reach Meta, and public **`/privacy`** and
+  **`/terms`** URLs (server-rendered HTML, no JS, no auth — Meta and Play check those links with
+  tools that may not run JavaScript).
+  🔒 **THE GUARD THAT MATTERS MORE THAN THE WORDING:** `tests/privacyPolicyTruth.test.ts` asserts
+  the pixel's allowlist against what Section 3.1 discloses, so **adding an event to
+  `pixelEventFor` fails CI until the policy is updated too** (verified to bite). Do not weaken it;
+  it exists because the first drift produced no failure of any kind.
+
+- **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
+  `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
+  publish and the hit route recording; apps already published keep their script until republished,
+  which is harmless because the route then discards hits), `SITE_ANALYTICS_SALT` (optional — the HMAC
+  secret behind the daily-rotating visitor hash; **falls back to `SECRET_ENCRYPTION_KEY`**, which is
+  set, so nothing needs adding; a per-process random salt is the last resort and dedups uniques per
+  instance only, logged once), `SITE_ANALYTICS_SHARDS` (default 8, clamped 1–64 — documents per
+  app-day; §SCALE-PLAN item 1 applied on day one), `SITE_ANALYTICS_FLUSH_SECONDS` (default 20,
+  clamped 5–300). Read by `src/server/lib/siteAnalytics.ts` / `siteAnalyticsStore.ts`. The beacon
+  posts to `PUBLIC_BASE_URL` when set, else `https://navbharatai.com`. 🔒 What it collects is stated
+  in the Privacy Policy §12 and pinned by `tests/privacyPolicyTruth.test.ts` — adding a field to the
+  beacon fails CI until the policy discloses it.
+
+- **Site uptime alerts for connected domains (shipped 2026-09-10, ROADMAP §13 item 1.8):**
+  `SITE_UPTIME_SWEEP` (kill switch — **default ON**; `off` stops the 15-minute probe of every connected
+  custom domain), `SITE_UPTIME_COOLDOWN_HOURS` (default 6, clamped 1–72 — one "down" message per outage,
+  then quiet while it stays down), `SITE_UPTIME_MAX_DOMAINS` (default 500, clamped ≤ 5000 — domains per
+  sweep). Read by `src/server/lib/siteUptime.ts` / `siteUptimeSweep.ts`; registered in `server.ts` as the
+  `site-uptime` scheduled job, **exclusive** (one instance probes). Email to the OWNER rides the existing
+  `ALERT_EMAIL_*` mailer — unconfigured ⇒ the in-app bell only, never a silent nothing. A probe that could
+  not complete from our side is "unknown" and never counts as the user's site being down.
 
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 
@@ -731,6 +905,30 @@ weeks-long registration) — localStorage/IndexedDB are per-origin from day one,
   `SEMANTIC_MEMORY_MAX_CHUNKS` (60) and `SEMANTIC_MEMORY_TOP_K` (5) are code-defaulted.
 - **`PUBLISHED_APP_DOMAIN`** — the branded published-app host; see item 2 for why it must stay
   unset until the Cloudflare Worker is live.
+
+- **Published-app hosting — the THREE keys that together remove the publish ceiling (added 2026-09-07):**
+  `PUBLISHED_APPS_BUCKET` (the public Cloud Storage bucket published apps are mirrored into —
+  ⚠️ **NEVER `NAV_STORE_BUCKET`**, which holds unreviewed APKs and must never be public; the code
+  refuses that fallback deliberately and a test locks it), `PUBLISHED_APPS_MIRROR` (kill switch, `off`
+  disables the mirror while leaving the bucket configured), and **`PUBLISHED_APPS_BUCKET_ONLY`** —
+  `on` makes a publish skip Firebase Hosting **entirely**, which is the only thing that actually removes
+  the ~50-channels-per-site ceiling (ROADMAP §10.3 step 4).
+  🔴 **THE BUCKET ALONE DOES NOT RAISE THE CEILING, and believing it does is the exact mistake this
+  entry exists to prevent — I made it, in writing, to the admin, and corrected it the same session.**
+  The mirror runs AFTER the channel is created and released, so a mirrored publish still consumes a
+  channel; the bucket made publishing cheaper and faster to serve, never roomier. Only
+  `PUBLISHED_APPS_BUCKET_ONLY=on` stops a channel being created at all.
+  ⚠️ **ORDER OF ACTIVATION MATTERS, and getting it wrong hands users dead links.** All THREE of
+  `PUBLISHED_APPS_BUCKET`, `PUBLISHED_APP_DOMAIN` and `PUBLISHED_APPS_BUCKET_ONLY=on` must hold, and
+  the code ANDs them rather than warning: with no branded domain there is NO working URL to return,
+  because the default `<site>--<sub>.web.app` host resolves only *because* the channel exists. So the
+  sequence is **bucket public-readable → Worker's `APPS_BUCKET` set and deployed → `PUBLISHED_APP_DOMAIN`
+  set and a test app confirmed loading → only then `PUBLISHED_APPS_BUCKET_ONLY=on`.** Missing any
+  precondition disables the path silently and correctly (today's behaviour, byte-identical).
+  **Reverting is one key.** Unset `PUBLISHED_APPS_BUCKET_ONLY` and new publishes go back to Firebase
+  immediately. Apps ALREADY published bucket-only keep working (the Worker serves them) and stay
+  removable — takedown deletes their bucket objects unconditionally, not behind the flag, precisely so
+  turning the flag off can never strand an app nobody can unpublish.
 
 **🔵 4. `FIREBASE_DEPLOY_PROJECT` is NOT set — and that CLOSES a live hypothesis.** While diagnosing the
 2026-08-19 publish 404 I proposed that the deploy might be pointing at the wrong project, since that env
@@ -943,25 +1141,26 @@ sets `webDir: 'dist'` with **no `server.url`**, so the app boots from its own bu
 **What this means in practice:** a SERVER/backend change reaches installed app users immediately (API
 calls are rewritten to the production origin by `src/lib/apiBase.ts`), but a FRONTEND change does NOT —
 it is baked into `dist/` and needs a fresh signed `.aab`/`.ipa`. Locked by
-`tests/nativeShellInvariants.test.ts`. Because of that, the store build must track
-our progress: **whenever a roadmap phase completes, or any big checkpoint/milestone ships to
-`main`, Claude MUST build a fresh signed Android App Bundle (`.aab`) so a current, uploadable
-release is always ready for Play Console.** This is part of "done" for a phase/checkpoint, the
-same way a green Cloud Run deploy is — it is not optional cleanup.
+`tests/nativeShellInvariants.test.ts`.
 
-**What counts as a trigger (use judgement — do NOT over-build):**
-- ✅ A roadmap **phase/Tier** completes, or a named milestone (a cluster of merged PRs that forms
-  one shippable increment), or the admin explicitly asks for a build.
+**⚠️ CORRECTION 2026-09-07 (admin, verbatim: "jab mai bolu tab ipa,aab banana hai") — this SUPERSEDES
+the "on every milestone/phase" trigger that used to stand here.** A store build is now made **ONLY**
+when the admin explicitly asks — never automatically on a roadmap phase completing, a checkpoint
+shipping, or any other milestone. Do NOT build one on your own initiative for any reason; the
+admin's word is the ONLY trigger.
+
+**The trigger, and only the trigger:**
 - ✅ **STANDING INSTRUCTION (admin 2026-08-24, verbatim: "jab jab mai bolu to aab aur ipa bana
   dena"): whenever the admin asks, build BOTH — the Android `.aab` AND the iOS `.ipa`, together.**
-  Not one or the other, and no waiting for a phase boundary: their word IS the trigger. Both
-  workflows are dispatched (`android-aab.yml` and `ios-ipa.yml`, ref `main`), both are polled to
-  green in the background, and both run URLs are reported back. ⚠️ Build from **`main`**, after the
-  work is merged — an `.aab` cut from a feature branch is not the app anyone is shipping. And per
-  the BUNDLED-MODE note above, a FRONTEND change reaches installed users ONLY through a fresh
-  bundle, which is precisely why this instruction exists.
-- ❌ NOT every individual small PR. Each `.aab` run consumes CI and burns a Play `versionCode`
-  (it auto-increments per run), so batch to phase/checkpoint boundaries, not micro-commits.
+  Not one or the other. Both workflows are dispatched (`android-aab.yml` and `ios-ipa.yml`, ref
+  `main`), both are polled to green in the background, and both run URLs are reported back.
+  ⚠️ Build from **`main`**, after the work is merged — an `.aab` cut from a feature branch is not
+  the app anyone is shipping. And per the BUNDLED-MODE note above, a FRONTEND change reaches
+  installed users ONLY through a fresh bundle, which is precisely why this instruction exists.
+- ❌ A roadmap phase completing, a checkpoint shipping, or any other milestone is **NOT** a trigger
+  on its own anymore — only the admin explicitly asking is. Each `.aab` run consumes CI and burns a
+  Play `versionCode` (it auto-increments per run), which is exactly the cost this correction avoids
+  paying on every merge.
 
 **How to build it (the pipeline is real and already working — last green run: #4 on `main`):**
 - The signed bundle is produced by **`.github/workflows/android-aab.yml`** (`workflow_dispatch`).
@@ -975,12 +1174,29 @@ same way a green Cloud Run deploy is — it is not optional cleanup.
 
 **Honest boundaries (rule 6 — what Claude CAN and CANNOT do here):**
 - Claude CAN trigger the workflow and confirm it goes green.
-- ⛔ **ORGANIZATION DEVELOPER ACCOUNT (D-U-N-S) — DEFERRED, do NOT start it (admin 2026-08-26: "yeh baad
-  me karenge jab user badhenge").** The full, verified conversion guide lives in `MOBILE_PUBLISHING.md` §10
-  — including the finding that the EXISTING account converts in place (no new account, no app transfer),
-  the four easy-to-miss traps, and the fact that this is the ONLY thing that brings Doctor AI, Pharmacist,
-  First Aid and Maternity back to the Play app. §10.6 records the separate (also deferred) HPR/ABDM
-  doctor-verification plan. A session must not begin either without the admin asking.
+- 🟢 **ORGANIZATION DEVELOPER ACCOUNT (D-U-N-S) — STARTED. The admin asked for it on 2026-09-07
+  ("DUNS account banwao"), which lifts the earlier deferral** (admin 2026-08-26: "yeh baad me karenge jab
+  user badhenge"). The old ⛔ "do NOT start it" line stood here until that moment; it is replaced rather
+  than deleted so the change of instruction is legible, and so no session stalls on an order that has
+  been withdrawn. The full, verified conversion guide is `MOBILE_PUBLISHING.md` §10 — including the
+  finding that the EXISTING account converts in place (no new account, no app transfer), the four
+  easy-to-miss traps, and the fact that this is the ONLY thing that brings Doctor AI, Pharmacist, First
+  Aid and Maternity back to the Play app.
+  **What a session may do, and where the line is.** Almost all of this is admin work a session cannot
+  touch: registering a company, applying to Dun & Bradstreet, and every click in Play Console. A session
+  CAN do exactly one piece end to end — Track A's **HTML-file website verification**, because `public/`
+  is copied into `dist/` and both serving paths serve `dist/`, so a file committed there is live at
+  `https://navbharatai.com/<name>` on the next merge. Google issues that filename only AFTER the admin
+  presses *Send verification request*, so a session waits for the admin to hand it over; it cannot be
+  prepared in advance.
+  🔒 **THE ORDER IS A COMPLIANCE REQUIREMENT, NOT A PREFERENCE.** `MEDICAL_PROFESSIONAL_IDS` in
+  `src/lib/playCompliance.ts` may be touched ONLY after the org account is live AND the Health-apps
+  declaration is filed. Reversing that order is a deceptive-behaviour violation that can ban the whole
+  developer account — a far worse outcome than the rejected update it would be trying to fix.
+  ⚠️ **AND IT IS A ONE-WAY DOOR:** Google does not convert an organization account back to an individual
+  one. Going back would mean a brand-new account plus an app transfer.
+  §10.6 records the separate HPR/ABDM doctor-verification plan, which **remains deferred** — it is a
+  different thing that does NOT unlock the mobile app, and it must not be started without its own ask.
 - Claude CANNOT set/rotate the signing keystore secrets (`ANDROID_KEYSTORE_BASE64`,
   `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`) — that is a one-time
   admin setup (documented in the workflow header); the keystore is the app's permanent identity

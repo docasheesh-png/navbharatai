@@ -861,13 +861,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       name: 'generate_payment',
       description:
         'Add a REAL payment checkout to the app (Bring-Your-Own keys): a server route (creates the order/' +
-        'session AND verifies the payment signature — never trusts the client) + a client checkout helper, ' +
-        'for razorpay (India-first) or stripe. The user pastes their provider keys into .env — NavBharatAI ' +
-        'never stores them. Use when the app needs to accept payments. Never overwrites an existing .env.example.',
+        'session AND verifies the payment — never trusts the client), a WEBHOOK route with real HMAC signature ' +
+        'verification (the provider\'s "paid" callback survives a closed tab), and a client checkout helper. ' +
+        'Providers: cashfree or razorpay (India-first — both show UPI: GPay/PhonePe/Paytm/BHIM, plus cards, net ' +
+        'banking, wallets; pick cashfree when the user names it or wants the lowest UPI friction, razorpay when ' +
+        'they name it) or stripe (international cards). The user\'s keys live in THEIR env (.env, or the per-app ' +
+        'Secrets vault merged into .env at build) and the money lands in THEIR merchant account — NavBharatAI never ' +
+        'holds either. Use when the app needs to accept payments. Never overwrites an existing .env.example.',
       input_schema: {
         type: 'object',
         properties: {
-          provider: { type: 'string', enum: ['razorpay', 'stripe'], description: 'The payment provider to wire up.' },
+          provider: { type: 'string', enum: ['cashfree', 'razorpay', 'stripe'], description: 'The payment provider to wire up.' },
         },
         required: ['provider'],
       },
@@ -1365,6 +1369,71 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_society',
+      description:
+        'Add a real housing-society / RWA (residents\' welfare association) backend to the app ' +
+        '(server/society/) — a packaged domain vertical for apartment complexes and gated communities. ' +
+        'THREE real guarantees: (1) EXACT MAINTENANCE-DUES LEDGER — a unit\'s balance is invoiced minus ' +
+        'paid, a payment can NEVER exceed the outstanding balance (rejected 409, balance never negative), ' +
+        'and every invoice/payment is append-only; (2) COMPLAINT STATE-MACHINE — open → in_progress → ' +
+        'resolved → closed along allowed transitions only (+ reopen), an invalid jump rejected (409); ' +
+        '(3) APPEND-ONLY visitor log + notice board. Emits a dependency-free SocietyService (addUnit, ' +
+        'invoice, pay, balanceOf, ledgerFor, defaulters, checkInVisitor, checkOutVisitor, currentlyInside, ' +
+        'raiseComplaint, setComplaintStatus, postNotice) + an Express router + a README. In-memory by ' +
+        'default — swap the Maps for your DB. Use for society / apartment / RWA / maintenance-dues / ' +
+        'visitor-log / housing-complex prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_ngo',
+      description:
+        'Add a real NGO / donation-management backend to the app (server/ngo/) — a packaged India-first ' +
+        'domain vertical for non-profits and fundraisers. THREE real guarantees: (1) GAPLESS, UNIQUE ' +
+        'RECEIPT NUMBERS per Indian financial year (Apr–Mar), e.g. FY2024-25/0001 — an 80G receipt series ' +
+        'must have no gaps or duplicates, so the number is minted from a per-FY counter, never reused; ' +
+        '(2) a campaign\'s RAISED amount is DERIVED (the exact sum of its donations, never a stored field) ' +
+        'and a CLOSED campaign takes no donations (409); (3) APPEND-ONLY donation ledger. Emits a ' +
+        'dependency-free NgoService (addDonor, createCampaign, closeCampaign, donate, raisedFor, ' +
+        'donationsFor, receiptFor, totalRaised) + an Express router + a README. In-memory by default — ' +
+        'swap the Maps for your DB. Use for NGO / donation / fundraiser / 80G / charity prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_field_service',
+      description:
+        'Add a real field-service / job-dispatch backend to the app (server/fieldservice/) — a packaged ' +
+        'domain vertical for on-site service businesses (plumbing, electrical, AC/appliance repair, pest ' +
+        'control). THREE real guarantees: (1) JOB STATE-MACHINE — requested → assigned → en_route → ' +
+        'on_site → completed along allowed transitions only (cancel from any non-terminal; unassign back ' +
+        'to requested), an invalid jump rejected (409), and a job becomes assigned ONLY via assign() (never ' +
+        'a bare status change with no technician); (2) ONE ACTIVE JOB PER TECHNICIAN — assigning a ' +
+        'technician who already has an active job (assigned/en_route/on_site) is rejected (409); completing ' +
+        'or cancelling frees them automatically (derived); (3) APPEND-ONLY job history. Emits a ' +
+        'dependency-free FieldServiceService (addTechnician, createJob, assign, setStatus, cancel, ' +
+        'activeJobOf, listJobs) + an Express router + a README. In-memory by default — swap the Maps for ' +
+        'your DB. Use for field-service / technician / dispatch / on-site / repair / service-visit prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'manage_dependency',
+      description:
+        "Add, remove, or list an npm package in the project's package.json — use it when the user asks to " +
+        'add / install / remove / uninstall a library (e.g. "add axios", "install stripe", "remove lodash") ' +
+        'or to see the current dependencies. The package name is validated against npm\'s naming rules and ' +
+        'rejected if invalid; an add lands in "dependencies" (or updates it in place if it already sits in ' +
+        'dev/peer/optional — never a duplicate across sections); a remove clears it from every section. It ' +
+        'edits the manifest only — the change is installed by the next build/preview, so it is never left ' +
+        'half-installed. Prefer this over hand-editing package.json.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['add', 'remove', 'list'], description: 'What to do. Defaults to "add".' },
+          name: { type: 'string', description: 'The package name (required for add/remove), e.g. "axios" or "@scope/pkg".' },
+          version: { type: 'string', description: 'Optional version/range for add, e.g. "^1.6.0". Defaults to "latest".' },
+        },
+      },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -1696,6 +1765,30 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         '/consent/:user/history). Distinct from generate_audit (general tamper-evident log). In-memory by ' +
         'default — swap the store for your DB.',
       input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_consent_banner',
+      description:
+        'Add a real DPDP (India) + GDPR cookie/consent BANNER to the app — the part visitors SEE (public/consent-banner.js, ' +
+        'dependency-free, works for plain HTML and React). Distinct from generate_consent, which is the backend consent LOG. ' +
+        'What it enforces: NOTHING non-essential loads before consent (third-party scripts are written as ' +
+        '<script type="text/plain" data-consent="analytics" data-src="…"> and activated only when every purpose they name is ' +
+        'granted); NO pre-ticked boxes; "Reject all" as prominent as "Accept all"; withdrawal as easy as consent (a persistent ' +
+        '"Privacy choices" control reopens it); re-consent when the policy version changes; Global Privacy Control honoured; ' +
+        'notice in English AND Hindi by default; the Privacy Policy link and the DPDP grievance contact on the banner. ' +
+        'Use it whenever an app has analytics, ads, chat widgets or embeds, or the user asks for a cookie banner / ' +
+        'DPDP / GDPR compliance. After wiring, convert EVERY third-party script tag and add the footer link the result names.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          appName: { type: 'string', description: 'Shown in the notice ("<app> uses cookies…"). Defaults to "This site".' },
+          policyUrl: { type: 'string', description: 'Path of the Privacy Policy page in the app (default /privacy). Make sure it exists.' },
+          grievanceEmail: { type: 'string', description: 'DPDP grievance / data-questions contact shown on the banner (optional).' },
+          language: { type: 'string', enum: ['en', 'hi', 'both'], description: 'Notice language. Default both (English + Hindi).' },
+          purposes: { type: 'array', items: { type: 'string', enum: ['analytics', 'marketing', 'personalization'] }, description: 'Non-essential purposes the app actually uses. Default analytics + marketing.' },
+          policyVersion: { type: 'string', description: 'Version stamped on every stored choice; change it to ask everyone again. Default: today.' },
+        },
+      },
     },
     {
       name: 'generate_activity_feed',
@@ -3263,6 +3356,10 @@ export const CATALOG_TOOL_NAMES = [
   'generate_recruitment',
   'generate_invoicing',
   'generate_helpdesk',
+  'generate_society',
+  'generate_ngo',
+  'generate_field_service',
+  'manage_dependency',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',
@@ -3286,6 +3383,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_short_links',
   'generate_feedback',
   'generate_consent',
+  'generate_consent_banner',
   'generate_activity_feed',
   'generate_cart',
   'generate_reactions',

@@ -159,6 +159,16 @@ button, [role='button'], nav, header, footer {
     --nb-safe-bottom: env(safe-area-inset-bottom, 0px);
     --nb-safe-left: env(safe-area-inset-left, 0px);
     --nb-safe-right: env(safe-area-inset-right, 0px);
+
+    /* THE APP'S OWN BOTTOM CHROME (admin 2026-09-06). The global mobile tab bar is `fixed bottom-0`
+       at z-150 and therefore paints OVER every dialog below that z-index. It is a RUNTIME fact — it
+       depends on device mode, focus mode and the active view — so the stylesheet cannot detect it and
+       React publishes it here instead (src/lib/mobileNav.ts → publishMobileNavHeight, driven by the
+       same `showsGlobalMobileNav` boolean that renders the bar).
+       `0px` is the correct default in every state where the bar is absent, so anything that has not
+       been told otherwise — desktop, SSR, a test, the first paint before the effect runs — behaves
+       exactly as it did before this variable existed. */
+    --nb-bottom-nav: 0px;
   }
 
   /* P-DESIGN.3 — user font-scaling (Settings → General → Text Size). `--nb-font-scale` is set on
@@ -273,26 +283,68 @@ button, [role='button'], nav, header, footer {
      desktop browser every env() resolves to 0 and these rules are a no-op there.
 
      Use them as a PAIR: `nb-sheet-overlay` on the fixed backdrop, `nb-sheet` on the card. The card
-     then caps at "whatever is really visible", so no dialog has to guess a viewport fraction again. */
+     then caps at "whatever is really visible", so no dialog has to guess a viewport fraction again.
+
+     🔒 THE THIRD SUBTRACTION (admin 2026-09-06, screenshot: the Publish → connect-a-domain sheet).
+     The two rules above subtract what CSS can see for itself — the browser toolbar (`dvh`) and the
+     device inset (`env()`). They did NOT subtract the app's OWN global tab bar, which is `fixed
+     bottom-0` at z-150 and paints over every dialog below that z-index. On a phone that hid the last
+     ~40px (web/Android) to ~56px (iOS) of every full-height dialog, and hid it in the worst possible
+     way: the scroll container ends under the bar too, so the user scrolls to the end of the sheet and
+     the buttons are STILL covered, with no scroll left. `--nb-bottom-nav` carries that height (see
+     :root above) and is `0px` whenever the bar is not rendered, which is what keeps desktop, focus
+     mode and Code Studio byte-identical to before. */
   .nb-sheet-overlay {
     height: 100vh;
     height: 100dvh;
     padding-top: max(1rem, var(--nb-safe-top));
-    padding-bottom: max(1rem, var(--nb-safe-bottom));
+    padding-bottom: max(1rem, var(--nb-safe-bottom), var(--nb-bottom-nav));
     padding-left: max(0.75rem, var(--nb-safe-left));
     padding-right: max(0.75rem, var(--nb-safe-right));
   }
 
   /* The same height authority for a sheet that is meant to touch the screen edges — a phone bottom
      sheet. No gutter, only the device's own safe area, so the design stays edge-to-edge while the
-     centring/height still happen inside the visible viewport rather than the large one. */
+     centring/height still happen inside the visible viewport rather than the large one.
+     The tab bar is still subtracted: "edge-to-edge" means the edges the sheet can actually reach, and
+     a bottom sheet resting UNDER an opaque tab bar is the same unreachable-controls bug as above.
+     `--nb-bottom-nav` already includes the device inset, so `max()` never double-counts it. */
   .nb-sheet-overlay-flush {
     height: 100vh;
     height: 100dvh;
     padding-top: var(--nb-safe-top);
-    padding-bottom: var(--nb-safe-bottom);
+    padding-bottom: max(var(--nb-safe-bottom), var(--nb-bottom-nav));
     padding-left: var(--nb-safe-left);
     padding-right: var(--nb-safe-right);
+  }
+
+  /* THE OPT-OUT, for a dialog that paints ABOVE the tab bar (z-index > 150) and therefore covers it
+     rather than being covered by it. Such a dialog owns the whole screen and must not hold a strip
+     for a bar the user cannot see — that would be the "dead strip" failure this file already records,
+     in reverse.
+
+     It works by re-declaring the variable to zero ON THE OVERLAY ITSELF, so the `max()` above simply
+     collapses. That makes it independent of rule order and specificity: there is no "which
+     declaration wins" question to get wrong later, and the opt-out cannot be half-applied.
+
+     ⚠️ RESERVING IS THE DEFAULT ON PURPOSE. A dialog that reserves when it needn't loses 56px of
+     height — visible, harmless, and obvious in review. A dialog that fails to reserve when it must
+     hides its own buttons with no way to reach them — the bug this whole block exists to kill. The
+     safe state is therefore the one you get by doing nothing, and `sheetOverlayGeometry.test.ts`
+     checks the pairing mechanically (z-index ≥ 150 ⟺ this class) so it is never a judgement call. */
+  .nb-sheet-over-nav {
+    --nb-bottom-nav: 0px;
+  }
+
+  /* A sheet the design deliberately keeps SHORTER than the screen — a "laid over" bottom sheet that
+     should read as something on top of the page rather than a new screen. Its own fraction is passed
+     as `--nb-sheet-cap`; the `min()` clamps it to the room the overlay really has once the tab bar
+     and insets are reserved, so the design choice can never become an overflow. Without the clamp a
+     92%-tall sheet is taller than the space left on a short phone, and because these sheets are
+     bottom-anchored the overflow is silently cut off the TOP. */
+  .nb-sheet-partial {
+    max-height: min(var(--nb-sheet-cap, 100%), 100%);
+    min-height: 0;
   }
 
   /* `min-height: 0` is as load-bearing as the cap: without it a flex child of this card defaults to

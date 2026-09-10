@@ -64,7 +64,11 @@ steps:
       - '--port'
       - '8080'
       - '--update-env-vars'
-      - 'NODE_ENV=production'
+      # PLATFORM_MAX_INSTANCES is the SAME `_MAX_INSTANCES` number the deploy flag below uses, handed to
+      # the running server so the admin load board reports the real ceiling instead of a code default
+      # that can drift away from it. One number, two consumers — the drift is unrepresentable.
+      # (`--update-env-vars` adds/updates only these keys; every other Cloud Run env survives untouched.)
+      - 'NODE_ENV=production,PLATFORM_MAX_INSTANCES=${_MAX_INSTANCES}'
       - '--allow-unauthenticated'
       - '--cpu'
       - '2'
@@ -73,7 +77,7 @@ steps:
       - '--min-instances'
       - '0'
       - '--max-instances'
-      - '10'
+      - '${_MAX_INSTANCES}'
       - '--timeout'
       - '3600'
       - '--concurrency'
@@ -189,6 +193,22 @@ substitutions:
   # large pre-existing backlog drains over a few deploys. For a big one-shot drain, prefer a native
   # Artifact Registry cleanup policy (server-side, off the build path) over raising this.
   _PRUNE_MAX: '20'
+  # SCALE (ROADMAP §12 #2) — the platform's own hard ceiling on concurrent capacity.
+  #
+  # RAISED 10 -> 100 (2026-09-08). With `--concurrency 100`, ten instances is a hard ceiling of ~1,000
+  # concurrent in-flight requests; past it Cloud Run queues and then SHEDS. That is the honest answer to
+  # "does the server just scale?" — the mechanism does, but only up to the number we told it, and ten
+  # was that number. One hundred moves the ceiling to ~10,000 concurrent requests.
+  #
+  # It costs NOTHING while idle: `--min-instances` stays 0, and Cloud Run bills instances that actually
+  # run. What it does buy is exposure — a traffic spike (or an abusive one) can now scale to 100 x 2 vCPU
+  # before anything stops it, so this stays a BOUND rather than becoming unlimited, and it is a
+  # substitution so the admin can lower it in the Cloud Build trigger without a code change or a deploy.
+  #
+  # ⚠️ Raising this multiplies anything that runs per-instance. That is why the scheduled-job lease
+  # (§12 #1, `lib/jobLease.ts`) shipped FIRST, and why the next per-instance ceiling in that section —
+  # the hot metrics document, §12 #4 — is the one to watch as this number is used.
+  _MAX_INSTANCES: '100'
 
 options:
   logging: CLOUD_LOGGING_ONLY

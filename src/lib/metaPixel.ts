@@ -20,6 +20,11 @@
 //     Forwarding every internal product event would hand an ad network our whole telemetry stream —
 //     that is a privacy problem, not a measurement upgrade.
 //
+//     🔒 THIS LIST IS A PUBLISHED PROMISE, NOT AN IMPLEMENTATION DETAIL. Section 3.1 of the Privacy
+//     Policy tells users exactly which events reach Meta, so ADDING A CASE HERE MAKES THAT POLICY
+//     UNTRUE until the policy is updated too. tests/privacyPolicyTruth.test.ts fails when the two
+//     drift apart — deliberately, because nothing else would notice.
+//
 //  4. NEVER INVENT A VALUE. A Purchase carries the REAL rupee amount the SERVER confirmed, or it is
 //     reported with no value at all. A made-up amount would both misstate revenue in Meta's reporting
 //     and train the campaign to chase the wrong customers.
@@ -83,9 +88,6 @@ export function pixelEventFor(event: string, props?: Record<string, unknown>): P
       // Exact semantic match: a NavBharatAI account was created.
       return { name: 'CompleteRegistration', standard: true };
 
-    case 'checkout_started':
-      return { name: 'InitiateCheckout', standard: true };
-
     case 'purchase': {
       const value = Number(props?.value);
       if (Number.isFinite(value) && value > 0) {
@@ -120,6 +122,27 @@ export type PixelSender = (method: 'track' | 'trackCustom', name: string, params
 /** Installs the pixel for `pixelId` and returns the sender to use, or null if it could not start. */
 export type PixelInstaller = (pixelId: string) => PixelSender | null;
 
+/** One `fbq(...)` invocation: the method name followed by its arguments. */
+export type FbqCall = readonly [string, ...unknown[]];
+
+/**
+ * Pure: the EXACT fbq call sequence used to start the pixel, in order.
+ *
+ * Extracted from the installer so the ordering can be asserted in a test, because here the order IS
+ * the privacy property: `autoConfig false` must land BEFORE `init`. Sent afterwards, Meta's
+ * Automatic Advanced Matching has already read the page's form fields, and the Privacy Policy's
+ * "we never share your name, email address or phone number" is broken before anything can stop it.
+ */
+export function pixelBootSequence(pixelId: string): FbqCall[] {
+  return [
+    // Refuse automatic advanced matching + automatic event detection, whatever the Meta dashboard says.
+    ['set', 'autoConfig', false, pixelId],
+    // Say it a second way on init, so a future Meta default cannot quietly re-enable it.
+    ['init', pixelId, {}, { withAutoMatching: false }],
+    ['track', 'PageView'],
+  ];
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * The real installer: Meta's standard loader snippet, then init + the first PageView.
@@ -142,8 +165,9 @@ export const defaultInstaller: PixelInstaller = (pixelId: string) => {
     s.src = 'https://connect.facebook.net/en_US/fbevents.js';
     document.head.appendChild(s);
   }
-  w.fbq('init', pixelId);
-  w.fbq('track', 'PageView');
+  // 🔒 The boot sequence turns OFF Meta's automatic collection before init — see pixelBootSequence,
+  // which owns the order because the order is what makes the policy's promise hold.
+  for (const call of pixelBootSequence(pixelId)) w.fbq(...call);
   return (method, name, params) => {
     if (params) w.fbq(method, name, params);
     else w.fbq(method, name);

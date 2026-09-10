@@ -1017,3 +1017,129 @@ describe('the repair loop refuses a repair that makes the app worse', () => {
     expect(logs.join('\n')).not.toContain('made the app worse');
   });
 });
+
+/**
+ * THE FAST LANE FIXES MECHANICAL ERRORS ITSELF — 2026-09-04.
+ *
+ * `EndgameRepair` exists because a build ground its last ten tsc errors one round-trip each until the
+ * step limit, when almost all of them were mechanical: an unused import, a missing import, an
+ * export-name mismatch. Its mandate, verbatim: "stop paying an LLM to do grep's job."
+ *
+ * Its deterministic layer was reachable only through `runEndgameRepair`, which only `AgentRunner`
+ * calls — so THIS lane, the one most builds take, went from the scaffold restore straight to a model
+ * call. A build failing purely on TS6133 paid a full repair pass for a pure string edit.
+ */
+describe('the fast lane fixes mechanical tsc errors without a model call', () => {
+  /** A generator whose file carries an import the app never uses — the TS6133 shape, exactly. */
+  const withUnusedImport = (over: Record<string, unknown> = {}) => ({
+    prompt: 'build a todo app', framework: 'vite-react', scaffoldPaths: ['index.html', 'src/App.tsx'],
+    // Mirrors the working harness above; only App.tsx's CONTENT differs — it imports `useEffect` and
+    // never uses it, which is exactly the TS6133 shape.
+    generate: async (_system: string, user: string) => {
+      if (user.includes('Plan the file list')) {
+        return 'src/App.tsx :: root\nsrc/TodoList.tsx :: the list\nsrc/index.css :: styles';
+      }
+      const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+      if (path === 'src/App.tsx') {
+        return "<<<FILE src/App.tsx>>>\nimport { useState, useEffect } from 'react';\nexport default function App(){ const [n] = useState(0); return null; }\n<<<ENDFILE>>>";
+      }
+      return `<<<FILE ${path}>>>\n// ${path}\nexport default function X(){return null}\n<<<ENDFILE>>>`;
+    },
+    writeFiles: async (_f: OneShotFile[]) => {},
+    ...over,
+  });
+
+  it('removes the unused import itself and never reaches the repair model', async () => {
+    let verifies = 0;
+    let repairs = 0;
+    const writes: OneShotFile[][] = [];
+    const logs: string[] = [];
+    const r = await runSimpleBuild(withUnusedImport({
+      writeFiles: async (f: OneShotFile[]) => { writes.push(f.map((x) => ({ ...x }))); },
+      // Fail once with a real TS6133 line, then pass — mirroring a genuine tsc run.
+      verify: async () => {
+        verifies++;
+        return verifies === 1
+          ? { ok: false, errors: "src/App.tsx(1,23): error TS6133: 'useEffect' is declared but its value is never read." }
+          : { ok: true, errors: '' };
+      },
+      repair: async () => { repairs++; return []; },
+      log: (m: string) => logs.push(m),
+    }) as never);
+
+    expect(r.ok).toBe(true);
+    // THE POINT: the model was never asked to do what a string edit does.
+    expect(repairs).toBe(0);
+    // …and the fix genuinely landed, rather than the error merely being tolerated.
+    const lastApp = writes.flat().reverse().find((f) => f.path === 'src/App.tsx');
+    expect(lastApp?.content).toContain('useState');
+    expect(lastApp?.content).not.toContain('useEffect');
+    expect(logs.join(' ')).toMatch(/mechanical error/i);
+  });
+
+  it('re-verifies after fixing, so the model only ever sees what is genuinely left', async () => {
+    let verifies = 0;
+    await runSimpleBuild(withUnusedImport({
+      verify: async () => {
+        verifies++;
+        return verifies === 1
+          ? { ok: false, errors: "src/App.tsx(1,23): error TS6133: 'useEffect' is declared but its value is never read." }
+          : { ok: true, errors: '' };
+      },
+      repair: async () => [],
+    }) as never);
+    // The first verify found the error; a second one proves the deterministic fix was re-checked
+    // rather than assumed to have worked.
+    expect(verifies).toBeGreaterThanOrEqual(2);
+  });
+
+  it('a NON-mechanical error still goes to the repair model — this replaces nothing', async () => {
+    let repairs = 0;
+    let verifies = 0;
+    await runSimpleBuild(withUnusedImport({
+      verify: async () => {
+        verifies++;
+        return verifies === 1
+          ? { ok: false, errors: "src/App.tsx(2,10): error TS2339: Property 'nope' does not exist on type 'X'." }
+          : { ok: true, errors: '' };
+      },
+      repair: async (_e: string, files: OneShotFile[]) => { repairs++; return [{ path: files[0].path, content: '// fixed' }]; },
+    }) as never);
+    expect(repairs).toBeGreaterThan(0);
+  });
+
+  it('with the kill switch OFF the same error DOES reach the model — proving the pass is what saved it', async () => {
+    // The honest way to show this guard bites: flip its documented kill switch and watch the model call
+    // come back. No source is broken to prove it, and the switch itself is exercised as real behaviour.
+    const prev = process.env.AGENTV3_ENDGAME_REPAIR;
+    process.env.AGENTV3_ENDGAME_REPAIR = 'off';
+    try {
+      let repairs = 0;
+      let verifies = 0;
+      await runSimpleBuild(withUnusedImport({
+        verify: async () => {
+          verifies++;
+          return verifies === 1
+            ? { ok: false, errors: "src/App.tsx(1,23): error TS6133: 'useEffect' is declared but its value is never read." }
+            : { ok: true, errors: '' };
+        },
+        repair: async (_e: string, files: OneShotFile[]) => { repairs++; return [{ path: files[0].path, content: '// fixed' }]; },
+      }) as never);
+      expect(repairs).toBeGreaterThan(0);
+    } finally {
+      if (prev === undefined) delete process.env.AGENTV3_ENDGAME_REPAIR; else process.env.AGENTV3_ENDGAME_REPAIR = prev;
+    }
+  });
+
+  it('a HEALTHY build costs nothing — no extra verify, no writes, no repair', async () => {
+    let verifies = 0;
+    let repairs = 0;
+    const r = await runSimpleBuild(withUnusedImport({
+      verify: async () => { verifies++; return { ok: true, errors: '' }; },
+      repair: async () => { repairs++; return []; },
+    }) as never);
+    expect(r.ok).toBe(true);
+    expect(verifies).toBe(1);   // the deterministic pass is gated on a FAILING verdict
+    expect(repairs).toBe(0);
+  });
+});

@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import { copyName, copyStatus } from '../AgentV3/duplicateApp';
 import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
 import { HIT_PATH, parseHit, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
@@ -3224,6 +3225,62 @@ export function registerAgentV3Routes(app: Express): void {
    * `updatedAt` is preserved (as pinning does): naming an app is not "working on" it, and bumping it
    * would silently reorder the user's history list under them.
    */
+  /**
+   * DUPLICATE APP — "make a copy of this app" (ROADMAP §13, 3.6).
+   *
+   * Copies the FILES and the CHAT under a new name, into a fresh workspace of the SAME verified user.
+   * Copies nothing that points at a place in the world — repo, deployment, domain, site settings,
+   * secrets (per-app by construction) — so a copy starts unpublished and unconnected, which is the
+   * only honest state for a thing that has never been published or connected. See duplicateApp.ts.
+   */
+  app.post('/api/agentv3/conversations/:id/duplicate', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    if (!userId || userId === 'anon') {
+      res.status(403).json({ error: 'Sign in to make a copy of an app.' });
+      return;
+    }
+    const store = getConversationStore();
+    let source: Awaited<ReturnType<typeof store.get>> = null;
+    let forbidden = false;
+    for (const cid of candidateConversationIds(req.params.id, userId)) {
+      const rec = await store.get(cid).catch(() => null);
+      const access = conversationAccess(rec, userId);
+      if (access === 'ok' && rec) { source = rec; break; }
+      if (access === 'forbidden') forbidden = true;
+    }
+    if (!source) {
+      res.status(forbidden ? 403 : 404).json({ error: forbidden ? 'This app belongs to another account.' : 'This app could not be found.' });
+      return;
+    }
+    const files = await loadWorkspaceFiles(source.workspaceId).catch(() => ({} as Record<string, string>));
+    if (Object.keys(files).length === 0) {
+      res.status(409).json({ error: 'This app has no files yet, so there is nothing to copy. Build it first.' });
+      return;
+    }
+    const newSessionId = randomUUID();
+    const newWorkspaceId = workspaceIdFor(userId, newSessionId);
+    if (!newWorkspaceId) { res.status(400).json({ error: 'Could not create a workspace for the copy.' }); return; }
+    const mine = await store.listByUser(userId, 200).catch(() => []);
+    const name = copyName(effectiveAppName(source), mine.map((c) => effectiveAppName(c)));
+    const now = Date.now();
+    try {
+      await saveWorkspaceFiles(newWorkspaceId, files);
+      // Files + chat + name. Deliberately NOT: repoName, repoOwner, deployBranch, backendDomain,
+      // pinned, or anything about hosting — see duplicateApp.ts.
+      await store.create({ id: newSessionId, userId, workspaceId: newWorkspaceId, title: name, messages: source.messages ?? [], createdAt: now });
+      await store.update(newSessionId, { appName: name, status: copyStatus(source.status), updatedAt: now, ...(source.framework ? { framework: source.framework } : {}) });
+    } catch (err) {
+      console.error(`[HTTP 500] duplicate app: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+      res.status(500).json({ error: 'Could not make the copy just now. The original is unchanged.' });
+      return;
+    }
+    res.json({ ok: true, id: newSessionId, workspaceId: newWorkspaceId, name });
+  });
+
   app.post('/api/agentv3/conversations/:id/name', async (req: Request, res: Response) => {
     const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
     if (!isAgentV3Enabled(userId, email)) {

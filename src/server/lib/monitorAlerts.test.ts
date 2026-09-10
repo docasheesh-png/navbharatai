@@ -60,6 +60,42 @@ describe('decideAlertActions — announce once, then stay quiet', () => {
     expect(Object.keys(out.nextState).sort()).toEqual(['a', 'b']);
   });
 
+  it('🔒 breaks the cooldown when a warning becomes CRITICAL', () => {
+    // Before this, an alert announced as a warning stayed silent for the rest of the quiet period —
+    // six hours by default — however much worse it got. `slow-builds` has had both severities since it
+    // was written (10 min / 20 min), so builds could go from 11 minutes to half an hour, in the window
+    // where the admin most needs to hear from us, with nothing said.
+    const state: AlertState = { 'slow-builds': { firstSeenAt: 0, lastNotifiedAt: 0, severity: 'warning' } };
+    const out = decideAlertActions([alert('slow-builds', 'critical')], state, 1_000, COOLDOWN);
+    expect(out.notify).toHaveLength(1);
+    expect(out.nextState['slow-builds'].severity).toBe('critical');
+    expect(out.nextState['slow-builds'].firstSeenAt).toBe(0);   // same episode, not a new one
+    expect(out.resolved).toEqual([]);                            // it escalated; it did not recover
+  });
+
+  it('🔒 a legacy state entry with no recorded severity is NOT read as an escalation', () => {
+    // Every entry written before the field existed lacks it. Reading "unknown" as "was a warning"
+    // would make every currently-critical alert announce itself once more on the first sweep after
+    // deploy — a burst of notifications caused by shipping, about nothing that changed.
+    const state: AlertState = { 'high-error-rate': { firstSeenAt: 0, lastNotifiedAt: 0 } };
+    const out = decideAlertActions([alert('high-error-rate', 'critical')], state, 1_000, COOLDOWN);
+    expect(out.notify).toEqual([]);
+    // …but the field is backfilled, so a genuine escalation is caught from the next sweep onwards.
+    expect(out.nextState['high-error-rate'].severity).toBe('critical');
+    expect(out.nextState['high-error-rate'].lastNotifiedAt).toBe(0);  // still not "announced"
+  });
+
+  it('🔒 cannot be made to flap across a threshold', () => {
+    // An episode announces its escalation ONCE. Otherwise a condition sitting on the boundary would
+    // notify on every crossing — exactly the noise this module exists to prevent.
+    const state: AlertState = { 'slow-builds': { firstSeenAt: 0, lastNotifiedAt: 0, severity: 'critical' } };
+    const down = decideAlertActions([alert('slow-builds', 'warning')], state, 1_000, COOLDOWN);
+    expect(down.notify).toEqual([]);
+    expect(down.nextState['slow-builds'].severity).toBe('critical');  // high-water mark, never lowered
+    const up = decideAlertActions([alert('slow-builds', 'critical')], down.nextState, 2_000, COOLDOWN);
+    expect(up.notify).toEqual([]);
+  });
+
   it('survives empty input on both sides', () => {
     const out = decideAlertActions([], {}, 1, COOLDOWN);
     expect(out).toEqual({ notify: [], resolved: [], nextState: {} });

@@ -12,7 +12,16 @@
 // service-account JSON with the "Firebase Hosting Admin" role. A 403 means that role is missing.
 
 import { GoogleAuth } from 'google-auth-library';
+import { hostingVersionConfig, type HostingVersionConfig } from './siteConfig';
+import { siteConfigStore } from './siteConfigStore';
 import { mirrorPublishToBucket, removePublishFromBucket } from './bucketPublish';
+import { pickRollbackTarget, type HostingRelease, type RollbackTarget } from './publishRollback';
+import {
+  bucketOnlyPublishEnabled,
+  bucketOnlyPublishUsable,
+  bucketOnlyPublishedUrl,
+  bucketOnlySubdomain,
+} from './bucketOnlyPublish';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
@@ -105,12 +114,46 @@ export class FirebaseHostingDeployer {
     if (files.size === 0) {
       throw new Error('No files to deploy. Ensure "npm run build" produced a dist/ directory.');
     }
+
+    // ═══ THE CEILING FIX (ROADMAP §10.3) — publish WITHOUT consuming a Hosting channel ═══
+    //
+    // The channel POOL is what runs out, so the only fix that removes the ceiling is to stop drawing
+    // from it. When the bucket and the branded domain are both live, the app is served end-to-end by
+    // Cloud Storage behind the Cloudflare Worker and Firebase has no part in it — no channel, no slot,
+    // no cap. See bucketOnlyPublish.ts for why all three preconditions are required.
+    //
+    // ONLY the workspace's own PUBLISH channel takes this path. A preview snapshot passes its own
+    // channelId (previewSnapshot.ts) and must keep its separate, throwaway Firebase channel — the id
+    // check is the same one the mirror uses, so a future caller cannot forget to opt out.
+    //
+    // 🔒 A BUCKET PROBLEM CAN NEVER BREAK A PUBLISH. Anything short of a COMPLETE mirror falls through
+    // to the Firebase path below, which still works and still costs a slot: the ceiling matters, and
+    // handing the user a broken app matters more. The partial objects are swept on the way out so a
+    // failed attempt cannot leave paid-for garbage behind.
+    if (channelId === makeChannelId(workspaceId) && bucketOnlyPublishEnabled()) {
+      const sub = bucketOnlySubdomain(workspaceId);
+      const mirror = await mirrorPublishToBucket(sub, files).catch((err) => ({
+        attempted: true, bucket: '', uploaded: 0, failed: files.size, error: String((err as Error)?.message ?? err),
+      }));
+      const url = bucketOnlyPublishedUrl(sub);
+      if (bucketOnlyPublishUsable(mirror) && url) {
+        return url;
+      }
+      console.warn(
+        `[PUBLISH-BUCKET-ONLY] ${sub}: falling back to Firebase — ${mirror.uploaded} uploaded, `
+        + `${mirror.failed} failed${mirror.error ? ` — ${mirror.error}` : ''}`,
+      );
+      // Best-effort sweep: nothing will ever request this key (the URL returned below is Firebase's),
+      // so leaving a half-written app in the bucket is pure cost with no reader.
+      await removePublishFromBucket(sub).catch(() => undefined);
+    }
+
     const { token, headers } = await this.authHeaders();
     const site = FIREBASE_PROJECT;
 
     // The REAL channel URL, from Firebase — see ensureChannel for why it can never be constructed.
     const channelUrl = await this.ensureChannel(site, channelId, headers);
-    const versionName = await this.publishVersion(site, files, token, headers);
+    const versionName = await this.publishVersion(site, files, token, headers, await this.versionConfigFor(workspaceId, files));
     await this.hostingCall('release', () =>
       axios.post(
         `${HOSTING_API}/sites/${site}/channels/${channelId}/releases?versionName=${encodeURIComponent(versionName)}`,
@@ -161,7 +204,7 @@ export class FirebaseHostingDeployer {
     }
     const siteId = await ensureSite(workspaceId); // creates-or-reuses `nbai-<hash>`
     const { token, headers } = await this.authHeaders();
-    const versionName = await this.publishVersion(siteId, files, token, headers);
+    const versionName = await this.publishVersion(siteId, files, token, headers, await this.versionConfigFor(workspaceId, files));
     // Release to the site's default LIVE channel (a site release, not a named preview channel).
     await this.hostingCall('site release', () =>
       axios.post(
@@ -218,8 +261,9 @@ export class FirebaseHostingDeployer {
     files: Map<string, Buffer>,
     token: string,
     headers: Record<string, string>,
+    config: HostingVersionConfig,
   ): Promise<string> {
-    const versionName = await this.createVersion(site, headers);
+    const versionName = await this.createVersion(site, headers, config);
     const versionId = versionName.split('/').pop() ?? '';
 
     // ⚠️ THE HASH IS OF THE GZIPPED BYTES, NOT THE FILE (admin 2026-08-20, and Google said it plainly:
@@ -286,6 +330,27 @@ export class FirebaseHostingDeployer {
    * Admin role). Returns true when the channel is gone (deleted or already absent).
    */
   async deleteChannel(workspaceId: string): Promise<boolean> {
+    // 🔒 A BUCKET-ONLY APP HAS NO CHANNEL TO DELETE, AND THIS IS THE ONLY PLACE ITS COPY IS REACHABLE.
+    //
+    // Without this line "unpublish" on a bucket-only app would delete nothing and report success: the
+    // Firebase delete 404s (idempotent success), and the bucket cleanup inside deleteChannelById keys
+    // off the CHANNEL's own host, which does not exist — so the app would stay live at its public URL
+    // with the platform insisting it was taken down. A takedown that is not one is the worst outcome
+    // this file can produce.
+    //
+    // The key is derivable from the workspace id alone (that is the point of generating it ourselves),
+    // so this works whether or not bucket-only mode is still switched on — a previously published app
+    // must stay removable after the flag is turned off. For a Firebase-published app the prefix simply
+    // does not exist and the delete is a harmless no-op, so it runs unconditionally rather than behind
+    // a flag that could be wrong.
+    const bucketOnlyRemoved = await removePublishFromBucket(bucketOnlySubdomain(workspaceId))
+      .catch((err) => ({ attempted: true, deleted: false, error: String((err as Error)?.message ?? err) }));
+    if (bucketOnlyRemoved.attempted && !bucketOnlyRemoved.deleted) {
+      console.warn(
+        `[PUBLISH-BUCKET-ONLY] takedown left bucket objects for ${bucketOnlySubdomain(workspaceId)}: `
+        + `${bucketOnlyRemoved.error ?? 'unknown'}`,
+      );
+    }
     return this.deleteChannelById(makeChannelId(workspaceId));
   }
 
@@ -374,6 +439,73 @@ export class FirebaseHostingDeployer {
    * never saw as gone. Same class as the registry-side bug this was found with (2026-08-21): a
    * returned list standing in for a complete list.
    */
+  /**
+   * The publish history of one app's channel, newest first — what a rollback chooses from.
+   *
+   * Returns `null` when the history could not be read. That is DELIBERATELY distinct from `[]`: an
+   * empty list means "this app has never been published", while null means "we do not know", and the
+   * caller must not turn the second into the first. Reporting an unreadable history as "nothing to
+   * roll back to" is the same dishonesty as reporting an unreadable channel list as zero channels in
+   * use — a mistake this file has already made once.
+   */
+  async listChannelReleases(channelId: string): Promise<HostingRelease[] | null> {
+    try {
+      const { headers } = await this.authHeaders();
+      const site = FIREBASE_PROJECT;
+      const out: HostingRelease[] = [];
+      let pageToken = '';
+      // Bounded like the channel listing, for the same reason: a malformed nextPageToken must not spin
+      // forever. A rollback only ever looks at the most recent handful, so this is far past enough.
+      for (let page = 0; page < 10; page += 1) {
+        const resp = await this.hostingCall('release list', () =>
+          axios.get<{ releases?: HostingRelease[]; nextPageToken?: string }>(
+            `${HOSTING_API}/sites/${site}/channels/${channelId}/releases?pageSize=100${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`,
+            { headers },
+          ));
+        for (const r of resp.data?.releases ?? []) out.push(r);
+        pageToken = typeof resp.data?.nextPageToken === 'string' ? resp.data.nextPageToken : '';
+        if (!pageToken) break;
+      }
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Point the live app back at an earlier version.
+   *
+   * This creates a NEW release on the SAME version rather than deleting anything, which is what makes
+   * the operation safe: nothing is destroyed, the history keeps growing, and a rollback can itself be
+   * rolled back (`pickRollbackTarget` walks by version identity precisely so a second undo goes
+   * further back instead of bouncing between two versions).
+   *
+   * Returns the target on success and null on failure — never a thrown error, because the caller is a
+   * user pressing "undo" on a broken live app and deserves an honest "that did not work" rather than
+   * a 500.
+   */
+  async rollbackChannel(channelId: string, target: RollbackTarget): Promise<RollbackTarget | null> {
+    try {
+      const { headers } = await this.authHeaders();
+      const site = FIREBASE_PROJECT;
+      await this.hostingCall('rollback release', () =>
+        axios.post(
+          `${HOSTING_API}/sites/${site}/channels/${channelId}/releases?versionName=${encodeURIComponent(target.versionName)}`,
+          {},
+          { headers },
+        ));
+      return target;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Convenience: read the history and choose, in one call. Null when either step cannot be done. */
+  async findRollbackTarget(workspaceId: string): Promise<RollbackTarget | null> {
+    const releases = await this.listChannelReleases(makeChannelId(workspaceId));
+    return releases === null ? null : pickRollbackTarget(releases);
+  }
+
   async listChannelsWithCompleteness(): Promise<{ channels: Array<{ channelId: string; url: string; updateTime: string | null }>; complete: boolean }> {
     const { headers } = await this.authHeaders();
     const site = FIREBASE_PROJECT;
@@ -464,18 +596,25 @@ export class FirebaseHostingDeployer {
     return url;
   }
 
-  private async createVersion(site: string, headers: Record<string, string>): Promise<string> {
+  /**
+   * The version's config is FORMED, not hardcoded (ROADMAP §13, 1.6): the user's redirects, the safe
+   * headers every publish gets, and the SPA catch-all — kept for a single-page app, dropped only for a
+   * multi-page site that ships its own 404.html. One place, `hostingVersionConfig`, for both publish
+   * paths; an unreadable settings store yields the defaults, never a broken site.
+   */
+  private async createVersion(site: string, headers: Record<string, string>, config: HostingVersionConfig): Promise<string> {
     const resp = await this.hostingCall('version create', () => axios.post<{ name: string }>(
       `${HOSTING_API}/sites/${site}/versions`,
-      {
-        config: {
-          rewrites: [{ glob: '**', path: '/index.html' }],
-          headers: [{ glob: '/assets/**', headers: { 'Cache-Control': 'max-age=31536000,immutable' } }],
-        },
-      },
+      { config },
       { headers },
     ));
     return resp.data.name;
+  }
+
+  /** Load the workspace's saved site settings (best-effort) and form the version config from the files. */
+  private async versionConfigFor(workspaceId: string, files: Map<string, Buffer>): Promise<HostingVersionConfig> {
+    const saved = await siteConfigStore.get(workspaceId).catch(() => null);
+    return hostingVersionConfig(files, saved);
   }
 }
 

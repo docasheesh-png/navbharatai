@@ -57,14 +57,60 @@ export function decidePreviewReload(o: {
   phase: BuildPhase;
   /** Has the live preview successfully rendered at least once? */
   everRendered: boolean;
+  /**
+   * ms since Vite's hot reload last applied an update inside the app, or null if it never has.
+   *
+   * 🔑 THE PREMISE ABOVE CHANGED (2026-09-10). This module states, correctly for when it was written,
+   * that we cannot see inside a cross-origin frame. The preview bridge now runs INSIDE the app and
+   * reports both of these, so the decision can use evidence rather than the build phase as a proxy.
+   */
+  hmrAgeMs?: number | null;
+  /** ms since someone last clicked, typed or scrolled inside the app, or null if nobody has. */
+  activityAgeMs?: number | null;
 }): ReloadDecision {
   if (o.mode !== 'live') return { reload: true, defer: false };
   // Nothing on screen yet — there is no user state to lose and everything to gain by showing it.
   if (!o.everRendered) return { reload: true, defer: false };
+
+  // HOT RELOAD ALREADY DID IT. The change is on screen; the hard remount that used to follow was pure
+  // loss — it destroyed whatever the person had typed or opened in order to show them something they
+  // could already see. Not a defer: there is nothing left to land, so nothing is held back and no
+  // "updates waiting" line is shown for a change that has already arrived.
+  if (typeof o.hmrAgeMs === 'number' && o.hmrAgeMs >= 0 && o.hmrAgeMs <= HMR_FRESH_MS) {
+    return { reload: false, defer: false };
+  }
+
+  // SOMEONE IS USING THE APP RIGHT NOW. This is the rule the module said could not be implemented, and
+  // it is strictly better than the phase test that stood in for it: a build that is still 'generating'
+  // can perfectly well be one whose app the user has already started filling in.
+  if (typeof o.activityAgeMs === 'number' && o.activityAgeMs >= 0 && o.activityAgeMs <= ACTIVITY_FRESH_MS) {
+    return { reload: false, defer: true };
+  }
+
   // The app is up and the engine is only settling it. Hold.
   if (o.phase === 'settling') return { reload: false, defer: true };
   return { reload: true, defer: false };
 }
+
+/**
+ * How recently a hot update must have landed for us to trust that the change is already on screen.
+ *
+ * The reload signal is debounced by 900ms before this runs, and Vite applies an update within a few
+ * hundred ms of the write, so a live HMR client always lands well inside this. Kept SHORT on purpose:
+ * if HMR has gone quiet — the socket dropped, the update needed a full reload, the app is not
+ * Vite-served at all — the window lapses and the hard reload happens exactly as it does today. A
+ * stale preview is a worse failure than a lost scroll position, so the fallback must be the reload.
+ */
+export const HMR_FRESH_MS = 4_000;
+
+/**
+ * How recently someone must have touched the app to count as "using it".
+ *
+ * Long enough to cover reading a page or thinking mid-form, short enough that an abandoned tab does
+ * not hold updates back forever — and it cannot hold them forever in any case, because
+ * shouldFlushOnBuildEnd lands everything held the moment the build finishes.
+ */
+export const ACTIVITY_FRESH_MS = 30_000;
 
 /**
  * The build just ended. Should the held-back changes land now?

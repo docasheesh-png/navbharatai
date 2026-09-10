@@ -72,7 +72,33 @@ describe('3. it is served only when the machine is genuinely gone', () => {
 
 describe('4. the user is told WHICH version they are looking at', () => {
   it('the server says so, from the same record and the same rule the door uses', () => {
-    expect(route).toContain('snapshotServing: true, snapshotNote: SNAPSHOT_NOTE');
+    // REPOINTED (2026-09-08): there are now TWO situations and two notes — an EXPIRED machine and one
+    // that is STARTING UP — so the payload picks between them instead of always sending SNAPSHOT_NOTE.
+    // What this test protects is unchanged: whenever a copy is framed, the user is told so.
+    expect(route).toContain('snapshotServing: true, snapshotNote: snapshotWaking ? SNAPSHOT_WAKING_NOTE : SNAPSHOT_NOTE');
+  });
+
+  it('🔒 the health verdict is the DOOR\'S OWN rule, not a second copy of it', () => {
+    // The load-bearing half of the waking fallback. If this block still answered only for a machine
+    // that is GONE, the door would frame a saved copy while the panel said nothing at all — the exact
+    // silent substitution the old blanket refusal existed to prevent.
+    const at = route.indexOf('let snapshotServing = false;');
+    expect(at).toBeGreaterThan(-1);
+    const block = route.slice(at, at + 1600);
+    expect(block).toContain("const doorState = sandboxGone ? 'asleep' as const : 'starting' as const;");
+    expect(block).toContain('shouldServeSnapshot({');
+    expect(block).toContain('workspaceFilesSavedAt(workspaceId)');
+    expect(block).toContain("snapshotWaking = doorState === 'starting'");
+  });
+
+  it('🔒 and the frame returns to the live app by itself, exactly once, on the edge', () => {
+    // Once the door 302s to the copy, the frame has left our origin and nothing in it is watching for
+    // the live app. Without this the copy would stay up until something else reloaded the frame —
+    // which for a wake that healed itself could be never.
+    expect(surface).toContain('snapshotFramedRef');
+    expect(surface).toContain('if (snapshotFramedRef.current && !servingSnapshot) setLiveReloadKey((k) => k + 1);');
+    // On the EDGE, never the level: bumping every poll would remount the framed app every 150s.
+    expect(surface).toContain('snapshotFramedRef.current = servingSnapshot;');
   });
 
   it('the surface shows it', () => {

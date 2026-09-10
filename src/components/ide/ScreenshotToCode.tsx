@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, DragEvent, ChangeEvent, ClipboardEvent } from 'react';
-import { Upload, X, Copy, AlertCircle, ChevronDown, ChevronUp, Clock, Check, Image as ImageIcon, Clipboard } from 'lucide-react';
+import { Upload, X, Copy, AlertCircle, ChevronDown, ChevronUp, Clock, Check, Image as ImageIcon, Clipboard, Globe } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface ScreenshotToCodeProps {
@@ -15,6 +15,20 @@ interface ScreenshotToCodeProps {
 type StyleOption = 'Tailwind CSS' | 'Plain CSS' | 'Bootstrap';
 type FrameworkOption = 'Vanilla HTML' | 'React JSX';
 type AppStatus = 'idle' | 'ready' | 'generating' | 'done' | 'error';
+type UrlStatus = 'idle' | 'reading' | 'error';
+
+/** What the server read from the page — shown BEFORE Build so the user knows what the spec is based on. */
+interface ExtractedSiteView {
+  title: string;
+  nav: string[];
+  headings: Array<{ level: number; text: string }>;
+  ctas: string[];
+  forms: Array<{ fields: Array<{ type: string; label: string }>; submit: string }>;
+  colors: string[];
+  fonts: string[];
+  counts: { sections: number; images: number; links: number; forms: number };
+  thin: boolean;
+}
 
 interface HistoryEntry {
   timestamp: number;
@@ -85,6 +99,13 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
   const [clipboardSupported] = useState(() =>
     typeof navigator !== 'undefined' && !!(navigator.clipboard as any)?.read
   );
+
+  // Website → App (ROADMAP §13, 4.2): a public page's address instead of a screenshot.
+  const [siteUrl, setSiteUrl] = useState('');
+  const [urlStatus, setUrlStatus] = useState<UrlStatus>('idle');
+  const [urlError, setUrlError] = useState('');
+  const [extracted, setExtracted] = useState<ExtractedSiteView | null>(null);
+  const [sitePrompt, setSitePrompt] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const prevImageUrlRef = useRef<string | null>(null);
@@ -213,6 +234,49 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
     }
   };
 
+  /**
+   * Read the page's structure (server: /api/site-import/to-prompt — SSRF-guarded fetch, deterministic
+   * extraction, NO model call, so nothing is charged). The spec is shown and handed to Pro v5.0 only
+   * after the user has seen what was read and pressed Build.
+   */
+  const handleImportUrl = async () => {
+    const address = siteUrl.trim();
+    if (!address) return;
+    setUrlStatus('reading');
+    setUrlError('');
+    setExtracted(null);
+    setSitePrompt('');
+    try {
+      const res = await fetch('/api/site-import/to-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: address, style: selectedStyle, framework: selectedFramework, includeJs }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || typeof data.prompt !== 'string' || !data.extracted) {
+        throw new Error((data && data.error) || 'Could not read that website — please check the address.');
+      }
+      setExtracted(data.extracted as ExtractedSiteView);
+      setSitePrompt(data.prompt);
+      setUrlStatus('idle');
+    } catch (e) {
+      setUrlStatus('error');
+      setUrlError(e instanceof Error ? e.message : 'Could not read that website — please try again.');
+    }
+  };
+
+  const handleBuildFromSite = () => {
+    if (!sitePrompt) return;
+    setStatus('done');
+    setGeneratedCode(sitePrompt);
+    setErrorMsg('');
+    const entry: HistoryEntry = { timestamp: Date.now(), preview: sitePrompt.slice(0, 200) };
+    const updated = [entry, ...history].slice(0, MAX_HISTORY);
+    setHistory(updated);
+    saveHistory(updated);
+    onBuildViaV5(sitePrompt);
+  };
+
   const handleCopy = async () => {
     if (!generatedCode) return;
     try {
@@ -242,6 +306,79 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
     >
       {/* LEFT COLUMN */}
       <div className="flex flex-col gap-4 lg:w-1/2 w-full">
+        {/* Website → App: a public page's address instead of a screenshot */}
+        <div
+          className="rounded-xl border border-white/10 p-4 flex flex-col gap-3"
+          style={{ backgroundColor: 'var(--surface-card)' }}
+        >
+          <div className="flex items-center gap-2">
+            <Globe className="w-4 h-4 text-indigo-400" />
+            <p className="text-xs text-gray-500 uppercase tracking-wide">From a website address</p>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="url"
+              value={siteUrl}
+              onChange={(e) => setSiteUrl(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleImportUrl(); }}
+              placeholder="shop.example.com"
+              className="flex-1 min-w-0 text-sm px-3 py-2 rounded-lg border border-white/10 bg-black/20 text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+              disabled={urlStatus === 'reading'}
+            />
+            <button
+              onClick={handleImportUrl}
+              disabled={!siteUrl.trim() || urlStatus === 'reading'}
+              className="text-sm px-3 py-2 rounded-lg border border-white/10 text-gray-300 hover:border-indigo-500 hover:text-indigo-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 shrink-0"
+            >
+              {urlStatus === 'reading' ? <TirangaLoader className="w-4 h-4" /> : null}
+              {urlStatus === 'reading' ? 'Reading…' : 'Read website'}
+            </button>
+          </div>
+          {urlStatus === 'error' && (
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-950/30 border border-red-800/40">
+              <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-red-400">{urlError}</p>
+            </div>
+          )}
+          {extracted && (
+            <div className="flex flex-col gap-2 text-xs text-gray-400">
+              <p className="text-sm text-gray-200 truncate">{extracted.title || 'Untitled page'}</p>
+              {extracted.thin && (
+                <p className="text-amber-300/80">
+                  This site draws itself with JavaScript, so little could be read from its markup. The build will rely on looking at the live page.
+                </p>
+              )}
+              {extracted.nav.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {extracted.nav.map((n) => (
+                    <span key={n} className="px-2 py-0.5 rounded-full border border-white/10 text-gray-300">{n}</span>
+                  ))}
+                </div>
+              )}
+              <p>
+                {extracted.headings.length} heading{extracted.headings.length === 1 ? '' : 's'} · {extracted.ctas.length} button{extracted.ctas.length === 1 ? '' : 's'} · {extracted.counts.forms} form{extracted.counts.forms === 1 ? '' : 's'} · {extracted.counts.images} image{extracted.counts.images === 1 ? '' : 's'}
+                {extracted.fonts.length > 0 ? ` · fonts: ${extracted.fonts.join(', ')}` : ''}
+              </p>
+              {extracted.colors.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  {extracted.colors.map((c) => (
+                    <span key={c} title={c} className="w-5 h-5 rounded border border-white/20" style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={handleBuildFromSite}
+                className="mt-1 w-full py-2.5 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+              >
+                Build from this website
+              </button>
+              <p className="text-[11px] text-gray-500 leading-relaxed">
+                The site's images, logos, icons and fonts are never copied — the layout is recreated with placeholders and you add your own. Reading the page costs nothing; the build is charged as usual.
+              </p>
+            </div>
+          )}
+        </div>
+
         {/* Drag & Drop Zone */}
         <div
           className={`rounded-xl border-2 border-dashed p-8 flex flex-col items-center justify-center cursor-pointer transition-all min-h-48 ${
@@ -375,7 +512,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-            <h2 className="text-sm font-semibold text-gray-300">Build spec (from your screenshot)</h2>
+            <h2 className="text-sm font-semibold text-gray-300">Build spec (from your screenshot or website)</h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleCopy}
@@ -394,7 +531,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
                 <Upload className="w-8 h-8 text-gray-600" />
                 <p className="text-sm text-gray-500">
-                  Upload any website screenshot — AI will build a same-to-same app
+                  Upload a website screenshot, or paste a website address on the left — a same-to-same app is built from it
                 </p>
               </div>
             )}

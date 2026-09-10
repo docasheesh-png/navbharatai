@@ -17,12 +17,12 @@ import {
   AuthProvider,
   UserCredential,
 } from 'firebase/auth';
-import { SIGN_IN_HINT_KEY } from '../lib/accountRoster';
+import { SIGN_IN_HINT_KEY, SIGN_IN_PROVIDER_KEY, switchBannerText } from '../lib/accountRoster';
 import { Capacitor } from '@capacitor/core';
 import { raceNativeAuth, settleWithinOrProceed, preLoginWebSignOutAllowed } from '../lib/nativeAuthGuard';
 import { normalizePhone } from '../lib/phoneNumber';
 import { motion } from 'motion/react';
-import { X, AlertCircle, Github } from 'lucide-react';
+import { X, AlertCircle, Github, Users } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
@@ -207,6 +207,29 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   // Custom states for Secure Verification System
   const [otpSending, setOtpSending] = useState(false);
   const [otpCooldown, setOtpCooldown] = useState(0);
+  /**
+   * "You are switching, not starting over" — read ONCE on mount (admin 2026-09-02).
+   *
+   * Tapping an account in the switch menu opened this screen exactly as a stranger sees it: "Sign in",
+   * every method offered, no sign it knew who was asked for. Someone who just pointed at their own
+   * face and email lands there and concludes the switch failed. Nothing about the flow is wrong — it
+   * forgets, one screen later, what it was just told.
+   *
+   * ⚠️ READ, NOT CONSUMED. `handleGoogleSignIn` still removes the email hint when it uses it as a
+   * `login_hint`; taking it here as well would clear it before the provider ever saw it and quietly
+   * put the account chooser back to a full list. Display and use must not compete for the same key.
+   *
+   * ⚠️ AND NO AUTO-LAUNCH. Firing the provider popup from an effect would lose the click's user
+   * gesture and browsers would block it — a blocked popup is worse than the extra tap this saves. The
+   * fix is to make the right button obvious, not to press it for them.
+   */
+  const [switchBanner] = useState<string>(() => {
+    try {
+      return switchBannerText(localStorage.getItem(SIGN_IN_HINT_KEY), localStorage.getItem(SIGN_IN_PROVIDER_KEY));
+    } catch {
+      return ''; // private mode / blocked storage — the ordinary sign-in screen is a fine fallback
+    }
+  });
   const [successMessage, setSuccessMessage] = useState('');
   
   // NATIVE AUTH TRAIL (admin iPhone debug 2026-07-17): a live, on-screen list of the exact sign-in
@@ -1128,6 +1151,13 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-3 text-emerald-400 text-[10px] font-bold">
               <div className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">✓</div>
               <span>{successMessage}</span>
+            </div>
+          )}
+
+          {switchBanner && (
+            <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex items-start gap-3">
+              <Users className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+              <span className="text-[11px] leading-relaxed text-indigo-200">{switchBanner}</span>
             </div>
           )}
 

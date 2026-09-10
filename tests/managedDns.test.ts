@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   managedDnsConfigured, ensureZone, zoneStatus, applyRecords, toCfRecordPayloads,
-  sanitizeManagedDnsError, _setCfFetchForTests,
+  sanitizeManagedDnsError, _setCfFetchForTests, conflictingTypesFor,
 } from '../src/server/lib/cloudflareManagedDns';
 
 /**
@@ -84,14 +84,20 @@ describe('applyRecords', () => {
       if (method === 'GET' && url.includes('type=TXT')) {
         return j({ success: true, result: [{ id: 'r2', type: 'TXT', name: 'mitrify.in', content: '"other-unrelated"' }] });
       }
+      // ⚠️ RECORD ONLY MUTATIONS (2026-09-07). This used to treat every unmatched request as a write,
+      // which was fine while the only reads were the two matched above — the cross-type conflict sweep
+      // now reads `type=CNAME` too, and an unrecorded read must not shift the write indices below.
+      // The property under test is unchanged: a changed A is PUT in place, a new TXT is POSTed beside.
+      if (method === 'GET') return j({ success: true, result: [] });
       writes.push({ method, url });
       return j({ success: true, result: {} });
     });
-    const changed = await applyRecords('z1', [
+    const result = await applyRecords('z1', [
       { type: 'A', name: 'mitrify.in', value: '1.2.3.4' },      // differs → PUT replace
       { type: 'TXT', name: 'mitrify.in', value: 'fb-challenge' }, // new value → POST alongside
     ]);
-    expect(changed).toBe(2);
+    // BOTH writes place a DESIRED value, so both count as `added` — neither is cleanup.
+    expect(result).toEqual({ added: 2, removed: 0 });
     expect(writes[0].method).toBe('PUT');                        // single-value type replaced in place
     expect(writes[0].url).toContain('/dns_records/r1');
     expect(writes[1].method).toBe('POST');                       // TXT added, unrelated TXT untouched
@@ -112,8 +118,8 @@ describe('applyRecords', () => {
       writes.push({ method, url, body: init.body });
       return j({ success: true, result: {} });
     });
-    const changed = await applyRecords('z1', [{ type: 'A', name: 'mitrify.in', value: '199.36.158.100' }]);
-    expect(changed).toBe(1);
+    const result = await applyRecords('z1', [{ type: 'A', name: 'mitrify.in', value: '199.36.158.100' }]);
+    expect(result).toEqual({ added: 1, removed: 0 });
     expect(writes[0].method).toBe('PUT');
     expect(writes[0].url).toContain('/dns_records/r1');
     expect(writes[0].body).toContain('"proxied":false');
@@ -134,16 +140,17 @@ describe('applyRecords', () => {
       writes.push({ method, url });
       return j({ success: true, result: {} });
     });
-    const changed = await applyRecords('z1', [
+    const result = await applyRecords('z1', [
       { type: 'A', name: 'mitrify.in', value: '151.101.1.195' },
       { type: 'A', name: 'mitrify.in', value: '151.101.65.195' },
     ]);
-    // 2 replacements + 1 delete — the set ends EXACTLY at the two desired values, nothing thrashes.
-    expect(changed).toBe(3);
+    // 2 replacements (both DESIRED values, so `added`) + 1 delete of the genuine EXTRA (`removed`) —
+    // the set ends EXACTLY at the two desired values, nothing thrashes, and the two counts stay honest.
+    expect(result).toEqual({ added: 2, removed: 1 });
     expect(writes.map((w) => w.method)).toEqual(['PUT', 'PUT', 'DELETE']);
   });
 
-  it('an already-correct zone reports 0 changes — an honest, verifiable no-op', async () => {
+  it('an already-correct zone reports {added:0, removed:0} — an honest, verifiable no-op', async () => {
     process.env.CLOUDFLARE_API_TOKEN = 't';
     _setCfFetchForTests(async (url, init) => {
       if ((init.method ?? 'GET') === 'GET') {
@@ -151,7 +158,30 @@ describe('applyRecords', () => {
       }
       throw new Error('no write should happen');
     });
-    expect(await applyRecords('z1', [{ type: 'A', name: 'mitrify.in', value: '1.2.3.4' }])).toBe(0);
+    expect(await applyRecords('z1', [{ type: 'A', name: 'mitrify.in', value: '1.2.3.4' }])).toEqual({ added: 0, removed: 0 });
+  });
+
+  /**
+   * 🔒 THE ADMIN'S OWN SCREENSHOT (2026-09-02): "Done — all 1 record are now in place (we added 2)."
+   * One desired TXT record was written; one FOREIGN `hosting-site=` token from a different app was
+   * deleted as cleanup. The old single `changed` count summed both into "2" beside "all 1 record" — a
+   * number contradicting the sentence it was in. `added` and `removed` now travel separately, and
+   * `added` can never exceed the number of records actually desired.
+   */
+  it('🔒 a foreign ownership token cleaned up during a genuine add is `removed`, never folded into `added`', async () => {
+    process.env.CLOUDFLARE_API_TOKEN = 't';
+    _setCfFetchForTests(async (url, init) => {
+      if ((init.method ?? 'GET') === 'GET') {
+        // The zone already holds ANOTHER app's ownership token — nothing that matches what we want.
+        return j({ success: true, result: [{ id: 'foreign', type: 'TXT', name: 'mitrify.com', content: '"hosting-site=nbai-other-app"' }] });
+      }
+      return j({ success: true, result: {} });
+    });
+    const result = await applyRecords('z1', [{ type: 'TXT', name: 'mitrify.com', value: 'hosting-site=nbai-this-app' }]);
+    // Exactly ONE desired record was added; the foreign token's deletion is accounted separately.
+    expect(result).toEqual({ added: 1, removed: 1 });
+    // The property the admin's screenshot violated: `added` must never exceed the number desired (1).
+    expect(result.added).toBeLessThanOrEqual(1);
   });
 });
 
@@ -174,8 +204,14 @@ describe('auto-DNS surface honesty', () => {
       // read-back, 2026-08-22) — the catch block simply fell outside it while remaining perfectly
       // correct. A magic byte count is not the property being tested; "within this handler" is. So
       // the segment now runs to the NEXT route registration, which cannot drift as the body changes.
-      const start = route.indexOf(ep);
-      const next = route.indexOf('app.post(', start + ep.length);
+      // ⚠️ ANCHORED ON THE REGISTRATION, not the bare path (2026-09-10). A shared helper's doc
+      // comment above the routes names both endpoints, so `indexOf('auto-dns/start')` began
+      // matching PROSE and this test read a comment block instead of a handler. A conclusion drawn
+      // from the wrong slice is not a weaker test, it is a different one.
+      const marker = `app.post('/api/domains/nbai/${ep}'`;
+      const start = route.indexOf(marker);
+      expect(start).toBeGreaterThan(0);
+      const next = route.indexOf('app.post(', start + marker.length);
       const seg = route.slice(start, next === -1 ? route.length : next);
       expect(seg).toContain('ownsWorkspace');
       expect(seg).toContain('managedDnsConfigured()');
@@ -184,7 +220,7 @@ describe('auto-DNS surface honesty', () => {
   });
 
   it('sync refuses to pretend: a pending zone applies nothing, and attach must precede apply', () => {
-    const seg = route.slice(route.indexOf('auto-dns/sync'));
+    const seg = route.slice(route.indexOf("app.post('/api/domains/nbai/auto-dns/sync'"));
     expect(seg).toMatch(/zone\.status !== 'active'/);
     expect(seg).toContain('Connect the domain first');
   });
@@ -214,5 +250,109 @@ describe('auto-DNS surface honesty', () => {
     expect(client).not.toContain('record${autoApplied');
     // The waiting case still has to say the slow step is one-time, or the fast path reads as slow.
     expect(client).toContain('only once');
+  });
+});
+
+/**
+ * 🔴 THE CROSS-TYPE CONFLICT — the last thing standing between mitrify.com and a live app
+ * (admin 2026-09-07, "ab kuch bacha hai?").
+ *
+ * `applyRecords` groups by `type|name` and reads the zone back filtered BY THAT TYPE, so it could
+ * only ever see records of the same kind. That is right within a type and wrong across types: DNS
+ * (RFC 1034) forbids a CNAME from coexisting with other data at the same name. A domain already
+ * connected to our static host carries an A record at its apex; pointing that same domain at a
+ * backend service writes a CNAME there — and the provider refuses it for as long as the A record
+ * lives. Same shape as the ownership-TXT conflict above: a permanent refusal, not a slow state. The
+ * deploy would report success while the domain never moved.
+ */
+describe('applyRecords — the cross-type conflict DNS itself forbids', () => {
+  it('🔒 an existing A record at the apex is REMOVED before the CNAME is written', async () => {
+    process.env.CLOUDFLARE_API_TOKEN = 't';
+    const calls: Array<{ method: string; url: string }> = [];
+    _setCfFetchForTests(async (url, init) => {
+      const method = init.method ?? 'GET';
+      if (method === 'GET' && url.includes('type=CNAME')) return j({ success: true, result: [] });
+      // NOTE: 'type=AAAA' also contains 'type=A' — match precisely, or the fake answers both queries.
+      if (method === 'GET' && url.includes('type=A&')) {
+        return j({ success: true, result: [{ id: 'firebase-a', type: 'A', name: 'mitrify.com', content: '199.36.158.100' }] });
+      }
+      if (method === 'GET') return j({ success: true, result: [] });
+      calls.push({ method, url });
+      return j({ success: true, result: {} });
+    });
+    const result = await applyRecords('z1', [{ type: 'CNAME', name: 'mitrify.com', value: 'app.onrender.com' }]);
+
+    // ORDER IS THE FIX: delete first, then create — the reverse leaves the create already rejected.
+    expect(calls[0].method).toBe('DELETE');
+    expect(calls[0].url).toContain('/dns_records/firebase-a');
+    expect(calls[1].method).toBe('POST');
+    // The delete is CLEANUP of a blocker, never a desired value — so it counts as removed, not added.
+    expect(result).toEqual({ added: 1, removed: 1 });
+  });
+
+  it('🔒 an existing CNAME is removed before an A record is written — the same rule, reversed', async () => {
+    process.env.CLOUDFLARE_API_TOKEN = 't';
+    const calls: Array<{ method: string; url: string }> = [];
+    _setCfFetchForTests(async (url, init) => {
+      const method = init.method ?? 'GET';
+      if (method === 'GET' && url.includes('type=CNAME')) {
+        return j({ success: true, result: [{ id: 'old-cname', type: 'CNAME', name: 'mitrify.com', content: 'app.onrender.com' }] });
+      }
+      if (method === 'GET') return j({ success: true, result: [] });
+      calls.push({ method, url });
+      return j({ success: true, result: {} });
+    });
+    const result = await applyRecords('z1', [{ type: 'A', name: 'mitrify.com', value: '199.36.158.100' }]);
+    expect(calls[0].method).toBe('DELETE');
+    expect(calls[0].url).toContain('/dns_records/old-cname');
+    expect(result).toEqual({ added: 1, removed: 1 });
+  });
+
+  it('🔒 TXT and MX are NEVER swept — that would break the user\'s email to fix a problem they do not have', async () => {
+    // Cloudflare's apex CNAME flattening deliberately permits TXT and MX alongside, and those records
+    // carry SPF/DKIM/MX plus other services' verifications.
+    process.env.CLOUDFLARE_API_TOKEN = 't';
+    const gets: string[] = [];
+    _setCfFetchForTests(async (url, init) => {
+      const method = init.method ?? 'GET';
+      if (method === 'GET') { gets.push(url); return j({ success: true, result: [] }); }
+      return j({ success: true, result: {} });
+    });
+    await applyRecords('z1', [{ type: 'CNAME', name: 'mitrify.com', value: 'app.onrender.com' }]);
+    expect(gets.some((u) => u.includes('type=TXT'))).toBe(false);
+    expect(gets.some((u) => u.includes('type=MX'))).toBe(false);
+    expect(gets.some((u) => u.includes('type=NS'))).toBe(false);
+  });
+
+  it('nothing conflicting present ⇒ behaviour is exactly what it was before', async () => {
+    process.env.CLOUDFLARE_API_TOKEN = 't';
+    _setCfFetchForTests(async (url, init) => {
+      const method = init.method ?? 'GET';
+      if (method === 'GET' && url.includes('type=A') && url.includes('mitrify.in')) {
+        return j({ success: true, result: [{ id: 'r1', type: 'A', name: 'mitrify.in', content: '1.2.3.4' }] });
+      }
+      if (method === 'GET') return j({ success: true, result: [] });
+      return j({ success: true, result: {} });
+    });
+    // Already-correct A record, no CNAME in the zone: no writes, no deletes.
+    expect(await applyRecords('z1', [{ type: 'A', name: 'mitrify.in', value: '1.2.3.4' }])).toEqual({ added: 0, removed: 0 });
+  });
+});
+
+describe('conflictingTypesFor — only what genuinely blocks the write', () => {
+  it('a CNAME is blocked by address records; an address record is blocked by a CNAME', () => {
+    expect(conflictingTypesFor('CNAME')).toEqual(['A', 'AAAA']);
+    expect(conflictingTypesFor('A')).toEqual(['CNAME']);
+    expect(conflictingTypesFor('AAAA')).toEqual(['CNAME']);
+  });
+
+  it('🔒 TXT sweeps nothing — the email-safety rule, encoded', () => {
+    expect(conflictingTypesFor('TXT')).toEqual([]);
+    expect(conflictingTypesFor('MX')).toEqual([]);
+    expect(conflictingTypesFor('')).toEqual([]);
+  });
+
+  it('case and whitespace do not change the answer', () => {
+    expect(conflictingTypesFor(' cname ')).toEqual(['A', 'AAAA']);
   });
 });

@@ -1,8 +1,15 @@
 // P-UX.1 — Privacy / analytics consent banner (GDPR + India DPDP).
 //
 // Shown once, on first visit, until the user makes a choice. "Accept" enables non-essential
-// analytics (product events + Core Web Vitals); "Decline" keeps them off. The choice is stored in
-// localStorage and respected by trackEvent() and the web-vitals observers (see src/lib/consent.ts).
+// analytics (product events + Core Web Vitals) AND the Meta advertising pixel; "Decline" keeps them
+// all off. The choice is stored in localStorage and respected by trackEvent(), the web-vitals
+// observers and initMetaPixel() (see src/lib/consent.ts and src/lib/metaPixel.ts).
+//
+// THE COPY NAMES META ON PURPOSE. Loading a third-party advertising pixel is materially different
+// from first-party product analytics, and a banner that said only "privacy-friendly analytics"
+// while an ad network's script loaded would be consent obtained on a false description. The white-
+// label law forbids naming the AI PROVIDERS behind a build — it does not licence hiding who
+// receives a user's data, which is a disclosure obligation under GDPR and India's DPDP Act.
 // Operational crash/error logging is essential and runs regardless — this banner only governs
 // non-essential telemetry. Self-contained inline styles (matching main.tsx's RootFallback) so it
 // renders correctly in any theme without depending on global CSS.
@@ -64,9 +71,10 @@ export function ConsentBanner() {
           <strong style={{ display: 'block', fontSize: 13, fontWeight: 800, marginBottom: 4 }}>
             We respect your privacy
           </strong>
-          We use privacy-friendly analytics and performance measurement to improve NavBharatAI. These
-          are optional. Essential features and crash reporting work either way. You can change your
-          choice anytime by clearing the site data.
+          We use analytics and performance measurement to improve NavBharatAI, and — only if you
+          accept — advertising measurement from Meta, so we can tell which ads genuinely help people
+          find us. These are optional. Essential features and crash reporting work either way. You
+          can change your choice anytime by clearing the site data.
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <button

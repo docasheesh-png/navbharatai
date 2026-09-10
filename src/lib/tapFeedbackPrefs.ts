@@ -25,9 +25,22 @@ export interface TapFeedbackPrefs {
    *  whole-hand buzz, and at typing frequency it is irritating rather than reassuring (the reason
    *  vibration was removed from taps on 2026-08-09 in the first place). */
   vibration: boolean;
+  /**
+   * Swipe from the LEFT EDGE to open the sidebar menu. OFF by default.
+   *
+   * ADMIN 2026-08-28: "left se right finger swipe ho jaye galti se bhi to slidebar menu open ho jata
+   * hai — isko band karne ka system banao, default off."
+   *
+   * Why it fired by accident: the gesture listened on `document` for ANY mostly-horizontal 70px swipe
+   * anywhere on the screen — so scrolling a horizontal toolbar, flicking through a preview, or nudging
+   * a code block all counted as "open the menu". Two things follow from that, and both are here:
+   * the gesture is now OFF unless asked for, and when it IS on it must start at the screen's left edge
+   * like every operating system's back-gesture, instead of anywhere at all.
+   */
+  swipeMenu: boolean;
 }
 
-export const TAP_FEEDBACK_DEFAULTS: TapFeedbackPrefs = { sound: true, vibration: false };
+export const TAP_FEEDBACK_DEFAULTS: TapFeedbackPrefs = { sound: true, vibration: false, swipeMenu: false };
 
 export const TAP_FEEDBACK_STORAGE_KEY = 'navbharat_tap_feedback';
 
@@ -61,6 +74,7 @@ export function readTapFeedbackPrefs(store: StorageLike | null = storage()): Tap
     return {
       sound: typeof parsed.sound === 'boolean' ? parsed.sound : TAP_FEEDBACK_DEFAULTS.sound,
       vibration: typeof parsed.vibration === 'boolean' ? parsed.vibration : TAP_FEEDBACK_DEFAULTS.vibration,
+      swipeMenu: typeof parsed.swipeMenu === 'boolean' ? parsed.swipeMenu : TAP_FEEDBACK_DEFAULTS.swipeMenu,
     };
   } catch {
     return { ...TAP_FEEDBACK_DEFAULTS };
@@ -82,10 +96,34 @@ export function writeTapFeedbackPrefs(
   const clean: TapFeedbackPrefs = {
     sound: next?.sound !== false,          // anything not explicitly false stays ON (the default)
     vibration: next?.vibration === true,   // vibration is opt-IN, so only an explicit true enables it
+    swipeMenu: next?.swipeMenu === true,   // opt-IN too: a stored `undefined` must never re-enable it
   };
   try { store?.setItem(TAP_FEEDBACK_STORAGE_KEY, JSON.stringify(clean)); } catch { /* unwritable storage must not break the toggle */ }
   try { emit?.(TAP_FEEDBACK_EVENT); } catch { /* an event listener throwing must not break the save */ }
   return clean;
+}
+
+/**
+ * How close to the left edge a swipe must START to count as "open the menu", in CSS pixels.
+ *
+ * Wide enough to hit with a thumb through a phone case, narrow enough that it cannot overlap content
+ * the user is scrolling sideways in the middle of the screen — which is precisely how the old
+ * anywhere-on-screen version kept opening the menu by accident.
+ */
+export const MENU_SWIPE_EDGE_PX = 32;
+
+/**
+ * Should a left→right swipe that began at `startX` open the sidebar?
+ *
+ * BOTH conditions, and in this order: the user has opted in, AND the swipe began at the left edge.
+ * PURE — no DOM, no storage — so every rule here is directly testable, which matters because the
+ * failure this replaces (a gesture firing on ordinary sideways scrolling) is invisible to a type
+ * checker and awkward to catch by hand on a phone.
+ */
+export function shouldOpenMenuOnSwipe(startX: number, prefs: TapFeedbackPrefs): boolean {
+  if (!prefs?.swipeMenu) return false;
+  if (!Number.isFinite(startX)) return false;
+  return startX <= MENU_SWIPE_EDGE_PX;
 }
 
 function defaultEmit(name: string): void {

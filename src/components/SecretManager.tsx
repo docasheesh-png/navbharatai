@@ -7,6 +7,7 @@ import { db } from '../lib/firebase'; // shared handle → navbharat-prod (NOT t
 import { saveSecret, deleteSecret, verifySecrets, type SecretVerdict } from '../lib/secretsApi';
 import { findRecipeSource } from '../lib/credentialRecipes';
 import { listApps, type AppChoice } from '../lib/appList';
+import { scopeControl, saveScope, scopeSentence, secretOwnerLabel, shortAppName } from '../lib/secretScope';
 
 interface Secret {
   id: string;
@@ -42,7 +43,15 @@ export const SecretManager: React.FC<{
    * of every other app's `.env`. Settings passes nothing and opens on "All apps".
    */
   defaultAppId?: string | null;
-}> = ({ userId, embedded, defaultAppId }) => {
+  /**
+   * What to CALL that app on this screen.
+   *
+   * Passed in rather than looked up, so the sheet can name the app even when the app-list request fails
+   * — the caller already knows the name it is displaying in its own header, and a screen that says
+   * "this app" when it could say the name is a screen that makes the user check.
+   */
+  defaultAppName?: string | null;
+}> = ({ userId, embedded, defaultAppId, defaultAppName }) => {
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
@@ -59,16 +68,41 @@ export const SecretManager: React.FC<{
    * It is a real choice rather than an absence: a Stripe key most of somebody's apps use belongs here.
    */
   const [scope, setScope] = useState<string>(defaultAppId ?? '');
+  /**
+   * Fixed mode only: "also use this key in my other apps".
+   *
+   * Off by default, because a key typed while building one app belongs to that app far more often than
+   * to all of them — and the safe default is the narrow one: a key that reaches too few apps is a
+   * missing key the user notices and fixes, while a key that reaches too many is a payment secret in
+   * a to-do app's `.env`.
+   */
+  const [shareWithAll, setShareWithAll] = useState(false);
   // Loaded here rather than passed in, so BOTH doors onto the vault get the picker without either call
   // site having to remember to wire it — and so the two can never disagree about the user's app list.
   const [apps, setApps] = useState<AppChoice[]>([]);
   const appTitle = (id?: string | null) => apps.find((a) => a.id === id)?.title;
+  /**
+   * Which control this screen shows, and the ONE place the answer is decided. See lib/secretScope.ts —
+   * opened from inside an app ⇒ that app is fixed and the only extra choice is "share with all"; opened
+   * from Settings ⇒ the full picker, unchanged.
+   */
+  const control = scopeControl(defaultAppId, apps.length);
+  /** The app this screen is about, named as well as we can name it. */
+  const currentAppName = defaultAppName?.trim() || appTitle(defaultAppId) || '';
+  /**
+   * The scope a save will actually use. In fixed mode this is derived from the checkbox and CANNOT be
+   * another app; in picker mode it is the dropdown. Deriving it in one place is what stops the sentence
+   * on screen from ever disagreeing with what is stored.
+   */
+  const effectiveScope = saveScope({ control, defaultAppId, pickerValue: scope, shareWithAll });
   // Shared keys are shown under EVERY app, because they genuinely apply to every app — hiding them
   // while an app is selected would make somebody paste a second copy of a key they already have.
-  const visibleSecrets = scope
-    ? secrets.filter((s) => !s.workspace_id || s.workspace_id === scope)
+  // In fixed mode the list is always THIS app's keys plus the shared ones, even when the checkbox is
+  // ticked: ticking it changes where the NEXT key goes, not which keys this app receives.
+  const viewingAppId = control === 'fixed' ? String(defaultAppId ?? '') : scope;
+  const visibleSecrets = viewingAppId
+    ? secrets.filter((s) => !s.workspace_id || s.workspace_id === viewingAppId)
     : secrets;
-  const scopeTitle = appTitle(scope);
   // Derived, not stored: a pure catalogue lookup on every keystroke is cheaper than keeping a second
   // copy of it in state that could fall out of step with the field.
   const recipe = findRecipeSource(name.trim());
@@ -89,6 +123,19 @@ export const SecretManager: React.FC<{
     return () => unsubscribe();
   }, [userId]);
 
+  /**
+   * 🔒 IF THE APP ON SCREEN CHANGES, THE SCOPE FOLLOWS IT.
+   *
+   * `useState(defaultAppId)` only reads its argument on the FIRST render, so a sheet left mounted while
+   * the user moves to another build would keep saving into the previous app — the same silent
+   * wrong-app write this change exists to make impossible, arriving by a different route. Guarded on a
+   * real change so a re-render never discards a deliberate "share with all".
+   */
+  useEffect(() => {
+    setScope(defaultAppId ?? '');
+    setShareWithAll(false);
+  }, [defaultAppId]);
+
   // The app list is best-effort decoration on a picker: it never blocks saving a key, and an account
   // without v5 access (or a failed request) simply gets no picker.
   useEffect(() => {
@@ -104,7 +151,8 @@ export const SecretManager: React.FC<{
     setAddError('');
     setVerdicts([]);
     try {
-      await saveSecret(userId, savedName, value.trim(), scope || null);
+      // The DERIVED scope, never the raw picker state — in fixed mode it cannot name another app.
+      await saveSecret(userId, savedName, value.trim(), effectiveScope);
       setName('');
       setValue('');
       // SAY WHETHER IT ACTUALLY WORKS, not just that it stored (2026-08-17). "Saved" is a statement about
@@ -180,17 +228,41 @@ export const SecretManager: React.FC<{
         never pasted in chat, never committed to git. Use the exact variable name your app reads.
       </p>
 
-      {/* WHICH APP ARE THESE KEYS FOR? (admin 2026-08-17)
-          Until now the vault had no app dimension at all, so EVERY key a user had ever saved was written
-          into the `.env` of EVERY app they built — a to-do list carried their payment secret, and went on
-          carrying it if the app was published. This picker is the user-facing half of fixing that: a key
-          saved while an app is selected goes only to that app.
-          "All apps" is a real, deliberate choice, not an absence: a Stripe key most of somebody's apps
-          share belongs there — and it is what every key saved before today already is, which is why
-          nothing that exists today changes behaviour.
-          Hidden entirely when the user has no apps yet: nobody should be asked to choose between one
-          thing, or between nothing. */}
-      {apps.length > 0 && (
+      {/* WHICH APP ARE THESE KEYS FOR?
+          Originally (admin 2026-08-17) one dropdown listing every app, rendered identically at both
+          doors onto the vault. Corrected 2026-09-08 after the admin sent a v5 screenshot: inside a
+          build that control asks a question the user already answered by opening it, and its list of
+          OTHER apps is a one-tap way to save a key into the wrong app's `.env` with nothing to say so.
+          The full reasoning — including why the control is narrowed rather than deleted — is in
+          lib/secretScope.ts. */}
+      {control === 'fixed' && (
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <span className="block text-[11px] uppercase tracking-widest text-gray-500 font-bold">Keys for</span>
+            {/* A statement, not a choice. `title` carries the full name for an app whose derived name is
+                its entire opening prompt — the clamp is what stopped it running off the edge. */}
+            <p className="text-sm font-semibold text-gray-100 truncate" title={currentAppName || undefined}>
+              {shortAppName(currentAppName) || 'This app'}
+            </p>
+          </div>
+          {/* The one choice worth keeping. There is no UI anywhere to re-scope a saved key, so without
+              this a v5 user who wanted a shared key would have to delete it and re-add it in Settings. */}
+          <label className="flex items-start gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={shareWithAll}
+              onChange={(e) => setShareWithAll(e.target.checked)}
+              className="mt-0.5 accent-indigo-500"
+            />
+            <span className="text-xs text-gray-300 leading-snug">
+              Also use this key in my other apps
+              <span className="block text-[11px] text-gray-500">For a key you reuse everywhere, like an AI or payment key.</span>
+            </span>
+          </label>
+        </div>
+      )}
+
+      {control === 'picker' && (
         <div className="space-y-1">
           <label htmlFor="secret-scope" className="block text-[11px] uppercase tracking-widest text-gray-500 font-bold">
             Keys for
@@ -203,21 +275,22 @@ export const SecretManager: React.FC<{
           >
             <option value="">All apps (shared)</option>
             {apps.map((a) => (
-              <option key={a.id} value={a.id}>{a.title}</option>
+              <option key={a.id} value={a.id}>{shortAppName(a.title)}</option>
             ))}
           </select>
         </div>
       )}
 
-      {/* SAY WHERE THE KEY IS ABOUT TO GO — always, not only when the picker happens to be on screen.
-          v5 opens this with the current build pre-selected, and the picker is hidden whenever the app
-          list could not be loaded. Without this line, that combination saves an app-scoped key while
-          telling the user nothing, and they would later wonder why their other app cannot see it. */}
+      {/* SAY WHERE THE KEY IS ABOUT TO GO — always, in every mode, and never only when a control
+          happens to be on screen. The answer matters most exactly when there is no control to imply it. */}
       <p className="text-[11px] text-gray-500 leading-snug">
-        {scope
-          ? `A key you add now goes only to ${scopeTitle ? `“${scopeTitle}”` : 'this app'} — your other apps will not receive it. Keys shared with all apps are listed here too, and every app still gets those.`
-          : 'A key you add now goes to every app you build.'
-            + (apps.length > 0 ? ' Pick an app above to keep a key out of your other apps.' : '')}
+        {scopeSentence({
+          control,
+          appName: currentAppName,
+          shareWithAll,
+          pickerTitle: appTitle(scope),
+          hasApps: apps.length > 0,
+        })}
       </p>
 
       <div className="bg-gray-800 p-4 rounded-lg space-y-4">
@@ -330,9 +403,9 @@ export const SecretManager: React.FC<{
                 {/* Which app owns this key. Shown only when the user actually has apps to tell apart —
                     and a shared key says so explicitly, because "goes to everything" is the fact most
                     worth knowing about a payment secret. */}
-                {apps.length > 0 && (
+                {(apps.length > 0 || !!defaultAppId) && (
                   <span className="shrink-0 font-sans text-[10px] text-gray-500 truncate max-w-[45%]">
-                    {s.workspace_id ? (appTitle(s.workspace_id) ?? 'Another app') : 'All apps'}
+                    {secretOwnerLabel({ workspaceId: s.workspace_id, currentAppId: defaultAppId, titleOf: appTitle })}
                   </span>
                 )}
                 <button onClick={() => handleDeleteSecret(s.id)} aria-label={`Delete ${s.secret_name}`} className="shrink-0 text-red-400 hover:text-red-300">

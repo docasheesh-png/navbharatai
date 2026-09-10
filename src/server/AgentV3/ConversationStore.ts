@@ -27,6 +27,51 @@ export interface ConversationRecord {
   workspaceId: string;
   /** Short human label (typically derived from the first user prompt). */
   title: string;
+  /**
+   * The name the USER chose for this app (admin 2026-09-04), set from the chat's name card.
+   *
+   * Absent on every record until someone renames, so `title` remains the fallback and nothing about
+   * an un-renamed build changes. Never read this directly for display — call `effectiveAppName`,
+   * which is what makes the chosen name appear in EVERY surface rather than only the one that
+   * happened to be updated.
+   */
+  appName?: string;
+  /**
+   * The GitHub repo this app's code actually lives in, once one has been ensured.
+   *
+   * ⚠️ THIS FIELD IS WHY A RENAME IS SAFE. The repo name used to be recomputed from title+createdAt
+   * on every build turn, and `ensureRepo(name)` creates whatever name it is handed — so changing the
+   * inputs to that computation would have silently created a NEW empty repo and pushed there,
+   * stranding the real app. Persisted, the name becomes a FACT rather than a derivation: the build
+   * pushes where it already pushed, and a rename that GitHub refuses cannot move it.
+   */
+  repoName?: string;
+  /**
+   * The GitHub account that repo lives under, and whether it is the USER'S OWN.
+   *
+   * ⚠️ ADDED 2026-09-04. Without these, the Publish screen learned the app's repo ONLY from a
+   * transient `repo` build event — so reopening the app and going straight to Publish showed
+   * "push this app to a repo of your own" for an app that already HAD one, with no control to do it.
+   * `repoOwnedByUser` is the fact that matters to a backend deploy: a mirror in the platform org is
+   * one the user's own host cannot read, so it must never be offered as deployable.
+   */
+  repoOwner?: string;
+  repoOwnedByUser?: boolean;
+  /**
+   * The branch a backend deploy should build from — the app's SHIPPED state, never a work-in-progress
+   * branch (own-repo storage keeps live edits on `navbharatai/work` until the user ships them to this
+   * branch). Absent means "derive the ordinary default" (main), exactly as before this field existed.
+   */
+  deployBranch?: string;
+  /**
+   * The domain a backend deploy pointed at the RUNNING SERVICE, when one did.
+   *
+   * ⚠️ THIS IS A SAFETY FACT, not a convenience. Once a domain moves to the backend, the static
+   * host's records are deliberately gone — and every screen that reads the static host's opinion
+   * would conclude the domain is broken and offer to re-apply those records, which would delete the
+   * backend's CNAME and take the live site down. See domainPointing.ts.
+   */
+  backendDomain?: string;
   status: ConversationStatus;
   /** The AgentRunner transcript, stored VERBATIM so a resumed run sees its exact prior context. */
   messages: unknown[];
@@ -80,6 +125,17 @@ export interface ConversationPatch {
   framework?: string;
   /** Pin/unpin this build in the user's history list. */
   pinned?: boolean;
+  /** The user's chosen app name (admin 2026-09-04). Applies instantly; never touches the build. */
+  appName?: string;
+  /** The GitHub repo this app's code lives in — written once when ensured, and on a real rename. */
+  repoName?: string;
+  /** Which account that repo is under, and whether the user owns it (a deploy needs their own). */
+  repoOwner?: string;
+  repoOwnedByUser?: boolean;
+  /** See ConversationRecord.deployBranch. */
+  deployBranch?: string;
+  /** See ConversationRecord.backendDomain — written when a deploy moves a domain to the service. */
+  backendDomain?: string;
 }
 
 /**
@@ -254,6 +310,12 @@ export class InMemoryConversationStore implements ConversationStore {
     if (patch.finalState !== undefined) rec.finalState = { ...patch.finalState };
     if (patch.framework !== undefined) rec.framework = patch.framework;
     if (patch.pinned !== undefined) rec.pinned = patch.pinned;
+    if (patch.appName !== undefined) rec.appName = patch.appName;
+    if (patch.repoName !== undefined) rec.repoName = patch.repoName;
+    if (patch.repoOwner !== undefined) rec.repoOwner = patch.repoOwner;
+    if (patch.repoOwnedByUser !== undefined) rec.repoOwnedByUser = patch.repoOwnedByUser;
+    if (patch.deployBranch !== undefined) rec.deployBranch = patch.deployBranch;
+    if (patch.backendDomain !== undefined) rec.backendDomain = patch.backendDomain;
     rec.updatedAt = patch.updatedAt;
   }
 }

@@ -1,8 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlignLeft, Check, ChevronDown, Columns, Copy, GitBranch, GitMerge } from 'lucide-react';
+import { AlignLeft, Check, ChevronDown, Columns, Copy, GitBranch, GitMerge, RotateCcw } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { hasConflictMarkers } from '../../lib/merge3';
 import { MergeEditor } from './MergeEditor';
+// ONE diff engine, shared with the revert logic. The maths used to live in this file; revert needs
+// the SAME line classification the view is showing, and two copies would eventually disagree — the
+// user would click revert on one hunk and get another.
+import {
+  computeDiff, buildHunks, diffStats, splitLines, revertHunk, revertFile,
+  type DiffLine, type DiffLineType, type Hunk,
+} from '../../lib/fileDiff';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -16,109 +23,13 @@ interface DiffViewerProps {
    * content is handed back here to persist.
    */
   onResolveConflicts?: (fileName: string, resolvedContent: string) => void;
-}
-
-type DiffLineType = 'added' | 'removed' | 'unchanged';
-
-interface DiffLine {
-  type: DiffLineType;
-  content: string;
-  oldLineNo: number | null;
-  newLineNo: number | null;
-}
-
-interface Hunk {
-  lines: DiffLine[];
-}
-
-// ─── LCS-based diff ──────────────────────────────────────────────────────────
-
-function lcs(a: string[], b: string[]): number[][] {
-  const m = a.length;
-  const n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (a[i - 1] === b[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
-  }
-  return dp;
-}
-
-function computeDiff(oldLines: string[], newLines: string[]): DiffLine[] {
-  const dp = lcs(oldLines, newLines);
-  const result: DiffLine[] = [];
-
-  let i = oldLines.length;
-  let j = newLines.length;
-
-  // Backtrack through the LCS table
-  const ops: DiffLine[] = [];
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-      ops.push({ type: 'unchanged', content: oldLines[i - 1], oldLineNo: i, newLineNo: j });
-      i--;
-      j--;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      ops.push({ type: 'added', content: newLines[j - 1], oldLineNo: null, newLineNo: j });
-      j--;
-    } else {
-      ops.push({ type: 'removed', content: oldLines[i - 1], oldLineNo: i, newLineNo: null });
-      i--;
-    }
-  }
-
-  ops.reverse().forEach((op) => result.push(op));
-  return result;
-}
-
-function buildHunks(diffLines: DiffLine[], contextLines = 5): Hunk[] {
-  const changedIndices = new Set<number>();
-  diffLines.forEach((line, idx) => {
-    if (line.type !== 'unchanged') {
-      for (
-        let c = Math.max(0, idx - contextLines);
-        c <= Math.min(diffLines.length - 1, idx + contextLines);
-        c++
-      ) {
-        changedIndices.add(c);
-      }
-    }
-  });
-
-  if (changedIndices.size === 0) return [];
-
-  const hunks: Hunk[] = [];
-  let currentHunk: DiffLine[] | null = null;
-  let prevIncluded = false;
-
-  diffLines.forEach((line, idx) => {
-    const included = changedIndices.has(idx);
-    if (included) {
-      if (!prevIncluded) {
-        currentHunk = [];
-        hunks.push({ lines: currentHunk });
-      }
-      currentHunk!.push(line);
-    }
-    prevIncluded = included;
-  });
-
-  return hunks;
-}
-
-function diffStats(diffLines: DiffLine[]): { added: number; removed: number } {
-  let added = 0;
-  let removed = 0;
-  for (const line of diffLines) {
-    if (line.type === 'added') added++;
-    else if (line.type === 'removed') removed++;
-  }
-  return { added, removed };
+  /**
+   * Write a file back to an earlier version — the "put that change back" half of reviewing a diff.
+   *
+   * Optional on purpose: where the host cannot persist (a read-only comparison), no revert control is
+   * offered at all, rather than a button that appears to work and quietly changes nothing.
+   */
+  onRevertFile?: (fileName: string, content: string) => void;
 }
 
 function buildPatch(filename: string, hunks: Hunk[]): string {
@@ -210,7 +121,7 @@ const UnifiedDiffLine: React.FC<{ line: DiffLine }> = ({ line }) => {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, onClose, onResolveConflicts }) => {
+export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, onClose, onResolveConflicts, onRevertFile }) => {
   const fileNames = Object.keys(files);
   const [selectedFile, setSelectedFile] = useState<string>(fileNames[0] ?? '');
   const [unified, setUnified] = useState(false);
@@ -229,13 +140,42 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
   // Leave merge mode whenever the selected file changes or no longer has conflicts.
   useEffect(() => { if (!fileHasConflicts) setMergeMode(false); }, [selectedFile, fileHasConflicts]);
 
-  const oldLines = resolvedOld !== undefined ? resolvedOld.split('\n') : [];
-  const newLines = newCode.split('\n');
+  // splitLines, not split('\n'): the trailing newline is the END of the file, not an empty last line.
+  // Diffing that phantom element shows a spurious blank-line change AND makes revert reassemble the
+  // file with the newline dropped or doubled. The view and the revert must agree on this or the user
+  // reverts what they saw and gets something else.
+  const oldLines = resolvedOld !== undefined ? splitLines(resolvedOld).lines : [];
+  const newLines = splitLines(newCode).lines;
 
   const diffLines = resolvedOld !== undefined ? computeDiff(oldLines, newLines) : [];
   const hunks = buildHunks(diffLines);
   const stats = diffStats(diffLines);
   const hasDiff = resolvedOld !== undefined;
+  /**
+   * Can this file be put back? Only when the host gave us a way to persist, a previous version
+   * genuinely exists, and something actually changed. A file the build CREATED has no previous
+   * version — offering "revert" there would promise a restore that cannot happen (deleting it is a
+   * different action, with different consequences, and is not this control's job).
+   */
+  const canRevert = !!onRevertFile && resolvedOld !== undefined && resolvedOld !== newCode;
+
+  const handleRevertFile = () => {
+    const restored = revertFile(resolvedOld);
+    if (restored === null || !onRevertFile) return;
+    onRevertFile(selectedFile, restored);
+  };
+
+  /**
+   * Put ONE change back and leave every other change in place — the reason this is not just an undo
+   * button. `revertHunk` returns null for an index that no longer exists (the file moved under us),
+   * and that refusal is honoured rather than written: a stale click must not corrupt a file.
+   */
+  const handleRevertHunk = (hunkIndex: number) => {
+    if (resolvedOld === undefined || !onRevertFile) return;
+    const next = revertHunk(resolvedOld, newCode, hunkIndex);
+    if (next === null) return;
+    onRevertFile(selectedFile, next);
+  };
 
   // Synchronized scroll
   useEffect(() => {
@@ -382,8 +322,22 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
       )}
       {hunks.map((hunk, hi) => (
         <div key={hi} className="border-b border-gray-800/50">
-          <div className="px-3 py-0.5 bg-gray-900/60 text-gray-500 font-mono text-xs">
-            @@ hunk {hi + 1} @@
+          <div className="flex items-center gap-2 px-3 py-0.5 bg-gray-900/60 text-gray-500 font-mono text-xs">
+            <span>@@ hunk {hi + 1} @@</span>
+            <span className="flex-1" />
+            {/* Put back THIS change only. The reason the whole feature is worth building: without it
+                the user's only escape from one unwanted edit is restoring the entire project from
+                History and losing everything else the build did. */}
+            {canRevert && (
+              <button
+                onClick={() => handleRevertHunk(hi)}
+                title={`Undo this change only — every other change in ${selectedFile} stays`}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-700 text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+              >
+                <RotateCcw size={10} />
+                <span>Revert</span>
+              </button>
+            )}
           </div>
           {hunk.lines.map((line, li) => (
             <UnifiedDiffLine key={li} line={line} />
@@ -446,6 +400,19 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ files, previousFiles, on
         )}
 
         <div className="flex-1" />
+
+        {/* Put the WHOLE file back to how it was before the build. Shown only when there is genuinely
+            something to go back to — see `canRevert`. */}
+        {canRevert && !mergeMode && (
+          <button
+            onClick={handleRevertFile}
+            title={`Undo every change to ${selectedFile} and restore the version from before this build`}
+            className="flex items-center gap-1 px-2 py-1 text-xs border rounded transition-colors bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
+          >
+            <RotateCcw size={12} />
+            <span>Revert file</span>
+          </button>
+        )}
 
         {/* P-DEV.4 — open the merge-conflict resolver */}
         {fileHasConflicts && (

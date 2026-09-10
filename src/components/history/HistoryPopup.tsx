@@ -55,7 +55,12 @@ export const HistoryPopup: React.FC<HistoryPopupProps> = ({
   const closeAfter = <T,>(fn: ((arg: T) => void) | undefined) => (arg: T) => { fn?.(arg); onClose(); };
 
   return (
-    <div className="fixed inset-0 z-[130] flex items-end sm:items-center sm:justify-center">
+    // `nb-sheet-overlay-flush` (admin 2026-09-06): z-130 is BELOW the global tab bar's z-150, so the
+    // bar painted over this sheet's bottom rows and its own scroll ended underneath it. The shared
+    // overlay reserves the bar's real height — and reserves nothing on any screen where the bar is not
+    // rendered. The backdrop below is `absolute inset-0`, which resolves against the padding box, so
+    // it still covers the whole screen rather than stopping at the reserved strip.
+    <div className="nb-sheet-overlay-flush fixed inset-0 z-[130] flex items-end sm:items-center sm:justify-center">
       <div
         className="absolute inset-0 bg-black/60 cursor-pointer touch-manipulation"
         onClick={onClose}
@@ -67,12 +72,16 @@ export const HistoryPopup: React.FC<HistoryPopupProps> = ({
         role="dialog"
         aria-modal="true"
         aria-label="Chat history"
+        // 80% is the DESIGN's height; `nb-sheet-partial` clamps it to the room actually left once the
+        // tab bar and device insets are reserved, so the intent survives without becoming an overflow
+        // on a short phone (these sheets are bottom-anchored, so an overflow is cut off the top).
+        style={{ '--nb-sheet-cap': '80dvh' } as React.CSSProperties}
         className={
           'relative w-full sm:max-w-2xl bg-[#0d1117] border border-zinc-800 shadow-2xl outline-none '
           // A bottom sheet on a phone (thumb reach) and a centred dialog on a wider screen. The height
           // is capped so the popup always reads as something laid OVER the chat rather than a new
           // screen, and the list inside scrolls instead of the page behind it.
-          + 'rounded-t-2xl sm:rounded-2xl max-h-[80vh] supports-[height:100dvh]:max-h-[80dvh] flex flex-col'
+          + 'rounded-t-2xl sm:rounded-2xl nb-sheet-partial flex flex-col'
         }
       >
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800 shrink-0">

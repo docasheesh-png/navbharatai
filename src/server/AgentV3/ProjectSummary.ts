@@ -71,7 +71,31 @@ function runHint(stack: string, previewLive: boolean): string {
  * graph (no files) so the caller never shows an empty summary.
  */
 /** Engine-written setup files (dev env/config) — changes the PIPELINE made, never the user's source. */
-const ENGINE_CONFIG_PATH = /^(\.env(\..*)?|\.npmrc|\.nvmrc)$/;
+/**
+ * Files the ENGINE writes to make an imported app runnable here — never the user's source.
+ *
+ * ROOT CAUSE, second time (report faa98da9, 2026-09-03 — the same app, mitrify, and the same
+ * complaint as the 2026-08-04 autopsy this list was created by). The user said "Do not change any
+ * files yet". The engine changed none of their files, and the summary still opened with "✅ Done — I
+ * changed 2 files in your project (.env, .gitignore)" — while `E2E_SCAFFOLD_SKIPPED`, in the same
+ * report, said "your files were left untouched, as asked". Two contradictory sentences about one
+ * turn, and the alarming one led.
+ *
+ * WHY THE EARLIER FIX FELL OVER, which is the part worth keeping. It was an allowlist of the literal
+ * names that turn happened to write: `.env`, `.npmrc`, `.nvmrc`. The next import wrote ONE more file
+ * and `.every()` went false, so the honest branch silently stopped firing — a fix to the instance,
+ * not the class, and it lasted exactly until the change-set grew.
+ *
+ * `.gitignore` is not an oversight to patch in and move on from: `devSecretsBoot` writes it in the
+ * SAME act as `.env` and only because of it (`gitignoreWithEnv` keeps the user's real keys out of
+ * their git repo). Two files, one provisioning step — so a summary that calls one "setup" and the
+ * other "your file" is describing something that never happened.
+ *
+ * ⚠️ Anything added here is a file the engine ITSELF writes during provisioning. A config file the
+ * USER asked to change must never be listed, or a real edit would be reported as untouched — the
+ * mirror image of this bug, and the worse one.
+ */
+const ENGINE_CONFIG_PATH = /^(\.env(\..*)?|\.gitignore|\.npmrc|\.nvmrc)$/;
 
 export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean; changedPaths?: string[] }): string {
   void request; // reserved for future tailoring; summary is graph-derived for now.

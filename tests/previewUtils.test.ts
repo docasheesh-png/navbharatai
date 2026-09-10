@@ -181,7 +181,13 @@ describe('buildSourceAppPreview — vendored same-origin React runtime', () => {
     const html = buildSourceAppPreview(app('^18.3.1'));
     expect(html).toContain('specUrlCdn');
     expect(html).toContain('__CDN_IMAP');
-    expect(html).toContain('from the CDN after the same-origin runtime failed');
+    // The per-spec fallback became an ordered LADDER (2026-09-10) rather than a single alternate, so
+    // the assertion follows it there: the pure-CDN map is still a candidate, a failure is still
+    // reported per attempt, and — the part that must never be lost — a genuine failure still says so
+    // instead of silently leaving the dependency missing.
+    expect(html).toContain('fetchCandidates');
+    expect(html).toContain("list.push(alt)");
+    expect(html).toContain("failedDeps.push(spec)");
     expect(html).toContain("map[root].indexOf(ESM)===0");
   });
 });

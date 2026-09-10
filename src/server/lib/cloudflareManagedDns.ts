@@ -129,6 +129,28 @@ export function isSiteToken(txtValue: string): boolean {
 }
 
 /**
+ * How many records `applyRecords` actually touched — split, not summed.
+ *
+ * 🔒 ROOT CAUSE (admin screenshot, 2026-09-02): the return value used to be ONE number covering both
+ * "a desired record was created/replaced" AND "a foreign ownership token was deleted as cleanup" —
+ * two operations with nothing in common except that both call the Cloudflare API. Cleaning up ONE
+ * stale token while adding ONE desired record produced `changed: 2`, which the UI then read as "we
+ * added 2" beside "all 1 record are now in place" — a number contradicting the sentence it was in.
+ *
+ * `added` counts only records that now hold a DESIRED value (so `added` can never exceed the number
+ * of records asked for — the exact property that ends the contradiction). `removed` counts records
+ * deleted as cleanup (foreign `hosting-site=` tokens, or excess values beyond what a converged
+ * type+name set needs) — these are not part of what was "desired" and must never be added to that
+ * count. A caller that wants the old combined figure can still do `added + removed`.
+ */
+export interface ApplyRecordsResult {
+  /** Records created or replaced-in-place to hold a value that was actually asked for. */
+  added: number;
+  /** Records deleted as cleanup — never part of the desired set. */
+  removed: number;
+}
+
+/**
  * Write the desired records into the zone by CONVERGING each type+name set we manage.
  *
  * ROOT CAUSE HARDENING (mitrify.in live walk, 2026-08-06): when a zone activates, Cloudflare
@@ -143,11 +165,42 @@ export function isSiteToken(txtValue: string): boolean {
  *     re-written un-proxied.
  *   • TXT: desired values are added alongside (multiple TXT values are legal; the ownership/ACME
  *     challenge must not clobber unrelated TXT like SPF).
- * Records on names we were not asked about are never touched. Returns how many records were
- * created/updated/removed — an honest "0 changes" remains a valid, verifiable outcome.
+ * Records on names we were not asked about are never touched. Returns `{ added, removed }` — an
+ * honest "0 of each" remains a valid, verifiable outcome.
  */
-export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Promise<number> {
-  let changed = 0;
+/**
+ * WHICH EXISTING RECORDS MUST GO BEFORE THIS ONE CAN EXIST — the cross-type conflict DNS itself
+ * forbids (admin 2026-09-07, and it is the last thing standing between mitrify.com and a live app).
+ *
+ * 🔴 THE BUG THIS CLOSES. `applyRecords` groups desired records by `type|name` and reads the zone
+ * back with `?type=<type>&name=<name>` — so it only ever SEES records of the same type. That is the
+ * right invariant WITHIN a type and the wrong one across types, because DNS (RFC 1034) forbids a
+ * CNAME from coexisting with any other data at the same name. A domain already connected to our
+ * static host carries an A record at its apex; pointing that same domain at a backend service writes
+ * a CNAME there — and the provider rejects it, every time, for as long as the A record survives.
+ *
+ * That is exactly the shape of the ownership-TXT conflict fixed above: not a slow state that
+ * eventually resolves, a permanent refusal. The deploy succeeds, the domain never moves, and the user
+ * keeps seeing the old host's error page.
+ *
+ * 🔒 A AND AAAA ONLY — NEVER TXT, MX OR NS. Strict RFC says a CNAME excludes everything, but our zones
+ * are Cloudflare's, whose apex CNAME flattening deliberately permits TXT and MX alongside. Those
+ * records carry the user's EMAIL (SPF/DKIM/MX) and other services' verifications; sweeping them to
+ * satisfy a rule the provider does not enforce would silently break mail to fix a problem that is not
+ * there. So the sweep is scoped to the record types that genuinely block the write and nothing else.
+ *
+ * PURE.
+ */
+export function conflictingTypesFor(desiredType: string): string[] {
+  const t = String(desiredType ?? '').trim().toUpperCase();
+  if (t === 'CNAME') return ['A', 'AAAA'];
+  if (t === 'A' || t === 'AAAA') return ['CNAME'];
+  return [];
+}
+
+export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Promise<ApplyRecordsResult> {
+  let added = 0;
+  let removed = 0;
   const groups = new Map<string, ReturnType<typeof toCfRecordPayloads>>();
   for (const want of toCfRecordPayloads(desired)) {
     const key = `${want.type}|${want.name}`;
@@ -166,7 +219,7 @@ export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Pr
         const present = existing.some((r) => stripQuotes(r.content) === stripQuotes(want.content));
         if (present) continue;
         await cf(`/zones/${zoneId}/dns_records`, { method: 'POST', body: want });
-        changed++;
+        added++; // a desired TXT value now exists
       }
       /**
        * 🔒 REMOVE THE OWNERSHIP TOKENS THAT ARE NO LONGER OURS — the fix for a domain that could
@@ -204,10 +257,39 @@ export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Pr
           const content = stripQuotes(r.content);
           if (!isSiteToken(content) || wantedTokens.has(content)) continue;
           await cf(`/zones/${zoneId}/dns_records/${r.id}`, { method: 'DELETE' });
-          changed++;
+          removed++; // a FOREIGN token, never a desired one — must not read as "added"
         }
       }
       continue;
+    }
+
+    /**
+     * 🔴 CLEAR THE CROSS-TYPE CONFLICT FIRST, or the write below cannot succeed at all.
+     *
+     * DNS forbids a CNAME beside an A record at the same name, so a domain moving from our static
+     * host (an A record at the apex) to a backend service (a CNAME) is REFUSED by the provider until
+     * the A record is gone. Nothing above this line could ever see that record: the zone read is
+     * filtered by the record's own type. See conflictingTypesFor for why only A/AAAA/CNAME are swept
+     * and never TXT or MX.
+     *
+     * Ordering is the whole point — deleting AFTER the create would leave the create already rejected.
+     */
+    for (const conflictType of conflictingTypesFor(type)) {
+      const raw = await cf<CfDnsRecord[]>(
+        `/zones/${zoneId}/dns_records?type=${encodeURIComponent(conflictType)}&name=${encodeURIComponent(name)}&per_page=100`,
+      );
+      const blockers = Array.isArray(raw) ? raw : [];
+      for (const r of blockers) {
+        /**
+         * 🔒 NEVER DELETE A RECORD WHOSE TYPE WE DID NOT ASK TO SWEEP. The query already filters by
+         * type, so this can only differ if the provider answers with something else — and a DELETE is
+         * irreversible. Re-checking what came back costs nothing and makes an unexpected response
+         * impossible to act on destructively.
+         */
+        if (String(r.type ?? '').trim().toUpperCase() !== conflictType) continue;
+        await cf(`/zones/${zoneId}/dns_records/${r.id}`, { method: 'DELETE' });
+        removed++; // cleanup of a record that BLOCKS the desired one — never a desired value itself
+      }
     }
 
     // Non-TXT: converge to exactly the desired value set, all DNS-only (grey cloud).
@@ -218,21 +300,26 @@ export async function applyRecords(zoneId: string, desired: DesiredRecord[]): Pr
     const missing = group.filter((w) => !goodContents.has(stripQuotes(w.content)));
 
     // Replace stale records with missing values pairwise, then create/delete the remainder.
+    // Every PUT/POST in this pass makes a record hold a value that was actually DESIRED — `added`,
+    // never `removed`, even though a PUT reuses an existing record id rather than creating a new one.
     let i = 0;
     for (; i < missing.length && i < stale.length; i++) {
       await cf(`/zones/${zoneId}/dns_records/${stale[i].id}`, { method: 'PUT', body: missing[i] });
-      changed++;
+      added++;
     }
     for (; i < missing.length; i++) {
       await cf(`/zones/${zoneId}/dns_records`, { method: 'POST', body: missing[i] });
-      changed++;
+      added++;
     }
+    // Beyond `missing.length` there is nothing left to place a desired value into — anything still
+    // stale here is a genuine EXTRA (e.g. an old multi-value A record with more entries than the
+    // desired set needs), so deleting it is cleanup, exactly like the foreign TXT tokens above.
     for (let j = missing.length; j < stale.length; j++) {
       await cf(`/zones/${zoneId}/dns_records/${stale[j].id}`, { method: 'DELETE' });
-      changed++;
+      removed++;
     }
   }
-  return changed;
+  return { added, removed };
 }
 
 /**

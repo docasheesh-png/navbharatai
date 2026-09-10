@@ -16,6 +16,9 @@ import {
   Activity, CheckCircle2, ShieldCheck, ExternalLink,
 } from 'lucide-react';
 
+import { packBreakdown, type PurchaseRail, type StoreConfig } from '../../lib/storePurchase';
+import { splitPaymentAtPct, DEFAULT_PLATFORM_FEE_PCT } from '../../lib/platformFee';
+
 type BillingDetailTab = 'purchase' | 'gift' | 'use' | 'remaining' | 'budget';
 type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -39,6 +42,24 @@ export interface BillingPanelProps {
   copiedReferral: boolean;
   buyAmountInput: string;
   isRecharging: boolean;
+  /**
+   * GOOGLE PLAY BILLING (admin 2026-09-06). `storeRail` is the pure decision from storePurchase.ts:
+   * 'play-billing' ONLY on a native shell where the server says the rail is configured AND this
+   * build has the native plugin. Everywhere else it is 'web-gateway' and this panel renders exactly
+   * what it renders today — which is what makes shipping the rail unable to strand anyone.
+   */
+  /**
+   * The wallet-recharge platform fee, in percent, as this server actually charges it. Threaded in
+   * (rather than fetched here) because this panel is a pure render — see the file header. The
+   * default is the server's own fallback, so a config route that never answered still shows the
+   * user the number they will really be charged.
+   */
+  platformFeePct?: number;
+  storeRail?: PurchaseRail;
+  storeConfig?: StoreConfig | null;
+  buyingProductId?: string | null;
+  storePurchaseNotice?: string | null;
+  onBuyStorePack?: (productId: string) => void;
   tempReminderLimit: string;
   tempBudgetLimit: string;
   limitError: string | null;
@@ -70,6 +91,9 @@ export function BillingPanel(props: BillingPanelProps) {
     reminderLimit, budgetLimit, dismissedReminderWarning, couponCodeInput,
     isRedeemingCoupon, couponError, couponSuccess, copiedReferral,
     buyAmountInput, isRecharging, tempReminderLimit, tempBudgetLimit,
+    platformFeePct = DEFAULT_PLATFORM_FEE_PCT,
+    storeRail = 'web-gateway', storeConfig = null, buyingProductId = null,
+    storePurchaseNotice = null, onBuyStorePack,
     limitError, limitSuccess,
     onShowAuth, onFetchWallet, onSetActiveBillingDetailTab, onSetReminderLimit,
     onSetBudgetLimit, onSetDismissedReminderWarning, onSetCouponCodeInput,
@@ -78,6 +102,10 @@ export function BillingPanel(props: BillingPanelProps) {
     onSetLimitError, onSetLimitSuccess, onToast,
   } = props;
   const { monthlyAiCost } = props;
+
+  // The recharge split, computed by the SAME pure function the server settles with. One money rule,
+  // one implementation — the user is never shown a number the server will later disagree with.
+  const rechargeSplit = splitPaymentAtPct(parseFloat(buyAmountInput) || 0, platformFeePct);
 
   return (
     <div className="flex-1 bg-[#0d1117] p-6 text-left min-h-screen">
@@ -655,6 +683,65 @@ export function BillingPanel(props: BillingPanelProps) {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
                   <div className="space-y-6">
+                    {storePurchaseNotice && (
+                      <div className="bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs font-bold p-4 rounded-2xl">
+                        {storePurchaseNotice}
+                      </div>
+                    )}
+                    {storeRail === 'play-billing' && storeConfig ? (
+                      /*
+                       * GOOGLE PLAY PACKS. Google Play requires digital goods consumed in the app to
+                       * be bought through Play's billing, so on the Play build these fixed packs
+                       * REPLACE the free-form gateway top-up rather than sitting beside it — an app
+                       * offering both would still be in breach.
+                       *
+                       * THE FEE IS SHOWN, NOT BURIED (admin: "google ka charge add kar ke clear
+                       * dikhao"). Each line is arithmetic on the server's own catalogue, never a
+                       * typed-in number: credit + fee = exactly what Google will charge.
+                       */
+                      <div className="bg-black/20 border border-white/5 p-6 rounded-[2rem] space-y-4">
+                        <h4 className="text-xs font-black text-white uppercase tracking-widest font-mono">Choose a top-up pack</h4>
+                        <div className="space-y-3">
+                          {storeConfig.packs.map((pack) => {
+                            const b = packBreakdown(pack);
+                            const busy = buyingProductId === pack.productId;
+                            return (
+                              <button
+                                key={pack.productId}
+                                onClick={() => onBuyStorePack?.(pack.productId)}
+                                disabled={!!buyingProductId}
+                                className="w-full text-left bg-black/30 hover:bg-black/50 disabled:opacity-40 border border-white/10 hover:border-emerald-500/40 p-4 rounded-2xl transition-all active:scale-[0.99]"
+                              >
+                                <div className="flex items-center justify-between gap-4">
+                                  <div>
+                                    <span className="block text-sm font-black text-white">₹{b.creditInr.toLocaleString('en-IN')} of credit</span>
+                                    <span className="block text-[10px] text-[#8b949e] font-bold mt-0.5 font-mono">
+                                      {(b.creditInr * 100).toLocaleString('en-IN')} tokens
+                                    </span>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <span className="block text-base font-black text-emerald-400">₹{b.priceInr.toLocaleString('en-IN')}</span>
+                                    {!b.feeFree && (
+                                      <span className="block text-[10px] text-[#8b949e] font-bold font-mono">
+                                        ₹{b.creditInr.toLocaleString('en-IN')} + ₹{b.storeFeeInr.toLocaleString('en-IN')} fee
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                {busy && (
+                                  <span className="block text-[10px] text-emerald-400 font-black uppercase tracking-widest mt-2 font-mono">Opening Google Play…</span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[10px] text-[#8b949e] leading-relaxed font-semibold border-t border-white/5 pt-3">
+                          Purchases in the app are processed by Google Play, which charges a fee on each
+                          purchase — shown above as a separate line so you can see exactly what it adds.
+                          Your wallet is credited the full credit amount shown, never less.
+                        </p>
+                      </div>
+                    ) : (
                     <div className="bg-black/20 border border-white/5 p-6 rounded-[2rem] space-y-4">
                       <h4 className="text-xs font-black text-white uppercase tracking-widest font-mono">Instant balance calculator (₹1 to ₹999999)</h4>
 
@@ -674,18 +761,31 @@ export function BillingPanel(props: BillingPanelProps) {
                         </div>
                       </div>
 
-                      {/* Live tokens calculations outputs */}
-                      <div className="grid grid-cols-2 gap-4 bg-black/40 border border-white/5 p-4 rounded-xl font-mono text-center">
-                        <div>
-                          <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Wallet Tokens</span>
-                          <span className="text-base text-emerald-400 font-extrabold block mt-1">{(parseFloat(buyAmountInput) || 0) * 100}</span>
-                          <span className="text-[8px] text-[#8b949e]">at ₹1 = 100 tokens</span>
+                      {/*
+                        WHAT THE USER ACTUALLY GETS — shown BEFORE they pay, never after.
+                        This used to print `amount × 100` under the caption "at ₹1 = 100 tokens",
+                        which was true of the old rupee-for-rupee credit and became a false promise
+                        the moment a platform fee existed. The split comes from the SAME pure module
+                        the server settles with (platformFeeAtPct), so the two can never disagree.
+                      */}
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-4 bg-black/40 border border-white/5 p-4 rounded-xl font-mono text-center">
+                          <div>
+                            <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Wallet Tokens</span>
+                            <span className="text-base text-emerald-400 font-extrabold block mt-1">{Math.round(rechargeSplit.creditInr * 100).toLocaleString('en-IN')}</span>
+                            <span className="text-[8px] text-[#8b949e]">₹{rechargeSplit.creditInr.toFixed(2)} of credit, at ₹1 = 100 tokens</span>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Equivalent AI Outputs</span>
+                            <span className="text-base text-indigo-400 font-extrabold block mt-1">{(Math.round(rechargeSplit.creditInr * 100) * 200).toLocaleString('en-IN')}</span>
+                            <span className="text-[8px] text-[#8b949e]">At 1 token = 200 outputs</span>
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Equivalent AI Outputs</span>
-                          <span className="text-base text-indigo-400 font-extrabold block mt-1">{(parseFloat(buyAmountInput) || 0) * 100 * 200}</span>
-                          <span className="text-[8px] text-[#8b949e]">At 1 token = 200 outputs</span>
-                        </div>
+                        {rechargeSplit.feeInr > 0 && (
+                          <p className="text-[10px] text-[#8b949e] font-semibold leading-relaxed font-mono text-center">
+                            ₹{rechargeSplit.paidInr.toFixed(2)} paid − ₹{rechargeSplit.feeInr.toFixed(2)} platform fee ({platformFeePct}%) = <span className="text-emerald-400 font-black">₹{rechargeSplit.creditInr.toFixed(2)} credited</span>
+                          </p>
+                        )}
                       </div>
 
                       <button
@@ -703,6 +803,7 @@ export function BillingPanel(props: BillingPanelProps) {
                         Purchase Wallet Tokens (₹{(parseFloat(buyAmountInput) || 0).toLocaleString('en-IN')})
                       </button>
                     </div>
+                    )}
                   </div>
 
                   <div className="space-y-4">

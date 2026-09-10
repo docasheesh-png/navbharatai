@@ -226,6 +226,7 @@ import { generateExperimentsIntegration } from '../lib/ExperimentsGenerator';
 import { generateShortLinksIntegration } from '../lib/ShortLinksGenerator';
 import { generateFeedbackIntegration } from '../lib/FeedbackGenerator';
 import { generateConsentIntegration } from '../lib/ConsentGenerator';
+import { generateConsentBannerIntegration, type ConsentBannerOptions } from '../lib/ConsentBannerGenerator';
 import { generateActivityFeedIntegration } from '../lib/ActivityFeedGenerator';
 import { generateCartIntegration } from '../lib/CartGenerator';
 import { generateReactionsIntegration } from '../lib/ReactionsGenerator';
@@ -5165,6 +5166,34 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('consent starter');
         const csDeps = cscfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a GDPR consent-log backend:\n${csWritten.join('\n')}\nAdd the dependencies: ${csDeps}\n\n${cscfg.instructions}`;
+      }
+
+      case 'generate_consent_banner': {
+        // ROADMAP §13 4.4 — the DPDP (India) + GDPR consent BANNER (public/consent-banner.js): nothing non-essential
+        // loads before consent, no pre-ticked boxes, reject = accept prominence, withdraw any time, re-consent on
+        // policy version change, English + Hindi. Pure generator in ConsentBannerGenerator.ts (it sanitises every
+        // option itself, so a hostile appName cannot break out of the emitted script).
+        const cbIn = (input ?? {}) as Record<string, unknown>;
+        const cbOpts: ConsentBannerOptions = {
+          appName: typeof cbIn.appName === 'string' ? cbIn.appName : undefined,
+          policyUrl: typeof cbIn.policyUrl === 'string' ? cbIn.policyUrl : undefined,
+          grievanceEmail: typeof cbIn.grievanceEmail === 'string' ? cbIn.grievanceEmail : undefined,
+          language: cbIn.language === 'en' || cbIn.language === 'hi' || cbIn.language === 'both' ? cbIn.language : undefined,
+          purposes: Array.isArray(cbIn.purposes) ? (cbIn.purposes as ConsentBannerOptions['purposes']) : undefined,
+          policyVersion: typeof cbIn.policyVersion === 'string' ? cbIn.policyVersion : undefined,
+        };
+        const cbcfg = generateConsentBannerIntegration(cbOpts);
+        const cbWritten: string[] = [];
+        for (const [path, content] of Object.entries(cbcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cbWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('consent banner');
+        return `Wired a DPDP + GDPR consent banner:\n${cbWritten.join('\n')}\n\n${cbcfg.instructions}`;
       }
 
       case 'generate_activity_feed': {

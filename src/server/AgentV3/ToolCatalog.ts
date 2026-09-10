@@ -861,13 +861,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       name: 'generate_payment',
       description:
         'Add a REAL payment checkout to the app (Bring-Your-Own keys): a server route (creates the order/' +
-        'session AND verifies the payment signature — never trusts the client) + a client checkout helper, ' +
-        'for razorpay (India-first) or stripe. The user pastes their provider keys into .env — NavBharatAI ' +
-        'never stores them. Use when the app needs to accept payments. Never overwrites an existing .env.example.',
+        'session AND verifies the payment — never trusts the client), a WEBHOOK route with real HMAC signature ' +
+        'verification (the provider\'s "paid" callback survives a closed tab), and a client checkout helper. ' +
+        'Providers: cashfree or razorpay (India-first — both show UPI: GPay/PhonePe/Paytm/BHIM, plus cards, net ' +
+        'banking, wallets; pick cashfree when the user names it or wants the lowest UPI friction, razorpay when ' +
+        'they name it) or stripe (international cards). The user\'s keys live in THEIR env (.env, or the per-app ' +
+        'Secrets vault merged into .env at build) and the money lands in THEIR merchant account — NavBharatAI never ' +
+        'holds either. Use when the app needs to accept payments. Never overwrites an existing .env.example.',
       input_schema: {
         type: 'object',
         properties: {
-          provider: { type: 'string', enum: ['razorpay', 'stripe'], description: 'The payment provider to wire up.' },
+          provider: { type: 'string', enum: ['cashfree', 'razorpay', 'stripe'], description: 'The payment provider to wire up.' },
         },
         required: ['provider'],
       },

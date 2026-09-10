@@ -6,7 +6,7 @@
 // build never writes — so the preview looked permanently "disconnected" from the v5.0 engine.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RotateCcw, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles } from 'lucide-react';
+import { RotateCcw, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles, ChevronLeft, ChevronRight, Sun, Moon } from 'lucide-react';
 import { canOfferRestart, restartStatusLine } from './previewRestart';
 import { nextDoorUrl } from './previewDoorClient';
 import { resolveApiHref } from '../../lib/apiBase';
@@ -22,10 +22,11 @@ import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
 import { shouldFailoverToLive, liveFailoverNotice, noLiveRescueNotice, rescueActionForPreviewError } from './previewLiveFailover';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
-import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
+import { type PreviewViewport, type PreviewZoom, DEVICE_DIMS, resolveZoomScale, nextZoom, zoomLabel } from './previewViewport';
 import { frameworkRunsInBrowser } from '../../lib/frameworkDetect';
 import { inBrowserRefusal } from './inBrowserRefusal';
 import { shouldShowNotServingSurface } from './previewFraming';
+import { pickedElementPrompt, type PickedElement } from './previewPick';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { LIVE_SERVER_PAID_NOTE, LIVE_SERVER_PAID_TAG, isLiveServerNoticeDismissed, dismissLiveServerNotice } from '../../lib/liveServerNotice';
 import { previewAddressLabel } from './previewAddress';
@@ -69,7 +70,7 @@ function Empty({ children }: { children: React.ReactNode }) {
  * media queries respond for real) and scales the whole device box down to fit the panel when it's
  * larger than the available room. The child iframe must be `w-full h-full` to fill the box.
  */
-function ResponsiveFrame({ viewport, children }: { viewport: PreviewViewport; children: React.ReactNode }) {
+function ResponsiveFrame({ viewport, zoom = 'fit', children }: { viewport: PreviewViewport; zoom?: PreviewZoom; children: React.ReactNode }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const dims = viewport === 'auto' ? null : DEVICE_DIMS[viewport];
@@ -79,13 +80,15 @@ function ResponsiveFrame({ viewport, children }: { viewport: PreviewViewport; ch
     const el = wrapRef.current;
     if (!el) return;
     // 24px accounts for the padding around the device so it never touches the panel edges.
-    const recompute = () => setScale(computeDeviceScale(el.clientWidth - 24, el.clientHeight - 24, dims.w, dims.h));
+    // 'fit' keeps the original never-upscale behaviour; an explicit step is honoured even when it
+    // overflows the panel, because scrolling a true-size layout is the entire point of asking for one.
+    const recompute = () => setScale(resolveZoomScale(zoom, el.clientWidth - 24, el.clientHeight - 24, dims.w, dims.h));
     recompute();
     const ro = new ResizeObserver(recompute);
     ro.observe(el);
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dims?.w, dims?.h]);
+  }, [dims?.w, dims?.h, zoom]);
 
   // CONSTANT tree depth in EVERY mode — stage → footprint → device-box → iframe. Viewport changes flow
   // ONLY through inline style/className; the tree SHAPE never changes, so switching Auto↔device (or
@@ -165,7 +168,7 @@ const TOOLBAR_ROW =
   'flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400 '
   + 'overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
 
-export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, buildPhase, bootSignal, onFixError, onFileEdited, onAskAiAboutElement }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean;
+export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, buildPhase, bootSignal, onFixError, onFileEdited, onAskAiAboutElement, versionUrl, versionSha, onExitVersion }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean;
   /**
    * Is this pane the surface actually on screen INSIDE the app?
    *
@@ -175,7 +178,13 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
    * silently reintroduce the sandbox-cost leak this prop was added to close — see
    * `shouldWatchLivePreview` in previewKeepAlive.ts for the full history.
    */
-  paneVisible: boolean; reloadSignal?: number; buildPhase?: BuildPhase; bootSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void }) {
+  paneVisible: boolean; reloadSignal?: number; buildPhase?: BuildPhase; bootSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void;
+  /**
+   * AN OLDER CHECKPOINT, RUNNING. Set while the user is looking at a previous version of their app
+   * (Checkpoints → Preview). It takes over the frame so the address never leaves this page — the same
+   * billable-address rule the toolbar label follows. Never null-and-showing: no url ⇒ no banner.
+   */
+  versionUrl?: string; versionSha?: string; onExitVersion?: () => void }) {
   // A4 (unified preview): in-browser is the DETERMINISTIC DEFAULT — it always renders the current
   // files instantly with no server, so the preview is never a dead "No live preview yet" empty state
   // that depends on an ephemeral E2B sandbox being up. "Live server" (full-fidelity, real runtime) is
@@ -185,6 +194,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // Chosen responsive viewport — shared across BOTH previews (live + in-browser), so switching the
   // preview source keeps the device you were testing at. 'auto' = fill the panel (default).
   const [viewport, setViewport] = useState<PreviewViewport>('auto');
+  /**
+   * MANUAL ZOOM for a device viewport. 'fit' is today's behaviour — shrink the device box until it
+   * fits the panel. The fixed steps let the user look at a desktop layout at its true size and scroll,
+   * which is the only way to judge real text size and spacing on a narrow split.
+   */
+  const [zoom, setZoom] = useState<PreviewZoom>('fit');
   const [html, setHtml] = useState<string>('');
   const [kind, setKind] = useState<string>('');
   // Task #64 — honest full-stack state: the in-browser preview compiles only the frontend, so when the
@@ -213,6 +228,16 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   /** Config variables the app reads that we deliberately do not hold — see the banner below. */
   const [envVarsUsed, setEnvVarsUsed] = useState<string[]>([]);
   const [backendReason, setBackendReason] = useState('');
+  /**
+   * ONE HONEST SENTENCE ABOUT WHAT THIS PREVIEW CANNOT REPRODUCE (see AgentV3/previewFidelity.ts).
+   *
+   * The in-browser preview is a bundler in the page, not a dev server, and a few ordinary build
+   * features have no equivalent in it — CSS Modules, Sass, a customised Tailwind theme, files under
+   * public/. When one of those is used, the app renders and simply is NOT what it really looks like.
+   * The toolbar said only "In-browser preview (react)", so a user could not tell whether their app
+   * was broken or the preview was approximate. We knew the answer and did not say it.
+   */
+  const [fidelityNotice, setFidelityNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>('');
   // Honest elapsed counter while the in-browser preview loads — "loading vs stuck" must be
@@ -321,7 +346,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // Reset the viewport to Auto on a new/changed workspace too — a leftover Mobile/Tablet device frame
   // from the previous app would otherwise misrepresent the next one.
   useEffect(() => {
-    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setIdleSnapshotUrl(''); setIdleSnapshotNote(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto');
+    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setIdleSnapshotUrl(''); setIdleSnapshotNote(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto'); setLiveBridgeReady(false); setConsoleEntries([]); lastHmrAtRef.current = null; lastActivityAtRef.current = null; setRoutePath(''); setRouteDraft(''); setFidelityNotice(''); setPicking(false); setThemeToggleAvailable(false); setPreviewIsDark(false); setZoom('fit');
     // The failover guards are per-project state: a new workspace gets a fresh chance to rescue itself.
     failedOverToLive.current = false; userPickedInBrowser.current = false; setFailoverNote('');
   }, [workspaceId]);
@@ -784,6 +809,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       setKind(typeof data.kind === 'string' ? data.kind : '');
       setHasBackend(data.hasBackend === true);
       setBackendReason(typeof data.backendReason === 'string' ? data.backendReason : '');
+      setFidelityNotice(typeof data.fidelityNotice === 'string' ? data.fidelityNotice : '');
       // PHASE 1 — the server's proof that the browser can run this project. Only an explicit boolean
       // is accepted: an older server that does not send the field leaves this null, which the boot
       // rule reads as "still pending" rather than a verdict it never gave.
@@ -890,7 +916,18 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   useEffect(() => {
     if (!shouldReloadOnSignal(reloadTracker.current, reloadSignal)) return;
     if (!workspaceId) return;
-    const decision = decidePreviewReload({ mode, phase: buildPhase ?? 'idle', everRendered: everRenderedRef.current });
+    const now = Date.now();
+    const decision = decidePreviewReload({
+      mode,
+      phase: buildPhase ?? 'idle',
+      everRendered: everRenderedRef.current,
+      // Evidence from inside the app, which this decision never used to have — see previewBridge.ts.
+      hmrAgeMs: lastHmrAtRef.current === null ? null : now - lastHmrAtRef.current,
+      activityAgeMs: lastActivityAtRef.current === null ? null : now - lastActivityAtRef.current,
+    });
+    // HOT RELOAD ALREADY SHOWED IT: nothing to reload and nothing to hold, so no "updates waiting"
+    // line either — that line would be claiming a change is pending when it is already on screen.
+    if (!decision.reload && !decision.defer) return;
     if (decision.defer) { setHeldReloads((n) => n + 1); return; }
     if (reloadTimer.current) clearTimeout(reloadTimer.current);
     reloadTimer.current = setTimeout(applyReload, 900);
@@ -920,8 +957,126 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   /** Which rows the drawer shows. 'problems' spans errors AND warnings — the question actually asked. */
   const [consoleFilter, setConsoleFilter] = useState<ConsoleFilter>('all');
   const [consoleQuery, setConsoleQuery] = useState('');
+  /**
+   * Has the LIVE app's bridge actually announced itself?
+   *
+   * This is what separates "your app has printed nothing" from "nothing is reporting to me" — two
+   * completely different facts that an empty drawer used to state as the same sentence. A framework
+   * with no entry document (Next, Nuxt) never gets a bridge, and telling that user their app printed
+   * nothing would simply be false.
+   */
+  const [liveBridgeReady, setLiveBridgeReady] = useState(false);
+  /**
+   * WHEN THE APP LAST HOT-RELOADED, AND WHEN SOMEONE LAST TOUCHED IT.
+   *
+   * Refs, not state, deliberately: these arrive several times a second while a person is typing, and
+   * re-rendering the whole preview surface on each one would be its own performance bug. Nothing on
+   * screen depends on them — only the reload decision reads them, at the moment it is made.
+   */
+  const lastHmrAtRef = useRef<number | null>(null);
+  const lastActivityAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    const onSignal = (e: MessageEvent) => {
+      const d = e.data as { __nbaiPreviewHmr?: boolean; __nbaiPreviewActivity?: boolean } | null;
+      if (!d) return;
+      if (d.__nbaiPreviewHmr === true) lastHmrAtRef.current = Date.now();
+      if (d.__nbaiPreviewActivity === true) lastActivityAtRef.current = Date.now();
+    };
+    window.addEventListener('message', onSignal);
+    return () => window.removeEventListener('message', onSignal);
+  }, []);
+  /**
+   * WHERE THE APP CURRENTLY IS, and the ability to send it somewhere else.
+   *
+   * The panel cannot read this itself — a cross-origin frame's history is off limits, which is why
+   * the Code Studio panel's back/forward chevrons were removed as fake rather than wired. The bridge
+   * reports it from INSIDE the app instead, so the address is real and so are the history steps.
+   *
+   * Empty until the app actually reports, so the bar simply does not appear for a preview that
+   * cannot drive it — never a dead control.
+   */
+  const [routePath, setRoutePath] = useState('');
+  const [routeDraft, setRouteDraft] = useState('');
+  const liveIframeRef = useRef<HTMLIFrameElement | null>(null);
+  useEffect(() => {
+    const onRoute = (e: MessageEvent) => {
+      const d = e.data as { __nbaiPreviewRoute?: boolean; path?: string } | null;
+      if (!d || d.__nbaiPreviewRoute !== true || typeof d.path !== 'string') return;
+      setRoutePath(d.path);
+      // Only follow the app into the box while the user is NOT mid-edit — overwriting a half-typed
+      // path because the app happened to navigate is the small rudeness that makes a control feel
+      // broken. `document.activeElement` is the honest test for "they are typing right now".
+      setRouteDraft((prev) => (document.activeElement?.getAttribute('data-nb-route-input') ? prev : d.path!));
+    };
+    window.addEventListener('message', onRoute);
+    return () => window.removeEventListener('message', onRoute);
+  }, []);
+  /**
+   * DARK MODE, ONLY WHERE IT IS REAL. A page cannot emulate prefers-color-scheme for a frame it
+   * embeds — that is a devtools capability — so the app is asked whether it has class-based dark
+   * styling at all, and the button appears only when the answer is yes. An app themed purely by the
+   * OS setting gets no button rather than one that does nothing.
+   */
+  const [themeToggleAvailable, setThemeToggleAvailable] = useState(false);
+  const [previewIsDark, setPreviewIsDark] = useState(false);
+  useEffect(() => {
+    const onTheme = (e: MessageEvent) => {
+      const d = e.data as { __nbaiPreviewTheme?: boolean; canToggle?: boolean; isDark?: boolean } | null;
+      if (!d || d.__nbaiPreviewTheme !== true) return;
+      setThemeToggleAvailable(d.canToggle === true);
+      setPreviewIsDark(d.isDark === true);
+    };
+    window.addEventListener('message', onTheme);
+    return () => window.removeEventListener('message', onTheme);
+  }, []);
+  /**
+   * POINT & ASK on the LIVE preview — the capability the Visual Editor cannot offer there.
+   *
+   * The exact-edit toolbar needs file:line:column from our own Babel stamp, which does not exist in
+   * a Vite-built app, and patching a plugin into the user's vite.config to get it back is a way to
+   * break their build. So Live gets the part that matters — point at a thing, tell the AI what to
+   * change about it — described in words rather than coordinates. See previewPick.ts.
+   */
+  const [picking, setPicking] = useState(false);
+  useEffect(() => {
+    const onPicked = (e: MessageEvent) => {
+      const d = e.data as { __nbaiPreviewPicked?: boolean; element?: PickedElement } | null;
+      if (!d || d.__nbaiPreviewPicked !== true) return;
+      setPicking(false);
+      const line = pickedElementPrompt(d.element);
+      // Nothing identifying came back, so there is nothing honest to hand the chat. Say so rather
+      // than sending "the <div>" and letting the AI edit whichever one it guesses.
+      if (!line) { setFailoverNote('That element has nothing to identify it — try one with text on it.'); return; }
+      onAskAiAboutElement?.(line);
+    };
+    window.addEventListener('message', onPicked);
+    return () => window.removeEventListener('message', onPicked);
+  }, [onAskAiAboutElement]);
+  /** Post to whichever preview is actually on screen — they are different frames. */
+  const postToPreview = useCallback((msg: Record<string, unknown>) => {
+    const frame = mode === 'live' ? liveIframeRef.current : inBrowserIframeRef.current;
+    try { frame?.contentWindow?.postMessage(msg, '*'); } catch { /* best-effort */ }
+  }, [mode]);
+  // LEAVING LIVE MUST DISARM THE PICKER. Without this the app is left with a crosshair cursor and a
+  // swallowed first click — so the next thing the user tapped would do nothing, with no way to guess
+  // why. A control that can be left armed invisibly is worse than no control.
+  useEffect(() => {
+    if (mode !== 'live' && picking) { setPicking(false); postToPreview({ __nbaiPickMode: false }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+
+
   const consoleErrorCount = countConsoleErrors(consoleEntries);
   const visibleConsoleEntries = filterConsoleEntries(consoleEntries, consoleFilter, consoleQuery);
+  useEffect(() => {
+    const onBridgeReady = (e: MessageEvent) => {
+      const d = e.data as { __nbaiPreviewBridgeReady?: boolean; source?: string } | null;
+      if (d && d.__nbaiPreviewBridgeReady === true && d.source === 'live') setLiveBridgeReady(true);
+    };
+    window.addEventListener('message', onBridgeReady);
+    return () => window.removeEventListener('message', onBridgeReady);
+  }, []);
   useEffect(() => {
     const onConsoleMsg = (e: MessageEvent) => {
       const d = e.data as { __nbaiPreviewConsole?: boolean; level?: string; text?: string } | null;
@@ -1253,7 +1408,20 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         />
       </div>
       <div className="max-h-40 overflow-y-auto px-3 py-1.5 space-y-0.5">
-        {consoleEntries.length === 0 && <p className="text-zinc-600">Console is empty — your app has not printed anything yet.</p>}
+        {/* TWO DIFFERENT FACTS, NOT ONE SENTENCE. "Your app has not printed anything" is only true
+            when something is actually listening. On Live, a framework with no entry document never
+            receives the bridge, and saying the app printed nothing there would be a plain untruth —
+            so it says what is really the case, and points at the preview whose console always works. */}
+        {consoleEntries.length === 0 && mode === 'live' && !liveBridgeReady && (
+          <p className="text-zinc-600">
+            The live console is not reporting for this app — server-rendered frameworks have no entry page to attach it to.{' '}
+            <button onClick={() => { userPickedInBrowser.current = true; setMode('inbrowser'); }} className="underline hover:text-zinc-400">
+              The in-browser preview
+            </button>{' '}
+            always shows one.
+          </p>
+        )}
+        {consoleEntries.length === 0 && !(mode === 'live' && !liveBridgeReady) && <p className="text-zinc-600">Console is empty — your app has not printed anything yet.</p>}
         {/* An ACTIVE filter hiding everything is a different state from an empty console, and saying
             "your app has not printed anything" there would simply be untrue. */}
         {consoleEntries.length > 0 && visibleConsoleEntries.length === 0 && (
@@ -1287,6 +1455,50 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     </div>
   );
 
+  /**
+   * THE ADDRESS BAR — a real one, for the first time.
+   *
+   * It renders only once the app has actually reported where it is, so a preview that cannot drive
+   * itself never shows a dead control (the mistake the Code Studio panel's fake chevrons made).
+   * Back/forward call the app's OWN history; Enter performs a real navigation, exactly as a browser's
+   * address bar does. Nothing here is simulated, which is the whole reason it can exist at all.
+   */
+  const routeBar = routePath ? (
+    <div className="flex items-center gap-1 px-3 py-1 border-b border-zinc-800 bg-zinc-900/60">
+      <button
+        onClick={() => postToPreview({ __nbaiHistory: 'back' })}
+        className="shrink-0 w-6 h-6 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 flex items-center justify-center"
+        title="Back — steps your app's own history"
+        aria-label="Back"
+      >
+        <ChevronLeft className="w-3.5 h-3.5" />
+      </button>
+      <button
+        onClick={() => postToPreview({ __nbaiHistory: 'forward' })}
+        className="shrink-0 w-6 h-6 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 flex items-center justify-center"
+        title="Forward"
+        aria-label="Forward"
+      >
+        <ChevronRight className="w-3.5 h-3.5" />
+      </button>
+      <form
+        className="flex-1 min-w-0 flex items-center"
+        onSubmit={(e) => { e.preventDefault(); const to = routeDraft.trim(); if (to) postToPreview({ __nbaiNavigate: to }); }}
+      >
+        <input
+          data-nb-route-input="1"
+          value={routeDraft}
+          onChange={(e) => setRouteDraft(e.target.value)}
+          spellCheck={false}
+          autoComplete="off"
+          aria-label="Page address inside your app"
+          title="Type a page inside your app (for example /dashboard) and press Enter"
+          className="w-full bg-zinc-950/70 border border-zinc-800 rounded px-2 py-0.5 text-[11px] font-mono text-zinc-300 focus:outline-none focus:border-zinc-600"
+        />
+      </form>
+    </div>
+  ) : null;
+
   // Responsive viewport switcher — REAL device-width rendering (not a label), shown on BOTH previews.
   const viewportSwitcher = (
     <div className="flex items-center gap-0.5 rounded border border-zinc-700 p-0.5 shrink-0">
@@ -1310,12 +1522,82 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     </div>
   );
 
+  /**
+   * ZOOM — only in a device viewport, because Auto already fills the panel and there is nothing to
+   * fit. One cycling button rather than four: the toolbar row is already the thing that overflows on
+   * a phone, and this is a control the user reaches for occasionally, not constantly.
+   */
+  const zoomButton = viewport === 'auto' ? null : (
+    <button
+      onClick={() => setZoom((z) => nextZoom(z))}
+      className="shrink-0 px-1.5 py-0.5 rounded border border-zinc-700 text-[10px] font-semibold text-zinc-400 hover:text-zinc-200 tabular-nums"
+      title="Zoom the device view — Fit shrinks it into the panel; 100% shows the real size and scrolls, which is the only way to judge true text size and spacing"
+      aria-label={`Zoom: ${zoomLabel(zoom)}`}
+    >
+      {zoomLabel(zoom)}
+    </button>
+  );
+
+  /**
+   * DARK / LIGHT — shown ONLY when the app reported that it actually has class-based dark styling.
+   * A page cannot emulate the OS colour-scheme setting for a frame it embeds, so an app themed purely
+   * that way correctly gets no button here instead of one that silently does nothing.
+   */
+  const themeButton = themeToggleAvailable ? (
+    <button
+      onClick={() => { const next = previewIsDark ? 'light' : 'dark'; setPreviewIsDark(!previewIsDark); postToPreview({ __nbaiTheme: next }); }}
+      className="shrink-0 px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200"
+      title={previewIsDark ? 'Switch your app to its light theme' : 'Switch your app to its dark theme'}
+      aria-label="Toggle your app's dark theme"
+      aria-pressed={previewIsDark}
+    >
+      {previewIsDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+    </button>
+  ) : null;
+
+  // AN OLDER VERSION TAKES OVER THE WHOLE SURFACE, with an unmissable banner.
+  //
+  // It sits ABOVE both mode branches deliberately: a user looking at last week's build must not also
+  // be looking at today's toolbar, its Edit button or its console — every one of those would act on
+  // the CURRENT app while the frame showed an old one, which is the worst kind of wrong.
+  if (versionUrl) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-800 bg-amber-950/40 text-[11px] text-amber-100">
+          <span className="shrink-0" aria-hidden="true">🕘</span>
+          <span className="flex-1 min-w-0 truncate">
+            You are looking at an <strong>older version</strong> of your app{versionSha ? ` (${versionSha.slice(0, 7)})` : ''}. Your current app is untouched.
+          </span>
+          <button
+            onClick={() => onExitVersion?.()}
+            className="shrink-0 px-2 py-0.5 rounded border border-amber-600/60 hover:bg-amber-900/40"
+          >
+            Back to my app
+          </button>
+        </div>
+        {/* The url is never displayed and never opened in a tab — it addresses a machine billed by the
+            minute, exactly like the live preview's. See AgentV3Panel's versionView for the full note. */}
+        <iframe
+          title="Older version of your app"
+          src={versionUrl}
+          className="w-full flex-1 bg-white border-0"
+          allow={PREVIEW_IFRAME_ALLOW}
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        />
+      </div>
+    );
+  }
+
   if (mode === 'live' && effectiveUrl) {
     return (
       <div className="h-full flex flex-col">
         <div className={TOOLBAR_ROW}>
           {switcher}
           {viewportSwitcher}
+        {zoomButton}
+        {themeButton}
+          {zoomButton}
+          {themeButton}
           {/* THE MACHINE'S ADDRESS USED TO BE PRINTED HERE, VERBATIM (gap analysis 2026-09-10).
               `{effectiveUrl}` rendered `https://3000-<sandboxId>.e2b.app` — the very string the admin
               had ordered out of the chat, because forwarding it puts someone else's traffic on a
@@ -1323,6 +1605,24 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
               label keeps the port (a process, not a machine) and drops everything that addresses one.
               See previewAddress.ts for why this is not, and is not meant to be, the lock. */}
           <span className="truncate flex-1 min-w-0" title="Your app is running on a NavBharatAI development machine. Use Publish to give anyone else a link.">{previewAddressLabel(effectiveUrl)}</span>
+          {/* THE LIVE PREVIEW NOW HAS A CONSOLE TOO (gap analysis 2026-09-10). It never did: the
+              mirror was built into the in-browser document only, so the mode where the app is most
+              real — actual dependencies, actual machine — reported nothing at all, and a user
+              watching their live app throw had to open devtools to find out why. Same button, same
+              drawer, same "Fix with AI"; the rows arrive from the bridge injected at dev-server
+              launch (AgentV3/previewBridge.ts). */}
+          {onAskAiAboutElement && (
+            <button
+              onClick={() => { const next = !picking; setPicking(next); postToPreview({ __nbaiPickMode: next }); }}
+              className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] ${picking ? 'bg-indigo-600 text-white border-indigo-500' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
+              title={picking ? 'Now click any part of your app' : 'Point at something in your app and tell the AI what to change about it'}
+              aria-pressed={picking}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {picking ? 'Click it…' : 'Point'}
+            </button>
+          )}
+          {consoleButton}
           <button onClick={() => setLiveReloadKey((k) => k + 1)} className="shrink-0 flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           {/* RESTART THE SERVER — reachable while the preview is SHOWING (ROADMAP §8B B3).
               Diagnose only ever existed in the "No live preview yet" empty state, so a user whose
@@ -1363,6 +1663,8 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             split divider drags.
           */}
         </div>
+        {routeBar}
+        {consoleOpen && consoleDrawer}
         {paidNote}
         {/* A restart is a 30–90s sandbox reboot. A spinner alone for that long is indistinguishable
             from a hang, so it says WHAT it is doing and for how long — the same real stage events the
@@ -1509,12 +1811,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             </div>
           </div>
         ) : (
-          <ResponsiveFrame viewport={viewport}>
+          <ResponsiveFrame viewport={viewport} zoom={zoom}>
             {/* The DOOR leads when the server offers it: the frame then never holds a machine's
                 address, so a dead sandbox resolves to our own reconnecting page instead of a vendor
                 error, and a moved app resolves to wherever it now lives. A remount (reload button,
                 watchdog) re-resolves. effectiveUrl stays as the fallback for an older server. */}
-            <iframe key={liveReloadKey} title="Live preview" src={idleSnapshotUrl || (doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl)} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; }} className="w-full h-full bg-white border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+            <iframe key={liveReloadKey} ref={liveIframeRef} title="Live preview" src={idleSnapshotUrl || (doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl)} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; }} className="w-full h-full bg-white border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
           </ResponsiveFrame>
         )}
       </div>
@@ -1619,6 +1921,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           {loading ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
         </button>
       </div>
+      {routeBar}
       {consoleOpen && consoleDrawer}
       {editMode && selection && (
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 bg-zinc-900/80 text-[11px] text-zinc-300 flex-wrap">
@@ -1695,6 +1998,20 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           ⚙️ This app reads {envVarsUsed.length === 1 ? 'a setting' : `${envVarsUsed.length} settings`} we
           don't hold ({envVarsUsed.slice(0, 3).join(', ')}{envVarsUsed.length > 3 ? `, +${envVarsUsed.length - 3} more` : ''}) —
           your .env is never uploaded, so anything using them will be blank here.
+        </div>
+      )}
+      {/* WHAT THIS PREVIEW CANNOT REPRODUCE — said before the user has to work it out from a broken
+          layout. Only ever shown when the workspace genuinely uses something unsupported, because a
+          false caveat teaches distrust of a preview that was in fact accurate, and sends the user to
+          the paid live server for nothing. Deliberately ONE line: a wall of caveats above a working
+          app reads as "this is broken", which is the opposite of what is being said. */}
+      {mode === 'inbrowser' && !!html && !err && !refusal.refuse && !!fidelityNotice && (
+        <div className="px-3 py-1.5 text-[11px] text-amber-200/90 bg-amber-950/30 border-b border-amber-900/60 flex items-start gap-2">
+          <span className="flex-1">{fidelityNotice}</span>
+          {!!effectiveUrl && (
+            <button onClick={() => setMode('live')} className="shrink-0 underline hover:text-amber-100">See it on the live server</button>
+          )}
+          <button onClick={() => setFidelityNotice('')} className="shrink-0 text-amber-500/70 hover:text-amber-200" title="Dismiss">✕</button>
         </div>
       )}
       {mode === 'inbrowser' && hasBackend && !refusal.refuse && (
@@ -1813,7 +2130,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         // so the untrusted app runs in an isolated origin. `allow-same-origin` is safe now — it's the
         // preview origin's (empty) localStorage, never the platform's Firebase token — and `import()`
         // still works because the preview origin is a real https origin.
-        <ResponsiveFrame viewport={viewport}>
+        <ResponsiveFrame viewport={viewport} zoom={zoom}>
           <iframe
             ref={inBrowserIframeRef}
             title="In-browser preview"
@@ -1833,7 +2150,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         // (how the preview loads React from the CDN) is blocked → "Missing dependency react". Safe under
         // the allowlist (trusted admins only); Phase 4 cross-origin isolation activates once
         // VITE_PREVIEW_ORIGIN is set. The live-server iframe above already sets allow-same-origin.
-        <ResponsiveFrame viewport={viewport}>
+        <ResponsiveFrame viewport={viewport} zoom={zoom}>
           <iframe
             ref={inBrowserIframeRef}
             title="In-browser preview"

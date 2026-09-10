@@ -46461,3 +46461,100 @@ its own summary in this artifact. `rootCause` (derived from the LAST `OUTCOME_*`
 timedOut?: boolean; budgetReached?: boolean }` to the schema, filled from the same `result` the route
 already has in hand at the merge point PR #2788 touches. Free, small, and would have made root cause #1
 answerable from this exact report instead of requiring a live-code investigation.
+
+---
+
+## 2026-09-10 — PREVIEW GAP ANALYSIS + CLOSURE (admin: "navbharatai ka in-browser preview aur vsc/cursor/antigravity ka preview … sabhi chote bade gaps dhundo", then "sabhi gaps ko khatam karo")
+
+The admin asked for an exhaustive comparison of NavBharatAI's two previews (In-browser and Live)
+against VS Code's Live Preview / Simple Browser, Cursor's browser tab and Antigravity's agent-driven
+browser, then for every gap found to be closed. 22 gaps were found. What shipped, and what did not.
+
+### Shipped — PR #2790 (merged) and the follow-up PR
+
+**The billable-address leak, in TWO places.** The Live toolbar rendered `{effectiveUrl}` verbatim —
+`https://<port>-<sandboxId>.e2b.app` — permanently and selectably on every Live preview. PR #2739 had
+removed that address from the AI's chat replies for exactly this reason ("yah link dena band karo …
+mera kharcha badta hai"); the toolbar was the sibling that fix never touched, and it was the worse of
+the two because the chat mentions a link in passing while the toolbar displayed it always. It also
+named a vendor, which the white-label law forbids on any user-facing surface. Now
+`previewAddressLabel()` keeps the PORT (a process, not a machine) and drops everything that addresses
+one. **A SECOND sibling was found later in the same session:** Checkpoints → Preview opened the same
+kind of address with `window.open`, with a second dev server running behind it. That now renders
+inside the preview panel instead. ⚠️ Recorded for whoever revisits it: the door route CANNOT be the
+vehicle for a version preview — `portCandidates` puts the main app's proven port ahead of any hint, so
+a door minted for a version's port would redirect to TODAY's app under a banner saying "an older
+version", which is worse than the leak.
+
+**The Live preview had no console at all.** The mirror was written inline inside `ReactPreview.ts`, so
+the drawer, the error badge and "Fix with AI" existed only for the in-browser render — while the mode
+where the app is most real reported nothing. Extracted to `AgentV3/previewBridge.ts`, shared by both,
+and injected into the sandbox's entry document at dev-server launch beside the block that already
+patches the Vite config there. Kill switch `AGENTV3_PREVIEW_BRIDGE=off`. It also reports FAILED network
+calls, which the browser hides in a Network tab the user cannot open. 🔒 The bridge is stripped from
+what the model READS and again from what it WRITES: models preserve script tags they find when
+rewriting HTML, which is how a development-only bridge would have been published inside a user's app.
+
+**A real address bar.** Neither preview had one. It could not be built from the panel — a cross-origin
+frame's history cannot be read or stepped, which is why the Code Studio chevrons were removed as fake
+in August rather than wired. The bridge reports the route from inside the app instead, wrapping
+`pushState`/`replaceState` as well as `popstate`/`hashchange` because a SPA route change fires no event
+at all. Back/Forward call the app's own history; Enter performs a real navigation.
+
+**Honesty about what the in-browser preview cannot reproduce** (`previewFidelity.ts`): CSS Modules,
+Sass/Less, a customised Tailwind theme, workers, `import.meta.glob`, `public/` assets. The toolbar said
+only "In-browser preview (react)", so a user whose layout collapsed could not tell whether their app
+was broken or the preview was approximate — and the answer, which we knew and did not say, was the
+second.
+
+**Point & Ask on Live**, camera/mic/location delegation on all preview iframes, zoom, a dark-theme
+toggle gated on the app actually having dark styling, "Fix with AI" on React warnings that are really
+bugs, console filter/search/repeat-collapsing, `sourceURL` so a preview error names its file, a
+dependency retry, and a MutationObserver so "Preview is empty" is evidence rather than a stopwatch.
+
+**The verification proof reaches the user** (`journeyUserSummary.ts`). After a build the platform
+already drives a real browser through the app's forms — fills, submits, RELOADS, confirms the entry
+survived. That result went only into the ADMIN diagnostics report while the chat said "your app is
+ready" in the same words it uses when nothing was verified. It is now a card in the chat, and a
+FAILURE is as visible as a pass.
+
+### 🟡 Open item #1 — the in-browser preview still runs on the PLATFORM's origin
+
+`cloudbuild.yaml` sets `_VITE_PREVIEW_ORIGIN: ''`, so `configuredPreviewSandboxUrl()` returns null and
+the preview keeps the same-origin `srcDoc` path with `allow-same-origin`. The code comment in
+`previewOrigin.ts` says this is "safe because the allowlist keeps the app to trusted admins" — that
+premise EXPIRED when the app went public. Generated app code can read `navbharatai.com`'s localStorage,
+which holds the Firebase auth token. **The code for the fix has been ready since July**; it needs an
+admin action, not a commit: point a subdomain at the app and set the `_VITE_PREVIEW_ORIGIN` trigger
+substitution. Recorded as an open root cause rather than silently left.
+
+### 🔴 Deliberately NOT built — viewing your own app on your own phone
+
+Listed as a gap in the analysis (competitors offer a QR code). It is **declined**, and the reasoning is
+recorded so it is not re-proposed as an oversight: a QR is a shareable link by construction, and the
+door route's refusal of top-level navigation — the thing that makes a leaked preview URL worthless — is
+exactly what would have to be weakened to make it work. Building it would re-open the cost hole the
+admin closed by hand. The existing answer is Publish: static hosting that costs nothing per visitor.
+
+### 🟡 Open item #2 — the two preview surfaces are still different products
+
+`components/agentv3/PreviewSurface.tsx` (Pro) now has the console, address bar, picker, zoom and theme
+toggle; `components/ide/PreviewPanel.tsx` (Code Studio) has print, fullscreen and preview history that
+the Pro surface does not. Only the capability delegation was brought to parity here. Full convergence
+is a real refactor of an 843-line component and was not attempted in this pass — a user moving between
+the two still meets two different previews.
+
+### 🟡 Known flake, unrelated to the preview work — `AgentRunner.test.ts` "timedOut is true when work was saved"
+
+Went red once in a full-suite run on 2026-09-10 and passed immediately when run alone, in a session
+that changed nothing AgentRunner imports. **The cause is in the test, not the code:** it builds the
+runner with `maxBuildMs: 1` and relies on at least one real millisecond of wall clock elapsing between
+the run's start and the second loop check. Under a heavily parallel suite that interval can round to
+zero, `buildTimedOut()` correctly returns false, and the assertion fails — the production behaviour is
+right in both cases.
+
+**The fix, deliberately NOT taken here** because it is unrelated to this PR's diff and widening it to
+touch another module's test is how an unrelated regression gets attributed to a preview change: make
+the elapsed time REAL rather than relaxing the assertion — have the scripted client await a couple of
+milliseconds so the second check genuinely happens after `maxBuildMs`. The assertion itself must stay
+exactly as it is; changing it to match the flake would be changing a test to match broken behaviour.

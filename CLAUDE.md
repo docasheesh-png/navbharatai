@@ -277,6 +277,22 @@ best. Both layers — reactive autopsy AND proactive world-best suggestions — 
    trust a truncated `tail`) + a manual/boot smoke check for server changes.
    This gate is non-negotiable, even under time or credit pressure.
 
+   ⚠️ **THE GATE ABOVE IS NARROWER THAN CI, AND THAT GAP HAS COST A RED BUILD
+   (2026-09-10).** A session ran tsc and the full 20,000-test suite, got green
+   on both, pushed — and CI failed in 87 seconds on `scripts/noUnusedImports.mjs`
+   over a single import left behind by a refactor. Neither tsc nor vitest can
+   see an unused import, so a gate made only of those two is structurally
+   incapable of catching that class at all. **`.github/workflows/ci.yml` is the
+   real gate; the list above is a subset of it.** Before a push, run the steps
+   CI runs that the list omits:
+   `npm run typecheck` · `node scripts/noUnusedImports.mjs` ·
+   `npm run typecheck:server` · `npm run build` · `npm run test:bundle` ·
+   `npm run boot:check` (and `npm run audit:gate` / `license:gate` when
+   dependencies changed). They take about two minutes together — far less than
+   a red CI round trip, and they catch what the two-command gate cannot.
+   **Re-read the workflow rather than trusting this list**: CI gains steps, and
+   a list in a doc goes stale exactly the way this one did.
+
    🔴 **RUN IT AT THE END, ON THE FINAL STATE OF THE CHANGE — NEVER MID-WAY.**
    A gate run before the last file was written proves nothing about what is
    being pushed, and it is worse than no gate at all, because it produces a

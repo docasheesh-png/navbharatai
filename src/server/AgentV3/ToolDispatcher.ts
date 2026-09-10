@@ -357,6 +357,7 @@ import { formatUiFindings, type ScannedElement } from './UiElementFinder';
 import { envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
+import { stripPreviewBridge, isHtmlDocumentPath } from './previewBridge';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -2185,6 +2186,14 @@ export class ToolDispatcher {
         let full: string;
         try {
           full = await this.actuator.readFile(this.workspaceId, reqPath);
+          // THE PREVIEW BRIDGE IS OURS, NOT THE APP'S (see AgentV3/previewBridge.ts). The dev-server
+          // launch injects a console/network mirror into the SANDBOX's entry document so the Live
+          // preview can report what the app prints. `readFile` reads the sandbox, so without this the
+          // model would find a script it never wrote sitting in the user's index.html — and models
+          // preserve the script tags they find when they rewrite an HTML file, which is precisely how
+          // a development-only bridge ends up published inside somebody's finished app. It is removed
+          // here so the model only ever sees the file it actually authored.
+          if (isHtmlDocumentPath(reqPath)) full = stripPreviewBridge(full);
         } catch (err) {
           // PATH-MISS RECOVERY (build-report autopsy 2026-08-01): a bare "does not exist" made the builder
           // loop 12 times guessing the same wrong root (created src/components/ui/X.tsx, read
@@ -2254,6 +2263,13 @@ export class ToolDispatcher {
         // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
         this.assertWritable(path); // C2 — checked AFTER any relocation, so the REAL destination is judged
         let content = guardConfigContent(path, this.applyPostgresProviderLock(path, reqStr(input, 'content')));
+        // THE OTHER END OF THE SAME GUARD (see read_file above). The model is not supposed to be able
+        // to see the preview bridge at all — but "cannot see it" and "cannot store it" are different
+        // guarantees, and only the second one is a guarantee. A write that carries the marker anyway
+        // (a model reproducing an older document from memory, a paste, a future read path that
+        // forgets to strip) has it removed before it reaches durable storage, so the bridge can never
+        // be published inside a user's app. Both ends, deliberately: unlikely is not impossible.
+        if (isHtmlDocumentPath(path)) content = stripPreviewBridge(content);
         // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
         // to their known-good major IN the written package.json, so a later plain `npm install` (which
         // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking

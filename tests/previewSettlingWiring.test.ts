@@ -58,7 +58,15 @@ describe('the word reaches the preview', () => {
   });
 
   it('the preview decides with the shared pure rule, never an inline condition', () => {
-    expect(surface).toContain('decidePreviewReload({ mode, phase: buildPhase ?? \'idle\', everRendered: everRenderedRef.current })');
+    // Asserted by the CALL and its inputs rather than by one exact argument string: the decision
+    // gained two more inputs on 2026-09-10 (hot-reload age and user activity, both newly observable
+    // through the preview bridge), and pinning the old literal made that a false failure. What must
+    // never change is that the surface asks the shared rule instead of deciding for itself.
+    expect(surface).toContain('decidePreviewReload({');
+    expect(surface).toContain("phase: buildPhase ?? 'idle'");
+    expect(surface).toContain('everRendered: everRenderedRef.current');
+    // The three things it must not do: decide inline on the phase, or on the mode, without the rule.
+    expect(surface).not.toMatch(/if \(\s*buildPhase === 'settling'\s*\)\s*\{?\s*setLiveReloadKey/);
   });
 
   it('a held update is released when the build ends', () => {
@@ -80,7 +88,10 @@ describe('the invariant this change had to respect', () => {
     // ResponsiveFrame keeps a constant tree depth precisely so the iframe is never reparented, and
     // reparenting an iframe IS a reload — the very thing this bar exists to prevent. Putting the bar
     // inside it would have made the fix cause the bug.
-    const frame = surface.indexOf('<ResponsiveFrame viewport={viewport}>');
+    // Matched by TAG rather than by the exact prop list: this guard broke once simply because a
+    // `zoom` prop was added, which is a false failure — the invariant is about what is INSIDE the
+    // frame, not about how many props it takes.
+    const frame = surface.search(/<ResponsiveFrame[\s>]/);
     const close = surface.indexOf('</ResponsiveFrame>', frame);
     expect(frame).toBeGreaterThan(-1);
     expect(surface.slice(frame, close)).not.toContain('deferredReloadNote');

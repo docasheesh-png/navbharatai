@@ -90,6 +90,23 @@ export function reminderMessage(days: number, expiresAt: string, shortfallInr: n
     : `Your ${label} plan renews on ${date} — ₹${price} will be taken from your wallet automatically. Nothing to do; this is just a heads-up ${days} day${days === 1 ? '' : 's'} ahead.`;
 }
 
+/**
+ * The message sent once AFTER expiry, while the grace window is still running.
+ *
+ * It says the thing the pre-expiry reminders cannot: the plan is over NOW, and there are only N days
+ * before the domain actually pauses. It names the shortfall when the wallet cannot cover the renewal,
+ * for the same reason the pre-expiry reminder does — "recharge" is not actionable if you do not know
+ * how much.
+ */
+export function graceMessage(graceDaysLeft: number, shortfallInr: number, planId?: string | null): string {
+  const label = planLabel(planId);
+  const price = planPriceInr(planId);
+  const window = `${graceDaysLeft} day${graceDaysLeft === 1 ? '' : 's'}`;
+  return shortfallInr > 0
+    ? `Your ${label} plan has ended. You have ${window} left to renew before your domain pauses — your wallet is about ₹${shortfallInr} short of the ₹${price} renewal. Recharge and it renews automatically, with nothing interrupted. Your app stays live on its free NavBharatAI link either way.`
+    : `Your ${label} plan has ended. You have ${window} left to renew before your domain pauses — ₹${price} from your wallet, and nothing is interrupted. Your app stays live on its free NavBharatAI link either way.`;
+}
+
 export function lapseMessage(domains: string[], planId?: string | null): string {
   const list = domains.length ? ` (${domains.join(', ')})` : '';
   return `Your ${planLabel(planId)} plan has ended, so your domain${domains.length === 1 ? '' : 's'}${list} ${domains.length === 1 ? 'is' : 'are'} paused. Your app is still live on its free NavBharatAI link — nothing was deleted. Renew the plan from Billing → Plans and your domain reconnects automatically.`;
@@ -125,6 +142,8 @@ export async function sweepOneWallet(db: any, walletDocId: string): Promise<Plan
 
     if (action.kind === 'remind') {
       await _deps.notify(userId, reminderMessage(action.days, outcome.expiresAt, action.shortfallInr, outcome.planId)).catch(() => null);
+    } else if (action.kind === 'grace') {
+      await _deps.notify(userId, graceMessage(action.graceDaysLeft, action.shortfallInr, outcome.planId)).catch(() => null);
     } else if (action.kind === 'renewed') {
       await _deps.notify(userId, renewedMessage(outcome.planId)).catch(() => null);
     } else if (action.kind === 'lapse') {

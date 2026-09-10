@@ -111,8 +111,17 @@ export interface HostingPlanRecord {
   agreedTerms?: readonly string[];
 }
 
-/** Days before expiry the renewal reminders go out (admin 2026-08-06: "5 din pahle reminder"). */
-export const HOSTING_PLAN_REMINDER_DAYS: ReadonlyArray<number> = [5, 1];
+/**
+ * Days before expiry the renewal reminders go out.
+ *
+ * Admin 2026-08-06 asked for "5 din pahle reminder"; admin 2026-09-10 widened it to **5, 3 and 1**,
+ * because one warning five days out and then silence until the last day is easy to miss entirely.
+ * The middle one is the useful one: far enough out to still act, close enough to feel real.
+ */
+export const HOSTING_PLAN_REMINDER_DAYS: ReadonlyArray<number> = [5, 3, 1];
+
+/** The `remindedFor` key for the ONE message sent after expiry, inside the grace window. */
+export const GRACE_REMINDER_KEY = 'grace';
 /** Days AFTER expiry before the domain is actually detached — the late-recharge grace window. */
 export const HOSTING_PLAN_GRACE_DAYS = 3;
 
@@ -379,6 +388,8 @@ export function computeLazyRenewal(current: Record<string, any>, nowIso: string)
 export type PlanSweepAction =
   | { kind: 'renewed' }
   | { kind: 'remind'; days: number; shortfallInr: number } // 0 = balance covers the renewal
+  /** The plan has ENDED and the grace window is running — the last chance to renew with nothing lost. */
+  | { kind: 'grace'; graceDaysLeft: number; shortfallInr: number }
   | { kind: 'lapse' }
   | null;
 
@@ -442,8 +453,36 @@ export function decidePlanSweepStep(
     return { wallet: { ...w, hostingPlan: plan }, applied: true, action: { kind: 'remind', days, shortfallInr } };
   }
 
-  // 3) expired: inside grace = wait (a lazy renewal can still save it); past grace = lapse once.
-  if (nowMs - exp <= HOSTING_PLAN_GRACE_DAYS * DAY) return { wallet: w, applied: false, action: null };
+  // 3) EXPIRED BUT INSIDE GRACE — one last warning, then wait.
+  //
+  // 🔴 THE GAP THIS CLOSES (admin 2026-09-10). The plan expires, and for the next three days the user
+  // heard NOTHING AT ALL — the pre-expiry reminders had stopped and the lapse message had not fired.
+  // Those three days are the single most useful moment to reach someone: the plan has genuinely ended,
+  // their domain is about to pause, and one recharge still fixes it with nothing interrupted. Staying
+  // silent through exactly that window was the opposite of the reminder feature's purpose.
+  //
+  // Sent ONCE per period (keyed on the expiry, so a new period resets it naturally), and it never
+  // competes with the pre-expiry reminders because those only run while the plan is still live.
+  if (nowMs - exp <= HOSTING_PLAN_GRACE_DAYS * DAY) {
+    const remindedFor = p.remindedFor ?? {};
+    if (remindedFor[GRACE_REMINDER_KEY] === p.expiresAt) return { wallet: w, applied: false, action: null };
+    const price = planPriceInr(p.id);
+    const needed = inrToDebitTokens(price);
+    const balance = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
+    const shortTokens = Math.max(0, needed - balance);
+    const shortfallInr = shortTokens > 0 ? Math.ceil((shortTokens * price) / needed) : 0;
+    // Days LEFT in grace, rounded up — "1 day" while any part of a day remains, never a bare 0.
+    const graceDaysLeft = Math.max(1, Math.ceil((exp + HOSTING_PLAN_GRACE_DAYS * DAY - nowMs) / DAY));
+    const plan: HostingPlanRecord = {
+      ...p,
+      remindedFor: { ...remindedFor, [GRACE_REMINDER_KEY]: p.expiresAt },
+    };
+    return {
+      wallet: { ...w, hostingPlan: plan },
+      applied: true,
+      action: { kind: 'grace', graceDaysLeft, shortfallInr },
+    };
+  }
   if (p.lapsedAt) return { wallet: w, applied: false, action: null }; // already enforced
   const plan: HostingPlanRecord = { ...p, lapsedAt: nowIso };
   return { wallet: { ...w, hostingPlan: plan }, applied: true, action: { kind: 'lapse' } };

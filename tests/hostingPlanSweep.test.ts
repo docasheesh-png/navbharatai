@@ -6,7 +6,7 @@ import {
   _clearPlanCacheForTests,
 } from '../src/server/lib/hostingPlan';
 import {
-  sweepOneWallet, reattachSuspendedDomains, reminderMessage, lapseMessage,
+  sweepOneWallet, reattachSuspendedDomains, reminderMessage, lapseMessage, graceMessage,
   _setSweepDepsForTests,
 } from '../src/server/lib/hostingPlanSweep';
 import { TOKENS_PER_RUPEE } from '../src/server/lib/payments';
@@ -68,7 +68,9 @@ describe('decidePlanSweepStep', () => {
   it('a short balance is named in exact ₹ (the user knows precisely what to recharge)', () => {
     const w = wallet(49 * TOKENS_PER_RUPEE, plan(2)); // ₹49 held, ₹99 needed
     const r = decidePlanSweepStep(w, NOW);
-    expect(r.action).toEqual({ kind: 'remind', days: 5, shortfallInr: 50 });
+    // 2 days left, so the 3-day window is the smallest REACHED one — the only one that describes
+    // reality. (Before the admin added the 3-day window this correctly said 5.)
+    expect(r.action).toEqual({ kind: 'remind', days: 3, shortfallInr: 50 });
   });
 
   it('expired + affordable + autoRenew ⇒ RENEWS (renewal always wins over reminding/lapsing)', () => {
@@ -77,9 +79,18 @@ describe('decidePlanSweepStep', () => {
     expect((r.wallet.hostingPlan as any).expiresAt).toBe(new Date(NOW_MS + 30 * DAY).toISOString());
   });
 
-  it('expired + unaffordable: inside grace ⇒ WAIT (a late recharge saves the domain silently)', () => {
-    const r = decidePlanSweepStep(wallet(100, plan(-(HOSTING_PLAN_GRACE_DAYS - 1))), NOW);
-    expect(r.action).toBeNull();
+  it('expired + unaffordable: inside grace ⇒ ONE last warning, and the domain is NOT touched', () => {
+    // Changed 2026-09-10 (admin: "aise user ko reminder notification show hona chahiye"). This used
+    // to assert SILENCE through the whole grace window — the pre-expiry reminders had stopped and
+    // the lapse had not fired, so the single most useful moment to reach someone produced nothing.
+    // What has NOT changed, and is the real point of the test: no lapse, so no domain is detached.
+    const w = wallet(100, plan(-(HOSTING_PLAN_GRACE_DAYS - 1)));
+    const first = decidePlanSweepStep(w, NOW);
+    // ₹1 held against the ₹99 renewal ⇒ ₹98 short, named exactly.
+    expect(first.action).toEqual({ kind: 'grace', graceDaysLeft: 1, shortfallInr: 98 });
+    expect((first.wallet.hostingPlan as any).lapsedAt).toBeUndefined();
+    // ONCE per period — a daily sweep must not nag every day.
+    expect(decidePlanSweepStep(first.wallet, NOW).action).toBeNull();
   });
 
   it('past grace ⇒ LAPSE exactly once', () => {
@@ -154,7 +165,7 @@ describe('sweepOneWallet', () => {
     const notes: string[] = [];
     _setSweepDepsForTests({ notify: async (_u, m) => { notes.push(m); }, now: () => new Date(NOW_MS) });
     const db = fakeAdminDb(docs);
-    expect(await sweepOneWallet(db, 'u1')).toEqual({ kind: 'remind', days: 5, shortfallInr: 0 });
+    expect(await sweepOneWallet(db, 'u1')).toEqual({ kind: 'remind', days: 3, shortfallInr: 0 });
     expect(await sweepOneWallet(db, 'u1')).toBeNull(); // marker persisted — no double-send
     expect(notes).toHaveLength(1);
   });
@@ -233,8 +244,22 @@ describe('lifecycle wiring', () => {
     expect(kb).toContain('reconnects automatically');
   });
 
-  it('reminder windows are what the admin asked for: 5 days (and 1 day), grace 3 days', () => {
-    expect(HOSTING_PLAN_REMINDER_DAYS).toEqual([5, 1]);
+  it('reminder windows are what the admin asked for: 5, 3 and 1 days, grace 3 days', () => {
+    // Widened from [5, 1] on 2026-09-10 — one warning five days out and then silence until the last
+    // day is easy to miss entirely, and the middle one is the useful one.
+    expect(HOSTING_PLAN_REMINDER_DAYS).toEqual([5, 3, 1]);
     expect(HOSTING_PLAN_GRACE_DAYS).toBe(3);
+  });
+
+  it('the grace message says the plan ENDED, how long is left, and that the app stays live', () => {
+    const msg = graceMessage(2, 0, 'starter');
+    expect(msg).toContain('has ended');
+    expect(msg).toContain('2 days left');
+    expect(msg).toContain('before your domain pauses');
+    // The honest half: losing the plan never takes the app down, and the message says so rather
+    // than letting the user imagine the worst.
+    expect(msg).toContain('stays live on its free NavBharatAI link');
+    // Short balance names the exact figure — "recharge" is not actionable without an amount.
+    expect(graceMessage(1, 75, 'starter')).toContain('₹75');
   });
 });

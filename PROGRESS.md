@@ -47169,3 +47169,50 @@ and nothing more. The error is entirely in their favour. The agreement SAYS SO i
 by `tests/hostingTiers.test.ts` so removing that line the day the meter goes live is a deliberate act
 rather than a silent one, and `AppKnowledgeBase.ts` tells every AI to never claim a traffic charge a
 user's ledger does not actually show.
+
+---
+
+## 2026-09-10 — Renewal reminders: 5 / 3 / 1 days, plus the grace-window warning that was missing
+
+Admin: **"user ko 5-3-1 day me reminder notification show hona chahiye"**.
+
+Two changes, and the second is the one that mattered more than the ask:
+
+1. `HOSTING_PLAN_REMINDER_DAYS` widened from `[5, 1]` to `[5, 3, 1]`. One warning five days out and
+   then silence until the last day is easy to miss entirely; the middle one is the useful one.
+
+2. **🔴 THE THREE-DAY SILENCE AFTER EXPIRY, WHICH NOBODY HAD NOTICED.** The pre-expiry reminders only
+   fire while `exp > now`, and the lapse message only fires *past* the grace window. So for the entire
+   3-day grace period — the single most useful moment to reach someone, when the plan has genuinely
+   ended and one recharge still fixes it with nothing interrupted — the user heard **nothing at all**.
+   That was the exact opposite of the reminder feature's purpose. There is now ONE grace message,
+   keyed on the expiry so a new period resets it and a daily sweep cannot nag.
+
+The grace message says three things, in this order because that is the order the user needs them:
+the plan HAS ended; there are N days before the domain pauses; and the app stays live on its free
+NavBharatAI link either way. It names the exact shortfall when the wallet cannot cover the renewal —
+"recharge" is not actionable without an amount.
+
+One existing test asserted SILENCE through the grace window and now asserts the message; what it
+really guarded — that no domain is detached inside grace — is unchanged and still asserted.
+
+### ⏸️ OPEN QUESTION PUT TO THE ADMIN — "plan khatam, app offline honi chahiye"
+
+The admin's instinct (a lapse with no bite means nobody recharges) is right, but the literal fix has a
+hole worth naming before it ships, so it is asked rather than assumed:
+
+**Free hosting is a real product here.** `HostingQuota` gives EVERY user — paid or not — 5 published
+apps, 200 MB total, 50 MB each, on NavBharatAI's bill, with the badge. If a lapsed PAYING user's app
+goes fully offline while someone who never paid a rupee keeps 5 apps live, then paying once makes you
+strictly worse off than never paying.
+
+**And the real hole the admin is sensing is a different one:** `publishedAppCap()` is NOT plan-aware.
+A ₹499 Growth customer gets the same 5-app cap as a free user, so the plan today grants domains, badge
+removal, remix and ad-free — and **no hosting allowance at all**. "Hosting plan" is currently a
+misnomer, which is precisely why losing it feels toothless.
+
+Recommendation put to the admin: make the plans grant real hosting headroom, and make a lapse a
+**demotion to the free tier** rather than a blackout — apps above the free 5 go offline (files kept,
+one tap to restore on renewal), the domain pauses, the badge returns. A Growth user holding 20 live
+apps then loses 15 on lapse, which is real pressure; a one-app user keeps their app but loses the
+domain, which is fair. Awaiting the admin's call before building either.

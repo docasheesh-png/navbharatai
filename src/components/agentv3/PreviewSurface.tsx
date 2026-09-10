@@ -6,7 +6,7 @@
 // build never writes — so the preview looked permanently "disconnected" from the v5.0 engine.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RotateCcw, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RotateCcw, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles, ChevronLeft, ChevronRight, Sun, Moon } from 'lucide-react';
 import { canOfferRestart, restartStatusLine } from './previewRestart';
 import { nextDoorUrl } from './previewDoorClient';
 import { resolveApiHref } from '../../lib/apiBase';
@@ -22,7 +22,7 @@ import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
 import { shouldFailoverToLive, liveFailoverNotice, noLiveRescueNotice, rescueActionForPreviewError } from './previewLiveFailover';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
-import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
+import { type PreviewViewport, type PreviewZoom, DEVICE_DIMS, computeDeviceScale, resolveZoomScale, nextZoom, zoomLabel } from './previewViewport';
 import { frameworkRunsInBrowser } from '../../lib/frameworkDetect';
 import { inBrowserRefusal } from './inBrowserRefusal';
 import { shouldShowNotServingSurface } from './previewFraming';
@@ -69,7 +69,7 @@ function Empty({ children }: { children: React.ReactNode }) {
  * media queries respond for real) and scales the whole device box down to fit the panel when it's
  * larger than the available room. The child iframe must be `w-full h-full` to fill the box.
  */
-function ResponsiveFrame({ viewport, children }: { viewport: PreviewViewport; children: React.ReactNode }) {
+function ResponsiveFrame({ viewport, zoom = 'fit', children }: { viewport: PreviewViewport; zoom?: PreviewZoom; children: React.ReactNode }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const dims = viewport === 'auto' ? null : DEVICE_DIMS[viewport];
@@ -79,13 +79,15 @@ function ResponsiveFrame({ viewport, children }: { viewport: PreviewViewport; ch
     const el = wrapRef.current;
     if (!el) return;
     // 24px accounts for the padding around the device so it never touches the panel edges.
-    const recompute = () => setScale(computeDeviceScale(el.clientWidth - 24, el.clientHeight - 24, dims.w, dims.h));
+    // 'fit' keeps the original never-upscale behaviour; an explicit step is honoured even when it
+    // overflows the panel, because scrolling a true-size layout is the entire point of asking for one.
+    const recompute = () => setScale(resolveZoomScale(zoom, el.clientWidth - 24, el.clientHeight - 24, dims.w, dims.h));
     recompute();
     const ro = new ResizeObserver(recompute);
     ro.observe(el);
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dims?.w, dims?.h]);
+  }, [dims?.w, dims?.h, zoom]);
 
   // CONSTANT tree depth in EVERY mode — stage → footprint → device-box → iframe. Viewport changes flow
   // ONLY through inline style/className; the tree SHAPE never changes, so switching Auto↔device (or
@@ -185,6 +187,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // Chosen responsive viewport — shared across BOTH previews (live + in-browser), so switching the
   // preview source keeps the device you were testing at. 'auto' = fill the panel (default).
   const [viewport, setViewport] = useState<PreviewViewport>('auto');
+  /**
+   * MANUAL ZOOM for a device viewport. 'fit' is today's behaviour — shrink the device box until it
+   * fits the panel. The fixed steps let the user look at a desktop layout at its true size and scroll,
+   * which is the only way to judge real text size and spacing on a narrow split.
+   */
+  const [zoom, setZoom] = useState<PreviewZoom>('fit');
   const [html, setHtml] = useState<string>('');
   const [kind, setKind] = useState<string>('');
   // Task #64 — honest full-stack state: the in-browser preview compiles only the frontend, so when the
@@ -331,7 +339,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // Reset the viewport to Auto on a new/changed workspace too — a leftover Mobile/Tablet device frame
   // from the previous app would otherwise misrepresent the next one.
   useEffect(() => {
-    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setIdleSnapshotUrl(''); setIdleSnapshotNote(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto'); setLiveBridgeReady(false); setConsoleEntries([]); setRoutePath(''); setRouteDraft(''); setFidelityNotice('');
+    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setIdleSnapshotUrl(''); setIdleSnapshotNote(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto'); setLiveBridgeReady(false); setConsoleEntries([]); setRoutePath(''); setRouteDraft(''); setFidelityNotice(''); setThemeToggleAvailable(false); setPreviewIsDark(false); setZoom('fit');
     // The failover guards are per-project state: a new workspace gets a fresh chance to rescue itself.
     failedOverToLive.current = false; userPickedInBrowser.current = false; setFailoverNote('');
   }, [workspaceId]);
@@ -966,6 +974,24 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     window.addEventListener('message', onRoute);
     return () => window.removeEventListener('message', onRoute);
   }, []);
+  /**
+   * DARK MODE, ONLY WHERE IT IS REAL. A page cannot emulate prefers-color-scheme for a frame it
+   * embeds — that is a devtools capability — so the app is asked whether it has class-based dark
+   * styling at all, and the button appears only when the answer is yes. An app themed purely by the
+   * OS setting gets no button rather than one that does nothing.
+   */
+  const [themeToggleAvailable, setThemeToggleAvailable] = useState(false);
+  const [previewIsDark, setPreviewIsDark] = useState(false);
+  useEffect(() => {
+    const onTheme = (e: MessageEvent) => {
+      const d = e.data as { __nbaiPreviewTheme?: boolean; canToggle?: boolean; isDark?: boolean } | null;
+      if (!d || d.__nbaiPreviewTheme !== true) return;
+      setThemeToggleAvailable(d.canToggle === true);
+      setPreviewIsDark(d.isDark === true);
+    };
+    window.addEventListener('message', onTheme);
+    return () => window.removeEventListener('message', onTheme);
+  }, []);
   /** Post to whichever preview is actually on screen — they are different frames. */
   const postToPreview = useCallback((msg: Record<string, unknown>) => {
     const frame = mode === 'live' ? liveIframeRef.current : inBrowserIframeRef.current;
@@ -1427,12 +1453,49 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     </div>
   );
 
+  /**
+   * ZOOM — only in a device viewport, because Auto already fills the panel and there is nothing to
+   * fit. One cycling button rather than four: the toolbar row is already the thing that overflows on
+   * a phone, and this is a control the user reaches for occasionally, not constantly.
+   */
+  const zoomButton = viewport === 'auto' ? null : (
+    <button
+      onClick={() => setZoom((z) => nextZoom(z))}
+      className="shrink-0 px-1.5 py-0.5 rounded border border-zinc-700 text-[10px] font-semibold text-zinc-400 hover:text-zinc-200 tabular-nums"
+      title="Zoom the device view — Fit shrinks it into the panel; 100% shows the real size and scrolls, which is the only way to judge true text size and spacing"
+      aria-label={`Zoom: ${zoomLabel(zoom)}`}
+    >
+      {zoomLabel(zoom)}
+    </button>
+  );
+
+  /**
+   * DARK / LIGHT — shown ONLY when the app reported that it actually has class-based dark styling.
+   * A page cannot emulate the OS colour-scheme setting for a frame it embeds, so an app themed purely
+   * that way correctly gets no button here instead of one that silently does nothing.
+   */
+  const themeButton = themeToggleAvailable ? (
+    <button
+      onClick={() => { const next = previewIsDark ? 'light' : 'dark'; setPreviewIsDark(!previewIsDark); postToPreview({ __nbaiTheme: next }); }}
+      className="shrink-0 px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200"
+      title={previewIsDark ? 'Switch your app to its light theme' : 'Switch your app to its dark theme'}
+      aria-label="Toggle your app's dark theme"
+      aria-pressed={previewIsDark}
+    >
+      {previewIsDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+    </button>
+  ) : null;
+
   if (mode === 'live' && effectiveUrl) {
     return (
       <div className="h-full flex flex-col">
         <div className={TOOLBAR_ROW}>
           {switcher}
           {viewportSwitcher}
+        {zoomButton}
+        {themeButton}
+          {zoomButton}
+          {themeButton}
           {/* THE MACHINE'S ADDRESS USED TO BE PRINTED HERE, VERBATIM (gap analysis 2026-09-10).
               `{effectiveUrl}` rendered `https://3000-<sandboxId>.e2b.app` — the very string the admin
               had ordered out of the chat, because forwarding it puts someone else's traffic on a
@@ -1635,7 +1698,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             </div>
           </div>
         ) : (
-          <ResponsiveFrame viewport={viewport}>
+          <ResponsiveFrame viewport={viewport} zoom={zoom}>
             {/* The DOOR leads when the server offers it: the frame then never holds a machine's
                 address, so a dead sandbox resolves to our own reconnecting page instead of a vendor
                 error, and a moved app resolves to wherever it now lives. A remount (reload button,
@@ -1954,7 +2017,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         // so the untrusted app runs in an isolated origin. `allow-same-origin` is safe now — it's the
         // preview origin's (empty) localStorage, never the platform's Firebase token — and `import()`
         // still works because the preview origin is a real https origin.
-        <ResponsiveFrame viewport={viewport}>
+        <ResponsiveFrame viewport={viewport} zoom={zoom}>
           <iframe
             ref={inBrowserIframeRef}
             title="In-browser preview"
@@ -1974,7 +2037,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         // (how the preview loads React from the CDN) is blocked → "Missing dependency react". Safe under
         // the allowlist (trusted admins only); Phase 4 cross-origin isolation activates once
         // VITE_PREVIEW_ORIGIN is set. The live-server iframe above already sets allow-same-origin.
-        <ResponsiveFrame viewport={viewport}>
+        <ResponsiveFrame viewport={viewport} zoom={zoom}>
           <iframe
             ref={inBrowserIframeRef}
             title="In-browser preview"

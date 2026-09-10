@@ -73,6 +73,45 @@ export function previewBridgeSource(source: 'in-browser' | 'live'): string {
     var r = e && e.reason;
     mirror('error', ['Unhandled promise rejection: ' + (r instanceof Error ? r.message : String(r))]);
   });
+  // ── DARK MODE, WITHOUT PRETENDING TO BE DEVTOOLS (gap analysis 2026-09-10) ──────────────────
+  // A web page CANNOT emulate prefers-color-scheme, a coarse pointer or a device pixel ratio for a
+  // frame it embeds — those are devtools capabilities, and claiming them would be a fake control.
+  // What can be done honestly is the thing most apps actually use: a class on <html>, which is what
+  // Tailwind's darkMode:['class'] compiles against and what NavBharatAI's own scaffolds ship.
+  //
+  // So the app is ASKED whether it has any dark styling at all, and the panel shows the toggle only
+  // if the answer is yes. An app themed purely by prefers-color-scheme reports false and gets no
+  // button, rather than a button that does nothing.
+  function hasClassDarkStyling() {
+    try {
+      var sheets = document.styleSheets, scanned = 0;
+      for (var i = 0; i < sheets.length; i++) {
+        var rules = null;
+        try { rules = sheets[i].cssRules; } catch (e) { continue; }  // a cross-origin sheet is unreadable
+        if (!rules) continue;
+        for (var j = 0; j < rules.length; j++) {
+          // Bounded: a full Tailwind build is tens of thousands of rules and this runs on the user's
+          // phone. The dark variants appear early enough that a cap costs nothing real.
+          if (++scanned > 6000) return false;
+          var sel = rules[j] && rules[j].selectorText;
+          if (sel && sel.indexOf('.dark') >= 0) return true;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+  function reportTheme() {
+    try {
+      post({
+        __nbaiPreviewTheme: true, source: SOURCE,
+        canToggle: hasClassDarkStyling(),
+        isDark: !!(document.documentElement && document.documentElement.classList.contains('dark')),
+      });
+    } catch (e) { /* ignore */ }
+  }
+  // Stylesheets are not there yet at parse time, so the answer is only meaningful after load.
+  window.addEventListener('load', function () { setTimeout(reportTheme, 300); });
+
   // ── WHICH PAGE AM I ON, AND TAKE ME TO ANOTHER ONE (gap analysis 2026-09-10) ────────────────
   // The preview had no address bar and no back/forward, in either mode. A multi-page app could be
   // navigated only by clicking inside it, and there was no way to jump straight to /checkout to look
@@ -111,6 +150,11 @@ export function previewBridgeSource(source: 'in-browser' | 'live'): string {
     var d = e && e.data;
     if (!d || typeof d !== 'object') return;
     try {
+      if (d.__nbaiTheme === 'dark' || d.__nbaiTheme === 'light') {
+        document.documentElement.classList.toggle('dark', d.__nbaiTheme === 'dark');
+        reportTheme();
+        return;
+      }
       if (d.__nbaiHistory === 'back') { history.back(); return; }
       if (d.__nbaiHistory === 'forward') { history.forward(); return; }
       if (typeof d.__nbaiNavigate === 'string' && d.__nbaiNavigate) {

@@ -960,7 +960,17 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
         body: JSON.stringify({ workspaceId, domain: cleanDomain }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { setError(data?.error || 'Could not start automatic setup.'); setErrorDetail(typeof data?.detail === 'string' ? data.detail : null); return; }
+      if (!res.ok) {
+        // Automatic setup is plan-gated too since 2026-09-10 — and it must READ as the upgrade note,
+        // not as a red failure. Nothing is broken here: this step creates a real DNS zone and asks
+        // the user to repoint their nameservers, which is precisely why a free account must be
+        // stopped BEFORE it, rather than after they have already changed them.
+        setNeedsPlan(data?.needsPlan === true);
+        setError(data?.error || 'Could not start automatic setup.');
+        setErrorDetail(typeof data?.detail === 'string' ? data.detail : null);
+        return;
+      }
+      setNeedsPlan(false);
       setAutoNs(Array.isArray(data?.nameServers) ? data.nameServers : []);
       setAutoZoneStatus(typeof data?.zoneStatus === 'string' ? data.zoneStatus : null);
     } catch (e) {

@@ -243,8 +243,8 @@ import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
-import { publishedAppCap } from '../lib/HostingQuota';
-import { hostingPlansEnabled, hostingPlanPriceInr } from '../lib/hostingPlan';
+import { publishedAppCap, publishedAppCapForTier } from '../lib/HostingQuota';
+import { hostingPlansEnabled, hostingPlanPriceInr, readHostingPlanStatus } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
 import {
   buildOutputCandidates, buildOutputCensusCommand, readBuildOutputCensus, builtSiteRefusal,
@@ -342,7 +342,7 @@ function sessionCostCapUsd(): number {
   const v = parseFloat(process.env.SESSION_COST_CAP_USD ?? '');
   return Number.isFinite(v) && v > 0 ? v : 5.0;
 }
-import { deploymentStore, withDeploymentPersistence, isLiveDeployment, publishedAppList, type DeploymentRecord } from '../AgentV3/DeploymentStore';
+import { deploymentStore, withDeploymentPersistence, isLiveDeployment, publishedAppList, pausedAppList, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 import { resolvePublishState } from '../AgentV3/publishState';
 import { ensureBootEnv, bootEnvNote, type BootEnvIo } from '../AgentV3/devSecretsBoot';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
@@ -6997,10 +6997,22 @@ async function noteBuildOutcome(
     // Only LIVE apps, and `orphaned` surfaced so the UI can say plainly why an app has no chat to
     // open — the very case this endpoint exists for. See publishedAppList for both rules.
     const apps = publishedAppList(records);
+    // Apps a plan lapse took offline, listed separately so the user can find and restore them. They
+    // are deliberately NOT in `apps` — that count has to equal what the publish cap enforces.
+    const paused = pausedAppList(records);
+    // The tier the user actually holds, so the cap shown matches the cap enforced. Bounded and
+    // forgiving: unreadable ⇒ null ⇒ the free cap, which is the safe answer in both directions.
+    const tier = await readHostingPlanStatus(getDb() as any, identity.uid)
+      .then((st) => st.tier)
+      .catch(() => null);
     res.json({
       apps,
-      // The cap is stated with the list so "5 of 5 used" is visible before a publish is refused.
-      cap: publishedAppCap(),
+      paused,
+      // The cap is stated with the list so "5 of 5 used" is visible before a publish is refused. It
+      // follows the user's PLAN, so a Growth customer is not told they are at the free limit of 5.
+      cap: publishedAppCapForTier(tier),
+      freeCap: publishedAppCap(),
+      planName: tier?.name ?? null,
       used: apps.length,
     });
   });

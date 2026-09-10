@@ -168,7 +168,7 @@ const TOOLBAR_ROW =
   'flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400 '
   + 'overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
 
-export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, buildPhase, bootSignal, onFixError, onFileEdited, onAskAiAboutElement }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean;
+export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, buildPhase, bootSignal, onFixError, onFileEdited, onAskAiAboutElement, versionUrl, versionSha, onExitVersion }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean;
   /**
    * Is this pane the surface actually on screen INSIDE the app?
    *
@@ -178,7 +178,13 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
    * silently reintroduce the sandbox-cost leak this prop was added to close — see
    * `shouldWatchLivePreview` in previewKeepAlive.ts for the full history.
    */
-  paneVisible: boolean; reloadSignal?: number; buildPhase?: BuildPhase; bootSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void }) {
+  paneVisible: boolean; reloadSignal?: number; buildPhase?: BuildPhase; bootSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void;
+  /**
+   * AN OLDER CHECKPOINT, RUNNING. Set while the user is looking at a previous version of their app
+   * (Checkpoints → Preview). It takes over the frame so the address never leaves this page — the same
+   * billable-address rule the toolbar label follows. Never null-and-showing: no url ⇒ no banner.
+   */
+  versionUrl?: string; versionSha?: string; onExitVersion?: () => void }) {
   // A4 (unified preview): in-browser is the DETERMINISTIC DEFAULT — it always renders the current
   // files instantly with no server, so the preview is never a dead "No live preview yet" empty state
   // that depends on an ephemeral E2B sandbox being up. "Live server" (full-fidelity, real runtime) is
@@ -1518,6 +1524,39 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       {previewIsDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
     </button>
   ) : null;
+
+  // AN OLDER VERSION TAKES OVER THE WHOLE SURFACE, with an unmissable banner.
+  //
+  // It sits ABOVE both mode branches deliberately: a user looking at last week's build must not also
+  // be looking at today's toolbar, its Edit button or its console — every one of those would act on
+  // the CURRENT app while the frame showed an old one, which is the worst kind of wrong.
+  if (versionUrl) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-800 bg-amber-950/40 text-[11px] text-amber-100">
+          <span className="shrink-0" aria-hidden="true">🕘</span>
+          <span className="flex-1 min-w-0 truncate">
+            You are looking at an <strong>older version</strong> of your app{versionSha ? ` (${versionSha.slice(0, 7)})` : ''}. Your current app is untouched.
+          </span>
+          <button
+            onClick={() => onExitVersion?.()}
+            className="shrink-0 px-2 py-0.5 rounded border border-amber-600/60 hover:bg-amber-900/40"
+          >
+            Back to my app
+          </button>
+        </div>
+        {/* The url is never displayed and never opened in a tab — it addresses a machine billed by the
+            minute, exactly like the live preview's. See AgentV3Panel's versionView for the full note. */}
+        <iframe
+          title="Older version of your app"
+          src={versionUrl}
+          className="w-full flex-1 bg-white border-0"
+          allow={PREVIEW_IFRAME_ALLOW}
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        />
+      </div>
+    );
+  }
 
   if (mode === 'live' && effectiveUrl) {
     return (

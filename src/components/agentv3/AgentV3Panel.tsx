@@ -838,6 +838,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   /** Which checkpoint is currently being opened — the button says so rather than looking dead. */
   const [previewingSha, setPreviewingSha] = useState<string>('');
   /**
+   * AN OLDER VERSION, SHOWN INSIDE THE PANEL RATHER THAN IN A NEW TAB.
+   *
+   * 🔴 THE SIBLING THE TOOLBAR FIX MISSED (found 2026-09-10 while closing the preview gaps). The Live
+   * toolbar stopped printing the sandbox's address because forwarding it puts a stranger's traffic on
+   * a machine billed by the minute — and this path handed the user the SAME KIND of address, in their
+   * own address bar, ready to copy, by opening it with window.open. Worse than the toolbar: a second
+   * dev server is running behind that one.
+   *
+   * The door route cannot be the answer here. It resolves the port by sweeping, with the MAIN app's
+   * proven port first, so a door minted for a version's port would very likely redirect to today's
+   * app while the banner said "an older version" — a wrong answer dressed as a right one, which is
+   * worse than the leak. So the url stays internal to an iframe, exactly as the live preview's does.
+   */
+  const [versionView, setVersionView] = useState<{ sha: string; url: string } | null>(null);
+  /**
    * Look at an old checkpoint WITHOUT restoring it.
    *
    * Restore is destructive: until this existed, comparing against an older version meant overwriting
@@ -850,9 +865,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     try {
       const { ok, url, message } = await previewVersion(sha);
       setRestoreNote(`${ok ? '✅' : '⚠️'} ${message}`);
-      // Opened only on a URL the server proved answers — never optimistically, or the user lands on a
-      // browser error page and blames their app.
-      if (ok && url) window.open(url, '_blank', 'noopener,noreferrer');
+      // Shown only on a URL the server proved answers — never optimistically, or the user lands on a
+      // browser error page and blames their app. Shown IN the panel, never handed over as a link: see
+      // versionView above for why this is the same billable-address leak the toolbar fix closed.
+      if (ok && url) setVersionView({ sha, url });
     } finally {
       setPreviewingSha('');
     }
@@ -5213,6 +5229,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           {previewMounted(previewEverOpened, showWorkspace, tab, previewPrewarm) && (
             <div className={previewWrapClass(showWorkspace, tab)}>
               <PreviewSurface
+                versionUrl={versionView?.url}
+                versionSha={versionView?.sha}
+                onExitVersion={() => setVersionView(null)}
                 url={state.previewUrl}
                 // Prefer the live build's workspace, but FALL BACK to this session's derived id when a
                 // restored/idle session has no live workspace in state (the "preview gaya" half of the

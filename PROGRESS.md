@@ -46940,3 +46940,81 @@ Nothing was broken — a wire was missing. Now refreshed at boot and every six h
 exclusive job would refresh exactly one instance and leave every other one billing at 85 — the same
 bug with extra steps. Every instance refreshes its own copy; the cost is one small HTTP call per
 instance per six hours.
+## 2026-09-10 — DPDP + GDPR consent banner, one click, for USER apps (ROADMAP §13 item 4.4)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2801).
+
+### The gap
+`generate_consent` (shipped earlier) is the BACKEND consent LOG. Nothing produced the banner a visitor
+actually sees, or kept third-party scripts off until they agreed — and the platform's own
+`ComplianceAnalysis` flags exactly that ("third-party trackers running with no cookie-consent surface").
+Every competitor ships a generic GDPR widget; none ships one written for India's DPDP Act. Safeguard-6:
+`ConsentBanner.tsx` is NavBharatAI's OWN banner; `publishConsent.ts` is "did the user ask to publish" —
+unrelated names, same word, checked before writing.
+
+### What shipped
+- **`src/server/lib/ConsentBannerGenerator.ts`** (pure builder → files): `public/consent-banner.js`
+  (dependency-free, plain HTML and React alike) + `CONSENT_BANNER.md`. The testable heart sits between
+  `NAVCONSENT-CORE` markers as plain JS with no DOM — the test executes the REAL emitted code — and the
+  DOM shell is string-locked. Every option is sanitised inside the generator (quotes, angle brackets,
+  backticks and `$` stripped before `JSON.stringify`; a bad URL → `/privacy`; a bad email → omitted; an
+  unknown purpose → the default list), so a hostile app name cannot break out of the emitted script.
+- **The rules the banner enforces (legal requirements, not style):** nothing non-essential loads before
+  consent — a third-party script is written `<script type="text/plain" data-consent="analytics"
+  data-src="…">` and activated once, only when every purpose it names is granted; no pre-ticked boxes;
+  "Reject all" beside "Accept all"; a persistent "Privacy choices" control (or the app's own
+  `data-consent-open` link) reopens it — withdrawal as easy as consent (DPDP §6(4)); the stored choice
+  carries the policy VERSION, so a changed policy asks again; Global Privacy Control = no consent and no
+  nag, opt-in still possible; notice in English AND Hindi by default; Privacy Policy link and the DPDP
+  grievance contact on the banner itself. `window.NavConsent.has/granted/open/onChange` +
+  `nbconsent:change`.
+- **Tool `generate_consent_banner`** (catalog def with a real input schema — appName, policyUrl,
+  grievanceEmail, language, purposes, policyVersion; allow-list entry; dispatcher case that writes the
+  files and returns the three wiring steps: include once in `<head>`, convert every third-party script,
+  add the footer link). `AppKnowledgeBase` bullet beside the consent-log one.
+- Locked by `ConsentBannerGenerator.test.ts`: fresh visitor asked with nothing granted; stored choice
+  honoured only for its policy version; GPC; every-purpose gating; the three answers; sanitisation;
+  no pre-ticked boxes; reopen control; bilingual defaults; white-label; emitted JS parses.
+  `ToolWiring.test.ts` proves the advertised tool routes to a real handler.
+
+### Honest limits
+- A script already running in the current page session cannot be unloaded by anyone; withdrawal stops
+  the next load and fires the change event so the app stops sending. The README says so.
+- A tool, not legal advice: the Privacy Policy must still name every recipient of visitors' data. The
+  instructions tell the model to make sure that page exists.
+
+## 2026-09-10 — Payments, UPI first: Cashfree added, verified webhooks on both Indian recipes (ROADMAP §13 item 3.2)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after 4.4).
+
+### The gap
+`generate_payment` wired Razorpay or Stripe: an order route, a client-side verify, no webhook — so a
+buyer who closed the tab after paying was never recorded as paid. Cashfree, the gateway NavBharatAI
+itself runs on, was not offered at all, while every competitor is Stripe-only. UPI is the moat for an
+Indian shop, and the roadmap row says so.
+
+### What shipped (PaymentGenerator.ts, pure; catalog + dispatcher + knowledge base)
+- **Cashfree provider** — dependency-free (platform `fetch` + `node:crypto`): `POST /order` creates the
+  order against the REAL PG API (`/pg/orders`, `x-client-id` / `x-client-secret` / `x-api-version
+  2023-08-01`, the same shape the platform's own `routes/payment.ts` uses) and returns the
+  `payment_session_id`; `POST /verify` asks CASHFREE whether the order is `PAID` — never the browser;
+  `paymentWebhook` checks Cashfree's documented signature — base64 HMAC-SHA256(timestamp + rawBody,
+  client secret) — with `timingSafeEqual`, on the RAW body. Client: the official SDK modal
+  (`sdk.cashfree.com/js/v3`, UPI / cards / net banking / wallets), then server verification. Env:
+  `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY`, `CASHFREE_ENV` (sandbox default; keys must match).
+- **Razorpay gains the webhook** (`X-Razorpay-Signature` = hex HMAC-SHA256(rawBody, webhook secret),
+  constant-time) and `RAZORPAY_WEBHOOK_SECRET`. `PaymentConfig.dependency` is now optional; the
+  dispatcher says "no dependency needed" instead of printing `undefined@undefined`.
+- **Honest about keys and money:** the instructions say the keys go in the app's OWN env — `.env`, or
+  Settings → App Settings → Secrets & API Keys (merged into `.env` at build) — and that the money lands
+  in the USER's merchant account. NavBharatAI's own Cashfree account is never used for a user's app
+  (standing rule). The webhook URL must be registered in the provider's dashboard; the instructions
+  name the exact screen rather than pretending we can register it with someone else's keys.
+- Catalog: `provider` enum gains `cashfree`; the description tells the model when to pick which, and
+  that both Indian gateways show UPI. Knowledge-base PAYMENTS bullet rewritten around UPI.
+- Locked in `PaymentGenerator.test.ts`: real API hosts/headers, PAID-only verification, both signature
+  schemes verbatim + `timingSafeEqual`, SDK checkout, blank env values, white-label, no stubs.
+
+### Honest limits
+- The ₹1 UPI test the roadmap names as "done when" needs a real merchant's sandbox keys in a real app —
+  a session cannot run it. The code paths mirror the platform's own live Cashfree integration.

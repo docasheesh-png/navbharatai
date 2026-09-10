@@ -80,7 +80,10 @@ describe('the invariant this change had to respect', () => {
     // ResponsiveFrame keeps a constant tree depth precisely so the iframe is never reparented, and
     // reparenting an iframe IS a reload — the very thing this bar exists to prevent. Putting the bar
     // inside it would have made the fix cause the bug.
-    const frame = surface.indexOf('<ResponsiveFrame viewport={viewport}>');
+    // Matched by TAG rather than by the exact prop list: this guard broke once simply because a
+    // `zoom` prop was added, which is a false failure — the invariant is about what is INSIDE the
+    // frame, not about how many props it takes.
+    const frame = surface.search(/<ResponsiveFrame[\s>]/);
     const close = surface.indexOf('</ResponsiveFrame>', frame);
     expect(frame).toBeGreaterThan(-1);
     expect(surface.slice(frame, close)).not.toContain('deferredReloadNote');

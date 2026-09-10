@@ -26,6 +26,7 @@ import { type PreviewViewport, type PreviewZoom, DEVICE_DIMS, computeDeviceScale
 import { frameworkRunsInBrowser } from '../../lib/frameworkDetect';
 import { inBrowserRefusal } from './inBrowserRefusal';
 import { shouldShowNotServingSurface } from './previewFraming';
+import { pickedElementPrompt, type PickedElement } from './previewPick';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { LIVE_SERVER_PAID_NOTE, LIVE_SERVER_PAID_TAG, isLiveServerNoticeDismissed, dismissLiveServerNotice } from '../../lib/liveServerNotice';
 import { previewAddressLabel } from './previewAddress';
@@ -339,7 +340,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // Reset the viewport to Auto on a new/changed workspace too — a leftover Mobile/Tablet device frame
   // from the previous app would otherwise misrepresent the next one.
   useEffect(() => {
-    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setIdleSnapshotUrl(''); setIdleSnapshotNote(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto'); setLiveBridgeReady(false); setConsoleEntries([]); setRoutePath(''); setRouteDraft(''); setFidelityNotice(''); setThemeToggleAvailable(false); setPreviewIsDark(false); setZoom('fit');
+    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setIdleSnapshotUrl(''); setIdleSnapshotNote(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto'); setLiveBridgeReady(false); setConsoleEntries([]); setRoutePath(''); setRouteDraft(''); setFidelityNotice(''); setPicking(false); setThemeToggleAvailable(false); setPreviewIsDark(false); setZoom('fit');
     // The failover guards are per-project state: a new workspace gets a fresh chance to rescue itself.
     failedOverToLive.current = false; userPickedInBrowser.current = false; setFailoverNote('');
   }, [workspaceId]);
@@ -992,11 +993,43 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     window.addEventListener('message', onTheme);
     return () => window.removeEventListener('message', onTheme);
   }, []);
+  /**
+   * POINT & ASK on the LIVE preview — the capability the Visual Editor cannot offer there.
+   *
+   * The exact-edit toolbar needs file:line:column from our own Babel stamp, which does not exist in
+   * a Vite-built app, and patching a plugin into the user's vite.config to get it back is a way to
+   * break their build. So Live gets the part that matters — point at a thing, tell the AI what to
+   * change about it — described in words rather than coordinates. See previewPick.ts.
+   */
+  const [picking, setPicking] = useState(false);
+  useEffect(() => {
+    const onPicked = (e: MessageEvent) => {
+      const d = e.data as { __nbaiPreviewPicked?: boolean; element?: PickedElement } | null;
+      if (!d || d.__nbaiPreviewPicked !== true) return;
+      setPicking(false);
+      const line = pickedElementPrompt(d.element);
+      // Nothing identifying came back, so there is nothing honest to hand the chat. Say so rather
+      // than sending "the <div>" and letting the AI edit whichever one it guesses.
+      if (!line) { setFailoverNote('That element has nothing to identify it — try one with text on it.'); return; }
+      onAskAiAboutElement?.(line);
+    };
+    window.addEventListener('message', onPicked);
+    return () => window.removeEventListener('message', onPicked);
+  }, [onAskAiAboutElement]);
   /** Post to whichever preview is actually on screen — they are different frames. */
   const postToPreview = useCallback((msg: Record<string, unknown>) => {
     const frame = mode === 'live' ? liveIframeRef.current : inBrowserIframeRef.current;
     try { frame?.contentWindow?.postMessage(msg, '*'); } catch { /* best-effort */ }
   }, [mode]);
+  // LEAVING LIVE MUST DISARM THE PICKER. Without this the app is left with a crosshair cursor and a
+  // swallowed first click — so the next thing the user tapped would do nothing, with no way to guess
+  // why. A control that can be left armed invisibly is worse than no control.
+  useEffect(() => {
+    if (mode !== 'live' && picking) { setPicking(false); postToPreview({ __nbaiPickMode: false }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+
 
   const consoleErrorCount = countConsoleErrors(consoleEntries);
   const visibleConsoleEntries = filterConsoleEntries(consoleEntries, consoleFilter, consoleQuery);
@@ -1509,6 +1542,17 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
               watching their live app throw had to open devtools to find out why. Same button, same
               drawer, same "Fix with AI"; the rows arrive from the bridge injected at dev-server
               launch (AgentV3/previewBridge.ts). */}
+          {onAskAiAboutElement && (
+            <button
+              onClick={() => { const next = !picking; setPicking(next); postToPreview({ __nbaiPickMode: next }); }}
+              className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] ${picking ? 'bg-indigo-600 text-white border-indigo-500' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
+              title={picking ? 'Now click any part of your app' : 'Point at something in your app and tell the AI what to change about it'}
+              aria-pressed={picking}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {picking ? 'Click it…' : 'Point'}
+            </button>
+          )}
           {consoleButton}
           <button onClick={() => setLiveReloadKey((k) => k + 1)} className="shrink-0 flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           {/* RESTART THE SERVER — reachable while the preview is SHOWING (ROADMAP §8B B3).

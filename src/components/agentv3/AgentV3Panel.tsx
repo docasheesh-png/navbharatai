@@ -4151,6 +4151,39 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {(running || state.activity.length > 0) && (
               <WorkingIndicator activity={state.activity} running={running} />
             )}
+            {/* THE PROOF THAT WE ACTUALLY CHECKED (gap analysis 2026-09-10). After a build,
+                NavBharatAI drives a real browser through the app's own forms — fills them in,
+                submits, RELOADS, and confirms the entry survived. That reload is the only thing
+                separating an app that really saves data from one that looks like it does, and it is
+                the most valuable check the platform performs.
+
+                The user was never told any of it: the result went into the ADMIN diagnostics report,
+                which they cannot open, while the chat said "your app is ready" in exactly the same
+                words it uses when nothing was verified at all. Showing the work is the whole of
+                Antigravity's pitch, and we were doing the harder half of it in private.
+
+                A FAILURE IS AS VISIBLE AS A PASS, in the same card and the same place — the wording
+                comes from the server (journeyUserSummary) so it cannot be softened here, and a check
+                that could not run says so rather than being rounded up. */}
+            {state.verification && state.verification.steps.length > 0 && (
+              <div className={`mx-auto my-3 max-w-[92%] rounded-xl border px-3 py-2.5 text-sm ${
+                state.verification.ok
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
+                  : 'border-amber-500/40 bg-amber-500/10 text-amber-100'}`}>
+                <div className="flex items-start gap-2">
+                  <span className="mt-0.5 shrink-0" aria-hidden="true">{state.verification.ok ? '✅' : '⚠️'}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium">{state.verification.headline}</div>
+                    <ul className="mt-1 space-y-0.5 text-xs opacity-90">
+                      {state.verification.steps.map((line, i) => (
+                        <li key={i} className="flex gap-1.5"><span aria-hidden="true">•</span><span className="flex-1">{line}</span></li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ASK-USER (opt-in) — a NON-BLOCKING clarify card. The engine is already building with
                 sensible defaults for these; the user MAY refine any of them with a follow-up message, or
                 dismiss. It never pauses the build (honours "text reply > build app"). */}

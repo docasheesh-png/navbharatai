@@ -73,6 +73,79 @@ export function previewBridgeSource(source: 'in-browser' | 'live'): string {
     var r = e && e.reason;
     mirror('error', ['Unhandled promise rejection: ' + (r instanceof Error ? r.message : String(r))]);
   });
+  // ── POINT AT A THING AND SAY WHAT TO CHANGE (gap analysis 2026-09-10) ───────────────────────
+  // The Visual Editor works on the IN-BROWSER preview only, and for a real reason: it needs
+  // file:line:column, which comes from a Babel plugin (nbaiSrcPlugin) stamping data-nbai-src during
+  // OUR compile. The live app is compiled by Vite inside the sandbox, where that plugin does not run,
+  // and React 19 removed the _debugSource that used to be the alternative.
+  //
+  // 🔒 WHAT WE DELIBERATELY DID NOT DO: patch a plugin into the user's own vite.config to get the
+  // stamp back. Rewriting somebody's build config to add a feature is a way to break their app, and
+  // the app never breaking outranks any feature. So Live gets the capability the user actually wants
+  // — point at something, describe it to the AI — through a mechanism that cannot break a build.
+  //
+  // What it sends is a DESCRIPTION rather than coordinates: the tag, its visible text, its position
+  // among siblings and the nearest heading above it. That is enough for the builder to find the
+  // element in the source; it is not enough for the AST patcher, which is why the exact-edit toolbar
+  // stays where the stamp exists and is not offered here as a half-working copy.
+  var pickMode = false;
+  function describeElement(el) {
+    try {
+      var text = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+      var parent = el.parentElement;
+      var position = '';
+      if (parent) {
+        var sibs = [], kids = parent.children;
+        for (var i = 0; i < kids.length; i++) if (kids[i].tagName === el.tagName) sibs.push(kids[i]);
+        if (sibs.length > 1) position = ' (' + (sibs.indexOf(el) + 1) + ' of ' + sibs.length + ')';
+      }
+      // The nearest heading ABOVE it in reading order is how a person would say where something is
+      // ("the button under Recent Orders") — far more locating than a CSS path a user cannot read.
+      var section = '';
+      try {
+        var heads = document.querySelectorAll('h1,h2,h3,h4,[role="heading"]');
+        for (var k = heads.length - 1; k >= 0; k--) {
+          if (heads[k].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) {
+            section = (heads[k].innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+            break;
+          }
+        }
+      } catch (e) { /* ignore */ }
+      return {
+        tag: String(el.tagName || '').toLowerCase(),
+        text: text,
+        id: el.id || '',
+        classes: String(el.className || '').split(/\s+/).filter(Boolean).slice(0, 6).join(' '),
+        position: position,
+        section: section,
+        path: String(location.pathname + location.hash || '/'),
+      };
+    } catch (e) { return null; }
+  }
+  var pickOutline = null;
+  function clearOutline() {
+    try { if (pickOutline) { pickOutline.style.outline = pickOutline.__nbaiPrevOutline || ''; pickOutline = null; } } catch (e) { /* ignore */ }
+  }
+  document.addEventListener('mouseover', function (e) {
+    if (!pickMode) return;
+    clearOutline();
+    try {
+      pickOutline = e.target;
+      pickOutline.__nbaiPrevOutline = pickOutline.style.outline;
+      pickOutline.style.outline = '2px solid #6366f1';
+    } catch (err) { /* ignore */ }
+  }, true);
+  document.addEventListener('click', function (e) {
+    if (!pickMode) return;
+    // CAPTURE PHASE + full suppression: the whole point is to pick the element rather than activate
+    // it, and letting the app's own click run would submit the form the user was only pointing at.
+    e.preventDefault(); e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+    var info = describeElement(e.target);
+    pickMode = false; clearOutline();
+    post({ __nbaiPreviewPicked: true, source: SOURCE, element: info });
+  }, true);
+
   // ── DARK MODE, WITHOUT PRETENDING TO BE DEVTOOLS (gap analysis 2026-09-10) ──────────────────
   // A web page CANNOT emulate prefers-color-scheme, a coarse pointer or a device pixel ratio for a
   // frame it embeds — those are devtools capabilities, and claiming them would be a fake control.
@@ -150,6 +223,12 @@ export function previewBridgeSource(source: 'in-browser' | 'live'): string {
     var d = e && e.data;
     if (!d || typeof d !== 'object') return;
     try {
+      if (typeof d.__nbaiPickMode === 'boolean') {
+        pickMode = d.__nbaiPickMode;
+        if (!pickMode) clearOutline();
+        try { document.body.style.cursor = pickMode ? 'crosshair' : ''; } catch (err) { /* ignore */ }
+        return;
+      }
       if (d.__nbaiTheme === 'dark' || d.__nbaiTheme === 'light') {
         document.documentElement.classList.toggle('dark', d.__nbaiTheme === 'dark');
         reportTheme();

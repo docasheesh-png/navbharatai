@@ -251,6 +251,12 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       // Non-blocking: just record the questions for the panel to surface. The build keeps streaming.
       return { ...state, pendingClarify: { domain: event.domain, questions: event.questions } };
 
+    case 'verified':
+      // The proof that the finished app was actually driven in a real browser. Recorded verbatim —
+      // the wording is decided on the server by journeyUserSummary precisely so it cannot be softened
+      // here, and a failure must be exactly as visible as a pass.
+      return { ...state, verification: { ok: event.ok, headline: event.headline, steps: event.steps } };
+
     case 'secret_request':
       // Same shape as a permission request — one pending interactive gate — but with fields to fill.
       // Kept SEPARATE so a secrets popup can never be answered by the yes/no buttons, and so the

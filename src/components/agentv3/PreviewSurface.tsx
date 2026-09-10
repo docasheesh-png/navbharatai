@@ -22,7 +22,7 @@ import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
 import { shouldFailoverToLive, liveFailoverNotice, noLiveRescueNotice, rescueActionForPreviewError } from './previewLiveFailover';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
-import { type PreviewViewport, type PreviewZoom, DEVICE_DIMS, computeDeviceScale, resolveZoomScale, nextZoom, zoomLabel } from './previewViewport';
+import { type PreviewViewport, type PreviewZoom, DEVICE_DIMS, resolveZoomScale, nextZoom, zoomLabel } from './previewViewport';
 import { frameworkRunsInBrowser } from '../../lib/frameworkDetect';
 import { inBrowserRefusal } from './inBrowserRefusal';
 import { shouldShowNotServingSurface } from './previewFraming';

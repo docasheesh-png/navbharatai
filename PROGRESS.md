@@ -46399,3 +46399,65 @@ renders is a lot, and **38% of it is Firebase**, which a visitor who never signs
 Making that lazy is a real change with real risk and belongs in its own PR. This one exists to make the
 number visible and guarded — which is the precondition for improving it, and the reason the deferred
 "tighten 400" follow-up is now moot rather than done.
+
+## 2026-09-10 — a stuck v5 build's diagnostics report: one fix shipped, two open root causes recorded honestly
+
+Admin sent a real diagnostics JSON + screenshot: a 184-file edit build ("Continue from where you left
+off and finish/fix the build") ran 30 minutes, its own tool loop reported repeated `screenshot` /
+`browser_action` failures ("exit status 1") and two "noticed a repeated step… nudging a change of
+approach" nudges, then the record simply STOPPED — no terminal entry at all — and the client showed the
+generic "The build stopped responding" banner. The Live-preview tab, meanwhile, showed E2B's own
+"Closed Port Error" on port 3000, even though the build's own log had moved the verified preview to
+port 5000 twenty minutes earlier.
+
+### ✅ Fix shipped (PR #2788): the wall-clock timeout gets its own honest outcome code
+
+Math first, not a guess: `1789011461847 - 1789009662530 = 1799317ms` — **29m 59s**, one second under
+`AGENTV3_MAX_BUILD_SECONDS`'s 1800s default. Not a coincidence. Confirmed in code: `AgentRunner.ts`'s
+`buildTimedOut()` check sits exactly where the log stops, but `AgentRunner` never touches `buildDiag` —
+only `routes/agentv3.ts` does, from the run's return value — and NO `OUTCOME_*` code existed for hitting
+the cap, unlike every other recognised outcome (`OUTCOME_BUILD_SUCCESS`, `OUTCOME_STOPPED`,
+`OUTCOME_SYNTAX_ERROR`, `OUTCOME_PREVIEW_FAILED`, `OUTCOME_REVIEW_CRITICAL`, …). So a report like this
+one had literally no way to say why it ended — a reader had to infer a timeout from a timing coincidence,
+which is the "wrong verdict" the fifth absolute rule's honesty step exists to forbid.
+
+`AgentRunResult` gained `timedOut?: boolean` (mirrors the existing `budgetReached` field); the route now
+records `OUTCOME_BUILD_TIMEOUT` (severity `warning` when files were saved, `error` when nothing was
+built) at the one point every build path converges on `result`. `deriveRootCause()` already promotes any
+`OUTCOME_*` message to the report's root cause, so this needed no further wiring. Tested: 2 cases in
+`AgentRunner.test.ts`, a 3-case wiring `describe` in the existing `tests/buildOutcomeWiring.test.ts`.
+
+### 🟡 Open root cause #1 — the Live preview can be left on a stale/dead port with no explanation
+
+Traced deep into `PreviewSurface.tsx`, `previewKeepAlive.ts` and `previewUrlFreshness.ts`. The healing
+machinery for exactly this class of bug already exists and is real — built after two prior admin reports
+(2026-08-22 "Sandbox Not Found" shown as the user's app, 2026-08-23 "Closed Port Error" as the user's
+app) — `probeAndMaybeHeal()` compares the displayed host against the server's `currentPreviewUrl` and
+re-points the frame (`setFoundUrl`) with an honest "Your preview moved to a new server" note the moment
+it detects staleness. The server-side port switch itself DID fire correctly in this build (`ToolDispatcher.ts`'s
+supersede block ran, `sandboxStore.supersedeRecipe(workspaceId, 5000)` was called, matching the exact
+narration in the log). The watchdog that would re-probe is gated on `shouldWatchLivePreview()`
+(`autoResume=!running`, `mode==='live'`, `paneVisible`, `!documentHidden`) AND `sandbox?.livePreviewAvailable===true`
+— every one of those gates is PLAUSIBLY satisfied moments after the client's own stall-watchdog flips
+`running` to `false`, which would fire an immediate probe (the effect's dependency array includes
+`autoResume`). I could not, without live reproduction, pin down which single condition failed —
+candidates in order of likelihood: (a) a benign race where the screenshot was taken in the few-hundred-ms
+window between "stopped responding" appearing and the immediate re-probe actually landing, or (b) the
+event stream itself dropped earlier (around the repeated tool-call failures at minute 27), so the
+client's local `previewUrl` state was already behind the server's by the time anything tried to correct
+it. **Trigger for revisiting:** a reproducible case, or a second admin report of the same symptom.
+
+### 🟡 Open root cause #2 — the diagnostics EXPORT SCHEMA has no field for the build's final outcome
+
+While investigating #1, found that `BuildDiagnosticsReport`'s top-level keys (`schema, buildId,
+promptHash, sessionId, workspaceId, prompt, model, plannedModel, framework, startedAt, counts, issues,
+problems, rootCause, commands, llmCalls, providerDelivery, builtBy, priorFailedBuilds`) carry no
+`ok`/`summary`/`outcome` field at all — the terminal result text a build actually returns to the client
+is not part of the exported report. This is WHY confirming or ruling out root cause #1's hypotheses from
+the diagnostics JSON alone was impossible: even a perfectly honest server-side finish leaves no trace of
+its own summary in this artifact. `rootCause` (derived from the LAST `OUTCOME_*`-coded issue, per PR
+#2788 above) is the closest proxy but is not the same thing — it is inferred, not the actual returned
+`result.summary`. **The economical fix, not done here:** add `outcome: { ok: boolean; summary: string;
+timedOut?: boolean; budgetReached?: boolean }` to the schema, filled from the same `result` the route
+already has in hand at the merge point PR #2788 touches. Free, small, and would have made root cause #1
+answerable from this exact report instead of requiring a live-code investigation.

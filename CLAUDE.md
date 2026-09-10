@@ -846,6 +846,15 @@ the code (it is actually read somewhere) on 2026-07-11.
   in the Privacy Policy §12 and pinned by `tests/privacyPolicyTruth.test.ts` — adding a field to the
   beacon fails CI until the policy discloses it.
 
+- **Site uptime alerts for connected domains (shipped 2026-09-10, ROADMAP §13 item 1.8):**
+  `SITE_UPTIME_SWEEP` (kill switch — **default ON**; `off` stops the 15-minute probe of every connected
+  custom domain), `SITE_UPTIME_COOLDOWN_HOURS` (default 6, clamped 1–72 — one "down" message per outage,
+  then quiet while it stays down), `SITE_UPTIME_MAX_DOMAINS` (default 500, clamped ≤ 5000 — domains per
+  sweep). Read by `src/server/lib/siteUptime.ts` / `siteUptimeSweep.ts`; registered in `server.ts` as the
+  `site-uptime` scheduled job, **exclusive** (one instance probes). Email to the OWNER rides the existing
+  `ALERT_EMAIL_*` mailer — unconfigured ⇒ the in-app bell only, never a silent nothing. A probe that could
+  not complete from our side is "unknown" and never counts as the user's site being down.
+
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 
 The admin sent the complete list of env-var NAMES from the live Cloud Run service, and every one was

@@ -46778,3 +46778,43 @@ whose missing pages should say so, and the response headers every serious host s
 `npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
 **1511 files / 20,310 passed, 0 failed**. The first run of the new pure test caught a real hole —
 `//evil.com` passed the path check (protocol-relative = another host) — fixed before anything shipped.
+
+## 2026-09-10 — Site uptime: "your site is down" reaches the OWNER (ROADMAP §13 item 1.8)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2797; PR for 1.6 in CI alongside).
+
+### The defect
+The platform has watched itself since 2026-08-23 (`monitorAlerts`). Nothing watched the apps our users
+PUBLISHED: a connected domain could answer errors for a day and the first person to notice would be a
+customer. Every host with a paid tier sends an "it's down" mail; we did not.
+
+### What shipped
+- **`src/server/lib/siteUptime.ts`** (pure): `decideUptime` — TWO consecutive failures before an alert
+  (a deploy in progress or a blip must not wake anyone); `unknown` (WE could not reach it) neither counts
+  nor resets — it is not their site's failure; ONE alert per outage, then quiet for a cooldown (6h) while
+  it stays down; a recovery announced once, only after an alert was sent. Messages name the domain and the
+  next step ("press Publish once"), never a vendor or a probe internal.
+- **`siteUptimeSweep.ts`**: probes every connected custom domain (the paid plan by construction, so probe
+  cost scales with revenue, not signups; `www` twins skipped — they redirect to the canonical) through the
+  SSRF-guarded `checkDomainServing`; bounded concurrency; one domain's failure never stops the rest. Two
+  channels, both best-effort: the in-app bell (`saveNotification`) and email via the existing
+  `ALERT_EMAIL_*` mailer — to the OWNER's verified address, never the admin list (a `footer` dep added to
+  `sendAlertEmail` so a user mail does not sign off "Open Admin → Monitor").
+- **`siteUptimeStore`** (`site_uptime/<domain>`); an unreadable record reads as fresh, which can only
+  DELAY an alert by one sweep, never invent one.
+- **Registered in `server.ts`** as the `site-uptime` scheduled job, **exclusive**, every 15 minutes.
+  Kill switch `SITE_UPTIME_SWEEP=off`. `CLAUDE.md` registry + `AppKnowledgeBase` updated.
+- Locked by `siteUptime.test.ts` (the rule) and `siteUptimeSweep.test.ts` (the orchestration with
+  injected deps, the exclusive registration, owner-only email, no raw fetch).
+
+### Honest limits
+- Email needs the mailer configured (`ALERT_EMAIL_API_KEY` + `ALERT_EMAIL_FROM`, not set today per the
+  registry); until then the bell alone fires, and the AppKnowledgeBase says "and an email, when the mailer
+  is set up" rather than promising one.
+- The probe is one HTTP GET from our region; a site down only for some visitors would read "up". The
+  Worker path (0.3) could add edge-side evidence later.
+
+### Gate (CI-equivalent)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1513 files / 20,325 passed, 0 failed**.

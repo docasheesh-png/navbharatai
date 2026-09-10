@@ -792,6 +792,20 @@ setInterval(() => {
           // its normal range, instead of finding out by happening to open the panel. Every 15 minutes;
           // the sweep itself decides what is worth saying (new / still-firing-after-a-cooldown /
           // recovered) and says NOTHING when the window cannot be judged. Kill switch: MONITOR_ALERTS=off.
+          // SITE UPTIME (ROADMAP §13, 1.8): probe every connected custom domain and tell its OWNER
+          // when it is down — exclusive, so one instance probes rather than every instance. Kill
+          // switch SITE_UPTIME_SWEEP=off. Never throws; a domain that cannot be probed is "unknown".
+          scheduler.register({
+            id: 'site-uptime',
+            exclusive: true,
+            schedule: { kind: 'everyMs', ms: 15 * 60_000 },
+            handler: async () => {
+              await import('./src/server/lib/siteUptimeSweep')
+                .then(({ runSiteUptimeSweep }) => runSiteUptimeSweep())
+                .then((r) => { if (r.alertedDown || r.alertedUp) console.log(`[site-uptime] probed ${r.probed}, down alerts ${r.alertedDown}, recoveries ${r.alertedUp}`); })
+                .catch(() => { /* best-effort — the sweep must never affect the server */ });
+            },
+          });
           scheduler.register({
             id: 'monitor-alerts',
             schedule: { kind: 'everyMs', ms: 15 * 60_000 },

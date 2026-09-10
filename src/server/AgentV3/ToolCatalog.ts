@@ -1763,6 +1763,30 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_consent_banner',
+      description:
+        'Add a real DPDP (India) + GDPR cookie/consent BANNER to the app — the part visitors SEE (public/consent-banner.js, ' +
+        'dependency-free, works for plain HTML and React). Distinct from generate_consent, which is the backend consent LOG. ' +
+        'What it enforces: NOTHING non-essential loads before consent (third-party scripts are written as ' +
+        '<script type="text/plain" data-consent="analytics" data-src="…"> and activated only when every purpose they name is ' +
+        'granted); NO pre-ticked boxes; "Reject all" as prominent as "Accept all"; withdrawal as easy as consent (a persistent ' +
+        '"Privacy choices" control reopens it); re-consent when the policy version changes; Global Privacy Control honoured; ' +
+        'notice in English AND Hindi by default; the Privacy Policy link and the DPDP grievance contact on the banner. ' +
+        'Use it whenever an app has analytics, ads, chat widgets or embeds, or the user asks for a cookie banner / ' +
+        'DPDP / GDPR compliance. After wiring, convert EVERY third-party script tag and add the footer link the result names.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          appName: { type: 'string', description: 'Shown in the notice ("<app> uses cookies…"). Defaults to "This site".' },
+          policyUrl: { type: 'string', description: 'Path of the Privacy Policy page in the app (default /privacy). Make sure it exists.' },
+          grievanceEmail: { type: 'string', description: 'DPDP grievance / data-questions contact shown on the banner (optional).' },
+          language: { type: 'string', enum: ['en', 'hi', 'both'], description: 'Notice language. Default both (English + Hindi).' },
+          purposes: { type: 'array', items: { type: 'string', enum: ['analytics', 'marketing', 'personalization'] }, description: 'Non-essential purposes the app actually uses. Default analytics + marketing.' },
+          policyVersion: { type: 'string', description: 'Version stamped on every stored choice; change it to ask everyone again. Default: today.' },
+        },
+      },
+    },
+    {
       name: 'generate_activity_feed',
       description:
         'Add a real activity feed / timeline backend to the app (server/activity/) — a packaged domain vertical ' +
@@ -3355,6 +3379,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_short_links',
   'generate_feedback',
   'generate_consent',
+  'generate_consent_banner',
   'generate_activity_feed',
   'generate_cart',
   'generate_reactions',

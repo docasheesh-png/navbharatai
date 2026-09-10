@@ -46903,3 +46903,46 @@ result that varies run to run. Instead:
   live browser look. A redirecting address must be pasted in its final form (the guard refuses redirects,
   for the reason recorded in `webFetch.ts`).
 - The structure is read from ONE page. Multi-page cloning = paste each page, or ask v5.0 to browse.
+
+## 2026-09-10 — DPDP + GDPR consent banner, one click, for USER apps (ROADMAP §13 item 4.4)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2801).
+
+### The gap
+`generate_consent` (shipped earlier) is the BACKEND consent LOG. Nothing produced the banner a visitor
+actually sees, or kept third-party scripts off until they agreed — and the platform's own
+`ComplianceAnalysis` flags exactly that ("third-party trackers running with no cookie-consent surface").
+Every competitor ships a generic GDPR widget; none ships one written for India's DPDP Act. Safeguard-6:
+`ConsentBanner.tsx` is NavBharatAI's OWN banner; `publishConsent.ts` is "did the user ask to publish" —
+unrelated names, same word, checked before writing.
+
+### What shipped
+- **`src/server/lib/ConsentBannerGenerator.ts`** (pure builder → files): `public/consent-banner.js`
+  (dependency-free, plain HTML and React alike) + `CONSENT_BANNER.md`. The testable heart sits between
+  `NAVCONSENT-CORE` markers as plain JS with no DOM — the test executes the REAL emitted code — and the
+  DOM shell is string-locked. Every option is sanitised inside the generator (quotes, angle brackets,
+  backticks and `$` stripped before `JSON.stringify`; a bad URL → `/privacy`; a bad email → omitted; an
+  unknown purpose → the default list), so a hostile app name cannot break out of the emitted script.
+- **The rules the banner enforces (legal requirements, not style):** nothing non-essential loads before
+  consent — a third-party script is written `<script type="text/plain" data-consent="analytics"
+  data-src="…">` and activated once, only when every purpose it names is granted; no pre-ticked boxes;
+  "Reject all" beside "Accept all"; a persistent "Privacy choices" control (or the app's own
+  `data-consent-open` link) reopens it — withdrawal as easy as consent (DPDP §6(4)); the stored choice
+  carries the policy VERSION, so a changed policy asks again; Global Privacy Control = no consent and no
+  nag, opt-in still possible; notice in English AND Hindi by default; Privacy Policy link and the DPDP
+  grievance contact on the banner itself. `window.NavConsent.has/granted/open/onChange` +
+  `nbconsent:change`.
+- **Tool `generate_consent_banner`** (catalog def with a real input schema — appName, policyUrl,
+  grievanceEmail, language, purposes, policyVersion; allow-list entry; dispatcher case that writes the
+  files and returns the three wiring steps: include once in `<head>`, convert every third-party script,
+  add the footer link). `AppKnowledgeBase` bullet beside the consent-log one.
+- Locked by `ConsentBannerGenerator.test.ts`: fresh visitor asked with nothing granted; stored choice
+  honoured only for its policy version; GPC; every-purpose gating; the three answers; sanitisation;
+  no pre-ticked boxes; reopen control; bilingual defaults; white-label; emitted JS parses.
+  `ToolWiring.test.ts` proves the advertised tool routes to a real handler.
+
+### Honest limits
+- A script already running in the current page session cannot be unloaded by anyone; withdrawal stops
+  the next load and fires the change event so the app stops sending. The README says so.
+- A tool, not legal advice: the Privacy Policy must still name every recipient of visitors' data. The
+  instructions tell the model to make sure that page exists.

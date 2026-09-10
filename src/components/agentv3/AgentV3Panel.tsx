@@ -116,7 +116,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -2417,6 +2417,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Delete a saved session from the history list. Confirms first (destructive + irreversible —
   // the Firestore record and its transcript are gone). If the deleted session is the one currently
   // open, starts a fresh session so the panel never keeps showing a chat that no longer exists.
+  // DUPLICATE (ROADMAP §13, 3.6): a copy of the files + chat under a new name, opened at once so
+  // the user is looking at the thing they just made. The server refuses to copy what points at the
+  // world (repo, deployment, domain, secrets); the note says so.
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const handleDuplicateConversation = async (e: React.MouseEvent, c: { id: string }) => {
+    e.stopPropagation();
+    if (duplicatingId) return;
+    setDuplicatingId(c.id);
+    try {
+      const r = await duplicateConversation(c.id);
+      if ('error' in r) { setOpenChatError(r.error); return; }
+      setPublishMsg(`Made a copy: "${r.name}". It starts unpublished, with no domain, repo or secrets — those stay with the original.`);
+      await openConversation(r.id);
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
   const handleDeleteConversation = async (e: React.MouseEvent, c: ConversationMeta) => {
     e.stopPropagation();
     if (deletingHistoryId) return;
@@ -3604,6 +3621,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             className={`p-1 rounded touch-manipulation disabled:opacity-40 focus:opacity-100 ${c.pinned ? 'text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 opacity-100' : 'text-zinc-500 hover:text-indigo-400 hover:bg-indigo-500/10 opacity-60 sm:opacity-0 sm:group-hover:opacity-100'}`}
           >
             {isPinning ? <TirangaLoader className="w-3.5 h-3.5" /> : <Star className={`w-3.5 h-3.5 ${c.pinned ? 'fill-current' : ''}`} />}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => void handleDuplicateConversation(e, c)}
+            disabled={running || isDeleting || duplicatingId === c.id}
+            title="Make a copy of this app"
+            aria-label="Make a copy of this app"
+            className="p-1 rounded touch-manipulation text-zinc-500 hover:text-indigo-400 hover:bg-indigo-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+          >
+            {duplicatingId === c.id ? <TirangaLoader className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
           </button>
           <button
             type="button"

@@ -46818,3 +46818,35 @@ customer. Every host with a paid tier sends an "it's down" mail; we did not.
 `npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
 `npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
 **1513 files / 20,325 passed, 0 failed**.
+
+## 2026-09-10 — "Make a copy of this app" (ROADMAP §13 item 3.6)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2798; PR for 1.8 alongside).
+
+### The defect
+A user who wanted a variant — the same shop with a different catalogue, a second client's site from
+the first — could only rebuild from scratch or hand-edit the original in place. Every builder has a
+copy; a safeguard-6 search (five names, filename-first) found none here.
+
+### What shipped
+- **`src/server/AgentV3/duplicateApp.ts`** (pure): `copyName` — "X (copy)", then "X (copy 2)"…, never a
+  name the user already has, and copying a copy does not stack suffixes; `copyStatus` — a copy is never
+  "running" (the store's statuses are running | complete | stopped | error; the first draft returned a
+  status that does not exist, caught by reading the union before the route was written).
+- **`POST /api/agentv3/conversations/:id/duplicate`**: identity from the verified token, anon refused,
+  the source reached only through `conversationAccess`; files copied with `saveWorkspaceFiles` into a
+  workspace minted for the SAME user (`workspaceIdFor`), the chat carried so the next edit understands
+  the app, the name from `copyName` against the user's own list. **Copies nothing that points at a
+  place in the world** — repo, deploy branch, domain, site settings, deployment, pin; the secrets vault
+  is per-app by construction. A copy starts unpublished and unconnected, which is the only honest state.
+  "No files yet" is a 409 that says so, not an empty copy.
+- **Client:** a copy button beside pin/delete in History; the copy is opened at once; the note says what
+  stayed with the original. `AppKnowledgeBase` updated.
+- Locked by `duplicateApp.test.ts` (pure) and `tests/duplicateAppWiring.test.ts` (verified identity,
+  conversationAccess, same-user workspace, and — the one that matters — that the create/update calls carry
+  none of the world-pointing fields).
+
+### Gate (CI-equivalent)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1515 files / 20,335 passed, 0 failed**.

@@ -833,6 +833,19 @@ the code (it is actually read somewhere) on 2026-07-11.
   `pixelEventFor` fails CI until the policy is updated too** (verified to bite). Do not weaken it;
   it exists because the first drift produced no failure of any kind.
 
+- **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
+  `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
+  publish and the hit route recording; apps already published keep their script until republished,
+  which is harmless because the route then discards hits), `SITE_ANALYTICS_SALT` (optional — the HMAC
+  secret behind the daily-rotating visitor hash; **falls back to `SECRET_ENCRYPTION_KEY`**, which is
+  set, so nothing needs adding; a per-process random salt is the last resort and dedups uniques per
+  instance only, logged once), `SITE_ANALYTICS_SHARDS` (default 8, clamped 1–64 — documents per
+  app-day; §SCALE-PLAN item 1 applied on day one), `SITE_ANALYTICS_FLUSH_SECONDS` (default 20,
+  clamped 5–300). Read by `src/server/lib/siteAnalytics.ts` / `siteAnalyticsStore.ts`. The beacon
+  posts to `PUBLIC_BASE_URL` when set, else `https://navbharatai.com`. 🔒 What it collects is stated
+  in the Privacy Policy §12 and pinned by `tests/privacyPolicyTruth.test.ts` — adding a field to the
+  beacon fails CI until the policy discloses it.
+
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 
 The admin sent the complete list of env-var NAMES from the live Cloud Run service, and every one was

@@ -224,6 +224,8 @@ We use a small set of cookies and local-storage keys that are **necessary** for 
 
 When you build an app with NavBharatAI and share or deploy it, **you** are responsible to the people who use it. Their data lives in the database and services **you** connect (your own Supabase/Firebase/other account — NavBharatAI deliberately provisions user apps on the builder's own accounts, not ours). If your app collects personal data, you need your own privacy policy for it — you can generate a starting draft with NavBharatAI, and the same review advice applies: have it checked before you rely on it.
 
+**Visitor counts for apps published on NavBharatAI hosting.** So that you can see whether anyone is visiting the app you published, pages served from NavBharatAI's own hosting carry a small script that reports each visit to us. It sends only: the page path (never the query string), the referring site's hostname (never the full address), and a short code derived from the visitor's IP address and browser using a secret that **rotates daily** — so the same visitor is counted once per day, the code cannot be turned back into a person, and it cannot be joined across days. It sets no cookie and stores nothing on the visitor's device. Browsers that send **Do Not Track** or Global Privacy Control are not counted at all. These counts are shown only to you, the app's builder, and are kept for 30 days. Apps you deploy to your own hosting provider do not carry this script.
+
 ---
 
 ## 13. Changes to this policy

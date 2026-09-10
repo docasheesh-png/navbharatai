@@ -95,6 +95,14 @@ export interface HostingChooserProps {
    */
   onRollback?: () => Promise<void>;
   /**
+   * Visitor counts for the live app (ROADMAP §13, 1.1). `undefined`/`null` = not loaded yet;
+   * `available: false` = NavBharatAI could not read them, which the tile says in words — a zero it
+   * did not measure is the fake result this panel keeps refusing to show.
+   */
+  siteAnalytics?: SiteAnalyticsView | null;
+  /** Load (or reload) the counts for a window. Absent ⇒ no tile at all, never a dead one. */
+  onLoadSiteAnalytics?: (days: 7 | 30) => Promise<void>;
+  /**
    * Load every app this USER has live. Keyed by user rather than workspace on purpose — an app whose
    * chat was deleted has nothing pointing at it, and this list is the only way back to it.
    */
@@ -158,15 +166,36 @@ interface DatabaseReadiness {
   canProvision: boolean;
 }
 
+/** The client's view of the server's summary — declared here, not imported: the server module
+ *  pulls in node:crypto, which must never reach the frontend build (see PR #2778's lesson). */
+export interface SiteAnalyticsView {
+  available: boolean;
+  reason?: string;
+  days?: Array<{ day: string; views: number; uniques: number }>;
+  totalViews?: number;
+  totalUniques?: number;
+  todayViews?: number;
+  topPaths?: Array<{ path: string; views: number }>;
+  topReferrers?: Array<{ host: string; views: number }>;
+  sinceDay?: string;
+}
+
 const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI hosting"
 
 export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr,
-  liveUrl, onUnpublish, onRollback, onLoadMyApps, onUnpublishApp,
+  liveUrl, onUnpublish, onRollback, onLoadMyApps, onUnpublishApp, siteAnalytics, onLoadSiteAnalytics,
   ownRepo, githubConnected, onConnectGitHub, onRepoPushed, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
   onMakeIcon, publishRefusalCode, backendKeySource, deployRepo,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost' | 'myapps'>('choose');
+  // VISITOR COUNTS (ROADMAP §13, 1.1): loaded the moment a live app is on screen, because "did
+  // anyone come?" is the first question after publishing and should not need a click to answer.
+  const [analyticsDays, setAnalyticsDays] = useState<7 | 30>(7);
+  useEffect(() => {
+    if (liveUrl && onLoadSiteAnalytics) void onLoadSiteAnalytics(analyticsDays);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveUrl, analyticsDays]);
   // MY PUBLISHED APPS (admin 2026-08-21). Loaded on demand, because most people opening Publish are
   // here to publish, not to audit — and a list nobody asked for is a request nobody needed.
   const [myApps, setMyApps] = useState<Array<{ workspaceId: string; url: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }> | null>(null);
@@ -1018,6 +1047,67 @@ export function HostingChooser({
                       </button>
                     </div>
                   </div>
+                )}
+              </div>
+            )}
+
+            {/* VISITORS (ROADMAP §13, 1.1) — the first question after publishing, answered where the
+                live link is. Three honest states: loading, numbers, or "could not read" in words.
+                Never a zero that was not measured. */}
+            {liveUrl && onLoadSiteAnalytics && (
+              <div className="rounded-lg border border-zinc-700/80 bg-zinc-900/60 p-2.5 flex flex-col gap-1.5" data-testid="site-analytics">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-zinc-200">Visitors</span>
+                  <div className="flex gap-1">
+                    {([7, 30] as const).map((d) => (
+                      <button key={d} onClick={() => setAnalyticsDays(d)}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${analyticsDays === d ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                        {d}d
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {!siteAnalytics ? (
+                  <p className="text-[10.5px] text-zinc-500">Counting…</p>
+                ) : !siteAnalytics.available ? (
+                  <p className="text-[10.5px] text-amber-200/90 leading-relaxed">
+                    Visitor counts are unavailable right now — NavBharatAI could not read them. This is not a zero; try again in a minute.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex items-baseline gap-3">
+                      <span className="text-lg font-black text-white leading-none">{siteAnalytics.totalUniques ?? 0}</span>
+                      <span className="text-[10.5px] text-zinc-400">people · {siteAnalytics.totalViews ?? 0} views · today {siteAnalytics.todayViews ?? 0}</span>
+                    </div>
+                    {/* One bar per day, height by that day's views against the window's max. */}
+                    <div className="flex items-end gap-[2px] h-7" aria-hidden="true">
+                      {(siteAnalytics.days ?? []).map((p) => {
+                        const max = Math.max(1, ...(siteAnalytics.days ?? []).map((q) => q.views));
+                        return <div key={p.day} title={`${p.day}: ${p.views} views`} className="flex-1 rounded-sm bg-emerald-500/70" style={{ height: `${Math.max(2, Math.round((p.views / max) * 100))}%` }} />;
+                      })}
+                    </div>
+                    {((siteAnalytics.topPaths?.length ?? 0) > 0 || (siteAnalytics.topReferrers?.length ?? 0) > 0) && (
+                      <div className="grid grid-cols-2 gap-2 text-[10px] text-zinc-400">
+                        <div>
+                          <div className="font-semibold text-zinc-300 mb-0.5">Top pages</div>
+                          {(siteAnalytics.topPaths ?? []).slice(0, 3).map((t) => (
+                            <div key={t.path} className="flex justify-between gap-2"><span className="truncate font-mono">{t.path}</span><span>{t.views}</span></div>
+                          ))}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-zinc-300 mb-0.5">Came from</div>
+                          {(siteAnalytics.topReferrers ?? []).length === 0
+                            ? <div className="text-zinc-500">direct / unknown</div>
+                            : (siteAnalytics.topReferrers ?? []).slice(0, 3).map((t) => (
+                              <div key={t.host} className="flex justify-between gap-2"><span className="truncate">{t.host}</span><span>{t.views}</span></div>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                    {(siteAnalytics.totalViews ?? 0) === 0 && (
+                      <p className="text-[10px] text-zinc-500">No visits recorded in this window yet. Counting starts from the first publish after 10 Sep 2026.</p>
+                    )}
+                  </>
                 )}
               </div>
             )}

@@ -140,3 +140,27 @@ describe('No claim about which jurisdictions a government has restricted', () =>
     expect(PRIVACY_POLICY).toMatch(/we transfer it only where permitted by applicable law/i);
   });
 });
+
+describe('Privacy Policy — it discloses the visitor analytics on published apps (ROADMAP §13, 1.1)', () => {
+  // The beacon collects exactly three things (siteAnalytics.ts header). Each is named in the policy,
+  // and the list is imported from the code rather than retyped — so adding a fourth field to the
+  // beacon fails this test until the policy discloses it. The same guard that caught the pixel drift.
+  it('names each collected field, from the code\'s own list', async () => {
+    const { POLICY_PHRASES } = await import('../src/server/lib/siteAnalytics');
+    for (const phrase of POLICY_PHRASES) expect(PRIVACY_POLICY).toContain(phrase);
+  });
+
+  it('promises what the beacon actually does: no cookie, nothing on the device, builder-only', () => {
+    expect(PRIVACY_POLICY).toMatch(/sets no cookie and stores nothing on the visitor's device/);
+    expect(PRIVACY_POLICY).toMatch(/shown only to you, the app's builder/);
+    expect(PRIVACY_POLICY).toMatch(/kept for 30 days/);
+  });
+
+  it('🔒 the beacon keeps those promises in code, not only in prose', async () => {
+    const { beaconHtml } = await import('../src/server/lib/siteAnalytics');
+    const html = beaconHtml('nbai-0123456789abcdef0123', 'https://navbharatai.com');
+    expect(html).not.toMatch(/cookie|localStorage|sessionStorage/i);
+    expect(html).toContain('doNotTrack');
+    expect(html).not.toContain('location.search');
+  });
+});

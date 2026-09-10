@@ -504,6 +504,7 @@ import {
   safeWorkspaceUid,
 } from '../lib/workspaceIdentity';
 import { adminRequestOk } from '../lib/adminAuth';
+import { previewFidelityCaveats, previewFidelityNotice } from '../AgentV3/previewFidelity';
 export { buildActuator };
 
 /**
@@ -7842,7 +7843,7 @@ async function noteBuildOutcome(
       const fresh = req.body?.fresh === true;
       const cached = fresh ? undefined : inbrowserPreviewCache.get(cacheKey);
       if (cached && cached.hash === filesHash && Date.now() - cached.ts < INBROWSER_CACHE_TTL_MS) {
-        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed });
+        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)) });
         return;
       }
       const vfs = VirtualFileSystem.fromRecord(files);
@@ -7854,7 +7855,7 @@ async function noteBuildOutcome(
         const oldest = inbrowserPreviewCache.keys().next().value;
         if (oldest !== undefined) inbrowserPreviewCache.delete(oldest);
       }
-      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed });
+      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)) });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
     }

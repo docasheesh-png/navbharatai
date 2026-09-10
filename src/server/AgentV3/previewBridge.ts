@@ -73,6 +73,61 @@ export function previewBridgeSource(source: 'in-browser' | 'live'): string {
     var r = e && e.reason;
     mirror('error', ['Unhandled promise rejection: ' + (r instanceof Error ? r.message : String(r))]);
   });
+  // ── WHICH PAGE AM I ON, AND TAKE ME TO ANOTHER ONE (gap analysis 2026-09-10) ────────────────
+  // The preview had no address bar and no back/forward, in either mode. A multi-page app could be
+  // navigated only by clicking inside it, and there was no way to jump straight to /checkout to look
+  // at it — VS Code and Cursor both have this, and NavBharatAI did not.
+  //
+  // It could not be done from the panel: the live app is cross-origin, so the parent is forbidden to
+  // read or step its history (contentWindow.history throws — which is exactly why the old
+  // back/forward chevrons in the Code Studio panel were removed as fake). It CAN be done from in
+  // here, because this script runs inside the app itself. So the app reports where it is, and obeys
+  // real history calls; nothing is simulated and nothing is faked.
+  function currentPath() {
+    try { return location.pathname + location.search + location.hash; } catch (e) { return '/'; }
+  }
+  function reportRoute() { post({ __nbaiPreviewRoute: true, source: SOURCE, path: currentPath() }); }
+  // A SPA changes route WITHOUT firing popstate — pushState is a silent history mutation, which is
+  // how a React Router navigation would have gone unreported. Wrapping both keeps the address honest
+  // on every kind of navigation; the original is always called and always returns its own value.
+  ['pushState', 'replaceState'].forEach(function (m) {
+    try {
+      var origFn = history[m];
+      if (typeof origFn !== 'function') return;
+      history[m] = function () {
+        var out = origFn.apply(this, arguments);
+        try { setTimeout(reportRoute, 0); } catch (e) { /* ignore */ }
+        return out;
+      };
+    } catch (e) { /* a locked-down history is not worth failing over */ }
+  });
+  window.addEventListener('popstate', reportRoute);
+  window.addEventListener('hashchange', reportRoute);
+  try { if (document.readyState === 'complete') reportRoute(); } catch (e) { /* ignore */ }
+  window.addEventListener('load', reportRoute);
+  window.addEventListener('message', function (e) {
+    // ONLY THE PANEL MAY DRIVE THE APP. Anything else embedding this page could otherwise navigate it.
+    if (e.source !== window.parent && e.source !== window.top) return;
+    var d = e && e.data;
+    if (!d || typeof d !== 'object') return;
+    try {
+      if (d.__nbaiHistory === 'back') { history.back(); return; }
+      if (d.__nbaiHistory === 'forward') { history.forward(); return; }
+      if (typeof d.__nbaiNavigate === 'string' && d.__nbaiNavigate) {
+        var to = d.__nbaiNavigate;
+        if (to.charAt(0) !== '/' && to.indexOf('://') < 0) to = '/' + to;
+        // A HASH-ROUTED APP MUST BE MOVED BY ITS HASH, not by a document navigation: the in-browser
+        // preview rewrites BrowserRouter to HashRouter (it has no real History to route against), and
+        // a srcdoc document cannot be navigated at all. Setting the hash routes it for real.
+        var hashRouted = SOURCE === 'in-browser' || String(location.hash || '').indexOf('#/') === 0;
+        if (hashRouted) { location.hash = '#' + (to.charAt(0) === '/' ? to : '/' + to); reportRoute(); return; }
+        // Everything else gets a REAL navigation — the same thing a browser address bar does. It
+        // reloads, which is honest: guessing that an app is a SPA and faking a pushState would leave
+        // a multi-page app showing the old page under a new address.
+        location.assign(to);
+      }
+    } catch (err) { /* a refused navigation must never break the app */ }
+  });
   // ── FAILED NETWORK CALLS (gap analysis 2026-09-10) ──────────────────────────────────────────
   // A user whose app's API call 404s or CORS-fails saw an app that silently did nothing: the browser
   // reports those in the Network tab, not the console, so the mirror above never carried them and

@@ -130,6 +130,12 @@ export const PREVIEW_BOOTSTRAP = `
     src=src.replace(/import\\.meta\\b/g,'{env:(window.__importMetaEnv__||{}),url:location.href}');
     var code;
     try{code=Babel.transform(src,{filename:path,presets:presets,plugins:['transform-modules-commonjs'],sourceType:'module'}).code;}
+    // NAME THE FILE IN EVERY STACK TRACE (gap analysis 2026-09-10). Modules are executed through
+    // new Function(), which the browser labels "<anonymous>" — so an error in the preview produced a
+    // stack with no file in it at all. The user could not tell which file broke, and neither could
+    // the AI when the error text was handed to it by "Fix with AI". A sourceURL comment costs nothing
+    // (no size, no transform change) and makes both of them able to name the file.
+    code=code+'\n//# sourceURL=nbai-preview://'+path;
     catch(e){throw new Error('Compile '+path+': '+e.message);}
     var module={exports:{}};cache[path]=module;
     var req=function(spec){

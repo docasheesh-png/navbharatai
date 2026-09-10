@@ -46341,3 +46341,61 @@ had already broken that test once) and dated.
 were split, so the 400 ceiling now permits ~150 KB of silent first-paint drift. Tightening it would
 lock that win in — but it is a judgement call with its own risk of failing somebody else's PR, and this
 change existed to unblock a gate, not to re-tune every ceiling while passing through.
+
+---
+
+## 2026-09-10 — the first-paint guard was not measuring first paint
+
+**How this was found.** Yesterday's bundle-budget entry closed with a deferred follow-up: the entry
+chunk had shrunk 354.9 → 250.3 KB, so the 400 KB ceiling permitted ~150 KB of silent drift, and
+tightening it would lock the win in. Picking that up today produced a different answer — **tightening
+it would have improved a number that had quietly stopped meaning what every comment in the file says
+it means.**
+
+**What `largestChunkGzipKB` actually is:** the biggest chunk, whichever one that happens to be.
+`bundleBudget.mjs` reasons about it everywhere as the entry — *"the entry EVERY user downloads"*, and
+the standing instruction to a future session that *"the question to answer first is 'what did I just
+put on the first-paint path'"*. That was true on 2026-08-24, when the entry WAS the largest chunk.
+
+**Measured today, from `dist/index.html` — the document the browser actually receives:**
+
+| what | file | gz |
+|---|---|---|
+| entry | `index-*.js` | 247.7 KB |
+| modulepreload | `react-vendor-*.js` | 59.2 KB |
+| modulepreload | `firebase-vendor-*.js` | 188.9 KB |
+| **first-paint JS** | | **495.8 KB** |
+| what the gate reported as "largest chunk" | `OfflineAI-*.js` — **a lazy chunk first paint never fetches** | 250.3 KB |
+
+So the guard was reporting a number roughly **half** the real first-paint cost, about a file the user
+does not download, while `firebase-vendor`'s 188.9 KB — paid by every visitor before anything renders —
+was guarded by nothing tighter than the 1720 KB total.
+
+**The failure mode is silent and in the future**, which is why nothing had caught it: let any lazy
+chunk drift to ~390 KB and it becomes "the largest", after which the entry could double from 247 to
+399 KB with this gate reporting success the whole way. Proven by bite test: with only the old metrics,
+a 700 KB first paint passes every budget; the new one is the only thing that fails it.
+
+**The fix is to measure the thing, not to tune the proxy.** `firstPaintJsGzipKB` is the entry script
+plus every `modulepreload` in the emitted HTML — by construction exactly what the browser must fetch
+before it can render, read from build output rather than inferred from a filename convention (which
+would drift again the day the naming changes). A `lazy()` route contributes nothing, because Vite emits
+no preload link for a dynamic import — so splitting a route still reduces the number it exists to
+reduce. `largestChunkGzipKB` is KEPT (it still catches any single chunk ballooning) but its comment no
+longer claims to be the first-paint guard, because it is not.
+
+Budget **560** = 495.8 + ~13% headroom, the same discipline as the other ceilings. Reported FIRST in
+the CLI output and listed with its file names, so "it grew" is immediately "it grew because THIS is now
+eager". `LAST_MEASURED` gains the same field, per this file's own rule about updating both together.
+
+🔒 **An unmeasurable first paint is a VIOLATION, not a pass.** `measureDist` throws when `index.html`
+is missing or references no module script (a build that produced no loadable app would otherwise score
+0 KB — the greenest possible result), and the pure `checkBudget` independently rejects a missing or
+non-finite value, because a caller that omitted the field would sail through the one gate that matters
+most. Test-locked in both directions.
+
+**⚠️ NOT optimised here, and recorded so it is not mistaken for acceptable:** 495.8 KB before anything
+renders is a lot, and **38% of it is Firebase**, which a visitor who never signs in still pays in full.
+Making that lazy is a real change with real risk and belongs in its own PR. This one exists to make the
+number visible and guarded — which is the precondition for improving it, and the reason the deferred
+"tighten 400" follow-up is now moot rather than done.

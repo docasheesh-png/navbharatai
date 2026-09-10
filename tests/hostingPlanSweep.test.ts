@@ -6,7 +6,7 @@ import {
   _clearPlanCacheForTests,
 } from '../src/server/lib/hostingPlan';
 import {
-  sweepOneWallet, reattachSuspendedDomains, reminderMessage, lapseMessage,
+  sweepOneWallet, reattachSuspendedDomains, reminderMessage, lapseMessage, graceMessage,
   _setSweepDepsForTests,
 } from '../src/server/lib/hostingPlanSweep';
 import { TOKENS_PER_RUPEE } from '../src/server/lib/payments';
@@ -68,7 +68,9 @@ describe('decidePlanSweepStep', () => {
   it('a short balance is named in exact ₹ (the user knows precisely what to recharge)', () => {
     const w = wallet(49 * TOKENS_PER_RUPEE, plan(2)); // ₹49 held, ₹99 needed
     const r = decidePlanSweepStep(w, NOW);
-    expect(r.action).toEqual({ kind: 'remind', days: 5, shortfallInr: 50 });
+    // 2 days left, so the 3-day window is the smallest REACHED one — the only one that describes
+    // reality. (Before the admin added the 3-day window this correctly said 5.)
+    expect(r.action).toEqual({ kind: 'remind', days: 3, shortfallInr: 50 });
   });
 
   it('expired + affordable + autoRenew ⇒ RENEWS (renewal always wins over reminding/lapsing)', () => {
@@ -77,9 +79,18 @@ describe('decidePlanSweepStep', () => {
     expect((r.wallet.hostingPlan as any).expiresAt).toBe(new Date(NOW_MS + 30 * DAY).toISOString());
   });
 
-  it('expired + unaffordable: inside grace ⇒ WAIT (a late recharge saves the domain silently)', () => {
-    const r = decidePlanSweepStep(wallet(100, plan(-(HOSTING_PLAN_GRACE_DAYS - 1))), NOW);
-    expect(r.action).toBeNull();
+  it('expired + unaffordable: inside grace ⇒ ONE last warning, and the domain is NOT touched', () => {
+    // Changed 2026-09-10 (admin: "aise user ko reminder notification show hona chahiye"). This used
+    // to assert SILENCE through the whole grace window — the pre-expiry reminders had stopped and
+    // the lapse had not fired, so the single most useful moment to reach someone produced nothing.
+    // What has NOT changed, and is the real point of the test: no lapse, so no domain is detached.
+    const w = wallet(100, plan(-(HOSTING_PLAN_GRACE_DAYS - 1)));
+    const first = decidePlanSweepStep(w, NOW);
+    // ₹1 held against the ₹99 renewal ⇒ ₹98 short, named exactly.
+    expect(first.action).toEqual({ kind: 'grace', graceDaysLeft: 1, shortfallInr: 98 });
+    expect((first.wallet.hostingPlan as any).lapsedAt).toBeUndefined();
+    // ONCE per period — a daily sweep must not nag every day.
+    expect(decidePlanSweepStep(first.wallet, NOW).action).toBeNull();
   });
 
   it('past grace ⇒ LAPSE exactly once', () => {
@@ -101,11 +112,24 @@ describe('messages (White-Label: NavBharatAI terms only)', () => {
   it('reminder names the shortfall when short, reassures when covered; lapse says the app survived', () => {
     expect(reminderMessage(5, NOW, 50)).toContain('₹50 short');
     expect(reminderMessage(5, NOW, 0)).toContain('automatically');
+    // NOTHING PAUSED — the old, domain-only lapse. The app survived and the message says so.
     const lapse = lapseMessage(['mitrify.in']);
     expect(lapse).toContain('mitrify.in');
-    expect(lapse).toContain('still live on its free NavBharatAI link');
-    expect(lapse).toContain('reconnects automatically');
-    for (const msg of [reminderMessage(5, NOW, 50), lapseMessage(['x.in'])]) {
+    expect(lapse).toContain('still live on their free NavBharatAI links');
+    expect(lapse).toContain('reconnects on its own');
+
+    // APPS PAUSED (2026-09-10 demotion) — the message must carry the second piece of bad news AND
+    // its limits, because bad news that omits the limits of the damage reads as worse than it is.
+    const demoted = lapseMessage(['mitrify.in'], 'growth', 3);
+    expect(demoted).toContain('3 apps');
+    expect(demoted).toContain('nothing was deleted');
+    expect(demoted).toContain('your files are all still here');
+    expect(demoted).toContain('open it and press Publish');
+    expect(demoted).toContain('Growth');
+    // Singular reads correctly too — "1 apps have been paused" is the kind of detail users notice.
+    expect(lapseMessage([], 'starter', 1)).toContain('1 app has been paused');
+
+    for (const msg of [reminderMessage(5, NOW, 50), lapseMessage(['x.in']), lapseMessage(['x.in'], 'growth', 2)]) {
       expect(msg.toLowerCase()).not.toMatch(/firebase|cloudflare|google/);
     }
   });
@@ -124,6 +148,71 @@ function fakeAdminDb(docs: Record<string, any>) {
     }),
   } as any;
 }
+
+describe('renewal never points a domain at a dead app (audit 2026-09-10)', () => {
+  it('🔒 a domain whose app is PAUSED is not reconnected — and the user is told the one step that fixes it', async () => {
+    // The lapse now pauses apps as well as suspending domains, so reattaching unconditionally would
+    // point a domain at a deleted channel — right after the notice promised "your domain reconnects
+    // on its own". A false promise is worse than the outage it replaced.
+    const attached: string[] = [];
+    const notes: string[] = [];
+    _setSweepDepsForTests({
+      linksForUser: async () => [
+        { domain: 'live.in', workspaceId: 'w-live', userId: 'u1', suspended: 'plan_lapsed' },
+        { domain: 'paused.in', workspaceId: 'w-paused', userId: 'u1', suspended: 'plan_lapsed' },
+      ] as any,
+      appsForUser: async () => [
+        { workspaceId: 'w-live', status: 'active', updatedAt: 1 },
+        { workspaceId: 'w-paused', status: 'plan_paused', updatedAt: 2 },
+      ],
+      attachDomain: async (_ws, d) => { attached.push(d); },
+      setSuspended: async () => {},
+      notify: async (_u, m) => { notes.push(m); },
+    });
+    expect(await reattachSuspendedDomains('u1')).toBe(1);
+    expect(attached).toEqual(['live.in']);
+    const all = notes.join(' | ');
+    expect(all).toContain('live.in');
+    expect(all).toContain('paused.in');
+    expect(all).toContain('press Publish');   // the actionable step, not a silent skip
+    expect(all).toContain('Nothing was lost');
+  });
+
+  it('🔒 only a KNOWN-down app is skipped — an absent or unreadable record still reattaches', async () => {
+    // The first version of this guard collected the LIVE workspaces and skipped anything missing
+    // from that set. That is a different, much worse rule: a user whose apps predate the deployment
+    // registry — or a read that returns an empty page rather than throwing — would have had EVERY
+    // domain refused, right after paying. "Cannot tell" must reattach; only a record that exists and
+    // is not active may be skipped. Caught by an existing test that stubbed no registry at all.
+    for (const appsForUser of [
+      async () => { throw new Error('registry down'); },          // read failed
+      async () => [],                                             // legacy user, no records at all
+      async () => [{ workspaceId: 'other', status: 'plan_paused', updatedAt: 1 }], // a DIFFERENT app is down
+    ]) {
+      const attached: string[] = [];
+      _setSweepDepsForTests({
+        linksForUser: async () => [{ domain: 'x.in', workspaceId: 'w', userId: 'u1', suspended: 'plan_lapsed' }] as any,
+        appsForUser: appsForUser as any,
+        attachDomain: async (_ws, d) => { attached.push(d); },
+        setSuspended: async () => {},
+        notify: async () => {},
+      });
+      expect(await reattachSuspendedDomains('u1')).toBe(1);
+      expect(attached).toEqual(['x.in']);
+    }
+  });
+
+  it('nothing suspended ⇒ no lookup, no messages', async () => {
+    let looked = false;
+    _setSweepDepsForTests({
+      linksForUser: async () => [],
+      appsForUser: async () => { looked = true; return []; },
+      notify: async () => { throw new Error('must not notify'); },
+    });
+    expect(await reattachSuspendedDomains('u1')).toBe(0);
+    expect(looked).toBe(false);
+  });
+});
 
 describe('sweepOneWallet', () => {
   it('a lapse detaches every active domain, marks it suspended, and tells the user honestly', async () => {
@@ -149,12 +238,109 @@ describe('sweepOneWallet', () => {
     expect(docs['user_token_wallets/u1'].hostingPlan.lapsedAt).toBeTruthy(); // persisted
   });
 
+  it('🔒 a lapse DEMOTES to the free allowance: apps above it really go offline, the rest stay', async () => {
+    // Admin 2026-09-10: "month complete ho gaya, tab to app offline honi chahiye." The demotion is the
+    // FAIR version of that — back to exactly what a free account gets, never below it, so paying once
+    // can never leave someone worse off than never paying.
+    const docs: Record<string, any> = {
+      'user_token_wallets/u1': wallet(100, plan(-(HOSTING_PLAN_GRACE_DAYS + 1))),
+    };
+    const paused: string[] = [];
+    let notice = '';
+    // Seven live apps, one of them holding the custom domain. The free cap is 5, so two must go.
+    const apps = [
+      { workspaceId: 'w-domain', status: 'active', updatedAt: 1 },       // oldest, but has the domain
+      { workspaceId: 'w-6', status: 'active', updatedAt: 60 },
+      { workspaceId: 'w-5', status: 'active', updatedAt: 50 },
+      { workspaceId: 'w-4', status: 'active', updatedAt: 40 },
+      { workspaceId: 'w-3', status: 'active', updatedAt: 30 },
+      { workspaceId: 'w-2', status: 'active', updatedAt: 20 },
+      { workspaceId: 'w-1', status: 'active', updatedAt: 10 },
+      { workspaceId: 'w-gone', status: 'unpublished', updatedAt: 99 },   // not live — holds no slot
+    ];
+    _setSweepDepsForTests({
+      linksForUser: async () => [{ domain: 'mitrify.in', workspaceId: 'w-domain', userId: 'u1' }],
+      detachDomain: async () => {},
+      setSuspended: async () => {},
+      appsForUser: async () => apps,
+      pauseApp: async (ws) => { paused.push(ws); },
+      notify: async (_u, msg) => { notice = msg; },
+    });
+    expect(await sweepOneWallet(fakeAdminDb(docs), 'u1')).toEqual({ kind: 'lapse' });
+
+    // Exactly the two least-defensible apps, and NEVER the one with a real domain pointed at it.
+    expect(paused.sort()).toEqual(['w-1', 'w-2']);
+    expect(paused).not.toContain('w-domain');
+    // An already-unpublished app was never live, so pausing it would be an action that does nothing.
+    expect(paused).not.toContain('w-gone');
+    // The user is told the count and the limits of the damage.
+    expect(notice).toContain('2 apps');
+    expect(notice).toContain('nothing was deleted');
+  });
+
+  it('one app that refuses to come down does not stop the rest, and is never marked paused', async () => {
+    // The registry must never claim "paused" over a site that is still serving — the fake status the
+    // unpublish route warns about. A throw leaves it live AND active, so the next sweep retries it.
+    const docs: Record<string, any> = {
+      'user_token_wallets/u1': wallet(100, plan(-(HOSTING_PLAN_GRACE_DAYS + 1))),
+    };
+    const paused: string[] = [];
+    let notice = '';
+    _setSweepDepsForTests({
+      linksForUser: async () => [],
+      appsForUser: async () => Array.from({ length: 8 }, (_, i) => ({
+        workspaceId: `w-${i}`, status: 'active', updatedAt: 100 - i,
+      })),
+      pauseApp: async (ws) => {
+        if (ws === 'w-6') throw new Error('hosting said no');
+        paused.push(ws);
+      },
+      notify: async (_u, msg) => { notice = msg; },
+    });
+    expect(await sweepOneWallet(fakeAdminDb(docs), 'u1')).toEqual({ kind: 'lapse' });
+    expect(paused).toEqual(['w-5', 'w-7']);          // w-6 threw; the others still went down
+    expect(notice).toContain('2 apps');              // the count is what REALLY happened, not what was tried
+  });
+
+  it('a lapse for a user at or under the free allowance pauses nothing at all', async () => {
+    const docs: Record<string, any> = {
+      'user_token_wallets/u1': wallet(100, plan(-(HOSTING_PLAN_GRACE_DAYS + 1))),
+    };
+    const paused: string[] = [];
+    let notice = '';
+    _setSweepDepsForTests({
+      linksForUser: async () => [],
+      appsForUser: async () => [{ workspaceId: 'only-one', status: 'active', updatedAt: 1 }],
+      pauseApp: async (ws) => { paused.push(ws); },
+      notify: async (_u, msg) => { notice = msg; },
+    });
+    await sweepOneWallet(fakeAdminDb(docs), 'u1');
+    expect(paused).toEqual([]);
+    expect(notice).toContain('still live on their free NavBharatAI links');
+  });
+
+  it('the domain half of a lapse survives even if listing the apps blows up', async () => {
+    const docs: Record<string, any> = {
+      'user_token_wallets/u1': wallet(100, plan(-(HOSTING_PLAN_GRACE_DAYS + 1))),
+    };
+    const events: string[] = [];
+    _setSweepDepsForTests({
+      linksForUser: async () => [{ domain: 'x.in', workspaceId: 'w', userId: 'u1' }],
+      detachDomain: async (_ws, d) => { events.push(`detach ${d}`); },
+      setSuspended: async () => {},
+      appsForUser: async () => { throw new Error('store down'); },
+      notify: async () => {},
+    });
+    expect(await sweepOneWallet(fakeAdminDb(docs), 'u1')).toEqual({ kind: 'lapse' });
+    expect(events).toContain('detach x.in'); // the half that already succeeded is never undone
+  });
+
   it('a due reminder notifies once and persists the marker', async () => {
     const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(2 * PRICE_TOKENS, plan(2)) };
     const notes: string[] = [];
     _setSweepDepsForTests({ notify: async (_u, m) => { notes.push(m); }, now: () => new Date(NOW_MS) });
     const db = fakeAdminDb(docs);
-    expect(await sweepOneWallet(db, 'u1')).toEqual({ kind: 'remind', days: 5, shortfallInr: 0 });
+    expect(await sweepOneWallet(db, 'u1')).toEqual({ kind: 'remind', days: 3, shortfallInr: 0 });
     expect(await sweepOneWallet(db, 'u1')).toBeNull(); // marker persisted — no double-send
     expect(notes).toHaveLength(1);
   });
@@ -233,8 +419,22 @@ describe('lifecycle wiring', () => {
     expect(kb).toContain('reconnects automatically');
   });
 
-  it('reminder windows are what the admin asked for: 5 days (and 1 day), grace 3 days', () => {
-    expect(HOSTING_PLAN_REMINDER_DAYS).toEqual([5, 1]);
+  it('reminder windows are what the admin asked for: 5, 3 and 1 days, grace 3 days', () => {
+    // Widened from [5, 1] on 2026-09-10 — one warning five days out and then silence until the last
+    // day is easy to miss entirely, and the middle one is the useful one.
+    expect(HOSTING_PLAN_REMINDER_DAYS).toEqual([5, 3, 1]);
     expect(HOSTING_PLAN_GRACE_DAYS).toBe(3);
+  });
+
+  it('the grace message says the plan ENDED, how long is left, and that the app stays live', () => {
+    const msg = graceMessage(2, 0, 'starter');
+    expect(msg).toContain('has ended');
+    expect(msg).toContain('2 days left');
+    expect(msg).toContain('before your domain pauses');
+    // The honest half: losing the plan never takes the app down, and the message says so rather
+    // than letting the user imagine the worst.
+    expect(msg).toContain('stays live on its free NavBharatAI link');
+    // Short balance names the exact figure — "recharge" is not actionable without an amount.
+    expect(graceMessage(1, 75, 'starter')).toContain('₹75');
   });
 });

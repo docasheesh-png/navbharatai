@@ -52,6 +52,17 @@ export interface HostingTier {
    * ordinary editing as well as the hosting — the admin's "credit bundle karo".
    */
   bundledCreditInr: number;
+  /**
+   * How many apps this plan may keep published on NavBharatAI's own hosting at once.
+   *
+   * 🔴 WHY THIS FIELD EXISTS AT ALL (admin 2026-09-10, "plan khatam to app offline honi chahiye, nahi
+   * to user recharge hi nahi karega"). Before it, `publishedAppCap()` gave EVERY user the same 5 apps
+   * whether they paid or not — so a "hosting plan" granted domains, badge removal, remix and ad-free,
+   * and **no hosting at all**. That is why losing the plan felt toothless: there was nothing hosting-
+   * shaped to lose. The plan now grants real headroom, which is what makes the demotion below mean
+   * something.
+   */
+  publishedApps: number;
   /** One line for the plan card. */
   tagline: string;
   /** The bullet list on the plan card, in order. */
@@ -67,6 +78,21 @@ export interface HostingTier {
  * number that varies by region or by month cannot be quoted in advance.
  */
 export const HOSTING_OVERAGE_INR_PER_GB = 20;
+
+/**
+ * Apps a FREE account may keep published on NavBharatAI's hosting.
+ *
+ * 🔑 THIS IS THE FLOOR A LAPSED PLAN FALLS BACK TO — never zero, and that is the whole design. Free
+ * hosting is a real product here (HostingQuota has given every account 5 apps since 2026-08-21), so
+ * switching a lapsed PAYING user's apps all the way off would leave them strictly worse than someone
+ * who never paid a rupee. The pressure to renew comes from losing the HEADROOM the plan bought, which
+ * a user with 20 live apps feels immediately, not from taking away what free accounts get for nothing.
+ *
+ * It mirrors `publishedAppCap()`'s default on the server. That function stays authoritative (it is
+ * env-tunable); this constant is what the purchase screen and the agreement quote, and a test pins
+ * the two together so they cannot drift.
+ */
+export const FREE_PUBLISHED_APPS = 5;
 
 /**
  * The purchasable tiers, cheapest first.
@@ -85,9 +111,11 @@ export const HOSTING_TIERS: readonly HostingTier[] = [
     domains: 1,
     includedTransferGb: 5,
     bundledCreditInr: 0,
+    publishedApps: 15,
     tagline: 'One live site on your own domain.',
     includes: [
       'Connect 1 domain of your own',
+      'Keep up to 15 apps published (free accounts get 5)',
       'No "Made with NavBharatAI" badge',
       '5 GB of visitor traffic each month',
       'Remix any app in the gallery',
@@ -102,9 +130,11 @@ export const HOSTING_TIERS: readonly HostingTier[] = [
     domains: 3,
     includedTransferGb: 20,
     bundledCreditInr: 150,
+    publishedApps: 50,
     tagline: 'Several sites, room to grow, and credit to keep building.',
     includes: [
       'Connect up to 3 domains of your own',
+      'Keep up to 50 apps published (free accounts get 5)',
       'No "Made with NavBharatAI" badge',
       '20 GB of visitor traffic each month',
       '₹150 of build credit added to your wallet every month',
@@ -150,6 +180,17 @@ export function tierRank(planId: string | null | undefined): number {
 export function hostingAgreementTerms(tier: HostingTier): readonly string[] {
   return [
     `₹${tier.priceInr} is taken from your NavBharatAI wallet now, and again every ${tier.days} days while auto-renew is on. You can switch auto-renew off at any time.`,
+    `The plan lets you keep up to ${tier.publishedApps} apps published at once. Free accounts keep ${FREE_PUBLISHED_APPS}.`,
+    // 🔒 THE HONEST WARNING ABOUT WHAT LAPSING COSTS. The admin asked for a lapse with real bite; the
+    // user is owed the same sentence BEFORE they buy, not discovered afterwards. It says exactly what
+    // is paused and exactly what is not, because a vague "your apps may be affected" is the kind of
+    // clause people only read after it has already happened to them.
+    // ⚠️ THE RESTORE IS DESCRIBED EXACTLY AS IT WORKS, and two earlier drafts of this line were not.
+    // "Everything comes back when you renew" implied an automatic restore nothing performs; "in one
+    // tap" implied a Restore button that does not exist. Republishing re-runs a real build, so it is
+    // done by opening the app and pressing Publish. Promising less friction than there is would be
+    // discovered at the worst possible moment — just after the user paid to get their apps back.
+    `If the plan ends and you do not renew, you go back to the free ${FREE_PUBLISHED_APPS} apps: anything above that is PAUSED, never deleted. All your files are kept — renew, then open a paused app and press Publish to put it back online. Your domain pauses too (that one reconnects on its own), and the "Made with NavBharatAI" badge returns.`,
     `The plan includes ${tier.includedTransferGb} GB of visitor traffic every ${tier.days} days, across all your connected sites.`,
     `If your sites go past ${tier.includedTransferGb} GB, your apps KEEP RUNNING — nothing is switched off. The extra traffic is charged from your wallet at ₹${HOSTING_OVERAGE_INR_PER_GB} per GB, and every charge appears in your ledger.`,
     // 🔴 THIS LINE IS HERE BECAUSE THE METER IS NOT LIVE YET, and an agreement that quietly implies

@@ -47255,3 +47255,182 @@ commits old; it proved nothing about today's `main`, and the one thing it could 
 another session solving the same problem better. **A PR left open drifts from green to unknown without
 any event marking the moment.** The rule that follows: re-verify a PR against current `main` before
 merging it, and treat an old green as a claim about a tree that no longer exists.
+---
+
+## 2026-09-10 — Renewal reminders: 5 / 3 / 1 days, plus the grace-window warning that was missing
+
+Admin: **"user ko 5-3-1 day me reminder notification show hona chahiye"**.
+
+Two changes, and the second is the one that mattered more than the ask:
+
+1. `HOSTING_PLAN_REMINDER_DAYS` widened from `[5, 1]` to `[5, 3, 1]`. One warning five days out and
+   then silence until the last day is easy to miss entirely; the middle one is the useful one.
+
+2. **🔴 THE THREE-DAY SILENCE AFTER EXPIRY, WHICH NOBODY HAD NOTICED.** The pre-expiry reminders only
+   fire while `exp > now`, and the lapse message only fires *past* the grace window. So for the entire
+   3-day grace period — the single most useful moment to reach someone, when the plan has genuinely
+   ended and one recharge still fixes it with nothing interrupted — the user heard **nothing at all**.
+   That was the exact opposite of the reminder feature's purpose. There is now ONE grace message,
+   keyed on the expiry so a new period resets it and a daily sweep cannot nag.
+
+The grace message says three things, in this order because that is the order the user needs them:
+the plan HAS ended; there are N days before the domain pauses; and the app stays live on its free
+NavBharatAI link either way. It names the exact shortfall when the wallet cannot cover the renewal —
+"recharge" is not actionable without an amount.
+
+One existing test asserted SILENCE through the grace window and now asserts the message; what it
+really guarded — that no domain is detached inside grace — is unchanged and still asserted.
+
+### ⏸️ OPEN QUESTION PUT TO THE ADMIN — "plan khatam, app offline honi chahiye"
+
+The admin's instinct (a lapse with no bite means nobody recharges) is right, but the literal fix has a
+hole worth naming before it ships, so it is asked rather than assumed:
+
+**Free hosting is a real product here.** `HostingQuota` gives EVERY user — paid or not — 5 published
+apps, 200 MB total, 50 MB each, on NavBharatAI's bill, with the badge. If a lapsed PAYING user's app
+goes fully offline while someone who never paid a rupee keeps 5 apps live, then paying once makes you
+strictly worse off than never paying.
+
+**And the real hole the admin is sensing is a different one:** `publishedAppCap()` is NOT plan-aware.
+A ₹499 Growth customer gets the same 5-app cap as a free user, so the plan today grants domains, badge
+removal, remix and ad-free — and **no hosting allowance at all**. "Hosting plan" is currently a
+misnomer, which is precisely why losing it feels toothless.
+
+Recommendation put to the admin: make the plans grant real hosting headroom, and make a lapse a
+**demotion to the free tier** rather than a blackout — apps above the free 5 go offline (files kept,
+one tap to restore on renewal), the domain pauses, the badge returns. A Growth user holding 20 live
+apps then loses 15 on lapse, which is real pressure; a one-app user keeps their app but loses the
+domain, which is fair. Awaiting the admin's call before building either.
+
+---
+
+## 2026-09-10 — The lapse now bites: demotion to the free tier (branch `feat/renewal-reminders`)
+
+Admin: **"user ka month complete ho gaya, tab to app offline honi chahiye, nahi to user recharge hi
+nahi karega"** — and, asked to choose, they picked **demote to the free tier** over a full blackout.
+
+**The hole underneath the complaint, which was worse than the complaint.** `publishedAppCap()` gave
+EVERY account 5 published apps whether they paid or not, so a ₹499 Growth customer had exactly the
+hosting headroom of someone who had never paid a rupee. The plan granted domains, badge removal, remix
+and ad-free — and **no hosting at all**. "Hosting plan" was a misnomer, and that is the real reason
+losing one felt like it cost nothing. Fixed first: Starter now grants **15** published apps, Growth
+**50**, free stays **5**, and the publish gate reads the user's plan (bounded, and failing open to the
+FREE cap in both directions — never more room than was bought, never a refusal we cannot justify).
+
+**Why demotion and not a blackout, stated plainly because the admin's literal instruction was the
+blackout.** Free hosting is a real product here. Switching a lapsed PAYER all the way off while
+someone who never paid keeps 5 apps live would make paying once leave you strictly worse than never
+paying — a user notices that immediately — and the site's own visitors, who did nothing, pay for it
+too. Demotion keeps the pressure where it belongs: a user holding 20 live apps loses 15 the moment
+they stop paying. A one-app user keeps their app and loses their domain, which is fair.
+
+**Which apps survive, using the only two real signals we have.** `appsToPauseOnLapse` keeps the free
+slots for (1) apps with a **custom domain** pointed at them — somebody bought a domain for it, the
+strongest evidence a site has real visitors — then (2) the **most recently updated**. Guessing is
+unavoidable; guessing with the user's own evidence beats "take the first five", which is what document
+order would silently be. A cap of 0 pauses **nothing** — a misconfiguration must never black out an
+account.
+
+**The pause is real, and cannot lie.** `pauseApp` deletes the live Hosting channel FIRST and only then
+marks the record `plan_paused`; a throw leaves the app live AND active so the next sweep retries it.
+A record saying "paused" over a still-serving site would be the fake status the unpublish route already
+warns about, and here it would be worse — the user would be told to renew to get back something that
+never went away.
+
+**`plan_paused` is a THIRD status on purpose.** Not `taken_down` (a punishment whose republish block
+must never apply here) and not `unpublished` (the owner's choice, which this was not). It is non-active,
+so it correctly reads as not live and frees the slot — which is exactly right, since the slot is what
+they stopped paying for.
+
+**🔴 THE RESTORE IS DESCRIBED EXACTLY AS IT WORKS, after two drafts that were not.** Republishing
+re-runs a real sandbox build, so there is no instant restore: the user renews, opens the app, presses
+Publish. The first draft said "everything comes back when you renew" (implying an automatic restore
+nothing performs); the second said "in one tap" (implying a Restore button that does not exist). Both
+would have been discovered at the worst possible moment — just after paying to get their apps back.
+Auto-restoring a dozen apps inside a sweep would spend real money on our own bill and fail often, which
+is why it is manual rather than hidden.
+
+**Paused apps stay VISIBLE** under "Your published apps" — separate from the live list, because that
+list's count must equal what the cap enforces. An app that vanished from every screen would look
+deleted and could never be found again.
+
+**Also in this branch:** reminders at **5 / 3 / 1** days, and the grace-window message that closed a
+three-day silence nobody had noticed (the pre-expiry reminders stop at expiry and the lapse fires only
+after grace, so the most useful moment to reach someone produced nothing at all).
+
+### Free vs paid, spelled out — and the gate that was missing from the step BEFORE connect
+
+Admin, 2026-09-10: **"free user apni website connect nahi kar sakta hai … paid user app connect kar ke
+apni website par app chalata hai … plan ka month pura ho jaye to live website offline ho jani chahiye,
+host on navbharatai chalti rahe."**
+
+Three statements. Two were already true and are now pinned by tests so a refactor cannot quietly undo
+them. The third found a real hole.
+
+**✅ Already true — a lapse kills the DOMAIN, not the hosting.** `decidePlanSweepStep`'s lapse detaches
+every custom domain and marks it suspended, while the app keeps serving on its free NavBharatAI link.
+And the demotion built earlier the same day deliberately hands the free slots to **domain-holding apps
+first**, so the site the user cared most about is the last thing to pause. Both halves are now asserted
+directly (`hostingTiers.test.ts`), because an invariant that merely *happens* to hold is one refactor
+from breaking.
+
+**🔴 THE HOLE: `/api/domains/nbai/auto-dns/start` HAD NO PLAN GATE, and it runs BEFORE connect.**
+`/connect` has been gated since 2026-08-06 — but start is the step a user reaches first: it calls
+`ensureZone(host)`, which **creates a real DNS zone on NavBharatAI's own Cloudflare account**, and
+hands back nameservers for the user to set at their registrar. So a free account could:
+
+1. start automatic setup (a zone on our bill, every time),
+2. repoint their domain's nameservers — slow, disruptive and awkward to undo on their side,
+3. and only THEN be told at connect that the whole thing needs a plan.
+
+That is the dead end the second absolute rule forbids, and it cost us a zone each time somebody hit it.
+
+**The fix is one shared gate, not a second copy.** `refusedForNoPlan(res, uid, email)` now serves both
+routes, so they cannot drift apart again — the exact class of bug the fourth rule's step 2 names. Both
+exemptions are preserved deliberately: the admin/tester free-list, and a plan store that cannot answer
+(`known` false ⇒ allow), because rule #1 says an outage must never block a legitimate paying user.
+`auto-dns/sync` and `hostinger/apply` need an already-connected domain and refuse without one, so
+gating connect and start covers the whole path.
+
+**The refusal now names what the free user still HAS.** "Your app is still published and live on its
+NavBharatAI link" — a refusal that only says no reads as the product being broken, when the free tier
+genuinely gives them a working, hosted site. The auto-DNS screen renders it as the amber upgrade note
+rather than a red error, which it previously did only for connect.
+
+**Three guard tests were re-anchored, not weakened.** They sliced `nbaiDomains.ts` from a bare route
+name (`indexOf('auto-dns/start')`), and the new shared helper's doc comment mentions both endpoint
+names — so they began reading PROSE instead of a handler. They now anchor on the registration
+(`app.post('/api/domains/nbai/auto-dns/start'`). Same lesson this file already records twice: a
+conclusion drawn from the wrong slice is not a weaker test, it is a different one.
+
+### Self-audit of the demotion, the same day it shipped — one real hole found and closed
+
+Asked "sare error/bugs/holes fix ho gaye?", the honest move was to go back over the money paths just
+shipped rather than answer from memory. Four seams were checked; three were already sound, one was not.
+
+**✅ Republish really un-pauses.** `withDeploymentPersistence` writes `status: 'active'` on every
+publish, so opening a `plan_paused` app and pressing Publish restores it fully — the instruction the
+lapse notice gives is a real one.
+
+**✅ Every Cashfree credit path carries the fee.** Redirect, webhook and reconcile-on-sign-in all go
+through `verifyPaymentInternal` → `computeCreditedWallet` with the transaction doc that holds
+`platformFeeInr`. There is no fourth path. Store purchases pass their own txData with no fee (correct),
+and a coupon writes the wallet directly with `amountPaid: 0` (correct — a gift is not a payment).
+
+**✅ No stale advertised price.** Every remaining `hostingPlanPriceInr()` call site is a "start a plan"
+pitch aimed at someone who has none, which is exactly what that function is for.
+
+**🔴 THE HOLE: renewal would have pointed a domain at a deleted channel.** The lapse now does two
+things — suspends domains AND pauses apps above the free allowance — but `reattachSuspendedDomains`
+reattached unconditionally. A domain whose app had been paused would come back pointing at nothing,
+right after the lapse notice promised "your domain reconnects on its own". A false promise, which is
+worse than the outage it replaced. Reachable when `AGENTV3_USER_PUBLISHED_APP_CAP` is set below the
+number of domains a user holds, or when the domain-count gate failed OPEN during an outage.
+
+**And the first fix for it was itself wrong, which is the more useful lesson.** It collected the LIVE
+workspaces and skipped any domain missing from that set — so a user whose apps predate the deployment
+registry, or a read returning an empty page rather than throwing, would have had EVERY domain refused
+immediately after paying. An existing test that stubbed no registry at all is what caught it. The rule
+is now: **skip only what we positively know is down** (a record that exists and is not active);
+absent, empty or unreadable all mean "cannot tell", and cannot-tell reattaches. The skipped domains are
+named in their own message with the one step that fixes them, because a silent skip looks like failure.

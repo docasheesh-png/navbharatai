@@ -11,6 +11,7 @@ import { giftPlanV2Enabled, decideSignupGrant, decidePhoneClaim, claimRefusalMes
 import { normalizeEmailForGift, normalizePhoneForGift, giftMarkerCandidates, giftMarkerIdToWrite } from '../lib/giftIdentity';
 import { verifiedPhoneNumber } from '../lib/authMiddleware';
 import { readHostingPlanStatus, purchaseHostingPlan, setHostingPlanAutoRenew } from '../lib/hostingPlan';
+import { HOSTING_TIERS } from '../../lib/hostingTiers';
 import { registerHostingPlanSweep, reattachSuspendedDomains } from '../lib/hostingPlanSweep';
 import { sendSafeError } from '../lib/httpError';
 
@@ -483,9 +484,10 @@ export function registerWalletRoutes(app: Express): void {
     }
   });
 
-  // ---------- Hosting plan (₹99/30d Custom Domain — admin-approved 2026-08-06) ----------
+  // ---------- Hosting plans (two tiers — admin 2026-09-10: "do tier banao") ----------
   // The plan lives ON the wallet doc; purchase debits the SAME wallet in the SAME transaction.
   // Lazy auto-renewal happens inside the status read (readHostingPlanStatus), so no cron exists.
+  // The catalogue (prices, limits, agreement text) is src/lib/hostingTiers.ts — shared with the UI.
 
   app.get('/api/wallet/:userId/hosting-plan', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
@@ -498,10 +500,24 @@ export function registerWalletRoutes(app: Express): void {
 
   app.post('/api/wallet/:userId/hosting-plan/purchase', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      const result = await purchaseHostingPlan(getDb() as any, req.params.userId);
+      // The tier and the agreement tick come from the body. `agreedToTerms` is checked SERVER-side
+      // (computePlanPurchase refuses without it) rather than trusted to a disabled button: a purchase
+      // whose terms were never accepted must be impossible, not merely awkward to reach.
+      //
+      // An ABSENT tier defaults to Starter so an older client that has not learned about tiers still
+      // buys something real. It cannot silently buy the expensive one.
+      const tierId = typeof req.body?.tierId === 'string' ? req.body.tierId : undefined;
+      const agreedToTerms = req.body?.agreedToTerms === true;
+      const result = await purchaseHostingPlan(
+        getDb() as any, req.params.userId, undefined, tierId ?? HOSTING_TIERS[0].id, { agreedToTerms },
+      );
       if (!result.ok) {
-        // insufficient → 402 (recharge first); disabled/unavailable → 503. Nothing was charged.
-        return res.status(result.reason === 'insufficient' ? 402 : 503).json(result);
+        // insufficient → 402 (recharge first); a missing tick or an unbuyable tier is the caller's
+        // request being wrong → 400; disabled/unavailable → 503. Nothing was charged on any path.
+        const status = result.reason === 'insufficient' ? 402
+          : (result.reason === 'agreement_required' || result.reason === 'unknown_tier') ? 400
+          : 503;
+        return res.status(status).json(result);
       }
       // Renewal undoes a lapse: any domain paused for the lapsed plan reconnects automatically.
       // Best-effort and non-blocking — the purchase result never waits on hosting calls.

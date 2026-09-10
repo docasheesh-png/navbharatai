@@ -46940,6 +46940,72 @@ Nothing was broken — a wire was missing. Now refreshed at boot and every six h
 exclusive job would refresh exactly one instance and leave every other one billing at 85 — the same
 bug with extra steps. Every instance refreshes its own copy; the cost is one small HTTP call per
 instance per six hours.
+
+---
+
+## 2026-09-10 — Revenue, slice A: the platform fee on a wallet recharge (branch `feat/platform-fee`)
+
+Admin, confirmed: **"2% flat theek hai"** (after asking for "cashfree/google/apple ka charge + 1%").
+
+**Why flat, and why it is not called a gateway fee.** India's real cost of taking a payment is not one
+number: UPI carries ZERO merchant discount rate by regulation, cards and netbanking cost roughly 2%
+plus GST. Deducting the ACTUAL cost would mean the same ₹500 credits a different amount depending on a
+method the user only picks on the NEXT screen — three prices for one product, none showable in advance.
+A flat rate can be stated before payment, which is the only version a user can agree to. And it is
+named a **platform fee**, never "Cashfree's charge": the gateway's real charge on a given payment is a
+number no statement of ours will ever match, so naming it after them would be a claim we cannot support
+even when it flatters us. (Same reasoning CLAUDE.md already records for the Play Store fee label.)
+
+**What was actually wrong.** `routes/payment.ts` credited `balanceAdded: orderAmount` with the comment
+"₹1 = ₹1 balance added to wallet". The gateway's charge therefore came out of NavBharatAI's side of
+every card payment and appeared **nowhere in the books** — there was no gateway-fee line anywhere in
+the codebase. On a ₹500 card recharge we credited ₹500 and received about ₹490.
+
+**Where the fee is applied, and the three places it deliberately is NOT.**
+- ✅ Cashfree create-order stores `balanceAdded = paid − fee`, plus `platformFeeInr` / `platformFeePct`
+  on the transaction so the admin's revenue reporting can total it without re-deriving a rate that may
+  since have changed.
+- ❌ **Google Play / Apple packs.** Already priced with their fee inside (₹119 buys ₹99), and the
+  billing panel promises "your wallet is credited the full credit amount shown, never less". Charging
+  here would bill one thing twice AND make that sentence a lie.
+- ❌ **Coupons and referral gifts.** No gateway, no money arriving — a fee on a gift is taking money in
+  order to give money.
+- ❌ **Transactions created before this shipped.** No `platformFeeInr` field means zero, so a pending
+  order sold at rupee-for-rupee still credits in full, exactly as it was sold.
+
+**The sibling that would have leaked the fee straight past it.** `computeCreditedWallet` has TWO
+branches. The standard one credits `balanceAdded`, so setting that net at create-order was enough. The
+**vishwakarma** one — which is also the branch Play packs are credited through — derives its tokens
+from `amountPaid` on purpose (security fix C4: never trust a client-supplied token count), so a fee
+applied only to `balanceAdded` would have been invisible to it. It now mints from the NET. The fee is
+read from the transaction rather than re-computed from the current rate, so an order that sits pending
+while the admin changes the rate still credits what its buyer was shown.
+
+**🔴 A REAL MONEY BUG FOUND ON THE WAY, unrelated to the fee and worse than it.** The Vishwakarma
+chooser modal printed its entry-pass price as `vkMode === 'pro' ? 100 : 50` — in the price badge, the
+totals box and the buy button — while `createVishwakarmaOrder` hardcoded ₹100 and the server credited
+`(paid − 100) × 100` tokens. **`setVkMode` is never called anywhere in the codebase**, so `vkMode` was
+permanently `'basic'`: every single pass buyer was shown **₹50 + tokens** and charged **₹100 + tokens**,
+receiving the tokens they expected and ₹50 less than the screen promised. Root cause was not the wrong
+literal — it was a money constant with three homes, free to drift between them. It now has one:
+`src/lib/walletPricing.ts`, which the server re-exports from rather than keeping its own copy.
+
+**One implementation of the split, shared.** The arithmetic lives in `src/lib/platformFee.ts`; the
+server wraps it with the env rate, the browser wraps it with the rate it reads from
+`/api/public-config`. The user is shown the exact split the server will apply — "₹500.00 paid −
+₹10.00 platform fee = ₹490.00 credited" — before paying, and the fee is named again in their ledger
+line afterwards. `fee + credit === paid` exactly at every amount, because the fee is rounded and the
+credit is the remainder: a wallet whose two halves disagree with the payment is the drift the
+debit-carry fix was written to end.
+
+**Config.** `PLATFORM_FEE_PCT` in Cloud Run, unset ⇒ 2. An EMPTY value falls back to the default
+rather than meaning "no fee" (`Number('')` is 0 — the trap `hostingCost.ts` already records); an
+out-of-range or unreadable value is refused, never obeyed; an explicit `0` IS honoured, because
+switching the fee off must be possible and visible. Capped at 20%.
+
+**Open, deliberately not built in this slice:** the two hosting tiers (₹149 / ₹499), the hosting
+meter and its overage billing, and the remix gate. Paid remix (Cashfree split settlement) and the TDS
+admin card stay deferred at the admin's instruction — "isko chor do! last ke liye."
 ## 2026-09-10 — DPDP + GDPR consent banner, one click, for USER apps (ROADMAP §13 item 4.4)
 
 **Session:** claude/upgrade-md-review-vxbdy0 (after #2801).
@@ -47018,3 +47084,88 @@ Indian shop, and the roadmap row says so.
 ### Honest limits
 - The ₹1 UPI test the roadmap names as "done when" needs a real merchant's sandbox keys in a real app —
   a session cannot run it. The code paths mirror the platform's own live Cashfree integration.
+
+---
+
+## 2026-09-10 — Revenue, slice B: two hosting tiers with a real agreement (branch `feat/platform-fee`)
+
+Admin: **"do tier banao, credit bundle karo, 20 GB theek hai"**, and earlier **"yeh bat clear likhi ho
+jab user 149₹ ka purchage kare, agreement type aa jaye, 'ok' tick karne ko aye"**, and **"app remix
+only woh user kar sakta hai, jo user ₹149/mahina par hai … purchase ₹149/mahina ka popup a jaye"**.
+
+**Starter ₹149** — 1 domain, 5 GB traffic, badge-free, gallery remix, ad-free.
+**Growth ₹499** — 3 domains, 20 GB, **₹150 of build credit every month**, everything in Starter.
+**₹2,999 Business is deliberately NOT built.** A purchasable plan with nobody on it is a promise about
+capacity, support and limits that no code keeps. It is "write to us" until a real customer defines it —
+which is also the honest way to find out what it should contain.
+
+**The catalogue is one file, shared.** `src/lib/hostingTiers.ts` holds prices, limits, entitlements AND
+the agreement text, and both the browser and the server read it. The consent text is **generated from
+the tier**, never written beside it — an agreement that quotes one number while the meter enforces
+another is worse than no agreement.
+
+**The tick is enforced on the SERVER.** `computePlanPurchase` refuses without `agreedToTerms`, so a
+plan record with no `agreedAt` cannot be created. That matters beyond the ceremony: **overage may only
+ever be billed against a plan whose terms were actually accepted**, which is exactly why the accepted
+terms are frozen onto the record rather than a version number — and exactly why a legacy ₹99 plan,
+which carries no agreement, can never be billed for it.
+
+**Going over the limit does not switch the app off.** The agreement says so in capitals. Overage is
+₹20/GB from the wallet (measured cost is ~₹14/GB — an overage rate at or under cost turns a popular
+app into a loss that grows with its success). The meter itself is slice C.
+
+**Upgrading mid-month loses nothing:** the unused days are valued at the old plan's own daily rate,
+returned to the wallet as credit, and the new tier starts a full period from that day. Downgrading
+while a bigger plan is live is refused rather than silently shortening what was paid for.
+
+**🔒 THE LEGACY ₹99 PLAN IS GRANDFATHERED, AND THAT IS A DECISION.** Those users agreed to ₹99. Moving
+them to ₹149 because a catalogue was introduced would be raising a price on a live subscription without
+asking, which no amount of "the new plan is better" makes honest. They keep ₹99 and receive Starter's
+entitlements — strictly more than they bought.
+
+**Three siblings that would each have silently broken the new tiers**, all found by grepping for the
+one-constant comparison the old single-plan design licensed:
+- `hostingPlanActive` tested `p.id !== HOSTING_PLAN_ID` — every Starter and Growth plan would have read
+  as INACTIVE. A paying customer with no entitlements and nothing failing anywhere.
+- `sweepHostingPlans` filtered the same way — no reminders, no renewals, no lapses for the new tiers.
+- Every sweep message hardcoded "Custom Domain" and the ADVERTISED price, so a Growth customer would
+  have been told their ₹499 plan renews at ₹149.
+
+**Entitlements are enforced, not printed.** Gallery remix now needs an active plan (402 + `needsPlan`,
+and the panel shows a real offer with a route to Billing — a refusal with no way to act on it is the
+dead button rule 2 forbids). The per-tier domain count is counted against active links. Both gates
+exempt the admin/tester list and **fail OPEN** on a store outage, the same shape as the existing
+domain gate, so the two cannot drift.
+
+**⚠️ ONE THING I DID NOT GATE, and the admin should overrule me if they disagree.** The Nav App Store's
+"make it yours" remix (`/api/nav-store/web/app/:id/remix`) supports SIGNED-OUT users by design — it is
+the store's whole conversion loop, viewer to creator in one tap. Gating that behind ₹149 would break
+signed-out remix entirely and remove the store's reason to exist. The GALLERY remix — taking another
+creator's published app as your starting point — is what the plan now covers.
+
+### Slice C (hosting traffic meter + overage) — OPEN ROOT CAUSE, honestly recorded (rule 6)
+
+**It cannot be built honestly today, and pretending otherwise would break the billing law.**
+
+The tiers include 5 GB / 20 GB of visitor traffic and quote ₹20/GB beyond it. Charging that needs a
+**per-app byte measurement**, and there is no honest source for one right now:
+
+- **Firebase Hosting** serves today's published apps as channels on ONE site. Its usage figures are
+  per-SITE, so the bytes of one user's app cannot be separated from everyone else's. Splitting them
+  would be inventing a number, which `hostingCost.ts`'s inherited law forbids outright.
+- **Cloud Run** metrics (`hostingUsage.ts`) measure NavBharatAI's own service, not a user's app.
+- **The site-analytics beacon** counts page VIEWS, not bytes. Multiplying views by an assumed page
+  weight would produce a figure that looks like a measurement and would land on a real person's bill.
+
+**The real path, when the admin wants it:** the Cloudflare Worker (`infra/cloudflare/mitrify-apps-worker.js`)
+is the one place every bucket-served app's response actually passes through, so it can count real
+response bytes per app and report them the way the analytics beacon already reports hits. That path
+only carries traffic once the bucket-only publishing sequence in CLAUDE.md is switched on — bucket
+public-readable → Worker `APPS_BUCKET` deployed → `PUBLISHED_APP_DOMAIN` set → `PUBLISHED_APPS_BUCKET_ONLY=on`.
+Until then the Worker would measure zero apps, so building the meter first would be building nothing.
+
+**What ships instead, and why it is safe:** no meter ⇒ no overage ⇒ the user is charged the plan price
+and nothing more. The error is entirely in their favour. The agreement SAYS SO in its own line, pinned
+by `tests/hostingTiers.test.ts` so removing that line the day the meter goes live is a deliberate act
+rather than a silent one, and `AppKnowledgeBase.ts` tells every AI to never claim a traffic charge a
+user's ledger does not actually show.

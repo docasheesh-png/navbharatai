@@ -453,7 +453,7 @@ export function ViewPanels({
           make an app public, so this screen never claims an app is live. */}
       {activeView === 'gallery' && (
         <div className="flex-1 h-full overflow-hidden">
-          <GalleryPanel user={user} files={files as Record<string, string>} />
+          <GalleryPanel user={user} files={files as Record<string, string>} onOpenPlans={() => toggleTab('billing')} />
         </div>
       )}
 

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 
 import { packBreakdown, type PurchaseRail, type StoreConfig } from '../../lib/storePurchase';
+import { splitPaymentAtPct, DEFAULT_PLATFORM_FEE_PCT } from '../../lib/platformFee';
 
 type BillingDetailTab = 'purchase' | 'gift' | 'use' | 'remaining' | 'budget';
 type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -47,6 +48,13 @@ export interface BillingPanelProps {
    * build has the native plugin. Everywhere else it is 'web-gateway' and this panel renders exactly
    * what it renders today — which is what makes shipping the rail unable to strand anyone.
    */
+  /**
+   * The wallet-recharge platform fee, in percent, as this server actually charges it. Threaded in
+   * (rather than fetched here) because this panel is a pure render — see the file header. The
+   * default is the server's own fallback, so a config route that never answered still shows the
+   * user the number they will really be charged.
+   */
+  platformFeePct?: number;
   storeRail?: PurchaseRail;
   storeConfig?: StoreConfig | null;
   buyingProductId?: string | null;
@@ -83,6 +91,7 @@ export function BillingPanel(props: BillingPanelProps) {
     reminderLimit, budgetLimit, dismissedReminderWarning, couponCodeInput,
     isRedeemingCoupon, couponError, couponSuccess, copiedReferral,
     buyAmountInput, isRecharging, tempReminderLimit, tempBudgetLimit,
+    platformFeePct = DEFAULT_PLATFORM_FEE_PCT,
     storeRail = 'web-gateway', storeConfig = null, buyingProductId = null,
     storePurchaseNotice = null, onBuyStorePack,
     limitError, limitSuccess,
@@ -93,6 +102,10 @@ export function BillingPanel(props: BillingPanelProps) {
     onSetLimitError, onSetLimitSuccess, onToast,
   } = props;
   const { monthlyAiCost } = props;
+
+  // The recharge split, computed by the SAME pure function the server settles with. One money rule,
+  // one implementation — the user is never shown a number the server will later disagree with.
+  const rechargeSplit = splitPaymentAtPct(parseFloat(buyAmountInput) || 0, platformFeePct);
 
   return (
     <div className="flex-1 bg-[#0d1117] p-6 text-left min-h-screen">
@@ -748,18 +761,31 @@ export function BillingPanel(props: BillingPanelProps) {
                         </div>
                       </div>
 
-                      {/* Live tokens calculations outputs */}
-                      <div className="grid grid-cols-2 gap-4 bg-black/40 border border-white/5 p-4 rounded-xl font-mono text-center">
-                        <div>
-                          <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Wallet Tokens</span>
-                          <span className="text-base text-emerald-400 font-extrabold block mt-1">{(parseFloat(buyAmountInput) || 0) * 100}</span>
-                          <span className="text-[8px] text-[#8b949e]">at ₹1 = 100 tokens</span>
+                      {/*
+                        WHAT THE USER ACTUALLY GETS — shown BEFORE they pay, never after.
+                        This used to print `amount × 100` under the caption "at ₹1 = 100 tokens",
+                        which was true of the old rupee-for-rupee credit and became a false promise
+                        the moment a platform fee existed. The split comes from the SAME pure module
+                        the server settles with (platformFeeAtPct), so the two can never disagree.
+                      */}
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-4 bg-black/40 border border-white/5 p-4 rounded-xl font-mono text-center">
+                          <div>
+                            <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Wallet Tokens</span>
+                            <span className="text-base text-emerald-400 font-extrabold block mt-1">{Math.round(rechargeSplit.creditInr * 100).toLocaleString('en-IN')}</span>
+                            <span className="text-[8px] text-[#8b949e]">₹{rechargeSplit.creditInr.toFixed(2)} of credit, at ₹1 = 100 tokens</span>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Equivalent AI Outputs</span>
+                            <span className="text-base text-indigo-400 font-extrabold block mt-1">{(Math.round(rechargeSplit.creditInr * 100) * 200).toLocaleString('en-IN')}</span>
+                            <span className="text-[8px] text-[#8b949e]">At 1 token = 200 outputs</span>
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Equivalent AI Outputs</span>
-                          <span className="text-base text-indigo-400 font-extrabold block mt-1">{(parseFloat(buyAmountInput) || 0) * 100 * 200}</span>
-                          <span className="text-[8px] text-[#8b949e]">At 1 token = 200 outputs</span>
-                        </div>
+                        {rechargeSplit.feeInr > 0 && (
+                          <p className="text-[10px] text-[#8b949e] font-semibold leading-relaxed font-mono text-center">
+                            ₹{rechargeSplit.paidInr.toFixed(2)} paid − ₹{rechargeSplit.feeInr.toFixed(2)} platform fee ({platformFeePct}%) = <span className="text-emerald-400 font-black">₹{rechargeSplit.creditInr.toFixed(2)} credited</span>
+                          </p>
+                        )}
                       </div>
 
                       <button

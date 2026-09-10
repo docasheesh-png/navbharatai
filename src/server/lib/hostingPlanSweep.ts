@@ -27,9 +27,10 @@
 
 import { doc, runTransaction, getServerDb } from './serverDb';
 import {
-  decidePlanSweepStep, hostingPlansEnabled, hostingPlanPriceInr, HOSTING_PLAN_ID,
+  decidePlanSweepStep, hostingPlansEnabled, planPriceInr, planDays,
   invalidatePlanCache, type PlanSweepAction, type HostingPlanRecord,
 } from './hostingPlan';
+import { LEGACY_HOSTING_PLAN_ID, isKnownPlanId, tierForPlanId } from '../../lib/hostingTiers';
 import { saveNotification } from './AdminNotificationStore';
 import { firebaseDomainLinksForUser, setDomainSuspended, type DomainLinkRecord } from './firebaseDomainLink';
 import { deleteCustomDomain, attachCustomDomain } from './firebaseCustomDomain';
@@ -66,21 +67,36 @@ export function _setSweepDepsForTests(deps: Partial<SweepDeps> | null): void {
   _deps = deps ? { ...realDeps, ...deps } : realDeps;
 }
 
-/** User-facing texts — NavBharatAI terms only (White-Label Law: no vendor ever named). */
-export function reminderMessage(days: number, expiresAt: string, shortfallInr: number): string {
+/**
+ * User-facing texts — NavBharatAI terms only (White-Label Law: no vendor ever named).
+ *
+ * ⚠️ EVERY ONE OF THESE TAKES THE USER'S OWN PLAN ID, and that is not tidiness. They used to name
+ * "Custom Domain" and quote `hostingPlanPriceInr()` — the ADVERTISED entry price. With two tiers and
+ * a grandfathered ₹99 plan, that would tell a Growth customer their ₹499 plan renews at ₹149 and a
+ * legacy holder that theirs renews at ₹149 when it renews at ₹99. A renewal notice that misstates
+ * the amount about to leave someone's wallet is the worst kind of wrong message to send.
+ */
+export function planLabel(planId: string | null | undefined): string {
+  if (String(planId ?? '') === LEGACY_HOSTING_PLAN_ID) return 'Custom Domain';
+  return `${tierForPlanId(planId)?.name ?? 'Hosting'} hosting`;
+}
+
+export function reminderMessage(days: number, expiresAt: string, shortfallInr: number, planId?: string | null): string {
   const date = new Date(expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  const label = planLabel(planId);
+  const price = planPriceInr(planId);
   return shortfallInr > 0
-    ? `Your Custom Domain plan ends on ${date} and your wallet is about ₹${shortfallInr} short of the ₹${hostingPlanPriceInr()} renewal. Recharge before then to keep your domain live — otherwise the domain pauses (your app stays on its free NavBharatAI link).`
-    : `Your Custom Domain plan renews on ${date} — ₹${hostingPlanPriceInr()} will be taken from your wallet automatically. Nothing to do; this is just a heads-up ${days} day${days === 1 ? '' : 's'} ahead.`;
+    ? `Your ${label} plan ends on ${date} and your wallet is about ₹${shortfallInr} short of the ₹${price} renewal. Recharge before then to keep your domain live — otherwise the domain pauses (your app stays on its free NavBharatAI link).`
+    : `Your ${label} plan renews on ${date} — ₹${price} will be taken from your wallet automatically. Nothing to do; this is just a heads-up ${days} day${days === 1 ? '' : 's'} ahead.`;
 }
 
-export function lapseMessage(domains: string[]): string {
+export function lapseMessage(domains: string[], planId?: string | null): string {
   const list = domains.length ? ` (${domains.join(', ')})` : '';
-  return `Your Custom Domain plan has ended, so your domain${domains.length === 1 ? '' : 's'}${list} ${domains.length === 1 ? 'is' : 'are'} paused. Your app is still live on its free NavBharatAI link — nothing was deleted. Renew the plan from Billing → Plans and your domain reconnects automatically.`;
+  return `Your ${planLabel(planId)} plan has ended, so your domain${domains.length === 1 ? '' : 's'}${list} ${domains.length === 1 ? 'is' : 'are'} paused. Your app is still live on its free NavBharatAI link — nothing was deleted. Renew the plan from Billing → Plans and your domain reconnects automatically.`;
 }
 
-export function renewedMessage(): string {
-  return `Your Custom Domain plan auto-renewed for 30 days (₹${hostingPlanPriceInr()} from your wallet). Your domain stays live.`;
+export function renewedMessage(planId?: string | null): string {
+  return `Your ${planLabel(planId)} plan auto-renewed for ${planDays(planId)} days (₹${planPriceInr(planId)} from your wallet). Your domain stays live.`;
 }
 
 export function reattachedMessage(domains: string[]): string {
@@ -96,21 +112,21 @@ export async function sweepOneWallet(db: any, walletDocId: string): Promise<Plan
     const ref = doc(db, 'user_token_wallets', walletDocId);
     const outcome = await runTransaction(db, async (t: any) => {
       const snap = await t.get(ref);
-      if (!snap.exists()) return { action: null as PlanSweepAction, userId: walletDocId, expiresAt: '' };
+      if (!snap.exists()) return { action: null as PlanSweepAction, userId: walletDocId, expiresAt: '', planId: null as string | null };
       const current = snap.data();
       const step = decidePlanSweepStep(current, _deps.now().toISOString());
       if (step.applied) t.set(ref, step.wallet);
       const plan = step.wallet.hostingPlan as HostingPlanRecord | undefined;
-      return { action: step.action, userId: (current.userId as string) || walletDocId, expiresAt: plan?.expiresAt ?? '' };
+      return { action: step.action, userId: (current.userId as string) || walletDocId, expiresAt: plan?.expiresAt ?? '', planId: plan?.id ?? null };
     });
     const { action, userId } = outcome;
     if (!action) return null;
     invalidatePlanCache(userId);
 
     if (action.kind === 'remind') {
-      await _deps.notify(userId, reminderMessage(action.days, outcome.expiresAt, action.shortfallInr)).catch(() => null);
+      await _deps.notify(userId, reminderMessage(action.days, outcome.expiresAt, action.shortfallInr, outcome.planId)).catch(() => null);
     } else if (action.kind === 'renewed') {
-      await _deps.notify(userId, renewedMessage()).catch(() => null);
+      await _deps.notify(userId, renewedMessage(outcome.planId)).catch(() => null);
     } else if (action.kind === 'lapse') {
       // Enforce: detach every ACTIVE link the user has. Idempotent — a re-run detaches nothing new.
       const links = (await _deps.linksForUser(userId)).filter((l) => !l.suspended);
@@ -122,7 +138,7 @@ export async function sweepOneWallet(db: any, walletDocId: string): Promise<Plan
           detached.push(link.domain);
         } catch { /* one stubborn domain must not block the rest; the next sweep retries it */ }
       }
-      await _deps.notify(userId, lapseMessage(detached)).catch(() => null);
+      await _deps.notify(userId, lapseMessage(detached, outcome.planId)).catch(() => null);
     }
     return action;
   } catch {
@@ -151,7 +167,10 @@ export async function sweepHostingPlans(limit = 200): Promise<number> {
       .get();
     let acted = 0;
     for (const walletDoc of snap.docs) {
-      if ((walletDoc.data()?.hostingPlan as HostingPlanRecord | undefined)?.id !== HOSTING_PLAN_ID) continue;
+      // ⚠️ Asks the CATALOGUE, not one constant. The old `!== HOSTING_PLAN_ID` test would have
+      // skipped every Starter and Growth wallet — no reminders, no renewals, no lapses, and nothing
+      // failing anywhere to say so.
+      if (!isKnownPlanId((walletDoc.data()?.hostingPlan as HostingPlanRecord | undefined)?.id)) continue;
       const action = await sweepOneWallet(db, walletDoc.id);
       if (action) acted++;
     }

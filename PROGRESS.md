@@ -47473,3 +47473,55 @@ The local `npm run test:coverage` run exited 1 with `[vitest-worker]: Timeout ca
 a worker RPC timeout under coverage instrumentation on this machine, with **zero test failures** and
 thresholds comfortably met (branches 83.86% against a floor of 72). That is an environment limit, not a
 result; CI's dedicated runner is the authority and is what gates the merge.
+
+## 2026-09-10 — vitest 2 → 4: the lockfile trap, and a coverage ruler that changed
+
+**Session:** claude/upgrade-md-review-vxbdy0. Dependabot split this across #2723 (vitest) and #2722
+(@vitest/coverage-v8), which makes **both individually unmergeable**: CI's only test step is
+`npm run test:coverage`, and the coverage provider's major must match vitest's. Bumped together here.
+
+### The upgrade itself was free
+The same **1,523 files and 20,490 tests** pass under 4.1.11 with no test changes at all, and the config
+needed nothing (no `environmentMatchGlobs`, no `workspace`, no custom pool — the surface v3/v4 broke).
+
+### 🔴 The lockfile trap — this is the part that would have gone red after a green local run
+npm 10.9.7 (this machine's default) **crashes** resolving vitest 4's optional peer set:
+`Cannot read properties of null (reading 'edgesOut')` inside arborist's `#loadPeerSet`. The obvious
+workaround, `--legacy-peer-deps`, "succeeded" — and silently produced a lockfile that had **dropped
+`eslint` and `monaco-editor` and their entire trees**. Two consequences: `npm run build` failed locally
+with "monaco-editor not found", and `npm ci` — *exactly what CI runs* — refused the lockfile with
+EUSAGE and a list of missing packages.
+**The fix is to match CI's own toolchain:** CI upgrades to **npm 11.18.0** before installing, so the
+lockfile is now generated with that version via `npx` (a global install is not writable in this
+environment). `npm ci` then exits 0, vitest resolves to 4.1.11, and monaco is present.
+**Lesson for the gate:** a dependency change is not verified by tests passing. It is verified by
+`npm ci` succeeding on the lockfile being shipped, because that is the install CI performs.
+
+### The coverage floor moved because the RULER changed — and the first version of this note was wrong
+Vitest 4's v8 provider does AST-aware remapping unconditionally (v3's
+`coverage.experimentalAstAwareRemapping` toggle no longer exists), so every denominator moved. Measured
+on the same tree, both versions:
+
+|            | vitest 2          | vitest 4         |
+|------------|-------------------|------------------|
+| statements | 71.99% (117,020)  | 63.23% (71,596)  |
+| branches   | 83.86% ( 38,672)  | 60.70% (56,004)  |
+| functions  | 86.54% (  6,369)  | 70.33% (11,170)  |
+| lines      | 71.99%            | 64.52%           |
+
+⚠️ **An earlier draft of this claimed "only branches moved".** That was wrong, and it was wrong because
+it compared against the STALE baseline written in `vitest.config.ts`'s own comment (lines 63.6% /
+functions 73.5% / branches 79.5%) instead of measuring vitest 2 on today's tree. All four moved; the
+denominators move in BOTH directions (fewer statements, far more branches and functions), which is what
+a redefinition looks like and what a real coverage loss does not. Not one test stopped running.
+
+**Only `branches` fell below its floor, so only `branches` is re-baselined** (72 → 57, just under the
+honest 60.7% with the same ~3-point buffer `lines` has always had). The other three are left alone —
+lowering a floor that still passes weakens the gate for nothing. ⚠️ Recorded in the config: `functions`
+now clears 68 by only **2.3 points**, so if it trips on an unrelated change that is this upgrade's
+accounting, not a regression.
+
+### Gate (CI-equivalent, on the final state)
+`npm ci` (npm 11.18.0) **exit 0** · `npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean ·
+`npm run typecheck:server` 0 · `npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS ·
+`npm run test:coverage` **exit 0 — 1,523 files / 20,490 passed / 0 failed**, thresholds met.

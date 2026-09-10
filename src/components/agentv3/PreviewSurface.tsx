@@ -28,6 +28,26 @@ import { inBrowserRefusal } from './inBrowserRefusal';
 import { shouldShowNotServingSurface } from './previewFraming';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { LIVE_SERVER_PAID_NOTE, LIVE_SERVER_PAID_TAG, isLiveServerNoticeDismissed, dismissLiveServerNotice } from '../../lib/liveServerNotice';
+import { previewAddressLabel } from './previewAddress';
+import {
+  appendConsoleEntry, consoleErrorCount as countConsoleErrors, consoleRowFixable,
+  filterConsoleEntries, normalizeConsoleLevel,
+  type ConsoleFilter, type PreviewConsoleEntry,
+} from './previewConsole';
+
+/**
+ * Capability delegation for a preview iframe.
+ *
+ * WITHOUT THIS, A WHOLE CLASS OF APP IS UNTESTABLE IN ITS OWN PREVIEW (gap analysis 2026-09-10). An
+ * iframe gets NO powerful features unless the embedding page delegates them, so a QR-scanner app, a
+ * voice-note app or anything location-aware failed in the preview with a permission error — and the
+ * user, who asked for exactly that app, read it as "NavBharatAI built it wrong".
+ *
+ * This does NOT grant anything: it only makes the browser ASK. The user still sees the ordinary
+ * permission prompt and still decides, so the security posture is unchanged and the honesty is
+ * better — a refused prompt is the user's answer, a missing prompt was our bug.
+ */
+const PREVIEW_IFRAME_ALLOW = 'camera; microphone; geolocation; clipboard-write; autoplay; fullscreen; accelerometer; gyroscope; midi; payment; xr-spatial-tracking';
 
 
 function Empty({ children }: { children: React.ReactNode }) {
@@ -896,14 +916,19 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // What Replit surfaces via embedded devtools and Bolt leaves to F12, here is one tap — and every
   // error row carries "Fix with AI". A ring buffer so a chatty app can never grow it unbounded.
   const [consoleOpen, setConsoleOpen] = useState(false);
-  const [consoleEntries, setConsoleEntries] = useState<Array<{ level: string; text: string; at: number }>>([]);
-  const consoleErrorCount = consoleEntries.reduce((n, e) => n + (e.level === 'error' ? 1 : 0), 0);
+  const [consoleEntries, setConsoleEntries] = useState<PreviewConsoleEntry[]>([]);
+  /** Which rows the drawer shows. 'problems' spans errors AND warnings — the question actually asked. */
+  const [consoleFilter, setConsoleFilter] = useState<ConsoleFilter>('all');
+  const [consoleQuery, setConsoleQuery] = useState('');
+  const consoleErrorCount = countConsoleErrors(consoleEntries);
+  const visibleConsoleEntries = filterConsoleEntries(consoleEntries, consoleFilter, consoleQuery);
   useEffect(() => {
     const onConsoleMsg = (e: MessageEvent) => {
       const d = e.data as { __nbaiPreviewConsole?: boolean; level?: string; text?: string } | null;
       if (!d || d.__nbaiPreviewConsole !== true || typeof d.text !== 'string') return;
-      const level = d.level === 'error' || d.level === 'warn' || d.level === 'info' ? d.level : 'log';
-      setConsoleEntries((prev) => [...prev, { level, text: d.text!, at: Date.now() }].slice(-200));
+      // Rules live in previewConsole.ts — the ring buffer, and the repeat-collapsing that stops a
+      // render loop printing one line 400 times from evicting every other message the app sent.
+      setConsoleEntries((prev) => appendConsoleEntry(prev, { level: normalizeConsoleLevel(d.level), text: d.text!, at: Date.now() }));
     };
     window.addEventListener('message', onConsoleMsg);
     return () => window.removeEventListener('message', onConsoleMsg);
@@ -1176,6 +1201,92 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     </div>
   ) : null;
 
+  /**
+   * The console button and drawer, LIFTED OUT of the in-browser branch (gap analysis 2026-09-10).
+   *
+   * They used to be written inline in the in-browser return, so the Live preview — the mode where the
+   * app is most real, and therefore where a runtime error matters most — had no console at all and no
+   * "Fix with AI". Holding them here as values is what lets both branches render the same thing; the
+   * Live side additionally needs the sandbox to SEND rows, which is the bridge shipped alongside.
+   */
+  const consoleButton = (
+    <button
+      onClick={() => setConsoleOpen((v) => !v)}
+      className={`shrink-0 relative flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] ${consoleOpen ? 'bg-zinc-700 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
+      title="Console — everything your app prints, right here (no F12 needed)"
+      aria-label="Toggle the app console"
+      aria-pressed={consoleOpen}
+    >
+      <Terminal className="w-3.5 h-3.5" />
+      {consoleErrorCount > 0 && (
+        <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center">
+          {consoleErrorCount > 99 ? '99+' : consoleErrorCount}
+        </span>
+      )}
+    </button>
+  );
+
+  const consoleDrawer = (
+    <div className="border-b border-zinc-800 bg-black/60 text-[11px] font-mono">
+      {/* FILTER + SEARCH. With a hundred rows on screen the drawer was a wall of text, and the one
+          line that mattered was somewhere in it. "Problems" spans errors AND warnings on purpose:
+          "show me what is wrong" is one question, not two. */}
+      <div className="flex items-center gap-1.5 px-3 py-1 border-b border-zinc-800/60 flex-wrap">
+        {([
+          ['all', 'All'], ['problems', 'Problems'], ['error', 'Errors'], ['warn', 'Warnings'], ['log', 'Logs'],
+        ] as const).map(([f, label]) => (
+          <button
+            key={f}
+            onClick={() => setConsoleFilter(f)}
+            className={`px-1.5 py-0.5 rounded border text-[10px] ${consoleFilter === f ? 'bg-zinc-700 text-white border-zinc-600' : 'text-zinc-500 border-zinc-800 hover:text-zinc-300'}`}
+            aria-pressed={consoleFilter === f}
+          >
+            {label}
+          </button>
+        ))}
+        <input
+          value={consoleQuery}
+          onChange={(e) => setConsoleQuery(e.target.value)}
+          placeholder="Search…"
+          aria-label="Search the console"
+          className="flex-1 min-w-[90px] bg-zinc-900/80 border border-zinc-800 rounded px-1.5 py-0.5 text-[10px] text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
+        />
+      </div>
+      <div className="max-h-40 overflow-y-auto px-3 py-1.5 space-y-0.5">
+        {consoleEntries.length === 0 && <p className="text-zinc-600">Console is empty — your app has not printed anything yet.</p>}
+        {/* An ACTIVE filter hiding everything is a different state from an empty console, and saying
+            "your app has not printed anything" there would simply be untrue. */}
+        {consoleEntries.length > 0 && visibleConsoleEntries.length === 0 && (
+          <p className="text-zinc-600">Nothing matches this filter — {consoleEntries.length} {consoleEntries.length === 1 ? 'row' : 'rows'} hidden.</p>
+        )}
+        {visibleConsoleEntries.map((c, i) => (
+          <div key={`${c.at}-${i}`} className="flex items-start gap-2">
+            <span className={`flex-1 min-w-0 whitespace-pre-wrap break-words ${c.level === 'error' ? 'text-rose-300' : c.level === 'warn' ? 'text-amber-300' : 'text-zinc-300'}`}>
+              {c.text}
+              {(c.repeats ?? 1) > 1 && (
+                <span className="ml-1.5 px-1 rounded bg-zinc-700/70 text-zinc-300 text-[9px] font-bold tabular-nums" title="How many times in a row your app printed this">×{c.repeats}</span>
+              )}
+            </span>
+            {/* Errors always; a WARNING only when it names a real defect (a missing list key, a
+                controlled input flipping) — see previewConsole.ts for why not every warn. */}
+            {consoleRowFixable(c.level, c.text) && onFixError && (
+              <button
+                onClick={() => onFixError(c.text)}
+                className="shrink-0 px-1.5 rounded border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10 text-[10px]"
+                title="Hand this to the AI to fix"
+              >
+                Fix with AI
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-end px-3 py-1 border-t border-zinc-800/60">
+        <button onClick={() => { setConsoleEntries([]); setConsoleQuery(''); }} className="text-[10px] text-zinc-500 hover:text-zinc-300">Clear</button>
+      </div>
+    </div>
+  );
+
   // Responsive viewport switcher — REAL device-width rendering (not a label), shown on BOTH previews.
   const viewportSwitcher = (
     <div className="flex items-center gap-0.5 rounded border border-zinc-700 p-0.5 shrink-0">
@@ -1205,7 +1316,13 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         <div className={TOOLBAR_ROW}>
           {switcher}
           {viewportSwitcher}
-          <span className="truncate flex-1 min-w-0">{effectiveUrl}</span>
+          {/* THE MACHINE'S ADDRESS USED TO BE PRINTED HERE, VERBATIM (gap analysis 2026-09-10).
+              `{effectiveUrl}` rendered `https://3000-<sandboxId>.e2b.app` — the very string the admin
+              had ordered out of the chat, because forwarding it puts someone else's traffic on a
+              per-minute machine. It also names a vendor, which no user-facing surface may do. The
+              label keeps the port (a process, not a machine) and drops everything that addresses one.
+              See previewAddress.ts for why this is not, and is not meant to be, the lock. */}
+          <span className="truncate flex-1 min-w-0" title="Your app is running on a NavBharatAI development machine. Use Publish to give anyone else a link.">{previewAddressLabel(effectiveUrl)}</span>
           <button onClick={() => setLiveReloadKey((k) => k + 1)} className="shrink-0 flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           {/* RESTART THE SERVER — reachable while the preview is SHOWING (ROADMAP §8B B3).
               Diagnose only ever existed in the "No live preview yet" empty state, so a user whose
@@ -1397,7 +1514,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
                 address, so a dead sandbox resolves to our own reconnecting page instead of a vendor
                 error, and a moved app resolves to wherever it now lives. A remount (reload button,
                 watchdog) re-resolves. effectiveUrl stays as the fallback for an older server. */}
-            <iframe key={liveReloadKey} title="Live preview" src={idleSnapshotUrl || (doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl)} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; }} className="w-full h-full bg-white border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+            <iframe key={liveReloadKey} title="Live preview" src={idleSnapshotUrl || (doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl)} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; }} className="w-full h-full bg-white border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
           </ResponsiveFrame>
         )}
       </div>
@@ -1497,48 +1614,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             {editMode ? 'Editing…' : 'Edit'}
           </button>
         )}
-        <button
-          onClick={() => setConsoleOpen((v) => !v)}
-          className={`shrink-0 relative flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] ${consoleOpen ? 'bg-zinc-700 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
-          title="Console — everything your app prints, right here (no F12 needed)"
-        >
-          <Terminal className="w-3.5 h-3.5" />
-          {consoleErrorCount > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center">
-              {consoleErrorCount > 99 ? '99+' : consoleErrorCount}
-            </span>
-          )}
-        </button>
+        {consoleButton}
         <button onClick={() => void loadInBrowser()} disabled={loading || !workspaceId} className="shrink-0 flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
           {loading ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
         </button>
       </div>
-      {consoleOpen && (
-        <div className="border-b border-zinc-800 bg-black/60 text-[11px] font-mono">
-          <div className="max-h-40 overflow-y-auto px-3 py-1.5 space-y-0.5">
-            {consoleEntries.length === 0 && <p className="text-zinc-600">Console is empty — your app has not printed anything yet.</p>}
-            {consoleEntries.map((c, i) => (
-              <div key={`${c.at}-${i}`} className="flex items-start gap-2">
-                <span className={`flex-1 min-w-0 whitespace-pre-wrap break-words ${c.level === 'error' ? 'text-rose-300' : c.level === 'warn' ? 'text-amber-300' : 'text-zinc-300'}`}>
-                  {c.text}
-                </span>
-                {c.level === 'error' && onFixError && (
-                  <button
-                    onClick={() => onFixError(c.text)}
-                    className="shrink-0 px-1.5 rounded border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10 text-[10px]"
-                    title="Hand this error to the AI to fix"
-                  >
-                    Fix with AI
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="flex items-center justify-end px-3 py-1 border-t border-zinc-800/60">
-            <button onClick={() => setConsoleEntries([])} className="text-[10px] text-zinc-500 hover:text-zinc-300">Clear</button>
-          </div>
-        </div>
-      )}
+      {consoleOpen && consoleDrawer}
       {editMode && selection && (
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 bg-zinc-900/80 text-[11px] text-zinc-300 flex-wrap">
           {/* With several elements picked, the COUNT is what matters — the user needs to know a change
@@ -1743,7 +1824,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
               try { inBrowserIframeRef.current?.contentWindow?.postMessage({ [PREVIEW_HTML_MESSAGE]: html }, new URL(previewSandboxUrl).origin); } catch { /* best-effort */ }
             }}
             className="w-full h-full bg-white border-0"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            allow={PREVIEW_IFRAME_ALLOW} sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
         </ResponsiveFrame>
       ) : html ? (
@@ -1758,7 +1839,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             title="In-browser preview"
             srcDoc={html}
             className="w-full h-full bg-white border-0"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            allow={PREVIEW_IFRAME_ALLOW} sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
         </ResponsiveFrame>
       ) : (

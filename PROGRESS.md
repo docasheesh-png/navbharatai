@@ -46612,3 +46612,50 @@ admin decision. Every competitor with hosting answers that question; we could no
   free once published apps are served through the Cloudflare Worker (§13 Phase 0.3) — `cf-ipcountry`.
 - Retention: documents are read for 30 days; a deletion sweep for older ones is not written yet — at
   today's publish volume the growth is negligible, and it belongs with the cron runner (§13 2.7).
+
+## 2026-09-10 — `www` ↔ apex: both spellings of a connected domain work (ROADMAP §13 item 1.2)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2794).
+
+### The defect
+Every host handles `www.x.com` ↔ `x.com`; we attached exactly the one the user typed. Connect
+`mitrify.com`, have a friend type `www.mitrify.com`, and they got a hosting error — two unrelated
+domains to the hosting service, one of them attached. It was in the 8-builder audit as the one gap
+**every** competitor had closed.
+
+### What shipped
+- **`src/server/lib/domainPair.ts`** (pure): the canonical is ALWAYS the apex (`www.x.com` → `x.com`),
+  because the managed-DNS zone must be the registrable domain; only a two-label host gets a `www`
+  twin (`blog.x.com` does not become `www.blog.x.com`). The honest limit — a three-label apex such as
+  `shop.co.in` gets no twin, since without a public-suffix list it is indistinguishable from a
+  subdomain — is written in the header so nobody "fixes" it with a heuristic.
+- **The redirect is real, not assumed.** `redirectTarget` was verified against Google's own v1beta1
+  discovery document before a line was written ("A domain name that this CustomDomain should direct
+  traffic towards"). `attachCustomDomain` sends it on create and PATCHes (`updateMask=redirectTarget`)
+  an existing twin that lacks it — an older connect or a plan re-attach must not leave `www` serving a
+  second copy of the site.
+- **Connect** attaches the twin with the redirect and links it as `alternateOf` the canonical;
+  best-effort, so a twin that cannot be attached never turns a connected canonical into a 500.
+- **ONE verdict, ONE record list.** The twin's records are merged into `displayRecords` before the
+  single `verifyRecordsLive` call, and its own states ride BESIDE the verdict as `alternate` — never
+  inside it, so a twin still waiting for its record cannot make a finished domain read as unfinished.
+  The one-source locks (`domainVerdictOneSource.test.ts`: exactly one serving probe, one DNS check)
+  stand untouched.
+- **Every applier writes both spellings in one pass** — managed DNS (`applyRecords`, `missingFromZone`,
+  `desired` count), Domain Connect's template, Hostinger's token flow — and the saved-state and sync
+  responses carry the twin's records so a reload or a "Check & apply" never makes the www record vanish.
+- **The link store knows a twin is a spelling, not a second domain**: `firebaseDomainsForWorkspaceStrict`
+  and the `/links` badge skip `alternateOf`; the plan sweep still sees twins (detached on lapse) and
+  re-attaches them WITH the redirect.
+- **Every route canonicalises the host it is handed** — a zone named `www.x.com` is not something a
+  registrar delegates. The screen adopts the spelling the server actually connected, and shows one
+  line under the verdict: "✓ www.x.com works too — it sends visitors here" / "⏳ being set up too" /
+  "could not check just now".
+- `AppKnowledgeBase` updated. Locked by `domainPair.test.ts` (pure) and `tests/domainWwwApex.test.ts`
+  (source-locks across the route, link store, sweep, client, and the API field).
+
+### Gate
+`tsc --noEmit` 0 · `tsc -p tsconfig.server.json` 0 · `vitest run` **1507 files / 20,281 passed, 0 failed**.
+One existing lock (`domainPointing.test.ts`, "the sync route refuses BEFORE it can write") named the old
+write literal; it now names the merged one — the guarded property (guard upstream of the ONE write) is
+unchanged and still asserted.

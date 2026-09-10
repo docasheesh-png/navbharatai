@@ -48,6 +48,8 @@ export interface CustomDomainStatus {
   hostState: string;      // HOST_PENDING | HOST_ACTIVE | HOST_BROKEN | …
   sslState: string;       // CERT_PENDING | CERT_ACTIVE | CERT_BROKEN | …
   records: CustomDomainDnsRecord[]; // the records still needed to finish the connection
+  /** Set on a `www` twin: the canonical host it redirects to (ROADMAP §13, 1.2). Absent otherwise. */
+  redirectTarget?: string;
   /**
    * WHAT FIREBASE ITSELF SAYS IS WRONG — and until 2026-08-21 we threw it away.
    *
@@ -105,6 +107,8 @@ interface ApiCustomDomain {
   requiredDnsUpdates?: ApiDnsUpdates;
   /** The field this module ignored until 2026-08-21 — see `CustomDomainStatus.issues`. */
   issues?: ApiIssue[];
+  /** "A domain name that this CustomDomain should direct traffic towards." (discovery doc, 2026-09-10) */
+  redirectTarget?: string;
 }
 
 // ── Pure helpers (unit-testable without any live API) ───────────────────────────────────────
@@ -218,6 +222,7 @@ export function customDomainStatus(domain: string, cd: ApiCustomDomain): CustomD
     domain, active, ownershipState, hostState, sslState,
     records: customDomainRecords(cd),
     issues: customDomainIssues(cd),
+    ...(typeof cd.redirectTarget === 'string' && cd.redirectTarget ? { redirectTarget: cd.redirectTarget } : {}),
     // Both sources carry a checkTime; the freshest one is the honest answer to "when did it last look?"
     lastCheckedAt: [cd.requiredDnsUpdates?.checkTime, cd.cert?.verification?.dns?.checkTime]
       .filter((t): t is string => typeof t === 'string' && t.length > 0)
@@ -324,7 +329,11 @@ export async function ensureSite(workspaceId: string): Promise<string> {
 }
 
 /** Attach (or return the existing) custom domain on the workspace's dedicated site. */
-export async function attachCustomDomain(workspaceId: string, domain: string): Promise<CustomDomainStatus> {
+export async function attachCustomDomain(
+  workspaceId: string,
+  domain: string,
+  opts?: { redirectTarget?: string },
+): Promise<CustomDomainStatus> {
   // ROOT CAUSE of "Failed to start domain connection" (admin 2026-08-02, mitrify.xyz): this function
   // assumed the workspace's dedicated site already existed — but the site is only created by the
   // DEPLOY path (Deployment.ts). A user who connects a domain BEFORE a dedicated-site deploy (e.g.
@@ -332,11 +341,23 @@ export async function attachCustomDomain(workspaceId: string, domain: string): P
   // NONEXISTENT site → Google API 404 → 500. The site must be ensured HERE too — ensureSite is
   // idempotent (409 = success), so a site the deploy path already created is simply reused.
   const siteId = await ensureSite(workspaceId);
+  const redirectTarget = opts?.redirectTarget?.trim() || undefined;
   const existing = await getCustomDomainRaw(siteId, domain);
-  if (existing) return customDomainStatus(domain, existing);
+  if (existing) {
+    // A `www` twin re-attached without its redirect (an older connect, a plan re-attach) would serve
+    // a second copy of the site instead of redirecting — so the redirect is converged, not assumed.
+    if (redirectTarget && existing.redirectTarget !== redirectTarget) {
+      await api(
+        `/projects/${FIREBASE_PROJECT}/sites/${siteId}/customDomains/${encodeURIComponent(domain)}?updateMask=redirectTarget`,
+        { method: 'PATCH', body: { redirectTarget } },
+      );
+      return customDomainStatus(domain, (await getCustomDomainRaw(siteId, domain)) ?? existing);
+    }
+    return customDomainStatus(domain, existing);
+  }
   await api(
     `/projects/${FIREBASE_PROJECT}/sites/${siteId}/customDomains?customDomainId=${encodeURIComponent(domain)}`,
-    { method: 'POST', body: {} },
+    { method: 'POST', body: redirectTarget ? { redirectTarget } : {} },
   );
   // create returns a long-running Operation; read the resource back for its DNS records + state.
   const cd = (await getCustomDomainRaw(siteId, domain)) ?? {};

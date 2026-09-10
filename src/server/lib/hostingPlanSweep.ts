@@ -37,7 +37,8 @@ import { deleteCustomDomain, attachCustomDomain } from './firebaseCustomDomain';
 export interface SweepDeps {
   notify: (userId: string, message: string) => Promise<unknown>;
   detachDomain: (workspaceId: string, domain: string) => Promise<unknown>;
-  attachDomain: (workspaceId: string, domain: string) => Promise<unknown>;
+  /** `redirectTarget` is the canonical host when re-attaching a `www` twin (ROADMAP §13, 1.2). */
+  attachDomain: (workspaceId: string, domain: string, redirectTarget?: string) => Promise<unknown>;
   linksForUser: (userId: string) => Promise<DomainLinkRecord[]>;
   setSuspended: (domain: string, reason: string | null) => Promise<unknown>;
   /**
@@ -53,7 +54,7 @@ export interface SweepDeps {
 const realDeps: SweepDeps = {
   notify: (userId, message) => saveNotification({ message, target: { type: 'user', userId }, createdBy: 'system' }),
   detachDomain: (workspaceId, domain) => deleteCustomDomain(workspaceId, domain),
-  attachDomain: (workspaceId, domain) => attachCustomDomain(workspaceId, domain),
+  attachDomain: (workspaceId, domain, redirectTarget) => attachCustomDomain(workspaceId, domain, redirectTarget ? { redirectTarget } : undefined),
   linksForUser: (userId) => firebaseDomainLinksForUser(userId),
   setSuspended: (domain, reason) => setDomainSuspended(domain, reason),
   now: () => new Date(),
@@ -170,7 +171,7 @@ export async function reattachSuspendedDomains(userId: string): Promise<number> 
     const restored: string[] = [];
     for (const link of links) {
       try {
-        await _deps.attachDomain(link.workspaceId, link.domain);
+        await _deps.attachDomain(link.workspaceId, link.domain, link.alternateOf ?? undefined);
         await _deps.setSuspended(link.domain, null);
         restored.push(link.domain);
       } catch { /* stays suspended; the user can also reconnect from the domain screen */ }

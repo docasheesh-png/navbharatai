@@ -49,6 +49,8 @@ interface DomainStatus {
    * the canonical's. `null` = this domain has no twin (a subdomain); absent = an older server.
    */
   alternate?: { host: string; active: boolean; ownershipState: string; hostState: string; sslState: string; redirectTarget: string | null; pendingRecords: number } | null;
+  /** Set on the connect response when the domain was taken off another app of yours (ROADMAP §13, 1.3). */
+  movedFrom?: string | null;
   /**
    * This domain was moved to the app's OWN SERVER by a backend deploy, so the static host's record
    * states describe a setup deliberately no longer in use — and the setup block below must stay shut,
@@ -1144,6 +1146,14 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                       : result.alternate.ownershipState === 'unknown'
                         ? <><span className="font-mono">{result.alternate.host}</span> — could not check just now.</>
                         : <>⏳ <span className="font-mono">{result.alternate.host}</span> is being set up too, so both spellings work{result.alternate.pendingRecords > 0 ? ' — its record is in the list below' : ''}.</>}
+                  </p>
+                )}
+                {/* MOVED HERE FROM ANOTHER APP OF YOURS (ROADMAP §13, 1.3). Said once, plainly, with the
+                    way back — the other app silently losing its domain is the one thing a one-tap move
+                    must never do quietly. */}
+                {result.movedFrom && (
+                  <p className="text-[10.5px] text-amber-100/90 leading-relaxed">
+                    This domain was moved here from another app of yours — that app no longer serves it. To move it back, open that app and connect it there.
                   </p>
                 )}
                 {/* THE CHECK BUTTON MOVED DOWN (admin 2026-08-22: "check now button sahi jagah nahi

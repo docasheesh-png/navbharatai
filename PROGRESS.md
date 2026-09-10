@@ -46659,3 +46659,41 @@ domains to the hosting service, one of them attached. It was in the 8-builder au
 One existing lock (`domainPointing.test.ts`, "the sync route refuses BEFORE it can write") named the old
 write literal; it now names the merged one — the guarded property (guard upstream of the ONE write) is
 unchanged and still asserted.
+
+## 2026-09-10 — "Move this domain to this app" in one tap (ROADMAP §13 item 1.3)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2795).
+
+### The defect
+A domain connected to app A, then Connect pressed on app B (the admin's `mitrify.com` screenshots of
+2026-09-02 and 2026-09-10). Two things stood in the way and the user was left to find both: the hosting
+service still held the domain on A's site (so B's attach could be refused as "already connected to
+another site"), and the ownership TXT named A's site. #2792 made the second fixable by the button the
+verdict names; this closes the first.
+
+### What shipped
+- **`src/server/lib/domainMove.ts`** (pure): `decideDomainMove(holder, workspaceId, verifiedUid)` —
+  no holder or the same app ⇒ nothing; **same user, another app ⇒ move**; **a different account ⇒
+  refuse**, with a message that names nobody (whose it is, is not this caller's business). A holder
+  with no recorded user is never treated as ours — moving it would be acting on a guess.
+- **`linkForDomain(domain)`** in the link store: who holds a domain right now, fail-open to `null` so an
+  unreadable link is never mistaken for "held by someone else" (a refusal) nor "held by you" (a move).
+- **Connect** reads the holder and decides BEFORE the attach; on a move it detaches BOTH spellings
+  from the old app's site (best-effort each), then attaches here and carries `movedFrom` on the
+  response without touching the one-source `res.json` line. A different account gets a 409.
+- **The screen** says, under the verdict, that the domain was moved from another app of yours and how
+  to move it back. `AppKnowledgeBase` updated.
+- Locked by `domainMove.test.ts` (pure) and `tests/domainMoveWiring.test.ts` (decided-before-attach
+  ordering, both spellings detached, the 409, the response field, the screen line).
+
+### Deliberately NOT done
+Auto-running "Check & apply records" inside Connect when the managed zone is active. It would make
+the move a single tap end-to-end, but it adds a second `applyRecords` write path outside the sync
+route's guard (`domainPointing.test.ts`: the guard is upstream of the ONE write). After #2792 the
+button is always reachable, so the honest sequence today is Connect → Check & apply. Recorded as the
+follow-up rather than shipped as a second write.
+
+### Gate (the CI-equivalent one, per the 2026-09-10 safeguard-5 correction)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1509 files / 20,294 passed, 0 failed**.

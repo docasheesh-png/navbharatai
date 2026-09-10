@@ -6299,7 +6299,7 @@ export class ToolDispatcher {
         // (order/session + signature verification) + a client checkout helper. The user pastes their keys
         // into .env (NavBharatAI never stores them). Pure generator in PaymentGenerator.ts.
         const pProvider = optStr(input, 'provider');
-        if (!isPaymentProvider(pProvider)) return 'generate_payment: pass provider = "razorpay" | "stripe".';
+        if (!isPaymentProvider(pProvider)) return 'generate_payment: pass provider = "cashfree" | "razorpay" | "stripe".';
         const pcfg = generatePaymentIntegration(pProvider);
         const payWritten: string[] = [];
         for (const [path, content] of Object.entries(pcfg.files)) {
@@ -6314,7 +6314,8 @@ export class ToolDispatcher {
           payWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
         }
         this.scheduleCheckpoint('payment integration');
-        return `Wired ${pProvider} payments:\n${payWritten.join('\n')}\nAdd the dependency: ${pcfg.dependency.name}@${pcfg.dependency.version}\n\n${pcfg.instructions}`;
+        const payDep = pcfg.dependency ? `\nAdd the dependency: ${pcfg.dependency.name}@${pcfg.dependency.version}` : '\nNo dependency needed (uses the platform fetch + node:crypto).';
+        return `Wired ${pProvider} payments:\n${payWritten.join('\n')}${payDep}\n\n${pcfg.instructions}`;
       }
 
       case 'generate_email': {

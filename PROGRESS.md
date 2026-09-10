@@ -46903,3 +46903,40 @@ result that varies run to run. Instead:
   live browser look. A redirecting address must be pasted in its final form (the guard refuses redirects,
   for the reason recorded in `webFetch.ts`).
 - The structure is read from ONE page. Multi-page cloning = paste each page, or ask v5.0 to browse.
+
+### ✅ 2026-09-10 (later the same day) — that AgentRunner flake was FIXED, not left
+
+The entry above says the fix was "deliberately NOT taken here" because it was unrelated to the preview
+diff. It went red **twice more** the same day — once under the full parallel suite and once **running
+entirely on its own**, which killed the "parallel load" theory: the test was simply marginal. A gate
+that fails at random is a gate nobody can read, so it was fixed at its cause.
+
+**What was wrong, and what was NOT changed.** The scripted client answered synchronously, so a whole
+turn could complete inside the same millisecond the run started in; `buildTimedOut` then correctly
+returned false and the assertion failed on a run where the production code behaved perfectly. The fix
+gives the scripted client an explicit `turnDelayMs` so a test that depends on wall-clock elapsing says
+so, instead of hoping today's event loop is slow enough. **The assertion itself is untouched** — the
+precondition it always relied on is now guaranteed, rather than what it proves being relaxed. Verified
+by three consecutive clean runs.
+
+### 2026-09-10 — REVENUE AUDIT: the first two leaks closed
+
+**Coupons.** Five codes lived in `routes/payment.ts` — FREE100, WELCOME100, NAVBHARAT50, FESTIVE2026,
+SAKUNI25 — each minting ₹25-₹200 of real credit, with no expiry, no total cap, and names that are the
+first thing anyone would type into a promo box. The redemption logic was always sound (atomic, one per
+user); the leak was that the PRICE LIST sat in the source, where the admin could not reach it and an
+attacker could guess it. It now reads `PROMO_COUPONS`, and **an unset value redeems nothing** — so the
+default is off and re-opening the door is a deliberate, visible act in Cloud Run rather than a deploy.
+A value above ₹5,000 is refused outright: `DIWALI:10000` where ₹100 was meant is one missing decimal
+whose cost is unbounded.
+
+**The live exchange rate was never switched on.** `refreshUsdInrRate()` had existed and been unit-tested
+since the billing model was written, and was **never called anywhere outside its own test file**. So
+`usdInrRate()` returned its 85 fallback forever while the real rate sat near 87-88: **every build was
+billed roughly 3% under its real cost, silently, for months, with nothing failing to reveal it.**
+Nothing was broken — a wire was missing. Now refreshed at boot and every six hours.
+
+⚠️ **Registered NON-exclusive on purpose.** The rate is an in-memory cache per instance, so an
+exclusive job would refresh exactly one instance and leave every other one billing at 85 — the same
+bug with extra steps. Every instance refreshes its own copy; the cost is one small HTTP call per
+instance per six hours.

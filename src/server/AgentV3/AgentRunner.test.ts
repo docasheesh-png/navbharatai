@@ -41,11 +41,14 @@ class FakeActuator implements ActuatorPort {
 }
 
 /** A mock Anthropic client that replays a scripted list of raw messages. */
-function scriptedClient(messages: unknown[]): MessagesCreateClient {
+function scriptedClient(messages: unknown[], turnDelayMs = 0): MessagesCreateClient {
   let i = 0;
   return {
     messages: {
       create: async () => {
+        // A real model call takes real time. `turnDelayMs` lets a test that depends on wall-clock
+        // elapsing say so explicitly, instead of hoping the event loop is slow enough today.
+        if (turnDelayMs > 0) await new Promise((r) => setTimeout(r, turnDelayMs));
         const m = messages[i] ?? { content: [{ type: 'text', text: 'fallback end' }], stop_reason: 'end_turn' };
         i++;
         return m as never;
@@ -56,7 +59,7 @@ function scriptedClient(messages: unknown[]): MessagesCreateClient {
 
 function buildRunner(
   script: unknown[],
-  opts: { maxSteps?: number; maxBudgetUsd?: number; maxBuildMs?: number; signal?: AbortSignal; persistence?: AgentRunnerOptions['persistence']; expectsArtifacts?: boolean } = {},
+  opts: { maxSteps?: number; maxBudgetUsd?: number; maxBuildMs?: number; signal?: AbortSignal; persistence?: AgentRunnerOptions['persistence']; expectsArtifacts?: boolean; turnDelayMs?: number } = {},
 ) {
   const actuator = new FakeActuator();
   const stream = new AgentEventStream();
@@ -64,7 +67,8 @@ function buildRunner(
   stream.subscribe((e) => events.push(e), false);
   const state = new WorkspaceState(stream);
   const dispatcher = new ToolDispatcher(actuator, 'ws-1', state, stream);
-  const client = new ClaudeClient(scriptedClient(script));
+  const { turnDelayMs, ...runnerOpts } = opts;
+  const client = new ClaudeClient(scriptedClient(script, turnDelayMs));
   const runner = new AgentRunner({
     client,
     dispatcher,
@@ -73,7 +77,7 @@ function buildRunner(
     model: 'claude-sonnet-test',
     system: 'You are the Architect.',
     tools: defaultToolCatalog(),
-    ...opts,
+    ...runnerOpts,
   });
   return { runner, actuator, state, events };
 }
@@ -224,7 +228,14 @@ describe('AgentRunner (native tool-use loop)', () => {
     };
     // maxBuildMs=1: any real wall-clock time elapsing between the run's start and the SECOND loop
     // check (after one full turn) is enough — never 0, which buildTimedOut treats as "disabled".
-    const { runner } = buildRunner([looping, looping, looping], { maxBuildMs: 1 });
+    //
+    // ⚠️ THE ELAPSED TIME IS MADE REAL, NOT ASSUMED (flake fixed 2026-09-10, after this test went red
+    // twice — once under a full parallel suite and once on its own). The scripted client answers
+    // synchronously, so a whole turn could finish inside the same millisecond the run started in;
+    // `buildTimedOut` then correctly returned false and the assertion failed on a run where the
+    // PRODUCTION CODE was behaving perfectly. The assertion below is deliberately unchanged — the fix
+    // is to guarantee the precondition it was always relying on, never to relax what it proves.
+    const { runner } = buildRunner([looping, looping, looping], { maxBuildMs: 1, turnDelayMs: 3 });
     const result = await runner.run('build something big');
     expect(result.timedOut).toBe(true);
     expect(result.ok).toBe(true); // a tool ran, so this is the "files so far are saved" branch

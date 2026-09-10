@@ -12,7 +12,7 @@ const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ d
 import { Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Github, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
-import type { SiteAnalyticsView } from './HostingChooser';
+import type { SiteAnalyticsView, RollbackChoiceView } from './HostingChooser';
 import { PublishCelebration } from './PublishCelebration';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 import { auth as firebaseAuth } from '../../lib/firebase';
@@ -3058,14 +3058,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
   };
 
-  const rollbackLive = async (): Promise<void> => {
+  /**
+   * The publish history for the picker (ROADMAP §13, 1.4). Null when it could not be read — the
+   * chooser says so rather than rendering an unreadable history as an empty one.
+   */
+  const loadRollbackChoices = async (): Promise<RollbackChoiceView[] | null> => {
+    if (!state.workspaceId) return null;
+    try {
+      const res = await fetch('/api/agentv3/rollback-status', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email }),
+      });
+      const data = await res.json().catch(() => null);
+      return res.ok && Array.isArray(data?.choices) ? data.choices : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const rollbackLive = async (versionName?: string): Promise<void> => {
     if (!state.workspaceId) return;
-    setPublishMsg('Bringing back the previous version…');
+    setPublishMsg(versionName ? 'Bringing that version back…' : 'Bringing back the previous version…');
     try {
       const res = await fetch('/api/agentv3/rollback', {
         method: 'POST',
         headers: await authJsonHeaders(),
-        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email }),
+        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, ...(versionName ? { versionName } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       // A refusal here is NOT a failure to hide — it names something the user can act on, so it is
@@ -3704,6 +3723,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           liveUrl={liveUrl}
           onUnpublish={unpublishLive}
           onRollback={rollbackLive}
+          onLoadRollbackChoices={loadRollbackChoices}
           siteAnalytics={siteAnalytics}
           onLoadSiteAnalytics={loadSiteAnalytics}
           onLoadMyApps={loadMyPublishedApps}

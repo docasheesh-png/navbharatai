@@ -1,7 +1,8 @@
 import type { Express, Request, Response } from 'express';
 import { domainOpsRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, enforceNotBanned } from '../lib/authMiddleware';
 import { sendSafeError } from '../lib/httpError';
-import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
+import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan, readHostingPlanStatus } from '../lib/hostingPlan';
+import { getServerDb } from '../lib/serverDb';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import {
   normalizeDomain,
@@ -311,12 +312,39 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       const plan = await probeHostingPlan(verifiedUid);
       if (plan.known && !plan.active) {
         res.status(402).json({
-          error: `Connecting your own domain is part of the Custom Domain plan (₹${hostingPlanPriceInr()}/month, paid from your wallet — it also removes the "Made with NavBharatAI" badge). Buy it from Billing → Plans, then connect.`,
+          error: `Connecting your own domain is part of a hosting plan (from ₹${hostingPlanPriceInr()}/month, paid from your wallet — it also removes the "Made with NavBharatAI" badge). Buy it from Billing → Plans, then connect.`,
           needsPlan: true,
           priceInr: hostingPlanPriceInr(),
         });
         return;
       }
+      /**
+       * THE TIER'S DOMAIN COUNT, ENFORCED (2026-09-10). Starter includes 1 domain and Growth 3, and
+       * a number printed on a plan card that nothing checks is a fake feature — the second absolute
+       * rule's exact case. Counted over the user's ACTIVE links only, so a domain already suspended
+       * by a lapse does not occupy a slot the user is paying for.
+       *
+       * ⚠️ It reads the plan STATUS (not the cached probe) because only the status knows which tier
+       * is held; and like the gate above, any failure to read it FAILS OPEN — being unable to count
+       * must never block a paying user from connecting the domain they bought.
+       */
+      try {
+        const status = await readHostingPlanStatus(getServerDb() as any, verifiedUid);
+        const allowed = status.tier?.domains ?? 0;
+        if (allowed > 0) {
+          const existing = (await firebaseDomainLinksForUser(verifiedUid)).filter((l) => !l.suspended);
+          const alreadyThis = existing.some((l) => l.domain === canonicalHost(normalizeDomain(req.body?.domain)));
+          if (!alreadyThis && existing.length >= allowed) {
+            res.status(402).json({
+              error: `Your ${status.tier?.name} plan covers ${allowed} domain${allowed === 1 ? '' : 's'}, and ${allowed === 1 ? 'one is' : `${existing.length} are`} already connected. Move to a bigger plan in Billing → Plans, or disconnect a domain first.`,
+              needsPlan: true,
+              domainLimit: allowed,
+              connected: existing.length,
+            });
+            return;
+          }
+        }
+      } catch { /* fail OPEN — see the note above */ }
     }
     const host = canonicalHost(normalizeDomain(req.body?.domain));
     if (!DOMAIN_RE.test(host)) {

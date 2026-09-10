@@ -47084,3 +47084,61 @@ Indian shop, and the roadmap row says so.
 ### Honest limits
 - The ₹1 UPI test the roadmap names as "done when" needs a real merchant's sandbox keys in a real app —
   a session cannot run it. The code paths mirror the platform's own live Cashfree integration.
+
+---
+
+## 2026-09-10 — Revenue, slice B: two hosting tiers with a real agreement (branch `feat/platform-fee`)
+
+Admin: **"do tier banao, credit bundle karo, 20 GB theek hai"**, and earlier **"yeh bat clear likhi ho
+jab user 149₹ ka purchage kare, agreement type aa jaye, 'ok' tick karne ko aye"**, and **"app remix
+only woh user kar sakta hai, jo user ₹149/mahina par hai … purchase ₹149/mahina ka popup a jaye"**.
+
+**Starter ₹149** — 1 domain, 5 GB traffic, badge-free, gallery remix, ad-free.
+**Growth ₹499** — 3 domains, 20 GB, **₹150 of build credit every month**, everything in Starter.
+**₹2,999 Business is deliberately NOT built.** A purchasable plan with nobody on it is a promise about
+capacity, support and limits that no code keeps. It is "write to us" until a real customer defines it —
+which is also the honest way to find out what it should contain.
+
+**The catalogue is one file, shared.** `src/lib/hostingTiers.ts` holds prices, limits, entitlements AND
+the agreement text, and both the browser and the server read it. The consent text is **generated from
+the tier**, never written beside it — an agreement that quotes one number while the meter enforces
+another is worse than no agreement.
+
+**The tick is enforced on the SERVER.** `computePlanPurchase` refuses without `agreedToTerms`, so a
+plan record with no `agreedAt` cannot be created. That matters beyond the ceremony: **overage may only
+ever be billed against a plan whose terms were actually accepted**, which is exactly why the accepted
+terms are frozen onto the record rather than a version number — and exactly why a legacy ₹99 plan,
+which carries no agreement, can never be billed for it.
+
+**Going over the limit does not switch the app off.** The agreement says so in capitals. Overage is
+₹20/GB from the wallet (measured cost is ~₹14/GB — an overage rate at or under cost turns a popular
+app into a loss that grows with its success). The meter itself is slice C.
+
+**Upgrading mid-month loses nothing:** the unused days are valued at the old plan's own daily rate,
+returned to the wallet as credit, and the new tier starts a full period from that day. Downgrading
+while a bigger plan is live is refused rather than silently shortening what was paid for.
+
+**🔒 THE LEGACY ₹99 PLAN IS GRANDFATHERED, AND THAT IS A DECISION.** Those users agreed to ₹99. Moving
+them to ₹149 because a catalogue was introduced would be raising a price on a live subscription without
+asking, which no amount of "the new plan is better" makes honest. They keep ₹99 and receive Starter's
+entitlements — strictly more than they bought.
+
+**Three siblings that would each have silently broken the new tiers**, all found by grepping for the
+one-constant comparison the old single-plan design licensed:
+- `hostingPlanActive` tested `p.id !== HOSTING_PLAN_ID` — every Starter and Growth plan would have read
+  as INACTIVE. A paying customer with no entitlements and nothing failing anywhere.
+- `sweepHostingPlans` filtered the same way — no reminders, no renewals, no lapses for the new tiers.
+- Every sweep message hardcoded "Custom Domain" and the ADVERTISED price, so a Growth customer would
+  have been told their ₹499 plan renews at ₹149.
+
+**Entitlements are enforced, not printed.** Gallery remix now needs an active plan (402 + `needsPlan`,
+and the panel shows a real offer with a route to Billing — a refusal with no way to act on it is the
+dead button rule 2 forbids). The per-tier domain count is counted against active links. Both gates
+exempt the admin/tester list and **fail OPEN** on a store outage, the same shape as the existing
+domain gate, so the two cannot drift.
+
+**⚠️ ONE THING I DID NOT GATE, and the admin should overrule me if they disagree.** The Nav App Store's
+"make it yours" remix (`/api/nav-store/web/app/:id/remix`) supports SIGNED-OUT users by design — it is
+the store's whole conversion loop, viewer to creator in one tap. Gating that behind ₹149 would break
+signed-out remix entirely and remove the store's reason to exist. The GALLERY remix — taking another
+creator's published app as your starting point — is what the plan now covers.

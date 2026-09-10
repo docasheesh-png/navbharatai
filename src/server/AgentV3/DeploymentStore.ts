@@ -16,6 +16,9 @@ import { getServerDb } from '../lib/serverDb';
 import { enforceHostingQuota, isFirstPartyProvider, deployBytesMb } from '../lib/HostingQuota';
 import { hostingUsageStore } from '../lib/HostingUsageStore';
 import { scanPublishedContent, publishScanBlocks } from './ContentSafetyScanner';
+import { extractOutboundOrigins } from './outboundUrls';
+import { scanOrigins, webRiskEnabled, webRiskSummary } from './webRisk';
+import { GoogleAuth } from 'google-auth-library';
 import { injectBadgeIntoFiles } from '../lib/madeWithBadge';
 import { injectBeaconIntoFiles, publicOrigin } from '../lib/siteAnalytics';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
@@ -62,6 +65,18 @@ export interface DeploymentRecord {
   status?: DeploymentStatus;
   /** True when the content-safety scanner flagged this app in WARN mode (published, but surfaced). */
   flagged?: boolean;
+  /**
+   * The outside hosts this app's own code points at, captured at publish (`outboundUrls.ts`).
+   *
+   * Stored rather than re-derived because the periodic RE-SCAN (slice 4) needs them: an app that was
+   * clean on Monday can be listed by Friday, and the cron must be able to re-ask about the same hosts
+   * WITHOUT fetching every published app's files again. Empty array means "checked, none"; absent
+   * means the app was published before this existed — the two are different and the cron treats them
+   * differently.
+   */
+  outboundOrigins?: string[];
+  /** One line naming what the outbound-host check found. ADMIN-only — it names a third party. */
+  outboundNote?: string;
   /**
    * The owner deleted the workspace while this app was still published (2026-08-21).
    *
@@ -232,6 +247,37 @@ class DeploymentStore {
     } catch { /* best-effort — a purge must never fail on this */ }
   }
 
+  /**
+   * Land the outbound-host verdict on an already-published record.
+   *
+   * Separate from `record()` because this arrives LATE on purpose: the check runs after the publish
+   * has returned, so the user never waits on a network call (slice 4's ordering). Best-effort — a
+   * write failure here must never affect an app that is already live.
+   */
+  async setOutboundVerdict(
+    workspaceId: string,
+    patch: { outboundOrigins?: string[]; outboundNote?: string; flagged?: boolean },
+  ): Promise<boolean> {
+    const db = this.getDb();
+    if (!db || !workspaceId) return false;
+    try {
+      await db.collection('agentv3_deployments').doc(workspaceId).set(
+        {
+          ...(Array.isArray(patch.outboundOrigins) ? { outboundOrigins: patch.outboundOrigins } : {}),
+          ...(typeof patch.outboundNote === 'string' ? { outboundNote: patch.outboundNote } : {}),
+          // 🔒 Only ever raises the flag, never lowers it — a later clean scan must not erase a flag
+          // the CONTENT scanner raised for a different reason entirely.
+          ...(patch.flagged === true ? { flagged: true } : {}),
+          updatedAt: Date.now(),
+        },
+        { merge: true },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async setStatus(workspaceId: string, status: DeploymentStatus): Promise<boolean> {
     const db = this.getDb();
     if (!db || !workspaceId) return false;
@@ -380,6 +426,52 @@ export function withDeploymentPersistence(
       if (publishScanBlocks() && err instanceof Error && /held for review/.test(err.message)) throw err;
       /* warn-mode scan error is best-effort — never block a real publish */
     }
+
+    /**
+     * OUTBOUND-HOST CHECK (slice 4) — the URLs this app POINTS AT, asked about AFTER the publish.
+     *
+     * 🔒 THE ORDERING IS THE DESIGN, and it is recorded in ROADMAP §11. Asking Google Web Risk about
+     * the app's OWN url at publish time would be worthless: it is seconds old, so it cannot be on any
+     * list, and a check that always passes is reassurance rather than safety. The question that CAN
+     * catch a credential-harvest app is which outside hosts the code we wrote points at — and we can
+     * ask it only because we wrote the app.
+     *
+     * Extraction is pure, synchronous and instant (the files are already in hand), so the origins are
+     * captured on the record no matter what. The LOOKUP is fire-and-forget: the user never waits on a
+     * network call, and a Web Risk outage can never delay or fail a publish that has already worked.
+     *
+     * Storing the origins is what makes the periodic re-scan possible — an app clean on Monday can be
+     * listed by Friday, and the cron re-asks about these without re-fetching every published app.
+     */
+    const outboundOrigins = (() => {
+      try { return extractOutboundOrigins(files); } catch { return []; }
+    })();
+    void (async () => {
+      try {
+        if (!webRiskEnabled() || outboundOrigins.length === 0) {
+          // Still record WHAT the app points at — the cron and the admin both want it even when the
+          // lookup is switched off, and an empty array is a different answer from an absent field.
+          await deploymentStore.setOutboundVerdict(workspaceId, { outboundOrigins });
+          return;
+        }
+        const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+        const token = await auth.getAccessToken().catch(() => null);
+        const scan = await scanOrigins({ origins: outboundOrigins, token: token ? String(token) : null });
+        await deploymentStore.setOutboundVerdict(workspaceId, {
+          outboundOrigins,
+          outboundNote: webRiskSummary(scan),
+          // 🔒 ONLY a real listing raises the flag. An `unknown` — no key, API off, timeout — is not
+          // evidence of anything, and flagging on it would train the admin to ignore the flag.
+          ...(scan.listed.length > 0 ? { flagged: true } : {}),
+        });
+        if (scan.listed.length > 0) {
+          audit('APP_OUTBOUND_FLAGGED', {
+            workspaceId, userId: userId ?? 'anon',
+            hosts: scan.listed.map((l) => l.origin).join(','),
+          });
+        }
+      } catch { /* the app is already live — this check can never be allowed to affect it */ }
+    })();
 
     // "MADE WITH NAVBHARATAI" BADGE (admin 2026-08-06): stamped HERE — at publish time, after every
     // source edit the user or any AI assistant could make — so removing it from the workspace files

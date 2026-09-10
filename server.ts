@@ -790,6 +790,48 @@ setInterval(() => {
              */
             bootRun = () => { void scheduler.runNow('retention-purge'); };
           }
+          /**
+           * OUTBOUND RE-SCAN (NavBharat Cloud slice 4) — an app clean on Monday can be listed by
+           * Friday. Daily, over already-live apps, re-asking about the hosts their code points at.
+           *
+           * `exclusive`: this HOLDS apps, so it is exactly the class of job the lease exists for —
+           * ten instances would each hold the same app and each write the same admin record. It is
+           * also gated on the same switch as the publish-time lookup, so one key turns the whole
+           * outbound check on or off.
+           */
+          if (process.env.NAVBHARAT_WEB_RISK?.trim().toLowerCase() === 'on') {
+            scheduler.register({
+              id: 'outbound-rescan',
+              exclusive: true,
+              schedule: { kind: 'dailyAtUtc', hour: 4, minute: 30 },
+              handler: async () => {
+                await import('./src/server/AgentV3/outboundRescan')
+                  .then(async ({ runOutboundRescan, rescanSummary }) => {
+                    const [{ deploymentStore }, { scanOrigins }, { GoogleAuth }] = await Promise.all([
+                      import('./src/server/AgentV3/DeploymentStore'),
+                      import('./src/server/AgentV3/webRisk'),
+                      import('google-auth-library'),
+                    ]);
+                    const report = await runOutboundRescan({
+                      list: (o) => deploymentStore.list(o),
+                      scan: async (origins) => {
+                        const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+                        const token = await auth.getAccessToken().catch(() => null);
+                        return scanOrigins({ origins, token: token ? String(token) : null });
+                      },
+                      // HELD, not taken down: reversible by the admin, because a machine acting on a
+                      // third party's list should never give the irreversible verdict.
+                      hold: async (workspaceId, note) => {
+                        await deploymentStore.setStatus(workspaceId, 'held');
+                        await deploymentStore.setOutboundVerdict(workspaceId, { outboundNote: note, flagged: true });
+                      },
+                    });
+                    if (report.held.length > 0 || report.checked > 0) console.log(`[SLICE4] ${rescanSummary(report)}`);
+                  })
+                  .catch(() => { /* a safety sweep must never affect the server */ });
+              },
+            });
+          }
           // MONITOR ALERTS — the admin is TOLD when build success, preview rate or build time leaves
           // its normal range, instead of finding out by happening to open the panel. Every 15 minutes;
           // the sweep itself decides what is worth saying (new / still-firing-after-a-cooldown /

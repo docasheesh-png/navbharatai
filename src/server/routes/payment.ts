@@ -19,6 +19,7 @@ import { verifyStorePurchase } from '../lib/storeVerify';
 import {
   isAcceptablePassPayment, professionalPassPriceInr, professionalPassDays,
 } from '../professionals/professionalPaid';
+import { splitPayment, platformFeePct } from '../lib/platformFee';
 import { couponValueInr } from '../lib/promoCoupons';
 
 /**
@@ -94,6 +95,15 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       });
     }
 
+    // THE PLATFORM FEE (platformFee.ts). The wallet is credited the NET of what the user pays; the fee
+    // is our revenue and covers the payment gateway's own charge, which used to come silently out of
+    // NavBharatAI's side of every card payment and appeared nowhere in the books.
+    //
+    // ⚠️ Deliberately NOT applied to the Play/Apple store route below — those packs are already priced
+    // with their fee inside (₹119 buys ₹99 of credit) and the billing panel promises they credit the
+    // full amount shown. Charging here as well would bill one thing twice.
+    const feeSplit = splitPayment(orderAmount);
+
     // Cryptographically-random suffix avoids the collision/predictability of Math.random()*1000.
     const orderId = `ord_nb_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
 
@@ -104,7 +114,12 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         transactionId: orderId,
         userId,
         amountPaid: orderAmount,
-        balanceAdded: orderAmount, // ₹1 = ₹1 balance added to wallet
+        // NET of the platform fee — this is the number that actually reaches the wallet, and the same
+        // number the user was shown before they paid. The fee rides along so the admin's revenue
+        // reporting can total it without re-deriving a rate that may since have changed.
+        balanceAdded: feeSplit.creditInr,
+        platformFeeInr: feeSplit.feeInr,
+        platformFeePct: platformFeePct(),
         isVishwakarmaOrder: !!isVishwakarmaOrder,
         buyPass: !!buyPass,
         tokenAmount: tokenAmount ? parseFloat(tokenAmount) : 0,
@@ -155,7 +170,9 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
           orderId,
           paymentSessionId: `sim_session_${orderId}_${amount}`,
           isSimulator: true,
-          orderAmount
+          orderAmount,
+          platformFeeInr: feeSplit.feeInr,
+          creditInr: feeSplit.creditInr,
         });
       }
 
@@ -242,7 +259,9 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
           paymentSessionId: data.payment_session_id,
           isSimulator: false,
           orderAmount: finalAmount,
-          environment: env
+          environment: env,
+          platformFeeInr: feeSplit.feeInr,
+          creditInr: feeSplit.creditInr,
         });
       } else {
         throw new Error(data.message || 'Payment Session ID not generated');

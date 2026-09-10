@@ -46940,3 +46940,69 @@ Nothing was broken — a wire was missing. Now refreshed at boot and every six h
 exclusive job would refresh exactly one instance and leave every other one billing at 85 — the same
 bug with extra steps. Every instance refreshes its own copy; the cost is one small HTTP call per
 instance per six hours.
+
+---
+
+## 2026-09-10 — Revenue, slice A: the platform fee on a wallet recharge (branch `feat/platform-fee`)
+
+Admin, confirmed: **"2% flat theek hai"** (after asking for "cashfree/google/apple ka charge + 1%").
+
+**Why flat, and why it is not called a gateway fee.** India's real cost of taking a payment is not one
+number: UPI carries ZERO merchant discount rate by regulation, cards and netbanking cost roughly 2%
+plus GST. Deducting the ACTUAL cost would mean the same ₹500 credits a different amount depending on a
+method the user only picks on the NEXT screen — three prices for one product, none showable in advance.
+A flat rate can be stated before payment, which is the only version a user can agree to. And it is
+named a **platform fee**, never "Cashfree's charge": the gateway's real charge on a given payment is a
+number no statement of ours will ever match, so naming it after them would be a claim we cannot support
+even when it flatters us. (Same reasoning CLAUDE.md already records for the Play Store fee label.)
+
+**What was actually wrong.** `routes/payment.ts` credited `balanceAdded: orderAmount` with the comment
+"₹1 = ₹1 balance added to wallet". The gateway's charge therefore came out of NavBharatAI's side of
+every card payment and appeared **nowhere in the books** — there was no gateway-fee line anywhere in
+the codebase. On a ₹500 card recharge we credited ₹500 and received about ₹490.
+
+**Where the fee is applied, and the three places it deliberately is NOT.**
+- ✅ Cashfree create-order stores `balanceAdded = paid − fee`, plus `platformFeeInr` / `platformFeePct`
+  on the transaction so the admin's revenue reporting can total it without re-deriving a rate that may
+  since have changed.
+- ❌ **Google Play / Apple packs.** Already priced with their fee inside (₹119 buys ₹99), and the
+  billing panel promises "your wallet is credited the full credit amount shown, never less". Charging
+  here would bill one thing twice AND make that sentence a lie.
+- ❌ **Coupons and referral gifts.** No gateway, no money arriving — a fee on a gift is taking money in
+  order to give money.
+- ❌ **Transactions created before this shipped.** No `platformFeeInr` field means zero, so a pending
+  order sold at rupee-for-rupee still credits in full, exactly as it was sold.
+
+**The sibling that would have leaked the fee straight past it.** `computeCreditedWallet` has TWO
+branches. The standard one credits `balanceAdded`, so setting that net at create-order was enough. The
+**vishwakarma** one — which is also the branch Play packs are credited through — derives its tokens
+from `amountPaid` on purpose (security fix C4: never trust a client-supplied token count), so a fee
+applied only to `balanceAdded` would have been invisible to it. It now mints from the NET. The fee is
+read from the transaction rather than re-computed from the current rate, so an order that sits pending
+while the admin changes the rate still credits what its buyer was shown.
+
+**🔴 A REAL MONEY BUG FOUND ON THE WAY, unrelated to the fee and worse than it.** The Vishwakarma
+chooser modal printed its entry-pass price as `vkMode === 'pro' ? 100 : 50` — in the price badge, the
+totals box and the buy button — while `createVishwakarmaOrder` hardcoded ₹100 and the server credited
+`(paid − 100) × 100` tokens. **`setVkMode` is never called anywhere in the codebase**, so `vkMode` was
+permanently `'basic'`: every single pass buyer was shown **₹50 + tokens** and charged **₹100 + tokens**,
+receiving the tokens they expected and ₹50 less than the screen promised. Root cause was not the wrong
+literal — it was a money constant with three homes, free to drift between them. It now has one:
+`src/lib/walletPricing.ts`, which the server re-exports from rather than keeping its own copy.
+
+**One implementation of the split, shared.** The arithmetic lives in `src/lib/platformFee.ts`; the
+server wraps it with the env rate, the browser wraps it with the rate it reads from
+`/api/public-config`. The user is shown the exact split the server will apply — "₹500.00 paid −
+₹10.00 platform fee = ₹490.00 credited" — before paying, and the fee is named again in their ledger
+line afterwards. `fee + credit === paid` exactly at every amount, because the fee is rounded and the
+credit is the remainder: a wallet whose two halves disagree with the payment is the drift the
+debit-carry fix was written to end.
+
+**Config.** `PLATFORM_FEE_PCT` in Cloud Run, unset ⇒ 2. An EMPTY value falls back to the default
+rather than meaning "no fee" (`Number('')` is 0 — the trap `hostingCost.ts` already records); an
+out-of-range or unreadable value is refused, never obeyed; an explicit `0` IS honoured, because
+switching the fee off must be possible and visible. Capped at 20%.
+
+**Open, deliberately not built in this slice:** the two hosting tiers (₹149 / ₹499), the hosting
+meter and its overage billing, and the remix gate. Paid remix (Cashfree split settlement) and the TDS
+admin card stay deferred at the admin's instruction — "isko chor do! last ke liye."

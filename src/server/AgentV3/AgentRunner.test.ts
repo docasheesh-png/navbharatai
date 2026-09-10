@@ -226,16 +226,24 @@ describe('AgentRunner (native tool-use loop)', () => {
       stop_reason: 'tool_use',
       usage: { input_tokens: 1, output_tokens: 1 },
     };
-    // maxBuildMs=1: any real wall-clock time elapsing between the run's start and the SECOND loop
-    // check (after one full turn) is enough — never 0, which buildTimedOut treats as "disabled".
+    // ⚠️ THESE TWO NUMBERS ARE A SANDWICH, AND BOTH SIDES OF IT HAVE BITTEN (2026-09-10).
     //
-    // ⚠️ THE ELAPSED TIME IS MADE REAL, NOT ASSUMED (flake fixed 2026-09-10, after this test went red
-    // twice — once under a full parallel suite and once on its own). The scripted client answers
-    // synchronously, so a whole turn could finish inside the same millisecond the run started in;
-    // `buildTimedOut` then correctly returned false and the assertion failed on a run where the
-    // PRODUCTION CODE was behaving perfectly. The assertion below is deliberately unchanged — the fix
-    // is to guarantee the precondition it was always relying on, never to relax what it proves.
-    const { runner } = buildRunner([looping, looping, looping], { maxBuildMs: 1, turnDelayMs: 3 });
+    // The watchdog is checked at the TOP of the loop, and `totalToolUses` is incremented at the
+    // BOTTOM — so the outcome this test wants (ok:true, "files so far are saved") needs the cap to be
+    // NOT yet reached on the first check and reached on the second. That is a window, not a value:
+    //   turnDelayMs  >  maxBuildMs  >  the time from `buildStartMs` to the first loop check.
+    //
+    // It first went red with `maxBuildMs: 1` alone: the scripted client answers synchronously, so a
+    // whole turn could finish inside the same millisecond and the watchdog correctly did not fire.
+    // Adding a per-turn delay fixed that end and opened the other — with a 1 ms cap, a single
+    // millisecond spent in the ~140 lines of setup between `buildStartMs` and the first check is
+    // enough to time out on iteration 1, with nothing built, giving the honest ok:FALSE branch.
+    // Both reds were the test's arithmetic; the production code was right on every one of them.
+    //
+    // 800 ms is a generous roof over that setup even on a loaded parallel run, and 1500 ms is a
+    // turn that cannot finish under it. The assertions are deliberately unchanged — the fix is to
+    // guarantee the precondition they always relied on, never to relax what they prove.
+    const { runner } = buildRunner([looping, looping, looping], { maxBuildMs: 800, turnDelayMs: 1500 });
     const result = await runner.run('build something big');
     expect(result.timedOut).toBe(true);
     expect(result.ok).toBe(true); // a tool ran, so this is the "files so far are saved" branch

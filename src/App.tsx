@@ -279,7 +279,7 @@ export default function App() {
     referralHistory, setReferralHistory,
     fetchWallet,
     createBillingOrder,
-    storeRail, storeConfig, buyStorePack, buyingProductId, storePurchaseNotice,
+    storeRail, storeConfig, platformFeePct, buyStorePack, buyingProductId, storePurchaseNotice,
     createVishwakarmaOrder,
     verifyBillingPayment,
     redeemPromoCoupon,
@@ -3616,6 +3616,7 @@ export default function App() {
               isRecharging={isRecharging}
               storeRail={storeRail}
               storeConfig={storeConfig}
+              platformFeePct={platformFeePct}
               buyingProductId={buyingProductId}
               storePurchaseNotice={storePurchaseNotice}
               onBuyStorePack={(id) => { void buyStorePack(id); }}
@@ -3916,6 +3917,7 @@ export default function App() {
         setShowVishwakarmaUnlockModal={setShowVishwakarmaUnlockModal}
         wallet={wallet}
         vkMode={vkMode}
+        platformFeePct={platformFeePct}
         couponError={couponError}
         couponSuccess={couponSuccess}
         vkTokenInput={vkTokenInput}

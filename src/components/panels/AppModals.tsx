@@ -6,6 +6,8 @@ import { AuthComponent } from '../AuthComponent';
 import { PROVIDER_CONFIG } from '../../types';
 import { triggerCashfreeCheckout } from '../../services/paymentService';
 import type { User as FirebaseUser } from 'firebase/auth';
+import { TOKENS_PER_RUPEE, VISHWAKARMA_PASS_PRICE_INR } from '../../lib/walletPricing';
+import { splitPaymentAtPct, DEFAULT_PLATFORM_FEE_PCT } from '../../lib/platformFee';
 
 export interface AppModalsProps {
   // Auth
@@ -21,6 +23,12 @@ export interface AppModalsProps {
   showVishwakarmaUnlockModal: boolean;
   setShowVishwakarmaUnlockModal: (v: boolean) => void;
   wallet: any;
+  /**
+   * Kept on the props for App.tsx's existing call, but NO LONGER read here. It used to pick the pass
+   * price (`vkMode === 'pro' ? 100 : 50`) — and since `setVkMode` is never called anywhere, it was
+   * permanently 'basic', so every buyer was shown ₹50 and charged the server's real ₹100. The price
+   * now comes from walletPricing.ts, which is what the server charges.
+   */
   vkMode: 'basic' | 'pro' | 'vip';
   couponError: string;
   couponSuccess: string;
@@ -64,13 +72,15 @@ export interface AppModalsProps {
   // Preview failure popup
   previewBuildError: string | null;
   setPreviewBuildError: (v: string | null) => void;
+  /** The wallet-recharge platform fee, in percent, as this server actually charges it. */
+  platformFeePct?: number;
 }
 
 export function AppModals({
   showAuth, auth, setUser, onCloseAuth,
   githubRedirectingMessage, githubDebugData, setGithubRedirectingMessage,
   showVishwakarmaUnlockModal, setShowVishwakarmaUnlockModal,
-  wallet, vkMode, couponError, couponSuccess, vkTokenInput, setVkTokenInput,
+  wallet, couponError, couponSuccess, vkTokenInput, setVkTokenInput,
   isRecharging, createVishwakarmaOrder,
   showContinueModal, setShowContinueModal, setRestoreUciError, setResumeUciInputState,
   resumeUciInputState, restoreUciError, handleRestoreByUci, isRestoringUci,
@@ -81,7 +91,19 @@ export function AppModals({
   workspacePrepError, setWorkspacePrepError,
   isPreviewBuilding, previewBuildStage, detectedFramework,
   previewBuildError, setPreviewBuildError,
+  platformFeePct = DEFAULT_PLATFORM_FEE_PCT,
 }: AppModalsProps) {
+  // THE VISHWAKARMA ORDER, priced exactly as the server will settle it.
+  //
+  // `createVishwakarmaOrder` sends `pass + tokens` as ONE payment, the platform fee applies to that
+  // whole payment, and the server then mints `(net − pass) × TOKENS_PER_RUPEE`. So the tokens a user
+  // gets are the tokens their money buys AFTER both the pass and the fee come out — which is what
+  // these three values say, in the same order the totals box prints them.
+  const vkPassInr = wallet?.hasVishwakarmaPass ? 0 : VISHWAKARMA_PASS_PRICE_INR;
+  const vkTokenInr = parseFloat(vkTokenInput) || 0;
+  const vkTotalPayableInr = vkPassInr + vkTokenInr;
+  const vkSplit = splitPaymentAtPct(vkTotalPayableInr, platformFeePct);
+  const vkTokensEstimate = Math.max(0, Math.floor((vkSplit.creditInr - vkPassInr) * TOKENS_PER_RUPEE));
   return (
     <>
       {/* Auth Modal */}
@@ -253,7 +275,7 @@ export function AppModals({
                         </span>
                       ) : (
                         <span className="text-xs font-mono font-black text-amber-500 block">
-                          ₹{(vkMode === 'pro' ? 100 : 50).toFixed(2)}
+                          ₹{VISHWAKARMA_PASS_PRICE_INR.toFixed(2)}
                         </span>
                       )}
                     </div>
@@ -270,7 +292,7 @@ export function AppModals({
                       Advance AI Tokens (₹)
                     </label>
                     <span className="text-[9px] text-[#8b949e] block leading-none font-mono">
-                      Formula: ₹1.00 = 100 AI Tokens (Min: ₹10)
+                      Formula: ₹1.00 = {TOKENS_PER_RUPEE} AI Tokens (Min: ₹10)
                     </span>
 
                     <div className="flex items-center gap-1.5 mt-1">
@@ -286,7 +308,7 @@ export function AppModals({
 
                     <div className="mt-1 text-right">
                       <span className="text-[9px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded-full">
-                        Estimated: {(parseFloat(vkTokenInput) ? Math.floor(parseFloat(vkTokenInput) * 100) : 0).toLocaleString()} Tokens
+                        Estimated: {vkTokensEstimate.toLocaleString('en-IN')} Tokens
                       </span>
                     </div>
                   </div>
@@ -294,16 +316,22 @@ export function AppModals({
                   <div className="p-3 bg-[#0d1117] border border-white/5 rounded-xl space-y-1 text-[11px]">
                     <div className="flex justify-between text-[#8b949e]">
                       <span>Entry Pass Fee:</span>
-                      <span>{wallet?.hasVishwakarmaPass ? '₹0.00 (Owned)' : `₹${(vkMode === 'pro' ? 100 : 50).toFixed(2)}`}</span>
+                      <span>{wallet?.hasVishwakarmaPass ? '₹0.00 (Owned)' : `₹${VISHWAKARMA_PASS_PRICE_INR.toFixed(2)}`}</span>
                     </div>
                     <div className="flex justify-between text-[#8b949e]">
                       <span>Tokens Purchase Amount:</span>
                       <span>₹{parseFloat(vkTokenInput) ? parseFloat(vkTokenInput).toFixed(2) : '0.00'}</span>
                     </div>
+                    {vkSplit.feeInr > 0 && (
+                      <div className="flex justify-between text-[#8b949e]">
+                        <span>Platform fee ({platformFeePct}%):</span>
+                        <span>₹{vkSplit.feeInr.toFixed(2)}</span>
+                      </div>
+                    )}
                     <div className="border-t border-white/5 pt-1.5 flex justify-between text-xs font-black text-white tracking-tight">
                       <span>TOTAL PAYABLE AMOUNT:</span>
                       <span className="text-amber-500 font-mono">
-                        ₹{((wallet?.hasVishwakarmaPass ? 0 : (vkMode === 'pro' ? 100 : 50)) + (parseFloat(vkTokenInput) || 0)).toFixed(2)}
+                        ₹{vkTotalPayableInr.toFixed(2)}
                       </span>
                     </div>
                   </div>
@@ -339,7 +367,7 @@ export function AppModals({
                   ) : (
                     <>
                       <Sparkles className="w-4 h-4 animate-bounce" />
-                      Buy Pass & Activate Vishwakarma (₹{((vkMode === 'pro' ? 100 : 50) + (parseFloat(vkTokenInput) || 0)).toFixed(2)})
+                      Buy Pass & Activate Vishwakarma (₹{vkTotalPayableInr.toFixed(2)})
                     </>
                   )}
                 </button>

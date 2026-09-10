@@ -44,6 +44,12 @@ interface DomainStatus {
   /** Firebase's OWN explanation of why the domain is stuck. Absent on an older server. */
   issues?: string[];
   /**
+   * The `www` twin of this domain (ROADMAP §13, 1.2) — attached with a redirect to the canonical,
+   * its records merged into `displayRecords`, its own state reported here so the verdict above stays
+   * the canonical's. `null` = this domain has no twin (a subdomain); absent = an older server.
+   */
+  alternate?: { host: string; active: boolean; ownershipState: string; hostState: string; sslState: string; redirectTarget: string | null; pendingRecords: number } | null;
+  /**
    * This domain was moved to the app's OWN SERVER by a backend deploy, so the static host's record
    * states describe a setup deliberately no longer in use — and the setup block below must stay shut,
    * because its "Check & apply records" would hand the domain back and take the live site down.
@@ -889,6 +895,10 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
       }
       setNeedsPlan(false);
       setResult(data);
+      // The server connects the APEX and redirects `www` to it (domainPair.ts). Adopt its spelling,
+      // so the relative record names ("@", "www") and the zone the automatic path creates are
+      // computed against the domain that was actually connected, not the one that was typed.
+      if (typeof data?.domain === 'string' && data.domain && data.domain !== cleanDomain) setDomain(data.domain);
       setConfirmed(true);
       setStatusUnavailable(false);
       rememberDraft(data, autoNs);
@@ -1123,6 +1133,19 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                   <span className={`text-[12px] font-bold ${stage.tone === 'ok' ? 'text-green-200' : 'text-amber-100'}`}>{stage.headline}</span>
                 </div>
                 <p className="text-[11px] text-zinc-300/80 leading-relaxed">{stage.note}</p>
+                {/* www ↔ apex (ROADMAP §13, 1.2). Its own line, under the verdict, never inside it:
+                    a twin still waiting for its record must not make a finished domain read as
+                    unfinished — and a finished twin is worth saying, because "does www work?" is
+                    the second thing everyone tries. */}
+                {result.alternate && (
+                  <p className={`text-[10.5px] leading-relaxed ${result.alternate.active ? 'text-green-200/90' : 'text-zinc-400'}`}>
+                    {result.alternate.active
+                      ? <>✓ <span className="font-mono">{result.alternate.host}</span> works too — it sends visitors here.</>
+                      : result.alternate.ownershipState === 'unknown'
+                        ? <><span className="font-mono">{result.alternate.host}</span> — could not check just now.</>
+                        : <>⏳ <span className="font-mono">{result.alternate.host}</span> is being set up too, so both spellings work{result.alternate.pendingRecords > 0 ? ' — its record is in the list below' : ''}.</>}
+                  </p>
+                )}
                 {/* THE CHECK BUTTON MOVED DOWN (admin 2026-08-22: "check now button sahi jagah nahi
                     hai … upar wala"). It used to sit HERE — above the records, i.e. before the user
                     has anything to check. Someone lands on this screen, is told to add DNS records,

@@ -108,7 +108,9 @@ describe('🔒 the wiring — the destructive button is refused, and the screen 
   it('🔒 the sync route refuses BEFORE it can write anything', () => {
     const syncAt = domains.indexOf("app.post('/api/domains/nbai/auto-dns/sync'");
     const guardAt = domains.indexOf('isBackendPointed(pointingRec, host)', syncAt);
-    const applyAt = domains.indexOf('applyRecords(zone.id, fb.records)', syncAt);
+    // `desiredAll` = the canonical's records plus its www twin's (ROADMAP §13, 1.2) — still the ONE
+    // write this route makes, and still downstream of the guard.
+    const applyAt = domains.indexOf('applyRecords(zone.id, desiredAll)', syncAt);
     expect(guardAt).toBeGreaterThan(syncAt);
     expect(applyAt).toBeGreaterThan(guardAt);   // the guard is upstream of the write, not beside it
     expect(domains).toContain('backendPointedRefusal(host)');

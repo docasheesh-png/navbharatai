@@ -22,6 +22,13 @@ export interface DomainLink {
   domain: string;
   workspaceId: string;
   userId: string;
+  /**
+   * Set on the `www` twin of a connected apex (ROADMAP §13, 1.2): this link exists so the twin is
+   * detached and re-attached WITH its redirect alongside its canonical, and is skipped by every
+   * reader that wants "the workspace's domain" — a twin is a spelling of that domain, not a second
+   * one. Absent/null on an ordinary link. See domainPair.ts.
+   */
+  alternateOf?: string | null;
 }
 
 /** Record that `domain` is connected to `workspaceId` (owned by `userId`) via Firebase hosting. */
@@ -35,6 +42,7 @@ export async function linkWorkspaceDomain(link: DomainLink): Promise<void> {
       workspaceId: link.workspaceId,
       userId: link.userId,
       provider: 'firebase',
+      alternateOf: link.alternateOf ?? null,
       updatedAt: Date.now(),
     },
     { merge: true },
@@ -97,7 +105,11 @@ export async function firebaseDomainsForWorkspaceStrict(workspaceId: string): Pr
     );
     const out: string[] = [];
     snap.forEach((d: any) => {
-      const domain = d.data()?.domain;
+      const data = d.data() ?? {};
+      // A `www` twin is a spelling of the canonical domain, not a second domain: it shares the site,
+      // and every caller of this list wants "the domain" to publish to, point, or display.
+      if (data.alternateOf) return;
+      const domain = data.domain;
       if (typeof domain === 'string' && domain) out.push(domain);
     });
     return out;

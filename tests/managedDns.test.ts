@@ -204,8 +204,14 @@ describe('auto-DNS surface honesty', () => {
       // read-back, 2026-08-22) — the catch block simply fell outside it while remaining perfectly
       // correct. A magic byte count is not the property being tested; "within this handler" is. So
       // the segment now runs to the NEXT route registration, which cannot drift as the body changes.
-      const start = route.indexOf(ep);
-      const next = route.indexOf('app.post(', start + ep.length);
+      // ⚠️ ANCHORED ON THE REGISTRATION, not the bare path (2026-09-10). A shared helper's doc
+      // comment above the routes names both endpoints, so `indexOf('auto-dns/start')` began
+      // matching PROSE and this test read a comment block instead of a handler. A conclusion drawn
+      // from the wrong slice is not a weaker test, it is a different one.
+      const marker = `app.post('/api/domains/nbai/${ep}'`;
+      const start = route.indexOf(marker);
+      expect(start).toBeGreaterThan(0);
+      const next = route.indexOf('app.post(', start + marker.length);
       const seg = route.slice(start, next === -1 ? route.length : next);
       expect(seg).toContain('ownsWorkspace');
       expect(seg).toContain('managedDnsConfigured()');
@@ -214,7 +220,7 @@ describe('auto-DNS surface honesty', () => {
   });
 
   it('sync refuses to pretend: a pending zone applies nothing, and attach must precede apply', () => {
-    const seg = route.slice(route.indexOf('auto-dns/sync'));
+    const seg = route.slice(route.indexOf("app.post('/api/domains/nbai/auto-dns/sync'"));
     expect(seg).toMatch(/zone\.status !== 'active'/);
     expect(seg).toContain('Connect the domain first');
   });

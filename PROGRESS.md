@@ -47272,3 +47272,48 @@ deleted and could never be found again.
 **Also in this branch:** reminders at **5 / 3 / 1** days, and the grace-window message that closed a
 three-day silence nobody had noticed (the pre-expiry reminders stop at expiry and the lapse fires only
 after grace, so the most useful moment to reach someone produced nothing at all).
+
+### Free vs paid, spelled out — and the gate that was missing from the step BEFORE connect
+
+Admin, 2026-09-10: **"free user apni website connect nahi kar sakta hai … paid user app connect kar ke
+apni website par app chalata hai … plan ka month pura ho jaye to live website offline ho jani chahiye,
+host on navbharatai chalti rahe."**
+
+Three statements. Two were already true and are now pinned by tests so a refactor cannot quietly undo
+them. The third found a real hole.
+
+**✅ Already true — a lapse kills the DOMAIN, not the hosting.** `decidePlanSweepStep`'s lapse detaches
+every custom domain and marks it suspended, while the app keeps serving on its free NavBharatAI link.
+And the demotion built earlier the same day deliberately hands the free slots to **domain-holding apps
+first**, so the site the user cared most about is the last thing to pause. Both halves are now asserted
+directly (`hostingTiers.test.ts`), because an invariant that merely *happens* to hold is one refactor
+from breaking.
+
+**🔴 THE HOLE: `/api/domains/nbai/auto-dns/start` HAD NO PLAN GATE, and it runs BEFORE connect.**
+`/connect` has been gated since 2026-08-06 — but start is the step a user reaches first: it calls
+`ensureZone(host)`, which **creates a real DNS zone on NavBharatAI's own Cloudflare account**, and
+hands back nameservers for the user to set at their registrar. So a free account could:
+
+1. start automatic setup (a zone on our bill, every time),
+2. repoint their domain's nameservers — slow, disruptive and awkward to undo on their side,
+3. and only THEN be told at connect that the whole thing needs a plan.
+
+That is the dead end the second absolute rule forbids, and it cost us a zone each time somebody hit it.
+
+**The fix is one shared gate, not a second copy.** `refusedForNoPlan(res, uid, email)` now serves both
+routes, so they cannot drift apart again — the exact class of bug the fourth rule's step 2 names. Both
+exemptions are preserved deliberately: the admin/tester free-list, and a plan store that cannot answer
+(`known` false ⇒ allow), because rule #1 says an outage must never block a legitimate paying user.
+`auto-dns/sync` and `hostinger/apply` need an already-connected domain and refuse without one, so
+gating connect and start covers the whole path.
+
+**The refusal now names what the free user still HAS.** "Your app is still published and live on its
+NavBharatAI link" — a refusal that only says no reads as the product being broken, when the free tier
+genuinely gives them a working, hosted site. The auto-DNS screen renders it as the amber upgrade note
+rather than a red error, which it previously did only for connect.
+
+**Three guard tests were re-anchored, not weakened.** They sliced `nbaiDomains.ts` from a bare route
+name (`indexOf('auto-dns/start')`), and the new shared helper's doc comment mentions both endpoint
+names — so they began reading PROSE instead of a handler. They now anchor on the registration
+(`app.post('/api/domains/nbai/auto-dns/start'`). Same lesson this file already records twice: a
+conclusion drawn from the wrong slice is not a weaker test, it is a different one.

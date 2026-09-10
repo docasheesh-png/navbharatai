@@ -209,6 +209,63 @@ describe('every advertised entitlement has a real gate behind it', () => {
   });
 });
 
+describe("free vs paid: whose domain, and what survives a lapse (admin 2026-09-10)", () => {
+  const domains = src('src/server/routes/nbaiDomains.ts');
+  const sweep = src('src/server/lib/hostingPlanSweep.ts');
+
+  it('🔒 a free user cannot connect their own domain — and cannot START the DNS setup either', () => {
+    // "free user apni website connect nahi kar sakta hai." The connect gate always existed; the
+    // AUTO-DNS START did not have one, and start comes FIRST: it creates a real zone on our own
+    // Cloudflare account and hands the user nameservers to set at their registrar. Ungated, a free
+    // account could repoint their domain — slow and disruptive on their side — and only then be
+    // refused at connect. Both now go through ONE shared gate so they cannot drift apart again.
+    expect(domains).toContain('async function refusedForNoPlan(');
+    const connect = domains.slice(domains.indexOf("app.post('/api/domains/nbai/connect'"));
+    expect(connect.slice(0, connect.indexOf("app.get('/api/domains/nbai/status'"))).toContain('refusedForNoPlan(res');
+    const start = domains.slice(domains.indexOf("app.post('/api/domains/nbai/auto-dns/start'"));
+    expect(start.slice(0, start.indexOf("app.post('/api/domains/nbai/auto-dns/sync'"))).toContain('refusedForNoPlan(res');
+  });
+
+  it('the refusal says the free app is STILL LIVE on NavBharatAI, and offers the plan', () => {
+    // A refusal that only says "no" reads as the product being broken. "publish on NavBharatAI"
+    // is exactly what a free user still gets, and saying so is the difference between a dead end
+    // and an upgrade.
+    const gate = domains.slice(domains.indexOf('async function refusedForNoPlan('), domains.indexOf("app.post('/api/domains/nbai/connect'"));
+    expect(gate).toContain('needsPlan: true');
+    expect(gate).toContain('still published and live on its NavBharatAI link');
+    expect(gate).toContain('402');
+  });
+
+  it('the two exemptions that must never be removed: the free-list, and a store that cannot answer', () => {
+    const gate = domains.slice(domains.indexOf('async function refusedForNoPlan('), domains.indexOf("app.post('/api/domains/nbai/connect'"));
+    expect(gate).toContain('isAgentV3FreeUser(uid, email)');
+    // Only a KNOWN "no active plan" refuses — an outage must never block a paying user's setup.
+    expect(gate).toContain('if (!plan.known || plan.active) return false;');
+  });
+
+  it('🔒 on lapse the DOMAIN dies but NavBharatAI hosting keeps serving', () => {
+    // "plan ka month pura ho jaye to live website offline ho jani chahiye, host on navbharatai
+    // chalti rahe." Two separate guarantees, and this pins both so a later refactor cannot quietly
+    // trade one for the other.
+    //
+    // (1) the domain is really detached and marked suspended:
+    expect(sweep).toContain("_deps.detachDomain(link.workspaceId, link.domain)");
+    expect(sweep).toContain("_deps.setSuspended(link.domain, 'plan_lapsed')");
+    // (2) an app that HAD a domain keeps its free NavBharatAI slot — the demotion is explicitly told
+    //     which workspaces those are, so the site the user cared most about is the last to pause.
+    expect(sweep).toContain('const domainOwners = links.map((l) => l.workspaceId);');
+    expect(sweep).toContain('appsToPauseOnLapse(apps, publishedAppCap(), domainOwners)');
+  });
+
+  it('a lapsed user keeps at least the free apps — the demotion can never reach zero', () => {
+    // Whatever else changes, the floor is the free allowance. This is the sentence the admin's
+    // "host on navbharatai chalti rahe" actually depends on.
+    const apps = Array.from({ length: 30 }, (_, i) => ({ workspaceId: `w${i}`, updatedAt: i, status: 'active' }));
+    const paused = appsToPauseOnLapse(apps, FREE_PUBLISHED_APPS);
+    expect(apps.length - paused.length).toBe(FREE_PUBLISHED_APPS);
+  });
+});
+
 describe('the plan card', () => {
   const card = src('src/components/panels/HostingPlanCard.tsx');
 

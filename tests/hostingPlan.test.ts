@@ -340,12 +340,19 @@ describe('plan wiring', () => {
   it('domain connect is plan-gated with free-list exemption and FAIL-OPEN on unknown', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/routes/nbaiDomains.ts'), 'utf8');
     const code = stripComments(src);
-    expect(code).toContain('hostingPlansEnabled() && !isAgentV3FreeUser(');
-    expect(code).toContain('plan.known && !plan.active'); // unknown ⇒ allow (rule #1)
+    expect(code).toContain('hostingPlansEnabled() || isAgentV3FreeUser(uid, email)');
+    // Unknown ⇒ allow (rule #1). The condition moved into the SHARED gate on 2026-09-10, when
+    // auto-dns/start was found ungated — the fail-open direction is unchanged, only its home.
+    expect(code).toContain('if (!plan.known || plan.active) return false;');
     expect(code).toContain('needsPlan: true');
-    // The gate covers ONLY connect — the status/state routes must stay ungated so a lapse never
+    // BOTH write paths that begin a custom-domain setup go through the one gate — connect, and the
+    // auto-DNS start that precedes it.
+    // `await refusedForNoPlan(res` matches only the CALL sites — the bare name would also match the
+    // function's own declaration and quietly count three.
+    expect(code.match(/await refusedForNoPlan\(res/g) ?? []).toHaveLength(2);
+    // The gate covers only those — the status/state routes must stay ungated so a lapse never
     // breaks an already-live domain's checks.
-    const statusRoute = code.indexOf("'/api/domains/nbai/status'");
+    const statusRoute = code.indexOf("app.get('/api/domains/nbai/status'");
     expect(code.slice(statusRoute, statusRoute + 1200)).not.toContain('needsPlan');
   });
 

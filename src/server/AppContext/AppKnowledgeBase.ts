@@ -731,7 +731,7 @@ NOTE (2026-08-06): connecting a domain is part of a hosting plan (Starter ₹149
 • STARTER — ₹149 / 30 days: 1 domain of your own, no "Made with NavBharatAI" badge, 5 GB of visitor traffic a month, remix any app in the gallery, and no ads on NavBharatAI while the plan is on.
 • GROWTH — ₹499 / 30 days: everything in Starter, plus up to 3 domains, 20 GB of visitor traffic a month, and ₹150 of build credit added to your wallet every month (ordinary credit — it does not expire separately).
 • Bigger than that (many sites, heavy traffic, a dedicated setup)? There is no bigger plan to buy — write to us and we build it around what you actually need.
-BEFORE YOU PAY you are shown the plan's terms and must tick "OK — I have read and accept these terms." The purchase cannot go through without it; that tick is what makes the traffic limit and its overage charge real, and it is enforced on the server, not just in the screen.
+\ud83d\udd11 WHO CAN USE THEIR OWN DOMAIN: only a plan holder. On the FREE plan your app is fully published and live on its NavBharatAI link \u2014 that never costs anything and never stops \u2014 but connecting your OWN domain (myshop.com) needs a plan, and so does the automatic DNS setup that comes before it. Do NOT tell a free user to buy a domain first: they should start a plan, then connect. AND WHEN A PLAN ENDS: the app KEEPS RUNNING on its NavBharatAI link \u2014 it is the custom DOMAIN that stops serving. Renew and the domain reconnects on its own within minutes. An app that has your own domain pointed at it is also the LAST one to be paused if you go over the free app limit, so the site you care most about is protected. BEFORE YOU PAY you are shown the plan's terms and must tick "OK — I have read and accept these terms." The purchase cannot go through without it; that tick is what makes the traffic limit and its overage charge real, and it is enforced on the server, not just in the screen.
 ⚠️ TRAFFIC MEASUREMENT IS STILL BEING ROLLED OUT — say this plainly if asked. Until a site's traffic is genuinely measured, the user is charged the plan price and NOTHING more, and they will always see measured usage before anything extra is charged. Never tell a user they have been charged for extra traffic unless their ledger actually shows it.
 🔑 GOING OVER THE TRAFFIC LIMIT DOES NOT SWITCH YOUR APP OFF. Nothing is suspended, nothing is throttled — the extra traffic is charged from your wallet at ₹20 per GB and every charge shows in your ledger. Say this plainly if a user is worried: their site keeps serving.
 UPGRADING mid-month never wastes money: the unused days on your current plan are valued and returned to your wallet as credit first, then the new plan starts a full period from that day. Moving DOWN to a cheaper plan while a bigger one is still running is refused — let the current period finish, then choose the smaller one.
@@ -750,6 +750,8 @@ What happens if it is NOT renewed (honest answer): you get in-app reminders 5 da
       'app offline ho gayi', 'app band ho gayi', 'plan khatam', 'app kaise wapas laye', 'paused app',
       'restore app', 'app gayab', 'app delete ho gayi', 'kitni app publish kar sakte hai', 'app limit',
       'free 5 app', 'published app limit', 'demote',
+      'domain connect nahi ho raha', 'free me domain', 'apni website par app', 'custom domain free',
+      'website offline ho gayi', 'domain band ho gaya', 'domain kaam nahi kar raha', 'dns setup',
       'paid plan', 'subscription', 'upgrade', 'plans', 'hosting charge', 'domain plan', 'auto renew',
     ],
   },

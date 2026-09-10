@@ -287,6 +287,38 @@ async function formDomainVerdict(
 }
 
 export function registerNbaiDomainsRoutes(app: Express): void {
+  /**
+   * THE ONE PLAN GATE for "point your own domain at your app" — shared, not pasted.
+   *
+   * 🔴 WHY IT IS SHARED (admin 2026-09-10: "free user apni website connect nahi kar sakta hai").
+   * `/connect` had this check and `/auto-dns/start` did NOT, and start is the step that comes FIRST
+   * in the flow: it creates a real DNS zone on NavBharatAI's own Cloudflare account and hands the
+   * user nameservers to set at their registrar. So a free user could change their domain's
+   * nameservers — a slow, disruptive, hard-to-undo action on their side — and only then be told at
+   * connect that the whole thing needs a plan. That is the dead end this project's second absolute
+   * rule forbids, and it cost us a zone on our bill every time somebody hit it.
+   *
+   * The other write routes (`auto-dns/sync`, `hostinger/apply`) need an ALREADY-CONNECTED domain and
+   * refuse without one, so gating connect and start covers the whole path.
+   *
+   * Returns true when it has already answered — the caller just returns.
+   *
+   * 🔒 Two exemptions are deliberate and must stay: the admin/tester free-list, and a plan store that
+   * cannot answer (`known` false ⇒ allow). Rule #1 — an outage must never block a legitimate paying
+   * user's setup. Only a KNOWN "no active plan" refuses.
+   */
+  async function refusedForNoPlan(res: Response, uid: string, email: string | null): Promise<boolean> {
+    if (!hostingPlansEnabled() || isAgentV3FreeUser(uid, email)) return false;
+    const plan = await probeHostingPlan(uid);
+    if (!plan.known || plan.active) return false;
+    res.status(402).json({
+      error: `Using your own domain is part of a hosting plan (from ₹${hostingPlanPriceInr()}/month, paid from your wallet — it also removes the "Made with NavBharatAI" badge). On the free plan your app is still published and live on its NavBharatAI link. Start a plan from Billing → Plans, then connect your domain.`,
+      needsPlan: true,
+      priceInr: hostingPlanPriceInr(),
+    });
+    return true;
+  }
+
   app.post('/api/domains/nbai/connect', domainOpsRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     if (!firebaseCustomDomainsEnabled()) {
       res.status(503).json({ error: 'Custom-domain hosting on NavBharatAI is not enabled yet. Please try again later.' });
@@ -303,21 +335,9 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       res.status(403).json({ error: 'You can only connect a domain to your own app.' });
       return;
     }
-    // PLAN GATE (admin-approved 2026-08-06): connecting a custom domain is part of the paid Custom
-    // Domain plan. Free-list (admin/tester) accounts are exempt; a store outage FAILS OPEN (`known`
-    // false ⇒ allow — rule #1: an outage must never block a paying user's setup). Only the CONNECT
-    // action is gated — status/checks/sync for an already-connected domain keep working, so a lapse
-    // never breaks a live site mid-flow.
+    // PLAN GATE — see `refusedForNoPlan`, which both this route and the auto-DNS start share.
+    if (await refusedForNoPlan(res, verifiedUid, identity?.email ?? null)) return;
     if (hostingPlansEnabled() && !isAgentV3FreeUser(verifiedUid, identity?.email ?? null)) {
-      const plan = await probeHostingPlan(verifiedUid);
-      if (plan.known && !plan.active) {
-        res.status(402).json({
-          error: `Connecting your own domain is part of a hosting plan (from ₹${hostingPlanPriceInr()}/month, paid from your wallet — it also removes the "Made with NavBharatAI" badge). Buy it from Billing → Plans, then connect.`,
-          needsPlan: true,
-          priceInr: hostingPlanPriceInr(),
-        });
-        return;
-      }
       /**
        * THE TIER'S DOMAIN COUNT, ENFORCED (2026-09-10). Starter includes 1 domain and Growth 3, and
        * a number printed on a plan card that nothing checks is a fake feature — the second absolute
@@ -468,6 +488,11 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       res.status(403).json({ error: 'You can only set up DNS for your own app.' });
       return;
     }
+    // THE SAME PLAN GATE AS CONNECT, and it belongs here MORE than there: this is the step that
+    // creates a real zone on our own account and asks the user to repoint their nameservers. See
+    // `refusedForNoPlan`.
+    const startIdentity = await verifyFirebaseIdentity(req).catch(() => null);
+    if (await refusedForNoPlan(res, verifiedUid, startIdentity?.email ?? null)) return;
     const host = canonicalHost(normalizeDomain(req.body?.domain));
     if (!DOMAIN_RE.test(host)) {
       res.status(400).json({ error: 'Enter a valid domain like myshop.com (no https://, no slashes).' });

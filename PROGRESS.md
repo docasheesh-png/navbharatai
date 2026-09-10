@@ -47349,3 +47349,42 @@ immediately after paying. An existing test that stubbed no registry at all is wh
 is now: **skip only what we positively know is down** (a record that exists and is not active);
 absent, empty or unreadable all mean "cannot tell", and cannot-tell reattaches. The skipped domains are
 named in their own message with the one step that fixes them, because a silent skip looks like failure.
+
+## 2026-09-10 — lucide-react 1.x removed every brand icon; the two we use are now ours
+
+**Session:** claude/upgrade-md-review-vxbdy0. Dependabot PR #2724 (lucide-react 0.546 → 1.34) went RED
+on CI, and the reason turned out to be far larger than the one test that caught it.
+
+### What was actually wrong
+lucide-react 1.x REMOVED all brand marks. `Github` and `Figma` are not renamed and not moved to a
+subpath — verified against the real 1.34.0 tarball: absent from `dist/esm/lucide-react.mjs`, absent from
+all three `.d.ts` files, and no `icons/github.*` or `icons/figma.*` file exists. We import them in 14
+files.
+
+🔴 **And the typecheck does not catch it.** lucide-react ships no `types` field and no `exports` map, so
+`import { Github } from 'lucide-react'` resolves loosely and COMPILES CLEAN while evaluating to
+`undefined` at runtime. Rendering an undefined component is a React "Element type is invalid" CRASH, not
+a missing glyph. CI's typecheck and no-unused-imports steps both passed on the dependabot PR; the entire
+20,000-test suite caught it in exactly ONE place — `homeToolGroups.test.ts`, which happens to assert that
+every tool tile has an icon. **The sign-in screen, Settings, the Git panel and the v5 builder panel would
+all have crashed**, and nothing in the gate would have said so.
+
+### What shipped
+- **`src/components/ui/BrandIcons.tsx`** — `Github` and `Figma` vendored from lucide's OWN 0.546 path
+  data (ISC, attribution retained), with lucide's default SVG presentation and the same `size` /
+  `className` prop surface, so all 39 render sites are unchanged and the marks look identical. Nothing
+  was redrawn from memory, which is the point: an invented path would have been a wrong logo on the
+  sign-in button.
+- 14 files repointed from `lucide-react` to the vendored module; `lucide-react` bumped to ^1.44.0.
+- 🔴 **A separate, real user-facing bug found while sweeping (rule 3, hunt the siblings):** the
+  `portfolio-site` starter template in `SyncedTemplates.ts` imports `Github` INSIDE the template string
+  — code we write into a USER's generated app. Any user generating that template against current lucide
+  would get a crashing app. It was imported and never rendered, so the import is simply gone.
+- **`tests/lucideBrandIcons.test.ts`** locks it: no file under `src/` may import a removed brand icon
+  from lucide-react, template strings included, and the vendored paths must stay lucide's own.
+
+### Honest note on verification
+The local `npm run test:coverage` run exited 1 with `[vitest-worker]: Timeout calling "onTaskUpdate"` —
+a worker RPC timeout under coverage instrumentation on this machine, with **zero test failures** and
+thresholds comfortably met (branches 83.86% against a floor of 72). That is an environment limit, not a
+result; CI's dedicated runner is the authority and is what gates the merge.

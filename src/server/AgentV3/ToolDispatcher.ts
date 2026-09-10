@@ -6,6 +6,7 @@ import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAudi
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
 import { decideSupersede } from './previewSupersede';
+import { declaredPortFrom, DECLARED_PORT_FILES } from './declaredPort';
 import { sandboxStore } from './SandboxStore';
 import { buildPreKillPortCommand } from './sandbox/EngineerAI/actuators/devServerHost';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
@@ -7808,7 +7809,27 @@ export class ToolDispatcher {
             sandboxStore.getRecipe(this.workspaceId),
             sandboxStore.getRecord(this.workspaceId),
           ]);
-          const decision = decideSupersede({ newPort: port, recipe, declaredPort: record?.declaredPort });
+          /**
+           * ASK THE APP ITSELF WHICH PORT IT SERVES ON, before freeing anything.
+           *
+           * A port answering is not proof it is THIS app — a dev server left by a previous session in
+           * a resumed sandbox answers just as convincingly. Without this the supersede below killed the
+           * real app's server to bless a leftover (see `sourceDeclaredPort` in previewSupersede.ts for
+           * the full report). Bounded and best-effort in every direction: a read that fails or an app
+           * that declares nothing leaves `sourceDeclaredPort` null and the behaviour byte-identical to
+           * before, because the veto simply has nothing to veto.
+           */
+          let sourceDeclaredPort: number | null = null;
+          try {
+            const portFiles: Record<string, string | undefined> = {};
+            for (const path of DECLARED_PORT_FILES) {
+              try {
+                portFiles[path] = await withTimeout(this.actuator.readFile(this.workspaceId, path), 3_000, 'supersede-declared-port');
+              } catch { /* absent is normal — most apps have only one or two of these */ }
+            }
+            sourceDeclaredPort = declaredPortFrom(portFiles)?.port ?? null;
+          } catch { /* a port hint must never be able to affect a build */ }
+          const decision = decideSupersede({ newPort: port, recipe, declaredPort: record?.declaredPort, sourceDeclaredPort });
           if (decision.staleports.length > 0) {
             await withTimeout(
               this.actuator.runCommand(this.workspaceId, buildPreKillPortCommand(decision.staleports)),

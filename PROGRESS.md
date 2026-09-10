@@ -47525,3 +47525,46 @@ accounting, not a regression.
 `npm ci` (npm 11.18.0) **exit 0** · `npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean ·
 `npm run typecheck:server` 0 · `npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS ·
 `npm run test:coverage` **exit 0 — 1,523 files / 20,490 passed / 0 failed**, thresholds met.
+
+## 2026-09-10 — the mailer is live, and a green light over a dead feature was caught first
+
+**Session:** claude/upgrade-md-review-vxbdy0, walking the admin through Resend setup.
+
+### What is now true
+`ALERT_EMAIL_API_KEY` and `ALERT_EMAIL_FROM` are SET in Cloud Run, and `send.navbharatai.com` is
+**Verified** on Resend (DNS at Hostinger, sending region Tokyo). Both alert paths can now reach a real
+inbox: the admin Monitor's own alerts, and — the one that matters — the per-user "your site is down"
+mail from the uptime sweep shipped earlier today, which until now could only ring the in-app bell.
+
+⚠️ **This CORRECTS the "Honest limits" note in this file's item-1.8 entry above**, which said the mailer
+was not configured and only the bell would fire. That was true when written and is not true now.
+
+### Why a subdomain, and the evidence the live site was never at risk
+The admin's first question was whether editing DNS on the live domain would take the site down. It could
+not, and the setup was arranged so that it could not: every record went under **`send.navbharatai.com`**,
+so nothing at the zone root was added, edited or removed. Verified from this session by resolving them
+directly — DKIM TXT present and **complete** (218 characters, a single unsplit chunk, ending `…IDAQAB`,
+which is where a long DKIM record usually breaks), both CNAMEs matching Resend's targets exactly, and
+`navbharatai.com` still answering with Google's IPs throughout.
+
+The two hazards named up front, and neither happened: editing an existing row instead of adding one, and
+putting a CNAME at the apex.
+
+### 🔴 The bug this setup exposed — fixed the same hour
+`ALERT_EMAIL_FROM` was first entered as `NavBharatAI = alerts@send.navbharatai.com` — the display-name
+form with `=` where `<` and `>` belong. **`resolveEmailConfig` only checked that the sender was
+non-empty**, so that value passed every gate: the Monitor would have reported *"Alerts reach you by app
+and email"* in green while the provider rejected every single send.
+
+That is exactly the "worst of both states" the function's own comment names — reached through the other
+door. The empty-check was added because a missing sender fails on every send; a malformed one fails
+identically and was not checked at all.
+
+**Fixed:** `senderAddress()` now validates the shape and both real forms are accepted (`a@b.c` and
+`Name <a@b.c>`); anything else is refused **by name**, naming the field and showing the offending value.
+`alertEmail.test.ts` encodes the exact string that was typed, plus the shapes that only fail later at the
+provider (display name without brackets, no dot in the domain, two addresses in one From).
+
+**The general lesson, and it is the same one this file keeps re-learning:** a presence check is not a
+validity check. Anywhere config decides whether a feature reports itself as working, "not empty" and
+"usable" must not be the same test — the gap between them is a green light over a dead feature.

@@ -17,7 +17,8 @@ import { enforceHostingQuota, isFirstPartyProvider, deployBytesMb } from '../lib
 import { hostingUsageStore } from '../lib/HostingUsageStore';
 import { scanPublishedContent, publishScanBlocks } from './ContentSafetyScanner';
 import { extractOutboundOrigins } from './outboundUrls';
-import { scanOrigins, webRiskEnabled, webRiskSummary } from './webRisk';
+import { webRiskEnabled, webRiskSummary } from './webRisk';
+import { scanOriginsWithBudget } from './webRiskBudget';
 import { GoogleAuth } from 'google-auth-library';
 import { injectBadgeIntoFiles } from '../lib/madeWithBadge';
 import { injectBeaconIntoFiles, publicOrigin } from '../lib/siteAnalytics';
@@ -456,7 +457,13 @@ export function withDeploymentPersistence(
         }
         const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
         const token = await auth.getAccessToken().catch(() => null);
-        const scan = await scanOrigins({ origins: outboundOrigins, token: token ? String(token) : null });
+        // Through the budget, never around it — see `webRiskBudget.ts` for why this feature has a
+        // hard monthly ceiling and why running out of it is an honest "unchecked", not a charge.
+        const scan = await scanOriginsWithBudget({
+          origins: outboundOrigins,
+          token: token ? String(token) : null,
+          store: getServerDb() as never,
+        });
         await deploymentStore.setOutboundVerdict(workspaceId, {
           outboundOrigins,
           outboundNote: webRiskSummary(scan),

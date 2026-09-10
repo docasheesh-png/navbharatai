@@ -139,3 +139,65 @@ export function rollbackSummary(target: RollbackTarget): string {
     ? `Your live app is back to the version published on ${stamp}.`
     : 'Your live app is back to the previous published version.';
 }
+
+// ── The history picker (ROADMAP §13, 1.4) ─────────────────────────────────────────────────────
+
+/** One version the user may go back to. */
+export interface RollbackChoice {
+  versionName: string;
+  /** When this version was most recently live. Null when the API omitted it. */
+  releaseTime: string | null;
+  /** True for the version serving right now — shown, never offered. */
+  live: boolean;
+}
+
+/**
+ * Every version the live app could be put back to, newest first, ONE entry per version.
+ *
+ * "Undo last publish" goes one step back. This is the rest of the history, for the user who knows the
+ * version from Tuesday was the good one. Same filters as `pickRollbackTarget` — only FINALIZED versions,
+ * sorted by release time, never trusting the API's order — and deduplicated by VERSION: after a rollback
+ * the same version appears in several releases, and offering it three times as "three versions" would
+ * misdescribe the history. Each version keeps the time it was most recently live.
+ *
+ * Bounded: a long-lived app's history is hundreds of releases, and a picker is for the recent past.
+ * PURE.
+ */
+export function listRollbackChoices(releases: readonly HostingRelease[], max = 20): RollbackChoice[] {
+  const usable = [...(releases ?? [])]
+    .filter((r) => typeof r?.version?.name === 'string' && r.version.name.length > 0)
+    .filter((r) => (r.version?.status ?? 'FINALIZED') === 'FINALIZED')
+    .sort((a, b) => String(b.releaseTime ?? '').localeCompare(String(a.releaseTime ?? '')));
+  const seen = new Set<string>();
+  const out: RollbackChoice[] = [];
+  for (const r of usable) {
+    const name = r.version!.name!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push({
+      versionName: name,
+      releaseTime: typeof r.releaseTime === 'string' ? r.releaseTime : null,
+      live: out.length === 0,
+    });
+    if (out.length >= Math.max(1, Math.floor(max))) break;
+  }
+  return out;
+}
+
+/**
+ * The target for "go back to THIS version" — resolved against the history, never taken on trust.
+ *
+ * A version name from the browser is an instruction to serve arbitrary bytes under the user's URL,
+ * so it is only ever a KEY into the list this module itself derived: unknown ⇒ null, the live one ⇒
+ * null (there is nothing to do), anything else ⇒ the same target shape the one-step undo uses, so the
+ * route's rollback call is identical for both. PURE.
+ */
+export function pickRollbackTargetByVersion(
+  releases: readonly HostingRelease[],
+  versionName: string,
+): RollbackTarget | null {
+  if (typeof versionName !== 'string' || !versionName) return null;
+  const choice = listRollbackChoices(releases, 1_000).find((c) => c.versionName === versionName);
+  if (!choice || choice.live) return null;
+  return { versionName: choice.versionName, releaseTime: choice.releaseTime };
+}

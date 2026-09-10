@@ -1418,6 +1418,138 @@ concurrency, keys in rotation) and **money load** (spend vs recovered).
 UNKNOWN, never as zero.** A dashboard that says "0" when it means "I could not tell" is worse than one
 that says nothing, because it manufactures confidence at exactly the moment attention is needed.
 
+## 13 · 🗺️ THE PUBLISH-FLOW PLAN — closing the 8-builder audit (added 2026-09-10)
+
+**Admin's ask, verbatim:** *"v5 jab app banata hai, github/zip se import karta hai, uske bad publish karta
+hai … isko other ai app builder se compare karo … 7-8 app builders compare kare, aur hamare gaps dhundo"*,
+then *"to improvement ka plan banao"*. Compared against Lovable, Replit, Bolt.new, v0, Base44, Emergent,
+Firebase Studio and Hostinger Horizons (mid-2026 knowledge; they move monthly — re-check before quoting).
+
+### Where we actually stand (verified against `main` 2026-09-10, not against memory)
+
+**Import → Publish → Connect a domain: level with the best, ahead on honesty.** GitHub + ZIP + Figma +
+screenshot import; publish with rollback; deploy to the user's OWN Vercel/Netlify/Cloudflare/GitHub Pages
+(Lovable and Base44 offer none); managed DNS by nameserver delegation + Domain Connect + Hostinger token
+flow; a DNS diagnosis no competitor matches; Python backends; Android APK + Nav App Store + instant apps
+(nobody else). **Behind in two places, and they are the two that decide whether a beginner stays:**
+
+1. **After publish** — no visitor count, no staging, no private site, no custom 404. The user's first
+   question after publishing is "kitne log aaye?" and we cannot answer it.
+2. **Backend + data as a SERVICE** — we generate the code (160 `generate_*` starters: auth, storage,
+   email, payment, scheduler…) but the user still opens Supabase, Render and Resend accounts to run it.
+   Lovable Cloud / Base44 / Replit run it for them. **§11 (NavBharat Cloud) is already the plan for this**
+   and is further along than the audit first assumed — see the status table.
+
+**Three things the 2026-09-10 chat audit got WRONG, corrected here so nobody rebuilds them:**
+- ❌ *"no public remix gallery for web apps"* → **SHIPPED #2275** (`galleryPublishGate.ts`). Do not rebuild.
+- ❌ *"no managed file storage"* → **one-click bucket in the user's Supabase SHIPPED #2265**. The real
+  gap is storage WITHOUT a user account, which is §11 D2's shape — not a new item.
+- ❌ *"NavBharat Cloud is a proposal"* → **slices 1 and 2 are on `main`** (#2776, 2026-09-08:
+  `hostApp.ts`, `cloudRunHosting.ts`, `containerBuild.ts`, `hostingPreflight.ts`, `hostingCost.ts`,
+  `hostingUsage.ts`). It is **infra-blocked on the admin's five GCP steps**, not on code.
+
+### §11 status — the one line that changes every priority below
+
+| Slice | State on `main` | Blocked on |
+|---|---|---|
+| 1 · engine (store → container → Cloud Run) | ✅ #2776, admin-only, flag OFF | 👤 the five GCP steps (§11 checklist); `NAVBHARAT_*` keys absent from `CLAUDE.md`'s registry ⇒ **not done** |
+| 2 · metering + pricing (4 cost lines + 20%) | ✅ pure modules + admin `wouldBill` report | wiring the periodic **wallet debit** (small, but it is the line §💰 exists for) |
+| 3 · custom domain → Cloud Run via the Worker | ❌ | slice 1 live |
+| 4 · abuse layer | ❌ | slice 1 live |
+| 5 · ONE Publish button | ❌ (routes exist at `agentv3.ts` ~4254/4323; the Publish sheet does not call them) | slices 2–4 |
+| 6 · starter database | ❌ | 👤 **D2 OPEN** |
+| 7 · always-on tier | ❌ | slice 5 |
+| — · free-tier hosting allowance | — | 👤 **D3 OPEN** (recommendation: the gift wallet, no new currency) |
+
+**Nothing wide in Phase 2 below moves until the admin does the five GCP steps and answers D2/D3.**
+That is the honest critical path of the whole plan.
+
+### Phase 0 · 👤 ADMIN, THIS WEEK — the things every later phase waits on
+
+| # | Step | Unblocks |
+|---|---|---|
+| 0.1 | **§11's five GCP steps** (`navbharat-apps-prod`, APIs, separate billing account, cross-project IAM, the six env keys) — then tell a session, which records the keys in `CLAUDE.md` | all of Phase 2 |
+| 0.2 | **Decide D2** (starter DB in NavBharatAI's Supabase org, quota-bound) and **D3** (free hosting = gift wallet) | 2.5, 2.6 |
+| 0.3 | **Deploy the Cloudflare Worker** for the branded apps domain, confirm one test app loads, then set `PUBLISHED_APP_DOMAIN` (order per `CLAUDE.md`) | 1.1 (analytics has a place to count), 1.6, 1.7 |
+| 0.4 | Android **developer verification → Identity tab** (deadline 30 Sep 2026 — app removed globally otherwise) | not this plan; existential |
+| 0.5 | Publish the approved 9-Sep Play update (Managed publishing is ON, it is waiting); then set `ANDROID_LATEST_VERSION_CODE` | — |
+| 0.6 | Pick a **domain reseller** (GoDaddy Reseller / ResellerClub / Hostinger) and open the account — ₹ and KYC, weeks of lead time | 4.1 |
+
+### Phase 1 · 🟢 AFTER-PUBLISH BASICS — code only, no decision needed, ~2 weeks
+
+Ordered by what a user feels first. **S** ≤ 1 session · **M** 2–3 · **L** 4+.
+
+| # | Item | Size | Design that is already decided (read before building) | Done when |
+|---|---|---|---|---|
+| 1.1 🔴 | **Visitor analytics per published app** — pageviews, uniques, referrers, countries, last 30 days, on the Publish sheet | M | A **beacon injected at publish**, riding the SAME injection point as the "Made with NavBharatAI" badge (`madeWithBadge.ts`, applied in `DeploymentStore.ts` ~349) — one injection point, not two. Hits go to `POST /api/site-analytics/hit` → Firestore **SHARDED counters from day one** (§SCALE-PLAN item 1: a per-app daily doc is a hot-doc wall; write `app_<id>_<day>_shard_<0..7>`, sum on read). No cookie, no PII: uniques = HMAC(ip + UA, daily salt), unrecoverable next day. **Privacy policy §3.x must state it** — `privacyPolicyTruth.test.ts` will fail CI until it does, and that is the guard working. Kill switch `AGENTV3_SITE_ANALYTICS=off`, same shape as the badge. Rate-limit the endpoint per app (an app can be spammed). When 0.3 lands, the Worker can count edge-side instead and the beacon becomes the fallback. | The Publish sheet shows "142 visitors this week · top referrer: instagram.com" and the number matches a manual count on a test site. |
+| 1.2 🔴 | **`www` ↔ apex, both work, one canonical** | S | `attachCustomDomain` takes ONE domain; Firebase Hosting supports several per site with a `redirectTarget`. Attach BOTH on connect (apex canonical, `www` → 301 to apex, or the reverse if the user typed `www`), and have managed DNS write both records (`cloudflareManagedDns.ts` — the A/CNAME for `www` alongside the apex, in the same TXT-sweep pass). The connect screen shows one domain; the second is the engine's business. Test-lock: connecting `mitrify.com` yields two attached domains and `www.mitrify.com` answers 301. | `www.<domain>` and `<domain>` both load the app; the DNS verdict does not regress on the mismatch/conflict cases fixed in #2792. |
+| 1.3 🟡 | **"Move this domain to this app" — one tap** for `ownership: mismatch` | S | The verdict already names the cause; #2792 made the apply button reachable. This adds the button INSIDE the verdict box that does exactly one thing: `applyRecords` with the TXT sweep, then re-check — and, when the domain is attached to another app of the same user (`firebaseDomainsForWorkspace` across their workspaces), detaches it there first so the two apps cannot fight. Never across accounts. | The admin's 2026-09-02 and 2026-09-10 screenshots resolve in one tap with no registrar visit. |
+| 1.4 🟡 | **Publish history picker** — restore ANY earlier publish, not only the previous one | S | `listChannelReleases` (in `Deployment.ts`) already lists FINALIZED releases; `pickRollbackTarget` picks one. Add a `releaseId` argument, a list in the Publish sheet (time, "current" marker), and reuse `rollbackChannel`. Zero storage cost — same reason the rollback was free. | A user picks the publish from three days ago and the live site shows it; the registry is still deliberately not rewritten (`publishRollback.ts` header). |
+| 1.5 🟡 | **Password-protected / private site** | M | Two paths, pick by where the app is served: Firebase Hosting has no auth → for now a **Worker-side basic-auth** (needs 0.3) keyed per app in KV; for the bucket-only path the Worker is already in front. Until 0.3: honest "available once branded domains are on" — never a fake toggle (rule 2). Password stored hashed; shown once. | A private app answers 401 without the password and loads with it; the badge and analytics still work behind it. |
+| 1.6 🟡 | **Custom 404 + redirects + headers** | S–M | Publish already ships `firebase.json`-shaped config per site; expose `redirects[]`, a `404.html`, and a fixed safe header set (CSP defaults, `X-Frame-Options`, HSTS) from the engine. Redirect rules edited in a tiny form on the Publish sheet — max 50, validated, no open redirects to other hosts unless the user typed the host. | `/old-path` → `/new` works after publish; a missing route shows the user's 404, not Firebase's. |
+| 1.7 🟢 | **User-chosen subdomain slug** (`myshop.<apps-domain>`) | S | Needs 0.3. Slug = channel/bucket prefix; reserve a denylist (`api`, `admin`, `www`, brand names); one rename allowed per app per day; old slug 301s for 30 days so shared links survive. | The user renames `a-9f3k2.<domain>` to `myshop.<domain>` and both resolve. |
+| 1.8 🟢 | **Uptime check + alert to the USER** for their published app | S | `runMonitorAlertSweep` (repo-root `server.ts`) already sweeps the platform; add a per-app HEAD probe every 15 min for apps with a custom domain (paid plan only — a probe per free app at scale is §💰's category 3), email on two consecutive failures, once per 6h. | A paid user gets one email when their site is down and one when it is back. |
+
+### Phase 2 · 🔵 NAVBHARAT CLOUD, FINISHED — §11's slices 3–7, plus the three the audit added
+
+Everything here **waits on 0.1**. Order is §11's dependency order and is not negotiable — 2.3 before 2.4 is
+how a miner gets hosted for free.
+
+| # | Item | Size | Notes | Done when |
+|---|---|---|---|---|
+| 2.1 | **Slice 2's last mile — the wallet debit** | S | `hostingCost` + `hostingUsage` exist and feed an admin report. Add the daily job: measure → price → `computeRolledUpDebit` (one row per app per day, label `NavBharatAI hosting` — never a vendor name) → debit. Unmeasured lines bill zero AND are named, exactly as the modules already do. D3 decides the free allowance. | A hosted test app shows a daily hosting row in the wallet that matches `wouldBill` to the paisa. |
+| 2.2 | **Slice 3 — custom domain → Cloud Run** via the Worker | M | `backendDomain` already records where a domain points; the Worker learns a third target. `renderCustomDomain.ts` is the precedent for "domain follows the backend". | `mitrify.com` serves the Cloud Run app with HTTPS and the domain screen's `backendPointed` verdict is true. |
+| 2.3 | **Slice 4 — abuse layer** | M | Per §11's corrected ordering: instant source check (our code, free) → background Web Risk on outbound URLs, cached by URL → runtime caps (`max-instances`, wallet) → cron re-scan → `/abuse` + one-tap takedown. **Web Risk, never Safe Browsing** (non-commercial). | A test app that POSTs to a listed phishing host is refused at publish with the file and line named. |
+| 2.4 | **Slice 5 — ONE Publish button** | M | Publish stops refusing a fullstack app; `planDeployment` picks static / Cloud Run; GitHub + BYO Render move under "Advanced". Deletes the Blueprint walk the admin did on 2026-09-10. | A fullstack app reaches a live URL with zero steps outside NavBharatAI. |
+| 2.5 | **Slice 6 — starter database** (👤 D2) | L | Provision at BUILD time in NavBharatAI's own Supabase org, quota-bound like `NavData`; the user's own account stays the upgrade path. Widen the 2026-08-15 exception in `CLAUDE.md` in the same PR, in the admin's words. | An app has a working table before the user is asked for anything; a user at the quota gets an honest "no room" message. |
+| 2.6 | **Managed auth + storage without a user account** | M | Falls out of 2.5 — `generate_auth` (`type: 'supabase'`) and `generate_storage` already target Supabase; they point at the starter project instead. No new generator. | Login and uploads work on a fresh account's first build with no keys pasted. |
+| 2.7 | **Cron runner** — `generate_scheduler` gets something that fires it | S | Cloud Scheduler → the app's Cloud Run URL, one job per schedule, created by `hostApp` from the app's own manifest; costs ~₹0 at scale-to-zero. Never for apps on BYO Render (their cron is theirs). | A generated "send daily digest" job fires at 09:00 IST and the log shows it. |
+| 2.8 | **Backend logs in-product** | S | Cloud Logging read for the app's service, last 200 lines, on the Publish sheet — provider names redacted by the SAME `redactProviders` choke point. | A user sees their app's own `console.error` without opening Google Cloud. |
+| 2.9 | **Env vars per environment** (preview / production) | M | The vault is per-app since #2781; add an `environment` dimension with production as default and preview inheriting unless overridden. Needs 3.4 to be visible. | A preview build reads a test key while production reads the live one. |
+| 2.10 | **Slice 7 — always-on tier** | S | `min-instances: 1` as a paid plan beside the ₹99 domain plan, priced from the real Cloud Run rate + 20%. | A paying user's app answers in <300ms cold. |
+
+### Phase 3 · 🔵 PLATFORM SERVICES the user would otherwise leave to buy elsewhere
+
+| # | Item | Size | Notes | Done when |
+|---|---|---|---|---|
+| 3.1 🔴 | **AI gateway for user apps** — the app calls `/_nav/ai`, we route it, the wallet pays | M | 80% exists: the ONE-WALLET LAW, `aiSpendZone`, provider routing, `redactProviders`. New: a per-app token minted at publish (never the user's session), a per-app daily cap, and the model choice made by tier — the user's app never learns a provider name (white-label law applies to the app's users too). Replaces "bring your own OpenAI key" as the default; BYO stays under Advanced. | A generated chatbot works on a fresh account with no key, and its cost appears as one wallet row. |
+| 3.2 🟡 | **Payments one-click — Cashfree + Razorpay** (India-first; every competitor is Stripe-only) | M | `generate_payment` writes the code; add "Connect my Cashfree/Razorpay" (keys into the per-app vault, webhook endpoint registered by us, signature verification generated). UPI is the moat — say so on the tile. Never NavBharatAI's own merchant account (the user's money must land in the user's account). | A test ₹1 UPI payment completes and the webhook marks the order paid. |
+| 3.3 🟡 | **Managed transactional email** | S–M | `generate_email` exists; add a NavBharatAI-owned sending domain with per-app sub-identity (`app-<id>@mail.<domain>`), daily cap per app, billed per 1,000 from the wallet. Provider name hidden. Reply-to = the user. | An OTP email from a fresh app arrives in Gmail's inbox, not spam. |
+| 3.4 🟡 | **Preview / staging environment** | M | A second Firebase preview channel (or bucket prefix) per app, `preview.<slug>.<domain>`, password-protected by default (1.5), promoted to production by the Publish button — "Publish to preview" / "Promote". Expiring like Firebase channels already do. | A user shows a client a preview link that is not the live site, then promotes it in one tap. |
+| 3.5 🟡 | **Auto-publish on git push** | S | For apps with `agentv3_github_storage`: a webhook on the user's repo (GitHub App already installed) → the same publish path, from the shipped branch only. Off by default; a toggle on the GitHub panel. | A merge to the shipped branch is live within two minutes with no click. |
+| 3.6 🟢 | **Duplicate app** (a variant from this one) | S | Verify the two `duplicate/clone` hits first; if absent, it is a workspace copy minus secrets, with a fresh slug. | "Make a copy" produces an independent app that publishes to its own URL. |
+
+### Phase 4 · 🟢 GROWTH — worth it once Phases 1–3 hold
+
+| # | Item | Size | Notes |
+|---|---|---|---|
+| 4.1 🔴 | **Buy a domain inside NavBharatAI** (👤 0.6 first) | L | Reseller API search/price/buy in ₹, auto-delegated to managed DNS on purchase — the whole DNS ordeal disappears for the buyer. Paid from the wallet; ₹ price shown before, receipt after; renewal reminders. The margin is small; the retention is the point. |
+| 4.2 🟡 | **URL → app** (clone an existing site into an editable app) | M | Fetch through `assertPublicHttpUrl` (the SSRF guard), snapshot with the pre-baked browser, feed the design-contract path (#2345) that screenshots already use. Copyright note shown; never a bit-for-bit copy of assets. |
+| 4.3 🟡 | **iOS / TestFlight for USER apps** | L | The iOS pipeline exists for NavBharatAI itself; per-user needs their Apple account + certs — BYO-account by construction. Same E2B template limitation as §1 item 1 for Expo. |
+| 4.4 🟢 | **DPDP / GDPR consent banner one-click** for user apps | S | India moat; the platform already has the gate and the wording pattern. |
+| 4.5 🟢 | Transfer app to another account · org billing/seats · comments on preview links · auto favicon/OG on publish · monorepo subfolder pick on import · import from a Lovable/Bolt export | S each | Each real, none urgent. Build on a real ask. |
+
+### ⛔ Do not, even though a competitor does
+
+- A shared Render key for every user (§11), Redis for analytics counters (§💰 — shard Firestore instead),
+  BYOK (§7), a provider name on any surface the app's END USERS see (white-label law), Play-Store or
+  App-Store builds on a phase completing (admin's word is the only trigger), and anything in §SCALE-PLAN
+  before its trigger fires.
+
+### The one lever, and why the order is what it is
+
+Phase 1.1 (analytics) is first because it is the cheapest thing that changes what a user FEELS after
+publishing, and it needs no decision. Phase 2 is the biggest lever in the whole plan and is *already
+mostly built* — it is waiting on five console steps and two decisions, which is why Phase 0 is written as
+the admin's list rather than a session's. Phase 3.1 (the AI gateway) is the single feature most likely to
+make a builder choose NavBharatAI over Lovable in 2026, and 80% of its plumbing is the wallet law we
+already run. Everything in Phase 4 is real, and none of it matters until a published app can tell its
+owner how many people came.
+
+**How we will know it worked:** share of published apps whose owner opens the analytics tile in week one;
+share of fullstack apps that reach a live URL (today ≈ 0); support messages containing the word
+"registrar" (today: most of them).
+
 ## How to use this file
 
 1. **Re-grep before you start.** Every line here is a hint. Nine were wrong on 2026-08-07.

@@ -277,6 +277,22 @@ best. Both layers — reactive autopsy AND proactive world-best suggestions — 
    trust a truncated `tail`) + a manual/boot smoke check for server changes.
    This gate is non-negotiable, even under time or credit pressure.
 
+   ⚠️ **THE GATE ABOVE IS NARROWER THAN CI, AND THAT GAP HAS COST A RED BUILD
+   (2026-09-10).** A session ran tsc and the full 20,000-test suite, got green
+   on both, pushed — and CI failed in 87 seconds on `scripts/noUnusedImports.mjs`
+   over a single import left behind by a refactor. Neither tsc nor vitest can
+   see an unused import, so a gate made only of those two is structurally
+   incapable of catching that class at all. **`.github/workflows/ci.yml` is the
+   real gate; the list above is a subset of it.** Before a push, run the steps
+   CI runs that the list omits:
+   `npm run typecheck` · `node scripts/noUnusedImports.mjs` ·
+   `npm run typecheck:server` · `npm run build` · `npm run test:bundle` ·
+   `npm run boot:check` (and `npm run audit:gate` / `license:gate` when
+   dependencies changed). They take about two minutes together — far less than
+   a red CI round trip, and they catch what the two-command gate cannot.
+   **Re-read the workflow rather than trusting this list**: CI gains steps, and
+   a list in a doc goes stale exactly the way this one did.
+
    🔴 **RUN IT AT THE END, ON THE FINAL STATE OF THE CHANGE — NEVER MID-WAY.**
    A gate run before the last file was written proves nothing about what is
    being pushed, and it is worse than no gate at all, because it produces a
@@ -816,6 +832,28 @@ the code (it is actually read somewhere) on 2026-07-11.
   the pixel's allowlist against what Section 3.1 discloses, so **adding an event to
   `pixelEventFor` fails CI until the policy is updated too** (verified to bite). Do not weaken it;
   it exists because the first drift produced no failure of any kind.
+
+- **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
+  `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
+  publish and the hit route recording; apps already published keep their script until republished,
+  which is harmless because the route then discards hits), `SITE_ANALYTICS_SALT` (optional — the HMAC
+  secret behind the daily-rotating visitor hash; **falls back to `SECRET_ENCRYPTION_KEY`**, which is
+  set, so nothing needs adding; a per-process random salt is the last resort and dedups uniques per
+  instance only, logged once), `SITE_ANALYTICS_SHARDS` (default 8, clamped 1–64 — documents per
+  app-day; §SCALE-PLAN item 1 applied on day one), `SITE_ANALYTICS_FLUSH_SECONDS` (default 20,
+  clamped 5–300). Read by `src/server/lib/siteAnalytics.ts` / `siteAnalyticsStore.ts`. The beacon
+  posts to `PUBLIC_BASE_URL` when set, else `https://navbharatai.com`. 🔒 What it collects is stated
+  in the Privacy Policy §12 and pinned by `tests/privacyPolicyTruth.test.ts` — adding a field to the
+  beacon fails CI until the policy discloses it.
+
+- **Site uptime alerts for connected domains (shipped 2026-09-10, ROADMAP §13 item 1.8):**
+  `SITE_UPTIME_SWEEP` (kill switch — **default ON**; `off` stops the 15-minute probe of every connected
+  custom domain), `SITE_UPTIME_COOLDOWN_HOURS` (default 6, clamped 1–72 — one "down" message per outage,
+  then quiet while it stays down), `SITE_UPTIME_MAX_DOMAINS` (default 500, clamped ≤ 5000 — domains per
+  sweep). Read by `src/server/lib/siteUptime.ts` / `siteUptimeSweep.ts`; registered in `server.ts` as the
+  `site-uptime` scheduled job, **exclusive** (one instance probes). Email to the OWNER rides the existing
+  `ALERT_EMAIL_*` mailer — unconfigured ⇒ the in-app bell only, never a silent nothing. A probe that could
+  not complete from our side is "unknown" and never counts as the user's site being down.
 
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 

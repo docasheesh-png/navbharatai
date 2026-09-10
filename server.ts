@@ -48,6 +48,7 @@ import { registerAppDebugRoutes } from './src/server/routes/appDebug';
 import { registerImageGenRoutes } from './src/server/routes/imageGen';
 import { registerDevtoolsProxyRoutes } from './src/server/routes/devtoolsProxy';
 import { registerScreenshotToPromptRoutes } from './src/server/routes/screenshotToPrompt';
+import { registerSiteImportRoutes } from './src/server/routes/siteImport';
 import { registerFigmaProxyRoutes } from './src/server/routes/figmaProxy';
 import { registerCodeReviewRoutes } from './src/server/routes/codeReview';
 import { registerPaymentRoutes } from './src/server/routes/payment';
@@ -689,6 +690,7 @@ setInterval(() => {
   registerImageGenRoutes(app); // AI Image Gen — real image generation on our own key (POST /api/image/generate)
   registerDevtoolsProxyRoutes(app); // API Tester — SSRF-guarded server proxy (POST /api/devtools/proxy)
   registerScreenshotToPromptRoutes(app); // Screenshot→Code — vision → build prompt (POST /api/screenshot/to-prompt)
+  registerSiteImportRoutes(app); // Website→App — SSRF-guarded fetch → deterministic build prompt (POST /api/site-import/to-prompt)
   registerFigmaProxyRoutes(app); // Figma Import — server-side Figma fetch (POST /api/figma/proxy)
   registerCodeReviewRoutes(app); // P-DEV.11 — inline code review comments (/api/workspace/:workspaceId/review)
   registerZipRoutes(app, chatLimiter);
@@ -792,6 +794,47 @@ setInterval(() => {
           // its normal range, instead of finding out by happening to open the panel. Every 15 minutes;
           // the sweep itself decides what is worth saying (new / still-firing-after-a-cooldown /
           // recovered) and says NOTHING when the window cannot be judged. Kill switch: MONITOR_ALERTS=off.
+          // SITE UPTIME (ROADMAP §13, 1.8): probe every connected custom domain and tell its OWNER
+          // when it is down — exclusive, so one instance probes rather than every instance. Kill
+          // switch SITE_UPTIME_SWEEP=off. Never throws; a domain that cannot be probed is "unknown".
+          scheduler.register({
+            id: 'site-uptime',
+            exclusive: true,
+            schedule: { kind: 'everyMs', ms: 15 * 60_000 },
+            handler: async () => {
+              await import('./src/server/lib/siteUptimeSweep')
+                .then(({ runSiteUptimeSweep }) => runSiteUptimeSweep())
+                .then((r) => { if (r.alertedDown || r.alertedUp) console.log(`[site-uptime] probed ${r.probed}, down alerts ${r.alertedDown}, recoveries ${r.alertedUp}`); })
+                .catch(() => { /* best-effort — the sweep must never affect the server */ });
+            },
+          });
+          /**
+           * LIVE USD→INR — the rate every build's bill is converted at.
+           *
+           * 🔴 THE BUG THIS CLOSES (revenue audit 2026-09-10). `refreshUsdInrRate()` has existed, and
+           * been unit-tested, since the billing model was written — and it was NEVER CALLED anywhere
+           * outside its own test file. So `usdInrRate()` returned its 85 fallback forever, while the
+           * real rate sat around 87-88. Every single build was billed roughly 3% under its real cost,
+           * silently, with nothing failing to reveal it. Nothing was broken; a wire was simply missing.
+           *
+           * ⚠️ DELIBERATELY NOT `exclusive`. The rate is an IN-MEMORY cache per instance, so an
+           * exclusive job would refresh exactly one instance and leave every other one billing at 85 —
+           * which is the current bug with extra steps. Every instance must refresh its own copy. The
+           * cost of that is one tiny HTTP call per instance every six hours.
+           *
+           * Failure is already handled inside the module: it keeps the last good value and never
+           * throws, so a dead FX source means yesterday's rate rather than a broken bill.
+           */
+          const refreshFx = async () => {
+            await import('./src/server/lib/UsdInrRate')
+              .then(({ refreshUsdInrRate }) => refreshUsdInrRate())
+              .then((rate) => console.log(`[fx] USD→INR = ${rate}`))
+              .catch(() => { /* best-effort — billing must never break on FX */ });
+          };
+          scheduler.register({ id: 'usd-inr-refresh', schedule: { kind: 'everyMs', ms: 6 * 60 * 60_000 }, handler: refreshFx });
+          // AND ONCE AT BOOT. Without this the first six hours of a fresh instance — which includes
+          // every build right after a deploy — would still bill at the fallback.
+          void refreshFx();
           scheduler.register({
             id: 'monitor-alerts',
             schedule: { kind: 'everyMs', ms: 15 * 60_000 },

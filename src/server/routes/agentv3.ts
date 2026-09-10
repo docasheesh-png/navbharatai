@@ -1,5 +1,12 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
+import { copyName, copyStatus } from '../AgentV3/duplicateApp';
+import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
+import express from 'express';
+import { HIT_PATH, parseHit, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
+import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
+import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
+import { validateSiteConfig, DEFAULT_SITE_CONFIG, MAX_REDIRECTS } from '../AgentV3/siteConfig';
+import { siteConfigStore } from '../AgentV3/siteConfigStore';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
 import { recordPlatformBuild } from '../lib/platformBuildMetrics';
@@ -358,7 +365,7 @@ import { lastDevServerLaunch } from '../AgentV3/devServerLaunchLog';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
 import { FirebaseHostingDeployer, makeChannelId } from '../AgentV3/Deployment';
 import { bucketOnlyPublishEnabled } from '../AgentV3/bucketOnlyPublish';
-import { rollbackAvailability, rollbackSummary } from '../AgentV3/publishRollback';
+import { rollbackAvailability, rollbackSummary, listRollbackChoices, pickRollbackTargetByVersion } from '../AgentV3/publishRollback';
 import { firebaseCustomDomainsEnabled } from '../lib/firebaseCustomDomain';
 import { firebaseDomainsForWorkspaceStrict } from '../lib/firebaseDomainLink';
 import { publishToCustomDomainSite, type CustomDomainPublishOutcome } from '../AgentV3/customDomainPublish';
@@ -504,6 +511,8 @@ import {
   safeWorkspaceUid,
 } from '../lib/workspaceIdentity';
 import { adminRequestOk } from '../lib/adminAuth';
+import { previewFidelityCaveats, previewFidelityNotice } from '../AgentV3/previewFidelity';
+import { journeyUserSummary } from '../AgentV3/journeyUserSummary';
 export { buildActuator };
 
 /**
@@ -3216,6 +3225,62 @@ export function registerAgentV3Routes(app: Express): void {
    * `updatedAt` is preserved (as pinning does): naming an app is not "working on" it, and bumping it
    * would silently reorder the user's history list under them.
    */
+  /**
+   * DUPLICATE APP — "make a copy of this app" (ROADMAP §13, 3.6).
+   *
+   * Copies the FILES and the CHAT under a new name, into a fresh workspace of the SAME verified user.
+   * Copies nothing that points at a place in the world — repo, deployment, domain, site settings,
+   * secrets (per-app by construction) — so a copy starts unpublished and unconnected, which is the
+   * only honest state for a thing that has never been published or connected. See duplicateApp.ts.
+   */
+  app.post('/api/agentv3/conversations/:id/duplicate', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    if (!userId || userId === 'anon') {
+      res.status(403).json({ error: 'Sign in to make a copy of an app.' });
+      return;
+    }
+    const store = getConversationStore();
+    let source: Awaited<ReturnType<typeof store.get>> = null;
+    let forbidden = false;
+    for (const cid of candidateConversationIds(req.params.id, userId)) {
+      const rec = await store.get(cid).catch(() => null);
+      const access = conversationAccess(rec, userId);
+      if (access === 'ok' && rec) { source = rec; break; }
+      if (access === 'forbidden') forbidden = true;
+    }
+    if (!source) {
+      res.status(forbidden ? 403 : 404).json({ error: forbidden ? 'This app belongs to another account.' : 'This app could not be found.' });
+      return;
+    }
+    const files = await loadWorkspaceFiles(source.workspaceId).catch(() => ({} as Record<string, string>));
+    if (Object.keys(files).length === 0) {
+      res.status(409).json({ error: 'This app has no files yet, so there is nothing to copy. Build it first.' });
+      return;
+    }
+    const newSessionId = randomUUID();
+    const newWorkspaceId = workspaceIdFor(userId, newSessionId);
+    if (!newWorkspaceId) { res.status(400).json({ error: 'Could not create a workspace for the copy.' }); return; }
+    const mine = await store.listByUser(userId, 200).catch(() => []);
+    const name = copyName(effectiveAppName(source), mine.map((c) => effectiveAppName(c)));
+    const now = Date.now();
+    try {
+      await saveWorkspaceFiles(newWorkspaceId, files);
+      // Files + chat + name. Deliberately NOT: repoName, repoOwner, deployBranch, backendDomain,
+      // pinned, or anything about hosting — see duplicateApp.ts.
+      await store.create({ id: newSessionId, userId, workspaceId: newWorkspaceId, title: name, messages: source.messages ?? [], createdAt: now });
+      await store.update(newSessionId, { appName: name, status: copyStatus(source.status), updatedAt: now, ...(source.framework ? { framework: source.framework } : {}) });
+    } catch (err) {
+      console.error(`[HTTP 500] duplicate app: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+      res.status(500).json({ error: 'Could not make the copy just now. The original is unchanged.' });
+      return;
+    }
+    res.json({ ok: true, id: newSessionId, workspaceId: newWorkspaceId, name });
+  });
+
   app.post('/api/agentv3/conversations/:id/name', async (req: Request, res: Response) => {
     const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
     if (!isAgentV3Enabled(userId, email)) {
@@ -7057,6 +7122,105 @@ async function noteBuildOutcome(
     res.json(ok ? { ok: true } : { ok: false, error: 'Could not remove that service right now.' });
   });
 
+  // ═══ SITE ANALYTICS — "kitne log aaye?" (ROADMAP §13, 1.1) ═══
+  //
+  // THE HIT ENDPOINT IS PUBLIC AND CROSS-ORIGIN BY DESIGN: the caller is a visitor's browser on a
+  // published app's own origin, and it has no session with us. The beacon sends `text/plain`, which
+  // is a CORS "simple request" (no preflight), and reads nothing back — the headers below exist so a
+  // `fetch` fallback is never blocked either. Defences are exactly what a public endpoint can have:
+  // accept nothing that is not the beacon's shape (parseHit), honour DNT/GPC here as well as in the
+  // page, a rate limit, and a store that buffers, bounds every document and never throws.
+  // The response goes out BEFORE any work — a counter must never slow a visitor down.
+  const hitCors = (res: Response) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  };
+  app.options(HIT_PATH, (_req: Request, res: Response) => { hitCors(res); res.status(204).end(); });
+  // Per-IP 1,200/h is ~20 page views a minute from one address — generous for a person, cheap to
+  // exhaust for a script. In-memory only (`durable: false`): a lost count on a cold start costs
+  // nothing here, and a Firestore read per page view would cost more than the feature.
+  const hitLimiter = rateLimiter({ name: 'site-hit', authed: 3000, anon: 1200, noun: 'hits', durable: false, anonGlobalPerHour: 500_000 });
+  app.post(HIT_PATH, express.text({ type: '*/*', limit: '4kb' }), hitLimiter, (req: Request, res: Response) => {
+    hitCors(res);
+    res.status(204).end();
+    if (!siteAnalyticsEnabled() || requestOptsOut(req.headers as Record<string, unknown>)) return;
+    const hit = parseHit(req.body);
+    if (!hit) return;
+    siteAnalyticsStore.record({
+      ...hit,
+      ip: req.ip || '',
+      userAgent: String(req.headers['user-agent'] || ''),
+      nowMs: Date.now(),
+    });
+  });
+
+  /**
+   * The builder's own numbers. Owner-checked like rollback-status: a visitor count discloses how an
+   * app is doing, which is the owner's business and nobody else's. The app id is derived here from
+   * the workspace, never taken from the client — the same reason rollback re-derives its target.
+   */
+  app.post('/api/agentv3/site-analytics', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    if (!siteAnalyticsEnabled()) { res.json({ available: false, reason: 'disabled' }); return; }
+    const days = Math.min(30, Math.max(1, Math.floor(Number(req.body?.days) || 7)));
+    res.json(await siteAnalyticsStore.summary(siteIdForWorkspace(workspaceId), days));
+  });
+
+  // ═══ SITE SETTINGS — redirects, embedding, a real 404 (ROADMAP §13, 1.6) ═══
+  //
+  // Read and saved by the app's verified OWNER only; validated by the pure `validateSiteConfig`, so
+  // a rule that could turn the site into an open redirect never reaches the store, let alone the
+  // host. Settings take effect on the NEXT publish — the response says so rather than implying the
+  // live site changed.
+  app.post('/api/agentv3/site-config', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const saved = await siteConfigStore.get(workspaceId);
+    res.json({ config: saved ?? DEFAULT_SITE_CONFIG, maxRedirects: MAX_REDIRECTS });
+  });
+
+  app.post('/api/agentv3/site-config/save', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const { config, errors } = validateSiteConfig(req.body?.config);
+    if (!config) { res.status(400).json({ ok: false, errors }); return; }
+    const stored = await siteConfigStore.set(workspaceId, userId ?? '', config);
+    if (!stored) { res.status(503).json({ ok: false, errors: ['Your settings could not be saved just now. Nothing was changed — try again in a moment.'] }); return; }
+    res.json({ ok: true, config, message: 'Saved. Publish again for these settings to reach your live site.' });
+  });
+
   app.post('/api/agentv3/rollback-status', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
@@ -7081,7 +7245,9 @@ async function noteBuildOutcome(
     // A bucket-only app has no channel at all, so its history is not merely empty — it does not
     // exist. Asking for it would be a wasted call that could only fail.
     const releases = bucketOnly ? [] : await new FirebaseHostingDeployer().listChannelReleases(makeChannelId(workspaceId));
-    res.json(rollbackAvailability({ releases, bucketOnly }));
+    // THE HISTORY PICKER (ROADMAP §13, 1.4): every version the user may go back to, one per version,
+    // newest first — beside the one-step verdict, so "undo" and "go back to Tuesday's" read one list.
+    res.json({ ...rollbackAvailability({ releases, bucketOnly }), choices: bucketOnly ? [] : listRollbackChoices(releases ?? []) });
   });
 
   /**
@@ -7122,8 +7288,21 @@ async function noteBuildOutcome(
       res.status(409).json({ ok: false, reason: availability.reason, error: availability.message });
       return;
     }
+    /**
+     * "GO BACK TO THIS ONE" (ROADMAP §13, 1.4). The request may name a version, but it is only ever a
+     * KEY into the history this server just read: `pickRollbackTargetByVersion` returns a target only
+     * for a FINALIZED, non-live version of THIS app's channel, and the rollback call below is the same
+     * one the one-step undo makes. A name that is not in the history is refused, never served — a
+     * version name from the browser is an instruction to put arbitrary bytes under the user's URL.
+     */
+    const requested = typeof req.body?.versionName === 'string' ? req.body.versionName : '';
+    const target = requested ? pickRollbackTargetByVersion(releases ?? [], requested) : availability.target;
+    if (!target) {
+      res.status(409).json({ ok: false, reason: 'unknown-version', error: 'That version is not in this app\'s publish history any more (or it is the one already live), so it cannot be brought back. Pick another from the list.' });
+      return;
+    }
 
-    const done = await deployer.rollbackChannel(makeChannelId(workspaceId), availability.target);
+    const done = await deployer.rollbackChannel(makeChannelId(workspaceId), target);
     if (!done) {
       res.status(502).json({ ok: false, error: 'The previous version could not be brought back just now. Your app is unchanged — nothing was removed. Please try again in a moment.' });
       return;
@@ -7133,7 +7312,7 @@ async function noteBuildOutcome(
     // which version that same url serves. Bumping `updatedAt` would make the record claim a publish
     // that did not happen, and the Publish Capacity screen reads these records to reason about
     // channels. The version history lives with the host, which is the thing that actually knows it.
-    res.json({ ok: true, message: rollbackSummary(availability.target), url: rec?.url ?? null });
+    res.json({ ok: true, message: rollbackSummary(target), url: rec?.url ?? null });
   });
 
   app.post('/api/agentv3/unpublish', workspaceRateLimiter(), async (req: Request, res: Response) => {
@@ -7842,7 +8021,7 @@ async function noteBuildOutcome(
       const fresh = req.body?.fresh === true;
       const cached = fresh ? undefined : inbrowserPreviewCache.get(cacheKey);
       if (cached && cached.hash === filesHash && Date.now() - cached.ts < INBROWSER_CACHE_TTL_MS) {
-        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed });
+        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)) });
         return;
       }
       const vfs = VirtualFileSystem.fromRecord(files);
@@ -7854,7 +8033,7 @@ async function noteBuildOutcome(
         const oldest = inbrowserPreviewCache.keys().next().value;
         if (oldest !== undefined) inbrowserPreviewCache.delete(oldest);
       }
-      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed });
+      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)) });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
     }
@@ -15466,6 +15645,20 @@ async function noteBuildOutcome(
               autoResolved: verdict.ok,
               detail: journeyResults.map((r) => `${r.verdict.toUpperCase()} ${r.route} (${r.step}) — ${r.note}`).join('\n'),
             });
+            // SHOW THE USER THAT WE ACTUALLY CHECKED (gap analysis 2026-09-10). Everything above goes
+            // into the ADMIN diagnostics report, which the user cannot open — so the hardest and most
+            // valuable check the platform performs (fill the form, submit, RELOAD, confirm the entry
+            // survived) was invisible to the person it was performed for, and the chat said "your app
+            // is ready" in exactly the same words it uses when nothing was verified at all.
+            //
+            // Emitted as its own event rather than folded into the summary prose so it cannot be
+            // rewritten by a model, and so an honest failure is as visible as a pass. The wording is
+            // built by journeyUserSummary, which refuses to round "could not reach it" up into a pass
+            // and carries no codes, tool names or provider names.
+            try {
+              const proof = journeyUserSummary(journeyResults);
+              if (proof.headline) emit({ type: 'verified', ok: proof.ok, headline: proof.headline, steps: proof.steps, ts: Date.now() });
+            } catch { /* the proof is evidence for the user, never a gate on the build */ }
           } else {
             // A quiet result that explains itself. "Nothing ran" and "nothing could be derived" look
             // identical in a report unless one of them says which it was.

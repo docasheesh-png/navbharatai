@@ -12,6 +12,7 @@ const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ d
 import { Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Github, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
+import type { SiteAnalyticsView, RollbackChoiceView, SiteConfigView } from './HostingChooser';
 import { PublishCelebration } from './PublishCelebration';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 import { auth as firebaseAuth } from '../../lib/firebase';
@@ -115,7 +116,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -838,6 +839,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   /** Which checkpoint is currently being opened — the button says so rather than looking dead. */
   const [previewingSha, setPreviewingSha] = useState<string>('');
   /**
+   * AN OLDER VERSION, SHOWN INSIDE THE PANEL RATHER THAN IN A NEW TAB.
+   *
+   * 🔴 THE SIBLING THE TOOLBAR FIX MISSED (found 2026-09-10 while closing the preview gaps). The Live
+   * toolbar stopped printing the sandbox's address because forwarding it puts a stranger's traffic on
+   * a machine billed by the minute — and this path handed the user the SAME KIND of address, in their
+   * own address bar, ready to copy, by opening it with window.open. Worse than the toolbar: a second
+   * dev server is running behind that one.
+   *
+   * The door route cannot be the answer here. It resolves the port by sweeping, with the MAIN app's
+   * proven port first, so a door minted for a version's port would very likely redirect to today's
+   * app while the banner said "an older version" — a wrong answer dressed as a right one, which is
+   * worse than the leak. So the url stays internal to an iframe, exactly as the live preview's does.
+   */
+  const [versionView, setVersionView] = useState<{ sha: string; url: string } | null>(null);
+  /**
    * Look at an old checkpoint WITHOUT restoring it.
    *
    * Restore is destructive: until this existed, comparing against an older version meant overwriting
@@ -850,9 +866,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     try {
       const { ok, url, message } = await previewVersion(sha);
       setRestoreNote(`${ok ? '✅' : '⚠️'} ${message}`);
-      // Opened only on a URL the server proved answers — never optimistically, or the user lands on a
-      // browser error page and blames their app.
-      if (ok && url) window.open(url, '_blank', 'noopener,noreferrer');
+      // Shown only on a URL the server proved answers — never optimistically, or the user lands on a
+      // browser error page and blames their app. Shown IN the panel, never handed over as a link: see
+      // versionView above for why this is the same billable-address leak the toolbar fix closed.
+      if (ok && url) setVersionView({ sha, url });
     } finally {
       setPreviewingSha('');
     }
@@ -2400,6 +2417,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Delete a saved session from the history list. Confirms first (destructive + irreversible —
   // the Firestore record and its transcript are gone). If the deleted session is the one currently
   // open, starts a fresh session so the panel never keeps showing a chat that no longer exists.
+  // DUPLICATE (ROADMAP §13, 3.6): a copy of the files + chat under a new name, opened at once so
+  // the user is looking at the thing they just made. The server refuses to copy what points at the
+  // world (repo, deployment, domain, secrets); the note says so.
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const handleDuplicateConversation = async (e: React.MouseEvent, c: { id: string }) => {
+    e.stopPropagation();
+    if (duplicatingId) return;
+    setDuplicatingId(c.id);
+    try {
+      const r = await duplicateConversation(c.id);
+      if ('error' in r) { setOpenChatError(r.error); return; }
+      setPublishMsg(`Made a copy: "${r.name}". It starts unpublished, with no domain, repo or secrets — those stay with the original.`);
+      await openConversation(r.id);
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
   const handleDeleteConversation = async (e: React.MouseEvent, c: ConversationMeta) => {
     e.stopPropagation();
     if (deletingHistoryId) return;
@@ -2789,6 +2823,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
   // server so it survives a reconnect/new session, not just the current build stream.
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
+  const [siteAnalytics, setSiteAnalytics] = useState<SiteAnalyticsView | null>(null);
   // The first-ever-publish celebration. Null until the server says this user has never published
   // before AND we have looked at the link (see deployLive).
   const [celebration, setCelebration] = useState<{ kind: CelebrationKind; url: string; firstPublish: boolean } | null>(null);
@@ -2827,6 +2862,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     const wsId = state.workspaceId;
     if (!wsId) return;
     let cancelled = false;
+    // The previous app's visitor counts must not sit under the new app's name for even the length of
+    // this request — same leak class as the live URL (#2658). Cleared here, synchronously, so no new
+    // per-workspace effect is added to the census in appIdentityGuard.test.ts.
+    setSiteAnalytics(null);
     void (async () => {
       try {
         const params = new URLSearchParams({ workspaceId: wsId });
@@ -3017,14 +3056,71 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
    * one version, served from storage which keeps no history, or simply unreadable right now) — a
    * greyed-out button with no explanation reads as broken rather than as "there is nothing to undo".
    */
-  const rollbackLive = async (): Promise<void> => {
+  /**
+   * Visitor counts for the live app (ROADMAP §13, 1.1). A failed request is reported as
+   * `available: false` so the tile says "could not read" — never a zero it did not measure.
+   */
+  const loadSiteAnalytics = async (days: 7 | 30 = 7): Promise<void> => {
     if (!state.workspaceId) return;
-    setPublishMsg('Bringing back the previous version…');
+    try {
+      const res = await fetch('/api/agentv3/site-analytics', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, days }),
+      });
+      const data = await res.json().catch(() => null);
+      setSiteAnalytics(res.ok && data && typeof data.available === 'boolean' ? data : { available: false, reason: 'request-failed' });
+    } catch {
+      setSiteAnalytics({ available: false, reason: 'request-failed' });
+    }
+  };
+
+  /**
+   * The publish history for the picker (ROADMAP §13, 1.4). Null when it could not be read — the
+   * chooser says so rather than rendering an unreadable history as an empty one.
+   */
+  const loadRollbackChoices = async (): Promise<RollbackChoiceView[] | null> => {
+    if (!state.workspaceId) return null;
+    try {
+      const res = await fetch('/api/agentv3/rollback-status', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email }),
+      });
+      const data = await res.json().catch(() => null);
+      return res.ok && Array.isArray(data?.choices) ? data.choices : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** Site settings (ROADMAP §13, 1.6): read and save through the owner-checked routes. */
+  const loadSiteConfig = async (): Promise<SiteConfigView | null> => {
+    if (!state.workspaceId) return null;
+    try {
+      const res = await fetch('/api/agentv3/site-config', { method: 'POST', headers: await authJsonHeaders(), body: JSON.stringify({ workspaceId: state.workspaceId, userId, email }) });
+      const data = await res.json().catch(() => null);
+      return res.ok && data?.config ? data.config : null;
+    } catch { return null; }
+  };
+  const saveSiteConfig = async (config: SiteConfigView): Promise<{ errors: string[]; message?: string }> => {
+    if (!state.workspaceId) return { errors: ['No app selected.'] };
+    try {
+      const res = await fetch('/api/agentv3/site-config/save', { method: 'POST', headers: await authJsonHeaders(), body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, config }) });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) return { errors: Array.isArray(data?.errors) ? data.errors : [data?.error || 'Could not save the settings.'] };
+      return { errors: [], message: typeof data?.message === 'string' ? data.message : undefined };
+    } catch { return { errors: ['Could not reach NavBharatAI. Check your connection and try again.'] }; }
+  };
+
+  const rollbackLive = async (versionName?: string): Promise<void> => {
+    if (!state.workspaceId) return;
+    setPublishMsg(versionName ? 'Bringing that version back…' : 'Bringing back the previous version…');
     try {
       const res = await fetch('/api/agentv3/rollback', {
         method: 'POST',
         headers: await authJsonHeaders(),
-        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email }),
+        body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, ...(versionName ? { versionName } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       // A refusal here is NOT a failure to hide — it names something the user can act on, so it is
@@ -3528,6 +3624,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           </button>
           <button
             type="button"
+            onClick={(e) => void handleDuplicateConversation(e, c)}
+            disabled={running || isDeleting || duplicatingId === c.id}
+            title="Make a copy of this app"
+            aria-label="Make a copy of this app"
+            className="p-1 rounded touch-manipulation text-zinc-500 hover:text-indigo-400 hover:bg-indigo-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+          >
+            {duplicatingId === c.id ? <TirangaLoader className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
+          </button>
+          <button
+            type="button"
             onClick={(e) => handleDeleteConversation(e, c)}
             disabled={running || isDeleting}
             title="Delete this session"
@@ -3663,6 +3769,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           liveUrl={liveUrl}
           onUnpublish={unpublishLive}
           onRollback={rollbackLive}
+          onLoadRollbackChoices={loadRollbackChoices}
+          onLoadSiteConfig={loadSiteConfig}
+          onSaveSiteConfig={saveSiteConfig}
+          siteAnalytics={siteAnalytics}
+          onLoadSiteAnalytics={loadSiteAnalytics}
           onLoadMyApps={loadMyPublishedApps}
           onUnpublishApp={unpublishByWorkspace}
           customDomainsEnabled={customDomainsEnabled}
@@ -4151,6 +4262,39 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {(running || state.activity.length > 0) && (
               <WorkingIndicator activity={state.activity} running={running} />
             )}
+            {/* THE PROOF THAT WE ACTUALLY CHECKED (gap analysis 2026-09-10). After a build,
+                NavBharatAI drives a real browser through the app's own forms — fills them in,
+                submits, RELOADS, and confirms the entry survived. That reload is the only thing
+                separating an app that really saves data from one that looks like it does, and it is
+                the most valuable check the platform performs.
+
+                The user was never told any of it: the result went into the ADMIN diagnostics report,
+                which they cannot open, while the chat said "your app is ready" in exactly the same
+                words it uses when nothing was verified at all. Showing the work is the whole of
+                Antigravity's pitch, and we were doing the harder half of it in private.
+
+                A FAILURE IS AS VISIBLE AS A PASS, in the same card and the same place — the wording
+                comes from the server (journeyUserSummary) so it cannot be softened here, and a check
+                that could not run says so rather than being rounded up. */}
+            {state.verification && state.verification.steps.length > 0 && (
+              <div className={`mx-auto my-3 max-w-[92%] rounded-xl border px-3 py-2.5 text-sm ${
+                state.verification.ok
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
+                  : 'border-amber-500/40 bg-amber-500/10 text-amber-100'}`}>
+                <div className="flex items-start gap-2">
+                  <span className="mt-0.5 shrink-0" aria-hidden="true">{state.verification.ok ? '✅' : '⚠️'}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium">{state.verification.headline}</div>
+                    <ul className="mt-1 space-y-0.5 text-xs opacity-90">
+                      {state.verification.steps.map((line, i) => (
+                        <li key={i} className="flex gap-1.5"><span aria-hidden="true">•</span><span className="flex-1">{line}</span></li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ASK-USER (opt-in) — a NON-BLOCKING clarify card. The engine is already building with
                 sensible defaults for these; the user MAY refine any of them with a follow-up message, or
                 dismiss. It never pauses the build (honours "text reply > build app"). */}
@@ -5180,6 +5324,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           {previewMounted(previewEverOpened, showWorkspace, tab, previewPrewarm) && (
             <div className={previewWrapClass(showWorkspace, tab)}>
               <PreviewSurface
+                versionUrl={versionView?.url}
+                versionSha={versionView?.sha}
+                onExitVersion={() => setVersionView(null)}
                 url={state.previewUrl}
                 // Prefer the live build's workspace, but FALL BACK to this session's derived id when a
                 // restored/idle session has no live workspace in state (the "preview gaya" half of the

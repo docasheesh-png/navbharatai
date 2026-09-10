@@ -46499,3 +46499,759 @@ moved to a new server — reconnecting you to it now." was showing ABOVE a frame
 Both probes now send `effectiveUrl`, and `previewLiveFailover.test.ts` grep-locks that neither can drift
 back — a source assertion rather than a rendered one, because the bug WAS a one-token ordering
 difference between two call sites.
+While investigating #1, found that `BuildDiagnosticsReport`'s top-level keys (`schema, buildId,
+promptHash, sessionId, workspaceId, prompt, model, plannedModel, framework, startedAt, counts, issues,
+problems, rootCause, commands, llmCalls, providerDelivery, builtBy, priorFailedBuilds`) carry no
+`ok`/`summary`/`outcome` field at all — the terminal result text a build actually returns to the client
+is not part of the exported report. This is WHY confirming or ruling out root cause #1's hypotheses from
+the diagnostics JSON alone was impossible: even a perfectly honest server-side finish leaves no trace of
+its own summary in this artifact. `rootCause` (derived from the LAST `OUTCOME_*`-coded issue, per PR
+#2788 above) is the closest proxy but is not the same thing — it is inferred, not the actual returned
+`result.summary`. **The economical fix, not done here:** add `outcome: { ok: boolean; summary: string;
+timedOut?: boolean; budgetReached?: boolean }` to the schema, filled from the same `result` the route
+already has in hand at the merge point PR #2788 touches. Free, small, and would have made root cause #1
+answerable from this exact report instead of requiring a live-code investigation.
+
+---
+
+## 2026-09-10 — PREVIEW GAP ANALYSIS + CLOSURE (admin: "navbharatai ka in-browser preview aur vsc/cursor/antigravity ka preview … sabhi chote bade gaps dhundo", then "sabhi gaps ko khatam karo")
+
+The admin asked for an exhaustive comparison of NavBharatAI's two previews (In-browser and Live)
+against VS Code's Live Preview / Simple Browser, Cursor's browser tab and Antigravity's agent-driven
+browser, then for every gap found to be closed. 22 gaps were found. What shipped, and what did not.
+
+### Shipped — PR #2790 (merged) and the follow-up PR
+
+**The billable-address leak, in TWO places.** The Live toolbar rendered `{effectiveUrl}` verbatim —
+`https://<port>-<sandboxId>.e2b.app` — permanently and selectably on every Live preview. PR #2739 had
+removed that address from the AI's chat replies for exactly this reason ("yah link dena band karo …
+mera kharcha badta hai"); the toolbar was the sibling that fix never touched, and it was the worse of
+the two because the chat mentions a link in passing while the toolbar displayed it always. It also
+named a vendor, which the white-label law forbids on any user-facing surface. Now
+`previewAddressLabel()` keeps the PORT (a process, not a machine) and drops everything that addresses
+one. **A SECOND sibling was found later in the same session:** Checkpoints → Preview opened the same
+kind of address with `window.open`, with a second dev server running behind it. That now renders
+inside the preview panel instead. ⚠️ Recorded for whoever revisits it: the door route CANNOT be the
+vehicle for a version preview — `portCandidates` puts the main app's proven port ahead of any hint, so
+a door minted for a version's port would redirect to TODAY's app under a banner saying "an older
+version", which is worse than the leak.
+
+**The Live preview had no console at all.** The mirror was written inline inside `ReactPreview.ts`, so
+the drawer, the error badge and "Fix with AI" existed only for the in-browser render — while the mode
+where the app is most real reported nothing. Extracted to `AgentV3/previewBridge.ts`, shared by both,
+and injected into the sandbox's entry document at dev-server launch beside the block that already
+patches the Vite config there. Kill switch `AGENTV3_PREVIEW_BRIDGE=off`. It also reports FAILED network
+calls, which the browser hides in a Network tab the user cannot open. 🔒 The bridge is stripped from
+what the model READS and again from what it WRITES: models preserve script tags they find when
+rewriting HTML, which is how a development-only bridge would have been published inside a user's app.
+
+**A real address bar.** Neither preview had one. It could not be built from the panel — a cross-origin
+frame's history cannot be read or stepped, which is why the Code Studio chevrons were removed as fake
+in August rather than wired. The bridge reports the route from inside the app instead, wrapping
+`pushState`/`replaceState` as well as `popstate`/`hashchange` because a SPA route change fires no event
+at all. Back/Forward call the app's own history; Enter performs a real navigation.
+
+**Honesty about what the in-browser preview cannot reproduce** (`previewFidelity.ts`): CSS Modules,
+Sass/Less, a customised Tailwind theme, workers, `import.meta.glob`, `public/` assets. The toolbar said
+only "In-browser preview (react)", so a user whose layout collapsed could not tell whether their app
+was broken or the preview was approximate — and the answer, which we knew and did not say, was the
+second.
+
+**Point & Ask on Live**, camera/mic/location delegation on all preview iframes, zoom, a dark-theme
+toggle gated on the app actually having dark styling, "Fix with AI" on React warnings that are really
+bugs, console filter/search/repeat-collapsing, `sourceURL` so a preview error names its file, a
+dependency retry, and a MutationObserver so "Preview is empty" is evidence rather than a stopwatch.
+
+**The verification proof reaches the user** (`journeyUserSummary.ts`). After a build the platform
+already drives a real browser through the app's forms — fills, submits, RELOADS, confirms the entry
+survived. That result went only into the ADMIN diagnostics report while the chat said "your app is
+ready" in the same words it uses when nothing was verified. It is now a card in the chat, and a
+FAILURE is as visible as a pass.
+
+### 🟡 Open item #1 — the in-browser preview still runs on the PLATFORM's origin
+
+`cloudbuild.yaml` sets `_VITE_PREVIEW_ORIGIN: ''`, so `configuredPreviewSandboxUrl()` returns null and
+the preview keeps the same-origin `srcDoc` path with `allow-same-origin`. The code comment in
+`previewOrigin.ts` says this is "safe because the allowlist keeps the app to trusted admins" — that
+premise EXPIRED when the app went public. Generated app code can read `navbharatai.com`'s localStorage,
+which holds the Firebase auth token. **The code for the fix has been ready since July**; it needs an
+admin action, not a commit: point a subdomain at the app and set the `_VITE_PREVIEW_ORIGIN` trigger
+substitution. Recorded as an open root cause rather than silently left.
+
+### 🔴 Deliberately NOT built — viewing your own app on your own phone
+
+Listed as a gap in the analysis (competitors offer a QR code). It is **declined**, and the reasoning is
+recorded so it is not re-proposed as an oversight: a QR is a shareable link by construction, and the
+door route's refusal of top-level navigation — the thing that makes a leaked preview URL worthless — is
+exactly what would have to be weakened to make it work. Building it would re-open the cost hole the
+admin closed by hand. The existing answer is Publish: static hosting that costs nothing per visitor.
+
+### 🟡 Open item #2 — the two preview surfaces are still different products
+
+`components/agentv3/PreviewSurface.tsx` (Pro) now has the console, address bar, picker, zoom and theme
+toggle; `components/ide/PreviewPanel.tsx` (Code Studio) has print, fullscreen and preview history that
+the Pro surface does not. Only the capability delegation was brought to parity here. Full convergence
+is a real refactor of an 843-line component and was not attempted in this pass — a user moving between
+the two still meets two different previews.
+
+### 🟡 Known flake, unrelated to the preview work — `AgentRunner.test.ts` "timedOut is true when work was saved"
+
+Went red once in a full-suite run on 2026-09-10 and passed immediately when run alone, in a session
+that changed nothing AgentRunner imports. **The cause is in the test, not the code:** it builds the
+runner with `maxBuildMs: 1` and relies on at least one real millisecond of wall clock elapsing between
+the run's start and the second loop check. Under a heavily parallel suite that interval can round to
+zero, `buildTimedOut()` correctly returns false, and the assertion fails — the production behaviour is
+right in both cases.
+
+**The fix, deliberately NOT taken here** because it is unrelated to this PR's diff and widening it to
+touch another module's test is how an unrelated regression gets attributed to a preview change: make
+the elapsed time REAL rather than relaxing the assertion — have the scripted client await a couple of
+milliseconds so the second check genuinely happens after `maxBuildMs`. The assertion itself must stay
+exactly as it is; changing it to match the flake would be changing a test to match broken behaviour.
+
+## 2026-09-10 — Visitor analytics for published apps (ROADMAP §13 item 1.1) + the §13 plan itself
+
+**Session:** claude/upgrade-md-review-vxbdy0. PRs #2792 (domain screen contradiction), #2793 (ROADMAP §13),
+and this one.
+
+### Why this first
+The admin asked for NavBharatAI's import → publish → domain flow to be compared with 7-8 AI app builders
+and for an improvement plan. The plan is `ROADMAP.md` §13. Its first code item is this one, chosen because
+it is the cheapest thing that changes what a user FEELS after publishing — "kitne log aaye?" — and needs no
+admin decision. Every competitor with hosting answers that question; we could not.
+
+### What shipped
+- **`src/server/lib/siteAnalytics.ts`** (pure): the beacon stamped into every published HTML page, the
+  validation of what comes back (`parseHit` accepts exactly the beacon's shape and nothing else), the daily
+  rotating HMAC visitor hash, the sharded document layout, and `summarize()`.
+- **`src/server/lib/siteAnalyticsStore.ts`**: hits buffered in memory and flushed every 20s as
+  `FieldValue.increment` merges into `site_analytics/<appId>_<day>_s<shard>` — `metricsTimeline`'s
+  pattern, so N Cloud Run instances add up by construction. A visitor's shard is a function of their hash,
+  so "unique per day" is EXACT across instances, not approximate. Every document is bounded (200 distinct
+  paths/referrers, the rest fold into `_other`); a failed flush puts the counts back; a failed read returns
+  `available: false`, never zeros.
+- **Stamped at publish** in `DeploymentStore.withDeploymentPersistence`, right after the badge and for the
+  same reason (downstream of every edit, never in the user's source, never in a preview). First-party
+  publishes only. The public app id is `siteIdForWorkspace` — already in the site's URL, so nothing new is
+  disclosed. Kill switch `AGENTV3_SITE_ANALYTICS=off`.
+- **Routes** (`routes/agentv3.ts`): `POST /api/site-analytics/hit` — public, cross-origin by design
+  (`text/plain` simple request, no preflight), answers 204 BEFORE any work, honours DNT/GPC server-side
+  too, rate-limited in memory; `POST /api/agentv3/site-analytics` — owner-checked like rollback-status,
+  app id derived from the workspace, never taken from the client.
+- **Publish sheet** (`HostingChooser.tsx`): a "Visitors" tile under the live link — people / views / today,
+  a 7- or 30-day bar strip, top pages, "came from". Three honest states: counting, numbers, or
+  "unavailable — this is not a zero".
+- **Privacy Policy §12** discloses exactly what is collected; `tests/privacyPolicyTruth.test.ts` imports
+  `POLICY_PHRASES` from the code, so adding a collected field fails CI until the policy names it — the
+  guard that was missing when the pixel drifted on 2026-09-02. `AppKnowledgeBase` + `CLAUDE.md` registry
+  updated in the same change.
+
+### Two things the tests taught, kept
+- `fieldKey` first shipped with a lossy encoding (`%`→`_` collided with real underscores; `/__proto__`
+  did not round-trip). Now `_u`/`_p` escapes with a single-pass decode, test-locked with the very keys
+  that broke it.
+- The per-workspace reset could not go into the `[state.workspaceId]` effect: two source-locks pin that
+  line verbatim and a census caps such effects at 3. It sits inside the existing live-URL fetch effect
+  instead, synchronously before the request — same leak class as #2658, closed the same way.
+
+### Gate
+`tsc --noEmit` 0 · `tsc -p tsconfig.server.json` 0 · `vitest run` **1505 files / 20,262 passed, 0 failed**.
+
+### Open, honestly
+- Countries are not collected (the beacon posts to Cloud Run, which carries no geo header); they arrive
+  free once published apps are served through the Cloudflare Worker (§13 Phase 0.3) — `cf-ipcountry`.
+- Retention: documents are read for 30 days; a deletion sweep for older ones is not written yet — at
+  today's publish volume the growth is negligible, and it belongs with the cron runner (§13 2.7).
+
+## 2026-09-10 — `www` ↔ apex: both spellings of a connected domain work (ROADMAP §13 item 1.2)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2794).
+
+### The defect
+Every host handles `www.x.com` ↔ `x.com`; we attached exactly the one the user typed. Connect
+`mitrify.com`, have a friend type `www.mitrify.com`, and they got a hosting error — two unrelated
+domains to the hosting service, one of them attached. It was in the 8-builder audit as the one gap
+**every** competitor had closed.
+
+### What shipped
+- **`src/server/lib/domainPair.ts`** (pure): the canonical is ALWAYS the apex (`www.x.com` → `x.com`),
+  because the managed-DNS zone must be the registrable domain; only a two-label host gets a `www`
+  twin (`blog.x.com` does not become `www.blog.x.com`). The honest limit — a three-label apex such as
+  `shop.co.in` gets no twin, since without a public-suffix list it is indistinguishable from a
+  subdomain — is written in the header so nobody "fixes" it with a heuristic.
+- **The redirect is real, not assumed.** `redirectTarget` was verified against Google's own v1beta1
+  discovery document before a line was written ("A domain name that this CustomDomain should direct
+  traffic towards"). `attachCustomDomain` sends it on create and PATCHes (`updateMask=redirectTarget`)
+  an existing twin that lacks it — an older connect or a plan re-attach must not leave `www` serving a
+  second copy of the site.
+- **Connect** attaches the twin with the redirect and links it as `alternateOf` the canonical;
+  best-effort, so a twin that cannot be attached never turns a connected canonical into a 500.
+- **ONE verdict, ONE record list.** The twin's records are merged into `displayRecords` before the
+  single `verifyRecordsLive` call, and its own states ride BESIDE the verdict as `alternate` — never
+  inside it, so a twin still waiting for its record cannot make a finished domain read as unfinished.
+  The one-source locks (`domainVerdictOneSource.test.ts`: exactly one serving probe, one DNS check)
+  stand untouched.
+- **Every applier writes both spellings in one pass** — managed DNS (`applyRecords`, `missingFromZone`,
+  `desired` count), Domain Connect's template, Hostinger's token flow — and the saved-state and sync
+  responses carry the twin's records so a reload or a "Check & apply" never makes the www record vanish.
+- **The link store knows a twin is a spelling, not a second domain**: `firebaseDomainsForWorkspaceStrict`
+  and the `/links` badge skip `alternateOf`; the plan sweep still sees twins (detached on lapse) and
+  re-attaches them WITH the redirect.
+- **Every route canonicalises the host it is handed** — a zone named `www.x.com` is not something a
+  registrar delegates. The screen adopts the spelling the server actually connected, and shows one
+  line under the verdict: "✓ www.x.com works too — it sends visitors here" / "⏳ being set up too" /
+  "could not check just now".
+- `AppKnowledgeBase` updated. Locked by `domainPair.test.ts` (pure) and `tests/domainWwwApex.test.ts`
+  (source-locks across the route, link store, sweep, client, and the API field).
+
+### Gate
+`tsc --noEmit` 0 · `tsc -p tsconfig.server.json` 0 · `vitest run` **1507 files / 20,281 passed, 0 failed**.
+One existing lock (`domainPointing.test.ts`, "the sync route refuses BEFORE it can write") named the old
+write literal; it now names the merged one — the guarded property (guard upstream of the ONE write) is
+unchanged and still asserted.
+
+## 2026-09-10 — "Move this domain to this app" in one tap (ROADMAP §13 item 1.3)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2795).
+
+### The defect
+A domain connected to app A, then Connect pressed on app B (the admin's `mitrify.com` screenshots of
+2026-09-02 and 2026-09-10). Two things stood in the way and the user was left to find both: the hosting
+service still held the domain on A's site (so B's attach could be refused as "already connected to
+another site"), and the ownership TXT named A's site. #2792 made the second fixable by the button the
+verdict names; this closes the first.
+
+### What shipped
+- **`src/server/lib/domainMove.ts`** (pure): `decideDomainMove(holder, workspaceId, verifiedUid)` —
+  no holder or the same app ⇒ nothing; **same user, another app ⇒ move**; **a different account ⇒
+  refuse**, with a message that names nobody (whose it is, is not this caller's business). A holder
+  with no recorded user is never treated as ours — moving it would be acting on a guess.
+- **`linkForDomain(domain)`** in the link store: who holds a domain right now, fail-open to `null` so an
+  unreadable link is never mistaken for "held by someone else" (a refusal) nor "held by you" (a move).
+- **Connect** reads the holder and decides BEFORE the attach; on a move it detaches BOTH spellings
+  from the old app's site (best-effort each), then attaches here and carries `movedFrom` on the
+  response without touching the one-source `res.json` line. A different account gets a 409.
+- **The screen** says, under the verdict, that the domain was moved from another app of yours and how
+  to move it back. `AppKnowledgeBase` updated.
+- Locked by `domainMove.test.ts` (pure) and `tests/domainMoveWiring.test.ts` (decided-before-attach
+  ordering, both spellings detached, the 409, the response field, the screen line).
+
+### Deliberately NOT done
+Auto-running "Check & apply records" inside Connect when the managed zone is active. It would make
+the move a single tap end-to-end, but it adds a second `applyRecords` write path outside the sync
+route's guard (`domainPointing.test.ts`: the guard is upstream of the ONE write). After #2792 the
+button is always reachable, so the honest sequence today is Connect → Check & apply. Recorded as the
+follow-up rather than shipped as a second write.
+
+### Gate (the CI-equivalent one, per the 2026-09-10 safeguard-5 correction)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1509 files / 20,294 passed, 0 failed**.
+
+## 2026-09-10 — Publish history picker: go back to ANY earlier version (ROADMAP §13 item 1.4)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2796).
+
+### What shipped
+"Undo last publish" went one step back. Now, under it, **"Go back to an earlier version…"** lists every
+version the app has published — date and time, the live one marked — and puts any of them back live in
+two taps. Zero storage cost, for the same reason the one-step undo was free: the host already holds every
+finalized version; a rollback is one release call pointing the channel at one of them.
+
+- **`listRollbackChoices(releases, max=20)`** (pure, `publishRollback.ts`): same filters as
+  `pickRollbackTarget` (FINALIZED only, sorted by release time, never the API's order), **one entry per
+  VERSION** — after a rollback the same version sits in several releases, and listing it three times would
+  misdescribe the history — each keeping the time it was most recently live; bounded.
+- **`pickRollbackTargetByVersion(releases, versionName)`** (pure): the request's version is only ever a
+  KEY into the history the server itself read — unknown ⇒ null, the live one ⇒ null — and yields the same
+  target shape the one-step undo uses, so the route's hosting call is identical for both.
+- **Routes:** `rollback-status` now returns `choices`; `rollback` accepts an optional `versionName`
+  resolved through that function and refuses (409, `unknown-version`) anything not in the history.
+- **The screen:** a collapsed link under Undo; on open, the list with the same two-step confirm; an
+  unreadable history is said in words, never rendered as an empty one; "nothing is deleted — going back
+  adds a new entry, so you can come forward again." `AppKnowledgeBase` updated.
+
+### The lock that evolved, and why that was the honest move
+`publishRollback.test.ts` pinned "the rollback target is re-derived on the SERVER, never taken from the
+request" with a literal `not.toMatch(/req.body.versionName/)`. The picker needs the request to NAME a
+version, so the lock now asserts the actual property: the raw string reaches the hosting call only
+through `pickRollbackTargetByVersion(releases ?? [], requested)`, and never appears inside
+`rollbackChannel(…)` or a `versionName=` URL. The guarded invariant is unchanged and asserted more
+precisely than before.
+
+### Gate (CI-equivalent)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1509 files / 20,298 passed, 0 failed**.
+
+## 2026-09-10 — Site settings: redirects, a real 404, safe headers on every publish (ROADMAP §13 item 1.6)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2796; PR for 1.4 in CI alongside).
+
+### The defect
+The hosting version every first-party publish was created with carried ONE hardcoded config — a
+catch-all rewrite to index.html and a cache header — in TWO places (the v5 deployer and Engineer AI's,
+a sibling that had drifted into an identical copy). Right for the single-page app most builds are;
+wrong for everything a site needs once it has been live a week: a page that moved, a multi-page site
+whose missing pages should say so, and the response headers every serious host sets by default.
+
+### What shipped
+- **`src/server/AgentV3/siteConfig.ts`** (pure): `validateSiteConfig` refuses what cannot be safe — a
+  redirect target is a path on this site or an https URL the user typed (no `//evil`, no `javascript:`,
+  no http:), no loops, no duplicate sources, at most 50; `customNotFoundApplies(files)` drops the SPA
+  catch-all ONLY for a site that is visibly multi-page AND ships its own `404.html` — decided from the
+  files, not a checkbox, because dropping it for an SPA would 404 every deep link; `hostingVersionConfig`
+  forms the ONE config: asset cache, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and
+  `X-Frame-Options: SAMEORIGIN` unless the user allows embedding (HSTS is already set by the host).
+- **`siteConfigStore`** (`site_configs/<workspaceId>`), re-validated on read so a hand-edited document
+  cannot smuggle a bad rule; an unreadable store yields the defaults, never a broken site.
+- **`Deployment.createVersion` takes the formed config**; both first-party paths (channel + dedicated
+  site) pass `versionConfigFor(workspaceId, files)`. **Engineer AI's deployer** uses the same form with
+  the user half null — the sibling closed in the same change (rule 3).
+- **Routes** `site-config` / `site-config/save`: owner-checked; save validates through the pure module
+  and stores only the validated config; the response says *"Publish again for these settings to reach
+  your live site"* — the settings do not change the live site until then, and the screen must not imply
+  otherwise.
+- **Publish sheet:** "Site settings — redirects, embedding, 404" on the Host-on-NavBharatAI card: a
+  redirects editor (from → to, 301/302, up to 50), the embedding checkbox with the reason it is off by
+  default, and the 404 note. `AppKnowledgeBase` updated.
+
+### Honest limits
+- Bucket-only publishes (`PUBLISHED_APPS_BUCKET_ONLY=on`) are served by the Cloudflare Worker, which
+  does not read these settings yet; redirects/headers apply to Firebase-served apps until the Worker
+  learns a per-app `_nbai/site.json` (ROADMAP §13 Phase 0.3 / 1.5 territory). Stated here, not hidden.
+- `customNotFoundApplies` cannot tell a JS-routed multi-page bundle from a static one; it errs toward
+  keeping the catch-all (deep links keep working), which is the safe wrong.
+
+### Gate (CI-equivalent)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1511 files / 20,310 passed, 0 failed**. The first run of the new pure test caught a real hole —
+`//evil.com` passed the path check (protocol-relative = another host) — fixed before anything shipped.
+
+## 2026-09-10 — Site uptime: "your site is down" reaches the OWNER (ROADMAP §13 item 1.8)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2797; PR for 1.6 in CI alongside).
+
+### The defect
+The platform has watched itself since 2026-08-23 (`monitorAlerts`). Nothing watched the apps our users
+PUBLISHED: a connected domain could answer errors for a day and the first person to notice would be a
+customer. Every host with a paid tier sends an "it's down" mail; we did not.
+
+### What shipped
+- **`src/server/lib/siteUptime.ts`** (pure): `decideUptime` — TWO consecutive failures before an alert
+  (a deploy in progress or a blip must not wake anyone); `unknown` (WE could not reach it) neither counts
+  nor resets — it is not their site's failure; ONE alert per outage, then quiet for a cooldown (6h) while
+  it stays down; a recovery announced once, only after an alert was sent. Messages name the domain and the
+  next step ("press Publish once"), never a vendor or a probe internal.
+- **`siteUptimeSweep.ts`**: probes every connected custom domain (the paid plan by construction, so probe
+  cost scales with revenue, not signups; `www` twins skipped — they redirect to the canonical) through the
+  SSRF-guarded `checkDomainServing`; bounded concurrency; one domain's failure never stops the rest. Two
+  channels, both best-effort: the in-app bell (`saveNotification`) and email via the existing
+  `ALERT_EMAIL_*` mailer — to the OWNER's verified address, never the admin list (a `footer` dep added to
+  `sendAlertEmail` so a user mail does not sign off "Open Admin → Monitor").
+- **`siteUptimeStore`** (`site_uptime/<domain>`); an unreadable record reads as fresh, which can only
+  DELAY an alert by one sweep, never invent one.
+- **Registered in `server.ts`** as the `site-uptime` scheduled job, **exclusive**, every 15 minutes.
+  Kill switch `SITE_UPTIME_SWEEP=off`. `CLAUDE.md` registry + `AppKnowledgeBase` updated.
+- Locked by `siteUptime.test.ts` (the rule) and `siteUptimeSweep.test.ts` (the orchestration with
+  injected deps, the exclusive registration, owner-only email, no raw fetch).
+
+### Honest limits
+- Email needs the mailer configured (`ALERT_EMAIL_API_KEY` + `ALERT_EMAIL_FROM`, not set today per the
+  registry); until then the bell alone fires, and the AppKnowledgeBase says "and an email, when the mailer
+  is set up" rather than promising one.
+- The probe is one HTTP GET from our region; a site down only for some visitors would read "up". The
+  Worker path (0.3) could add edge-side evidence later.
+
+### Gate (CI-equivalent)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1513 files / 20,325 passed, 0 failed**.
+
+## 2026-09-10 — "Make a copy of this app" (ROADMAP §13 item 3.6)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2798; PR for 1.8 alongside).
+
+### The defect
+A user who wanted a variant — the same shop with a different catalogue, a second client's site from
+the first — could only rebuild from scratch or hand-edit the original in place. Every builder has a
+copy; a safeguard-6 search (five names, filename-first) found none here.
+
+### What shipped
+- **`src/server/AgentV3/duplicateApp.ts`** (pure): `copyName` — "X (copy)", then "X (copy 2)"…, never a
+  name the user already has, and copying a copy does not stack suffixes; `copyStatus` — a copy is never
+  "running" (the store's statuses are running | complete | stopped | error; the first draft returned a
+  status that does not exist, caught by reading the union before the route was written).
+- **`POST /api/agentv3/conversations/:id/duplicate`**: identity from the verified token, anon refused,
+  the source reached only through `conversationAccess`; files copied with `saveWorkspaceFiles` into a
+  workspace minted for the SAME user (`workspaceIdFor`), the chat carried so the next edit understands
+  the app, the name from `copyName` against the user's own list. **Copies nothing that points at a
+  place in the world** — repo, deploy branch, domain, site settings, deployment, pin; the secrets vault
+  is per-app by construction. A copy starts unpublished and unconnected, which is the only honest state.
+  "No files yet" is a 409 that says so, not an empty copy.
+- **Client:** a copy button beside pin/delete in History; the copy is opened at once; the note says what
+  stayed with the original. `AppKnowledgeBase` updated.
+- Locked by `duplicateApp.test.ts` (pure) and `tests/duplicateAppWiring.test.ts` (verified identity,
+  conversationAccess, same-user workspace, and — the one that matters — that the create/update calls carry
+  none of the world-pointing fields).
+
+### Gate (CI-equivalent)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1515 files / 20,335 passed, 0 failed**.
+
+## 2026-09-10 — Website → App: clone a site's DESIGN from its address (ROADMAP §13 item 4.2)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2800).
+
+### The gap
+Lovable, Bolt, v0 and Replit take a URL and hand back an editable app that looks like it. We took a
+SCREENSHOT (`/api/screenshot/to-prompt`) and a GitHub repo (`importUrl` — the safeguard-6 check confirmed
+it is the repo import only), never a live site. A user who wanted "my shop, laid out like this one"
+screenshotted it page by page.
+
+### The design, and why it is NOT the screenshot path again
+The roadmap row suggested "snapshot with the pre-baked browser, feed the design-contract path". Adapted
+(external-suggestion rule): that would spin a sandbox (₹7/hr) and a vision call just to READ a page, for a
+result that varies run to run. Instead:
+- **One fetch through `webFetchUrl`** — the SSRF-guarded reader every URL feature uses (public IPs only,
+  no redirects, 2 MB, 15 s). It gained an opt-in `keepHtml` (off by default, so the tool path is
+  byte-identical); a page that is all `<script>` hands back its `<head>` on the honest failure so the
+  importer can say "this site draws itself with JavaScript" instead of "nothing there".
+- **`src/server/lib/siteImport.ts`** (pure, regex, no DOM, same discipline as `htmlToText`):
+  `extractSiteDesign` reads title, description, language, navigation (in order, de-duplicated), headings
+  with level, CTAs (buttons + button-styled links), form fields (label > placeholder > aria-label > name;
+  hidden/submit skipped; submit text), colours (hex, normalised, most-used first, the declared
+  `theme-color` outranking frequency), fonts (Google Fonts link families + `font-family`), image ALT
+  texts, counts, login/payment/search flags, a capped text sample, and `thin`. `<script>`/`<style>`/`<svg>`
+  bodies are removed first, so a bundle's fake heading or colour never surfaces. **No model call** — the
+  same page always yields the same spec, in about a second, for ₹0.
+- **The VISUAL half is delegated to the builder**: `buildSiteImportPrompt` tells v5.0 to open the live
+  page in its own browser first (proportions, spacing, imagery, the real colours) and to fall back to the
+  summary if it will not open. Markup gives the words and the skeleton; the browser gives the look.
+- **`POST /api/site-import/to-prompt`** (`routes/siteImport.ts`, registered in `server.ts`): sign-in
+  required (our server fetching a visitor's address — an IP-keyed anonymous allowance is unbounded in
+  total), 30/hour, `anon: 0`; no `inAiSpendZone`, no `gateToolAction`, no charge — a deterministic tool
+  is free by the one-wallet law. A refused or unreadable address is a 422 in the guard's own words; a
+  non-HTML answer says "not a web page". The intent-aware design & anti-phishing policy
+  (`cloneGuardrailsBlock`) is hard-appended server-side, exactly as the screenshot path does.
+- **🔒 Copyright by construction:** no image URL, logo, icon, font file or stylesheet enters the spec —
+  an `<img>` contributes its alt text and nothing else — and the spec says in words: do not download,
+  hot-link or reproduce the site's assets; placeholders of the same size, the user's own assets.
+- **Client** (`ScreenshotToCode.tsx`): a "From a website address" box above the drop zone. "Read website"
+  shows WHAT was read (title, nav chips, counts, fonts, colour swatches, the JavaScript-drawn note) BEFORE
+  a second, explicit "Build from this website" hands the spec to Pro v5.0. `AppKnowledgeBase` entry
+  `website_to_app`.
+- Locked by `siteImport.test.ts` (extraction, caps, script-body exclusion, alt-text-only, thin, prompt
+  wording, white-label), the `keepHtml` block in `webFetch.test.ts`, and `tests/siteImportWiring.test.ts`
+  (SSRF reader only, no raw fetch, sign-in, no model/spend calls, policy appended, honest 422, second
+  press to build, knowledge base).
+
+### Honest limits
+- A site that renders entirely with JavaScript gives a thin summary; the spec says so and leans on the
+  live browser look. A redirecting address must be pasted in its final form (the guard refuses redirects,
+  for the reason recorded in `webFetch.ts`).
+- The structure is read from ONE page. Multi-page cloning = paste each page, or ask v5.0 to browse.
+
+### ✅ 2026-09-10 (later the same day) — that AgentRunner flake was FIXED, not left
+
+The entry above says the fix was "deliberately NOT taken here" because it was unrelated to the preview
+diff. It went red **twice more** the same day — once under the full parallel suite and once **running
+entirely on its own**, which killed the "parallel load" theory: the test was simply marginal. A gate
+that fails at random is a gate nobody can read, so it was fixed at its cause.
+
+**What was wrong, and what was NOT changed.** The scripted client answered synchronously, so a whole
+turn could complete inside the same millisecond the run started in; `buildTimedOut` then correctly
+returned false and the assertion failed on a run where the production code behaved perfectly. The fix
+gives the scripted client an explicit `turnDelayMs` so a test that depends on wall-clock elapsing says
+so, instead of hoping today's event loop is slow enough. **The assertion itself is untouched** — the
+precondition it always relied on is now guaranteed, rather than what it proves being relaxed. Verified
+by three consecutive clean runs.
+
+### 2026-09-10 — REVENUE AUDIT: the first two leaks closed
+
+**Coupons.** Five codes lived in `routes/payment.ts` — FREE100, WELCOME100, NAVBHARAT50, FESTIVE2026,
+SAKUNI25 — each minting ₹25-₹200 of real credit, with no expiry, no total cap, and names that are the
+first thing anyone would type into a promo box. The redemption logic was always sound (atomic, one per
+user); the leak was that the PRICE LIST sat in the source, where the admin could not reach it and an
+attacker could guess it. It now reads `PROMO_COUPONS`, and **an unset value redeems nothing** — so the
+default is off and re-opening the door is a deliberate, visible act in Cloud Run rather than a deploy.
+A value above ₹5,000 is refused outright: `DIWALI:10000` where ₹100 was meant is one missing decimal
+whose cost is unbounded.
+
+**The live exchange rate was never switched on.** `refreshUsdInrRate()` had existed and been unit-tested
+since the billing model was written, and was **never called anywhere outside its own test file**. So
+`usdInrRate()` returned its 85 fallback forever while the real rate sat near 87-88: **every build was
+billed roughly 3% under its real cost, silently, for months, with nothing failing to reveal it.**
+Nothing was broken — a wire was missing. Now refreshed at boot and every six hours.
+
+⚠️ **Registered NON-exclusive on purpose.** The rate is an in-memory cache per instance, so an
+exclusive job would refresh exactly one instance and leave every other one billing at 85 — the same
+bug with extra steps. Every instance refreshes its own copy; the cost is one small HTTP call per
+instance per six hours.
+
+---
+
+## 2026-09-10 — Revenue, slice A: the platform fee on a wallet recharge (branch `feat/platform-fee`)
+
+Admin, confirmed: **"2% flat theek hai"** (after asking for "cashfree/google/apple ka charge + 1%").
+
+**Why flat, and why it is not called a gateway fee.** India's real cost of taking a payment is not one
+number: UPI carries ZERO merchant discount rate by regulation, cards and netbanking cost roughly 2%
+plus GST. Deducting the ACTUAL cost would mean the same ₹500 credits a different amount depending on a
+method the user only picks on the NEXT screen — three prices for one product, none showable in advance.
+A flat rate can be stated before payment, which is the only version a user can agree to. And it is
+named a **platform fee**, never "Cashfree's charge": the gateway's real charge on a given payment is a
+number no statement of ours will ever match, so naming it after them would be a claim we cannot support
+even when it flatters us. (Same reasoning CLAUDE.md already records for the Play Store fee label.)
+
+**What was actually wrong.** `routes/payment.ts` credited `balanceAdded: orderAmount` with the comment
+"₹1 = ₹1 balance added to wallet". The gateway's charge therefore came out of NavBharatAI's side of
+every card payment and appeared **nowhere in the books** — there was no gateway-fee line anywhere in
+the codebase. On a ₹500 card recharge we credited ₹500 and received about ₹490.
+
+**Where the fee is applied, and the three places it deliberately is NOT.**
+- ✅ Cashfree create-order stores `balanceAdded = paid − fee`, plus `platformFeeInr` / `platformFeePct`
+  on the transaction so the admin's revenue reporting can total it without re-deriving a rate that may
+  since have changed.
+- ❌ **Google Play / Apple packs.** Already priced with their fee inside (₹119 buys ₹99), and the
+  billing panel promises "your wallet is credited the full credit amount shown, never less". Charging
+  here would bill one thing twice AND make that sentence a lie.
+- ❌ **Coupons and referral gifts.** No gateway, no money arriving — a fee on a gift is taking money in
+  order to give money.
+- ❌ **Transactions created before this shipped.** No `platformFeeInr` field means zero, so a pending
+  order sold at rupee-for-rupee still credits in full, exactly as it was sold.
+
+**The sibling that would have leaked the fee straight past it.** `computeCreditedWallet` has TWO
+branches. The standard one credits `balanceAdded`, so setting that net at create-order was enough. The
+**vishwakarma** one — which is also the branch Play packs are credited through — derives its tokens
+from `amountPaid` on purpose (security fix C4: never trust a client-supplied token count), so a fee
+applied only to `balanceAdded` would have been invisible to it. It now mints from the NET. The fee is
+read from the transaction rather than re-computed from the current rate, so an order that sits pending
+while the admin changes the rate still credits what its buyer was shown.
+
+**🔴 A REAL MONEY BUG FOUND ON THE WAY, unrelated to the fee and worse than it.** The Vishwakarma
+chooser modal printed its entry-pass price as `vkMode === 'pro' ? 100 : 50` — in the price badge, the
+totals box and the buy button — while `createVishwakarmaOrder` hardcoded ₹100 and the server credited
+`(paid − 100) × 100` tokens. **`setVkMode` is never called anywhere in the codebase**, so `vkMode` was
+permanently `'basic'`: every single pass buyer was shown **₹50 + tokens** and charged **₹100 + tokens**,
+receiving the tokens they expected and ₹50 less than the screen promised. Root cause was not the wrong
+literal — it was a money constant with three homes, free to drift between them. It now has one:
+`src/lib/walletPricing.ts`, which the server re-exports from rather than keeping its own copy.
+
+**One implementation of the split, shared.** The arithmetic lives in `src/lib/platformFee.ts`; the
+server wraps it with the env rate, the browser wraps it with the rate it reads from
+`/api/public-config`. The user is shown the exact split the server will apply — "₹500.00 paid −
+₹10.00 platform fee = ₹490.00 credited" — before paying, and the fee is named again in their ledger
+line afterwards. `fee + credit === paid` exactly at every amount, because the fee is rounded and the
+credit is the remainder: a wallet whose two halves disagree with the payment is the drift the
+debit-carry fix was written to end.
+
+**Config.** `PLATFORM_FEE_PCT` in Cloud Run, unset ⇒ 2. An EMPTY value falls back to the default
+rather than meaning "no fee" (`Number('')` is 0 — the trap `hostingCost.ts` already records); an
+out-of-range or unreadable value is refused, never obeyed; an explicit `0` IS honoured, because
+switching the fee off must be possible and visible. Capped at 20%.
+
+**Open, deliberately not built in this slice:** the two hosting tiers (₹149 / ₹499), the hosting
+meter and its overage billing, and the remix gate. Paid remix (Cashfree split settlement) and the TDS
+admin card stay deferred at the admin's instruction — "isko chor do! last ke liye."
+## 2026-09-10 — DPDP + GDPR consent banner, one click, for USER apps (ROADMAP §13 item 4.4)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2801).
+
+### The gap
+`generate_consent` (shipped earlier) is the BACKEND consent LOG. Nothing produced the banner a visitor
+actually sees, or kept third-party scripts off until they agreed — and the platform's own
+`ComplianceAnalysis` flags exactly that ("third-party trackers running with no cookie-consent surface").
+Every competitor ships a generic GDPR widget; none ships one written for India's DPDP Act. Safeguard-6:
+`ConsentBanner.tsx` is NavBharatAI's OWN banner; `publishConsent.ts` is "did the user ask to publish" —
+unrelated names, same word, checked before writing.
+
+### What shipped
+- **`src/server/lib/ConsentBannerGenerator.ts`** (pure builder → files): `public/consent-banner.js`
+  (dependency-free, plain HTML and React alike) + `CONSENT_BANNER.md`. The testable heart sits between
+  `NAVCONSENT-CORE` markers as plain JS with no DOM — the test executes the REAL emitted code — and the
+  DOM shell is string-locked. Every option is sanitised inside the generator (quotes, angle brackets,
+  backticks and `$` stripped before `JSON.stringify`; a bad URL → `/privacy`; a bad email → omitted; an
+  unknown purpose → the default list), so a hostile app name cannot break out of the emitted script.
+- **The rules the banner enforces (legal requirements, not style):** nothing non-essential loads before
+  consent — a third-party script is written `<script type="text/plain" data-consent="analytics"
+  data-src="…">` and activated once, only when every purpose it names is granted; no pre-ticked boxes;
+  "Reject all" beside "Accept all"; a persistent "Privacy choices" control (or the app's own
+  `data-consent-open` link) reopens it — withdrawal as easy as consent (DPDP §6(4)); the stored choice
+  carries the policy VERSION, so a changed policy asks again; Global Privacy Control = no consent and no
+  nag, opt-in still possible; notice in English AND Hindi by default; Privacy Policy link and the DPDP
+  grievance contact on the banner itself. `window.NavConsent.has/granted/open/onChange` +
+  `nbconsent:change`.
+- **Tool `generate_consent_banner`** (catalog def with a real input schema — appName, policyUrl,
+  grievanceEmail, language, purposes, policyVersion; allow-list entry; dispatcher case that writes the
+  files and returns the three wiring steps: include once in `<head>`, convert every third-party script,
+  add the footer link). `AppKnowledgeBase` bullet beside the consent-log one.
+- Locked by `ConsentBannerGenerator.test.ts`: fresh visitor asked with nothing granted; stored choice
+  honoured only for its policy version; GPC; every-purpose gating; the three answers; sanitisation;
+  no pre-ticked boxes; reopen control; bilingual defaults; white-label; emitted JS parses.
+  `ToolWiring.test.ts` proves the advertised tool routes to a real handler.
+
+### Honest limits
+- A script already running in the current page session cannot be unloaded by anyone; withdrawal stops
+  the next load and fires the change event so the app stops sending. The README says so.
+- A tool, not legal advice: the Privacy Policy must still name every recipient of visitors' data. The
+  instructions tell the model to make sure that page exists.
+
+## 2026-09-10 — Payments, UPI first: Cashfree added, verified webhooks on both Indian recipes (ROADMAP §13 item 3.2)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after 4.4).
+
+### The gap
+`generate_payment` wired Razorpay or Stripe: an order route, a client-side verify, no webhook — so a
+buyer who closed the tab after paying was never recorded as paid. Cashfree, the gateway NavBharatAI
+itself runs on, was not offered at all, while every competitor is Stripe-only. UPI is the moat for an
+Indian shop, and the roadmap row says so.
+
+### What shipped (PaymentGenerator.ts, pure; catalog + dispatcher + knowledge base)
+- **Cashfree provider** — dependency-free (platform `fetch` + `node:crypto`): `POST /order` creates the
+  order against the REAL PG API (`/pg/orders`, `x-client-id` / `x-client-secret` / `x-api-version
+  2023-08-01`, the same shape the platform's own `routes/payment.ts` uses) and returns the
+  `payment_session_id`; `POST /verify` asks CASHFREE whether the order is `PAID` — never the browser;
+  `paymentWebhook` checks Cashfree's documented signature — base64 HMAC-SHA256(timestamp + rawBody,
+  client secret) — with `timingSafeEqual`, on the RAW body. Client: the official SDK modal
+  (`sdk.cashfree.com/js/v3`, UPI / cards / net banking / wallets), then server verification. Env:
+  `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY`, `CASHFREE_ENV` (sandbox default; keys must match).
+- **Razorpay gains the webhook** (`X-Razorpay-Signature` = hex HMAC-SHA256(rawBody, webhook secret),
+  constant-time) and `RAZORPAY_WEBHOOK_SECRET`. `PaymentConfig.dependency` is now optional; the
+  dispatcher says "no dependency needed" instead of printing `undefined@undefined`.
+- **Honest about keys and money:** the instructions say the keys go in the app's OWN env — `.env`, or
+  Settings → App Settings → Secrets & API Keys (merged into `.env` at build) — and that the money lands
+  in the USER's merchant account. NavBharatAI's own Cashfree account is never used for a user's app
+  (standing rule). The webhook URL must be registered in the provider's dashboard; the instructions
+  name the exact screen rather than pretending we can register it with someone else's keys.
+- Catalog: `provider` enum gains `cashfree`; the description tells the model when to pick which, and
+  that both Indian gateways show UPI. Knowledge-base PAYMENTS bullet rewritten around UPI.
+- Locked in `PaymentGenerator.test.ts`: real API hosts/headers, PAID-only verification, both signature
+  schemes verbatim + `timingSafeEqual`, SDK checkout, blank env values, white-label, no stubs.
+
+### Honest limits
+- The ₹1 UPI test the roadmap names as "done when" needs a real merchant's sandbox keys in a real app —
+  a session cannot run it. The code paths mirror the platform's own live Cashfree integration.
+
+---
+
+## 2026-09-10 — Revenue, slice B: two hosting tiers with a real agreement (branch `feat/platform-fee`)
+
+Admin: **"do tier banao, credit bundle karo, 20 GB theek hai"**, and earlier **"yeh bat clear likhi ho
+jab user 149₹ ka purchage kare, agreement type aa jaye, 'ok' tick karne ko aye"**, and **"app remix
+only woh user kar sakta hai, jo user ₹149/mahina par hai … purchase ₹149/mahina ka popup a jaye"**.
+
+**Starter ₹149** — 1 domain, 5 GB traffic, badge-free, gallery remix, ad-free.
+**Growth ₹499** — 3 domains, 20 GB, **₹150 of build credit every month**, everything in Starter.
+**₹2,999 Business is deliberately NOT built.** A purchasable plan with nobody on it is a promise about
+capacity, support and limits that no code keeps. It is "write to us" until a real customer defines it —
+which is also the honest way to find out what it should contain.
+
+**The catalogue is one file, shared.** `src/lib/hostingTiers.ts` holds prices, limits, entitlements AND
+the agreement text, and both the browser and the server read it. The consent text is **generated from
+the tier**, never written beside it — an agreement that quotes one number while the meter enforces
+another is worse than no agreement.
+
+**The tick is enforced on the SERVER.** `computePlanPurchase` refuses without `agreedToTerms`, so a
+plan record with no `agreedAt` cannot be created. That matters beyond the ceremony: **overage may only
+ever be billed against a plan whose terms were actually accepted**, which is exactly why the accepted
+terms are frozen onto the record rather than a version number — and exactly why a legacy ₹99 plan,
+which carries no agreement, can never be billed for it.
+
+**Going over the limit does not switch the app off.** The agreement says so in capitals. Overage is
+₹20/GB from the wallet (measured cost is ~₹14/GB — an overage rate at or under cost turns a popular
+app into a loss that grows with its success). The meter itself is slice C.
+
+**Upgrading mid-month loses nothing:** the unused days are valued at the old plan's own daily rate,
+returned to the wallet as credit, and the new tier starts a full period from that day. Downgrading
+while a bigger plan is live is refused rather than silently shortening what was paid for.
+
+**🔒 THE LEGACY ₹99 PLAN IS GRANDFATHERED, AND THAT IS A DECISION.** Those users agreed to ₹99. Moving
+them to ₹149 because a catalogue was introduced would be raising a price on a live subscription without
+asking, which no amount of "the new plan is better" makes honest. They keep ₹99 and receive Starter's
+entitlements — strictly more than they bought.
+
+**Three siblings that would each have silently broken the new tiers**, all found by grepping for the
+one-constant comparison the old single-plan design licensed:
+- `hostingPlanActive` tested `p.id !== HOSTING_PLAN_ID` — every Starter and Growth plan would have read
+  as INACTIVE. A paying customer with no entitlements and nothing failing anywhere.
+- `sweepHostingPlans` filtered the same way — no reminders, no renewals, no lapses for the new tiers.
+- Every sweep message hardcoded "Custom Domain" and the ADVERTISED price, so a Growth customer would
+  have been told their ₹499 plan renews at ₹149.
+
+**Entitlements are enforced, not printed.** Gallery remix now needs an active plan (402 + `needsPlan`,
+and the panel shows a real offer with a route to Billing — a refusal with no way to act on it is the
+dead button rule 2 forbids). The per-tier domain count is counted against active links. Both gates
+exempt the admin/tester list and **fail OPEN** on a store outage, the same shape as the existing
+domain gate, so the two cannot drift.
+
+**⚠️ ONE THING I DID NOT GATE, and the admin should overrule me if they disagree.** The Nav App Store's
+"make it yours" remix (`/api/nav-store/web/app/:id/remix`) supports SIGNED-OUT users by design — it is
+the store's whole conversion loop, viewer to creator in one tap. Gating that behind ₹149 would break
+signed-out remix entirely and remove the store's reason to exist. The GALLERY remix — taking another
+creator's published app as your starting point — is what the plan now covers.
+
+### Slice C (hosting traffic meter + overage) — OPEN ROOT CAUSE, honestly recorded (rule 6)
+
+**It cannot be built honestly today, and pretending otherwise would break the billing law.**
+
+The tiers include 5 GB / 20 GB of visitor traffic and quote ₹20/GB beyond it. Charging that needs a
+**per-app byte measurement**, and there is no honest source for one right now:
+
+- **Firebase Hosting** serves today's published apps as channels on ONE site. Its usage figures are
+  per-SITE, so the bytes of one user's app cannot be separated from everyone else's. Splitting them
+  would be inventing a number, which `hostingCost.ts`'s inherited law forbids outright.
+- **Cloud Run** metrics (`hostingUsage.ts`) measure NavBharatAI's own service, not a user's app.
+- **The site-analytics beacon** counts page VIEWS, not bytes. Multiplying views by an assumed page
+  weight would produce a figure that looks like a measurement and would land on a real person's bill.
+
+**The real path, when the admin wants it:** the Cloudflare Worker (`infra/cloudflare/mitrify-apps-worker.js`)
+is the one place every bucket-served app's response actually passes through, so it can count real
+response bytes per app and report them the way the analytics beacon already reports hits. That path
+only carries traffic once the bucket-only publishing sequence in CLAUDE.md is switched on — bucket
+public-readable → Worker `APPS_BUCKET` deployed → `PUBLISHED_APP_DOMAIN` set → `PUBLISHED_APPS_BUCKET_ONLY=on`.
+Until then the Worker would measure zero apps, so building the meter first would be building nothing.
+
+**What ships instead, and why it is safe:** no meter ⇒ no overage ⇒ the user is charged the plan price
+and nothing more. The error is entirely in their favour. The agreement SAYS SO in its own line, pinned
+by `tests/hostingTiers.test.ts` so removing that line the day the meter goes live is a deliberate act
+rather than a silent one, and `AppKnowledgeBase.ts` tells every AI to never claim a traffic charge a
+user's ledger does not actually show.
+
+## 2026-09-10 — TWO SESSIONS FIXED ONE FLAKY TEST; the merge kept the better half (PR #2789 conflict resolution)
+
+**Session:** claude/upgrade-md-review-vxbdy0, resolving PR #2789 (branch
+`claude/preview-stale-port-and-root-cause`, opened by an earlier session) after it had sat open long
+enough for `main` to move 16 commits past its base.
+
+### What happened, and why it is worth recording rather than just merging
+PR #2789's three root-cause fixes (a port being UP is not proof of IDENTITY; the preview-health probe
+sending `url || foundUrl` while the frame renders `foundUrl || url`; a report blaming a command the
+build had already fixed) merged into today's `main` cleanly — **one file conflicted**, and the conflict
+was two sessions independently fixing the SAME flaky test in `AgentRunner.test.ts`:
+
+- **#2789's answer:** DELETE the end-to-end timeout test, keep only a source-grep assertion, on the
+  reasoning that "a flaky test is worse than no test."
+- **#2804's answer (already merged to `main`):** keep the end-to-end test AND fix the flake at its real
+  cause — the test's own arithmetic. The watchdog is checked at the TOP of the loop while
+  `totalToolUses` increments at the BOTTOM, so the ok:true branch needs
+  `turnDelayMs > maxBuildMs > time-to-first-check`; `maxBuildMs: 800` with `turnDelayMs: 1500` makes
+  that window real instead of hoping the machine is idle.
+
+**`main`'s version was kept in full.** It is strictly stronger: it holds the behavioural coverage
+#2789 was giving up AND the source-grep test, and it fixed the flake rather than removing the
+evidence of it. Nothing from #2789's actual subject matter was lost — its nine-file change touched this
+test file only to replace the flaky one, and every other file merged automatically.
+
+⚠️ **The PR body of #2789 still says it "replaces a test from #2788 that was flaky by construction".
+That sentence is no longer true of what shipped** — recorded here because a later session reading that
+description alone would look for a deletion that did not happen.
+
+### The wider lesson (safeguard #1, in a shape this file had not yet recorded)
+A finished, CI-GREEN PR is not safe just because it is green. #2789's green was earned on a base 16
+commits old; it proved nothing about today's `main`, and the one thing it could not have seen was
+another session solving the same problem better. **A PR left open drifts from green to unknown without
+any event marking the moment.** The rule that follows: re-verify a PR against current `main` before
+merging it, and treat an old green as a claim about a tree that no longer exists.

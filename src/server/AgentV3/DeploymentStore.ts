@@ -17,6 +17,8 @@ import { enforceHostingQuota, isFirstPartyProvider, deployBytesMb } from '../lib
 import { hostingUsageStore } from '../lib/HostingUsageStore';
 import { scanPublishedContent, publishScanBlocks } from './ContentSafetyScanner';
 import { injectBadgeIntoFiles } from '../lib/madeWithBadge';
+import { injectBeaconIntoFiles, publicOrigin } from '../lib/siteAnalytics';
+import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { probeHostingPlan } from '../lib/hostingPlan';
 import { audit } from '../lib/audit';
 
@@ -353,6 +355,18 @@ export function withDeploymentPersistence(
       const plan = await probeHostingPlan(userId);
       injectBadgeIntoFiles(files, { paidRemoval: plan.known && plan.active });
     } catch { /* the badge must never break a publish */ }
+
+    // VISITOR ANALYTICS BEACON (ROADMAP §13, 1.1) — stamped at the SAME choke point as the badge and
+    // for the same reason: downstream of every edit, so it is never part of the user's source and
+    // never reaches a preview. Unlike the badge it is not branding, so a paid plan keeps it — the
+    // count is the user's own feature. The public app id is the one already in the site's URL
+    // (`siteIdForWorkspace`), so nothing new about the workspace is disclosed. Kill switch
+    // AGENTV3_SITE_ANALYTICS=off. First-party publishes only: a BYO host serves no beacon of ours.
+    if (isFirstPartyProvider(providerId)) {
+      try {
+        injectBeaconIntoFiles(files, { appId: siteIdForWorkspace(workspaceId), origin: publicOrigin() });
+      } catch { /* analytics must never break a publish */ }
+    }
 
     const url = await base(workspaceId, files);
     const firstParty = isFirstPartyProvider(providerId);

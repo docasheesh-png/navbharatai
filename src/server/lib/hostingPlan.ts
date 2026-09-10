@@ -29,24 +29,67 @@
 
 import { doc, getDoc, runTransaction, getServerDb } from './serverDb';
 import { computeDebitedWallet } from './walletDebit';
-import { inrToDebitTokens } from './payments';
+import { inrToDebitTokens, inrToWalletTokens } from './payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
 import { envFlag } from './envFlag';
+import {
+  HOSTING_TIERS, LEGACY_HOSTING_PLAN_ID, hostingAgreementTerms, isKnownPlanId, purchasableTier,
+  tierForPlanId, tierRank, HOSTING_OVERAGE_INR_PER_GB, type HostingTier, type HostingTierId,
+} from '../../lib/hostingTiers';
 
-export const HOSTING_PLAN_ID = 'custom_domain';
+/**
+ * TWO TIERS SINCE 2026-09-10 (admin: "do tier banao, credit bundle karo, 20 GB theek hai").
+ * The catalogue — prices, limits, entitlements and the agreement text — lives in
+ * `src/lib/hostingTiers.ts` so the purchase screen and this module read the SAME numbers.
+ *
+ * ⚠️ `HOSTING_PLAN_ID` is now the LEGACY id, not the only id. It stays exported under its old name
+ * because six call sites import it, and it still identifies a real, paid plan on real wallets.
+ */
+export const HOSTING_PLAN_ID = LEGACY_HOSTING_PLAN_ID;
 export const HOSTING_PLAN_DAYS = 30;
 
 export function hostingPlansEnabled(): boolean {
   return envFlag('AGENTV3_HOSTING_PLANS', true);
 }
 
-/** ₹ per 30 days. Env-tunable so a price change never needs a deploy. */
+/**
+ * The ENTRY price we advertise — Starter. Used by every "buy the plan to unlock this" message.
+ *
+ * ⚠️ NOT the price a legacy ₹99 holder renews at; see `planPriceInr`. Keeping one function for both
+ * is what would quietly raise an existing customer's bill.
+ */
 export function hostingPlanPriceInr(): number {
+  const v = Number(process.env.HOSTING_PLAN_PRICE_INR);
+  return Number.isFinite(v) && v > 0 ? v : HOSTING_TIERS[0].priceInr;
+}
+
+/**
+ * What the legacy ₹99 "Custom Domain" plan renews at.
+ *
+ * 🔒 GRANDFATHERED ON PURPOSE, and this is a decision, not an oversight. Those users agreed to ₹99;
+ * moving them to ₹149 because a catalogue was introduced would be raising a price on a live
+ * subscription without asking, which no amount of "the new plan is better" makes honest. They keep
+ * ₹99 and receive Starter's entitlements — strictly more than they bought. When they choose a real
+ * tier, they accept its agreement like everyone else.
+ */
+export function legacyPlanPriceInr(): number {
   const v = Number(process.env.HOSTING_PLAN_PRICE_INR);
   return Number.isFinite(v) && v > 0 ? v : 99;
 }
 
+/** The price THIS plan id costs per period — the legacy one at its own price, tiers at theirs. */
+export function planPriceInr(planId: string | null | undefined): number {
+  if (String(planId ?? '') === LEGACY_HOSTING_PLAN_ID) return legacyPlanPriceInr();
+  return tierForPlanId(planId)?.priceInr ?? hostingPlanPriceInr();
+}
+
+/** Days per period for a plan id. */
+export function planDays(planId: string | null | undefined): number {
+  return tierForPlanId(planId)?.days ?? HOSTING_PLAN_DAYS;
+}
+
 export interface HostingPlanRecord {
+  /** The tier id ('starter' | 'growth'), or the legacy 'custom_domain' on plans bought before tiers. */
   id: string;
   purchasedAt: string;
   expiresAt: string;
@@ -55,6 +98,17 @@ export interface HostingPlanRecord {
   remindedFor?: Record<string, string>;
   /** Set when the lapse was ENFORCED (domains detached) — cleared by a new purchase. */
   lapsedAt?: string | null;
+  /**
+   * When the user ticked the agreement, and the exact terms they ticked.
+   *
+   * 🔒 THIS IS WHAT MAKES OVERAGE CHARGEABLE. The admin's instruction was that the limit and the
+   * separate charge for exceeding it are stated plainly and ticked before paying. A plan with no
+   * `agreedAt` — every legacy ₹99 plan — was never shown those terms, so nothing beyond its price
+   * may ever be billed against it. Storing the terms themselves, not a version number, means the
+   * record still says what was agreed even after the catalogue changes.
+   */
+  agreedAt?: string | null;
+  agreedTerms?: readonly string[];
 }
 
 /** Days before expiry the renewal reminders go out (admin 2026-08-06: "5 din pahle reminder"). */
@@ -66,64 +120,209 @@ export interface HostingPlanStatus {
   enabled: boolean;
   active: boolean;
   plan: HostingPlanRecord | null;
+  /** The ENTRY price (Starter) — what the card advertises to someone with no plan. */
   priceInr: number;
   days: number;
+  /** The purchasable catalogue, so the card never hardcodes a price or a limit. */
+  tiers: readonly HostingTier[];
+  /** The tier the held plan grants, or null. A legacy ₹99 plan reports Starter's entitlements. */
+  tier: HostingTier | null;
+  /** What the HELD plan renews at — ₹99 for a grandfathered holder, the tier price otherwise. */
+  renewalPriceInr: number;
+  /** ₹ per GB past the included allowance. */
+  overageInrPerGb: number;
 }
 
-/** Pure: is the wallet's plan active at `nowMs`? */
+/**
+ * Pure: is the wallet's plan active at `nowMs`?
+ *
+ * ⚠️ It asks the CATALOGUE whether the id is known, rather than comparing against one constant. The
+ * old `p.id !== HOSTING_PLAN_ID` test is precisely the line that would have reported every new
+ * Starter and Growth plan as inactive — a paying customer with no entitlements and no error anywhere.
+ */
 export function hostingPlanActive(wallet: Record<string, any> | null | undefined, nowMs: number = Date.now()): boolean {
   const p = wallet?.hostingPlan as HostingPlanRecord | undefined;
-  if (!p || p.id !== HOSTING_PLAN_ID || typeof p.expiresAt !== 'string') return false;
+  if (!p || !isKnownPlanId(p.id) || typeof p.expiresAt !== 'string') return false;
   const exp = Date.parse(p.expiresAt);
   return Number.isFinite(exp) && exp > nowMs;
 }
 
-export type PlanPurchaseOutcome =
-  | { ok: true; wallet: Record<string, any>; plan: HostingPlanRecord; charged: boolean }
-  | { ok: false; reason: 'insufficient' | 'disabled'; shortfallTokens?: number };
+/** The tier a wallet's plan grants right now, or null when there is no active plan. */
+export function activeHostingTier(wallet: Record<string, any> | null | undefined, nowMs: number = Date.now()): HostingTier | null {
+  if (!hostingPlanActive(wallet, nowMs)) return null;
+  return tierForPlanId((wallet?.hostingPlan as HostingPlanRecord | undefined)?.id);
+}
 
 /**
- * PURE purchase/extension. An active plan EXTENDS from its current expiry (paying early never
- * loses days); an expired/absent one starts a fresh 30 days from `now`. The idempotency ref is
- * keyed on the period start, so replaying the same purchase is a no-op that still returns ok.
+ * ₹ of unused time left on an active plan, for an UPGRADE.
+ *
+ * Paying for Growth on day 3 of a Starter month must not throw away the 27 days already bought. The
+ * remaining days are valued at the plan's OWN daily rate and returned to the wallet as credit, then
+ * the new tier is charged in full from today. Rounded DOWN to the paisa so the refund can never
+ * exceed what was actually paid for the unused stretch.
+ */
+export function unusedPlanValueInr(plan: HostingPlanRecord | undefined | null, nowMs: number): number {
+  if (!plan || !isKnownPlanId(plan.id)) return 0;
+  const exp = Date.parse(plan.expiresAt);
+  if (!Number.isFinite(exp) || exp <= nowMs) return 0;
+  const DAY = 24 * 60 * 60 * 1000;
+  const days = planDays(plan.id);
+  const remainingDays = Math.min(days, (exp - nowMs) / DAY);
+  const perDay = planPriceInr(plan.id) / days;
+  return Math.max(0, Math.floor(remainingDays * perDay * 100) / 100);
+}
+
+export type PlanPurchaseOutcome =
+  | { ok: true; wallet: Record<string, any>; plan: HostingPlanRecord; charged: boolean; creditedInr: number; bundledCreditInr: number }
+  | { ok: false; reason: 'insufficient' | 'disabled' | 'unknown_tier' | 'agreement_required'; shortfallTokens?: number };
+
+/**
+ * PURE purchase / extension / upgrade.
+ *
+ * Three shapes, and which one applies is decided by the tier the user already holds:
+ *
+ *  • **SAME tier (or none / expired)** — extends from the current expiry when one is live, so paying
+ *    early never loses days; otherwise a fresh period from `now`.
+ *  • **UPGRADE** (Growth over Starter, or over the legacy ₹99 plan) — the unused days on the old plan
+ *    are valued at their own daily rate and credited back to the wallet FIRST, then the new tier is
+ *    charged in full from today. Someone who upgrades on day 3 loses nothing.
+ *  • **DOWNGRADE** while a higher tier is still live — deliberately NOT a purchase. It would mean
+ *    either refunding at a rate nobody agreed to or silently reducing what they paid for, so it is
+ *    refused and the user is told to let the current period finish. (`unknown_tier` is the id being
+ *    wrong; a downgrade returns that too rather than inventing a fourth outcome the routes must learn.)
+ *
+ * 🔒 THE AGREEMENT IS A PRECONDITION, NOT A FORMALITY. Without `agreedToTerms` this refuses, because
+ * the tick-box is what makes the overage charge chargeable — and a plan record with no `agreedAt`
+ * must never be billed for overage later. The terms are frozen onto the record as they were shown.
+ *
+ * The idempotency ref is keyed on tier + period start, so replaying the same purchase is a no-op that
+ * still returns ok.
  */
 export function computePlanPurchase(
   current: Record<string, any>,
   nowIso: string,
+  tierId: HostingTierId | string = HOSTING_TIERS[0].id,
+  opts: { agreedToTerms?: boolean } = {},
 ): PlanPurchaseOutcome {
   if (!hostingPlansEnabled()) return { ok: false, reason: 'disabled' };
+  const tier = purchasableTier(tierId);
+  if (!tier) return { ok: false, reason: 'unknown_tier' };
+  if (!opts.agreedToTerms) return { ok: false, reason: 'agreement_required' };
+
   const w = current || {};
   const nowMs = Date.parse(nowIso);
-  const price = hostingPlanPriceInr();
-  const needed = inrToDebitTokens(price);
-  const balance = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
+  const prior = w.hostingPlan as HostingPlanRecord | undefined;
+  const priorActive = hostingPlanActive(w, nowMs);
+  const priorRank = priorActive ? tierRank(prior?.id) : -1;
+  const newRank = tierRank(tier.id);
+
+  // A live HIGHER tier is not replaced by a cheaper one mid-period — see the note above.
+  if (priorActive && priorRank > newRank) return { ok: false, reason: 'unknown_tier' };
+
+  const isUpgrade = priorActive && newRank > priorRank;
+  // Credit the unused stretch of the old plan BEFORE testing affordability, so an upgrade the user
+  // can afford *because of* their own unused days is not refused for being unaffordable.
+  const creditedInr = isUpgrade ? unusedPlanValueInr(prior, nowMs) : 0;
+  const creditedTokens = inrToWalletTokens(creditedInr);
+  const startWallet = creditedTokens > 0
+    ? {
+        ...w,
+        tokenBalance: (typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0) + creditedTokens,
+        remaining_balance: (typeof w.remaining_balance === 'number' && Number.isFinite(w.remaining_balance) ? w.remaining_balance : 0) + creditedInr,
+        walletLedger: [
+          ...(Array.isArray(w.walletLedger) ? w.walletLedger : []),
+          {
+            type: 'refund',
+            amountCoinsOrTokens: creditedTokens,
+            moneySpent: 0,
+            timestamp: nowIso,
+            description: `Unused days on your ${tierForPlanId(prior?.id)?.name ?? 'previous'} plan, returned as credit`,
+          },
+        ],
+      }
+    : w;
+
+  const needed = inrToDebitTokens(tier.priceInr);
+  const balance = typeof startWallet.tokenBalance === 'number' && Number.isFinite(startWallet.tokenBalance) ? startWallet.tokenBalance : 0;
   if (balance < needed) {
     return { ok: false, reason: 'insufficient', shortfallTokens: Math.ceil(needed - balance) };
   }
 
-  const prior = w.hostingPlan as HostingPlanRecord | undefined;
-  const priorExp = prior?.id === HOSTING_PLAN_ID ? Date.parse(prior.expiresAt) : NaN;
+  // An upgrade restarts the clock from today (the old period was paid back); a same-tier purchase
+  // extends from the live expiry so early payment never costs days.
+  const priorExp = priorActive && !isUpgrade ? Date.parse(prior!.expiresAt) : NaN;
   const periodStartMs = Number.isFinite(priorExp) && priorExp > nowMs ? priorExp : nowMs;
-  const expiresAt = new Date(periodStartMs + HOSTING_PLAN_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const buildRef = `hostingplan_${HOSTING_PLAN_ID}_${periodStartMs}`;
+  const expiresAt = new Date(periodStartMs + tier.days * 24 * 60 * 60 * 1000).toISOString();
+  const buildRef = `hostingplan_${tier.id}_${periodStartMs}`;
 
-  const debited = computeDebitedWallet(w, {
-    billedInr: price,
+  const debited = computeDebitedWallet(startWallet, {
+    billedInr: tier.priceInr,
     buildRef,
-    description: 'Hosting plan — Custom Domain (30 days)',
+    description: `Hosting plan — ${tier.name} (${tier.days} days)`,
   }, nowIso);
 
+  // The bundled credit is granted only when the charge really applied — a replayed purchase must not
+  // hand out a second month of credit for one payment.
+  const granted = debited.applied ? grantBundledCredit(debited.wallet, tier, nowIso, buildRef) : debited.wallet;
+
+  const samePlan = prior && prior.id === tier.id;
   const plan: HostingPlanRecord = {
-    id: HOSTING_PLAN_ID,
-    purchasedAt: (prior?.id === HOSTING_PLAN_ID && prior.purchasedAt) || nowIso,
+    id: tier.id,
+    purchasedAt: (samePlan && prior!.purchasedAt) || nowIso,
     expiresAt,
-    autoRenew: prior?.id === HOSTING_PLAN_ID ? prior.autoRenew !== false : true,
+    autoRenew: samePlan ? prior!.autoRenew !== false : true,
+    agreedAt: nowIso,
+    agreedTerms: hostingAgreementTerms(tier),
+    lapsedAt: null,
   };
 
   // `applied === false` here means the ledger already carries this exact period (double-tap /
   // transaction retry) — the plan grant below is then also a replay of the same state, so the whole
   // call converges to one purchase, one charge, one grant.
-  return { ok: true, wallet: { ...debited.wallet, hostingPlan: plan }, plan, charged: debited.applied };
+  return {
+    ok: true,
+    wallet: { ...granted, hostingPlan: plan },
+    plan,
+    charged: debited.applied,
+    creditedInr,
+    bundledCreditInr: debited.applied ? tier.bundledCreditInr : 0,
+  };
+}
+
+/**
+ * Add a tier's bundled build credit to the wallet.
+ *
+ * It is ORDINARY credit, deliberately: a separate expiring bucket would need its own balance, its own
+ * spend order and its own expiry rules, and would let a user hold ₹150 they cannot spend on the thing
+ * they want. The ledger row names where it came from, and the balance is just bigger.
+ */
+function grantBundledCredit(
+  wallet: Record<string, any>,
+  tier: HostingTier,
+  nowIso: string,
+  buildRef: string,
+): Record<string, any> {
+  if (!(tier.bundledCreditInr > 0)) return wallet;
+  const w = wallet || {};
+  const n = (v: any): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const tokens = inrToWalletTokens(tier.bundledCreditInr);
+  return {
+    ...w,
+    tokenBalance: n(w.tokenBalance) + tokens,
+    remaining_balance: n(w.remaining_balance) + tier.bundledCreditInr,
+    total_balance: n(w.total_balance) + tier.bundledCreditInr,
+    walletLedger: [
+      ...(Array.isArray(w.walletLedger) ? w.walletLedger : []),
+      {
+        type: 'plan_credit',
+        amountCoinsOrTokens: tokens,
+        moneySpent: 0,
+        timestamp: nowIso,
+        planRef: buildRef,
+        description: `${tier.name} plan — ₹${tier.bundledCreditInr} build credit included`,
+      },
+    ],
+  };
 }
 
 export interface LazyRenewalResult {
@@ -143,28 +342,38 @@ export function computeLazyRenewal(current: Record<string, any>, nowIso: string)
   const w = current || {};
   if (!hostingPlansEnabled()) return { wallet: w, renewed: false, applied: false };
   const p = w.hostingPlan as HostingPlanRecord | undefined;
-  if (!p || p.id !== HOSTING_PLAN_ID || p.autoRenew === false) return { wallet: w, renewed: false, applied: false };
+  if (!p || !isKnownPlanId(p.id) || p.autoRenew === false) return { wallet: w, renewed: false, applied: false };
   const nowMs = Date.parse(nowIso);
   const exp = Date.parse(p.expiresAt);
   if (!Number.isFinite(exp) || exp > nowMs) return { wallet: w, renewed: false, applied: false };
 
-  const price = hostingPlanPriceInr();
+  // A renewal charges the price of the plan the user HOLDS, never today's advertised one — that is
+  // what keeps a grandfathered ₹99 holder at ₹99 (see legacyPlanPriceInr).
+  const price = planPriceInr(p.id);
+  const days = planDays(p.id);
+  const tier = tierForPlanId(p.id);
+  const label = p.id === LEGACY_HOSTING_PLAN_ID ? 'Custom Domain' : (tier?.name ?? 'Hosting');
   const needed = inrToDebitTokens(price);
   const balance = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
   if (balance < needed) return { wallet: w, renewed: false, applied: false };
 
+  const renewRef = `hostingplan_renew_${p.expiresAt}`;
   const debited = computeDebitedWallet(w, {
     billedInr: price,
-    buildRef: `hostingplan_renew_${p.expiresAt}`,
-    description: 'Hosting plan — Custom Domain (auto-renewal, 30 days)',
+    buildRef: renewRef,
+    description: `Hosting plan — ${label} (auto-renewal, ${days} days)`,
   }, nowIso);
   if (!debited.applied) return { wallet: w, renewed: false, applied: false }; // this lapse already renewed
 
+  // Each renewed period carries the tier's bundled credit — it is part of the monthly product, not a
+  // one-off signing bonus. The legacy plan has no tier bundle, so this is a no-op for it.
+  const granted = tier ? grantBundledCredit(debited.wallet, tier, nowIso, renewRef) : debited.wallet;
+
   const plan: HostingPlanRecord = {
     ...p,
-    expiresAt: new Date(nowMs + HOSTING_PLAN_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+    expiresAt: new Date(nowMs + days * 24 * 60 * 60 * 1000).toISOString(),
   };
-  return { wallet: { ...debited.wallet, hostingPlan: plan }, renewed: true, applied: true };
+  return { wallet: { ...granted, hostingPlan: plan }, renewed: true, applied: true };
 }
 
 export type PlanSweepAction =
@@ -189,7 +398,7 @@ export function decidePlanSweepStep(
 ): { wallet: Record<string, any>; applied: boolean; action: PlanSweepAction } {
   const w = current || {};
   const p = w.hostingPlan as HostingPlanRecord | undefined;
-  if (!hostingPlansEnabled() || !p || p.id !== HOSTING_PLAN_ID) return { wallet: w, applied: false, action: null };
+  if (!hostingPlansEnabled() || !p || !isKnownPlanId(p.id)) return { wallet: w, applied: false, action: null };
   const nowMs = Date.parse(nowIso);
   const exp = Date.parse(p.expiresAt);
   if (!Number.isFinite(exp)) return { wallet: w, applied: false, action: null };
@@ -220,7 +429,8 @@ export function decidePlanSweepStep(
       .sort((a, b) => a - b); // smallest (most urgent, most accurate) first
     const days = reached.find((d) => remindedFor[String(d)] !== p.expiresAt);
     if (days === undefined) return { wallet: w, applied: false, action: null };
-    const price = hostingPlanPriceInr();
+    // The reminder must quote what THIS user will actually be charged, not the advertised entry price.
+    const price = planPriceInr(p.id);
     const needed = inrToDebitTokens(price);
     const balance = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
     const shortTokens = Math.max(0, needed - balance);
@@ -256,6 +466,8 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
   const base: HostingPlanStatus = {
     enabled: hostingPlansEnabled(), active: false, plan: null,
     priceInr: hostingPlanPriceInr(), days: HOSTING_PLAN_DAYS,
+    tiers: HOSTING_TIERS, tier: null, renewalPriceInr: hostingPlanPriceInr(),
+    overageInrPerGb: HOSTING_OVERAGE_INR_PER_GB,
   };
   if (!db || !userId) return base;
   try {
@@ -271,6 +483,7 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
     });
     if (!wallet) return base;
     const plan = (wallet.hostingPlan as HostingPlanRecord | undefined) ?? null;
+    const heldTier = tierForPlanId(plan?.id);
     // The SAME clock decides "is it active" as decided the renewal above. Threading `nowIso` into only
     // one of the two left this function half-injectable: a caller could pass a time, watch the renewal
     // honour it, and still get an `active` computed from today's real date. Caught by its own test.
@@ -278,7 +491,9 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
     return {
       ...base,
       active: hostingPlanActive(wallet, Number.isFinite(nowMs as number) ? (nowMs as number) : undefined),
-      plan: plan && plan.id === HOSTING_PLAN_ID ? plan : null,
+      plan: plan && isKnownPlanId(plan.id) ? plan : null,
+      tier: heldTier,
+      renewalPriceInr: plan && isKnownPlanId(plan.id) ? planPriceInr(plan.id) : hostingPlanPriceInr(),
     };
   } catch {
     return base;
@@ -286,8 +501,8 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
 }
 
 export type PlanPurchaseResult =
-  | { ok: true; plan: HostingPlanRecord; tokenBalance: number; charged: boolean }
-  | { ok: false; error: string; reason: 'insufficient' | 'disabled' | 'unavailable'; shortfallTokens?: number };
+  | { ok: true; plan: HostingPlanRecord; tokenBalance: number; charged: boolean; creditedInr: number; bundledCreditInr: number }
+  | { ok: false; error: string; reason: 'insufficient' | 'disabled' | 'unavailable' | 'unknown_tier' | 'agreement_required'; shortfallTokens?: number };
 
 /**
  * Atomic purchase: debit + grant in one transaction on the wallet doc. Never throws.
@@ -302,7 +517,13 @@ export type PlanPurchaseResult =
  * wrap a time-injectable core while hardcoding `new Date()`, and `purchaseHostingPlan` is itself under
  * test — so the next bomb was already armed. Production keeps the real clock by default.
  */
-export async function purchaseHostingPlan(db: any, userId: string, nowIso?: string): Promise<PlanPurchaseResult> {
+export async function purchaseHostingPlan(
+  db: any,
+  userId: string,
+  nowIso?: string,
+  tierId: HostingTierId | string = HOSTING_TIERS[0].id,
+  opts: { agreedToTerms?: boolean } = {},
+): Promise<PlanPurchaseResult> {
   if (!hostingPlansEnabled()) {
     return { ok: false, error: 'Hosting plans are not available right now.', reason: 'disabled' };
   }
@@ -315,7 +536,7 @@ export async function purchaseHostingPlan(db: any, userId: string, nowIso?: stri
     const outcome = await runTransaction(db, async (t: any) => {
       const snap = await t.get(ref);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
-      const result = computePlanPurchase(current, nowIso ?? new Date().toISOString());
+      const result = computePlanPurchase(current, nowIso ?? new Date().toISOString(), tierId, opts);
       if (result.ok) t.set(ref, result.wallet);
       return result;
     });
@@ -326,11 +547,23 @@ export async function purchaseHostingPlan(db: any, userId: string, nowIso?: stri
           error: 'Your wallet balance is not enough for this plan — please recharge first.',
         };
       }
+      if (outcome.reason === 'agreement_required') {
+        return { ok: false, reason: 'agreement_required', error: 'Please tick the plan terms before buying.' };
+      }
+      if (outcome.reason === 'unknown_tier') {
+        // Also the answer for a downgrade attempted mid-period — the message says which it was, so
+        // the user is not told "no such plan" about a plan that plainly exists on the screen.
+        return {
+          ok: false, reason: 'unknown_tier',
+          error: 'That plan cannot be started right now. If you are on a higher plan, it will finish its current period first — you can switch after that.',
+        };
+      }
       return { ok: false, error: 'Hosting plans are not available right now.', reason: 'disabled' };
     }
     invalidatePlanCache(userId);
     return {
       ok: true, plan: outcome.plan, charged: outcome.charged,
+      creditedInr: outcome.creditedInr, bundledCreditInr: outcome.bundledCreditInr,
       tokenBalance: typeof outcome.wallet.tokenBalance === 'number' ? outcome.wallet.tokenBalance : 0,
     };
   } catch {
@@ -349,7 +582,7 @@ export async function setHostingPlanAutoRenew(db: any, userId: string, autoRenew
       if (!snap.exists()) return false;
       const w = snap.data();
       const p = w.hostingPlan as HostingPlanRecord | undefined;
-      if (!p || p.id !== HOSTING_PLAN_ID) return false;
+      if (!p || !isKnownPlanId(p.id)) return false;
       t.set(ref, { ...w, hostingPlan: { ...p, autoRenew: !!autoRenew } });
       return true;
     });

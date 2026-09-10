@@ -47,6 +47,7 @@ import { assertWriteAllowed } from '../../../greenFreeze';
 import { shellQuote } from '../../../../lib/shellQuote';
 import { needsLegacyPeerDeps } from '../../../npmInstallFallback';
 import { buildOutputCandidates, configDumpCommand, parseConfigDump } from '../../../builtSiteCheck';
+import { injectPreviewBridge } from '../../../previewBridge';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -1451,6 +1452,47 @@ export class E2BActuator implements IEngineerActuator {
             }
             break; // only one vite config is loaded by Vite — stop at the first that exists
           } catch { /* best-effort — never block the dev server on a config patch */ }
+        }
+      }
+
+      // ── THE PREVIEW BRIDGE (gap analysis 2026-09-10) ────────────────────────────────────────────
+      // Give the LIVE preview the console the in-browser preview has had since August.
+      //
+      // THE GAP: the console mirror was built into the document ReactPreview.ts generates, so it
+      // existed only for the in-browser render. The Live preview — the app running for real, on a
+      // real machine, with its real dependencies, which is where a runtime error matters MOST — sent
+      // nothing back. A user watching their live app throw saw no rows, no error badge and no "Fix
+      // with AI"; the only way to see the error was devtools, which is the thing this product exists
+      // not to require.
+      //
+      // WHY HERE: the block immediately above already reads and rewrites a config file inside the
+      // SANDBOX at this exact point, best-effort, to make the preview work. This is the same move on
+      // the same seam, for the same reason, and it inherits the same properties: the DURABLE files
+      // are untouched, so a download, a publish and the user's own code never see it; a reboot or a
+      // second update_preview re-injects if the model rewrote the document meanwhile; and any
+      // failure at all just means today's behaviour.
+      //
+      // 🔒 The bridge is stripped back out on the two paths that could carry it into the user's real
+      // code — ToolDispatcher's read_file (so the model never SEES a script it did not write) and its
+      // write path (so a model that reproduced it anyway cannot store it). Both, deliberately:
+      // making that branch unlikely is not the same as making it impossible.
+      //
+      // Frameworks with no index.html (Next, Nuxt) simply get no bridge — an honest limit, not a
+      // silent one: the panel says the live console is unavailable rather than showing an empty
+      // drawer that implies the app printed nothing.
+      if ((process.env.AGENTV3_PREVIEW_BRIDGE ?? '').trim().toLowerCase() !== 'off') {
+        for (const doc of ['index.html', 'public/index.html']) {
+          try {
+            const full = `${WORKSPACE_ROOT}/${doc}`;
+            if (!(await sandbox.files.exists(full).catch(() => false))) continue;
+            const current = await sandbox.files.read(full);
+            const bridged = injectPreviewBridge(current, 'live');
+            if (bridged !== current) {
+              await sandbox.files.write(full, bridged);
+              stdout += `\n[preview-bridge] ${doc} now reports its console and failed network calls to the preview panel.`;
+            }
+            break; // one entry document is enough — the first that exists is the one being served
+          } catch { /* best-effort — a console is never worth failing a dev server for */ }
         }
       }
 

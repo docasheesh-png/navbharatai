@@ -1,13 +1,15 @@
 import type { Express, Request, Response } from 'express';
 import { domainOpsRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, enforceNotBanned } from '../lib/authMiddleware';
 import { sendSafeError } from '../lib/httpError';
-import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
+import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan, readHostingPlanStatus } from '../lib/hostingPlan';
+import { getServerDb } from '../lib/serverDb';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import {
   normalizeDomain,
   firebaseCustomDomainsEnabled,
   firebaseHostingConfigured,
   attachCustomDomain,
+  deleteCustomDomain,
   customDomainStatusLive,
   customDomainErrorMessage,
   sanitizeDomainErrorDetail,
@@ -15,7 +17,7 @@ import {
   type CustomDomainStatus,
 } from '../lib/firebaseCustomDomain';
 import {
-  linkWorkspaceDomain, firebaseDomainsForWorkspace, firebaseDomainLinksForUser,
+  linkWorkspaceDomain, firebaseDomainsForWorkspace, firebaseDomainLinksForUser, linkForDomain,
   rememberDomainDnsRecords, getStoredDomainDnsRecords,
 } from '../lib/firebaseDomainLink';
 import { mergeStableRecords, dropForeignSiteTokens, recordsStillPending, type StableDnsRecord } from '../lib/domainDnsRecords';
@@ -23,6 +25,8 @@ import {
   managedDnsConfigured, ensureZone, zoneStatus, applyRecords, sanitizeManagedDnsError,
   listZoneRecords, missingFromZone,
 } from '../lib/cloudflareManagedDns';
+import { canonicalHost, alternateHost } from '../lib/domainPair';
+import { decideDomainMove } from '../lib/domainMove';
 import { checkDomainConnect, domainConnectEnabled } from '../lib/domainConnect';
 import { hostingerDnsEnabled, applyHostingerRecords } from '../lib/hostingerDns';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
@@ -111,7 +115,24 @@ async function formDomainVerdict(
   host: string,
   status: CustomDomainStatus,
 ): Promise<CustomDomainStatus & Record<string, unknown>> {
-  const displayRecords = await stableRecordsFor(host, status.records, workspaceId);
+  /**
+   * www ↔ apex (ROADMAP §13, 1.2). The twin's records ride in the SAME list the user is shown and
+   * the same list the automatic appliers write — one instruction set, so `www` cannot be forgotten
+   * by a user who did everything the screen asked. Its own states are reported beside the verdict
+   * (`alternate`), never folded INTO it: the verdict stays the canonical domain's, formed by the
+   * one serving probe below, and a twin that is still pending must not make a finished domain
+   * read as unfinished. Best-effort: an unreadable twin is `null`, which the screen shows as
+   * "could not check", not as done.
+   */
+  const twinHost = alternateHost(host);
+  const twin = twinHost ? await customDomainStatusLive(workspaceId, twinHost).catch(() => null) : null;
+  const twinRecords = twin && twinHost ? await stableRecordsFor(twinHost, twin.records, workspaceId) : [];
+  const alternate = twinHost
+    ? (twin
+      ? { host: twinHost, active: twin.active, ownershipState: twin.ownershipState, hostState: twin.hostState, sslState: twin.sslState, redirectTarget: twin.redirectTarget ?? null, pendingRecords: twin.records.length }
+      : { host: twinHost, active: false, ownershipState: 'unknown', hostState: 'unknown', sslState: 'unknown', redirectTarget: null, pendingRecords: 0 })
+    : null;
+  const displayRecords = [...(await stableRecordsFor(host, status.records, workspaceId)), ...twinRecords];
   // DID THE USER'S RECORDS ACTUALLY LAND? (admin 2026-08-21, mitrify.com.) The screen used to
   // show one word from Firebase — `ownership: missing` — while every required record was live and
   // byte-perfect in public DNS. That state is indistinguishable from "you typed it wrong", so a
@@ -159,6 +180,7 @@ async function formDomainVerdict(
       backendStage: stage,
       displayRecords: [],
       serving,
+      alternate,
     };
   }
   if (status.active) {
@@ -261,7 +283,7 @@ async function formDomainVerdict(
       publishBlocked = domainPublishBlockNote(plan, { splitAdvised });
     } catch { /* never let a shape check break a status screen */ }
   }
-  return { ...status, displayRecords, dnsCheck, serving, publish, ...(publishBlocked ? { publishBlocked } : {}) };
+  return { ...status, displayRecords, dnsCheck, serving, publish, alternate, ...(publishBlocked ? { publishBlocked } : {}) };
 }
 
 export function registerNbaiDomainsRoutes(app: Express): void {
@@ -290,14 +312,41 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       const plan = await probeHostingPlan(verifiedUid);
       if (plan.known && !plan.active) {
         res.status(402).json({
-          error: `Connecting your own domain is part of the Custom Domain plan (₹${hostingPlanPriceInr()}/month, paid from your wallet — it also removes the "Made with NavBharatAI" badge). Buy it from Billing → Plans, then connect.`,
+          error: `Connecting your own domain is part of a hosting plan (from ₹${hostingPlanPriceInr()}/month, paid from your wallet — it also removes the "Made with NavBharatAI" badge). Buy it from Billing → Plans, then connect.`,
           needsPlan: true,
           priceInr: hostingPlanPriceInr(),
         });
         return;
       }
+      /**
+       * THE TIER'S DOMAIN COUNT, ENFORCED (2026-09-10). Starter includes 1 domain and Growth 3, and
+       * a number printed on a plan card that nothing checks is a fake feature — the second absolute
+       * rule's exact case. Counted over the user's ACTIVE links only, so a domain already suspended
+       * by a lapse does not occupy a slot the user is paying for.
+       *
+       * ⚠️ It reads the plan STATUS (not the cached probe) because only the status knows which tier
+       * is held; and like the gate above, any failure to read it FAILS OPEN — being unable to count
+       * must never block a paying user from connecting the domain they bought.
+       */
+      try {
+        const status = await readHostingPlanStatus(getServerDb() as any, verifiedUid);
+        const allowed = status.tier?.domains ?? 0;
+        if (allowed > 0) {
+          const existing = (await firebaseDomainLinksForUser(verifiedUid)).filter((l) => !l.suspended);
+          const alreadyThis = existing.some((l) => l.domain === canonicalHost(normalizeDomain(req.body?.domain)));
+          if (!alreadyThis && existing.length >= allowed) {
+            res.status(402).json({
+              error: `Your ${status.tier?.name} plan covers ${allowed} domain${allowed === 1 ? '' : 's'}, and ${allowed === 1 ? 'one is' : `${existing.length} are`} already connected. Move to a bigger plan in Billing → Plans, or disconnect a domain first.`,
+              needsPlan: true,
+              domainLimit: allowed,
+              connected: existing.length,
+            });
+            return;
+          }
+        }
+      } catch { /* fail OPEN — see the note above */ }
     }
-    const host = normalizeDomain(req.body?.domain);
+    const host = canonicalHost(normalizeDomain(req.body?.domain));
     if (!DOMAIN_RE.test(host)) {
       res.status(400).json({ error: 'Enter a valid domain like myshop.com (no https://, no slashes).' });
       return;
@@ -306,15 +355,57 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       res.status(503).json({ error: 'Custom-domain hosting is not configured on the server yet. Please try again later.' });
       return;
     }
+    /**
+     * "MOVE THIS DOMAIN TO THIS APP" — one tap (ROADMAP §13, 1.3; admin screenshots 2026-09-02 and
+     * 2026-09-10). If the domain is already held by ANOTHER app of the SAME user, pressing Connect
+     * here is the instruction: it is taken off that app's site first (both spellings), so the
+     * hosting service does not refuse this attach as "already connected elsewhere", and the screen
+     * says it moved. Held by a different account ⇒ refused, naming nobody. Decided by a pure
+     * function; the link read fails open to "nobody", which can only mean an ordinary attach — the
+     * hosting service still refuses a genuinely held domain, exactly as before.
+     */
+    const holder = await linkForDomain(host);
+    const move = decideDomainMove(holder, workspaceId, verifiedUid);
+    if (move.action === 'refuse') {
+      res.status(409).json({ error: move.message });
+      return;
+    }
+    let movedFrom: string | null = null;
+    if (move.action === 'move') {
+      for (const spelling of [host, alternateHost(host)].filter((h): h is string => !!h)) {
+        try { await deleteCustomDomain(move.from, spelling); } catch (detachErr) {
+          console.warn(`[nbai domains] could not detach ${spelling} from ${move.from} before moving: ${detachErr instanceof Error ? detachErr.message : String(detachErr)}`);
+        }
+      }
+      movedFrom = move.from;
+    }
     try {
       const status = await attachCustomDomain(workspaceId, host);
       // Persist the link so the deploy path publishes future builds to this workspace's dedicated site.
       await linkWorkspaceDomain({ domain: host, workspaceId, userId: verifiedUid });
+      /**
+       * www ↔ apex (ROADMAP §13, 1.2). The twin is attached WITH a redirect to the canonical, so
+       * `www.` answers with a redirect rather than a second copy of the site, and it is linked as an
+       * alternate so a plan lapse detaches it and a renewal re-attaches it with the same redirect.
+       * Best-effort on purpose: the canonical is connected and linked already, and a twin that
+       * could not be attached must not turn that success into a 500 — it is retried by the next
+       * connect/check, and the verdict names it as pending rather than pretending.
+       */
+      const twin = alternateHost(host);
+      if (twin) {
+        try {
+          await attachCustomDomain(workspaceId, twin, { redirectTarget: host });
+          await linkWorkspaceDomain({ domain: twin, workspaceId, userId: verifiedUid, alternateOf: host });
+        } catch (twinErr) {
+          console.warn(`[nbai domains] www twin attach deferred for ${twin}: ${twinErr instanceof Error ? twinErr.message : String(twinErr)}`);
+        }
+      }
       // Remember these records + return the STABLE (never-forgotten) view alongside the live set.
       // 🔒 THE SAME VERDICT THE STATUS ROUTE FORMS — never a bare status (admin screenshot 2026-09-07).
       // Pressing Connect on an already-connected domain used to answer without `serving` / `publishBlocked`
       // / `dnsCheck`, and the screen rendered that as a second, contradictory verdict. See formDomainVerdict.
       const verdict = await formDomainVerdict(workspaceId, host, status);
+      if (movedFrom) (verdict as Record<string, unknown>).movedFrom = movedFrom;
       // autoDns tells the client whether the zero-copy-paste path (nameserver delegation) exists on
       // this server — the UI offers it only when a tap can actually deliver it.
       res.json({ ...verdict, autoDns: managedDnsConfigured(), domainConnect: domainConnectEnabled(), hostingerDns: hostingerDnsEnabled() });
@@ -340,7 +431,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       res.status(403).json({ error: 'You can only view your own app’s domain.' });
       return;
     }
-    const host = normalizeDomain(req.query?.domain);
+    const host = canonicalHost(normalizeDomain(req.query?.domain));
     if (!DOMAIN_RE.test(host)) {
       res.status(400).json({ error: 'Invalid domain.' });
       return;
@@ -377,7 +468,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       res.status(403).json({ error: 'You can only set up DNS for your own app.' });
       return;
     }
-    const host = normalizeDomain(req.body?.domain);
+    const host = canonicalHost(normalizeDomain(req.body?.domain));
     if (!DOMAIN_RE.test(host)) {
       res.status(400).json({ error: 'Enter a valid domain like myshop.com (no https://, no slashes).' });
       return;
@@ -403,7 +494,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       res.status(403).json({ error: 'You can only set up DNS for your own app.' });
       return;
     }
-    const host = normalizeDomain(req.body?.domain);
+    const host = canonicalHost(normalizeDomain(req.body?.domain));
     if (!DOMAIN_RE.test(host)) { res.status(400).json({ error: 'Invalid domain.' }); return; }
     /**
      * 🔴 REFUSE TO WRITE THE WEBSITE RECORDS OVER A DOMAIN THAT IS SERVING THE APP'S OWN SERVER
@@ -435,14 +526,24 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       }
       const fb = await customDomainStatusLive(workspaceId, host);
       if (!fb) { res.status(404).json({ error: 'Connect the domain first, then run automatic setup.' }); return; }
+      // www ↔ apex (ROADMAP §13, 1.2): the twin's records are written in the same pass, so one tap
+      // finishes both spellings. An unreadable twin contributes nothing rather than failing the sync.
+      const syncTwin = alternateHost(host);
+      const twinFb = syncTwin ? await customDomainStatusLive(workspaceId, syncTwin).catch(() => null) : null;
+      const desiredAll = [...fb.records, ...(twinFb?.records ?? [])];
       // `added`/`removed` come back SEPARATE (admin screenshot 2026-09-02: "all 1 record are now in
       // place (we added 2)"). The old single `applied` count mixed two different operations — a
       // desired record written, and a FOREIGN ownership token deleted as cleanup — so cleaning up one
       // stale token while adding one desired record produced "2", printed beside "1 record". `added`
       // can never exceed `desired` (see ApplyRecordsResult in cloudflareManagedDns.ts); `removed` is
       // reported separately so the cleanup is explained rather than silently inflating "added".
-      const { added, removed } = await applyRecords(zone.id, fb.records);
-      const displayRecords = await stableRecordsFor(host, fb.records, workspaceId as string);
+      const { added, removed } = await applyRecords(zone.id, desiredAll);
+      // The screen replaces its record list with this response, so the twin's records must be in it
+      // too — or one tap of "Check & apply" would make the www record vanish from view.
+      const displayRecords = [
+        ...(await stableRecordsFor(host, fb.records, workspaceId as string)),
+        ...(twinFb && syncTwin ? await stableRecordsFor(syncTwin, twinFb.records, workspaceId as string) : []),
+      ];
       /**
        * 🔒 READ THE ZONE BACK, AND REPORT EVIDENCE INSTEAD OF A COUNT (admin 2026-08-22).
        *
@@ -457,13 +558,13 @@ export function registerNbaiDomainsRoutes(app: Express): void {
        * the records, so it degrades to "we could not verify" rather than inventing either verdict.
        */
       const inZone = await listZoneRecords(zone.id).catch(() => null);
-      const missing = inZone ? missingFromZone(fb.records, inZone) : null;
+      const missing = inZone ? missingFromZone(desiredAll, inZone) : null;
       res.json({
         zoneStatus: zone.status,
         nameServers: zone.nameServers,
         added,
         removed,
-        desired: fb.records.length,
+        desired: desiredAll.length,
         // null ⇒ we genuinely could not look; [] ⇒ we looked and everything is there.
         missing: missing ? missing.map((r) => ({ type: r.type, name: r.name, value: r.value })) : null,
         zoneRecordCount: inZone ? inZone.length : null,
@@ -517,9 +618,20 @@ export function registerNbaiDomainsRoutes(app: Express): void {
        * So the stored records are read unconditionally now. This is exactly the kind of data we
        * persisted them FOR — the moment the live source is unavailable is the moment they matter.
        */
-      const displayRecords = status
-        ? await stableRecordsFor(domain, status.records, workspaceId as string)
-        : await getStoredDomainDnsRecords(domain).catch(() => []);
+      // www ↔ apex (ROADMAP §13, 1.2): the twin's record must survive a reload too — the saved view
+      // is what the screen shows before any check, and a record that vanishes until "Check now" is
+      // the "DNS record bhulne nahi chahiye" defect in a new coat. Best-effort like the rest.
+      const twinHost = alternateHost(domain);
+      const twinStatus = status && twinHost ? await customDomainStatusLive(workspaceId as string, twinHost).catch(() => null) : null;
+      const twinRecords = twinStatus && twinHost
+        ? await stableRecordsFor(twinHost, twinStatus.records, workspaceId as string)
+        : twinHost ? await getStoredDomainDnsRecords(twinHost).catch(() => []) : [];
+      const displayRecords = [
+        ...(status
+          ? await stableRecordsFor(domain, status.records, workspaceId as string)
+          : await getStoredDomainDnsRecords(domain).catch(() => [])),
+        ...twinRecords,
+      ];
       // Zone lookup is best-effort: a missing/errored zone must not hide the rest of the state.
       const zone = managedDnsConfigured() ? await zoneStatus(domain).catch(() => null) : null;
       res.json({
@@ -556,6 +668,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     const byWorkspace: Record<string, string[]> = {};
     for (const l of links) {
       if (l.suspended) continue; // a plan-lapsed domain isn't actively serving — don't badge it "connected"
+      if (l.alternateOf) continue; // a `www` twin is a spelling of its canonical, not a second badge (ROADMAP §13, 1.2)
       (byWorkspace[l.workspaceId] ??= []).push(l.domain);
     }
     res.json({ byWorkspace });
@@ -573,11 +686,14 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       res.status(403).json({ error: 'You can only set up your own app.' });
       return;
     }
-    const host = normalizeDomain(req.query?.domain);
+    const host = canonicalHost(normalizeDomain(req.query?.domain));
     if (!DOMAIN_RE.test(host)) { res.status(400).json({ error: 'Invalid domain.' }); return; }
     try {
       const fb = await customDomainStatusLive(workspaceId, host);
-      const check = await checkDomainConnect(host, fb?.records ?? []);
+      // www ↔ apex (ROADMAP §13, 1.2): the registrar's one-click template carries both spellings.
+      const dcTwin = alternateHost(host);
+      const dcTwinFb = fb && dcTwin ? await customDomainStatusLive(workspaceId, dcTwin).catch(() => null) : null;
+      const check = await checkDomainConnect(host, [...(fb?.records ?? []), ...(dcTwinFb?.records ?? [])]);
       res.json(check);
     } catch (err) {
       // Discovery failing is never fatal to the flow — the other two paths remain.
@@ -601,7 +717,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       res.status(403).json({ error: 'You can only set up your own app.' });
       return;
     }
-    const host = normalizeDomain(req.body?.domain);
+    const host = canonicalHost(normalizeDomain(req.body?.domain));
     if (!DOMAIN_RE.test(host)) { res.status(400).json({ error: 'Invalid domain.' }); return; }
     const apiToken = typeof req.body?.apiToken === 'string' ? req.body.apiToken.trim() : '';
     if (!apiToken || apiToken.length > 512) {
@@ -611,9 +727,13 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     try {
       const fb = await customDomainStatusLive(workspaceId, host);
       if (!fb) { res.status(404).json({ error: 'Connect the domain first, then run Hostinger setup.' }); return; }
-      const result = await applyHostingerRecords(apiToken, host, fb.records);
+      // www ↔ apex (ROADMAP §13, 1.2): one tap at the registrar finishes both spellings.
+      const hTwin = alternateHost(host);
+      const hTwinFb = hTwin ? await customDomainStatusLive(workspaceId, hTwin).catch(() => null) : null;
+      const hDesired = [...fb.records, ...(hTwinFb?.records ?? [])];
+      const result = await applyHostingerRecords(apiToken, host, hDesired);
       if (!result.ok) { res.status(502).json({ error: 'Hostinger did not accept the records.', detail: result.error }); return; }
-      res.json({ ok: true, applied: fb.records.length });
+      res.json({ ok: true, applied: hDesired.length });
     } catch (err) {
       console.error(`[HTTP 500] hostinger apply: ${err instanceof Error ? err.message : String(err)}`);
       res.status(500).json({ error: 'Could not apply the records at Hostinger.' });

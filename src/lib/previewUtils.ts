@@ -75,12 +75,28 @@ export const PREVIEW_HARNESS = `<style>
     var v=document.querySelector('canvas,svg,img,video,input,button,#root *,#app *,[data-reactroot] *');
     return !t&&!v;
   }
-  // Check at 4s then 7s — React+CDN can take 4-6s on slow connections; don't show false "empty" while loading.
+  // WHEN MAY WE SAY "Preview is empty"? Only when we are sure, because saying it about an app that
+  // was merely still arriving is telling the user their working app is broken.
+  //
+  // Three guards, and all three must agree. (1) __nbLoading — never while the compiler and the
+  // dependencies are still coming down. (2) TIME — 4s, then again after 6 more; a phone on Indian
+  // mobile data routinely takes 5-8s to pull React and a router from a CDN. (3) THE DOM ITSELF —
+  // any mutation at all between the two checks means something IS rendering, however slowly, and the
+  // warning is abandoned outright. That third guard is the one that matters: it makes the message
+  // depend on evidence about this app rather than on a stopwatch that cannot know how slow the
+  // network is today.
+  var domChanged=false;
+  try{
+    var mo=new MutationObserver(function(){domChanged=true;});
+    mo.observe(document.documentElement,{childList:true,subtree:true,characterData:true});
+  }catch(e){/* no observer — fall back to the two time checks alone, i.e. today's behaviour */}
   setTimeout(function(){
     if(document.getElementById('__nb_err')||!isEmpty())return;
+    domChanged=false;  // watch the NEXT window only — everything before this point is boot noise
     setTimeout(function(){
+      if(domChanged)return;  // it is painting, just slowly. Say nothing.
       if(!document.getElementById('__nb_err')&&isEmpty())show('Preview is empty','The app rendered nothing — it may need a build step, or hit a runtime error.');
-    },3000);
+    },6000);
   },4000);
 })();
 </script>`;
@@ -130,6 +146,12 @@ export const PREVIEW_BOOTSTRAP = `
     src=src.replace(/import\\.meta\\b/g,'{env:(window.__importMetaEnv__||{}),url:location.href}');
     var code;
     try{code=Babel.transform(src,{filename:path,presets:presets,plugins:['transform-modules-commonjs'],sourceType:'module'}).code;}
+    // NAME THE FILE IN EVERY STACK TRACE (gap analysis 2026-09-10). Modules are executed through
+    // new Function(), which the browser labels "<anonymous>" — so an error in the preview produced a
+    // stack with no file in it at all. The user could not tell which file broke, and neither could
+    // the AI when the error text was handed to it by "Fix with AI". A sourceURL comment costs nothing
+    // (no size, no transform change) and makes both of them able to name the file.
+    code=code+'\n//# sourceURL=nbai-preview://'+path;
     catch(e){throw new Error('Compile '+path+': '+e.message);}
     var module={exports:{}};cache[path]=module;
     var req=function(spec){
@@ -182,18 +204,39 @@ export const PREVIEW_BOOTSTRAP = `
       var bare;try{bare=collectBare();}catch(ce){bare=[];}
       forced.forEach(function(s){if(bare.indexOf(s)<0)bare.push(s);});
       var failedDeps=[];
+      var appUsesReact=bare.indexOf('react')>=0||bare.indexOf('react-dom')>=0;
+      // WHERE A DEPENDENCY MAY BE FETCHED FROM, in order (gap analysis 2026-09-10).
+      //
+      // 1. the primary map (a same-origin vendored runtime for React 18, else esm.sh)
+      // 2. the pure-CDN map, when the vendored facade failed to load its UMD
+      // 3. THE SAME primary url once more, after a short pause — a CDN blip is far more common than a
+      //    CDN outage, and one retry turns a flaky "Missing dependency react-router-dom" into a
+      //    working preview at the cost of 400ms on a path that was going to fail anyway
+      // 4. jsdelivr, but ONLY for an app that does not use React
+      //
+      // ⚠️ THAT LAST RESTRICTION IS THE IMPORTANT PART, and it is why this is not simply "try another
+      // CDN". esm.sh is asked for every package with ?external=react,react-dom, which is what makes
+      // every dependency share the ONE React instance from the importmap. jsdelivr's +esm has no
+      // equivalent: it BUNDLES its own React. So a React app rescued that way would render with two
+      // Reacts and die on "Invalid hook call" — a silent, confusing wrong result in place of an
+      // honest "could not load". A fallback that can produce a broken app is worse than a failure
+      // that says so, so React apps do not get this rung.
+      function fetchCandidates(spec){
+        var list=[specUrl(spec)];
+        var alt=specUrlCdn(spec);
+        if(alt!==list[0])list.push(alt);
+        list.push(list[0]);  // one honest retry of the primary
+        if(!appUsesReact)list.push('https://cdn.jsdelivr.net/npm/'+spec+'/+esm');
+        return list;
+      }
       await Promise.all(bare.map(async function(spec){
-        try{bareCache[spec]=interop(await import(specUrl(spec)));}
-        catch(e){
-          // The primary URL failed (e.g. the same-origin vendored React facade could not load its
-          // UMD). Retry ONCE from the pure-CDN map before recording the dep as failed.
-          var alt=specUrlCdn(spec);
-          if(alt!==specUrl(spec)){
-            try{bareCache[spec]=interop(await import(alt));console.warn('[preview] loaded',spec,'from the CDN after the same-origin runtime failed');return;}
-            catch(e2){failedDeps.push(spec);console.warn('[preview] failed to load',spec,e2&&e2.message);return;}
-          }
-          failedDeps.push(spec);console.warn('[preview] failed to load',spec,e&&e.message);
+        var urls=fetchCandidates(spec),lastErr=null;
+        for(var i=0;i<urls.length;i++){
+          if(i===2)await new Promise(function(r){setTimeout(r,400);});  // the pause before the retry
+          try{bareCache[spec]=interop(await import(urls[i]));if(i>0)console.warn('[preview] loaded',spec,'on attempt',i+1);return;}
+          catch(e){lastErr=e;}
         }
+        failedDeps.push(spec);console.warn('[preview] failed to load',spec,lastErr&&lastErr.message);
       }));
       // BUG A2 FIX: Only hard-fail on React load error if the app actually imports React.
       // Vanilla ES module apps don't need React — killing them here was wrong.

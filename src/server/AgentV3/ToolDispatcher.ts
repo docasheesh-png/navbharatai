@@ -227,6 +227,7 @@ import { generateExperimentsIntegration } from '../lib/ExperimentsGenerator';
 import { generateShortLinksIntegration } from '../lib/ShortLinksGenerator';
 import { generateFeedbackIntegration } from '../lib/FeedbackGenerator';
 import { generateConsentIntegration } from '../lib/ConsentGenerator';
+import { generateConsentBannerIntegration, type ConsentBannerOptions } from '../lib/ConsentBannerGenerator';
 import { generateActivityFeedIntegration } from '../lib/ActivityFeedGenerator';
 import { generateCartIntegration } from '../lib/CartGenerator';
 import { generateReactionsIntegration } from '../lib/ReactionsGenerator';
@@ -358,6 +359,7 @@ import { formatUiFindings, type ScannedElement } from './UiElementFinder';
 import { envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
+import { stripPreviewBridge, isHtmlDocumentPath } from './previewBridge';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -2186,6 +2188,14 @@ export class ToolDispatcher {
         let full: string;
         try {
           full = await this.actuator.readFile(this.workspaceId, reqPath);
+          // THE PREVIEW BRIDGE IS OURS, NOT THE APP'S (see AgentV3/previewBridge.ts). The dev-server
+          // launch injects a console/network mirror into the SANDBOX's entry document so the Live
+          // preview can report what the app prints. `readFile` reads the sandbox, so without this the
+          // model would find a script it never wrote sitting in the user's index.html — and models
+          // preserve the script tags they find when they rewrite an HTML file, which is precisely how
+          // a development-only bridge ends up published inside somebody's finished app. It is removed
+          // here so the model only ever sees the file it actually authored.
+          if (isHtmlDocumentPath(reqPath)) full = stripPreviewBridge(full);
         } catch (err) {
           // PATH-MISS RECOVERY (build-report autopsy 2026-08-01): a bare "does not exist" made the builder
           // loop 12 times guessing the same wrong root (created src/components/ui/X.tsx, read
@@ -2255,6 +2265,13 @@ export class ToolDispatcher {
         // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
         this.assertWritable(path); // C2 — checked AFTER any relocation, so the REAL destination is judged
         let content = guardConfigContent(path, this.applyPostgresProviderLock(path, reqStr(input, 'content')));
+        // THE OTHER END OF THE SAME GUARD (see read_file above). The model is not supposed to be able
+        // to see the preview bridge at all — but "cannot see it" and "cannot store it" are different
+        // guarantees, and only the second one is a guarantee. A write that carries the marker anyway
+        // (a model reproducing an older document from memory, a paste, a future read path that
+        // forgets to strip) has it removed before it reaches durable storage, so the bridge can never
+        // be published inside a user's app. Both ends, deliberately: unlikely is not impossible.
+        if (isHtmlDocumentPath(path)) content = stripPreviewBridge(content);
         // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
         // to their known-good major IN the written package.json, so a later plain `npm install` (which
         // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking
@@ -5152,6 +5169,34 @@ export class ToolDispatcher {
         return `Wired a GDPR consent-log backend:\n${csWritten.join('\n')}\nAdd the dependencies: ${csDeps}\n\n${cscfg.instructions}`;
       }
 
+      case 'generate_consent_banner': {
+        // ROADMAP §13 4.4 — the DPDP (India) + GDPR consent BANNER (public/consent-banner.js): nothing non-essential
+        // loads before consent, no pre-ticked boxes, reject = accept prominence, withdraw any time, re-consent on
+        // policy version change, English + Hindi. Pure generator in ConsentBannerGenerator.ts (it sanitises every
+        // option itself, so a hostile appName cannot break out of the emitted script).
+        const cbIn = (input ?? {}) as Record<string, unknown>;
+        const cbOpts: ConsentBannerOptions = {
+          appName: typeof cbIn.appName === 'string' ? cbIn.appName : undefined,
+          policyUrl: typeof cbIn.policyUrl === 'string' ? cbIn.policyUrl : undefined,
+          grievanceEmail: typeof cbIn.grievanceEmail === 'string' ? cbIn.grievanceEmail : undefined,
+          language: cbIn.language === 'en' || cbIn.language === 'hi' || cbIn.language === 'both' ? cbIn.language : undefined,
+          purposes: Array.isArray(cbIn.purposes) ? (cbIn.purposes as ConsentBannerOptions['purposes']) : undefined,
+          policyVersion: typeof cbIn.policyVersion === 'string' ? cbIn.policyVersion : undefined,
+        };
+        const cbcfg = generateConsentBannerIntegration(cbOpts);
+        const cbWritten: string[] = [];
+        for (const [path, content] of Object.entries(cbcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cbWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('consent banner');
+        return `Wired a DPDP + GDPR consent banner:\n${cbWritten.join('\n')}\n\n${cbcfg.instructions}`;
+      }
+
       case 'generate_activity_feed': {
         // Breadth recipe (domain vertical) — activity feed / timeline (server/activity/): a real
         // ActivityFeedService whose core guarantee is STABLE CURSOR PAGINATION (monotonic event ids paged by
@@ -6255,7 +6300,7 @@ export class ToolDispatcher {
         // (order/session + signature verification) + a client checkout helper. The user pastes their keys
         // into .env (NavBharatAI never stores them). Pure generator in PaymentGenerator.ts.
         const pProvider = optStr(input, 'provider');
-        if (!isPaymentProvider(pProvider)) return 'generate_payment: pass provider = "razorpay" | "stripe".';
+        if (!isPaymentProvider(pProvider)) return 'generate_payment: pass provider = "cashfree" | "razorpay" | "stripe".';
         const pcfg = generatePaymentIntegration(pProvider);
         const payWritten: string[] = [];
         for (const [path, content] of Object.entries(pcfg.files)) {
@@ -6270,7 +6315,8 @@ export class ToolDispatcher {
           payWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
         }
         this.scheduleCheckpoint('payment integration');
-        return `Wired ${pProvider} payments:\n${payWritten.join('\n')}\nAdd the dependency: ${pcfg.dependency.name}@${pcfg.dependency.version}\n\n${pcfg.instructions}`;
+        const payDep = pcfg.dependency ? `\nAdd the dependency: ${pcfg.dependency.name}@${pcfg.dependency.version}` : '\nNo dependency needed (uses the platform fetch + node:crypto).';
+        return `Wired ${pProvider} payments:\n${payWritten.join('\n')}${payDep}\n\n${pcfg.instructions}`;
       }
 
       case 'generate_email': {

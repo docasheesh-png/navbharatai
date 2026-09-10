@@ -44,6 +44,14 @@ interface DomainStatus {
   /** Firebase's OWN explanation of why the domain is stuck. Absent on an older server. */
   issues?: string[];
   /**
+   * The `www` twin of this domain (ROADMAP §13, 1.2) — attached with a redirect to the canonical,
+   * its records merged into `displayRecords`, its own state reported here so the verdict above stays
+   * the canonical's. `null` = this domain has no twin (a subdomain); absent = an older server.
+   */
+  alternate?: { host: string; active: boolean; ownershipState: string; hostState: string; sslState: string; redirectTarget: string | null; pendingRecords: number } | null;
+  /** Set on the connect response when the domain was taken off another app of yours (ROADMAP §13, 1.3). */
+  movedFrom?: string | null;
+  /**
    * This domain was moved to the app's OWN SERVER by a backend deploy, so the static host's record
    * states describe a setup deliberately no longer in use — and the setup block below must stay shut,
    * because its "Check & apply records" would hand the domain back and take the live site down.
@@ -157,6 +165,52 @@ export function hostingReason(issues?: string[] | null): string {
  */
 export function shouldShowDnsSetup(active: boolean, sectionOpen: boolean): boolean {
   return !active || sectionOpen;
+}
+
+/**
+ * Is the user's REGISTRAR still the place their DNS records have to be typed?
+ *
+ * 🔴 THE CONTRADICTION THIS CLOSES (admin screenshot 2026-09-10, `mitrify.com`). One render of this
+ * screen said both of these, forty pixels apart:
+ *
+ *   "…any record you add at your registrar's DNS page is ignored from now on."   (the amber notice)
+ *   "At your registrar: in the 'Type' dropdown choose TXT, copy Name and Value…" (every pending record)
+ *
+ * The amber notice was added on 2026-08-22 after the admin spent six hours typing records into a
+ * registrar panel that had already stopped being read. It warned about the mistake but left the
+ * INSTRUCTION to make it sitting right underneath, so the screen still taught the dead action — a
+ * warning above a wrong instruction is not a fix, it is a louder wrong instruction.
+ *
+ * `active` is Cloudflare's own word for "this zone's nameservers are delegated to us and answering".
+ * Once that is true the registrar's DNS page is decoration, so nothing on this screen may send the
+ * user there.
+ *
+ * PURE, so the rule is tested directly instead of inferred from JSX.
+ */
+export function registrarEditsApply(zoneStatus: string | null | undefined): boolean {
+  return zoneStatus !== 'active';
+}
+
+/**
+ * Does the "Check & apply records" control need to be rendered on its own, away from the
+ * nameserver-setup block that normally carries it?
+ *
+ * 🔴 THE DEAD END THIS CLOSES (same screenshot). `connectStage`'s MISMATCH and CONFLICT verdicts both
+ * end with "Tap “Check & apply records” above" — that button IS the remedy, and applying the records
+ * genuinely fixes a wrong or duplicated ownership token. But the only copy of it lives inside the
+ * automatic-setup block, which renders only while `result.autoDns && autoNs` hold. The admin's screen
+ * had an ACTIVE zone (so we manage the DNS) with that block absent, so the message named a button
+ * that was nowhere on the page, the amber notice forbade the registrar, and there was no third way
+ * out. A domain whose records we write is a domain that must always be able to ask us to write them.
+ *
+ * So the availability of the remedy now follows the STATE THAT NEEDS IT (an active zone) rather than
+ * the state that happens to be showing the setup instructions. `blockVisible` suppresses the second
+ * copy when the setup block is already offering one — two identical buttons is its own confusion.
+ *
+ * PURE.
+ */
+export function needsStandaloneApplyButton(zoneStatus: string | null | undefined, blockVisible: boolean): boolean {
+  return zoneStatus === 'active' && !blockVisible;
 }
 
 export function connectStage(
@@ -843,6 +897,10 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
       }
       setNeedsPlan(false);
       setResult(data);
+      // The server connects the APEX and redirects `www` to it (domainPair.ts). Adopt its spelling,
+      // so the relative record names ("@", "www") and the zone the automatic path creates are
+      // computed against the domain that was actually connected, not the one that was typed.
+      if (typeof data?.domain === 'string' && data.domain && data.domain !== cleanDomain) setDomain(data.domain);
       setConfirmed(true);
       setStatusUnavailable(false);
       rememberDraft(data, autoNs);
@@ -1077,6 +1135,27 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                   <span className={`text-[12px] font-bold ${stage.tone === 'ok' ? 'text-green-200' : 'text-amber-100'}`}>{stage.headline}</span>
                 </div>
                 <p className="text-[11px] text-zinc-300/80 leading-relaxed">{stage.note}</p>
+                {/* www ↔ apex (ROADMAP §13, 1.2). Its own line, under the verdict, never inside it:
+                    a twin still waiting for its record must not make a finished domain read as
+                    unfinished — and a finished twin is worth saying, because "does www work?" is
+                    the second thing everyone tries. */}
+                {result.alternate && (
+                  <p className={`text-[10.5px] leading-relaxed ${result.alternate.active ? 'text-green-200/90' : 'text-zinc-400'}`}>
+                    {result.alternate.active
+                      ? <>✓ <span className="font-mono">{result.alternate.host}</span> works too — it sends visitors here.</>
+                      : result.alternate.ownershipState === 'unknown'
+                        ? <><span className="font-mono">{result.alternate.host}</span> — could not check just now.</>
+                        : <>⏳ <span className="font-mono">{result.alternate.host}</span> is being set up too, so both spellings work{result.alternate.pendingRecords > 0 ? ' — its record is in the list below' : ''}.</>}
+                  </p>
+                )}
+                {/* MOVED HERE FROM ANOTHER APP OF YOURS (ROADMAP §13, 1.3). Said once, plainly, with the
+                    way back — the other app silently losing its domain is the one thing a one-tap move
+                    must never do quietly. */}
+                {result.movedFrom && (
+                  <p className="text-[10.5px] text-amber-100/90 leading-relaxed">
+                    This domain was moved here from another app of yours — that app no longer serves it. To move it back, open that app and connect it there.
+                  </p>
+                )}
                 {/* THE CHECK BUTTON MOVED DOWN (admin 2026-08-22: "check now button sahi jagah nahi
                     hai … upar wala"). It used to sit HERE — above the records, i.e. before the user
                     has anything to check. Someone lands on this screen, is told to add DNS records,
@@ -1254,6 +1333,23 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 NavBharatAI&apos;s nameservers, so we write these records for you — and any record you add at
                 your registrar&apos;s DNS page is ignored from now on. The list below is only for reference.
               </p>
+              {/* 🔒 THE NOTICE THAT SAYS "WE WRITE THESE FOR YOU" NOW CARRIES THE BUTTON THAT MAKES US
+                  WRITE THEM (admin 2026-09-10). See needsStandaloneApplyButton: the ownership-mismatch
+                  verdict points at this exact control, and until now it could be absent from the whole
+                  page while the registrar was simultaneously declared dead — an instruction to press
+                  nothing, next to a warning not to type anywhere. Suppressed when the setup block above
+                  is already offering the same button. */}
+              {needsStandaloneApplyButton(autoZoneStatus, !!result.autoDns && !!autoNs) && (
+                <div className="flex items-center gap-2 flex-wrap pt-1">
+                  <button onClick={autoDnsSync} disabled={autoBusy}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold">
+                    {autoBusy ? 'Checking…' : 'Check & apply records'}
+                  </button>
+                  <span className="text-[10px] text-amber-100/80 leading-relaxed">
+                    Writes every record below into your domain for you, and clears any wrong one left behind.
+                  </span>
+                </div>
+              )}
             </div>
           )}
           <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
@@ -1308,9 +1404,13 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 <Field label="Type" value={rec.type} k={`dt${i}`} copied={copied} onCopy={copy} />
                 <Field label="Name" value={relativeRecordName(rec.name, cleanDomain)} k={`dn${i}`} copied={copied} onCopy={copy} />
                 <Field label="Value" value={rec.value} k={`dv${i}`} copied={copied} onCopy={copy} />
+                {/* SIBLING of the pending card's instruction (registrarEditsApply): a record we wrote
+                    into our own zone is not "live at your registrar", and saying so would send someone
+                    looking for it in a panel that no longer holds it. */}
                 <p className="text-[10px] text-zinc-500">
-                  Already live at your registrar — this is here so you can copy it again if you ever
-                  need to re-add it.
+                  {registrarEditsApply(autoZoneStatus)
+                    ? 'Already live at your registrar — this is here so you can copy it again if you ever need to re-add it.'
+                    : 'Already live — NavBharatAI holds this record for your domain. It is here so you can copy it again if you ever need it.'}
                 </p>
               </div>
             </details>
@@ -1330,12 +1430,22 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               <Field label="Type" value={rec.type} k={`t${i}`} copied={copied} onCopy={copy} />
               <Field label="Name" value={relativeRecordName(rec.name, cleanDomain)} k={`n${i}`} copied={copied} onCopy={copy} />
               <Field label="Value" value={rec.value} k={`v${i}`} copied={copied} onCopy={copy} />
-              <p className="text-[10px] text-zinc-500">
-                At your registrar: in the "Type" dropdown choose <span className="font-bold text-zinc-300">{rec.type}</span>, copy Name and Value into their boxes, and leave TTL as-is.
-                {relativeRecordName(rec.name, cleanDomain) === '@' && (
-                  <> ("@" simply means your domain, {cleanDomain} — every registrar form understands it.)</>
-                )}
-              </p>
+              {/* 🔒 NEVER SEND SOMEONE TO A DNS PANEL THAT HAS STOPPED BEING READ — see
+                  registrarEditsApply. Once the zone is delegated to us this instruction described an
+                  action that could not work, directly under the notice saying so. */}
+              {registrarEditsApply(autoZoneStatus) ? (
+                <p className="text-[10px] text-zinc-500">
+                  At your registrar: in the "Type" dropdown choose <span className="font-bold text-zinc-300">{rec.type}</span>, copy Name and Value into their boxes, and leave TTL as-is.
+                  {relativeRecordName(rec.name, cleanDomain) === '@' && (
+                    <> ("@" simply means your domain, {cleanDomain} — every registrar form understands it.)</>
+                  )}
+                </p>
+              ) : (
+                <p className="text-[10px] text-zinc-500">
+                  NavBharatAI adds this one for you — press <span className="font-bold text-zinc-300">Check &amp; apply records</span> above.
+                  Typing it at your registrar will not work: this domain&apos;s DNS is managed here now.
+                </p>
+              )}
             </div>
           ))}
           </>

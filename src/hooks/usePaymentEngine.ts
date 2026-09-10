@@ -16,6 +16,8 @@ import { decideReportOnce } from '../lib/conversionOnce';
 import { isNativeApp } from '../lib/mobileNative';
 import { purchaseRail, type StoreConfig, type PurchaseOutcome } from '../lib/storePurchase';
 import { launchPlayPurchase, consumePlayPurchase, pendingPlayPurchases, playBillingAvailable, outcomeForNativeStatus } from '../lib/playBillingNative';
+import { fetchPlatformFeePct, DEFAULT_PLATFORM_FEE_PCT } from '../lib/platformFee';
+import { VISHWAKARMA_PASS_PRICE_INR } from '../lib/walletPricing';
 /** Free-tier daily message ceiling for anonymous (not-signed-in) users. */
 export const FREE_DAILY_MESSAGES = 10;
 
@@ -75,6 +77,14 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
    * behaviour until all of them are genuinely true.
    */
   const [storeConfig, setStoreConfig] = useState<StoreConfig | null>(null);
+  /**
+   * THE PLATFORM FEE RATE this server charges on a wallet recharge (platformFee.ts). Read from the
+   * server so the purchase screen shows the user the SAME split the server will apply, rather than
+   * the two sides doing their own arithmetic. It starts at — and falls back to — the default, which
+   * is also what the server falls back to: an unreachable config route must never show a ₹0 fee the
+   * server would then contradict at checkout.
+   */
+  const [platformFeePct, setPlatformFeePct] = useState<number>(DEFAULT_PLATFORM_FEE_PCT);
   const [playPluginReady, setPlayPluginReady] = useState(false);
   const [buyingProductId, setBuyingProductId] = useState<string | null>(null);
   const [storePurchaseNotice, setStorePurchaseNotice] = useState<string | null>(null);
@@ -216,7 +226,9 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     setIsRecharging(true);
     setRechargeStatus('Requesting Cashfree checkout protocol for Vishwakarma...');
     try {
-      const passPrice = 100;
+      // The ONE pass price (walletPricing.ts). It used to be a literal here while the chooser modal
+      // printed ₹50 — see that file's header for what that cost users.
+      const passPrice = VISHWAKARMA_PASS_PRICE_INR;
       const amount = (buyPass ? passPrice : 0) + tokenAmount;
       const res = await axios.post('/api/payment/create-order', {
         amount,
@@ -394,6 +406,14 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
       setPlayPluginReady(available);
       setStoreConfig(cfg && Array.isArray(cfg.packs) ? cfg : null);
     })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // The recharge fee rate, fetched once per session. Unconditional (unlike the Play probe above)
+  // because the web gateway is exactly where this fee applies.
+  useEffect(() => {
+    let cancelled = false;
+    fetchPlatformFeePct().then((pct) => { if (!cancelled) setPlatformFeePct(pct); });
     return () => { cancelled = true; };
   }, []);
 
@@ -601,6 +621,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     createBillingOrder,
     // Google Play billing (native only — storeRail is 'web-gateway' everywhere else)
     storeRail, storeConfig,
+    platformFeePct,
     buyStorePack, buyingProductId,
     storePurchaseNotice, setStorePurchaseNotice,
     createVishwakarmaOrder,

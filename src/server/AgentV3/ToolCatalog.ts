@@ -861,13 +861,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       name: 'generate_payment',
       description:
         'Add a REAL payment checkout to the app (Bring-Your-Own keys): a server route (creates the order/' +
-        'session AND verifies the payment signature — never trusts the client) + a client checkout helper, ' +
-        'for razorpay (India-first) or stripe. The user pastes their provider keys into .env — NavBharatAI ' +
-        'never stores them. Use when the app needs to accept payments. Never overwrites an existing .env.example.',
+        'session AND verifies the payment — never trusts the client), a WEBHOOK route with real HMAC signature ' +
+        'verification (the provider\'s "paid" callback survives a closed tab), and a client checkout helper. ' +
+        'Providers: cashfree or razorpay (India-first — both show UPI: GPay/PhonePe/Paytm/BHIM, plus cards, net ' +
+        'banking, wallets; pick cashfree when the user names it or wants the lowest UPI friction, razorpay when ' +
+        'they name it) or stripe (international cards). The user\'s keys live in THEIR env (.env, or the per-app ' +
+        'Secrets vault merged into .env at build) and the money lands in THEIR merchant account — NavBharatAI never ' +
+        'holds either. Use when the app needs to accept payments. Never overwrites an existing .env.example.',
       input_schema: {
         type: 'object',
         properties: {
-          provider: { type: 'string', enum: ['razorpay', 'stripe'], description: 'The payment provider to wire up.' },
+          provider: { type: 'string', enum: ['cashfree', 'razorpay', 'stripe'], description: 'The payment provider to wire up.' },
         },
         required: ['provider'],
       },
@@ -1761,6 +1765,30 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         '/consent/:user/history). Distinct from generate_audit (general tamper-evident log). In-memory by ' +
         'default — swap the store for your DB.',
       input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_consent_banner',
+      description:
+        'Add a real DPDP (India) + GDPR cookie/consent BANNER to the app — the part visitors SEE (public/consent-banner.js, ' +
+        'dependency-free, works for plain HTML and React). Distinct from generate_consent, which is the backend consent LOG. ' +
+        'What it enforces: NOTHING non-essential loads before consent (third-party scripts are written as ' +
+        '<script type="text/plain" data-consent="analytics" data-src="…"> and activated only when every purpose they name is ' +
+        'granted); NO pre-ticked boxes; "Reject all" as prominent as "Accept all"; withdrawal as easy as consent (a persistent ' +
+        '"Privacy choices" control reopens it); re-consent when the policy version changes; Global Privacy Control honoured; ' +
+        'notice in English AND Hindi by default; the Privacy Policy link and the DPDP grievance contact on the banner. ' +
+        'Use it whenever an app has analytics, ads, chat widgets or embeds, or the user asks for a cookie banner / ' +
+        'DPDP / GDPR compliance. After wiring, convert EVERY third-party script tag and add the footer link the result names.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          appName: { type: 'string', description: 'Shown in the notice ("<app> uses cookies…"). Defaults to "This site".' },
+          policyUrl: { type: 'string', description: 'Path of the Privacy Policy page in the app (default /privacy). Make sure it exists.' },
+          grievanceEmail: { type: 'string', description: 'DPDP grievance / data-questions contact shown on the banner (optional).' },
+          language: { type: 'string', enum: ['en', 'hi', 'both'], description: 'Notice language. Default both (English + Hindi).' },
+          purposes: { type: 'array', items: { type: 'string', enum: ['analytics', 'marketing', 'personalization'] }, description: 'Non-essential purposes the app actually uses. Default analytics + marketing.' },
+          policyVersion: { type: 'string', description: 'Version stamped on every stored choice; change it to ask everyone again. Default: today.' },
+        },
+      },
     },
     {
       name: 'generate_activity_feed',
@@ -3355,6 +3383,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_short_links',
   'generate_feedback',
   'generate_consent',
+  'generate_consent_banner',
   'generate_activity_feed',
   'generate_cart',
   'generate_reactions',

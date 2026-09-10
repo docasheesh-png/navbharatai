@@ -100,6 +100,10 @@ export interface HostingChooserProps {
    * says so instead of showing an empty history as "nothing to go back to".
    */
   onLoadRollbackChoices?: () => Promise<RollbackChoiceView[] | null>;
+  /** Site settings (ROADMAP §13, 1.6): redirects, embedding. Null when they could not be read. */
+  onLoadSiteConfig?: () => Promise<SiteConfigView | null>;
+  /** Save them; resolves to the server's errors (empty on success) and its message. */
+  onSaveSiteConfig?: (config: SiteConfigView) => Promise<{ errors: string[]; message?: string }>;
   /**
    * Visitor counts for the live app (ROADMAP §13, 1.1). `undefined`/`null` = not loaded yet;
    * `available: false` = NavBharatAI could not read them, which the tile says in words — a zero it
@@ -189,11 +193,14 @@ export interface SiteAnalyticsView {
 /** One version the live app may go back to — the server's `choices` shape. */
 export interface RollbackChoiceView { versionName: string; releaseTime: string | null; live: boolean }
 
+/** A published app's site settings — the server's shape (ROADMAP §13, 1.6). */
+export interface SiteConfigView { redirects: Array<{ from: string; to: string; code: 301 | 302 }>; allowEmbedding: boolean }
+
 const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI hosting"
 
 export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr,
-  liveUrl, onUnpublish, onRollback, onLoadMyApps, onUnpublishApp, siteAnalytics, onLoadSiteAnalytics, onLoadRollbackChoices,
+  liveUrl, onUnpublish, onRollback, onLoadMyApps, onUnpublishApp, siteAnalytics, onLoadSiteAnalytics, onLoadRollbackChoices, onLoadSiteConfig, onSaveSiteConfig,
   ownRepo, githubConnected, onConnectGitHub, onRepoPushed, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
   onMakeIcon, publishRefusalCode, backendKeySource, deployRepo,
 }: HostingChooserProps) {
@@ -205,6 +212,28 @@ export function HostingChooser({
   // back, and a list nobody asked for is a request nobody needed. `undefined` = not asked yet,
   // `null` = asked and could not be read (said in words, never shown as an empty history).
   const [historyOpen, setHistoryOpen] = useState(false);
+  // SITE SETTINGS (ROADMAP §13, 1.6). Loaded when opened; saved explicitly; the server's own errors
+  // shown verbatim; the one honest line — settings reach the live site on the NEXT publish.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [siteCfg, setSiteCfg] = useState<SiteConfigView | null | undefined>(undefined);
+  const [cfgErrors, setCfgErrors] = useState<string[]>([]);
+  const [cfgNote, setCfgNote] = useState('');
+  const [cfgBusy, setCfgBusy] = useState(false);
+  const openSettings = async () => {
+    setSettingsOpen(true); setCfgErrors([]); setCfgNote('');
+    if (!onLoadSiteConfig) return;
+    setSiteCfg(undefined);
+    setSiteCfg(await onLoadSiteConfig().catch(() => null));
+  };
+  const saveSettings = async () => {
+    if (!onSaveSiteConfig || !siteCfg) return;
+    setCfgBusy(true); setCfgErrors([]); setCfgNote('');
+    try {
+      const r = await onSaveSiteConfig(siteCfg);
+      setCfgErrors(r.errors);
+      if (r.errors.length === 0) setCfgNote(r.message || 'Saved. Publish again for these settings to reach your live site.');
+    } finally { setCfgBusy(false); }
+  };
   const [choices, setChoices] = useState<RollbackChoiceView[] | null | undefined>(undefined);
   const [pickedVersion, setPickedVersion] = useState<string | null>(null);
   const openHistory = async () => {
@@ -1118,6 +1147,69 @@ export function HostingChooser({
                       </ul>
                     )}
                     <p className="text-[10px] text-zinc-500">Nothing is deleted — going back adds a new entry, so you can come forward again.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SITE SETTINGS (ROADMAP §13, 1.6): redirects, embedding, and the 404 note. Offered only
+                on our hosting; validated by the SERVER (validateSiteConfig) so the screen never has to
+                be the last line of defence against an open redirect. */}
+            {onLoadSiteConfig && onSaveSiteConfig && (
+              <div className="pt-1">
+                {!settingsOpen ? (
+                  <button onClick={() => void openSettings()} disabled={busy}
+                    className="w-full py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-600 text-zinc-500 hover:text-zinc-300 text-[11px] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                    Site settings — redirects, embedding, 404
+                  </button>
+                ) : (
+                  <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-2.5 flex flex-col gap-2" data-testid="site-settings">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-zinc-200">Site settings</span>
+                      <button onClick={() => setSettingsOpen(false)} className="text-[10px] text-zinc-500 hover:text-zinc-300">close</button>
+                    </div>
+                    {siteCfg === undefined ? (
+                      <p className="text-[10.5px] text-zinc-500">Loading…</p>
+                    ) : siteCfg === null ? (
+                      <p className="text-[10.5px] text-amber-200/90">Your settings could not be read just now. Try again in a moment.</p>
+                    ) : (
+                      <>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-semibold text-zinc-300 uppercase tracking-widest">Redirects</span>
+                          {siteCfg.redirects.length === 0 && <p className="text-[10px] text-zinc-500">None yet. Send an old address to a new one — visitors with the old link still arrive.</p>}
+                          {siteCfg.redirects.map((r, i) => (
+                            <div key={i} className="flex items-center gap-1">
+                              <input value={r.from} placeholder="/old-page" onChange={(e) => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)) })}
+                                className="flex-1 min-w-0 bg-zinc-950 border border-zinc-700 rounded px-1.5 py-1 text-[10.5px] text-zinc-200 font-mono outline-none focus:border-zinc-500" />
+                              <span className="text-zinc-500 text-[10px]">→</span>
+                              <input value={r.to} placeholder="/new-page or https://…" onChange={(e) => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)) })}
+                                className="flex-1 min-w-0 bg-zinc-950 border border-zinc-700 rounded px-1.5 py-1 text-[10.5px] text-zinc-200 font-mono outline-none focus:border-zinc-500" />
+                              <select value={r.code} onChange={(e) => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.map((x, j) => (j === i ? { ...x, code: e.target.value === '302' ? 302 : 301 } : x)) })}
+                                className="bg-zinc-950 border border-zinc-700 rounded px-1 py-1 text-[10px] text-zinc-300">
+                                <option value={301}>301 permanent</option>
+                                <option value={302}>302 temporary</option>
+                              </select>
+                              <button onClick={() => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.filter((_, j) => j !== i) })} className="text-zinc-500 hover:text-red-400 text-[11px] px-1" title="Remove">×</button>
+                            </div>
+                          ))}
+                          <button onClick={() => setSiteCfg({ ...siteCfg, redirects: [...siteCfg.redirects, { from: '', to: '', code: 301 }] })} disabled={siteCfg.redirects.length >= 50}
+                            className="self-start text-[10px] text-zinc-400 hover:text-zinc-200 disabled:opacity-40">+ add a redirect</button>
+                        </div>
+                        <label className="flex items-start gap-2 text-[10.5px] text-zinc-300">
+                          <input type="checkbox" checked={siteCfg.allowEmbedding} onChange={(e) => setSiteCfg({ ...siteCfg, allowEmbedding: e.target.checked })} className="mt-0.5" />
+                          <span>Allow other websites to embed this app in a frame. <span className="text-zinc-500">Off by default — that is what stops a stranger's site from framing yours.</span></span>
+                        </label>
+                        <p className="text-[10px] text-zinc-500 leading-relaxed">
+                          404 pages: a multi-page site that includes a <span className="font-mono">404.html</span> gets it served for missing pages. A single-page app handles missing pages in its own router, so nothing changes there.
+                        </p>
+                        {cfgErrors.length > 0 && <ul className="text-[10.5px] text-red-300 list-disc pl-4">{cfgErrors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
+                        {cfgNote && <p className="text-[10.5px] text-emerald-300">{cfgNote}</p>}
+                        <button onClick={() => void saveSettings()} disabled={cfgBusy}
+                          className="self-start px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white text-[11px] font-semibold disabled:opacity-50">
+                          {cfgBusy ? 'Saving…' : 'Save settings'}
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

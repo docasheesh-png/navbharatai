@@ -12,7 +12,7 @@ const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ d
 import { Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Github, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
-import type { SiteAnalyticsView, RollbackChoiceView } from './HostingChooser';
+import type { SiteAnalyticsView, RollbackChoiceView, SiteConfigView } from './HostingChooser';
 import { PublishCelebration } from './PublishCelebration';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 import { auth as firebaseAuth } from '../../lib/firebase';
@@ -3077,6 +3077,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
   };
 
+  /** Site settings (ROADMAP §13, 1.6): read and save through the owner-checked routes. */
+  const loadSiteConfig = async (): Promise<SiteConfigView | null> => {
+    if (!state.workspaceId) return null;
+    try {
+      const res = await fetch('/api/agentv3/site-config', { method: 'POST', headers: await authJsonHeaders(), body: JSON.stringify({ workspaceId: state.workspaceId, userId, email }) });
+      const data = await res.json().catch(() => null);
+      return res.ok && data?.config ? data.config : null;
+    } catch { return null; }
+  };
+  const saveSiteConfig = async (config: SiteConfigView): Promise<{ errors: string[]; message?: string }> => {
+    if (!state.workspaceId) return { errors: ['No app selected.'] };
+    try {
+      const res = await fetch('/api/agentv3/site-config/save', { method: 'POST', headers: await authJsonHeaders(), body: JSON.stringify({ workspaceId: state.workspaceId, userId, email, config }) });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) return { errors: Array.isArray(data?.errors) ? data.errors : [data?.error || 'Could not save the settings.'] };
+      return { errors: [], message: typeof data?.message === 'string' ? data.message : undefined };
+    } catch { return { errors: ['Could not reach NavBharatAI. Check your connection and try again.'] }; }
+  };
+
   const rollbackLive = async (versionName?: string): Promise<void> => {
     if (!state.workspaceId) return;
     setPublishMsg(versionName ? 'Bringing that version back…' : 'Bringing back the previous version…');
@@ -3724,6 +3743,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           onUnpublish={unpublishLive}
           onRollback={rollbackLive}
           onLoadRollbackChoices={loadRollbackChoices}
+          onLoadSiteConfig={loadSiteConfig}
+          onSaveSiteConfig={saveSiteConfig}
           siteAnalytics={siteAnalytics}
           onLoadSiteAnalytics={loadSiteAnalytics}
           onLoadMyApps={loadMyPublishedApps}

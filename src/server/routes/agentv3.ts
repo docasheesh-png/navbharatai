@@ -4,6 +4,8 @@ import express from 'express';
 import { HIT_PATH, parseHit, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
 import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
+import { validateSiteConfig, DEFAULT_SITE_CONFIG, MAX_REDIRECTS } from '../AgentV3/siteConfig';
+import { siteConfigStore } from '../AgentV3/siteConfigStore';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
 import { recordPlatformBuild } from '../lib/platformBuildMetrics';
@@ -7117,6 +7119,49 @@ async function noteBuildOutcome(
     if (!siteAnalyticsEnabled()) { res.json({ available: false, reason: 'disabled' }); return; }
     const days = Math.min(30, Math.max(1, Math.floor(Number(req.body?.days) || 7)));
     res.json(await siteAnalyticsStore.summary(siteIdForWorkspace(workspaceId), days));
+  });
+
+  // ═══ SITE SETTINGS — redirects, embedding, a real 404 (ROADMAP §13, 1.6) ═══
+  //
+  // Read and saved by the app's verified OWNER only; validated by the pure `validateSiteConfig`, so
+  // a rule that could turn the site into an open redirect never reaches the store, let alone the
+  // host. Settings take effect on the NEXT publish — the response says so rather than implying the
+  // live site changed.
+  app.post('/api/agentv3/site-config', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const saved = await siteConfigStore.get(workspaceId);
+    res.json({ config: saved ?? DEFAULT_SITE_CONFIG, maxRedirects: MAX_REDIRECTS });
+  });
+
+  app.post('/api/agentv3/site-config/save', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const { config, errors } = validateSiteConfig(req.body?.config);
+    if (!config) { res.status(400).json({ ok: false, errors }); return; }
+    const stored = await siteConfigStore.set(workspaceId, userId ?? '', config);
+    if (!stored) { res.status(503).json({ ok: false, errors: ['Your settings could not be saved just now. Nothing was changed — try again in a moment.'] }); return; }
+    res.json({ ok: true, config, message: 'Saved. Publish again for these settings to reach your live site.' });
   });
 
   app.post('/api/agentv3/rollback-status', workspaceRateLimiter(), async (req: Request, res: Response) => {

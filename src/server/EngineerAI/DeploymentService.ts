@@ -20,6 +20,7 @@ import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
 import axios, { AxiosError } from 'axios';
+import { hostingVersionConfig, type HostingVersionConfig } from '../AgentV3/siteConfig';
 
 const gzip = promisify(zlib.gzip);
 
@@ -59,8 +60,11 @@ export class DeploymentService {
     // 1. Ensure the per-workspace channel exists (idempotent — 409 = already there).
     await this.ensureChannel(site, channelId, authHeaders);
 
-    // 2. Create a new version with SPA rewrite config.
-    const versionName = await this.createVersion(site, authHeaders);
+    // 2. Create a new version. The config is the SAME form the v5 deployer uses (siteConfig.ts):
+    //    the SPA catch-all unless the bundle is a multi-page site with its own 404.html, the asset
+    //    cache, and the safe headers every first-party publish gets. Engineer AI has no per-app
+    //    settings, so the user half is null here — the defaults are what a publish deserves.
+    const versionName = await this.createVersion(site, authHeaders, hostingVersionConfig(files, null));
     const versionId = versionName.split('/').pop()!;
 
     // 3. Hash every file (SHA256 hex). Firebase uses hashes as deduplication keys —
@@ -152,19 +156,10 @@ export class DeploymentService {
     }
   }
 
-  private async createVersion(site: string, headers: Record<string, string>): Promise<string> {
+  private async createVersion(site: string, headers: Record<string, string>, config: HostingVersionConfig): Promise<string> {
     const resp = await axios.post<{ name: string }>(
       `${HOSTING_API}/sites/${site}/versions`,
-      {
-        config: {
-          // SPA catch-all rewrite so client-side routing works.
-          rewrites: [{ glob: '**', path: '/index.html' }],
-          headers: [
-            // Immutable cache for hashed JS/CSS bundles (Vite default naming).
-            { glob: '/assets/**', headers: { 'Cache-Control': 'max-age=31536000,immutable' } },
-          ],
-        },
-      },
+      { config },
       { headers },
     );
     return resp.data.name; // "sites/{site}/versions/{versionId}"

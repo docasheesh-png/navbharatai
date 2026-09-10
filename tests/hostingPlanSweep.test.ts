@@ -112,11 +112,24 @@ describe('messages (White-Label: NavBharatAI terms only)', () => {
   it('reminder names the shortfall when short, reassures when covered; lapse says the app survived', () => {
     expect(reminderMessage(5, NOW, 50)).toContain('₹50 short');
     expect(reminderMessage(5, NOW, 0)).toContain('automatically');
+    // NOTHING PAUSED — the old, domain-only lapse. The app survived and the message says so.
     const lapse = lapseMessage(['mitrify.in']);
     expect(lapse).toContain('mitrify.in');
-    expect(lapse).toContain('still live on its free NavBharatAI link');
-    expect(lapse).toContain('reconnects automatically');
-    for (const msg of [reminderMessage(5, NOW, 50), lapseMessage(['x.in'])]) {
+    expect(lapse).toContain('still live on their free NavBharatAI links');
+    expect(lapse).toContain('reconnects on its own');
+
+    // APPS PAUSED (2026-09-10 demotion) — the message must carry the second piece of bad news AND
+    // its limits, because bad news that omits the limits of the damage reads as worse than it is.
+    const demoted = lapseMessage(['mitrify.in'], 'growth', 3);
+    expect(demoted).toContain('3 apps');
+    expect(demoted).toContain('nothing was deleted');
+    expect(demoted).toContain('your files are all still here');
+    expect(demoted).toContain('open it and press Publish');
+    expect(demoted).toContain('Growth');
+    // Singular reads correctly too — "1 apps have been paused" is the kind of detail users notice.
+    expect(lapseMessage([], 'starter', 1)).toContain('1 app has been paused');
+
+    for (const msg of [reminderMessage(5, NOW, 50), lapseMessage(['x.in']), lapseMessage(['x.in'], 'growth', 2)]) {
       expect(msg.toLowerCase()).not.toMatch(/firebase|cloudflare|google/);
     }
   });
@@ -158,6 +171,103 @@ describe('sweepOneWallet', () => {
     expect(events.some((e) => e.startsWith('notify u1'))).toBe(true);
     expect(events.some((e) => e.includes('old.in'))).toBe(false); // idempotent: never re-detached
     expect(docs['user_token_wallets/u1'].hostingPlan.lapsedAt).toBeTruthy(); // persisted
+  });
+
+  it('🔒 a lapse DEMOTES to the free allowance: apps above it really go offline, the rest stay', async () => {
+    // Admin 2026-09-10: "month complete ho gaya, tab to app offline honi chahiye." The demotion is the
+    // FAIR version of that — back to exactly what a free account gets, never below it, so paying once
+    // can never leave someone worse off than never paying.
+    const docs: Record<string, any> = {
+      'user_token_wallets/u1': wallet(100, plan(-(HOSTING_PLAN_GRACE_DAYS + 1))),
+    };
+    const paused: string[] = [];
+    let notice = '';
+    // Seven live apps, one of them holding the custom domain. The free cap is 5, so two must go.
+    const apps = [
+      { workspaceId: 'w-domain', status: 'active', updatedAt: 1 },       // oldest, but has the domain
+      { workspaceId: 'w-6', status: 'active', updatedAt: 60 },
+      { workspaceId: 'w-5', status: 'active', updatedAt: 50 },
+      { workspaceId: 'w-4', status: 'active', updatedAt: 40 },
+      { workspaceId: 'w-3', status: 'active', updatedAt: 30 },
+      { workspaceId: 'w-2', status: 'active', updatedAt: 20 },
+      { workspaceId: 'w-1', status: 'active', updatedAt: 10 },
+      { workspaceId: 'w-gone', status: 'unpublished', updatedAt: 99 },   // not live — holds no slot
+    ];
+    _setSweepDepsForTests({
+      linksForUser: async () => [{ domain: 'mitrify.in', workspaceId: 'w-domain', userId: 'u1' }],
+      detachDomain: async () => {},
+      setSuspended: async () => {},
+      appsForUser: async () => apps,
+      pauseApp: async (ws) => { paused.push(ws); },
+      notify: async (_u, msg) => { notice = msg; },
+    });
+    expect(await sweepOneWallet(fakeAdminDb(docs), 'u1')).toEqual({ kind: 'lapse' });
+
+    // Exactly the two least-defensible apps, and NEVER the one with a real domain pointed at it.
+    expect(paused.sort()).toEqual(['w-1', 'w-2']);
+    expect(paused).not.toContain('w-domain');
+    // An already-unpublished app was never live, so pausing it would be an action that does nothing.
+    expect(paused).not.toContain('w-gone');
+    // The user is told the count and the limits of the damage.
+    expect(notice).toContain('2 apps');
+    expect(notice).toContain('nothing was deleted');
+  });
+
+  it('one app that refuses to come down does not stop the rest, and is never marked paused', async () => {
+    // The registry must never claim "paused" over a site that is still serving — the fake status the
+    // unpublish route warns about. A throw leaves it live AND active, so the next sweep retries it.
+    const docs: Record<string, any> = {
+      'user_token_wallets/u1': wallet(100, plan(-(HOSTING_PLAN_GRACE_DAYS + 1))),
+    };
+    const paused: string[] = [];
+    let notice = '';
+    _setSweepDepsForTests({
+      linksForUser: async () => [],
+      appsForUser: async () => Array.from({ length: 8 }, (_, i) => ({
+        workspaceId: `w-${i}`, status: 'active', updatedAt: 100 - i,
+      })),
+      pauseApp: async (ws) => {
+        if (ws === 'w-6') throw new Error('hosting said no');
+        paused.push(ws);
+      },
+      notify: async (_u, msg) => { notice = msg; },
+    });
+    expect(await sweepOneWallet(fakeAdminDb(docs), 'u1')).toEqual({ kind: 'lapse' });
+    expect(paused).toEqual(['w-5', 'w-7']);          // w-6 threw; the others still went down
+    expect(notice).toContain('2 apps');              // the count is what REALLY happened, not what was tried
+  });
+
+  it('a lapse for a user at or under the free allowance pauses nothing at all', async () => {
+    const docs: Record<string, any> = {
+      'user_token_wallets/u1': wallet(100, plan(-(HOSTING_PLAN_GRACE_DAYS + 1))),
+    };
+    const paused: string[] = [];
+    let notice = '';
+    _setSweepDepsForTests({
+      linksForUser: async () => [],
+      appsForUser: async () => [{ workspaceId: 'only-one', status: 'active', updatedAt: 1 }],
+      pauseApp: async (ws) => { paused.push(ws); },
+      notify: async (_u, msg) => { notice = msg; },
+    });
+    await sweepOneWallet(fakeAdminDb(docs), 'u1');
+    expect(paused).toEqual([]);
+    expect(notice).toContain('still live on their free NavBharatAI links');
+  });
+
+  it('the domain half of a lapse survives even if listing the apps blows up', async () => {
+    const docs: Record<string, any> = {
+      'user_token_wallets/u1': wallet(100, plan(-(HOSTING_PLAN_GRACE_DAYS + 1))),
+    };
+    const events: string[] = [];
+    _setSweepDepsForTests({
+      linksForUser: async () => [{ domain: 'x.in', workspaceId: 'w', userId: 'u1' }],
+      detachDomain: async (_ws, d) => { events.push(`detach ${d}`); },
+      setSuspended: async () => {},
+      appsForUser: async () => { throw new Error('store down'); },
+      notify: async () => {},
+    });
+    expect(await sweepOneWallet(fakeAdminDb(docs), 'u1')).toEqual({ kind: 'lapse' });
+    expect(events).toContain('detach x.in'); // the half that already succeeded is never undone
   });
 
   it('a due reminder notifies once and persists the marker', async () => {

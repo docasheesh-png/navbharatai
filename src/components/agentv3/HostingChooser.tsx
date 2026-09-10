@@ -116,7 +116,17 @@ export interface HostingChooserProps {
    * Load every app this USER has live. Keyed by user rather than workspace on purpose — an app whose
    * chat was deleted has nothing pointing at it, and this list is the only way back to it.
    */
-  onLoadMyApps?: () => Promise<{ apps: Array<{ workspaceId: string; url: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }>; used: number; cap: number } | null>;
+  onLoadMyApps?: () => Promise<{
+    apps: Array<{ workspaceId: string; url: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }>;
+    used: number;
+    cap: number;
+    /** Apps a plan lapse took offline — listed separately because they hold no slot and have no URL. */
+    paused?: Array<{ workspaceId: string; url: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }>;
+    /** The free allowance, so the copy can name the number the user fell back to. */
+    freeCap?: number;
+    /** The plan the user holds, or null on the free tier. */
+    planName?: string | null;
+  } | null>;
   /** Take ONE of them offline by workspace id. Resolves to '' on success, or an honest message. */
   onUnpublishApp?: (workspaceId: string) => Promise<string>;
   /** Set once this workspace is storing its code in the user's OWN GitHub repo (git-native storage). */
@@ -249,7 +259,8 @@ export function HostingChooser({
   // MY PUBLISHED APPS (admin 2026-08-21). Loaded on demand, because most people opening Publish are
   // here to publish, not to audit — and a list nobody asked for is a request nobody needed.
   const [myApps, setMyApps] = useState<Array<{ workspaceId: string; url: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }> | null>(null);
-  const [myAppsMeta, setMyAppsMeta] = useState<{ used: number; cap: number } | null>(null);
+  const [myAppsMeta, setMyAppsMeta] = useState<{ used: number; cap: number; freeCap?: number; planName?: string | null } | null>(null);
+  const [myPausedApps, setMyPausedApps] = useState<Array<{ workspaceId: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }>>([]);
   const [myAppsErr, setMyAppsErr] = useState('');
   const [myAppsBusy, setMyAppsBusy] = useState('');
   // Unpublish: two-step, because taking a public site down is irreversible from the visitor's side —
@@ -753,7 +764,9 @@ export function HostingChooser({
             <div className="flex items-baseline justify-between gap-2">
               <h4 className="text-[13px] font-bold text-white">Your published apps</h4>
               {myAppsMeta && (
-                <span className="text-[11px] text-zinc-400">{myAppsMeta.used} of {myAppsMeta.cap} free slots used</span>
+                <span className="text-[11px] text-zinc-400">
+                  {myAppsMeta.used} of {myAppsMeta.cap} {myAppsMeta.planName ? `${myAppsMeta.planName} slots` : 'free slots'} used
+                </span>
               )}
             </div>
 
@@ -764,6 +777,39 @@ export function HostingChooser({
                 You have no apps published on NavBharatAI right now. Publishing one puts it at a permanent
                 link you can share.
               </p>
+            )}
+
+            {/*
+              PAUSED BY A LAPSED PLAN. These have no URL and hold no slot, so they cannot sit in the
+              list above — but they must be VISIBLE, or an app that vanished from every screen when
+              the plan ended would look deleted, and the user could never find it again.
+
+              There is deliberately no "Restore" button here: republishing re-runs a real build, which
+              happens by opening the app and pressing Publish. A button that only *looked* like a
+              one-tap restore would be the built-but-not-working state this project forbids — so the
+              copy says exactly what to do instead.
+            */}
+            {myPausedApps.length > 0 && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                <p className="text-[12px] font-bold text-amber-200">
+                  {myPausedApps.length} app{myPausedApps.length === 1 ? '' : 's'} paused — your plan ended
+                </p>
+                <p className="text-[11px] text-zinc-300 leading-relaxed">
+                  You are back on the free {myAppsMeta?.freeCap ?? 5} published apps, so these went
+                  offline. <span className="text-white font-semibold">Nothing was deleted</span> — all
+                  your files are still here. Renew a plan in Billing → Plans, then open each app and
+                  press Publish to put it back online.
+                </p>
+                <div className="space-y-1">
+                  {myPausedApps.map((a) => (
+                    <p key={a.workspaceId} className="text-[11px] text-zinc-400 break-all">
+                      • {a.workspaceId}
+                      {a.updatedAt ? ` · last updated ${new Date(a.updatedAt).toLocaleDateString()}` : ''}
+                      {a.orphaned ? ' · its chat was deleted, so it cannot be reopened' : ''}
+                    </p>
+                  ))}
+                </div>
+              </div>
             )}
 
             {myApps?.map((a) => (
@@ -1331,12 +1377,13 @@ export function HostingChooser({
               <button
                 onClick={() => {
                   setView('myapps');
-                  setMyApps(null); setMyAppsErr(''); setMyAppsMeta(null);
+                  setMyApps(null); setMyAppsErr(''); setMyAppsMeta(null); setMyPausedApps([]);
                   void onLoadMyApps()
                     .then((r) => {
                       if (!r) { setMyAppsErr('Could not load your published apps. Please try again.'); return; }
                       setMyApps(r.apps);
-                      setMyAppsMeta({ used: r.used, cap: r.cap });
+                      setMyPausedApps(Array.isArray(r.paused) ? r.paused : []);
+                      setMyAppsMeta({ used: r.used, cap: r.cap, freeCap: r.freeCap, planName: r.planName });
                     })
                     .catch(() => setMyAppsErr('Could not load your published apps. Please try again.'));
                 }}

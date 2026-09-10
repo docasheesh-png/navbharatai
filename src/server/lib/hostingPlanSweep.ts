@@ -2,16 +2,26 @@
  * Hosting-plan lifecycle sweep (admin 2026-08-06: "jab app down hategi hi nahi, to user renewal kyu
  * karega? … 5 din pahle reminder"). The enforcement that makes the ₹99 plan a real subscription:
  *
- *   T-5d / T-1d  → renewal reminder (in-app notification; names the exact ₹ shortfall when the
+ *   T-5d/3d/1d   → renewal reminder (in-app notification; names the exact ₹ shortfall when the
  *                  wallet cannot cover it — the user knows precisely what to do).
  *   T-0          → lazy auto-renew fires wherever the plan is next read; the sweep also tries it.
- *   T+3d (grace) → still unpaid ⇒ the LAPSE: every custom domain of that user is DETACHED from
- *                  hosting (the paid feature stops), the link is marked suspended, the user is told.
- *                  THE APP ITSELF NEVER GOES DOWN — it stays live on its free NavBharatAI URL with
- *                  the badge; only the paid domain pauses. An angry user with a dead app leaves; a
- *                  user whose vanity domain paused recharges and comes back.
- *   re-purchase  → suspended domains are RE-ATTACHED automatically (reattachSuspendedDomains) —
- *                  renewal undoes the lapse without a single manual step.
+ *   T+0..3d      → ONE grace message: the plan HAS ended, N days before the domain pauses.
+ *   T+3d (grace) → still unpaid ⇒ the LAPSE, which is a DEMOTION TO THE FREE TIER:
+ *                    • every custom domain of that user is DETACHED and marked suspended, and
+ *                    • apps above the FREE published-app allowance are genuinely taken offline
+ *                      (channel deleted, marked `plan_paused` — files kept, nothing deleted).
+ *   re-purchase  → suspended domains are RE-ATTACHED automatically (reattachSuspendedDomains);
+ *                  paused apps go back up when the owner opens one and presses Publish. That step is
+ *                  MANUAL on purpose: republishing re-runs a real sandbox build, so auto-restoring a
+ *                  dozen apps inside a sweep would spend real money and fail often. A button that only
+ *                  looked like a one-tap restore would be worse than the honest instruction.
+ *
+ * ⚠️ THE LINE THAT USED TO STAND HERE — "THE APP ITSELF NEVER GOES DOWN" — IS NO LONGER TRUE, and it
+ * is replaced rather than deleted so the change of policy is legible. Admin 2026-09-10: "user ka month
+ * complete ho gaya, tab to app offline honi chahiye, nahi to user recharge hi nahi karega." The
+ * demotion is the version of that which is FAIR: a lapsed payer falls back to exactly what a free
+ * account gets, never below it. Switching them off entirely would have left someone who paid strictly
+ * worse than someone who never paid a rupee, and their site's own visitors would have paid for it too.
  *
  * Scheduling is two-layered, honestly bounded by our infra (no external cron exists):
  *   • a periodic in-process sweep (registered at boot beside the wallet routes), and
@@ -29,15 +39,30 @@ import { doc, runTransaction, getServerDb } from './serverDb';
 import {
   decidePlanSweepStep, hostingPlansEnabled, planPriceInr, planDays,
   invalidatePlanCache, type PlanSweepAction, type HostingPlanRecord,
+  appsToPauseOnLapse, type PausableApp,
 } from './hostingPlan';
 import { LEGACY_HOSTING_PLAN_ID, isKnownPlanId, tierForPlanId } from '../../lib/hostingTiers';
 import { saveNotification } from './AdminNotificationStore';
 import { firebaseDomainLinksForUser, setDomainSuspended, type DomainLinkRecord } from './firebaseDomainLink';
 import { deleteCustomDomain, attachCustomDomain } from './firebaseCustomDomain';
+import { publishedAppCap } from './HostingQuota';
+import { deploymentStore } from '../AgentV3/DeploymentStore';
+import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
 
 export interface SweepDeps {
   notify: (userId: string, message: string) => Promise<unknown>;
   detachDomain: (workspaceId: string, domain: string) => Promise<unknown>;
+  /** Every deployment record this user holds — the input to the lapse demotion. */
+  appsForUser: (userId: string) => Promise<PausableApp[]>;
+  /**
+   * Take ONE app genuinely offline: delete its live Hosting channel, then mark it `plan_paused`.
+   *
+   * 🔒 THE CHANNEL DELETE MUST SUCCEED BEFORE THE REGISTRY MOVES. A record saying "paused" over a
+   * site that is still serving is the fake status this codebase's own unpublish route warns about —
+   * and here it would be worse, because the user would be told to renew to get back something that
+   * never went away. Throwing leaves the app live AND active, which the next sweep retries.
+   */
+  pauseApp: (workspaceId: string) => Promise<unknown>;
   /** `redirectTarget` is the canonical host when re-attaching a `www` twin (ROADMAP §13, 1.2). */
   attachDomain: (workspaceId: string, domain: string, redirectTarget?: string) => Promise<unknown>;
   linksForUser: (userId: string) => Promise<DomainLinkRecord[]>;
@@ -58,6 +83,12 @@ const realDeps: SweepDeps = {
   attachDomain: (workspaceId, domain, redirectTarget) => attachCustomDomain(workspaceId, domain, redirectTarget ? { redirectTarget } : undefined),
   linksForUser: (userId) => firebaseDomainLinksForUser(userId),
   setSuspended: (domain, reason) => setDomainSuspended(domain, reason),
+  appsForUser: (userId) => deploymentStore.listByUser(userId, 500),
+  pauseApp: async (workspaceId) => {
+    // Real removal first — see the interface note. If this throws, nothing is marked.
+    await new FirebaseHostingDeployer().deleteChannel(workspaceId);
+    await deploymentStore.setStatus(workspaceId, 'plan_paused');
+  },
   now: () => new Date(),
 };
 
@@ -107,9 +138,26 @@ export function graceMessage(graceDaysLeft: number, shortfallInr: number, planId
     : `Your ${label} plan has ended. You have ${window} left to renew before your domain pauses — ₹${price} from your wallet, and nothing is interrupted. Your app stays live on its free NavBharatAI link either way.`;
 }
 
-export function lapseMessage(domains: string[], planId?: string | null): string {
+/**
+ * The lapse message.
+ *
+ * ⚠️ IT NOW CARRIES TWO DIFFERENT PIECES OF BAD NEWS, and conflating them would leave the user
+ * guessing which happened to them: the domain always pauses, and apps ABOVE the free allowance are
+ * paused too. It names the COUNT rather than the list — a user with fifteen paused apps does not want
+ * fifteen names in a notification, and the published-apps screen has the list.
+ *
+ * It also says, in the same breath, what did NOT happen: nothing was deleted, and the free apps are
+ * still live. Bad news that omits the limits of the damage reads as worse than it is.
+ */
+export function lapseMessage(domains: string[], planId?: string | null, pausedApps = 0): string {
   const list = domains.length ? ` (${domains.join(', ')})` : '';
-  return `Your ${planLabel(planId)} plan has ended, so your domain${domains.length === 1 ? '' : 's'}${list} ${domains.length === 1 ? 'is' : 'are'} paused. Your app is still live on its free NavBharatAI link — nothing was deleted. Renew the plan from Billing → Plans and your domain reconnects automatically.`;
+  const domainPart = domains.length
+    ? `your domain${domains.length === 1 ? '' : 's'}${list} ${domains.length === 1 ? 'is' : 'are'} paused`
+    : 'your plan benefits have stopped';
+  const appPart = pausedApps > 0
+    ? ` You are back on the free ${publishedAppCap()} published apps, so ${pausedApps} app${pausedApps === 1 ? '' : 's'} ${pausedApps === 1 ? 'has' : 'have'} been paused — nothing was deleted, and your files are all still here.`
+    : ' Your apps are still live on their free NavBharatAI links — nothing was deleted.';
+  return `Your ${planLabel(planId)} plan has ended, so ${domainPart}.${appPart} Renew from Billing → Plans: your domain reconnects on its own, and a paused app goes back online when you open it and press Publish.`;
 }
 
 export function renewedMessage(planId?: string | null): string {
@@ -157,7 +205,29 @@ export async function sweepOneWallet(db: any, walletDocId: string): Promise<Plan
           detached.push(link.domain);
         } catch { /* one stubborn domain must not block the rest; the next sweep retries it */ }
       }
-      await _deps.notify(userId, lapseMessage(detached, outcome.planId)).catch(() => null);
+      /**
+       * THE DEMOTION (admin 2026-09-10). Back to the free allowance: apps above it go genuinely
+       * offline. Domain-holding apps keep the free slots — see `appsToPauseOnLapse` for why.
+       *
+       * `links` is read BEFORE suspension above, which is exactly "which apps had a real domain
+       * pointed at them"; suspending the domain does not change that fact.
+       *
+       * Bounded and forgiving: one app that refuses to come down must not stop the rest, and it stays
+       * ACTIVE (never marked paused) so the next sweep retries it instead of lying about it.
+       */
+      const pausedIds: string[] = [];
+      try {
+        const apps = await _deps.appsForUser(userId);
+        const domainOwners = links.map((l) => l.workspaceId);
+        for (const workspaceId of appsToPauseOnLapse(apps, publishedAppCap(), domainOwners)) {
+          try {
+            await _deps.pauseApp(workspaceId);
+            pausedIds.push(workspaceId);
+          } catch { /* stays live and active; the next sweep tries again */ }
+        }
+      } catch { /* the domain half of the lapse already happened and must not be undone by this */ }
+
+      await _deps.notify(userId, lapseMessage(detached, outcome.planId, pausedIds.length)).catch(() => null);
     }
     return action;
   } catch {

@@ -34,8 +34,17 @@ import { audit } from '../lib/audit';
  *
  * Both are non-'active', so both correctly read as NOT live (isLiveDeployment) and both free the
  * user's slot in the hosting caps (liveAppCount / liveStorageMb skip anything not active).
+ *
+ * ⚠️ 'plan_paused' is a THIRD distinct thing (2026-09-10), and collapsing it into either of the above
+ * would be a lie in one of two directions. It is not a punishment, so the republish block that guards
+ * 'taken_down' must never apply to it; and it is not the owner's choice, so telling them they
+ * unpublished their own app would be false. It means: the hosting plan ended, the user is back on the
+ * free allowance, and this app was over it — the files are kept and it comes back on renewal.
+ *
+ * It is non-'active' like the others, so it correctly reads as not live and frees the user's slot —
+ * which is the whole point, since the slot is what they stopped paying for.
  */
-export type DeploymentStatus = 'active' | 'held' | 'taken_down' | 'unpublished';
+export type DeploymentStatus = 'active' | 'held' | 'taken_down' | 'unpublished' | 'plan_paused';
 
 export interface DeploymentRecord {
   workspaceId: string;
@@ -268,6 +277,34 @@ export interface PublishedAppSummary {
  * and the count it produces must be the SAME count the five-app cap enforces (`liveAppCount`), or the
  * screen says "3 of 5 used" while a publish is refused. Pure, so both can be pinned by a test.
  */
+/**
+ * The user's apps that a plan lapse took offline — kept SEPARATE from the live list on purpose.
+ *
+ * `publishedAppList` has an invariant the cap depends on: its count must equal what `liveAppCount`
+ * enforces, or the screen says "3 of 5 used" while a publish is refused. Folding paused apps into it
+ * would break that on day one. They still have to be VISIBLE, though — an app that vanished from
+ * every screen when the plan ended would look deleted, and the user could never find it to restore.
+ *
+ * Only `plan_paused` appears here. An owner's own unpublish and an admin takedown are different
+ * things with different remedies, and offering "restore" beside a policy takedown would be a promise
+ * the deploy gate refuses to keep.
+ */
+export function pausedAppList(
+  records: ReadonlyArray<Partial<DeploymentRecord>> | null | undefined,
+): PublishedAppSummary[] {
+  return (records ?? [])
+    .filter((r) => (r.status ?? 'active') === 'plan_paused' && typeof r.workspaceId === 'string' && !!r.workspaceId)
+    .map((r) => ({
+      workspaceId: r.workspaceId as string,
+      // A paused app has NO working URL — its channel is genuinely gone. Reporting the old one would
+      // hand the user a dead link and make the pause look like a glitch rather than what it is.
+      url: '',
+      updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : null,
+      sizeMb: typeof r.sizeMb === 'number' ? r.sizeMb : null,
+      orphaned: r.orphaned === true,
+    }));
+}
+
 export function publishedAppList(
   records: ReadonlyArray<Partial<DeploymentRecord>> | null | undefined,
 ): PublishedAppSummary[] {

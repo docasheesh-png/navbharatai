@@ -10,9 +10,11 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  HOSTING_TIERS, HOSTING_OVERAGE_INR_PER_GB, LEGACY_HOSTING_PLAN_ID,
+  HOSTING_TIERS, HOSTING_OVERAGE_INR_PER_GB, LEGACY_HOSTING_PLAN_ID, FREE_PUBLISHED_APPS,
   hostingAgreementTerms, isKnownPlanId, overageInr, purchasableTier, tierForPlanId, tierRank,
 } from '../src/lib/hostingTiers';
+import { appsToPauseOnLapse } from '../src/server/lib/hostingPlan';
+import { publishedAppCap, publishedAppCapForTier } from '../src/server/lib/HostingQuota';
 
 const src = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
 
@@ -86,6 +88,73 @@ describe('the agreement the user ticks', () => {
     const all = HOSTING_TIERS.flatMap((t) => [...hostingAgreementTerms(t), ...t.includes, t.tagline]).join(' ');
     for (const vendor of ['Cashfree', 'Firebase', 'Google', 'Cloud Run', 'Cloudflare', 'Vercel', 'gateway']) {
       expect(all).not.toContain(vendor);
+    }
+  });
+});
+
+describe('the lapse demotion — which apps survive, and why', () => {
+  const app = (id: string, updatedAt: number, status = 'active') => ({ workspaceId: id, updatedAt, status });
+
+  it('under the free cap ⇒ nothing is paused', () => {
+    expect(appsToPauseOnLapse([app('a', 1), app('b', 2)], 5)).toEqual([]);
+    expect(appsToPauseOnLapse([], 5)).toEqual([]);
+  });
+
+  it('over the cap ⇒ the freshest survive, the stalest are paused', () => {
+    const apps = [app('old', 1), app('mid', 2), app('new', 3)];
+    expect(appsToPauseOnLapse(apps, 1)).toEqual(['mid', 'old']);
+  });
+
+  it('🔑 an app with a real custom domain keeps its free slot, however old it is', () => {
+    // Somebody bought a domain and pointed it here: the strongest evidence we have that a site has
+    // real visitors. Losing THAT one while a scratch app from yesterday survives would be the worst
+    // possible guess, and "just take the first five" would make it silently.
+    const apps = [app('ancient-shop', 1), app('scratch-1', 90), app('scratch-2', 80)];
+    expect(appsToPauseOnLapse(apps, 1, ['ancient-shop'])).toEqual(['scratch-1', 'scratch-2']);
+  });
+
+  it('only LIVE apps are candidates — an unpublished or taken-down one holds no slot', () => {
+    const apps = [app('a', 3), app('b', 2, 'unpublished'), app('c', 1, 'taken_down'), app('d', 4)];
+    // Two live apps, cap of 1 ⇒ exactly one pause, and never the already-inactive ones.
+    expect(appsToPauseOnLapse(apps, 1)).toEqual(['a']);
+  });
+
+  it('🔒 a cap of 0 pauses NOTHING — a misconfiguration must not black out a whole account', () => {
+    const apps = [app('a', 1), app('b', 2)];
+    expect(appsToPauseOnLapse(apps, 0)).toEqual([]);
+    expect(appsToPauseOnLapse(apps, -3)).toEqual([]);
+    expect(appsToPauseOnLapse(apps, NaN)).toEqual([]);
+  });
+
+  it('the free floor the demotion falls back to is never zero, and matches the server cap', () => {
+    // The whole fairness of the design rests on this: a lapsed PAYER lands on exactly what a free
+    // account gets. If these two ever drift, the agreement quotes one number and the sweep enforces
+    // another — which is how a user ends up with fewer apps than they were promised.
+    expect(FREE_PUBLISHED_APPS).toBeGreaterThan(0);
+    expect(publishedAppCap()).toBe(FREE_PUBLISHED_APPS);
+  });
+
+  it('a plan grants MORE room than free, and never less however the env is set', () => {
+    for (const t of HOSTING_TIERS) {
+      expect(t.publishedApps).toBeGreaterThan(FREE_PUBLISHED_APPS);
+      expect(publishedAppCapForTier(t)).toBe(t.publishedApps);
+    }
+    // No plan, or an unreadable one, is the free cap — never more.
+    expect(publishedAppCapForTier(null)).toBe(publishedAppCap());
+    expect(publishedAppCapForTier({ publishedApps: 0 })).toBe(publishedAppCap());
+  });
+
+  it('the agreement warns about the demotion BEFORE the user pays', () => {
+    for (const t of HOSTING_TIERS) {
+      const text = hostingAgreementTerms(t).join(' ');
+      expect(text).toContain(`up to ${t.publishedApps} apps published`);
+      expect(text).toContain(`free ${FREE_PUBLISHED_APPS} apps`);
+      expect(text).toContain('PAUSED, never deleted');
+      // The restore is described EXACTLY as it works — open the app, press Publish — because
+      // republishing re-runs a real build and there is no one-tap Restore button. Promising less
+      // friction than exists would be discovered just after the user paid to get their apps back.
+      expect(text).toContain('open a paused app and press Publish');
+      expect(text).not.toContain('one tap');
     }
   });
 });

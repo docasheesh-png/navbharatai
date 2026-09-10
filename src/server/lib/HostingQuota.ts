@@ -21,6 +21,32 @@
  */
 import { hostingUsageStore } from './HostingUsageStore';
 import { deploymentStore } from '../AgentV3/DeploymentStore';
+import { FREE_PUBLISHED_APPS, type HostingTier } from '../../lib/hostingTiers';
+import { activeHostingTier, hostingPlansEnabled } from './hostingPlan';
+import { doc, getDoc, getServerDb } from './serverDb';
+
+/**
+ * The tier this user holds right now, for the publish gate. Never throws; null means "no plan, or we
+ * could not tell" — and both resolve to the FREE cap, which is the only safe answer in both
+ * directions (never more room than was bought, never a refusal we cannot justify).
+ *
+ * ⚠️ A PLAIN READ, deliberately — not `readHostingPlanStatus`, which runs a transaction to apply lazy
+ * auto-renewal. Publishing is a hot path and a read gate has no business writing; an expired plan that
+ * has not yet been renewed simply reads as no plan here, which errs toward the free cap. The renewal
+ * still happens on the plan screen and in the sweep, as it always did.
+ */
+async function readHostingTierForQuota(userId: string | null | undefined): Promise<HostingTier | null> {
+  if (!userId || !hostingPlansEnabled()) return null;
+  try {
+    const db = getServerDb() as any;
+    if (!db) return null;
+    const snap = await getDoc(doc(db, 'user_token_wallets', userId));
+    if (!snap.exists()) return null;
+    return activeHostingTier(snap.data() as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
 
 /** Providers where NavBharatAI foots the hosting bill (so the quota + size cap apply). */
 export const FIRST_PARTY_PROVIDERS = new Set<string>(['firebase', 'cloudflare']);
@@ -82,9 +108,28 @@ export function hostingStorageCapMb(): number {
 export function publishedAppCap(): number {
   // Empty means unset, not zero — see hostingStorageCapMb for the trap this avoids.
   const raw = String(process.env.AGENTV3_USER_PUBLISHED_APP_CAP ?? '').trim();
-  if (!raw) return 5;
+  if (!raw) return FREE_PUBLISHED_APPS;
   const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 5;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : FREE_PUBLISHED_APPS;
+}
+
+/**
+ * The cap for a user who holds a hosting plan — the tier's own allowance.
+ *
+ * 🔴 WHY THIS EXISTS (admin 2026-09-10). `publishedAppCap()` gave a ₹499 Growth customer exactly the
+ * same 5 apps as somebody who never paid, so the plan granted domains, badge removal, remix and
+ * ad-free — and no hosting whatsoever. That is not a "hosting plan", and it is the real reason losing
+ * one felt like it cost nothing.
+ *
+ * ⚠️ NEVER BELOW THE FREE CAP. If an admin ever sets `AGENTV3_USER_PUBLISHED_APP_CAP` above a tier's
+ * number, a paying user must not end up with LESS room than a free one — so the plan's allowance is
+ * the larger of the two, always.
+ */
+export function publishedAppCapForTier(tier: { publishedApps?: number } | null | undefined): number {
+  const free = publishedAppCap();
+  const tierCap = Number(tier?.publishedApps);
+  if (!Number.isFinite(tierCap) || tierCap <= 0) return free;
+  return Math.max(free, Math.floor(tierCap));
 }
 
 /** Pure: how many DISTINCT live first-party apps this user holds, excluding the one being republished. */
@@ -203,21 +248,36 @@ export async function enforceHostingQuota(input: {
     ]).catch(() => null);
     if (records) {
       // COUNT first — it is the scarcer resource, and its message is the more actionable one.
-      const appCap = publishedAppCap();
+      //
+      // The cap follows the user's PLAN (2026-09-10): a plan holder gets their tier's allowance, and
+      // anyone else the free one. Reading the plan is bounded and fails OPEN to the free cap — a plan
+      // store hiccup must never quietly hand someone MORE room than they bought, nor refuse a publish
+      // it cannot justify, so the free number is the safe answer in both directions.
+      const heldTier = await Promise.race([
+        readHostingTierForQuota(input.userId),
+        new Promise<null>((r) => setTimeout(() => r(null), 2_000)),
+      ]).catch(() => null);
+      const appCap = publishedAppCapForTier(heldTier);
       if (appCap > 0) {
         const apps = liveAppCount(records, input.workspaceId);
         if (apps >= appCap) {
+          const onPlan = appCap > publishedAppCap();
           return {
             allowed: false,
             used: apps,
             cap: appCap,
             byteMb: Math.round(byteMb * 100) / 100,
-            message:
-              `You already have ${apps} apps published on NavBharatAI, which is the free limit of ` +
-              `${appCap}. Updating an app you have already published is always free and does not count ` +
-              `against this. To publish a NEW one, remove an app you no longer need, or publish it to ` +
-              `your own free host (Vercel / Netlify / Cloudflare Pages) — that runs on your account, ` +
-              `free from us.`,
+            message: onPlan
+              ? `You already have ${apps} apps published on NavBharatAI, which is your plan's limit of ` +
+                `${appCap}. Updating an app you have already published is always free and does not count ` +
+                `against this. To publish a NEW one, remove an app you no longer need, move to a bigger ` +
+                `plan in Billing → Plans, or publish it to your own free host (Vercel / Netlify / ` +
+                `Cloudflare Pages) — that runs on your account, free from us.`
+              : `You already have ${apps} apps published on NavBharatAI, which is the free limit of ` +
+                `${appCap}. Updating an app you have already published is always free and does not count ` +
+                `against this. To publish a NEW one, remove an app you no longer need, start a hosting ` +
+                `plan in Billing → Plans for more room, or publish it to your own free host ` +
+                `(Vercel / Netlify / Cloudflare Pages) — that runs on your account, free from us.`,
           };
         }
       }

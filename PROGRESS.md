@@ -47216,3 +47216,59 @@ Recommendation put to the admin: make the plans grant real hosting headroom, and
 one tap to restore on renewal), the domain pauses, the badge returns. A Growth user holding 20 live
 apps then loses 15 on lapse, which is real pressure; a one-app user keeps their app but loses the
 domain, which is fair. Awaiting the admin's call before building either.
+
+---
+
+## 2026-09-10 — The lapse now bites: demotion to the free tier (branch `feat/renewal-reminders`)
+
+Admin: **"user ka month complete ho gaya, tab to app offline honi chahiye, nahi to user recharge hi
+nahi karega"** — and, asked to choose, they picked **demote to the free tier** over a full blackout.
+
+**The hole underneath the complaint, which was worse than the complaint.** `publishedAppCap()` gave
+EVERY account 5 published apps whether they paid or not, so a ₹499 Growth customer had exactly the
+hosting headroom of someone who had never paid a rupee. The plan granted domains, badge removal, remix
+and ad-free — and **no hosting at all**. "Hosting plan" was a misnomer, and that is the real reason
+losing one felt like it cost nothing. Fixed first: Starter now grants **15** published apps, Growth
+**50**, free stays **5**, and the publish gate reads the user's plan (bounded, and failing open to the
+FREE cap in both directions — never more room than was bought, never a refusal we cannot justify).
+
+**Why demotion and not a blackout, stated plainly because the admin's literal instruction was the
+blackout.** Free hosting is a real product here. Switching a lapsed PAYER all the way off while
+someone who never paid keeps 5 apps live would make paying once leave you strictly worse than never
+paying — a user notices that immediately — and the site's own visitors, who did nothing, pay for it
+too. Demotion keeps the pressure where it belongs: a user holding 20 live apps loses 15 the moment
+they stop paying. A one-app user keeps their app and loses their domain, which is fair.
+
+**Which apps survive, using the only two real signals we have.** `appsToPauseOnLapse` keeps the free
+slots for (1) apps with a **custom domain** pointed at them — somebody bought a domain for it, the
+strongest evidence a site has real visitors — then (2) the **most recently updated**. Guessing is
+unavoidable; guessing with the user's own evidence beats "take the first five", which is what document
+order would silently be. A cap of 0 pauses **nothing** — a misconfiguration must never black out an
+account.
+
+**The pause is real, and cannot lie.** `pauseApp` deletes the live Hosting channel FIRST and only then
+marks the record `plan_paused`; a throw leaves the app live AND active so the next sweep retries it.
+A record saying "paused" over a still-serving site would be the fake status the unpublish route already
+warns about, and here it would be worse — the user would be told to renew to get back something that
+never went away.
+
+**`plan_paused` is a THIRD status on purpose.** Not `taken_down` (a punishment whose republish block
+must never apply here) and not `unpublished` (the owner's choice, which this was not). It is non-active,
+so it correctly reads as not live and frees the slot — which is exactly right, since the slot is what
+they stopped paying for.
+
+**🔴 THE RESTORE IS DESCRIBED EXACTLY AS IT WORKS, after two drafts that were not.** Republishing
+re-runs a real sandbox build, so there is no instant restore: the user renews, opens the app, presses
+Publish. The first draft said "everything comes back when you renew" (implying an automatic restore
+nothing performs); the second said "in one tap" (implying a Restore button that does not exist). Both
+would have been discovered at the worst possible moment — just after paying to get their apps back.
+Auto-restoring a dozen apps inside a sweep would spend real money on our own bill and fail often, which
+is why it is manual rather than hidden.
+
+**Paused apps stay VISIBLE** under "Your published apps" — separate from the live list, because that
+list's count must equal what the cap enforces. An app that vanished from every screen would look
+deleted and could never be found again.
+
+**Also in this branch:** reminders at **5 / 3 / 1** days, and the grace-window message that closed a
+three-day silence nobody had noticed (the pre-expiry reminders stop at expiry and the lapse fires only
+after grace, so the most useful moment to reach someone produced nothing at all).

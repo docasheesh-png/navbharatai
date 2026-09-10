@@ -488,6 +488,58 @@ export function decidePlanSweepStep(
   return { wallet: { ...w, hostingPlan: plan }, applied: true, action: { kind: 'lapse' } };
 }
 
+/** The shape the pause decision needs from a deployment record. Kept minimal so it stays pure. */
+export interface PausableApp {
+  workspaceId: string;
+  status?: string;
+  updatedAt?: number;
+}
+
+/**
+ * PURE: which apps must go offline when a plan lapses, and in what order they are chosen.
+ *
+ * The admin's instruction was that a finished month has to bite — "nahi to user recharge hi nahi
+ * karega" — and the shape that bites without being unfair is a DEMOTION to the free allowance, not a
+ * blackout. Free hosting is a real product here (every account, paid or not, keeps
+ * `FREE_PUBLISHED_APPS`), so switching a lapsed payer all the way off would leave them strictly worse
+ * than somebody who never paid a rupee. The pressure comes from losing the HEADROOM the plan bought:
+ * a user holding 20 live apps loses 15 the moment they stop paying, which is felt immediately.
+ *
+ * 🔑 WHICH APPS SURVIVE, AND WHY THAT ORDER. The free slots go to the apps most likely to be real,
+ * living sites, using the only two signals we actually have:
+ *   1. **A connected custom domain.** Somebody bought a domain and pointed it here; that is the
+ *      strongest evidence a site has real visitors. (The domain itself pauses either way — this is
+ *      about which APP keeps serving on its free link.)
+ *   2. **Most recently updated.** Among the rest, the ones being worked on are the ones being used.
+ * Everything below the line is paused, newest-untouched first. Guessing is unavoidable here; guessing
+ * with the user's own evidence beats guessing by document order, which is what "just take the first
+ * five" would silently be.
+ *
+ * Only ACTIVE apps can be paused — a taken-down or already-paused one is not live and holds no slot.
+ */
+export function appsToPauseOnLapse(
+  apps: ReadonlyArray<PausableApp>,
+  freeCap: number,
+  domainWorkspaceIds: ReadonlyArray<string> = [],
+): string[] {
+  const cap = Number.isFinite(freeCap) && freeCap > 0 ? Math.floor(freeCap) : 0;
+  const withDomain = new Set(domainWorkspaceIds.filter(Boolean));
+  const live = (apps || [])
+    .filter((a) => a && typeof a.workspaceId === 'string' && a.workspaceId.length > 0)
+    .filter((a) => (a.status ?? 'active') === 'active');
+  // A cap of 0 would mean "pause everything", which this design never does — treat it as no action
+  // rather than as a blackout, so a misconfigured cap cannot switch off a whole account.
+  if (cap <= 0 || live.length <= cap) return [];
+
+  const ranked = [...live].sort((a, b) => {
+    const ad = withDomain.has(a.workspaceId) ? 1 : 0;
+    const bd = withDomain.has(b.workspaceId) ? 1 : 0;
+    if (ad !== bd) return bd - ad;                                   // domain-holders first
+    return (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0);  // then freshest
+  });
+  return ranked.slice(cap).map((a) => a.workspaceId);
+}
+
 async function canonicalId(db: any, uid: string): Promise<string> {
   if (!walletMergeResolveEnabled()) return uid;
   return resolveCanonicalWalletId(async (u) => {

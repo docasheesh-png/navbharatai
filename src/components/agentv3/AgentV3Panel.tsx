@@ -3019,7 +3019,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (!res.ok) return null;
     const data = await res.json().catch(() => null);
     if (!data || !Array.isArray(data.apps)) return null;
-    return { apps: data.apps, used: Number(data.used ?? data.apps.length), cap: Number(data.cap ?? 0) };
+    return {
+      apps: data.apps,
+      used: Number(data.used ?? data.apps.length),
+      cap: Number(data.cap ?? 0),
+      paused: Array.isArray(data.paused) ? data.paused : [],
+      freeCap: Number(data.freeCap ?? 0) || undefined,
+      planName: typeof data.planName === 'string' ? data.planName : null,
+    };
   };
 
   /**

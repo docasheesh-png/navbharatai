@@ -164,6 +164,18 @@ export function renewedMessage(planId?: string | null): string {
   return `Your ${planLabel(planId)} plan auto-renewed for ${planDays(planId)} days (₹${planPriceInr(planId)} from your wallet). Your domain stays live.`;
 }
 
+/**
+ * Sent when a renewed plan could NOT reconnect a domain because its app is paused.
+ *
+ * It names the domains and the single step that fixes each one. The alternative — reattaching to a
+ * dead channel — would hand the user a domain that resolves to nothing right after they paid.
+ */
+export function awaitingRepublishMessage(domains: string[]): string {
+  const list = domains.join(', ');
+  const one = domains.length === 1;
+  return `Welcome back! ${one ? 'One domain' : `${domains.length} domains`} (${list}) ${one ? 'is' : 'are'} waiting on ${one ? 'its' : 'their'} app: ${one ? 'that app' : 'those apps'} ${one ? 'was' : 'were'} paused while the plan was over. Open ${one ? 'it' : 'each one'} and press Publish — the domain reconnects as soon as the app is live again. Nothing was lost.`;
+}
+
 export function reattachedMessage(domains: string[]): string {
   return `Welcome back! Your domain${domains.length === 1 ? '' : 's'} (${domains.join(', ')}) ${domains.length === 1 ? 'is' : 'are'} reconnecting now — live again within a few minutes once the certificate re-issues.`;
 }
@@ -276,8 +288,47 @@ export async function sweepHostingPlans(limit = 200): Promise<number> {
 export async function reattachSuspendedDomains(userId: string): Promise<number> {
   try {
     const links = (await _deps.linksForUser(userId)).filter((l) => l.suspended === 'plan_lapsed');
+    if (links.length === 0) return 0;
+
+    /**
+     * 🔴 A DOMAIN MUST NOT BE POINTED AT AN APP THAT IS NOT SERVING (found 2026-09-10, auditing the
+     * demotion the same day it shipped).
+     *
+     * The lapse does two things now: it suspends domains AND it pauses apps above the free
+     * allowance, which really deletes their Hosting channel. Reattaching unconditionally would take
+     * a domain whose app was paused and point it at nothing — while the lapse notice had promised
+     * "your domain reconnects on its own". The user would renew, watch the domain come back, and
+     * find a dead site: a false promise, which is worse than the outage it replaced.
+     *
+     * How it is reachable at all: domain-holding apps take the free slots FIRST, and the largest
+     * tier allows 3 domains against a free allowance of 5, so the default configuration cannot hit
+     * it. It becomes reachable if `AGENTV3_USER_PUBLISHED_APP_CAP` is set below the number of
+     * domains a user holds, or if the domain-count gate failed OPEN during an outage and let them
+     * connect more than their tier allows. Narrow — and it costs almost nothing to close, while the
+     * failure it prevents is exactly the kind this project calls a fake success.
+     *
+     * 🔑 IT SKIPS ONLY WHAT IT POSITIVELY KNOWS IS DOWN — a record that EXISTS and is not active.
+     * The first version of this collected the LIVE workspaces and skipped anything absent from that
+     * set, which is a different and much worse rule: a user whose apps predate the deployment
+     * registry, or a read that returns an empty page rather than throwing, would have had every
+     * domain refused. An absent record means "we cannot tell", and cannot-tell must reattach — the
+     * reattach is the thing the user just paid for, and refusing it on a registry hiccup would be
+     * rule #1 broken in reverse. A failed lookup is the same: reattach.
+     */
+    const knownDown = await _deps.appsForUser(userId)
+      .then((apps) => {
+        const set = new Set<string>();
+        for (const a of apps || []) {
+          if (a?.workspaceId && (a.status ?? 'active') !== 'active') set.add(a.workspaceId);
+        }
+        return set;
+      })
+      .catch(() => new Set<string>());
+
     const restored: string[] = [];
+    const needRepublish: string[] = [];
     for (const link of links) {
+      if (knownDown.has(link.workspaceId)) { needRepublish.push(link.domain); continue; }
       try {
         await _deps.attachDomain(link.workspaceId, link.domain, link.alternateOf ?? undefined);
         await _deps.setSuspended(link.domain, null);
@@ -285,6 +336,11 @@ export async function reattachSuspendedDomains(userId: string): Promise<number> 
       } catch { /* stays suspended; the user can also reconnect from the domain screen */ }
     }
     if (restored.length > 0) await _deps.notify(userId, reattachedMessage(restored)).catch(() => null);
+    // The domains we deliberately did NOT reconnect are said out loud, with the one step that fixes
+    // them. Silence here would look like the reattach simply failed.
+    if (needRepublish.length > 0) {
+      await _deps.notify(userId, awaitingRepublishMessage(needRepublish)).catch(() => null);
+    }
     return restored.length;
   } catch {
     return 0;

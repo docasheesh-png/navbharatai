@@ -149,6 +149,71 @@ function fakeAdminDb(docs: Record<string, any>) {
   } as any;
 }
 
+describe('renewal never points a domain at a dead app (audit 2026-09-10)', () => {
+  it('🔒 a domain whose app is PAUSED is not reconnected — and the user is told the one step that fixes it', async () => {
+    // The lapse now pauses apps as well as suspending domains, so reattaching unconditionally would
+    // point a domain at a deleted channel — right after the notice promised "your domain reconnects
+    // on its own". A false promise is worse than the outage it replaced.
+    const attached: string[] = [];
+    const notes: string[] = [];
+    _setSweepDepsForTests({
+      linksForUser: async () => [
+        { domain: 'live.in', workspaceId: 'w-live', userId: 'u1', suspended: 'plan_lapsed' },
+        { domain: 'paused.in', workspaceId: 'w-paused', userId: 'u1', suspended: 'plan_lapsed' },
+      ] as any,
+      appsForUser: async () => [
+        { workspaceId: 'w-live', status: 'active', updatedAt: 1 },
+        { workspaceId: 'w-paused', status: 'plan_paused', updatedAt: 2 },
+      ],
+      attachDomain: async (_ws, d) => { attached.push(d); },
+      setSuspended: async () => {},
+      notify: async (_u, m) => { notes.push(m); },
+    });
+    expect(await reattachSuspendedDomains('u1')).toBe(1);
+    expect(attached).toEqual(['live.in']);
+    const all = notes.join(' | ');
+    expect(all).toContain('live.in');
+    expect(all).toContain('paused.in');
+    expect(all).toContain('press Publish');   // the actionable step, not a silent skip
+    expect(all).toContain('Nothing was lost');
+  });
+
+  it('🔒 only a KNOWN-down app is skipped — an absent or unreadable record still reattaches', async () => {
+    // The first version of this guard collected the LIVE workspaces and skipped anything missing
+    // from that set. That is a different, much worse rule: a user whose apps predate the deployment
+    // registry — or a read that returns an empty page rather than throwing — would have had EVERY
+    // domain refused, right after paying. "Cannot tell" must reattach; only a record that exists and
+    // is not active may be skipped. Caught by an existing test that stubbed no registry at all.
+    for (const appsForUser of [
+      async () => { throw new Error('registry down'); },          // read failed
+      async () => [],                                             // legacy user, no records at all
+      async () => [{ workspaceId: 'other', status: 'plan_paused', updatedAt: 1 }], // a DIFFERENT app is down
+    ]) {
+      const attached: string[] = [];
+      _setSweepDepsForTests({
+        linksForUser: async () => [{ domain: 'x.in', workspaceId: 'w', userId: 'u1', suspended: 'plan_lapsed' }] as any,
+        appsForUser: appsForUser as any,
+        attachDomain: async (_ws, d) => { attached.push(d); },
+        setSuspended: async () => {},
+        notify: async () => {},
+      });
+      expect(await reattachSuspendedDomains('u1')).toBe(1);
+      expect(attached).toEqual(['x.in']);
+    }
+  });
+
+  it('nothing suspended ⇒ no lookup, no messages', async () => {
+    let looked = false;
+    _setSweepDepsForTests({
+      linksForUser: async () => [],
+      appsForUser: async () => { looked = true; return []; },
+      notify: async () => { throw new Error('must not notify'); },
+    });
+    expect(await reattachSuspendedDomains('u1')).toBe(0);
+    expect(looked).toBe(false);
+  });
+});
+
 describe('sweepOneWallet', () => {
   it('a lapse detaches every active domain, marks it suspended, and tells the user honestly', async () => {
     const docs: Record<string, any> = {

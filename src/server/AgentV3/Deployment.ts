@@ -12,6 +12,8 @@
 // service-account JSON with the "Firebase Hosting Admin" role. A 403 means that role is missing.
 
 import { GoogleAuth } from 'google-auth-library';
+import { hostingVersionConfig, type HostingVersionConfig } from './siteConfig';
+import { siteConfigStore } from './siteConfigStore';
 import { mirrorPublishToBucket, removePublishFromBucket } from './bucketPublish';
 import { pickRollbackTarget, type HostingRelease, type RollbackTarget } from './publishRollback';
 import {
@@ -151,7 +153,7 @@ export class FirebaseHostingDeployer {
 
     // The REAL channel URL, from Firebase — see ensureChannel for why it can never be constructed.
     const channelUrl = await this.ensureChannel(site, channelId, headers);
-    const versionName = await this.publishVersion(site, files, token, headers);
+    const versionName = await this.publishVersion(site, files, token, headers, await this.versionConfigFor(workspaceId, files));
     await this.hostingCall('release', () =>
       axios.post(
         `${HOSTING_API}/sites/${site}/channels/${channelId}/releases?versionName=${encodeURIComponent(versionName)}`,
@@ -202,7 +204,7 @@ export class FirebaseHostingDeployer {
     }
     const siteId = await ensureSite(workspaceId); // creates-or-reuses `nbai-<hash>`
     const { token, headers } = await this.authHeaders();
-    const versionName = await this.publishVersion(siteId, files, token, headers);
+    const versionName = await this.publishVersion(siteId, files, token, headers, await this.versionConfigFor(workspaceId, files));
     // Release to the site's default LIVE channel (a site release, not a named preview channel).
     await this.hostingCall('site release', () =>
       axios.post(
@@ -259,8 +261,9 @@ export class FirebaseHostingDeployer {
     files: Map<string, Buffer>,
     token: string,
     headers: Record<string, string>,
+    config: HostingVersionConfig,
   ): Promise<string> {
-    const versionName = await this.createVersion(site, headers);
+    const versionName = await this.createVersion(site, headers, config);
     const versionId = versionName.split('/').pop() ?? '';
 
     // ⚠️ THE HASH IS OF THE GZIPPED BYTES, NOT THE FILE (admin 2026-08-20, and Google said it plainly:
@@ -593,18 +596,25 @@ export class FirebaseHostingDeployer {
     return url;
   }
 
-  private async createVersion(site: string, headers: Record<string, string>): Promise<string> {
+  /**
+   * The version's config is FORMED, not hardcoded (ROADMAP §13, 1.6): the user's redirects, the safe
+   * headers every publish gets, and the SPA catch-all — kept for a single-page app, dropped only for a
+   * multi-page site that ships its own 404.html. One place, `hostingVersionConfig`, for both publish
+   * paths; an unreadable settings store yields the defaults, never a broken site.
+   */
+  private async createVersion(site: string, headers: Record<string, string>, config: HostingVersionConfig): Promise<string> {
     const resp = await this.hostingCall('version create', () => axios.post<{ name: string }>(
       `${HOSTING_API}/sites/${site}/versions`,
-      {
-        config: {
-          rewrites: [{ glob: '**', path: '/index.html' }],
-          headers: [{ glob: '/assets/**', headers: { 'Cache-Control': 'max-age=31536000,immutable' } }],
-        },
-      },
+      { config },
       { headers },
     ));
     return resp.data.name;
+  }
+
+  /** Load the workspace's saved site settings (best-effort) and form the version config from the files. */
+  private async versionConfigFor(workspaceId: string, files: Map<string, Buffer>): Promise<HostingVersionConfig> {
+    const saved = await siteConfigStore.get(workspaceId).catch(() => null);
+    return hostingVersionConfig(files, saved);
   }
 }
 

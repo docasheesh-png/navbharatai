@@ -46733,3 +46733,48 @@ precisely than before.
 `npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
 `npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
 **1509 files / 20,298 passed, 0 failed**.
+
+## 2026-09-10 — Site settings: redirects, a real 404, safe headers on every publish (ROADMAP §13 item 1.6)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2796; PR for 1.4 in CI alongside).
+
+### The defect
+The hosting version every first-party publish was created with carried ONE hardcoded config — a
+catch-all rewrite to index.html and a cache header — in TWO places (the v5 deployer and Engineer AI's,
+a sibling that had drifted into an identical copy). Right for the single-page app most builds are;
+wrong for everything a site needs once it has been live a week: a page that moved, a multi-page site
+whose missing pages should say so, and the response headers every serious host sets by default.
+
+### What shipped
+- **`src/server/AgentV3/siteConfig.ts`** (pure): `validateSiteConfig` refuses what cannot be safe — a
+  redirect target is a path on this site or an https URL the user typed (no `//evil`, no `javascript:`,
+  no http:), no loops, no duplicate sources, at most 50; `customNotFoundApplies(files)` drops the SPA
+  catch-all ONLY for a site that is visibly multi-page AND ships its own `404.html` — decided from the
+  files, not a checkbox, because dropping it for an SPA would 404 every deep link; `hostingVersionConfig`
+  forms the ONE config: asset cache, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and
+  `X-Frame-Options: SAMEORIGIN` unless the user allows embedding (HSTS is already set by the host).
+- **`siteConfigStore`** (`site_configs/<workspaceId>`), re-validated on read so a hand-edited document
+  cannot smuggle a bad rule; an unreadable store yields the defaults, never a broken site.
+- **`Deployment.createVersion` takes the formed config**; both first-party paths (channel + dedicated
+  site) pass `versionConfigFor(workspaceId, files)`. **Engineer AI's deployer** uses the same form with
+  the user half null — the sibling closed in the same change (rule 3).
+- **Routes** `site-config` / `site-config/save`: owner-checked; save validates through the pure module
+  and stores only the validated config; the response says *"Publish again for these settings to reach
+  your live site"* — the settings do not change the live site until then, and the screen must not imply
+  otherwise.
+- **Publish sheet:** "Site settings — redirects, embedding, 404" on the Host-on-NavBharatAI card: a
+  redirects editor (from → to, 301/302, up to 50), the embedding checkbox with the reason it is off by
+  default, and the 404 note. `AppKnowledgeBase` updated.
+
+### Honest limits
+- Bucket-only publishes (`PUBLISHED_APPS_BUCKET_ONLY=on`) are served by the Cloudflare Worker, which
+  does not read these settings yet; redirects/headers apply to Firebase-served apps until the Worker
+  learns a per-app `_nbai/site.json` (ROADMAP §13 Phase 0.3 / 1.5 territory). Stated here, not hidden.
+- `customNotFoundApplies` cannot tell a JS-routed multi-page bundle from a static one; it errs toward
+  keeping the catch-all (deep links keep working), which is the safe wrong.
+
+### Gate (CI-equivalent)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1511 files / 20,310 passed, 0 failed**. The first run of the new pure test caught a real hole —
+`//evil.com` passed the path check (protocol-relative = another host) — fixed before anything shipped.

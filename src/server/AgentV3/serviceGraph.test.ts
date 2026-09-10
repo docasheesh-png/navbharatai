@@ -255,8 +255,19 @@ describe('the build actually computes it, and says what it does NOT do', () => {
   });
 
   it('it can never affect a build', () => {
-    const at = src.indexOf('const sgFiles = Object.fromEntries(writtenFiles);');
+    // The anchor moved on 2026-09-01 (`writtenFiles` → `integrityFiles`); the assertion it anchors —
+    // that the whole block is advisory — is unchanged.
+    const at = src.indexOf('const sgFiles = integrityFiles;');
     expect(at).toBeGreaterThan(-1);
     expect(src.slice(at, at + 1600)).toContain('the service graph is advisory');
+  });
+
+  it('it reads the WHOLE project, not just the files this turn wrote', () => {
+    // A real build: an Express proxy in `server.ts` from an earlier turn, a frontend-only edit this
+    // turn — and the graph reported "Single service: frontend on port 5173" for a project whose
+    // backend the platform had just started and health-checked on :3001. A second service is normally
+    // written in an earlier turn, so a turn-scoped view is blind to exactly the case this exists for.
+    expect(src).toContain('const sgFiles = integrityFiles;');
+    expect(src).not.toContain('const sgFiles = Object.fromEntries(writtenFiles)');
   });
 });

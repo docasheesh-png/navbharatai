@@ -122,6 +122,26 @@ export function dropForeignSiteTokens<T extends RecordLike>(records: readonly T[
   return records.filter((r) => !isForeignSiteToken(r?.value, currentSiteId));
 }
 
+/**
+ * The records worth checking in PUBLIC DNS right now: only the ones the user still has to add.
+ *
+ * 🔴 THE NOISE THIS ENDS (admin screenshot 2026-09-07, mitrify.com): `ownership: active · host:
+ * active · SSL: active` — and directly above it, *"Not visible on the internet yet: TXT
+ * _acme-challenge.mitrify.com … Nothing is wrong."* The certificate challenge record is needed only
+ * until the certificate is issued; once SSL is active the hosting service stops asking for it and the
+ * managed zone drops it. But the stable view REMEMBERS every record it ever showed (by design — see the
+ * module header), and the live check was verifying all of them, so it reported a record that no
+ * longer exists as "not visible yet" on a domain with nothing left to do.
+ *
+ * A `done` record has already been accepted by the hosting service — verifying it in DNS can only
+ * produce a sentence nobody can act on. If the service ever needs it again, it re-lists it as pending,
+ * and it is checked again. A record with no `done` flag at all (an older shape) is still checked.
+ * PURE.
+ */
+export function recordsStillPending<T extends { done?: boolean }>(records: readonly T[] | null | undefined): T[] {
+  return (records ?? []).filter((r) => r && r.done !== true);
+}
+
 export function mergeStableRecords(
   stored: readonly RecordLike[],
   pending: readonly RecordLike[],

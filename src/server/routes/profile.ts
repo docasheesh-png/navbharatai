@@ -11,8 +11,9 @@
 import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads user_token_wallets (owner-only).
 import { doc, getDoc, getServerDb as getDb } from '../lib/serverDb';
-import { verifyFirebaseToken, verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { verifyFirebaseToken, verifyFirebaseIdentity, deleteAuthAccount } from '../lib/authMiddleware';
 import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
+import { deleteUserWorkspaceData } from '../lib/workspaceDataErase';
 import { sendSafeError } from '../lib/httpError';
 import { userProfileStore } from '../lib/UserProfileStore';
 import { userBuildHistoryStore, type BuildHistoryQuery } from '../lib/UserBuildHistoryStore';
@@ -157,8 +158,37 @@ export function registerProfileRoutes(app: Express): void {
     const db = getRetentionDb();
     if (!db) return res.status(503).json({ error: 'Data store unavailable — please try again shortly.' });
     try {
+      // DATA FIRST, THEN THE CREDENTIAL. Erasing the sign-in first would strand any data whose
+      // deletion then failed, with the owner unable to sign in and retry.
       const report = await deleteUserData(db, identity.uid);
-      return res.json({ ok: true, message: 'Your account data has been permanently erased.', ...report });
+      // …AND THE APPS THEY BUILT. `deleteUserData` covers the platform's own user records and says so
+      // in its header ("not generated apps"); PROGRESS.md carried the rest as an OPEN root cause twice.
+      // Without this a user could delete their account and leave every app they ever built sitting in
+      // our Firestore. Best-effort like the cascade above: a failure is reported, never thrown, so it
+      // can never block the account deletion the user actually asked for.
+      const apps = await deleteUserWorkspaceData(identity.uid)
+        .catch((e) => ({ uid: identity.uid, collections: [], totalDeleted: 0, error: e instanceof Error ? e.message : String(e) }));
+      // Deleting the documents is not deleting the ACCOUNT: without this the Auth record survives and
+      // the person who asked to be deleted can sign back in to a blank account. That is not what the
+      // button says, and not what Play's deletion requirement means.
+      const account = await deleteAuthAccount(identity.uid);
+      const accountDeleted = account === 'deleted' || account === 'not-found';
+      return res.json({
+        ok: true,
+        // Say which of the two actually happened rather than one cheerful sentence for both. A user
+        // whose sign-in survived needs to know to email us, not to be told everything is gone.
+        message: accountDeleted
+          ? 'Your account and all of its data have been permanently deleted.'
+          : 'Your data has been permanently erased, but your sign-in could not be removed automatically. Please email info@navbharatai.com so we can finish it.',
+        accountDeleted,
+        account,
+        ...report,
+        // Reported SEPARATELY rather than folded into the totals above: these are the user's built
+        // apps, and someone checking whether their work is really gone should be able to see that line
+        // on its own. `refusal` appears only in the one case the eraser declines to guess at (see
+        // planWorkspaceErase) — surfaced, never swallowed.
+        apps,
+      });
     } catch (err: any) {
       return sendSafeError(res, 500, 'Deletion failed. Please try again.', err, 'account deletion');
     }

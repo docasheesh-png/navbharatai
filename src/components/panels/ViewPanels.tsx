@@ -363,6 +363,14 @@ export function ViewPanels({
           <DiffViewer
             files={files}
             previousFiles={previousFiles}
+            onRevertFile={(fileName: string, content: string) => {
+              // The same persist path the conflict resolver already uses — one way to write a file
+              // back, so a revert lands exactly where a resolve does and the preview follows both.
+              const next = { ...(files as Record<string, string>), [fileName]: content };
+              setFiles(next as any);
+              updatePreview(next as any);
+              addToast(`Reverted ${fileName} \u2713`, 'success');
+            }}
             onResolveConflicts={(fileName: string, resolved: string) => {
               // P-DEV.4 — write the marker-free resolved content back to the workspace + refresh preview.
               const next = { ...(files as Record<string, string>), [fileName]: resolved };
@@ -445,7 +453,7 @@ export function ViewPanels({
           make an app public, so this screen never claims an app is live. */}
       {activeView === 'gallery' && (
         <div className="flex-1 h-full overflow-hidden">
-          <GalleryPanel user={user} files={files as Record<string, string>} />
+          <GalleryPanel user={user} files={files as Record<string, string>} onOpenPlans={() => toggleTab('billing')} />
         </div>
       )}
 

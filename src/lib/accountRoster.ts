@@ -167,6 +167,46 @@ export const SWITCH_ACCOUNT_LABEL = 'Switch account';
 export const SIGN_IN_HINT_KEY = 'nbai:sign-in-hint';
 
 /**
+ * Which provider signed the account being switched TO. Written beside the email hint, read by the
+ * sign-in screen so it can say what is happening.
+ *
+ * WHY IT MATTERS (admin 2026-09-02: "2 account login theek se nahi chal rahe"). Tapping an account in
+ * the switch menu opened the ordinary sign-in screen — the same one a stranger sees. Someone who just
+ * pointed at their own face and email lands on "Sign in", with every method offered as if we had no
+ * idea who they were, and reasonably concludes the switch failed. Nothing is wrong with the flow; it
+ * simply forgets, one screen later, what it was just told.
+ */
+export const SIGN_IN_PROVIDER_KEY = 'nbai:sign-in-provider';
+
+/** Human name for a Firebase provider id, for the switch banner. '' when we should not name one. */
+export function providerLabel(providerId: string | null | undefined): string {
+  switch (String(providerId ?? '').trim()) {
+    case 'google.com': return 'Google';
+    case 'apple.com': return 'Apple';
+    case 'github.com': return 'GitHub';
+    case 'password': return 'your password';
+    case 'phone': return 'your phone number';
+    default: return '';
+  }
+}
+
+/**
+ * The line the sign-in screen shows when it was opened BY a switch.
+ *
+ * Names the account and the method, so the screen reads as "carry on as this person" rather than
+ * "prove who you are to us". Returns '' with no email — a banner with a blank name would be worse
+ * than none. PURE.
+ */
+export function switchBannerText(email: string | null | undefined, providerId?: string | null): string {
+  const who = String(email ?? '').trim();
+  if (!who) return '';
+  const via = providerLabel(providerId);
+  return via
+    ? `Switching to ${who} — continue with ${via} below.`
+    : `Switching to ${who} — sign in below to continue as this account.`;
+}
+
+/**
  * Every row the account list should show, current account FIRST and marked.
  *
  * The old list showed only the OTHERS, and hid itself entirely when there were none — so a user with

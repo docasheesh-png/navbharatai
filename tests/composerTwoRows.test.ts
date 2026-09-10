@@ -140,6 +140,17 @@ describe('the preview toolbar can be swiped', () => {
   });
 
   it('the middle label may shrink to nothing rather than force the row to fit', () => {
-    expect(prev).toContain('<span className="truncate flex-1 min-w-0">{effectiveUrl}</span>');
+    // The label's SIZING is what this guards: truncate + flex-1 + min-w-0 is what lets the middle
+    // item collapse instead of pushing the buttons off a phone screen.
+    expect(prev).toMatch(/<span className="truncate flex-1 min-w-0"[^>]*>\{previewAddressLabel\(effectiveUrl\)\}<\/span>/);
+  });
+
+  it('and it never prints the sandbox address (gap analysis 2026-09-10)', () => {
+    // The label used to be `{effectiveUrl}` — the machine's own https://<port>-<id>.e2b.app host,
+    // rendered permanently and selectably on every Live preview. Forwarding it puts a stranger's
+    // traffic on a per-minute machine, and it names a vendor besides. If this ever regresses, the
+    // preview is handing the address out again and nothing else would fail to say so.
+    expect(prev).not.toContain('>{effectiveUrl}<');
+    expect(prev).toContain('previewAddressLabel(effectiveUrl)');
   });
 });

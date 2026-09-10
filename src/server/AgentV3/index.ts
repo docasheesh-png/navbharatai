@@ -74,6 +74,11 @@ export { makeDeploy, FirebaseHostingDeployer, makeChannelId } from './Deployment
 export type { DeployFn } from './Deployment';
 export { GitHubAppClient, githubConfigFromEnv, githubStorageEnabled, githubStorageActive, repoNameForProject, readableAppNameForRepo } from './GitHubAppClient';
 export type { GitHubConfig, RepoInfo, CiVerdict, PullRequestInfo } from './GitHubAppClient';
+export {
+  validateAppName, appNameErrorMessage, findDuplicate, effectiveAppName,
+  normalizeAppName, repoSlugFromAppName, MAX_APP_NAME_LENGTH, MIN_APP_NAME_LENGTH,
+} from './appName';
+export type { AppNameError, ValidatedAppName, NamedApp } from './appName';
 export { GitRepoSync, sanitizeRepoUrl } from './GitRepoSync';
 export type { HydrateResult, PushResult } from './GitRepoSync';
 export { mergeViaPullRequest, githubPrMode, planRevert, readReviewRound, replyToReviewRound } from './GitHubPrFlow';

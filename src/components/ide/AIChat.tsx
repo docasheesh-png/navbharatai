@@ -1701,7 +1701,23 @@ export const AIChat: React.FC<AIChatProps> = ({
                     className={cn(
                       // Admin 2026-07-12: composer was py-3.5 + min-h-48px (~2 lines) and felt oversized on
                       // phones — trim to a single comfortable line; it still auto-grows up to 240px as you type.
-                      "w-full bg-transparent text-[var(--theme-text)] pr-24 py-2.5 text-xs outline-none transition-all resize-none min-h-[40px] leading-relaxed text-[16px]",
+                      //
+                      // ⚠️ min-h is 48px and that does NOT undo that trim (admin 2026-08-31). The box was
+                      // ALREADY rendering at 46px — py-2.5 (20px) plus one 16px line at leading-relaxed
+                      // (26px) — because the content exceeded the old min-h-40, which never bound. So this
+                      // is +2px of real height, and the padding stays py-2.5, not the py-3.5 that was
+                      // trimmed away. What the 48px buys is room for the control row: 36px of buttons plus
+                      // a symmetric 6px above and below. At 46px that row had ZERO gap at the top and sat
+                      // flush against the container's border, which is what made the send button look like
+                      // it was breaking out of the box.
+                      //
+                      // pr-44 reserves the right edge for that row so typed text never runs underneath it.
+                      // The row is 4 buttons wide in the common signed-in case (4x36 + 3x4 gaps + 8px inset
+                      // = 164px); pr-24 (96px) did not even cover the three-button case, so text slid under
+                      // the paperclip. With all five present the expand button can still overlap long text,
+                      // and that is the accepted edge: expand only appears once the text is long enough to
+                      // have wrapped anyway.
+                      "w-full bg-transparent text-[var(--theme-text)] pr-44 py-2.5 text-xs outline-none transition-all resize-none min-h-[48px] leading-relaxed text-[16px]",
                       onModeChange && activeAgent === 'navbharatai-pro' ? "pl-32" : "pl-5"
                     )}
                     style={{ maxHeight: '240px', overflowY: 'auto' }}
@@ -1711,21 +1727,46 @@ export const AIChat: React.FC<AIChatProps> = ({
                       {pasteLineCount} lines pasted
                     </div>
                   )}
-                  {( (input || '').length > 300 || (((input || '').match(/\n/g) || []).length > 4)) && (
-                    <button
-                      type="button"
-                      onClick={() => setIsExpanded(true)}
-                      className="absolute right-20 bottom-2 p-2 text-gray-500 hover:text-white transition-colors"
-                    >
-                      <Maximize2 size={16} />
-                    </button>
-                  )}
                   {onModeChange && activeAgent === 'navbharatai-pro' && (
                     <div className="absolute left-2 top-3 z-50 pointer-events-auto">
                       <ModeSelector mode={mode || 'chat'} setMode={onModeChange} />
                     </div>
                   )}
-                  <div className="absolute right-2 bottom-2 flex gap-1 items-center">
+                  {/* THE ONE CONTROL ROW (admin 2026-08-31: "send, mic aur attachment ke buttons
+                      unaligned hai").
+ 
+                      Two real defects, both visible on a phone:
+
+                      1. THE ROW DID NOT FIT THE BOX. It is absolutely positioned at `bottom-2` inside a
+                         container that renders 46px tall, and its tallest child — the send button at
+                         p-3 + a 3.5 icon = 38px — left the row's top edge at 46-8-38 = ZERO. The filled
+                         red/indigo button therefore sat flush against the container's rounded border and
+                         read as broken out of it. Fixed at both ends: every control is now the SAME 36px
+                         box, and the textarea's min-height carries the row with a symmetric 6px gap.
+
+                      2. THE EXPAND BUTTON SAT ON TOP OF THE MIC. It was positioned separately at
+                         `right-20` (80px), a number that was correct when the row was narrower — the row
+                         now spans 8px to ~126px (three buttons) or ~166px (four), so 80px lands INSIDE
+                         it. That is the root cause worth naming: controls in this corner were placed by
+                         hand-tuned absolute offsets, so adding the voice button in 2026-08-10 silently
+                         invalidated a magic number nobody re-derived. It lives in this flex row now, and
+                         a sixth control cannot reintroduce the overlap.
+
+                      ⚠️ Keep every child of this row at 36px (p-2.5 with a w-4 h-4 icon). A control with
+                      different padding makes the row taller than the space reserved for it and brings
+                      defect 1 straight back. */}
+                  <div className="absolute right-2 bottom-1.5 flex gap-1 items-center">
+                    {( (input || '').length > 300 || (((input || '').match(/\n/g) || []).length > 4)) && (
+                      <button
+                        type="button"
+                        onClick={() => setIsExpanded(true)}
+                        title="Expand"
+                        aria-label="Expand the message box"
+                        className="p-2.5 text-gray-500 hover:text-white transition-colors flex items-center justify-center"
+                      >
+                        <Maximize2 className="w-4 h-4" />
+                      </button>
+                    )}
                     <AttachMenu
                       onFiles={addPickedFiles}
                       fileAccept="image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.txt,.md,.csv,.json,.html,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.zip,.js,.ts,.tsx,.jsx,.py,.css,.xml,.yaml,.yml,.go,.java,.php,.sql,.rs,.kt,.swift,.rb,.sh,.env,.toml,.ini"
@@ -1771,9 +1812,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                       <button
                         onClick={() => onStop?.()}
                         title="Stop"
-                        className="p-3 bg-red-600 text-white rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95"
+                        className="p-2.5 bg-red-600 text-white rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95"
                       >
-                        <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[11px]">■</span>
+                        <span className="w-4 h-4 flex items-center justify-center font-black text-[11px]">■</span>
                       </button>
                     ) : (
                       <button
@@ -1786,9 +1827,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                           dismissKeyboardOnMobile(textareaRef.current);
                         }}
                         disabled={(!input.trim() && attachments.length === 0) || isLoading}
-                        className="p-3 bg-indigo-600 text-white rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95"
+                        className="p-2.5 bg-indigo-600 text-white rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95"
                       >
-                        <Send className="w-3.5 h-3.5" />
+                        <Send className="w-4 h-4" />
                       </button>
                     )}
                   </div>

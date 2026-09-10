@@ -28,6 +28,16 @@ export interface PersistedConversation {
   framework?: string;
   /** Cumulative token usage (older field, still returned by the server). */
   usage?: { inputTokens?: number; outputTokens?: number };
+  /**
+   * Whose GitHub repo this app's code lives in, and whether it is the USER'S OWN — see
+   * ConversationRecord in ConversationStore.ts (admin 2026-09-06, "GitHub se import ki hai, matlab
+   * connect hai!"). Without replaying this into a synthetic `repo` event below, a reopened session
+   * would "forget" a repo the import genuinely connected — `deployRepo` on the client is built from
+   * live stream events only, and a reload starts with none.
+   */
+  repoOwner?: string;
+  repoOwnedByUser?: boolean;
+  repoName?: string;
 }
 
 /**
@@ -108,6 +118,19 @@ function timelineToWireEvent(e: unknown): AgentV3WireEvent | null {
 export function conversationToEvents(conv: PersistedConversation): AgentV3WireEvent[] {
   const events: AgentV3WireEvent[] = [];
   if (conv.workspaceId) events.push({ type: 'workspace', workspaceId: conv.workspaceId, ts: 0 });
+  /**
+   * 🔴 REPLAY THE REPO FACT TOO, NOT JUST THE CHAT (admin 2026-09-06). The server has durably
+   * remembered whose GitHub repo this app lives in since the moment it was established — but that
+   * fact only ever reached the client as a live `repo` stream event, which a reload never replays.
+   * Synthesizing the SAME event here, through the SAME reducer case, is what lets `deployRepo` (the
+   * Publish/Deploy-backend screen's own signal) resolve correctly on the very next visit — no new
+   * client-side logic, just replaying a fact the server already had.
+   */
+  if (conv.repoOwnedByUser && conv.repoOwner?.trim() && conv.repoName?.trim()) {
+    const owner = conv.repoOwner.trim();
+    const repo = conv.repoName.trim();
+    events.push({ type: 'repo', url: `https://github.com/${owner}/${repo}`, fullName: `${owner}/${repo}`, ownedByUser: true, ts: 0 });
+  }
   const msgs = conv.messages ?? [];
   const replayed: AgentV3WireEvent[] = [];
   msgs.forEach((m, idx) => {

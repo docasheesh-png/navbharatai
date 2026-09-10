@@ -618,6 +618,11 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ files, onRun, genera
                 title="App Preview"
                 className="w-full h-full bg-white border-none"
                 style={{ opacity: previewOpacity, transition: 'opacity 0.15s ease' }}
+                // PARITY WITH THE PRO PREVIEW (gap analysis 2026-09-10). Without a delegated
+                // permission an embedded app cannot even ASK for the camera, microphone or location,
+                // so a scanner, voice or maps app failed inside its own preview here too. This grants
+                // nothing — it only lets the browser prompt, and the user still answers.
+                allow="camera; microphone; geolocation; clipboard-write; autoplay; fullscreen; accelerometer; gyroscope; midi; payment; xr-spatial-tracking"
                 sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
               />
             ) : (

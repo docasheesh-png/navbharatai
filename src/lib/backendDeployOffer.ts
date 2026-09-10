@@ -42,8 +42,16 @@ export interface BackendDeployOffer {
   repoPath: string;
   /** Numbered prerequisites. Never empty when `canDeploy` is false — that would be a dead end again. */
   steps: string[];
-  /** The one action offered beside the steps. */
-  cta: 'none' | 'connect-github' | 'save-render-key';
+  /**
+   * The one action offered beside the steps.
+   *
+   * ⚠️ `push-to-github` ADDED 2026-09-04, on the admin's screenshot of a genuine dead end: the steps
+   * said *"Connect GitHub, then push this app to a repo of your own"*, GitHub was ALREADY connected
+   * (so no Connect button was rendered), and pushing the app to a repo had **no control anywhere in
+   * the product** — every push lived inside the build route. The user had done everything asked and
+   * the screen still offered nothing. `POST /api/agentv3/github/push-app` is that missing action.
+   */
+  cta: 'none' | 'connect-github' | 'save-render-key' | 'push-to-github';
   /** An honest caveat shown WITH a live button (not instead of it). '' when there is nothing to add. */
   note: string;
 }
@@ -55,10 +63,24 @@ const SAVE_KEY_STEPS = [
   'Come back here and press Publish again.',
 ];
 
+/** GitHub not connected yet: the first step is genuinely theirs, and the Connect button is offered. */
 const REPO_STEPS = [
   'Your code has to live in a GitHub repository first — that is what a host reads it from.',
   'Connect GitHub, then push this app to a repo of your own.',
   'Come back here and press Publish again.',
+];
+
+/**
+ * GitHub IS connected, but this app is not in a repo of the user's own yet.
+ *
+ * The old wording told them to "Connect GitHub" — which they had already done — and then to push the
+ * app themselves, with nothing on screen that could. These steps describe what the button beside them
+ * actually does, so the instruction and the control finally match.
+ */
+const PUSH_STEPS = [
+  'Your code has to live in a GitHub repository first — that is what a host reads it from.',
+  'Press “Put this app in my GitHub” below — we create a private repository in your own account and save your app to it.',
+  'Then deploy the backend, and your domain will point at it automatically.',
 ];
 
 /**
@@ -112,13 +134,20 @@ export function backendDeployOffer(input: {
   const repoPath = owner && repo && String(input.workspaceId ?? '').trim() ? `${owner}/${repo}` : '';
 
   if (!repoPath) {
+    /**
+     * 🔒 `cta: 'none'` HERE WAS THE DEAD END (admin 2026-09-04). With GitHub already connected the
+     * panel rendered the steps and NO button at all, while step 2 asked the user to push the app to a
+     * repo — an action that existed nowhere in the product. Now the connected case offers the real
+     * action, and only a genuinely unconnected user is asked to connect first.
+     */
+    const connected = input.githubConnected === true;
     return {
       show: true,
       title,
       canDeploy: false,
       repoPath: '',
-      steps: REPO_STEPS,
-      cta: input.githubConnected ? 'none' : 'connect-github',
+      steps: connected ? PUSH_STEPS : REPO_STEPS,
+      cta: connected ? 'push-to-github' : 'connect-github',
       note: '',
     };
   }
@@ -135,4 +164,38 @@ export function backendDeployOffer(input: {
         + 'RENDER_API_KEY under Settings → Secrets & API Keys first so the deploy can find it.'
       : '',
   };
+}
+
+/**
+ * SHOULD PRESSING "PUBLISH" DEPLOY THE BACKEND BY ITSELF? (admin 2026-09-05)
+ *
+ * 🔴 THE STEP THIS REMOVES. To a user, "Publish" means *make my app live*. For an app with a server
+ * half that means BOTH halves — and what happened instead was: press Publish → refused → find the
+ * "Deploy backend" button → press that. The refusal was honest and the button worked; the second
+ * press was still ours to ask for, not theirs to make.
+ *
+ * 🔒 IT FIRES ONLY ON A FRESH REFUSAL, WHICH IS WHAT KEEPS IT FROM BEING A SURPRISE. The publish
+ * attempt CLEARS the refusal code before it runs, so the transition from anything else INTO
+ * `backend-deploy-available` can only mean "this person just pressed Publish and this is why it could
+ * not proceed". Reacting to the code merely BEING set would deploy on reopening a panel — an action
+ * nobody asked for, in someone's own hosting account.
+ *
+ * 🔒 AND ONLY WHEN IT COULD ALREADY HAVE BEEN PRESSED. `canDeploy` means the repository and the key
+ * are both already there — nothing new is being consented to, and no question is being skipped. With
+ * either missing the screen still shows the prerequisites and their buttons, exactly as before.
+ *
+ * PURE, so the rule is tested rather than inferred from a component. */
+export function shouldAutoDeployBackend(input: {
+  /** The refusal code the publish attempt just returned. */
+  code: string;
+  /** The code before it — a fresh refusal is a TRANSITION, never a standing value. */
+  previousCode: string;
+  /** Is the deploy button one the user could have pressed right now? */
+  canDeploy: boolean;
+  /** A deploy already running is never restarted. */
+  busy: boolean;
+}): boolean {
+  if (input.code !== 'backend-deploy-available') return false;
+  if (input.previousCode === input.code) return false;
+  return input.canDeploy && !input.busy;
 }

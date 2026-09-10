@@ -2,6 +2,7 @@ import UpdateBanner from './components/UpdateBanner';
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
 import { tokenFromDeepLink, ticketFromDeepLink, redeemGithubTicket, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
+import { readTapFeedbackPrefs, shouldOpenMenuOnSwipe } from './lib/tapFeedbackPrefs';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
@@ -35,7 +36,7 @@ import { medicalViewBlocked, medicalFeaturesHidden } from './lib/playCompliance'
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
-import { MOBILE_NAV_TOTAL_HEIGHT } from './lib/mobileNav';
+import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
 import { isModeSurface, FREE_MODE_ID, NEW_FREE_MODE_ID } from './components/chat/modePicker';
 import { ReportSheet } from './components/ReportSheet';
@@ -55,6 +56,7 @@ import { Capacitor } from '@capacitor/core';
 import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib/firebase';
 import { readRedirectMarker, clearRedirectMarker, redirectReturnVerdict, redirectLostMessage } from './lib/redirectSignInMarker';
 import { readRoster, writeRoster, rememberAccount } from './lib/accountRoster';
+import { isNewAccount, decideSignupReport, SIGNUP_REPORTED_KEY } from './lib/signupSignal';
 import { authedHeaders } from './lib/authHeaders';
 import { LS_EVICTABLE, safeLS } from './lib/localStorageSafe';
 import { rememberGithubOwner, clearGithubConnection, readGithubOwner } from './lib/githubTokenStore';
@@ -277,6 +279,7 @@ export default function App() {
     referralHistory, setReferralHistory,
     fetchWallet,
     createBillingOrder,
+    storeRail, storeConfig, platformFeePct, buyStorePack, buyingProductId, storePurchaseNotice,
     createVishwakarmaOrder,
     verifyBillingPayment,
     redeemPromoCoupon,
@@ -680,7 +683,22 @@ export default function App() {
   const v3ResumeInFlightRef = useRef(false);
 
   // Touch swipe → sidebar control (replaces the accidental browser back/forward).
-  // Left→right swipe opens the sidebar; right→left closes it (no-op if already closed).
+  //
+  // 🔒 TWO FIXES FROM ONE REPORT (admin 2026-08-28: "left se right finger swipe ho jaye GALTI SE BHI to
+  // slidebar menu open ho jata hai"):
+  //
+  //   1. OPENING IS OFF BY DEFAULT. It is opt-in under Settings → Touch feedback, and the preference is
+  //      read PER TOUCH (not captured at mount), so flipping the switch takes effect on the very next
+  //      swipe — the same discipline `installTapHaptics` follows, and the reason this effect still has
+  //      no dependency on the preference.
+  //   2. WHEN ON, IT MUST START AT THE LEFT EDGE. The real cause of the accidental opens was that this
+  //      listened on `document` for ANY mostly-horizontal 70px swipe ANYWHERE: scrolling the preview's
+  //      horizontal toolbar, flicking a code block or nudging a carousel all read as "open the menu".
+  //      An edge-anchored start is what every OS back-gesture uses, and it cannot collide with content
+  //      that scrolls sideways in the middle of the screen.
+  //
+  // CLOSING is deliberately NOT gated or edge-anchored: it only does anything while the menu is already
+  // open and covering the screen, so it can neither surprise the user nor fight page content.
   useEffect(() => {
     let startX = 0, startY = 0, tracking = false;
     const onStart = (e: TouchEvent) => {
@@ -695,8 +713,12 @@ export default function App() {
       const dx = t.clientX - startX, dy = t.clientY - startY;
       // Mostly-horizontal, decisive swipe only.
       if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-      if (dx > 0) setIsMenuOpen(true);                 // left→right: open
-      else setIsMenuOpen(prev => (prev ? false : prev)); // right→left: close if open, else nothing
+      if (dx > 0) {
+        if (!shouldOpenMenuOnSwipe(startX, readTapFeedbackPrefs())) return;
+        setIsMenuOpen(true);                           // left EDGE → right: open (opt-in)
+      } else {
+        setIsMenuOpen(prev => (prev ? false : prev));  // right→left: close if open, else nothing
+      }
     };
     document.addEventListener('touchstart', onStart, { passive: true });
     document.addEventListener('touchend', onEnd, { passive: true });
@@ -1149,6 +1171,27 @@ export default function App() {
             lastUsed: Date.now(),
           }));
         } catch { /* the roster is a convenience — it must never affect signing in */ }
+        // REGISTRATION CONVERSION — reported HERE for the same reason the roster above is: this is
+        // the ONE place every successful sign-in passes through, so all eight paths (email, phone
+        // web/native, Google popup/redirect/native, GitHub) are covered without each growing its own
+        // wiring, and a ninth added later is covered for free.
+        //
+        // "New account" is derived from Firebase's own stamps rather than from which button was
+        // pressed, and it is deduped per uid — onAuthStateChanged also fires on every page load and
+        // token refresh, and Firebase keeps reporting the same creationTime forever, so without the
+        // guard one signup would re-report on every reload and inflate the number ad spend is
+        // optimised against. See signupSignal.ts.
+        try {
+          const decision = decideSignupReport(
+            localStorage.getItem(SIGNUP_REPORTED_KEY),
+            currentUser.uid,
+            isNewAccount(currentUser.metadata?.creationTime, currentUser.metadata?.lastSignInTime),
+          );
+          if (decision.report) {
+            if (decision.nextStored) localStorage.setItem(SIGNUP_REPORTED_KEY, decision.nextStored);
+            trackEvent('signup', { provider: currentUser.providerData?.[0]?.providerId || 'unknown' });
+          }
+        } catch { /* measurement must never affect signing in */ }
         // GITHUB CONNECTION IS PER-USER: pick up this user's OWN GitHub token, but NEVER inherit a
         // token authorized by a different NavBharatAI user on this browser (the "every user sees my
         // account" bug). resolveGithubConnectionForUser decides keep / claim / clear.
@@ -2734,6 +2777,21 @@ export default function App() {
   const showsGlobalMobileNav =
     effectiveDeviceMode === 'mobile' && !focusMode && activeView !== 'botbuilder' && activeView !== 'studio';
 
+  /**
+   * …and publish that same answer to CSS, for the THIRD consumer of it.
+   *
+   * The bar is `fixed bottom-0` at z-150, so it paints over every dialog below that z-index. Two
+   * consumers already read the boolean above — the <nav> itself, and the page padding that keeps the
+   * composer clear of it. Modal sheets are the third: `nb-sheet-overlay` (index.css) has to know how
+   * much of the visible viewport our own chrome is occupying, and a stylesheet cannot work that out,
+   * because it depends on device mode / focus mode / the active view rather than on a media query.
+   *
+   * Written to <html> rather than the root <div> below, because the dialogs that portal to
+   * document.body — the publish celebration, the report sheet — sit outside that div and would not
+   * inherit the variable from it.
+   */
+  useEffect(() => { publishMobileNavHeight(showsGlobalMobileNav); }, [showsGlobalMobileNav]);
+
   return (
     <div
       className={cn("h-screen supports-[height:100dvh]:h-[100dvh] w-screen flex flex-col overflow-hidden transition-colors duration-500", themeClasses.bg, themeClasses.text)}
@@ -3556,6 +3614,12 @@ export default function App() {
               copiedReferral={copiedReferral}
               buyAmountInput={buyAmountInput}
               isRecharging={isRecharging}
+              storeRail={storeRail}
+              storeConfig={storeConfig}
+              platformFeePct={platformFeePct}
+              buyingProductId={buyingProductId}
+              storePurchaseNotice={storePurchaseNotice}
+              onBuyStorePack={(id) => { void buyStorePack(id); }}
               tempReminderLimit={tempReminderLimit}
               tempBudgetLimit={tempBudgetLimit}
               limitError={limitError}
@@ -3853,6 +3917,7 @@ export default function App() {
         setShowVishwakarmaUnlockModal={setShowVishwakarmaUnlockModal}
         wallet={wallet}
         vkMode={vkMode}
+        platformFeePct={platformFeePct}
         couponError={couponError}
         couponSuccess={couponSuccess}
         vkTokenInput={vkTokenInput}

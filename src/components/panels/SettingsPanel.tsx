@@ -7,6 +7,7 @@ import { authedHeaders } from '../../lib/authHeaders';
 // LegalDocPage dynamic-imports the full registry into its own lazy chunk.
 import { LEGAL_META } from '../../content/legal/meta';
 import { LegalDocPage } from './LegalDocPage';
+import { DangerZone } from '../settings/DangerZone';
 import {
   type MotionMode, getStoredMotionMode, applyMotionMode,
   getStoredFontScale, applyFontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_STEP, FONT_SCALE_DEFAULT,
@@ -200,6 +201,10 @@ function TouchFeedbackControl() {
   const rows: { key: keyof TapFeedbackPrefs; icon: string; label: string; hint: string }[] = [
     { key: 'sound', icon: '🔊', label: 'Click sound', hint: 'A soft tick when you tap. Follows your phone\'s silent mode.' },
     { key: 'vibration', icon: '📳', label: 'Vibration', hint: 'A short buzz when you tap. Off by default — it can feel heavy on some phones.' },
+    // ADMIN 2026-08-28: "left se right finger swipe ho jaye GALTI SE BHI to slidebar menu open ho jata
+    // hai." It now starts OFF, and when switched on it only fires from the very left edge — the old
+    // gesture counted any sideways swipe anywhere, which is why scrolling a toolbar opened the menu.
+    { key: 'swipeMenu', icon: '👉', label: 'Swipe to open menu', hint: 'Swipe from the left edge to open the sidebar. Off by default — it used to open by accident while scrolling sideways.' },
   ];
   return (
     <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
@@ -207,7 +212,7 @@ function TouchFeedbackControl() {
         <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">👆</div>
         <div>
           <div className="text-sm font-bold text-white">Touch feedback</div>
-          <div className="text-[11px] text-[#8b949e] mt-0.5 max-w-xs">What the app does when you tap something. Changes apply straight away.</div>
+          <div className="text-[11px] text-[#8b949e] mt-0.5 max-w-xs">What the app does when you tap or swipe. Changes apply straight away.</div>
         </div>
       </div>
       <div className="space-y-2">
@@ -680,6 +685,13 @@ export function SettingsPanel({
                   <Lock className="w-4 h-4 text-[#484f58] group-hover:text-red-400 transition-colors" />
                   <span className="text-xs font-bold text-[#8b949e] group-hover:text-white transition-colors">Admin Login</span>
                 </button>
+
+                {/* DANGER ZONE — last on the screen, deliberately (GitHub's placement). A control that
+                    irreversibly deletes an account must never sit where a thumb lands by accident, and
+                    it will not fire until the user types the word. Google Play also requires in-app
+                    account deletion for any app that lets people sign up; the public /delete-account
+                    page satisfies the URL half of that rule, and this satisfies the in-app half. */}
+                <DangerZone signedIn={!!user} onLog={addLog} />
 
                 <div className="pt-4 border-t border-white/5 flex flex-col items-center">
                   <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-3">

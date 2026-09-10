@@ -390,6 +390,78 @@ describe('wiring — migrations run before the boot; the log scan cannot be sile
 });
 
 /**
+ * 🔒 THE IMPORT LANE MUST REMEMBER WHAT IT PROVED (admin 2026-09-08).
+ *
+ * THE BUG, found by asking why the admin's own port question could still happen: the import boot
+ * resolves the port from every declaration site, VISITS the page and confirms it renders — the
+ * strongest evidence any lane holds — and then wrote NOTHING durable. Verified at the time: the whole
+ * import preview block contained zero `sandboxStore.` calls, while the build path saves a recipe on a
+ * browser render AND the declared port on every successful build, and the wake path saves a recipe the
+ * same way. Worse, the build path's declared-port capture is gated on `expectsArtifacts`, which is
+ * defined as `… && !isImportTurn` — so an import could not pick it up on the way past either.
+ *
+ * The damage lands DAYS later, which is why nothing caught it: once the sandbox is gone the door looks
+ * for a recipe and a declared port, finds neither, and guesses from the common-port list starting at
+ * 3000 — for an imported repo, the class of app most likely to be serving on 5000.
+ */
+describe('an imported app remembers the preview it just proved', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('../routes/agentv3.ts', import.meta.url)), 'utf8');
+  // Windowed between two anchors that BOUND the import boot's success path — the port resolution that
+  // opens it and the verdict it records — rather than by a character count from the boot command, which
+  // silently stops covering the code it was written about as the route grows around it. (It did, on the
+  // first run of this test: the window ended ~250 lines short of the block and every assertion failed
+  // against a slice that never contained the code. The test was wrong, not the route.)
+  const BLOCK_START = SRC.indexOf('const declared = declaredAppPort(importedFiles)');
+  const BLOCK_END = SRC.indexOf("'IMPORT_PREVIEW_SERVING'", BLOCK_START);
+  const BLOCK = SRC.slice(BLOCK_START, BLOCK_END);
+
+  it('the block that had NO durable memory at all now writes both facts', () => {
+    // The regression this pins is an ABSENCE, so it is asserted as a presence inside the exact block
+    // the absence lived in — a save added anywhere else would not fix the import lane.
+    expect(BLOCK_START).toBeGreaterThan(-1);
+    expect(BLOCK_END).toBeGreaterThan(BLOCK_START); // the window really bounds the block
+    expect(BLOCK).toContain('sandboxStore.saveDeclaredPort(workspaceId, declared!)');
+    expect(BLOCK).toContain('sandboxStore.saveRecipe(workspaceId, importCheck.recipe)');
+  });
+
+  it('🔒 the RECIPE is EARNED — only a page that genuinely rendered may become one', () => {
+    // A recipe is a port we have SEEN serving. Promoting a bound-but-blank port to one would teach the
+    // door to lead with a port that answers TCP and shows nothing, which is the failure the whole
+    // "earn the verdict" rule exists to stop.
+    const at = BLOCK.indexOf('const importCheck = buildRecipe(');
+    expect(at).toBeGreaterThan(-1);
+    const guard = BLOCK.slice(BLOCK.indexOf('if (served.rendered) {'), at);
+    expect(guard).toContain('if (served.rendered) {');
+    // …and it records the port that actually WON the visit, never the first one tried.
+    expect(BLOCK).toContain('port: bootPort');
+    expect(BLOCK).toContain('devCommand: bootCommand');
+  });
+
+  it('🔒 the DECLARED PORT is saved even when the preview did NOT render — that is the whole point', () => {
+    // An app whose preview never came up has no recipe, and that is exactly when the door has nothing
+    // else to lead with. So this write must NOT sit inside the rendered branch.
+    const declAt = BLOCK.indexOf('saveDeclaredPort(workspaceId, declared!)');
+    const renderedAt = BLOCK.indexOf('if (served.rendered) {');
+    expect(declAt).toBeGreaterThan(-1);
+    expect(renderedAt).toBeGreaterThan(-1);
+    expect(declAt).toBeLessThan(renderedAt);
+  });
+
+  it('remembering can never fail the import that just worked', () => {
+    const at = BLOCK.indexOf('saveDeclaredPort(workspaceId, declared!)');
+    const wrapper = BLOCK.slice(Math.max(0, at - 400), at);
+    expect(wrapper).toContain('try {');
+    expect(BLOCK.slice(at, at + 900)).toContain('} catch {');
+  });
+
+  it('the port it remembers is the one every declaration site agreed on, not a script-only read', () => {
+    // `declaredAppPort` is the resolver over package.json scripts, vite.config, .env and server entries;
+    // the old script-only reader is what sent an imported app to the wrong port in the first place.
+    expect(BLOCK).toContain('declaredAppPort(importedFiles)');
+  });
+});
+
+/**
  * A PLACEHOLDER MUST NEVER ERASE A REAL KEY (found 2026-08-09).
  *
  * `buildDevEnvContent` lists every declared variable with an EMPTY placeholder, and the caller wrote it

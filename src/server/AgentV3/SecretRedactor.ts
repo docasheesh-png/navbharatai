@@ -14,6 +14,8 @@
 // - Never throw: redaction must never break a build. Any failure returns input as-is.
 // - Idempotent: re-running on already-redacted text changes nothing.
 
+import { previewUrlPattern } from './PreviewDomain';
+
 const PLACEHOLDER = '[REDACTED:%s]';
 
 function mask(kind: string): string {
@@ -147,6 +149,39 @@ export function containsSecret(input: unknown): boolean {
 }
 
 /**
+ * A live preview URL names a BILLED MACHINE, not a secret — a different reason to mask it, so it
+ * gets its own function rather than folding into `redactSecrets` (same reasoning as `redactPII`
+ * living apart: two distinct concerns, two call sites, so touching one can never silently widen or
+ * narrow the other).
+ *
+ * WHY THIS EXISTS (admin 2026-09-03: "isse user yeh link copy paste kar ke dosto ko bhi bhej deta
+ * hai, mera kharcha badta hai"): `update_preview`'s tool result hands the model the real sandbox
+ * host it just verified, because the model needs that host for its OWN next steps (`screenshot`,
+ * `curl`, browser checks). It never needed to REPEAT that host back to the person — the running app
+ * is already visible in the app's own Preview panel, which resolves through the preview door
+ * (`previewDoor.ts`) rather than a raw machine address, and is exactly what refuses a copied link
+ * opened outside the app (`previewInAppOnly`). A model that quotes the raw host in its own reply
+ * text hands out an un-metered ticket onto NavBharatAI's E2B bill through a SEPARATE door — same
+ * leak, different shape, and the door's own protection cannot see it because it never touches
+ * chat text.
+ *
+ * Deliberately NOT folded into `redactSecrets`: that function also runs over bash stdout/stderr and
+ * admin diagnostics (`DiagnosticsStore.ts`), where the real preview URL is exactly what an admin
+ * debugging a build needs to see. Only the fields a PERSON reads in the live chat stream should ever
+ * lose this URL — see `redactEventForUser` below, the one place this is actually called.
+ */
+export function redactPreviewUrls(input: unknown): string {
+  if (typeof input !== 'string' || input.length === 0) {
+    return typeof input === 'string' ? input : String(input ?? '');
+  }
+  try {
+    return input.replace(previewUrlPattern(), '[your live preview — see the Preview panel]');
+  } catch {
+    return input;
+  }
+}
+
+/**
  * P-AI.6 — general PII patterns (India-focused), separate from secret/API-key shapes. Used to
  * mask personal data in USER-UPLOADED content (documents, pasted code/data) before it enters the
  * transcript/model context or logs. Ordered email → PAN → IFSC → Aadhaar → phone so longer/structured
@@ -221,9 +256,11 @@ export function redactDeep(value: unknown, depth = 0): unknown {
  *
  * Deliberately touches ONLY the fields a person reads — `text` (narration/thinking) and `summary` (the
  * final result). Structural fields (ids, urls, counts, tool payloads) are left exactly as they are, so
- * this can never mangle something the client parses. Anything that is not an object comes back
- * untouched, and `redactSecrets` returns its input unchanged when there is nothing to mask, which is
- * the overwhelming majority of events.
+ * this can never mangle something the client parses — this is exactly why the `preview` event's own
+ * `url` field (which the client's own health-check logic reads) is untouched here, while a sandbox
+ * URL the MODEL quotes inside `text`/`summary` is masked by `redactPreviewUrls` below. Anything that
+ * is not an object comes back untouched, and both maskers return their input unchanged when there is
+ * nothing to mask, which is the overwhelming majority of events.
  */
 export function redactEventForUser<T>(event: T): T {
   if (!event || typeof event !== 'object') return event;
@@ -234,7 +271,7 @@ export function redactEventForUser<T>(event: T): T {
     for (const field of ['text', 'summary'] as const) {
       const v = e[field];
       if (typeof v !== 'string' || !v) continue;
-      const masked = redactSecrets(v);
+      const masked = redactPreviewUrls(redactSecrets(v));
       if (masked !== v) { out[field] = masked; changed = true; }
     }
     return (changed ? out : event) as T;

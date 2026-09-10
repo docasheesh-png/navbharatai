@@ -10,6 +10,7 @@
 // global ceiling would either strand the fast calls or kill the slow one mid-flight.
 
 import { authHeader } from './authHeaders';
+import { FetchTimeoutError } from './longRequest';
 
 /**
  * Authorization header for the signed-in user, or `{}` when signed out.
@@ -30,7 +31,15 @@ export const DEFAULT_TIMEOUT_MS = 20_000;
 /**
  * `fetch` with auth attached and a bounded timeout, so no caller's spinner can hang forever.
  *
- * An abort is rethrown as a plain Error with a readable message; callers show it as-is.
+ * OUR timeout is rethrown as a `FetchTimeoutError` (see longRequest.ts) so a caller can tell "we
+ * stopped waiting" from "the network failed" — they are different truths to tell the user.
+ *
+ * 🔒 A CALLER'S OWN `signal` IS HONOURED, NOT REPLACED (fixed 2026-09-07). This used to overwrite
+ * `init.signal` with its own controller, so a caller that built a 90-second controller for a slow
+ * publish still had the request cut at the 20-second default — and, because the abort then arrived
+ * as OUR error rather than theirs, their timed-out branch never ran and the user read "nothing was
+ * published" over a publish that was still going. Now either signal aborts the request, and an abort
+ * that came from the caller is rethrown untouched, because it is theirs to describe.
  */
 export async function authedFetch(
   url: string,
@@ -39,6 +48,12 @@ export async function authedFetch(
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const outer = init.signal ?? null;
+  const onOuterAbort = () => controller.abort();
+  if (outer) {
+    if (outer.aborted) controller.abort();
+    else outer.addEventListener('abort', onOuterAbort, { once: true });
+  }
   try {
     return await fetch(url, {
       ...init,
@@ -47,10 +62,12 @@ export async function authedFetch(
     });
   } catch (err) {
     if ((err as { name?: string })?.name === 'AbortError') {
-      throw new Error('That took too long to respond. Please check your connection and try again.');
+      if (outer?.aborted) throw err;   // the caller's abort, in the caller's own terms
+      throw new FetchTimeoutError();
     }
     throw err;
   } finally {
     clearTimeout(timer);
+    outer?.removeEventListener('abort', onOuterAbort);
   }
 }

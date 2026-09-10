@@ -124,10 +124,41 @@ describe('the publish path stays safe (locked)', () => {
   const deployment = readFileSync(resolve(__dirname, 'Deployment.ts'), 'utf8');
 
   it('mirrors AFTER the Firebase release, never before', () => {
+    // ADDRESSED WITH lastIndexOf DELIBERATELY (2026-09-07). There are now TWO calls to
+    // mirrorPublishToBucket and they mean opposite things:
+    //   • the BUCKET-ONLY publish (ROADMAP §10.3) calls it FIRST, and that is the whole point — if it
+    //     succeeds there is no Firebase publish to undo, because no channel is ever created;
+    //   • the MIRROR proper calls it LAST, alongside a publish that has already succeeded.
+    // This test guards the second one, so it must name the second one. `indexOf` found the new call
+    // and failed on a change that does not threaten the guarantee at all.
     const release = deployment.indexOf('/releases?versionName=');
-    const mirror = deployment.indexOf('mirrorPublishToBucket(');
+    const mirror = deployment.lastIndexOf('mirrorPublishToBucket(');
     expect(release).toBeGreaterThan(-1);
     expect(mirror).toBeGreaterThan(release);
+  });
+
+  it('🔒 bucket-only publish runs BEFORE any Firebase call — that is what un-consumes the channel', () => {
+    // If this ever moved after authHeaders/ensureChannel the ceiling fix would silently stop working:
+    // the app would still serve from the bucket while quietly holding a Hosting slot, which is the
+    // exact "looks fixed, is not" state §10.3 already had once.
+    const bucketOnly = deployment.indexOf('bucketOnlyPublishEnabled()');
+    const firebaseAuth = deployment.indexOf('await this.authHeaders()');
+    expect(bucketOnly).toBeGreaterThan(-1);
+    expect(firebaseAuth).toBeGreaterThan(-1);
+    expect(bucketOnly).toBeLessThan(firebaseAuth);
+  });
+
+  it('🔒 an incomplete bucket-only publish FALLS BACK to Firebase instead of shipping a broken app', () => {
+    // A partial mirror is a blank page, and with the channel skipped there is no second origin to
+    // cover for it. Falling through costs a slot; handing the user a broken app costs the user.
+    expect(deployment).toContain('bucketOnlyPublishUsable(mirror)');
+    expect(deployment).toContain('[PUBLISH-BUCKET-ONLY]');
+  });
+
+  it('🔒 takedown reaches a bucket-only app, which has no channel to delete', () => {
+    // Without this the Firebase delete 404s into "idempotent success" and the app stays LIVE in the
+    // bucket while the platform reports it removed — a takedown that is not one.
+    expect(deployment).toContain('removePublishFromBucket(bucketOnlySubdomain(workspaceId))');
   });
 
   it('mirrors ONLY the workspace publish channel, never a preview snapshot', () => {

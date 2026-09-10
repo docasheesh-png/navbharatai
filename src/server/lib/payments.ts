@@ -3,6 +3,7 @@ import axios from 'axios';
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
 import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
 import { getSecretValue } from './secrets';
+import { TOKENS_PER_RUPEE, VISHWAKARMA_PASS_PRICE_INR } from '../../lib/walletPricing';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import {
   professionalPassPriceInr, passEntitlementForPayment, MAX_PASS_PERIODS,
@@ -15,8 +16,12 @@ import {
 // creditable tokens from the VERIFIED paid amount instead: tokens = (paid − pass) × TOKENS_PER_RUPEE.
 // (The standard, non-vishwakarma path already binds to paid ₹ via balanceAdded.) Pass price + rate must
 // match the client's createVishwakarmaOrder; change both together if pricing ever changes.
-export const VISHWAKARMA_PASS_PRICE_RUPEES = 100;
-export const TOKENS_PER_RUPEE = 100;
+// RE-EXPORTED, NOT REDECLARED (2026-09-10). These two numbers are also printed on purchase screens,
+// and keeping a server copy is what let the pass price drift to ₹50 in the chooser modal while this
+// file charged ₹100. One home: src/lib/walletPricing.ts. The names here are unchanged, so every
+// existing importer is unaffected.
+export const VISHWAKARMA_PASS_PRICE_RUPEES = VISHWAKARMA_PASS_PRICE_INR;
+export { TOKENS_PER_RUPEE };
 
 /**
  * WELCOME BONUS tokens minted for a brand-new wallet.
@@ -82,6 +87,31 @@ export interface WalletCreditTx {
   balanceAdded: number;
   isVishwakarmaOrder?: boolean;
   buyPass?: boolean;
+  /**
+   * The platform fee this payment carried, in ₹ — written by the route that CREATED the order, from
+   * the rate that was disclosed to the user on that screen. Absent on a transaction created before
+   * the fee existed, and absent on a store purchase (Play/Apple packs are priced with their fee
+   * already inside), and absent means ZERO: those credit in full, exactly as they were sold.
+   */
+  platformFeeInr?: number;
+}
+
+/**
+ * The platform fee actually recorded on a transaction.
+ *
+ * 🔑 READ FROM THE TRANSACTION, NOT RE-COMPUTED FROM THE CURRENT RATE. The user agreed to a split on
+ * the screen where they paid; if the admin changes the rate while an order sits pending, re-deriving
+ * it here would credit a different amount than the one they were shown. The stored number is written
+ * by our own route, never by the client, so reading it is not trusting the caller.
+ *
+ * Clamped to [0, amountPaid] so no corrupt or hand-edited row can ever produce a negative credit.
+ */
+export function recordedPlatformFee(txData: WalletCreditTx): number {
+  const paid = Number(txData.amountPaid);
+  const fee = Number(txData.platformFeeInr);
+  if (!Number.isFinite(paid) || paid <= 0) return 0;
+  if (!Number.isFinite(fee) || fee <= 0) return 0;
+  return Math.min(fee, paid);
 }
 
 /**
@@ -102,9 +132,16 @@ export function computeCreditedWallet(
   const n = (v: any): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   const isVishwakarmaOrder = !!txData.isVishwakarmaOrder;
   const buyPass = !!txData.buyPass;
-  const tokensToCredit = creditableVishwakarmaTokens(txData.amountPaid, buyPass);
   const amountPaid = n(txData.amountPaid);
   const balanceAdded = n(txData.balanceAdded);
+  // THE PLATFORM FEE (see platformFee.ts). The wallet is credited the NET of the payment; the fee is
+  // NavBharatAI's revenue and never reaches the balance. `totalMoneySpent` below still records the
+  // GROSS — that field answers "how much has this user paid us", which is the full amount.
+  const platformFee = recordedPlatformFee(txData);
+  const netPaid = Math.round((amountPaid - platformFee) * 100) / 100;
+  // SECURITY C4 stands: the tokens still derive from the VERIFIED paid amount, only now net of our
+  // own server-written fee — never from anything the client sent.
+  const tokensToCredit = creditableVishwakarmaTokens(netPaid, buyPass);
 
   const update: Record<string, any> = {};
   let promoApplied = false;
@@ -133,8 +170,8 @@ export function computeCreditedWallet(
       description: `Bought ${tokensToCredit.toLocaleString()} tokens${buyPass ? ` + Lifetime Pass Activated (₹${VISHWAKARMA_PASS_PRICE_RUPEES})` : ''}${promoApplied ? ' + Promo 1000 Tokens' : ''}`,
     };
     update.walletLedger = [...(w.walletLedger || []), ledgerEntry];
-    update.remaining_balance = n(w.remaining_balance) + amountPaid;
-    update.total_balance = n(w.total_balance) + amountPaid;
+    update.remaining_balance = n(w.remaining_balance) + netPaid;
+    update.total_balance = n(w.total_balance) + netPaid;
   } else {
     const tokensToCreditFallback = balanceAdded * 100;
     if (!promoApplied) update.tokenBalance = n(w.tokenBalance) + tokensToCreditFallback;
@@ -146,7 +183,9 @@ export function computeCreditedWallet(
       amountCoinsOrTokens: promoApplied ? 10000 : tokensToCreditFallback,
       moneySpent: amountPaid,
       timestamp: now,
-      description: `Standard wallet recharge: ₹${amountPaid} (${tokensToCreditFallback.toLocaleString()} tokens added)${promoApplied ? ' + Promo 100₹ Tokens' : ''}`,
+      // The fee is NAMED in the user's own ledger when there was one — a deduction the user can see
+      // in their history is a disclosure; one they can only infer from a smaller number is not.
+      description: `Standard wallet recharge: ₹${amountPaid}${platformFee > 0 ? ` (₹${platformFee.toFixed(2)} platform fee)` : ''} (${tokensToCreditFallback.toLocaleString()} tokens added)${promoApplied ? ' + Promo 100₹ Tokens' : ''}`,
     };
     update.walletLedger = [...(w.walletLedger || []), ledgerEntry];
     update.remaining_balance = n(w.remaining_balance) + balanceAdded;

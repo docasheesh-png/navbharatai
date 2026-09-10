@@ -252,19 +252,35 @@ export function planDeployment(files: Record<string, string>): DeployPlan {
  *
  * 🔒 IT NAMES THE SHAPE, THE REASON, AND THE NEXT STEP. A refusal without a next step is a dead end,
  * and this codebase keeps deleting those. It also never blames the user: they did nothing wrong by
- * bringing a backend — we simply have not finished the path that runs one, and saying so plainly is
- * more useful (and more honest) than a generic failure.
+ * bringing a backend.
+ *
+ * ⚠️ CORRECTED 2026-09-05, AND THE COMMENT BELOW `deployDecision` HAD ALREADY CALLED THIS OUT.
+ *
+ * This function used to say "Backend hosting is coming to NavBharatAI". That was true of the publish
+ * path when it was written and has been FALSE of the product for weeks: NavBharatAI deploys backends,
+ * on the user's own account, and now hosts Python as well as Node. `deployDecision` was added to stop
+ * that sentence reaching users — and it only covered the branch where a key IS available, leaving
+ * THIS branch teaching every user without one that a feature they already have does not exist.
+ *
+ * That is the same class of dishonesty as claiming something works when it does not; it simply errs
+ * in the other direction, and it costs the user the same thing — time spent on a false picture. Worse,
+ * it withheld the ONE fact that would unlock the feature (save your own key), which the panel beside
+ * it was already showing — so the screen contradicted itself, exactly as it did on 2026-09-04.
+ *
+ * A "coming soon" line is now a thing to distrust in this file: whenever one is written, it must be
+ * re-checked against what the product actually does before it is left standing.
  */
 export function staticHostingRefusal(plan: DeployPlan): string {
   if (plan.staticHostingSufficient) return '';
   const what = plan.backend?.framework ?? 'server';
+  // The one fact that unlocks the feature, said the same way the panel beside this says it.
+  const howTo = 'NavBharatAI can deploy it for you — save your own RENDER_API_KEY under '
+    + 'Settings → Secrets & API Keys and it runs in your own account, on your own billing.';
   if (plan.shape === 'fullstack') {
     return `${plan.summary} Publishing only the website half would put a page online that cannot reach its `
-      + `${what} server, so it would look broken. Backend hosting is coming to NavBharatAI — until then you can `
-      + 'deploy the server to your own provider and publish the website half here.';
+      + `${what} server, so it would look broken. ${howTo}`;
   }
-  return `${plan.summary} Backend hosting is coming to NavBharatAI — until then you can deploy it to your own `
-    + 'provider. Nothing has been published, so nothing is broken.';
+  return `${plan.summary} ${howTo} Nothing has been published, so nothing is broken.`;
 }
 
 /**
@@ -283,7 +299,17 @@ export function staticHostingRefusal(plan: DeployPlan): string {
  * Returns '' when static hosting IS sufficient — the ordinary case, where "press Publish" is right and
  * nothing should be added. PURE.
  */
-export function domainPublishBlockNote(plan: DeployPlan): string {
+export function domainPublishBlockNote(
+  plan: DeployPlan,
+  opts?: {
+    /**
+     * `analyzeApiWiring`'s verdict on the real files: false = ship the app WHOLE (no split possible),
+     * which is the one fullstack case where a static publish is certain to be refused. Undefined
+     * means no verdict was formed — and then this function still says nothing, as before.
+     */
+    splitAdvised?: boolean;
+  },
+): string {
   if (plan.staticHostingSufficient) return '';
   /**
    * 🔒 FULLSTACK IS DELIBERATELY SILENT, and getting this wrong would have been worse than the bug.
@@ -298,7 +324,27 @@ export function domainPublishBlockNote(plan: DeployPlan): string {
    * bare server servable by static hosting, so the refusal is certain and can be stated up front. For
    * fullstack the publish route decides with the facts this poll does not have, and its refusal is now
    * shown on this very screen (see NbaiDomainConnect's publishResult) rather than swallowed.
+   *
+   * ⚠️ AMENDED 2026-09-04, on the admin's *"yeh error abhi bhi aa rahi hai — 1 month se aap isko fix
+   * kar rahe ho"* with mitrify.com serving Firebase's "Site Not Found" while the connect screen read
+   * `ownership: active · host: active · SSL: active` and *"one last step: press Publish."*
+   *
+   * The silence above is right for a fullstack app we CANNOT judge, and wrong for one we can. The
+   * publish route has exactly one path that publishes a fullstack app: `wiredToBackend`, which
+   * requires `strategy === 'split'`. So when the app's own code says **ship whole**, the refusal is
+   * as certain as it is for a bare server — and staying silent produces precisely the loop this
+   * function exists to end, with the screen sending the user at a button that answers 422 every time.
+   *
+   * `splitAdvised` is therefore passed in rather than guessed, and only `false` — a real verdict from
+   * `analyzeApiWiring` on the real files — unlocks the fullstack wording. Undefined still means "no
+   * verdict formed", and still says nothing.
    */
+  if (plan.shape === 'fullstack') {
+    if (opts?.splitAdvised !== false) return '';
+    return 'Your app has a server half that runs alongside its website, and the two share one address, '
+      + 'so website hosting cannot serve it on its own. Deploy the whole app to a host that can run a '
+      + 'server, then point this domain there. Pressing Publish will not put anything on your domain.';
+  }
   if (plan.shape !== 'node-server' && plan.shape !== 'python-server') return '';
   const what = plan.backend?.framework ?? 'server';
   return `Your app is a ${what} that has to keep running, not a website made of files, so a domain on `

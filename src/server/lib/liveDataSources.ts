@@ -24,8 +24,16 @@
 // no-key tier is licensed for NON-COMMERCIAL use. Fine for launch-scale testing; before heavy real
 // traffic the admin either buys Open-Meteo's commercial plan or we switch this source to a keyed
 // provider. The code isolates the choice to ONE builder function per source, so a swap is one edit.
+//
+// ✅ 2026-09-09 — IT NOW HAS A SWITCH, AND THE ADMIN CAN SEE IT. `LIVE_WEATHER_SOURCE=off` stops the
+// weather and AQI blocks (the two Open-Meteo callers) while everything else here keeps working; the
+// questions then fall through to web search, exactly as gold rates and showtimes already do. The
+// switch is defined in `src/lib/licenceExposure.ts` and read by BOTH this dispatcher and the admin
+// panel's licence register, so the panel cannot say "off" while calls keep going out. Still a PAUSE,
+// not the fix — the fix is a commercial plan, which is the admin's decision.
 
 import { liveTransitContext } from './transitLive';
+import { liveWeatherSourceEnabled } from '../../lib/licenceExposure';
 
 const SOURCE_TIMEOUT_MS = 5_000;
 
@@ -239,7 +247,26 @@ export async function liveDataContext(message: string, opts: LiveDataOptions = {
   const now = opts.now ?? new Date();
   const transit = await liveTransitContext(message, { env, fetchImpl, now }).catch(() => '');
   if (transit) return transit;
-  for (const source of [weatherBlock, aqiBlock, currencyBlock, pincodeBlock]) {
+  /**
+   * 🔒 THE ONE SOURCE HERE WHOSE LICENCE DOES NOT COVER A COMMERCIAL PRODUCT (admin 2026-09-09).
+   *
+   * Weather and AQI both come from the same provider's NO-KEY tier, which its terms reserve for
+   * non-commercial use. Needing no credential is precisely why it was easy to leave running: every
+   * other restricted integration in this codebase announces itself by having an API key to set.
+   *
+   * The switch is read from `licenceExposure.liveWeatherSourceEnabled` — the SAME function the admin
+   * panel's licence register reads — so the panel can never claim a source is off while its calls
+   * keep going out. Off is an honest degradation, not a break: these two blocks simply return
+   * nothing, and the caller's web search answers the question as it already does for gold rates and
+   * showtimes.
+   *
+   * ⚠️ This is a PAUSE, not the fix. The fix is a commercial plan or a differently-licensed source,
+   * and that is the admin's purchase decision — see licenceExposure.ts.
+   */
+  const sources = liveWeatherSourceEnabled(env)
+    ? [weatherBlock, aqiBlock, currencyBlock, pincodeBlock]
+    : [currencyBlock, pincodeBlock];
+  for (const source of sources) {
     const block = await source(message, fetchImpl, now).catch(() => '');
     if (block) return block;
   }

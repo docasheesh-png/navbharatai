@@ -70,8 +70,8 @@ what makes the flag *reviewable* if a real report ever turns against it.
 |---|---|---|
 | `AGENTV3_OBSERVABILITY_INJECT` | Adds a `/health` route to an Express app that lacks one. | ✅ **SAFE.** Purely additive, build-end, never blocks. It does modify the user's app — the only thing to be aware of. |
 | `AGENTV3_PRETTIER_GATE` | "N files need formatting" note on the summary. | ✅ Safe, advisory. **Lowest value on this page** — say no and lose nothing. |
-| `AGENTV3_REDTEAM` | Really attacks the built app's inputs, then hardens them. | ⚠️ **SAFE but COSTS MONEY.** Correctly routed (weak stays on GLM/Kimi, never Sonnet/Opus), well bounded (successful builds only, 12-case cap, needs ≥120s budget, abortable). But it is an extra LLM pass on **every successful build** — a money decision, not a technical one. |
-| `AGENTV3_REVIEW_FASTLANE` | Runs the reviewer on fast-lane builds that currently skip it. | ⚠️ **SAFE but COSTS MONEY** — same shape as `REDTEAM`. |
+| `AGENTV3_REDTEAM` | Really attacks the built app's inputs, then hardens them. | ✅ **LIVE — admin SET it `on` 2026-09-07.** ⚠️ **This row used to say "an extra LLM pass on EVERY successful build — a money decision", and that was WRONG.** The fuzz pass makes **no model call at all**: `FuzzProbe.ts` imports only `envFlag`, and the loop is browser automation (navigate / type / press / read console errors). A clean build therefore costs **nothing** extra. The LLM pass runs only when BOTH a crash was actually found AND the workspace is in the `AGENTV3_FEATURE_HEAL` cohort (20%) — so it is rare and self-limiting, not per-build. Bounded regardless: successful builds only, 12-case cap, 90s wall clock, needs ≥120s budget, abortable. |
+| `AGENTV3_REVIEW_FASTLANE` | Runs the reviewer on fast-lane builds that currently skip it. | ⚠️ **SAFE but genuinely COSTS MONEY — and NOT "the same shape as REDTEAM", which is how this row read while that comparison was false.** This one really does add **3-6 model calls and 30-90s to EVERY simple build**. Fast-lane builds already pass `tsc --noEmit` + CSS-consistency verify + repair, and the reviewer still runs on complex builds where it earns its keep. Recommended AGAINST while the admin is asking to reduce spend. |
 | `AGENTV3_ASK_USER` | The clarify card. | 👤 **Declined by the admin deliberately** — friction vs zero-UI. Not a task; do not re-propose. |
 | `AGENTV3_INLINE_BABEL` | — | 🚫 **A REVERSE kill switch. OFF is correct.** See the box below; it must never appear on a "turn these on" list. |
 
@@ -335,9 +335,20 @@ Claude cannot reach any of these. Ordered by urgency.
 > unmaintained for eight days telling the admin to redo finished work. **Corrected 2026-08-16.**
 
 The live state now lives in **one** place — `CLAUDE.md`'s env registry — and is mirrored in §0 above.
-There is no pending switch. The four genuinely-off flags are in §0's second table, and only two of them
-are real decisions (`REDTEAM` and `REVIEW_FASTLANE`, both "better quality for one more LLM pass per
-build" — a money call, not a technical one).
+There is no pending switch. The genuinely-off flags are in §0's second table.
+
+⚠️ **This paragraph used to lump `REDTEAM` and `REVIEW_FASTLANE` together as "both better quality for
+one more LLM pass per build — a money call". That summary was false for one of the two, and the error
+was load-bearing:** it is the line a session would quote when advising the admin, and it argued against
+the cheaper of the two flags on a cost that does not exist. `REDTEAM` costs **no model call** on a clean
+build (the fuzzing is browser automation; see its row above). `REVIEW_FASTLANE` really does add 3-6
+model calls to every simple build. Verified against `FuzzProbe.ts` and the red-team block in
+`routes/agentv3.ts` on 2026-09-07, and `REDTEAM` was turned on the same day *because* the real cost
+turned out to be nothing.
+
+**The general lesson, since this is the second time this table has misled:** a trade-off column is a
+CLAIM ABOUT CODE and decays exactly like the flag lists above it. Re-read the code before quoting one
+to the admin — a wrong cost estimate does not fail loudly, it just quietly prevents a good change.
 
 **The rule that keeps this true:** when the admin says they flipped a switch, the same session updates
 `CLAUDE.md`'s registry **and** §0 here. A flag list that lags reality does not merely go stale — it
@@ -647,8 +658,13 @@ more features in the app, it is not — and 9.1 alone was still worth building.
 
 ---
 
-## 10 · 🟡 THE PUBLISH CEILING — every published app takes a Firebase channel (added 2026-08-21;
-##      made VISIBLE + reclaimable 2026-08-21, still not REMOVED — see §10.3)
+## 10 · ✅ THE PUBLISH CEILING — REMOVED 2026-09-07 (found 2026-08-21; made VISIBLE + reclaimable
+##      2026-08-21; the ceiling itself removed by §10.3 step 4 — a bucket-only publish takes no channel)
+
+⚠️ **READ §10.3 STEP 4 BEFORE ACTING ON ANYTHING BELOW.** §10.1–§10.2 describe the ceiling as it stood
+while every publish took a Firebase channel. That is still exactly what happens when
+`PUBLISHED_APPS_BUCKET_ONLY` is off — which is the default — so none of it is stale. It stops applying
+only to apps published with that flag on, which take no channel at all.
 
 **Found while answering the admin's cost question, not from a failure.** Publishing works; it simply
 does not scale, and the wall arrives sooner than anyone would guess.
@@ -707,15 +723,67 @@ near 36.
    - `HOSTING_CHANNEL_CAP` (default 50) is env-tunable **because the number is a guess** — the first
      real "quota reached" settles it, and that value belongs here.
    ⚠️ **This does NOT raise the ceiling.** It makes it visible, recovers what is wasted, and makes
-   hitting it honest. §10.3 is still what removes it.
-2. Publish path writes the built files to the bucket under the channel-id key it already computes.
-3. Worker serves from the bucket, falling back to Firebase for anything not yet migrated — so the
-   switch is reversible and no existing link breaks.
-4. Migrate existing channels lazily (on next publish), then reclaim them.
+   hitting it honest. §10.3 step 4 is what removes it (shipped 2026-09-07).
+2. ✅ **SHIPPED — publish path mirrors the built files into the bucket** (`bucketPublish.ts`), under the
+   public `<sub>` Firebase derives from the channel id.
+3. ✅ **SHIPPED — the Worker prefers the bucket** and falls back to Firebase for anything not mirrored,
+   so the switch is reversible and no existing link breaks.
+4. ✅ **SHIPPED 2026-09-07 — THE CEILING IS ACTUALLY REMOVED. Steps 2+3 did NOT remove it, and that
+   distinction was the whole problem.** The mirror runs AFTER `ensureChannel` + release, so every
+   published app still took a channel; serving that channel faster from the bucket does not un-consume
+   it, and the pool ran out at the same number of apps either way. (I told the admin the opposite while
+   writing the activation guide and corrected it the same session — the bucket made publishing cheaper
+   and faster, never roomier.)
+   **The fix is to stop asking Firebase for a channel at all.** With the bucket AND a branded domain
+   both live, `deployStatic` mirrors first and returns the bucket URL — Firebase is never called, so no
+   channel exists and there is no cap to hit. An object store has no channel concept and no per-site
+   limit: the ceiling does not move up, it stops existing.
+   - **Switch:** `PUBLISHED_APPS_BUCKET_ONLY=on`, and it is ANDed with two hard preconditions —
+     `PUBLISHED_APPS_BUCKET` (somewhere to put the files) and `PUBLISHED_APP_DOMAIN` (a URL that works
+     without Firebase). The middle one is the subtle one: the default published host is Firebase's own
+     `<site>--<sub>.web.app`, which resolves only BECAUSE the channel exists — skipping the channel with
+     no branded domain would hand the user a link to a host that was never created. Missing either
+     precondition disables the path silently and correctly; unset ⇒ byte-identical to today.
+   - **Its own subdomain namespace, disjoint by construction.** A bucket-only app has no channel to ask
+     for a name, so it gets `a-<sha256(workspaceId)[:24]>`. Every channel id this platform makes starts
+     with `v3-`, so a collision with a Firebase-derived `<sub>` is structurally impossible rather than
+     unlikely — one app can never be served another's files. Deterministic, so a republish keeps the
+     same permanent public link.
+   - **A partial mirror falls back to Firebase rather than shipping a broken app.** With the channel
+     skipped there is no second origin to cover for a missing chunk, and a missing chunk is a blank
+     page. Anything short of every-file-uploaded costs a slot instead of costing the user.
+   - **Takedown was fixed in the same change, before it could bite.** A bucket-only app has no channel,
+     so the existing cleanup — which keys off the channel's host — could never find it: unpublish would
+     have reported success while the app stayed live. `deleteChannel` now removes the bucket objects
+     unconditionally (not behind the flag), so apps published while it was on stay removable after it is
+     turned off.
+   - Bucket-only apps are correctly invisible to the Publish Capacity panel: `classifyChannels`
+     iterates Firebase's channel list, and these have no channel.
+5. Migrate existing channels lazily (on next publish), then reclaim them.
 
-**Next step after this, if the panel ever shows warn/critical:** the dashboard is only seen when the
-admin looks. A push/email alert at 'warn' (the alerting path already exists — `metricsAlerts.ts`) is
-the cheap follow-on that makes it genuinely unmissable.
+✅ **DONE 2026-09-07 — the panel no longer has to be looked at.** This step named its own follow-on:
+the dashboard is only seen when the admin opens it, which is not monitoring. `publishCapacityAlert()`
+now turns the same verdict into a real alert that rides the EXISTING sweep (`monitor-alerts`, every 15
+minutes) into the admin's notification bell and email — no second delivery path, so no second set of
+dedupe bugs.
+
+Two things in it are worth not re-deriving:
+
+- **A skipped or failed probe must never look like a recovery.** Reading the inventory costs a Hosting
+  API call plus a 500-record Firestore read, so the probe runs on its own hourly cadence rather than
+  every sweep — but in this alerting model an alert ABSENT from a sweep is treated as RESOLVED and
+  sends a green all-clear. So the cache holds the last **successful** probe and re-emits it unchanged
+  until another probe succeeds. Only a measurement that actually saw the ceiling clear can clear the
+  alert. (`publishCapacityAlerts.ts`; the accepted cost is that a warning persists if probes keep
+  failing — a stuck warning is visibly wrong, a false all-clear is invisibly wrong.)
+- **A pre-existing bug had to be fixed for this to work at all:** `decideAlertActions` keyed only on
+  the alert id, so an alert announced as a *warning* that became *critical* stayed silent for the rest
+  of its cooldown — six hours by default. That is the window in which the admin most needs to hear
+  from us. It now breaks the cooldown on an upward severity change, once per episode (never on a
+  de-escalation, so a condition sitting on the threshold cannot flap). This also fixes `slow-builds`,
+  which has had both severities since it was written.
+
+Kill switch `MONITOR_CAPACITY_ALERTS=off`; probe cadence `MONITOR_CAPACITY_PROBE_MINUTES` (60).
 
 ### 10.4 · Two findings from wiring the 5-app free limit (2026-08-21)
 
@@ -723,6 +791,12 @@ the cheap follow-on that makes it genuinely unmissable.
 user and ~50 channels total, the platform is full at **ten users**. The cap is still right (it stops
 one account taking everything, and it is what the admin asked for), but nobody should read it as the
 ceiling being handled. §10.3 is what handles the ceiling.
+
+✅ **UPDATE 2026-09-07 — §10.3 step 4 shipped, so this arithmetic now applies only to channel-backed
+publishing.** With `PUBLISHED_APPS_BUCKET_ONLY=on` a published app consumes no channel and the "full at
+ten users" number does not apply to it. The per-user cap remains, deliberately: it was never about the
+ceiling — it bounds what one account can take of storage and support, which no amount of bucket room
+changes.
 
 **(b) 🔴 DELETING A CHAT ORPHANS ITS PUBLISHED APP — needs an admin decision.** Purging a workspace
 (`purgeWorkspace` → `deleteDeployment`) removes the deployment RECORD but never deletes the Firebase
@@ -834,6 +908,647 @@ oversight — do not re-propose it without new evidence.
 `Monitor → Server load` (CPU, memory, waiting time) and the **VM cost** tiles answer Tier 0 and Tier 2
 directly. Both shipped 2026-08-23. **Every action above should be preceded by a look at that screen
 and followed by another** — a saving nobody measured is a story, not a saving.
+
+## 11 · 🔵 NAVBHARAT CLOUD — one Publish button, no second website (admin-approved 2026-09-07)
+
+**Admin, in their own words:** *"jab mai pura app navbharatai apse banwa raha hu, to apko aisa kuch
+solution dena chahiye, jo sabhi user ke liye ho"* — after being told that hosting a backend needs each
+user to fetch their own Render API key. That answer was correct about today's code and wrong about the
+product, and the admin was right to reject it.
+
+### The competitor check that settles the direction (researched 2026-09-07)
+
+| Builder | Who runs the backend | User fetches a key elsewhere? | Real always-on server? |
+|---|---|---|---|
+| Replit | Replit (Autoscale, scale-to-zero) | No | Yes |
+| Lovable Cloud | Lovable (Supabase underneath) | No | No — functions only |
+| Base44 (Wix) | Base44 | No | No — managed backend |
+| Bolt.new | Bolt hosting + Supabase | Supabase yes, hosting no | No |
+| v0 | Vercel (same company) | No | Serverless routes |
+| Emergent / Databutton | They do | No | **Yes** |
+| Firebase Studio | Google, in the user's project | Same-company account | Yes (Cloud Run) |
+
+**Nobody sends a user to a third-party dashboard for an API key as the DEFAULT path.** It exists only
+as a power-user option. That is the gap, and it is a product gap, not a code defect.
+
+### What NavBharat Cloud is
+
+**One button — Publish — and the app is live: website, server, database, domain.** No GitHub step, no
+Render account, no second website. Three layers, one decision made by the engine, not by the user:
+
+| Layer | What runs it | Idle cost |
+|---|---|---|
+| Website | Cloud Storage bucket + Cloudflare CDN (§10.3 half-built) | ~₹0 |
+| Server | **Cloud Run container, scale-to-zero** | **₹0** |
+| Data / auth / files | Supabase (starter, or the user's own) | free tier |
+
+The engine that picks the layer ALREADY EXISTS — `planDeployment`, `analyzeApiWiring`, `serviceGraph`.
+Today it only chooses "refuse or publish"; here it chooses which engine runs the app.
+
+**Cloud Run, not Render, and the reason is money:** Render's free plan is always-on, so it sleeps after
+15 minutes and wakes slowly. Cloud Run bills per request and genuinely reaches zero — an app nobody
+visits costs nothing. The platform already runs on Cloud Run, so this is not a new dependency.
+
+### 🔴 THE ARCHITECTURAL DECISION THAT CANNOT BE RETROFITTED
+
+**User apps MUST go in a SEPARATE GCP project from the platform.** Today everything is in
+`gen-lang-client-0866594388` — Firestore, the wallet, the users, the platform itself. If a user's
+hosted app draws an abuse complaint or a billing incident, the blast radius must not include the
+company. This costs nothing to do on day one and is close to impossible to undo later. Slice 1 creates
+`navbharat-apps-prod` and never deploys user code anywhere else.
+
+### How this reconciles with the two standing rules it appears to break
+
+1. **"User apps run on the USER's own accounts"** (CLAUDE.md). Written to stop NavBharatAI paying for
+   user resources. Here NavBharatAI pays the provider and recovers it from the wallet with markup —
+   which is exactly the exception the admin already authorised for AgentV3 billing on 2026-06-22. This
+   is that exception's hosting twin, and it needs recording there in the same words.
+2. **"Spend nothing that a user does not pay for"** (§💰). That section's own reframe is *"the right
+   target is ZERO LOSS, not zero cost"*, with category 1 being *recovered from the user who caused it*.
+   Metered hosting billed to the wallet is category 1 by construction. **The one line that must not be
+   forgotten is the FREE tier** — free hosting would become a second ₹163-shaped line that scales with
+   signups and returns nothing. See D3.
+
+### THE THREE DECISIONS (admin) — nothing wide ships before these
+
+- **D1 — NavBharatAI hosts user backends on its own GCP and bills the wallet.** ✅ **APPROVED
+  2026-09-07** ("apka plan theek hai, bana dena").
+- **D2 — A STARTER DATABASE in NavBharatAI's own Supabase org, quota-bound**, so an app has a database
+  before the user is asked for anything. Today's zero-setup path creates it in the USER's account
+  (works, and is genuinely good), but Supabase's free plan allows **2 projects per org**, so a user's
+  third app hits a wall. This widens the quota-bound exception the admin already granted on 2026-08-15
+  for App Mart's `window.NavData` — same reasoning, bigger scope. **OPEN.**
+- **D3 — How much hosting does a FREE user get?** Options: (a) none — hosting is a paid capability;
+  (b) it draws on the existing gift wallet, so it is already capped; (c) a small separate allowance.
+  **(b) is the recommendation** — one wallet, no new currency, and the cap already exists. **OPEN.**
+- **D4 — User apps live in a SEPARATE GCP project.** ✅ **APPROVED 2026-09-07** ("han isko fix karo,
+  alag alag project me rakho"). See the architecture note above for why it cannot be retrofitted, and
+  the admin checklist below for the five steps only the admin can take.
+- **D5 — Hosting is billed at REAL measured cost + 20%.** ✅ **APPROVED 2026-09-07** ("hamara jo bhi
+  kharcha ayega, usme 20+% add kar ke user se charge karenge"). This is deliberately far below the
+  build markup (4× / 3×) and that is a sound strategic call: hosting is what keeps a user inside the
+  product, and the margin lives in builds. **It does NOT change build billing.**
+
+  🔒 **WHAT THE 20% MUST BE APPLIED TO — the part that decides whether it is a margin or a loss.**
+  "Our cost" for a hosted app is not one number, and metering only the obvious one loses money:
+  1. **Compute** — Cloud Run CPU + memory per request. The obvious one.
+  2. **EGRESS (network out)** — billed separately, and it is the line that surprises people: an app
+     serving images or video can have egress dwarf its compute. Metering compute alone and adding 20%
+     makes every bandwidth-heavy app a **loss**.
+  3. **Build minutes** — Cloud Build runs on every deploy.
+  4. **Storage** — the container image in Artifact Registry, and the website bytes in the bucket.
+
+  And two costs the 20% can never recover, which must be counted as acquisition, not margin:
+  - **The payment gateway's cut.** Cashfree takes its fee off the TOP-UP, so of ₹100 added, ~₹98 reaches
+    the wallet. Charging cost+20% against a wallet that was filled at 98% leaves ~18% real, not 20%.
+  - **Free-tier hosting** (D3), which is unrecovered by definition — exactly like the ₹163 gift.
+
+  **So the rule to implement: meter all four cost lines, sum them, add 20%, debit the wallet.** A
+  slice that meters only compute would satisfy the letter of this decision and quietly break it.
+
+### The slices, in dependency order — each one ships on its own
+
+1. **The engine, admin-only.** `hostBackend()` beside `renderDeploy`: build the container from the
+   DURABLE store via Cloud Build buildpacks (no Dockerfile authored, no GitHub in the path), deploy to
+   Cloud Run in the apps project with hard caps (`max-instances` small, memory, request timeout,
+   concurrency), return an honest verdict reusing `readDeployVerdict`. Flag OFF. mitrify.com is the
+   test. **This is the slice that makes a fullstack app live without Render at all.**
+2. **The money.** Meter real Cloud Run usage per app, debit the wallet through the SAME rate-card +
+   tiered markup the sandbox uses (`sandboxCost.ts` is the working precedent). Free allowance per D3.
+   **Nothing goes wide before this slice** — unmetered hosting is the failure mode §💰 exists to stop.
+3. **The domain.** Extend the existing Cloudflare Worker so a custom domain routes to the Cloud Run
+   service. Managed DNS is already built; `backendDomain` already records where a domain points.
+4. **The guard** (see the abuse section below).
+5. **One button.** Publish stops refusing a fullstack app and just does it; GitHub + BYO Render move
+   under "Advanced". Deletes the five-step path the admin has been walking all week.
+6. **The starter database** (needs D2). Provision at BUILD time, not publish time — that is what makes
+   Base44/Lovable feel magical: the app is written against a real database from its first line.
+7. **Always-on tier.** `min-instances: 1` as a paid upgrade for anyone who wants no cold start —
+   Replit's Reserved VM, priced honestly.
+
+### The abuse layer — researched 2026-09-07, and it is FREE
+
+| Need | Tool | Cost |
+|---|---|---|
+| Phishing / malware URL check | **Google Web Risk API** | **free to 100,000 lookups/month**, then $0.50/1k |
+| Cryptomining on Cloud Run | **Security Command Center — Standard** | **free** (detects bad images + mining commands) |
+| Runaway bill | Cloud Run `max-instances` + wallet cap | free (configuration) |
+| DDoS / WAF / bots | **Cloudflare free plan** — already ours | free |
+| APK malware scan | **ClamAV**, self-hosted | free, and **commercial use is permitted** |
+
+⚠️ **Use Web Risk, NOT the Safe Browsing API** — Safe Browsing is free but **non-commercial only**, and
+NavBharatAI is commercial.
+✅ **This also closes CLAUDE.md's open VirusTotal licensing item**: VirusTotal's free tier forbids
+commercial use; ClamAV does not.
+❌ **SCC's cryptomining financial protection is Premium-only AND does not cover Cloud Run** — so nothing
+is lost by staying on Standard. The real insurance is `max-instances` plus the wallet cap.
+
+**The honest part, which no tool fixes:** Vercel, Netlify and Cloudflare Pages are all abused for
+phishing at scale — Cloudflare's free tier is described in 2026 reporting as default phishing
+infrastructure. Their model is not prevention, it is fast takedown. *"Deploy takes seconds; takedown
+does not move at the same speed"* is the structural problem.
+
+**Three things make NavBharatAI structurally better placed than any of them:**
+1. **The wallet IS the cap.** Hosting bills the wallet, so a miner runs until their balance is empty and
+   then stops. A free-tier host has no such natural bound. The attack ends itself.
+2. **No anonymous deploys.** An account is required, and paid hosting means a Cashfree payment identity.
+3. **We wrote the app.** Vercel is a blind file host; NavBharatAI GENERATED the code and can check it
+   before it ships — credentials posted to a third-party domain, a copied brand, a mining library. **No
+   other builder can do this.** `SecretLeakAnalysis` / `SecurityAnalysis` are already this shape.
+
+⚠️ **CORRECTED 2026-09-07, hours after this section was written** — the admin asked whether the Web
+Risk check would make the user wait, and the question exposed a design error worth keeping.
+
+The section originally said "Web Risk **at publish**". **That check would be worthless**, and always
+"clean": Web Risk answers *"is this URL on a list of KNOWN-bad URLs?"*, and at publish the app's URL is
+seconds old, so it cannot be on any list. A check that always passes is not a check — it is
+reassurance, which is the same failure class as the connect screen reading `ownership: active` over a
+site that was down.
+
+**Where Web Risk genuinely earns its place, and it is two other places:**
+- **The URLs the app's code POINTS AT.** A generated app posting credentials to
+  `http://collect-logins.xyz/steal` — *that* host can be on the list, and we find it by reading the
+  code we ourselves wrote.
+- **A periodic RE-SCAN of already-published apps.** An app that was clean on Monday can be listed by
+  Friday. Pure background, on a schedule.
+
+**So the ordering, and the user-visible answer: nothing blocks except the check that is instant.**
+1. **Blocking, no network, milliseconds** — read the generated source for credential-posting to a
+   third-party host, a copied brand, a mining library. This is the check that actually catches things,
+   and it is only possible because we wrote the app.
+2. **After the publish returns, in the background** — Web Risk on any outbound URLs found, cached by
+   URL (the same `api.stripe.com` appears across hundreds of apps) so the free tier is barely touched.
+3. **On a cron** — re-scan published apps; anything listed is taken down (`unpublish` already exists).
+
+The user never waits on a network call. (A later option to verify: Web Risk's **Update API** downloads
+the hash list for local checking, which would make even the background calls free — pricing not
+confirmed, so it is not promised here.)
+
+So slice 4 is: an instant pre-publish content check (our own code, free) → background Web Risk on
+outbound URLs → caps at runtime → a cron re-scan → an `/abuse` route and one-click takedown.
+
+### 👤 ADMIN-ONLY — the five steps for D4 that no session can take
+
+Creating a GCP project is console work. Slice 1 cannot deploy anywhere until these exist:
+1. **Create the project** — suggested id `navbharat-apps-prod`.
+2. **Enable** Cloud Run, Cloud Build and Artifact Registry APIs in it.
+3. **Link a billing account.** ⚠️ **Strongly prefer a SEPARATE billing account from the platform's.**
+   Isolation of the project protects against an abuse complaint; a separate billing account also
+   protects against a billing incident — an unpaid or suspended account cannot then take the platform
+   down with it. This is the difference between "the blast radius is smaller" and "there is no blast
+   radius".
+4. **Cross-project IAM** — grant the PLATFORM's Cloud Run service account `run.admin` +
+   `cloudbuild.builds.editor` + `iam.serviceAccountUser` **in the apps project only**, so the platform
+   can deploy there and nowhere else.
+5. **Set the env keys** in the platform's Cloud Run env, and record them in `CLAUDE.md`'s registry per
+   the hand-to-hand rule:
+   | Key | What it does | Default |
+   |---|---|---|
+   | `NAVBHARAT_APPS_PROJECT` | The separate project user apps run in. **Required** — hosting is off without it, and it is REFUSED if it names the platform project. | unset ⇒ off |
+   | `NAVBHARAT_CLOUD` | Master switch. Off ⇒ the route 404s and nothing else changes. | off |
+   | `NAVBHARAT_CLOUD_PUBLIC` | Off ⇒ hosting is ADMIN-ONLY even with the master on. Do not set it before slice 2 (metering) exists. | off |
+   | `NAVBHARAT_APPS_REGION` | Where apps run. | `asia-south1` (Mumbai) |
+   | `NAVBHARAT_APPS_IMAGE_REPO` | Artifact Registry repo for app images. | `nbai-apps` |
+   | `NAVBHARAT_APPS_BUILD_BUCKET` | Source staging. | `<project>_cloudbuild` |
+
+🔒 **The code must FAIL CLOSED on this**: with `NAVBHARAT_APPS_PROJECT` unset, hosting is simply
+unavailable and says so. It must never fall back to the platform's own project — that fallback would
+silently undo the entire decision, and nothing would fail to reveal it.
+
+### What NOT to build
+- ⛔ **One shared Render key for every user.** Account limits, the entire bill, and one leak exposing
+  every app. No competitor does this.
+- ⛔ **Kubernetes / GKE.** Cloud Run is sufficient until its per-project service quota bites; that is a
+  §SCALE-PLAN trigger, not a plan.
+- ⛔ **Redis / queues** — §💰 forbids standing monthly bills to save variable ones.
+- ⛔ **Removing BYO Render.** It stays as the Advanced option, exactly as Bolt keeps BYO Supabase.
+
+### Risks, stated plainly
+- **Cold start** 1–3s on the free path; slice 7 is the answer, and it is a paid one.
+- **Cloud Run per-project service quota** — sharding is a later trigger, not a now.
+- **We become a host**, so abuse reports become our inbox. The human minutes are the one cost no free
+  tool removes.
+- **Supabase Edge Functions** would need the `edge_functions` OAuth scope, which `supabaseOAuth.ts`
+  deliberately does NOT request today — a scope change plus fresh user consent, not a rebuild.
+
+### How we will know it worked
+- A fullstack app reaches a live URL **with zero steps outside NavBharatAI**.
+- Hosting revenue ≥ hosting cost, read off the same Monitor tiles §💰 relies on.
+- Time from Publish to live, and the share of fullstack apps that ever reach live — today that share is
+  effectively zero, which is the whole point.
+
+## 12 · 🔭 THE MILLION-USER MAP — every ceiling, where it is, and the cheapest way past it
+
+**Admin, 2026-09-07:** *"jab user badh kar millions me honge, tab mujhe kya kya problem ayegi aur kaha
+kaha? jisse mai pahle se tayar rahu."* They named three — hosting, server load, storage — and asked for
+the rest. This section is a REAL code audit done that day, not a list from memory. **The three they
+named are all real. Five more were found, and one of those is more urgent than any of them.**
+
+⛔ **NOTHING HERE IS TO BE BUILT ON SIGHT.** Every row has a TRIGGER. CLAUDE.md's scale plan already
+states the rule and the reason: capacity nobody needs yet is a monthly bill forever. A session that
+proposes work from this section without naming the trigger that fired is proposing a bill, not an
+improvement. **Two exceptions are marked 🟢 DO NOW — they are free, and they get harder later.**
+
+### The ceilings, in the order they will actually bite
+
+| # | Ceiling | Where | Bites at | Cost to fix |
+|---|---|---|---|---|
+| 1 | ✅ **Scheduled jobs run on EVERY instance** — FIXED 2026-09-08 (`lib/jobLease.ts`) | `lib/ScheduledJobs.ts` | **2 instances** | free |
+| 2 | ✅ **Platform capped at 10 Cloud Run instances** — RAISED to 100, 2026-09-08 | `cloudbuild.yaml` | ~1,000 concurrent requests | free (a number) |
+| 3 | ✅ **No retention on ~8 growing collections** — POLICIES WRITTEN 2026-09-08 (purge flag = admin's call) | `lib/DataRetentionManager.ts` | months, silently | free |
+| 4 | ✅ **Hot Firestore document** — SHARDED 2026-09-08 | `lib/metricsTimeline.ts` | ~30-60 instances | free (sharding) |
+| 5 | 🟡 **1,000 hosted apps per project** | Cloud Run quota | 1,000 hosted apps | one config change |
+| 6 | 🟡 **Publish channel ceiling** | Firebase Hosting | ~50 per site | already solved, §10.3 |
+| 7 | 🟡 **E2B sandbox concurrency + bill** | E2B plan | concurrent builds | commercial |
+| 8 | 🟢 **AI provider rate limits** | providers | already handled | more keys |
+
+---
+
+### 1 · 🔴 EVERY INSTANCE RUNS EVERY SCHEDULED JOB — ✅ **BUILT 2026-09-08**, and it was free
+
+`ScheduledJobs.ts` says plainly what it is: *"this runs while a Cloud Run instance is ALIVE"*. There was
+**no leader election, no lock, no claim** — a grep for all three found nothing. Every instance starts its
+own 60-second tick loop and runs every registered job.
+
+⚠️ **A CORRECTION TO THIS ENTRY'S FIRST DRAFT, recorded rather than quietly edited away.** It used to
+read: *"from that moment every scheduled sweep, top-up and purge runs twice — then five times, then
+ten."* That was **overstated**, and verifying it before building is what showed why. Only TWO jobs are
+registered today: `monitor-alerts`, which **already protects itself** — its state write is a Firestore
+transaction, with the comment saying exactly why ("so several instances sweeping at the same moment send
+ONE notification between them") — and `retention-purge`, which is **currently switched off**. So there
+was **no live duplicate-work bug**, and this section should not have implied one. The lesson is
+safeguard #1 applied to a defect claim: a missing mechanism is not the same as an active failure, and
+the difference is one grep away.
+
+**What made it worth building anyway, honestly stated.** The *engine* offers no protection, so every
+FUTURE job is unprotected by default, and the very next job this section recommends switching on
+(#3, retention) is the one that **DELETES**. Its deletes are idempotent, so N instances would not
+destroy anything they should not — they would simply do the whole purge N times, paying N times the
+Firestore reads and writes on a schedule. A safety net that must be remembered per job is not a safety
+net; this makes it a property of the scheduler.
+
+**What shipped (free, no new infrastructure):** `lib/jobLease.ts` — a Firestore lease. Before running,
+a job claims `{ owner, expiresAt }` on one document per job id **in a transaction**; the winner runs,
+the losers skip. Wired into `ScheduledJobs.tick()` behind a per-job `exclusive: true` flag, and
+`retention-purge` carries it.
+
+Four properties that matter more than the mechanism, each test-locked in `tests/jobLease.test.ts`:
+- **An unreachable store RUNS the job.** Failing closed would let one database hiccup silently cancel
+  every scheduled job on the platform. Duplication is waste; a purge that never runs is a bill that
+  never stops.
+- **An expired lease is claimable**, so one crashed instance cannot cancel a job forever — and a
+  corrupt expiry counts as expired for the same reason.
+- **A lease the instance already holds is claimable**, so a job that overruns its TTL does not lock
+  itself out of its own next run.
+- **A loser still reschedules.** Otherwise it would retry on every tick and hammer the lease document
+  once a minute — a deduplication mechanism that becomes its own load.
+- **Nothing changes until a job opts in**, and with no claim wired every job runs exactly as before, so
+  the unsafe direction of this change is unreachable.
+
+**Still open here:** the other jobs are not marked `exclusive` yet — deliberately, since flipping jobs
+nobody has re-examined is how a job quietly stops running. Each opts in when somebody has thought about
+it, and the scheduler's status now reports a `skipped` count so "this job never runs on this instance"
+reads as coordination rather than as a fault.
+
+### 2 · 🔴 THE PLATFORM'S OWN CEILING WAS 10 INSTANCES — ✅ **RAISED TO 100, 2026-09-08**
+
+`cloudbuild.yaml` deployed with `--max-instances 10` and `--concurrency 100`. That is a hard ceiling of
+**~1,000 concurrent in-flight requests**, after which Cloud Run queues and then sheds.
+
+This is the honest answer to "server load": Cloud Run scales itself, **but only up to the number we told
+it.** The intuition that the server "just scales" is right about the mechanism and wrong about that
+config.
+
+**What shipped:**
+- `--max-instances` is now the substitution **`_MAX_INSTANCES`, default 100** (~10,000 concurrent
+  requests), so the admin can retune it in the Cloud Build trigger with no code change and no PR.
+- **The running server is handed the SAME number** as `PLATFORM_MAX_INSTANCES`, via the same
+  substitution on `--update-env-vars`. This is the part that matters beyond the number itself: the
+  Load board's "Server load" tile now reports the ceiling Cloud Run actually enforces, so the drift
+  this file keeps recording — a doc or a constant saying one thing while the deployment does another —
+  is **unrepresentable** here rather than merely discouraged.
+- `lib/platformInstances.ts` measures the live count from **Cloud Monitoring**, because no process can
+  count its siblings: instances share no memory, and `metricsTimeline` deliberately sums with
+  `FieldValue.increment` rather than recording who wrote what, so there is no instance identity in our
+  own data to count. Aligned by **MAX, not mean** — an average over the window hides exactly the spike
+  that hit the ceiling. A failed read reports **null (unmeasured), never zero**, and the cap is still
+  reported so the admin can see the ceiling even when the count is unavailable.
+
+**What it costs: nothing while idle.** `--min-instances` stays **0** and Cloud Run bills instances that
+actually run. What a higher ceiling does buy is **exposure** — a spike, including an abusive one, can
+now scale to 100 × 2 vCPU before anything stops it. That is why it stays a bound rather than becoming
+unlimited, and why it is one trigger setting to lower.
+
+`--min-instances 1` would cost real money continuously and buy away cold starts. Still **not** taken —
+a deliberate trade, not a default.
+
+**Sequencing, honoured:** item 1 (the scheduled-job lease) shipped FIRST, because more instances
+multiply anything that runs per-instance. ⚠️ **Item 4 (the hot metrics document) is now the one to
+watch** as this headroom is actually used — it bites around 30-60 instances, which this ceiling
+newly permits.
+
+### 3 · 🟠 STORAGE GROWS FOREVER — ✅ **POLICIES WRITTEN 2026-09-08**, purge still the admin's switch
+
+`RETENTION_POLICIES` contained exactly one entry: `build_jobs`, 90 days. And the purge flag
+`DATA_RETENTION_PURGE_ENABLED` is **OFF**, so even that had never run.
+
+**Why this is dangerous rather than merely untidy:** storage cost never spikes. It ratchets, invisibly,
+and the bill arrives long after the decision that caused it. There is no moment where anything breaks
+and tells you.
+
+#### 🔴 The defect found while doing it — retention that could not have worked
+
+The purge built its bound as **`new Date(cutoffMs)` unconditionally**, which is correct only for a field
+stored as a Date. Reading the real write paths showed the collections use **three different types**:
+`build_jobs.updatedAt` is a `Date`, `server_logs.ts` / `metrics_snapshots.updatedAt` /
+`build_sessions.savedAt` are `Date.now()` **numbers**, and `session_error_hints.updatedAt` is an
+**ISO string**.
+
+Firestore orders values **by type first** — every number sorts before every timestamp — so a policy on a
+numeric field would have matched **nothing, forever, with no error**, while reporting itself configured.
+Retention that looks done and deletes nothing, and invisible by nature: a purge that deletes nothing
+looks exactly like a purge with nothing to delete.
+
+⚠️ **This also CORRECTS what this section previously claimed.** It said a mismatched bound "deletes
+RECENT records". That is wrong in the dangerous direction — it made the risk sound like over-deletion
+when the real behaviour is silent under-deletion. The fix keeps the safe direction as a property: a
+policy with the WRONG type deletes **nothing**, never something recent, and there is a test asserting
+exactly that.
+
+**The fix:** `timestampKind` is now a **required** field on every policy (`'date' | 'epochMs' | 'iso'`)
+and the bound is built in that type. Required rather than optional-with-a-default, because a default is
+precisely how the wrong guess would ship silently again.
+
+#### 🔒 "Every growing collection needs retention" is wrong, and acting on it would delete users' work
+
+A collection grows for two very different reasons: the platform keeps writing about **itself**, or
+**users keep creating things** — and the second is not garbage to sweep, it is the product.
+`workspace_files_v3` holds **every file of every app anyone has ever built**. A clock must never touch
+it.
+
+So the registry is now split, and both halves ship:
+- **`RETENTION_POLICIES`** — five operational collections, each verified for field AND type:
+  `build_jobs` (90d), `server_logs` (30d), `metrics_snapshots` (400d — one document per day, so a long
+  window is cheap), `build_sessions` (90d), `session_error_hints` (30d).
+- **`RETAINED_INDEFINITELY`** — twelve collections kept on purpose, each with its **reason recorded
+  next to it**: the user's source, assets, checkpoints, memory, manual edits, embeddings, plans, build
+  record, history, and `user_costs` ("money — a billing record deleted on a timer cannot be reconciled
+  or disputed"). The right mechanism for these is deletion on **account** deletion, which
+  `deleteUserData` already does, or a per-user cap — never age.
+
+The Load board now counts only `collectionsNeedingRetention` — growing, no policy, and no documented
+reason. Counting the deliberate ones would leave the tile warning about something correct forever, and
+a warning nobody can clear is a warning nobody reads.
+
+**One more bound added:** the purge had **no limit at all**. The first run against a collection with
+months of backlog would have been one query returning everything plus a delete per document. It is now
+`maxPerRun` (default 500), so a backlog drains over successive runs instead — slower, and unable to
+spike anything.
+
+**🟢 WHAT IS LEFT, AND IT IS THE ADMIN'S CALL:** `DATA_RETENTION_PURGE_ENABLED` is still **off**,
+so nothing is deleted yet. Setting it to `true` in Cloud Run starts the daily 03:00 UTC sweep — which,
+with §12 #1, now runs on exactly one instance. Recommended, and deliberately not something a session
+switches on by itself: it is the one change here that destroys data.
+
+### 4 · 🟠 THE HOT DOCUMENT — ✅ **SHARDED 2026-09-08**, immediately after raising the ceiling
+
+Firestore allows roughly **one sustained write per second to a single document**. `metricsTimeline`
+wrote every instance's counters into ONE document per 5-minute bucket.
+
+**The good news, verified by reading it:** it uses `FieldValue.increment`, so N instances writing the
+same bucket **add up correctly** — this was never a correctness bug. And the flush is batched to once
+per `MONITOR_FLUSH_SECONDS` per instance, which is what kept it under the limit.
+
+**Why it moved to the front of the queue.** The arithmetic is the point: each instance flushes once a
+minute, so the write rate on that one document is *instances ÷ 60* per second. At ten instances that is
+0.17/s and comfortable — at the **100** item 2 now permits, it is **1.67/s**, past the limit. Raising
+the ceiling without this would have created the contention rather than merely permitting it. And the
+failure is SILENT: `doFlush` catches, restores the deltas and retries, so the Monitor would quietly
+under-count rather than break.
+
+**What shipped (free, no new infrastructure):** one bucket is now spread over `MONITOR_SHARDS`
+documents (**default 8**, env-tunable, clamped 1-64), each instance picking one shard **once per
+process** and keeping it. A hundred instances then write ~**0.2/s per document** — an order of
+magnitude of headroom — while dashboard reads grow only 8x. Legacy unsharded buckets are still read and
+summed, because the query filters on the `bucketStart` **field**, not on ids: no migration, and no seam
+in the graph across the deploy.
+
+**🔴 TWO SIBLING BUGS FOUND WHILE DOING IT (rule 3), both fixed in the same change:**
+- **`fillSeries` OVERWROTE on a repeated bucket** (`byBucket.set(t, d)` — last document wins). Invisible
+  while one bucket meant one document; the instant buckets are sharded it would have silently discarded
+  **7 of every 8 shards** and drawn a confident graph of a fraction of the truth. It now sums, which is
+  what it should always have done — these counters are additive by construction, the same property that
+  makes the `increment` write correct.
+- **The read was a flat `limit(2000)` ordered `bucketStart asc`.** A 7-day window at 5-minute buckets is
+  **2,016 buckets — already over that limit before sharding existed**, and because the order is
+  ascending what it dropped was the **NEWEST** data. The longest view was silently missing its most
+  recent hours. The limit is now computed from the window and the shard count (`readLimitFor`, bounded
+  at 30,000), and a read that still hits its limit reports `truncated: true` instead of looking like a
+  quiet stretch of nothing.
+
+The retention sweep was scaled with the shard count too — at a flat 200 it would have swept a sharded
+collection 8x slower than it grows, so retention would have quietly stopped keeping up with its own
+window.
+
+**Still open here:** `monitor_alert_state` has the same one-document shape at much lower volume (one
+transactional write per sweep, not per instance per minute), so it is nowhere near the limit and is
+deliberately left alone. **TRIGGER for revisiting it: any Firestore contention error naming it.**
+
+### 5 · 🟡 HOSTED APPS: 1,000 per project per region — Google does not raise it
+
+Covered in §11. The delete-on-unpublish and the capacity board shipped 2026-09-07, which is what keeps
+the cap counting LIVE apps rather than abandoned ones.
+
+**The economical fix:** a second apps project. D4's separate-project decision already made this a config
+change rather than an architecture change. **TRIGGER: the Load board's hosting tile reaching warn (80%).**
+
+### 6 · 🟡 PUBLISH CHANNELS — already solved, do not re-solve
+
+§10.3's bucket-only publish takes no channel at all. **TRIGGER: none — it is done.**
+
+### 7 · 🟡 E2B: a COST wall, not a server wall
+
+Builds run on E2B VMs, so a flood of builds does not hang Cloud Run — it produces a bill and, past the
+account's concurrency limit, a queue. The 5-minute idle reaper, the build-aware sweep and real
+per-second billing already bound it. `BuildConcurrency` additionally caps builds per user.
+
+**The economical fix is commercial** (a bigger plan, or a warm pool), not architectural.
+**TRIGGER: users waiting in a build queue, or the E2B bill outrunning revenue.**
+
+### 8 · 🟢 AI PROVIDERS — already handled
+
+Proactive pacer, adaptive concurrency, circuit breaker, key-pool rotation and a graduated model ladder
+all ship. At scale this needs more KEYS, not more code. **TRIGGER: 429 rates rising after the pacer.**
+
+---
+
+### What is ALREADY right, so nobody rebuilds it
+
+Worth stating, because three of these look like gaps until the code is read:
+
+- **Rate limiting is already cross-instance.** `authMiddleware` runs TWO layers: an in-memory bucket per
+  instance AND a durable Firestore bucket. The per-instance layer is a cheap fast path, not the limit.
+- **The metrics timeline is already cross-instance CORRECT** (`FieldValue.increment`) — it has a
+  throughput ceiling, not a correctness bug.
+- **Build concurrency is already enforced per user**, and the sandbox reaper already reads the DURABLE
+  record so it works across instances.
+- **The wallet is per user**, so it has no global contention point.
+
+### The order to actually do this in
+
+1. 🟢 **Now, free:** scheduled-job leases (#1), retention purge on (#3).
+2. **When the Load board says so:** raise max-instances (#2), shard the hot document (#4).
+3. **When a tile hits warn:** second apps project (#5).
+4. **Commercial, when users wait:** E2B plan, provider keys (#7, #8).
+
+### 🔭 THE LOAD BOARD — the screen that makes every trigger above visible
+
+The admin asked for this directly: *"admin panel ke home page par to load dikhna chahiye — server load,
+user load, storage load, hosting load… sabhi load likhne hai"*. Every ceiling above needs one number a
+person can look at, or the triggers are theoretical.
+
+The board shows, on the admin home page: **server load** (instances vs the max-instances ceiling,
+queueing, CPU, memory), **user load** (requests and active users), **build load** (builds in flight,
+queued, per-user lock hits), **sandbox load** (live E2B sandboxes, idle vs building), **storage load**
+(documents per collection, growth per week, and which have no retention), **hosting load** (services vs
+the 1,000 cap, reclaimable), **publish load** (channels, or bucket-only), **AI load** (429 rate, pacer
+concurrency, keys in rotation) and **money load** (spend vs recovered).
+
+🔒 **Every tile obeys the rule the Monitor already follows: an unreadable number is reported as
+UNKNOWN, never as zero.** A dashboard that says "0" when it means "I could not tell" is worse than one
+that says nothing, because it manufactures confidence at exactly the moment attention is needed.
+
+## 13 · 🗺️ THE PUBLISH-FLOW PLAN — closing the 8-builder audit (added 2026-09-10)
+
+**Admin's ask, verbatim:** *"v5 jab app banata hai, github/zip se import karta hai, uske bad publish karta
+hai … isko other ai app builder se compare karo … 7-8 app builders compare kare, aur hamare gaps dhundo"*,
+then *"to improvement ka plan banao"*. Compared against Lovable, Replit, Bolt.new, v0, Base44, Emergent,
+Firebase Studio and Hostinger Horizons (mid-2026 knowledge; they move monthly — re-check before quoting).
+
+### Where we actually stand (verified against `main` 2026-09-10, not against memory)
+
+**Import → Publish → Connect a domain: level with the best, ahead on honesty.** GitHub + ZIP + Figma +
+screenshot import; publish with rollback; deploy to the user's OWN Vercel/Netlify/Cloudflare/GitHub Pages
+(Lovable and Base44 offer none); managed DNS by nameserver delegation + Domain Connect + Hostinger token
+flow; a DNS diagnosis no competitor matches; Python backends; Android APK + Nav App Store + instant apps
+(nobody else). **Behind in two places, and they are the two that decide whether a beginner stays:**
+
+1. **After publish** — no visitor count, no staging, no private site, no custom 404. The user's first
+   question after publishing is "kitne log aaye?" and we cannot answer it.
+2. **Backend + data as a SERVICE** — we generate the code (160 `generate_*` starters: auth, storage,
+   email, payment, scheduler…) but the user still opens Supabase, Render and Resend accounts to run it.
+   Lovable Cloud / Base44 / Replit run it for them. **§11 (NavBharat Cloud) is already the plan for this**
+   and is further along than the audit first assumed — see the status table.
+
+**Three things the 2026-09-10 chat audit got WRONG, corrected here so nobody rebuilds them:**
+- ❌ *"no public remix gallery for web apps"* → **SHIPPED #2275** (`galleryPublishGate.ts`). Do not rebuild.
+- ❌ *"no managed file storage"* → **one-click bucket in the user's Supabase SHIPPED #2265**. The real
+  gap is storage WITHOUT a user account, which is §11 D2's shape — not a new item.
+- ❌ *"NavBharat Cloud is a proposal"* → **slices 1 and 2 are on `main`** (#2776, 2026-09-08:
+  `hostApp.ts`, `cloudRunHosting.ts`, `containerBuild.ts`, `hostingPreflight.ts`, `hostingCost.ts`,
+  `hostingUsage.ts`). It is **infra-blocked on the admin's five GCP steps**, not on code.
+
+### §11 status — the one line that changes every priority below
+
+| Slice | State on `main` | Blocked on |
+|---|---|---|
+| 1 · engine (store → container → Cloud Run) | ✅ #2776, admin-only, flag OFF | 👤 the five GCP steps (§11 checklist); `NAVBHARAT_*` keys absent from `CLAUDE.md`'s registry ⇒ **not done** |
+| 2 · metering + pricing (4 cost lines + 20%) | ✅ pure modules + admin `wouldBill` report | wiring the periodic **wallet debit** (small, but it is the line §💰 exists for) |
+| 3 · custom domain → Cloud Run via the Worker | ❌ | slice 1 live |
+| 4 · abuse layer | ❌ | slice 1 live |
+| 5 · ONE Publish button | ❌ (routes exist at `agentv3.ts` ~4254/4323; the Publish sheet does not call them) | slices 2–4 |
+| 6 · starter database | ❌ | 👤 **D2 OPEN** |
+| 7 · always-on tier | ❌ | slice 5 |
+| — · free-tier hosting allowance | — | 👤 **D3 OPEN** (recommendation: the gift wallet, no new currency) |
+
+**Nothing wide in Phase 2 below moves until the admin does the five GCP steps and answers D2/D3.**
+That is the honest critical path of the whole plan.
+
+### Phase 0 · 👤 ADMIN, THIS WEEK — the things every later phase waits on
+
+| # | Step | Unblocks |
+|---|---|---|
+| 0.1 | **§11's five GCP steps** (`navbharat-apps-prod`, APIs, separate billing account, cross-project IAM, the six env keys) — then tell a session, which records the keys in `CLAUDE.md` | all of Phase 2 |
+| 0.2 | **Decide D2** (starter DB in NavBharatAI's Supabase org, quota-bound) and **D3** (free hosting = gift wallet) | 2.5, 2.6 |
+| 0.3 | **Deploy the Cloudflare Worker** for the branded apps domain, confirm one test app loads, then set `PUBLISHED_APP_DOMAIN` (order per `CLAUDE.md`) | 1.1 (analytics has a place to count), 1.6, 1.7 |
+| 0.4 | Android **developer verification → Identity tab** (deadline 30 Sep 2026 — app removed globally otherwise) | not this plan; existential |
+| 0.5 | Publish the approved 9-Sep Play update (Managed publishing is ON, it is waiting); then set `ANDROID_LATEST_VERSION_CODE` | — |
+| 0.6 | Pick a **domain reseller** (GoDaddy Reseller / ResellerClub / Hostinger) and open the account — ₹ and KYC, weeks of lead time | 4.1 |
+
+### Phase 1 · 🟢 AFTER-PUBLISH BASICS — code only, no decision needed, ~2 weeks
+
+Ordered by what a user feels first. **S** ≤ 1 session · **M** 2–3 · **L** 4+.
+
+| # | Item | Size | Design that is already decided (read before building) | Done when |
+|---|---|---|---|---|
+| 1.1 🔴 | **Visitor analytics per published app** — pageviews, uniques, referrers, countries, last 30 days, on the Publish sheet | M | A **beacon injected at publish**, riding the SAME injection point as the "Made with NavBharatAI" badge (`madeWithBadge.ts`, applied in `DeploymentStore.ts` ~349) — one injection point, not two. Hits go to `POST /api/site-analytics/hit` → Firestore **SHARDED counters from day one** (§SCALE-PLAN item 1: a per-app daily doc is a hot-doc wall; write `app_<id>_<day>_shard_<0..7>`, sum on read). No cookie, no PII: uniques = HMAC(ip + UA, daily salt), unrecoverable next day. **Privacy policy §3.x must state it** — `privacyPolicyTruth.test.ts` will fail CI until it does, and that is the guard working. Kill switch `AGENTV3_SITE_ANALYTICS=off`, same shape as the badge. Rate-limit the endpoint per app (an app can be spammed). When 0.3 lands, the Worker can count edge-side instead and the beacon becomes the fallback. | The Publish sheet shows "142 visitors this week · top referrer: instagram.com" and the number matches a manual count on a test site. |
+| 1.2 🔴 | **`www` ↔ apex, both work, one canonical** | S | `attachCustomDomain` takes ONE domain; Firebase Hosting supports several per site with a `redirectTarget`. Attach BOTH on connect (apex canonical, `www` → 301 to apex, or the reverse if the user typed `www`), and have managed DNS write both records (`cloudflareManagedDns.ts` — the A/CNAME for `www` alongside the apex, in the same TXT-sweep pass). The connect screen shows one domain; the second is the engine's business. Test-lock: connecting `mitrify.com` yields two attached domains and `www.mitrify.com` answers 301. | `www.<domain>` and `<domain>` both load the app; the DNS verdict does not regress on the mismatch/conflict cases fixed in #2792. |
+| 1.3 🟡 | **"Move this domain to this app" — one tap** for `ownership: mismatch` | S | The verdict already names the cause; #2792 made the apply button reachable. This adds the button INSIDE the verdict box that does exactly one thing: `applyRecords` with the TXT sweep, then re-check — and, when the domain is attached to another app of the same user (`firebaseDomainsForWorkspace` across their workspaces), detaches it there first so the two apps cannot fight. Never across accounts. | The admin's 2026-09-02 and 2026-09-10 screenshots resolve in one tap with no registrar visit. |
+| 1.4 🟡 | **Publish history picker** — restore ANY earlier publish, not only the previous one | S | `listChannelReleases` (in `Deployment.ts`) already lists FINALIZED releases; `pickRollbackTarget` picks one. Add a `releaseId` argument, a list in the Publish sheet (time, "current" marker), and reuse `rollbackChannel`. Zero storage cost — same reason the rollback was free. | A user picks the publish from three days ago and the live site shows it; the registry is still deliberately not rewritten (`publishRollback.ts` header). |
+| 1.5 🟡 | **Password-protected / private site** | M | Two paths, pick by where the app is served: Firebase Hosting has no auth → for now a **Worker-side basic-auth** (needs 0.3) keyed per app in KV; for the bucket-only path the Worker is already in front. Until 0.3: honest "available once branded domains are on" — never a fake toggle (rule 2). Password stored hashed; shown once. | A private app answers 401 without the password and loads with it; the badge and analytics still work behind it. |
+| 1.6 🟡 | **Custom 404 + redirects + headers** | S–M | Publish already ships `firebase.json`-shaped config per site; expose `redirects[]`, a `404.html`, and a fixed safe header set (CSP defaults, `X-Frame-Options`, HSTS) from the engine. Redirect rules edited in a tiny form on the Publish sheet — max 50, validated, no open redirects to other hosts unless the user typed the host. | `/old-path` → `/new` works after publish; a missing route shows the user's 404, not Firebase's. |
+| 1.7 🟢 | **User-chosen subdomain slug** (`myshop.<apps-domain>`) | S | Needs 0.3. Slug = channel/bucket prefix; reserve a denylist (`api`, `admin`, `www`, brand names); one rename allowed per app per day; old slug 301s for 30 days so shared links survive. | The user renames `a-9f3k2.<domain>` to `myshop.<domain>` and both resolve. |
+| 1.8 🟢 | **Uptime check + alert to the USER** for their published app | S | `runMonitorAlertSweep` (repo-root `server.ts`) already sweeps the platform; add a per-app HEAD probe every 15 min for apps with a custom domain (paid plan only — a probe per free app at scale is §💰's category 3), email on two consecutive failures, once per 6h. | A paid user gets one email when their site is down and one when it is back. |
+
+### Phase 2 · 🔵 NAVBHARAT CLOUD, FINISHED — §11's slices 3–7, plus the three the audit added
+
+Everything here **waits on 0.1**. Order is §11's dependency order and is not negotiable — 2.3 before 2.4 is
+how a miner gets hosted for free.
+
+| # | Item | Size | Notes | Done when |
+|---|---|---|---|---|
+| 2.1 | **Slice 2's last mile — the wallet debit** | S | `hostingCost` + `hostingUsage` exist and feed an admin report. Add the daily job: measure → price → `computeRolledUpDebit` (one row per app per day, label `NavBharatAI hosting` — never a vendor name) → debit. Unmeasured lines bill zero AND are named, exactly as the modules already do. D3 decides the free allowance. | A hosted test app shows a daily hosting row in the wallet that matches `wouldBill` to the paisa. |
+| 2.2 | **Slice 3 — custom domain → Cloud Run** via the Worker | M | `backendDomain` already records where a domain points; the Worker learns a third target. `renderCustomDomain.ts` is the precedent for "domain follows the backend". | `mitrify.com` serves the Cloud Run app with HTTPS and the domain screen's `backendPointed` verdict is true. |
+| 2.3 | **Slice 4 — abuse layer** | M | Per §11's corrected ordering: instant source check (our code, free) → background Web Risk on outbound URLs, cached by URL → runtime caps (`max-instances`, wallet) → cron re-scan → `/abuse` + one-tap takedown. **Web Risk, never Safe Browsing** (non-commercial). | A test app that POSTs to a listed phishing host is refused at publish with the file and line named. |
+| 2.4 | **Slice 5 — ONE Publish button** | M | Publish stops refusing a fullstack app; `planDeployment` picks static / Cloud Run; GitHub + BYO Render move under "Advanced". Deletes the Blueprint walk the admin did on 2026-09-10. | A fullstack app reaches a live URL with zero steps outside NavBharatAI. |
+| 2.5 | **Slice 6 — starter database** (👤 D2) | L | Provision at BUILD time in NavBharatAI's own Supabase org, quota-bound like `NavData`; the user's own account stays the upgrade path. Widen the 2026-08-15 exception in `CLAUDE.md` in the same PR, in the admin's words. | An app has a working table before the user is asked for anything; a user at the quota gets an honest "no room" message. |
+| 2.6 | **Managed auth + storage without a user account** | M | Falls out of 2.5 — `generate_auth` (`type: 'supabase'`) and `generate_storage` already target Supabase; they point at the starter project instead. No new generator. | Login and uploads work on a fresh account's first build with no keys pasted. |
+| 2.7 | **Cron runner** — `generate_scheduler` gets something that fires it | S | Cloud Scheduler → the app's Cloud Run URL, one job per schedule, created by `hostApp` from the app's own manifest; costs ~₹0 at scale-to-zero. Never for apps on BYO Render (their cron is theirs). | A generated "send daily digest" job fires at 09:00 IST and the log shows it. |
+| 2.8 | **Backend logs in-product** | S | Cloud Logging read for the app's service, last 200 lines, on the Publish sheet — provider names redacted by the SAME `redactProviders` choke point. | A user sees their app's own `console.error` without opening Google Cloud. |
+| 2.9 | **Env vars per environment** (preview / production) | M | The vault is per-app since #2781; add an `environment` dimension with production as default and preview inheriting unless overridden. Needs 3.4 to be visible. | A preview build reads a test key while production reads the live one. |
+| 2.10 | **Slice 7 — always-on tier** | S | `min-instances: 1` as a paid plan beside the ₹99 domain plan, priced from the real Cloud Run rate + 20%. | A paying user's app answers in <300ms cold. |
+
+### Phase 3 · 🔵 PLATFORM SERVICES the user would otherwise leave to buy elsewhere
+
+| # | Item | Size | Notes | Done when |
+|---|---|---|---|---|
+| 3.1 🔴 | **AI gateway for user apps** — the app calls `/_nav/ai`, we route it, the wallet pays | M | 80% exists: the ONE-WALLET LAW, `aiSpendZone`, provider routing, `redactProviders`. New: a per-app token minted at publish (never the user's session), a per-app daily cap, and the model choice made by tier — the user's app never learns a provider name (white-label law applies to the app's users too). Replaces "bring your own OpenAI key" as the default; BYO stays under Advanced. | A generated chatbot works on a fresh account with no key, and its cost appears as one wallet row. |
+| 3.2 🟡 | **Payments one-click — Cashfree + Razorpay** (India-first; every competitor is Stripe-only) | M | `generate_payment` writes the code; add "Connect my Cashfree/Razorpay" (keys into the per-app vault, webhook endpoint registered by us, signature verification generated). UPI is the moat — say so on the tile. Never NavBharatAI's own merchant account (the user's money must land in the user's account). | A test ₹1 UPI payment completes and the webhook marks the order paid. |
+| 3.3 🟡 | **Managed transactional email** | S–M | `generate_email` exists; add a NavBharatAI-owned sending domain with per-app sub-identity (`app-<id>@mail.<domain>`), daily cap per app, billed per 1,000 from the wallet. Provider name hidden. Reply-to = the user. | An OTP email from a fresh app arrives in Gmail's inbox, not spam. |
+| 3.4 🟡 | **Preview / staging environment** | M | A second Firebase preview channel (or bucket prefix) per app, `preview.<slug>.<domain>`, password-protected by default (1.5), promoted to production by the Publish button — "Publish to preview" / "Promote". Expiring like Firebase channels already do. | A user shows a client a preview link that is not the live site, then promotes it in one tap. |
+| 3.5 🟡 | **Auto-publish on git push** | S | For apps with `agentv3_github_storage`: a webhook on the user's repo (GitHub App already installed) → the same publish path, from the shipped branch only. Off by default; a toggle on the GitHub panel. | A merge to the shipped branch is live within two minutes with no click. |
+| 3.6 🟢 | **Duplicate app** (a variant from this one) | S | Verify the two `duplicate/clone` hits first; if absent, it is a workspace copy minus secrets, with a fresh slug. | "Make a copy" produces an independent app that publishes to its own URL. |
+
+### Phase 4 · 🟢 GROWTH — worth it once Phases 1–3 hold
+
+| # | Item | Size | Notes |
+|---|---|---|---|
+| 4.1 🔴 | **Buy a domain inside NavBharatAI** (👤 0.6 first) | L | Reseller API search/price/buy in ₹, auto-delegated to managed DNS on purchase — the whole DNS ordeal disappears for the buyer. Paid from the wallet; ₹ price shown before, receipt after; renewal reminders. The margin is small; the retention is the point. |
+| 4.2 🟡 | **URL → app** (clone an existing site into an editable app) | M | Fetch through `assertPublicHttpUrl` (the SSRF guard), snapshot with the pre-baked browser, feed the design-contract path (#2345) that screenshots already use. Copyright note shown; never a bit-for-bit copy of assets. |
+| 4.3 🟡 | **iOS / TestFlight for USER apps** | L | The iOS pipeline exists for NavBharatAI itself; per-user needs their Apple account + certs — BYO-account by construction. Same E2B template limitation as §1 item 1 for Expo. |
+| 4.4 🟢 | **DPDP / GDPR consent banner one-click** for user apps | S | India moat; the platform already has the gate and the wording pattern. |
+| 4.5 🟢 | Transfer app to another account · org billing/seats · comments on preview links · auto favicon/OG on publish · monorepo subfolder pick on import · import from a Lovable/Bolt export | S each | Each real, none urgent. Build on a real ask. |
+
+### ⛔ Do not, even though a competitor does
+
+- A shared Render key for every user (§11), Redis for analytics counters (§💰 — shard Firestore instead),
+  BYOK (§7), a provider name on any surface the app's END USERS see (white-label law), Play-Store or
+  App-Store builds on a phase completing (admin's word is the only trigger), and anything in §SCALE-PLAN
+  before its trigger fires.
+
+### The one lever, and why the order is what it is
+
+Phase 1.1 (analytics) is first because it is the cheapest thing that changes what a user FEELS after
+publishing, and it needs no decision. Phase 2 is the biggest lever in the whole plan and is *already
+mostly built* — it is waiting on five console steps and two decisions, which is why Phase 0 is written as
+the admin's list rather than a session's. Phase 3.1 (the AI gateway) is the single feature most likely to
+make a builder choose NavBharatAI over Lovable in 2026, and 80% of its plumbing is the wallet law we
+already run. Everything in Phase 4 is real, and none of it matters until a published app can tell its
+owner how many people came.
+
+**How we will know it worked:** share of published apps whose owner opens the analytics tile in week one;
+share of fullstack apps that reach a live URL (today ≈ 0); support messages containing the word
+"registrar" (today: most of them).
 
 ## How to use this file
 

@@ -283,6 +283,73 @@ done would break the build's provisioning-profile step):
 
 ---
 
+## 7.6 Ad conversion measurement — running Facebook / Instagram ads for installs
+
+**Why this section exists:** Meta can only optimise an ad campaign for an outcome it can OBSERVE.
+With nothing reporting back, the only campaign type available is **Traffic**, which optimises for
+link clicks — the budget goes to people who tap the ad, not to people who install, sign up or pay.
+An **App Promotion / App Install** campaign cannot even be created for an app Meta has no signal
+from. The code for both halves is already in the repo; each stays completely inert until you supply
+its credential, so nothing below changes the app until you decide.
+
+### Step 1 — create the Meta app (only you can do this)
+1. developers.facebook.com → **My Apps → Create App** → choose a **Business** app.
+2. Add the **Facebook Login for Business**-free product you need: under **App settings → Basic**,
+   scroll to **Add platform → Android**. Enter package name `com.navbharat.ai` and the default
+   activity class `com.navbharatai.app.MainActivity`.
+   ⚠️ The package (`com.navbharat.ai`) and the internal namespace (`com.navbharatai.app`) genuinely
+   differ in this project — that is deliberate and correct, see `android/app/build.gradle`.
+3. From **App settings → Basic**, copy the **App ID** and the **Client Token**.
+
+### Step 2 — turn on the ANDROID half (app installs)
+Repo → Settings → Secrets and variables → Actions → add **both**:
+
+| Secret | Value |
+|---|---|
+| `FACEBOOK_APP_ID` | the App ID from step 1 |
+| `FACEBOOK_CLIENT_TOKEN` | the Client Token from step 1 |
+
+Both are required together — an app id without a client token cannot initialise, and a
+half-configured SDK is exactly the "built but not really working" state that must not ship.
+
+Then run **Actions → Build Android App Bundle (.aab, signed)** on `main`. The run summary states, in
+words, whether Meta app events are ON or off in that bundle, so a downloaded `.aab` is never
+ambiguous. Upload it to Play as usual.
+
+> 🚨 **Before you roll that bundle out, update Play Console → App content → Data safety.** A build
+> with these secrets set collects the **advertising ID** and app events. Shipping that collection
+> without declaring it is a policy violation, not a detail. With the secrets unset, the Facebook SDK
+> is not in the bundle at all and nothing about your Data safety answers changes.
+
+> The app runs in **bundled mode**, so this only reaches users through a **new `.aab`** — there is no
+> way to enable it for already-installed copies from the server.
+
+### Step 3 — turn on the WEB half (signups and purchases)
+1. Meta **Events Manager → Connect data sources → Web → Pixel**, and copy the **Pixel ID**.
+2. Cloud Run → the `navbharat-ai-prod` service → **Edit & deploy new revision → Variables** → add
+   `META_PIXEL_ID` = that id. It takes effect on the next page load; no rebuild is needed.
+   ⚠️ It must be `META_PIXEL_ID`, **not** `VITE_META_PIXEL_ID`. A `VITE_` variable is frozen when the
+   Docker image is built, so setting that name in Cloud Run would silently do nothing.
+3. Verify: open navbharatai.com, **accept** the consent banner, and check that a request to
+   `connect.facebook.net` appears in the browser's Network tab. Meta's *Events Manager → Test events*
+   then shows `PageView`, and `CompleteRegistration` when you create an account.
+
+The pixel is gated on consent (GDPR / India DPDP) and never runs inside the native app — the Android
+SDK reports the app's own events, and running both would count one person twice.
+
+### What Meta will then be able to optimise for
+| Signal | Fires when | Where from |
+|---|---|---|
+| App install / app open | a user installs or opens the Android app | Android SDK |
+| `CompleteRegistration` | a NavBharatAI account is created (any sign-in method) | web pixel |
+| `Purchase` | the SERVER confirms a wallet recharge or a Pass | web pixel |
+| `AppBuilt` | a user's app is generated | web pixel |
+
+A recharge reports the real rupee amount. A Professional Pass resolves with a duration rather than an
+amount, so it is reported as a Purchase with **no value** — never an invented one.
+
+---
+
 ## 8. Git-ignore these secrets (never commit)
 Add to `.gitignore` (some may already be present):
 ```
@@ -332,6 +399,47 @@ not have to rediscover any of it.
 
 **The rule for any future session: do not begin this on your own initiative.** The trigger is the
 admin saying users have grown enough to need it. Until then, the correct action is to leave it alone.
+
+---
+
+## 🟢 STATUS: STARTED — the admin asked on 2026-09-07 ("DUNS account banwao")
+
+The trigger above has fired, so this section is no longer a map for later. It is the live plan. What
+follows is unchanged and still accurate; this block only records where the work stands and who is
+holding each piece, so a session resuming mid-way does not restart it or wait for permission it
+already has.
+
+**The critical-path order, because the two tracks have very different lengths:**
+
+| # | Step | Who | Time |
+|---|---|---|---|
+| 1 | Register the business entity (Private Limited recommended) | **admin / CA** | 7-15 days |
+| 2 | Apply for the D-U-N-S number — free, start the moment #1 issues a certificate | **admin** | 5-30 days |
+| 3 | Play Console → website → Save → **Send verification request** | **admin** | minutes |
+| 4 | Serve the verification file Google names | **a Claude session** | one PR |
+| 5 | Change account type → new payments profile → D-U-N-S → identity docs | **admin** | ~1 hour |
+| 6 | Wait 72 hours. Do not schedule a release into it | — | 3 days |
+| 7 | App content → **Health apps declaration** | **admin** | minutes |
+| 8 | Remove the ids from `MEDICAL_PROFESSIONAL_IDS`, fresh `.aab` | **a Claude session** | one PR |
+
+**Steps 1 and 3 can run on the same day** — Track A is free, takes an afternoon, and its only job is
+to make the *Change account type* button clickable. Track B is the long pole and gates everything
+after step 4, which is why it starts first.
+
+⚠️ **Step 4 cannot be prepared in advance.** Google issues the verification filename only after step 3,
+so a session has nothing to commit until the admin pastes it. (If the admin prefers the **DNS TXT**
+route instead, no code is needed at all — the record goes straight into Cloudflare and step 4 is
+skipped.)
+
+🔒 **Steps 7 and 8 are in that order for a compliance reason, not a tidiness one** — see §10.5 step 9.
+
+**Verified 2026-09-07, since §10.4 asserts it:** `public/` is Vite's default `publicDir` and is copied
+into `dist/`, and BOTH serving paths use `dist/` — `express.static(path.join(process.cwd(), 'dist'))`
+in `server.ts`, and `"public": "dist"` in `firebase.json`. Static files are matched BEFORE the SPA
+fallback, and `public/preview-sandbox.html` is an existing `.html` file served this way, so an
+`.html` verification file will be served as a file rather than swallowed by the SPA route. This was
+re-checked against the code rather than trusted from the earlier write-up; it could NOT be confirmed
+against the live site, because this environment's egress proxy refuses `navbharatai.com`.
 
 ---
 

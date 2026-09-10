@@ -84,12 +84,42 @@ describe('staticHostingRefusal — a refusal must carry a next step', () => {
     expect(staticHostingRefusal(planDeployment({ 'index.html': '<p>' }))).toBe('');
   });
 
-  it('names the framework and what is missing, without blaming the user', () => {
+  /**
+   * ⚠️ REWRITTEN 2026-09-05 — this assertion WAS the falsehood, and the test below it had already
+   * named the problem without noticing that this one enforced it.
+   *
+   * It required the message to say "Backend hosting is coming". That was true of the publish path when
+   * written and has been FALSE of the product for weeks: NavBharatAI deploys backends on the user's
+   * own account, and now hosts Python as well as Node. `deployDecision` was added to keep that
+   * sentence away from users — and covered only the branch where a key IS available, leaving this one
+   * teaching every user without a key that a feature they already have does not exist.
+   *
+   * The properties worth keeping are kept in full: name the framework, and never blame the user. What
+   * replaces the false claim is the ONE fact that unlocks the feature — which the panel beside this
+   * message was already showing, so the screen used to contradict itself.
+   */
+  it('names the framework and the way forward, without blaming the user', () => {
     const msg = staticHostingRefusal(planDeployment({ 'package.json': pkg({ dependencies: { express: '^4' } }) }));
     expect(msg).toContain('Express');
-    expect(msg).toContain('Backend hosting is coming');
+    expect(msg).toContain('RENDER_API_KEY');
+    expect(msg).toContain('your own account');
+    // 🔒 The claim that has to stay dead: it says a feature we HAVE does not exist.
+    expect(msg).not.toContain('coming to NavBharatAI');
     // The user did nothing wrong by bringing a backend, and the message must not imply they did.
     expect(msg).not.toMatch(/invalid|unsupported|error|wrong|cannot publish this/i);
+  });
+
+  it('🔒 no refusal anywhere may claim backend hosting is still coming', () => {
+    // One place said it, one place was fixed, and the third kept saying it for weeks. So the check is
+    // over EVERY shape rather than the one that was reported.
+    for (const files of [
+      { 'package.json': pkg({ dependencies: { express: '^4' } }) },
+      { 'package.json': pkg({ dependencies: { fastify: '^4' } }) },
+      { 'package.json': pkg({ dependencies: { express: '^4' }, devDependencies: { vite: '^5' } }) },
+      { 'requirements.txt': 'flask\n', 'app.py': 'from flask import Flask' },
+    ]) {
+      expect(staticHostingRefusal(planDeployment(files)), Object.keys(files)[0]).not.toContain('is coming');
+    }
   });
 
   it('🔒 reassures that nothing was published — so a refusal is not a half-broken site', () => {

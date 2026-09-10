@@ -43,6 +43,22 @@ interface DomainStatus {
   publishBlocked?: string | null;
   /** Firebase's OWN explanation of why the domain is stuck. Absent on an older server. */
   issues?: string[];
+  /**
+   * The `www` twin of this domain (ROADMAP §13, 1.2) — attached with a redirect to the canonical,
+   * its records merged into `displayRecords`, its own state reported here so the verdict above stays
+   * the canonical's. `null` = this domain has no twin (a subdomain); absent = an older server.
+   */
+  alternate?: { host: string; active: boolean; ownershipState: string; hostState: string; sslState: string; redirectTarget: string | null; pendingRecords: number } | null;
+  /** Set on the connect response when the domain was taken off another app of yours (ROADMAP §13, 1.3). */
+  movedFrom?: string | null;
+  /**
+   * This domain was moved to the app's OWN SERVER by a backend deploy, so the static host's record
+   * states describe a setup deliberately no longer in use — and the setup block below must stay shut,
+   * because its "Check & apply records" would hand the domain back and take the live site down.
+   * See domainPointing.ts. Absent on an older server ⇒ exactly today's behaviour.
+   */
+  backendPointed?: boolean;
+  backendStage?: { headline: string; note: string; tone: 'ok' | 'warn' } | null;
   /** When the hosting service last looked at the user's DNS (ISO). Absent on an older server. */
   lastCheckedAt?: string;
   /** What OUR resolver can see of the user's records right now. Absent on an older server. */
@@ -93,6 +109,15 @@ export interface NbaiDomainConnectProps {
    * The screen's own status response takes over as soon as it lands — it is the fresher reading.
    */
   publishFreshness?: PublishFreshness;
+  /**
+   * Take the user to the Deploy-backend controls (admin screenshot 2026-09-07).
+   *
+   * For an app with a server half this screen's verdict says *"deploy the whole app to a host that can
+   * run a server, then point this domain there"* — an instruction with no control beside it, on a
+   * screen two levels deep. The controls that do it ("Put this app in my GitHub", "Deploy backend")
+   * live on the Publish sheet's server-half card. Absent ⇒ the sentence stands alone, as before.
+   */
+  onDeployBackend?: () => void;
 }
 
 /**
@@ -105,6 +130,89 @@ export interface NbaiDomainConnectProps {
  *
  * Pure + exported for tests.
  */
+/**
+ * Firebase's own sentence, ready to prepend — or '' when it shipped none.
+ *
+ * Trimmed, single-spaced and capped, because these come from `google.rpc.Status` and can arrive long,
+ * multi-line, or duplicated across the domain's `issues[]` and the certificate's. Only the FIRST is
+ * used: a stack of provider messages in a user-facing note is how a real explanation becomes noise.
+ * PURE.
+ */
+export function hostingReason(issues?: string[] | null): string {
+  const first = (issues ?? []).map((i) => String(i ?? '').replace(/\s+/g, ' ').trim()).find((i) => i.length > 0);
+  if (!first) return '';
+  const text = first.length > 220 ? `${first.slice(0, 217)}…` : first;
+  return `Your host says: “${/[.!?]$/.test(text) ? text : `${text}.`}” `;
+}
+
+/**
+ * Should the DNS setup instructions (nameserver fields, "Check & apply records", the registrar
+ * picker, the reference record list) be visible right now?
+ *
+ * 🔴 THE PROBLEM THIS CLOSES (admin 2026-09-06, screenshot of an ALREADY-connected domain still
+ * showing the full nameserver-change block under a green "Connected, with HTTPS" banner). Once DNS
+ * is genuinely done, re-showing "Set these two nameservers… Check & apply records" invites exactly
+ * the mistake the admin found: a user re-reading setup instructions for a thing that is already set
+ * up, and re-pressing "Check & apply" believing something is still pending.
+ *
+ * 🔒 WHILE STILL CONNECTING, THIS ALWAYS RETURNS TRUE — never gated behind a click. `active` false
+ * means the user still needs these instructions to finish; hiding them behind a button they have to
+ * discover would make setup HARDER, the opposite of the point. Only once DNS is genuinely done does
+ * this collapse, and even then a manual re-open (`sectionOpen`) always wins — the records must stay
+ * reachable for someone who needs to re-copy a value or check their nameservers again.
+ *
+ * PURE, so the rule is tested directly instead of inferred from JSX.
+ */
+export function shouldShowDnsSetup(active: boolean, sectionOpen: boolean): boolean {
+  return !active || sectionOpen;
+}
+
+/**
+ * Is the user's REGISTRAR still the place their DNS records have to be typed?
+ *
+ * 🔴 THE CONTRADICTION THIS CLOSES (admin screenshot 2026-09-10, `mitrify.com`). One render of this
+ * screen said both of these, forty pixels apart:
+ *
+ *   "…any record you add at your registrar's DNS page is ignored from now on."   (the amber notice)
+ *   "At your registrar: in the 'Type' dropdown choose TXT, copy Name and Value…" (every pending record)
+ *
+ * The amber notice was added on 2026-08-22 after the admin spent six hours typing records into a
+ * registrar panel that had already stopped being read. It warned about the mistake but left the
+ * INSTRUCTION to make it sitting right underneath, so the screen still taught the dead action — a
+ * warning above a wrong instruction is not a fix, it is a louder wrong instruction.
+ *
+ * `active` is Cloudflare's own word for "this zone's nameservers are delegated to us and answering".
+ * Once that is true the registrar's DNS page is decoration, so nothing on this screen may send the
+ * user there.
+ *
+ * PURE, so the rule is tested directly instead of inferred from JSX.
+ */
+export function registrarEditsApply(zoneStatus: string | null | undefined): boolean {
+  return zoneStatus !== 'active';
+}
+
+/**
+ * Does the "Check & apply records" control need to be rendered on its own, away from the
+ * nameserver-setup block that normally carries it?
+ *
+ * 🔴 THE DEAD END THIS CLOSES (same screenshot). `connectStage`'s MISMATCH and CONFLICT verdicts both
+ * end with "Tap “Check & apply records” above" — that button IS the remedy, and applying the records
+ * genuinely fixes a wrong or duplicated ownership token. But the only copy of it lives inside the
+ * automatic-setup block, which renders only while `result.autoDns && autoNs` hold. The admin's screen
+ * had an ACTIVE zone (so we manage the DNS) with that block absent, so the message named a button
+ * that was nowhere on the page, the amber notice forbade the registrar, and there was no third way
+ * out. A domain whose records we write is a domain that must always be able to ask us to write them.
+ *
+ * So the availability of the remedy now follows the STATE THAT NEEDS IT (an active zone) rather than
+ * the state that happens to be showing the setup instructions. `blockVisible` suppresses the second
+ * copy when the setup block is already offering one — two identical buttons is its own confusion.
+ *
+ * PURE.
+ */
+export function needsStandaloneApplyButton(zoneStatus: string | null | undefined, blockVisible: boolean): boolean {
+  return zoneStatus === 'active' && !blockVisible;
+}
+
 export function connectStage(
   s: {
     active: boolean; ownershipState: string; hostState: string; sslState: string;
@@ -114,8 +222,40 @@ export function connectStage(
      * The server forms this from the app's own manifests; see domainPublishBlockNote.
      */
     publishBlocked?: string | null;
+    /**
+     * This domain was moved to the app's OWN SERVER by a backend deploy — so the static host's
+     * record states describe a setup that is deliberately no longer in use. See domainPointing.ts.
+     */
+    backendPointed?: boolean;
+    backendStage?: { headline: string; note: string; tone: 'ok' | 'warn' } | null;
+    /**
+     * WHAT FIREBASE ITSELF SAID IS WRONG (`issues[]`), when it said anything.
+     *
+     * 🔒 THIS FILE'S OWN RULE, APPLIED TO ITS OWN NEW CODE: "Never diagnose from a status enum when
+     * the API also shipped the reason" (firebaseCustomDomain.ts, after `ownership: missing` reached
+     * the admin as one unexplained word). The MISMATCH branch below was written on 2026-09-02 doing
+     * exactly what that rule forbids — it read the enum and ASSERTED a cause ("connected from another
+     * app before"), which is the likeliest cause and is not evidence. If Firebase shipped a reason, it
+     * outranks anything we infer; our sentence is the fallback for when it did not.
+     */
+    issues?: string[] | null;
   },
-): { headline: string; action: 'check' | 'none' | 'publish'; note: string; tone?: 'ok' | 'warn' } {
+): { headline: string; action: 'check' | 'none' | 'publish' | 'deploy-backend'; note: string; tone?: 'ok' | 'warn' } {
+  /**
+   * 🔴 CHECKED FIRST, BECAUSE EVERY BRANCH BELOW READS THE STATIC HOST'S VIEW (admin 2026-09-07).
+   *
+   * Once a backend deploy moves this domain to the app's own server, the static host's records are
+   * deliberately gone and its states go non-active — so those branches would announce "still
+   * connecting" over a live site and offer a Check button whose action would take it down. The server
+   * has already formed the honest verdict from whether the domain ANSWERS; this reproduces it rather
+   * than re-deriving one from states that no longer describe this domain.
+   *
+   * `action: 'none'` on purpose — there is nothing left for the user to do here, and the one thing
+   * this screen could offer them is the thing that must not be pressed.
+   */
+  if (s.backendPointed && s.backendStage) {
+    return { headline: s.backendStage.headline, action: 'none', note: s.backendStage.note, tone: s.backendStage.tone };
+  }
   if (s.active) {
     /**
      * 🔒 NEVER SEND SOMEONE AT A BUTTON THAT CANNOT WORK (admin 2026-08-24).
@@ -133,7 +273,9 @@ export function connectStage(
     if (s.publishBlocked) {
       return {
         headline: 'Connected — but this app needs its server part deployed first.',
-        action: 'none',
+        // A real path to the one thing that is left (admin screenshot 2026-09-07): the sentence below
+        // names the step, and the screen renders the button that goes to it — never a bare instruction.
+        action: 'deploy-backend',
         tone: 'warn',
         note: s.publishBlocked,
       };
@@ -204,12 +346,38 @@ export function connectStage(
    * plainly that waiting will not help, and names the one action that fixes it — which now genuinely
    * does, because "Check & apply records" removes the stale tokens (see applyRecords' TXT sweep).
    */
+  /**
+   * 🔒 MISMATCH IS THE SIBLING OF CONFLICT, AND IT WAS MISSED — the same wasted days, a different word.
+   *
+   * The branch below was written for `ownership: conflict` (more than one token). The hosting service
+   * also reports `ownership: MISMATCH` — a `hosting-site=` token that EXISTS but names a different
+   * site. It had no branch, so it fell straight through to "Waiting for your DNS records to spread
+   * across the internet", and the admin waited again (screenshot 2026-09-02, `mitrify.com`,
+   * `ownership: mismatch · host: active · SSL: active`).
+   *
+   * A wrong VALUE does not become right by waiting, any more than a duplicate does. And the same
+   * button fixes it, genuinely: `applyRecords`' TXT sweep adds the token the service is asking for and
+   * deletes every `hosting-site=` token that is not it — checked in cloudflareManagedDns.ts before
+   * this message was written, because pointing someone at a button that would not help is how the
+   * three days happened the first time.
+   */
+  if (/MISMATCH/i.test(s.ownershipState || '')) {
+    return {
+      headline: 'Your domain\'s ownership record points at a different app — waiting will not change it.',
+      action: 'check',
+      tone: 'warn',
+      note: `${hostingReason(s.issues)}The record is there, but it carries the wrong value — most often because this domain was `
+        + 'connected from another app before. A wrong value does not fix itself, however long you wait. '
+        + 'Tap “Check & apply records” above: we replace it with the right one and remove the wrong one.',
+    };
+  }
   if (/CONFLICT/i.test(s.ownershipState || '')) {
     return {
       headline: 'Your domain has more than one ownership record — waiting will not clear it.',
       action: 'check',
       tone: 'warn',
-      note: 'This happens when the same domain was connected from more than one app: each one left its '
+      note: hostingReason(s.issues)
+        + 'This happens when the same domain was connected from more than one app: each one left its '
         + 'own ownership record, and only one is allowed. It will not fix itself, however long you wait. '
         + 'Tap “Check & apply records” above — we will remove the extra ones and keep the right one.',
     };
@@ -315,12 +483,63 @@ export function lastCheckedLabel(checkedAt: number | null | undefined, now: numb
  * genuinely not in the zone. `null` means we could not look, and that is said plainly rather than
  * guessed in either direction. PURE.
  */
+/**
+ * "we added 1" / "we added 1 and removed 1 unrelated record that belonged to a different app" / "".
+ *
+ * 🔒 SPLIT ON PURPOSE (admin screenshot, 2026-09-02: "all 1 record are now in place (we added 2)").
+ * `applyRecords` used to return ONE combined number covering two different operations: a desired
+ * record written, and a FOREIGN ownership token deleted as cleanup (see `dropForeignSiteTokens` for
+ * the same confusion found once already, in what a "Verified" badge was allowed to claim). Cleaning
+ * up one stale token while adding one desired record produced "2", printed beside "all 1 record" — a
+ * number contradicting the sentence it was in.
+ *
+ * `added` can never exceed the number of records actually desired (`cloudflareManagedDns.ts`'s
+ * `ApplyRecordsResult`); `removed` is cleanup and is named as such, so it explains the extra activity
+ * instead of silently inflating "added" past what the sentence claims. PURE.
+ */
+export function appliedCountsPhrase(added: number, removed: number): string {
+  const parts: string[] = [];
+  if (added > 0) parts.push(`added ${added}`);
+  if (removed > 0) parts.push(`removed ${removed} unrelated record${removed === 1 ? '' : 's'} that belonged to a different app`);
+  return parts.length === 0 ? '' : ` (we ${parts.join(' and ')})`;
+}
+
 export function autoDnsSummary(input: {
   zoneStatus: string | null;
-  applied: number | null;
+  /** Records that now hold a value that was actually DESIRED — never exceeds `desired`. */
+  added: number | null;
+  /** Records deleted as cleanup (a foreign ownership token, an excess stale value) — never desired. */
+  removed?: number | null;
   desired?: number | null;
   missing?: Array<{ type: string; name: string }> | null;
   zoneRecordCount?: number | null;
+  /**
+   * What the HOSTING SERVICE currently says about ownership (`OWNERSHIP_ACTIVE`, `…_MISMATCH`, …).
+   *
+   * 🔒 WHY THIS PARAMETER EXISTS. Without it this function claimed "Nothing left for you to do; your
+   * domain connects on its own from here" from `missing.length === 0` alone — and `missing` only means
+   * "the records we manage are present in the zone". It says nothing about whether the service has
+   * ACCEPTED them. The admin's screenshot showed both at once: every record in place, the green
+   * "nothing left to do", and `ownership: mismatch` printed two lines above it.
+   *
+   * A record existing in DNS is not the service accepting it. This file already learned that lesson in
+   * the other direction — the "Verified" badge below was computed from what the service was ASKING
+   * for, not from evidence the record existed. Same mistake, mirrored.
+   */
+  ownershipState?: string | null;
+  /**
+   * The server's verdict that this app CANNOT be published to this domain at all (see
+   * `domainPublishBlockNote`). '' / absent when publishing is a real option.
+   *
+   * 🔒 WHY THIS PARAMETER EXISTS — the same lesson as `ownershipState`, one level up (admin
+   * 2026-09-04). With every record in place and ownership ACTIVE, this function printed *"Nothing
+   * left for you to do; your domain connects on its own from here."* For a fullstack ship-whole app
+   * that is simply FALSE: there is a great deal left to do, and the domain will never connect on its
+   * own, because it points at a site that can never receive this app. DNS being finished says nothing
+   * about whether the app can ever be SERVED — exactly as records existing said nothing about the
+   * host accepting them.
+   */
+  publishBlocked?: string | null;
 }): { text: string; tone: 'ok' | 'warn' | 'info' } {
   if (input.zoneStatus !== 'active') {
     return {
@@ -328,25 +547,65 @@ export function autoDnsSummary(input: {
       text: 'Waiting for your nameserver change to take effect. This is the one slow step, and it happens only once — after this, every record is written for you instantly.',
     };
   }
-  if (input.applied === null) return { tone: 'info', text: 'Nameservers are live. Tap “Check & apply records”.' };
+  if (input.added === null) return { tone: 'info', text: 'Nameservers are live. Tap “Check & apply records”.' };
   if (input.missing === null || input.missing === undefined) {
     // We wrote what we could but could not confirm. Say exactly that — claiming either verdict here
     // is how a screen ends up insisting a domain is fine while it is not, or vice versa.
+    const added = input.added ?? 0;
+    const removed = input.removed ?? 0;
+    if (added === 0 && removed === 0) {
+      return { tone: 'info', text: 'Nameservers live. We could not re-read your DNS to confirm what is in place; tap Check now in a minute.' };
+    }
+    // Named separately, not combined — the same reason `appliedCountsPhrase` exists: "written" and
+    // "removed" are different facts, and folding them into one count is what produced the original bug.
+    const parts: string[] = [];
+    if (added > 0) parts.push(`${added} record${added === 1 ? '' : 's'} written`);
+    if (removed > 0) parts.push(`${removed} unrelated record${removed === 1 ? '' : 's'} removed`);
     return {
       tone: 'info',
-      text: input.applied > 0
-        ? `Nameservers live — ${input.applied} record${input.applied === 1 ? '' : 's'} written. We could not re-read your DNS to confirm; tap Check now in a minute.`
-        : 'Nameservers live. We could not re-read your DNS to confirm what is in place; tap Check now in a minute.',
+      text: `Nameservers live — ${parts.join(', ')}. We could not re-read your DNS to confirm; tap Check now in a minute.`,
     };
   }
   if (input.missing.length === 0) {
+    const ownership = String(input.ownershipState ?? '');
+    const ownershipSettled = ownership === '' || /ACTIVE/i.test(ownership);
+    if (!ownershipSettled) {
+      // RECORDS IN PLACE ≠ THE SERVICE HAS ACCEPTED THEM. Claiming completion here is what put a
+      // green "nothing left to do" directly beneath a red `ownership: mismatch`. The records really
+      // are correct now, so this is not a failure — but the last word is the service's, not ours, and
+      // a wrong value that survives the re-check needs the button again rather than more patience.
+      return {
+        tone: 'info',
+        text: `Your records are in place. ${/MISMATCH|CONFLICT/i.test(ownership)
+          ? 'Your host still reports the ownership record as wrong — it re-checks on its own schedule, so give it a while. If it still says that in an hour, tap “Check & apply records” once more.'
+          : 'Your host has not confirmed ownership yet — it re-checks on its own schedule. Come back and tap Check in a little while.'}`,
+      };
+    }
     // THE CASE THAT USED TO READ AS FAILURE. Every record is in place; the only thing left is the
     // hosting service's own sweep, which is not ours to hurry — so say that, instead of a bare "0".
+    // 🔒 DNS DONE IS NOT "NOTHING LEFT TO DO". When the app itself cannot be published to this
+    // domain, the records being perfect changes nothing about the outcome — so the DNS half is still
+    // reported as finished (it genuinely is), and the promise that the domain "connects on its own"
+    // is withdrawn in favour of the real blocker. Checked before both completion branches so no path
+    // can make that claim while the app has nowhere to go.
+    const blocked = String(input.publishBlocked ?? '').trim();
+    const added = input.added ?? 0;
+    const removed = input.removed ?? 0;
+    if (blocked) {
+      return { tone: 'warn', text: `Your DNS is fully set up — nothing more to add there. But your domain still cannot show your app: ${blocked}` };
+    }
+    if (added === 0 && removed === 0) {
+      return { tone: 'ok', text: 'Done — every record is already in place. Nothing left for you to do; your domain connects on its own from here.' };
+    }
+    // `desired` names the target count only when we genuinely have one to name — a null/absent value
+    // used to print as a literal blank ("all  record are now in place"), papered over with a
+    // double-space collapse. "your records" is honest instead of guessing a number we do not have.
+    const desired = typeof input.desired === 'number' && input.desired > 0 ? input.desired : null;
+    const subject = desired !== null ? `all ${desired} record${desired === 1 ? '' : 's'}` : 'your records';
+    const verb = desired === 1 ? 'is' : 'are';
     return {
       tone: 'ok',
-      text: input.applied > 0
-        ? `Done — all ${input.desired ?? ''} record${input.desired === 1 ? '' : 's'} are now in place (we added ${input.applied}). Nothing left for you to do; your domain connects on its own from here.`.replace('  ', ' ')
-        : 'Done — every record is already in place. Nothing left for you to do; your domain connects on its own from here.',
+      text: `Done — ${subject} ${verb} now in place${appliedCountsPhrase(added, removed)}. Nothing left for you to do; your domain connects on its own from here.`,
     };
   }
   return {
@@ -452,7 +711,7 @@ export function relativeRecordName(name: string, domain: string): string {
 }
 
 
-export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy, publishResult, publishFreshness, onUnpublish }: NbaiDomainConnectProps) {
+export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy, publishResult, publishFreshness, onUnpublish, onDeployBackend }: NbaiDomainConnectProps) {
   /**
    * OPENS WITH WHAT YOU ALREADY TYPED (admin 2026-08-22: "abhi lagta hai sab gayab ho gaya").
    *
@@ -493,11 +752,19 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
   // tap can actually deliver it (result.autoDns), and honest about the ONE registrar step it needs.
   const [autoNs, setAutoNs] = useState<string[] | null>(draft?.nameServers?.length ? draft.nameServers : null);
   const [autoZoneStatus, setAutoZoneStatus] = useState<string | null>(null);
-  const [autoApplied, setAutoApplied] = useState<number | null>(null);
+  // SPLIT, not summed (admin screenshot 2026-09-02: "all 1 record are now in place (we added 2)").
+  // `added` = records that now hold a value that was actually DESIRED (can never exceed `autoDesired`);
+  // `removed` = cleanup deletes (a foreign ownership token, an excess stale value) — never part of
+  // "desired", and reported separately so cleanup activity cannot inflate "we added N" past N's meaning.
+  const [autoAdded, setAutoAdded] = useState<number | null>(null);
+  const [autoRemoved, setAutoRemoved] = useState<number | null>(null);
   // The zone read-back (see autoDnsSummary): `null` = we could not look, `[]` = everything is there.
   const [autoMissing, setAutoMissing] = useState<Array<{ type: string; name: string }> | null>(null);
   const [autoDesired, setAutoDesired] = useState<number | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
+  // Manual override for the collapsed DNS-setup section — see shouldShowDnsSetup. Starts collapsed;
+  // a user who wants to see it again (re-copy a record, re-check nameservers) can always reopen it.
+  const [dnsSectionOpen, setDnsSectionOpen] = useState(false);
   // Domain Connect one-click (registrar-approved template) + Hostinger token flow (Slice B/C).
   const [dcCheck, setDcCheck] = useState<{ supported: boolean; providerName?: string; applyUrl?: string; reason?: string } | null>(null);
   const [hostingerToken, setHostingerToken] = useState('');
@@ -630,6 +897,10 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
       }
       setNeedsPlan(false);
       setResult(data);
+      // The server connects the APEX and redirects `www` to it (domainPair.ts). Adopt its spelling,
+      // so the relative record names ("@", "www") and the zone the automatic path creates are
+      // computed against the domain that was actually connected, not the one that was typed.
+      if (typeof data?.domain === 'string' && data.domain && data.domain !== cleanDomain) setDomain(data.domain);
       setConfirmed(true);
       setStatusUnavailable(false);
       rememberDraft(data, autoNs);
@@ -689,7 +960,17 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
         body: JSON.stringify({ workspaceId, domain: cleanDomain }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { setError(data?.error || 'Could not start automatic setup.'); setErrorDetail(typeof data?.detail === 'string' ? data.detail : null); return; }
+      if (!res.ok) {
+        // Automatic setup is plan-gated too since 2026-09-10 — and it must READ as the upgrade note,
+        // not as a red failure. Nothing is broken here: this step creates a real DNS zone and asks
+        // the user to repoint their nameservers, which is precisely why a free account must be
+        // stopped BEFORE it, rather than after they have already changed them.
+        setNeedsPlan(data?.needsPlan === true);
+        setError(data?.error || 'Could not start automatic setup.');
+        setErrorDetail(typeof data?.detail === 'string' ? data.detail : null);
+        return;
+      }
+      setNeedsPlan(false);
       setAutoNs(Array.isArray(data?.nameServers) ? data.nameServers : []);
       setAutoZoneStatus(typeof data?.zoneStatus === 'string' ? data.zoneStatus : null);
     } catch (e) {
@@ -709,7 +990,8 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
       if (!res.ok) { setError(data?.error || 'Could not apply the records.'); setErrorDetail(typeof data?.detail === 'string' ? data.detail : null); return; }
       setAutoZoneStatus(typeof data?.zoneStatus === 'string' ? data.zoneStatus : null);
       if (Array.isArray(data?.nameServers)) setAutoNs(data.nameServers);
-      if (typeof data?.applied === 'number') setAutoApplied(data.applied);
+      if (typeof data?.added === 'number') setAutoAdded(data.added);
+      if (typeof data?.removed === 'number') setAutoRemoved(data.removed);
       // The zone read-back: what is genuinely there, so the line below states a fact instead of a count.
       setAutoMissing(Array.isArray(data?.missing) ? data.missing : null);
       setAutoDesired(typeof data?.desired === 'number' ? data.desired : null);
@@ -863,6 +1145,27 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                   <span className={`text-[12px] font-bold ${stage.tone === 'ok' ? 'text-green-200' : 'text-amber-100'}`}>{stage.headline}</span>
                 </div>
                 <p className="text-[11px] text-zinc-300/80 leading-relaxed">{stage.note}</p>
+                {/* www ↔ apex (ROADMAP §13, 1.2). Its own line, under the verdict, never inside it:
+                    a twin still waiting for its record must not make a finished domain read as
+                    unfinished — and a finished twin is worth saying, because "does www work?" is
+                    the second thing everyone tries. */}
+                {result.alternate && (
+                  <p className={`text-[10.5px] leading-relaxed ${result.alternate.active ? 'text-green-200/90' : 'text-zinc-400'}`}>
+                    {result.alternate.active
+                      ? <>✓ <span className="font-mono">{result.alternate.host}</span> works too — it sends visitors here.</>
+                      : result.alternate.ownershipState === 'unknown'
+                        ? <><span className="font-mono">{result.alternate.host}</span> — could not check just now.</>
+                        : <>⏳ <span className="font-mono">{result.alternate.host}</span> is being set up too, so both spellings work{result.alternate.pendingRecords > 0 ? ' — its record is in the list below' : ''}.</>}
+                  </p>
+                )}
+                {/* MOVED HERE FROM ANOTHER APP OF YOURS (ROADMAP §13, 1.3). Said once, plainly, with the
+                    way back — the other app silently losing its domain is the one thing a one-tap move
+                    must never do quietly. */}
+                {result.movedFrom && (
+                  <p className="text-[10.5px] text-amber-100/90 leading-relaxed">
+                    This domain was moved here from another app of yours — that app no longer serves it. To move it back, open that app and connect it there.
+                  </p>
+                )}
                 {/* THE CHECK BUTTON MOVED DOWN (admin 2026-08-22: "check now button sahi jagah nahi
                     hai … upar wala"). It used to sit HERE — above the records, i.e. before the user
                     has anything to check. Someone lands on this screen, is told to add DNS records,
@@ -878,6 +1181,17 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                     className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold"
                   >
                     Go to Publish
+                  </button>
+                )}
+                {/* THE SAME PRINCIPLE FOR A SERVER APP (admin screenshot 2026-09-07). The verdict said
+                    "deploy the whole app to a host that can run a server" and offered nothing to press;
+                    the controls that do it live on the Publish sheet's server-half card. */}
+                {stage.action === 'deploy-backend' && onDeployBackend && (
+                  <button
+                    onClick={onDeployBackend}
+                    className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold"
+                  >
+                    Go to Deploy backend
                   </button>
                 )}
                 {/* WHAT WE CAN SEE OF THEIR DNS (admin 2026-08-21, mitrify.com). The status line
@@ -928,6 +1242,22 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
 
               For someone shipping app after app, that difference is hours per app versus hours once.
               We were leading with the worse deal because of where a div sat. */}
+          {/* THE BUTTON THAT REPLACES THE REPEATED SETUP BLOCK (admin 2026-09-06). Once DNS is
+              genuinely done there is nothing left to press below except by mistake — see
+              shouldShowDnsSetup. Always offered once active, never forced open: someone who needs to
+              re-copy a record or re-check their nameservers can still get there in one tap. */}
+          {(result.active || result.backendPointed === true) && (
+            <button
+              onClick={() => setDnsSectionOpen((v) => !v)}
+              className="self-start flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/60 border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-[11px] font-bold transition-colors"
+            >
+              <Check className="w-3.5 h-3.5 text-green-400 shrink-0" />
+              DNS records
+              <span className="text-zinc-500 font-normal">{dnsSectionOpen ? '— hide' : '— all done, tap to view'}</span>
+            </button>
+          )}
+          {shouldShowDnsSetup(result.active || result.backendPointed === true, dnsSectionOpen) && (
+          <>
           {result.autoDns && (
             <div className="px-3 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex flex-col gap-2">
               <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">Or: automatic setup (one-time nameserver change)</span>
@@ -963,7 +1293,10 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                     {/* The line that used to say "0 records applied automatically" for BOTH complete
                         success and total failure. It now reports what is genuinely in the zone. */}
                     {(() => {
-                      const s = autoDnsSummary({ zoneStatus: autoZoneStatus, applied: autoApplied, desired: autoDesired, missing: autoMissing });
+                      // The host's own verdict travels WITH the record counts, so this line can never announce
+                      // completion while the service is still refusing the domain — the exact pairing in the
+                      // admin's screenshot: a green "nothing left to do" under a red `ownership: mismatch`.
+                      const s = autoDnsSummary({ zoneStatus: autoZoneStatus, added: autoAdded, removed: autoRemoved, desired: autoDesired, missing: autoMissing, ownershipState: result?.ownershipState, publishBlocked: result?.publishBlocked });
                       const tone = s.tone === 'ok' ? 'text-green-300' : s.tone === 'warn' ? 'text-amber-300' : 'text-zinc-400';
                       return <span className={`text-[10px] leading-relaxed ${tone}`}>{s.text}</span>;
                     })()}
@@ -1010,6 +1343,23 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 NavBharatAI&apos;s nameservers, so we write these records for you — and any record you add at
                 your registrar&apos;s DNS page is ignored from now on. The list below is only for reference.
               </p>
+              {/* 🔒 THE NOTICE THAT SAYS "WE WRITE THESE FOR YOU" NOW CARRIES THE BUTTON THAT MAKES US
+                  WRITE THEM (admin 2026-09-10). See needsStandaloneApplyButton: the ownership-mismatch
+                  verdict points at this exact control, and until now it could be absent from the whole
+                  page while the registrar was simultaneously declared dead — an instruction to press
+                  nothing, next to a warning not to type anywhere. Suppressed when the setup block above
+                  is already offering the same button. */}
+              {needsStandaloneApplyButton(autoZoneStatus, !!result.autoDns && !!autoNs) && (
+                <div className="flex items-center gap-2 flex-wrap pt-1">
+                  <button onClick={autoDnsSync} disabled={autoBusy}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold">
+                    {autoBusy ? 'Checking…' : 'Check & apply records'}
+                  </button>
+                  <span className="text-[10px] text-amber-100/80 leading-relaxed">
+                    Writes every record below into your domain for you, and clears any wrong one left behind.
+                  </span>
+                </div>
+              )}
             </div>
           )}
           <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
@@ -1064,9 +1414,13 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 <Field label="Type" value={rec.type} k={`dt${i}`} copied={copied} onCopy={copy} />
                 <Field label="Name" value={relativeRecordName(rec.name, cleanDomain)} k={`dn${i}`} copied={copied} onCopy={copy} />
                 <Field label="Value" value={rec.value} k={`dv${i}`} copied={copied} onCopy={copy} />
+                {/* SIBLING of the pending card's instruction (registrarEditsApply): a record we wrote
+                    into our own zone is not "live at your registrar", and saying so would send someone
+                    looking for it in a panel that no longer holds it. */}
                 <p className="text-[10px] text-zinc-500">
-                  Already live at your registrar — this is here so you can copy it again if you ever
-                  need to re-add it.
+                  {registrarEditsApply(autoZoneStatus)
+                    ? 'Already live at your registrar — this is here so you can copy it again if you ever need to re-add it.'
+                    : 'Already live — NavBharatAI holds this record for your domain. It is here so you can copy it again if you ever need it.'}
                 </p>
               </div>
             </details>
@@ -1086,12 +1440,22 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               <Field label="Type" value={rec.type} k={`t${i}`} copied={copied} onCopy={copy} />
               <Field label="Name" value={relativeRecordName(rec.name, cleanDomain)} k={`n${i}`} copied={copied} onCopy={copy} />
               <Field label="Value" value={rec.value} k={`v${i}`} copied={copied} onCopy={copy} />
-              <p className="text-[10px] text-zinc-500">
-                At your registrar: in the "Type" dropdown choose <span className="font-bold text-zinc-300">{rec.type}</span>, copy Name and Value into their boxes, and leave TTL as-is.
-                {relativeRecordName(rec.name, cleanDomain) === '@' && (
-                  <> ("@" simply means your domain, {cleanDomain} — every registrar form understands it.)</>
-                )}
-              </p>
+              {/* 🔒 NEVER SEND SOMEONE TO A DNS PANEL THAT HAS STOPPED BEING READ — see
+                  registrarEditsApply. Once the zone is delegated to us this instruction described an
+                  action that could not work, directly under the notice saying so. */}
+              {registrarEditsApply(autoZoneStatus) ? (
+                <p className="text-[10px] text-zinc-500">
+                  At your registrar: in the "Type" dropdown choose <span className="font-bold text-zinc-300">{rec.type}</span>, copy Name and Value into their boxes, and leave TTL as-is.
+                  {relativeRecordName(rec.name, cleanDomain) === '@' && (
+                    <> ("@" simply means your domain, {cleanDomain} — every registrar form understands it.)</>
+                  )}
+                </p>
+              ) : (
+                <p className="text-[10px] text-zinc-500">
+                  NavBharatAI adds this one for you — press <span className="font-bold text-zinc-300">Check &amp; apply records</span> above.
+                  Typing it at your registrar will not work: this domain&apos;s DNS is managed here now.
+                </p>
+              )}
             </div>
           ))}
           </>
@@ -1147,9 +1511,11 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               a second copy here would be two sources of truth for one state. What remains is the
               closing reassurance, which belongs after the reference material. */}
           <p className="text-[10px] text-zinc-500 leading-relaxed">
-            DNS changes can take a few minutes to a few hours. Publish your app once after connecting, so the
+            DNS changes can take a few minutes to a few hours{result.active ? '' : ' — this is your registrar and the public internet catching up, not something on our side you can speed up'}. Publish your app once after connecting, so the
             domain serves your latest build. HTTPS is issued automatically once the records resolve.
           </p>
+          </>
+          )}
           {/* THE ONE Check now, and it is now the prominent one (admin 2026-08-22). It sits directly
               under the records the user just added, which is the only place where pressing it means
               anything — and it is the primary action of this whole screen while a domain is pending,
@@ -1239,18 +1605,30 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
             );
           })()}
 
-          {result.active && (
-            <a
-              href={visitUrl(cleanDomain)}
-              target="_blank"
-              rel="noreferrer"
-              className="self-start flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-500 text-white text-[13px] font-bold transition-colors"
-            >
-              <Globe className="w-4 h-4" />
-              Visit {cleanDomain}
-              <ExternalLink className="w-3.5 h-3.5 opacity-80" />
-            </a>
-          )}
+          {/* GREEN ONLY WHEN THE DOMAIN WAS SEEN SERVING THE APP (admin screenshot 2026-09-07: a bright
+              green "Visit mitrify.com" directly under a verdict saying the server part is not deployed,
+              and the domain answering Firebase's "Site Not Found"). The link stays — it is their domain
+              and the box above says what they will find — but a green button is a claim, and it is now
+              made only from evidence. See visitTone. */}
+          {result.active && (() => {
+            const tone = visitTone(result);
+            return (
+              <a
+                href={visitUrl(cleanDomain)}
+                target="_blank"
+                rel="noreferrer"
+                className={`self-start flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13px] font-bold transition-colors ${
+                  tone === 'live'
+                    ? 'bg-green-600 hover:bg-green-500 text-white'
+                    : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'
+                }`}
+              >
+                <Globe className="w-4 h-4" />
+                {tone === 'live' ? 'Visit' : 'Open'} {cleanDomain}
+                <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+              </a>
+            );
+          })()}
 
           {/* UNPUBLISH (admin 2026-08-22). Offered only for an app that is genuinely LIVE — there is
               nothing to take down otherwise, and a control with nothing behind it is the dead button
@@ -1349,6 +1727,26 @@ export function cleanDomainInput(raw: string): string {
 export function visitUrl(domain: string): string {
   const host = cleanDomainInput(domain);
   return host ? `https://${host}` : '';
+}
+
+/**
+ * How the Visit link is painted — `live` (green, "Visit") only when the domain was actually SEEN
+ * serving the app; `muted` (a plain link, "Open") for everything else.
+ *
+ * 🔒 A GREEN BUTTON IS A CLAIM. "Connected" describes DNS and a certificate; it says nothing about
+ * what the domain shows. Under a verdict that the server part is not deployed, or a probe that saw an
+ * error page, or no probe at all, painting the link green tells the user the opposite of the box above
+ * it. The link itself is never withheld — it is their domain — only the colour has to be earned. PURE.
+ */
+export function visitTone(s: {
+  serving?: { state: string } | null;
+  backendPointed?: boolean;
+  backendStage?: { tone: 'ok' | 'warn' } | null;
+  publishBlocked?: string | null;
+}): 'live' | 'muted' {
+  if (s.backendPointed) return s.backendStage?.tone === 'ok' ? 'live' : 'muted';
+  if (s.publishBlocked) return 'muted';
+  return s.serving?.state === 'serving' ? 'live' : 'muted';
 }
 
 /** Trim the API's verbose state enums (OWNERSHIP_ACTIVE -> active) for the status line. */

@@ -46543,3 +46543,18 @@ toggle; `components/ide/PreviewPanel.tsx` (Code Studio) has print, fullscreen an
 the Pro surface does not. Only the capability delegation was brought to parity here. Full convergence
 is a real refactor of an 843-line component and was not attempted in this pass — a user moving between
 the two still meets two different previews.
+
+### 🟡 Known flake, unrelated to the preview work — `AgentRunner.test.ts` "timedOut is true when work was saved"
+
+Went red once in a full-suite run on 2026-09-10 and passed immediately when run alone, in a session
+that changed nothing AgentRunner imports. **The cause is in the test, not the code:** it builds the
+runner with `maxBuildMs: 1` and relies on at least one real millisecond of wall clock elapsing between
+the run's start and the second loop check. Under a heavily parallel suite that interval can round to
+zero, `buildTimedOut()` correctly returns false, and the assertion fails — the production behaviour is
+right in both cases.
+
+**The fix, deliberately NOT taken here** because it is unrelated to this PR's diff and widening it to
+touch another module's test is how an unrelated regression gets attributed to a preview change: make
+the elapsed time REAL rather than relaxing the assertion — have the scripted client await a couple of
+milliseconds so the second check genuinely happens after `maxBuildMs`. The assertion itself must stay
+exactly as it is; changing it to match the flake would be changing a test to match broken behaviour.

@@ -346,7 +346,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // Reset the viewport to Auto on a new/changed workspace too — a leftover Mobile/Tablet device frame
   // from the previous app would otherwise misrepresent the next one.
   useEffect(() => {
-    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setIdleSnapshotUrl(''); setIdleSnapshotNote(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto'); setLiveBridgeReady(false); setConsoleEntries([]); setRoutePath(''); setRouteDraft(''); setFidelityNotice(''); setPicking(false); setThemeToggleAvailable(false); setPreviewIsDark(false); setZoom('fit');
+    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setIdleSnapshotUrl(''); setIdleSnapshotNote(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto'); setLiveBridgeReady(false); setConsoleEntries([]); lastHmrAtRef.current = null; lastActivityAtRef.current = null; setRoutePath(''); setRouteDraft(''); setFidelityNotice(''); setPicking(false); setThemeToggleAvailable(false); setPreviewIsDark(false); setZoom('fit');
     // The failover guards are per-project state: a new workspace gets a fresh chance to rescue itself.
     failedOverToLive.current = false; userPickedInBrowser.current = false; setFailoverNote('');
   }, [workspaceId]);
@@ -916,7 +916,18 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   useEffect(() => {
     if (!shouldReloadOnSignal(reloadTracker.current, reloadSignal)) return;
     if (!workspaceId) return;
-    const decision = decidePreviewReload({ mode, phase: buildPhase ?? 'idle', everRendered: everRenderedRef.current });
+    const now = Date.now();
+    const decision = decidePreviewReload({
+      mode,
+      phase: buildPhase ?? 'idle',
+      everRendered: everRenderedRef.current,
+      // Evidence from inside the app, which this decision never used to have — see previewBridge.ts.
+      hmrAgeMs: lastHmrAtRef.current === null ? null : now - lastHmrAtRef.current,
+      activityAgeMs: lastActivityAtRef.current === null ? null : now - lastActivityAtRef.current,
+    });
+    // HOT RELOAD ALREADY SHOWED IT: nothing to reload and nothing to hold, so no "updates waiting"
+    // line either — that line would be claiming a change is pending when it is already on screen.
+    if (!decision.reload && !decision.defer) return;
     if (decision.defer) { setHeldReloads((n) => n + 1); return; }
     if (reloadTimer.current) clearTimeout(reloadTimer.current);
     reloadTimer.current = setTimeout(applyReload, 900);
@@ -955,6 +966,25 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
    * nothing would simply be false.
    */
   const [liveBridgeReady, setLiveBridgeReady] = useState(false);
+  /**
+   * WHEN THE APP LAST HOT-RELOADED, AND WHEN SOMEONE LAST TOUCHED IT.
+   *
+   * Refs, not state, deliberately: these arrive several times a second while a person is typing, and
+   * re-rendering the whole preview surface on each one would be its own performance bug. Nothing on
+   * screen depends on them — only the reload decision reads them, at the moment it is made.
+   */
+  const lastHmrAtRef = useRef<number | null>(null);
+  const lastActivityAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    const onSignal = (e: MessageEvent) => {
+      const d = e.data as { __nbaiPreviewHmr?: boolean; __nbaiPreviewActivity?: boolean } | null;
+      if (!d) return;
+      if (d.__nbaiPreviewHmr === true) lastHmrAtRef.current = Date.now();
+      if (d.__nbaiPreviewActivity === true) lastActivityAtRef.current = Date.now();
+    };
+    window.addEventListener('message', onSignal);
+    return () => window.removeEventListener('message', onSignal);
+  }, []);
   /**
    * WHERE THE APP CURRENTLY IS, and the ability to send it somewhere else.
    *

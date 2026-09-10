@@ -73,6 +73,47 @@ export function previewBridgeSource(source: 'in-browser' | 'live'): string {
     var r = e && e.reason;
     mirror('error', ['Unhandled promise rejection: ' + (r instanceof Error ? r.message : String(r))]);
   });
+  // ── THE TWO FACTS THE PANEL COULD NEVER SEE BEFORE ──────────────────────────────────────────
+  // previewReloadPolicy.ts says, in writing: "the obvious rule — stop reloading once the user starts
+  // interacting — cannot be implemented: the app runs in a cross-origin iframe, so we cannot see a
+  // single click, keystroke or scroll inside it, and no amount of cleverness changes that."
+  //
+  // That was exactly true when it was written, and it stopped being true the moment this bridge
+  // existed — because this code runs INSIDE the app. So the two facts that were unavailable are now
+  // simply reported, and the reload decision can use evidence instead of a proxy.
+  //
+  // 1. IS SOMEONE USING THE APP RIGHT NOW? A hard remount takes away whatever they had typed, opened,
+  //    scrolled to or navigated to. The build's PHASE was the best available stand-in for "is this a
+  //    bad moment"; who is actually touching the app is the real question.
+  // 2. DID VITE'S HOT RELOAD ALREADY APPLY THE CHANGE? If it did, the change is on screen ALREADY and
+  //    the hard remount that follows is pure loss: it destroys the user's state to show them
+  //    something they can already see.
+  //
+  // Both are throttled to at most one message every 2s — this must never become a chat channel
+  // between an app and its panel.
+  var lastActivityPost = 0;
+  function reportActivity() {
+    var now = Date.now();
+    if (now - lastActivityPost < 2000) return;
+    lastActivityPost = now;
+    post({ __nbaiPreviewActivity: true, source: SOURCE, at: now });
+  }
+  ['pointerdown', 'keydown', 'input', 'scroll', 'touchstart'].forEach(function (evt) {
+    // Passive + capture: observing must never delay or alter the app's own handling of the event.
+    try { window.addEventListener(evt, reportActivity, { capture: true, passive: true }); }
+    catch (e) { try { window.addEventListener(evt, reportActivity, true); } catch (e2) { /* ignore */ } }
+  });
+  // Vite dispatches these on the document around every hot update — the documented client API, not a
+  // private detail. An app served by anything else simply never fires them, and the panel then falls
+  // back to exactly today's behaviour.
+  ['vite:afterUpdate', 'vite:beforeFullReload'].forEach(function (evt) {
+    try {
+      document.addEventListener(evt, function () {
+        post({ __nbaiPreviewHmr: true, source: SOURCE, kind: evt, at: Date.now() });
+      });
+    } catch (e) { /* ignore */ }
+  });
+
   // ── POINT AT A THING AND SAY WHAT TO CHANGE (gap analysis 2026-09-10) ───────────────────────
   // The Visual Editor works on the IN-BROWSER preview only, and for a real reason: it needs
   // file:line:column, which comes from a Babel plugin (nbaiSrcPlugin) stamping data-nbai-src during

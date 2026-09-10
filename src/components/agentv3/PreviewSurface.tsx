@@ -321,7 +321,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // Reset the viewport to Auto on a new/changed workspace too — a leftover Mobile/Tablet device frame
   // from the previous app would otherwise misrepresent the next one.
   useEffect(() => {
-    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setIdleSnapshotUrl(''); setIdleSnapshotNote(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto');
+    setFoundUrl(''); setDoorUrl(''); setPreviewChecked(false); setIdleSnapshotUrl(''); setIdleSnapshotNote(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto'); setLiveBridgeReady(false); setConsoleEntries([]);
     // The failover guards are per-project state: a new workspace gets a fresh chance to rescue itself.
     failedOverToLive.current = false; userPickedInBrowser.current = false; setFailoverNote('');
   }, [workspaceId]);
@@ -920,8 +920,25 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   /** Which rows the drawer shows. 'problems' spans errors AND warnings — the question actually asked. */
   const [consoleFilter, setConsoleFilter] = useState<ConsoleFilter>('all');
   const [consoleQuery, setConsoleQuery] = useState('');
+  /**
+   * Has the LIVE app's bridge actually announced itself?
+   *
+   * This is what separates "your app has printed nothing" from "nothing is reporting to me" — two
+   * completely different facts that an empty drawer used to state as the same sentence. A framework
+   * with no entry document (Next, Nuxt) never gets a bridge, and telling that user their app printed
+   * nothing would simply be false.
+   */
+  const [liveBridgeReady, setLiveBridgeReady] = useState(false);
   const consoleErrorCount = countConsoleErrors(consoleEntries);
   const visibleConsoleEntries = filterConsoleEntries(consoleEntries, consoleFilter, consoleQuery);
+  useEffect(() => {
+    const onBridgeReady = (e: MessageEvent) => {
+      const d = e.data as { __nbaiPreviewBridgeReady?: boolean; source?: string } | null;
+      if (d && d.__nbaiPreviewBridgeReady === true && d.source === 'live') setLiveBridgeReady(true);
+    };
+    window.addEventListener('message', onBridgeReady);
+    return () => window.removeEventListener('message', onBridgeReady);
+  }, []);
   useEffect(() => {
     const onConsoleMsg = (e: MessageEvent) => {
       const d = e.data as { __nbaiPreviewConsole?: boolean; level?: string; text?: string } | null;
@@ -1253,7 +1270,20 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         />
       </div>
       <div className="max-h-40 overflow-y-auto px-3 py-1.5 space-y-0.5">
-        {consoleEntries.length === 0 && <p className="text-zinc-600">Console is empty — your app has not printed anything yet.</p>}
+        {/* TWO DIFFERENT FACTS, NOT ONE SENTENCE. "Your app has not printed anything" is only true
+            when something is actually listening. On Live, a framework with no entry document never
+            receives the bridge, and saying the app printed nothing there would be a plain untruth —
+            so it says what is really the case, and points at the preview whose console always works. */}
+        {consoleEntries.length === 0 && mode === 'live' && !liveBridgeReady && (
+          <p className="text-zinc-600">
+            The live console is not reporting for this app — server-rendered frameworks have no entry page to attach it to.{' '}
+            <button onClick={() => { userPickedInBrowser.current = true; setMode('inbrowser'); }} className="underline hover:text-zinc-400">
+              The in-browser preview
+            </button>{' '}
+            always shows one.
+          </p>
+        )}
+        {consoleEntries.length === 0 && !(mode === 'live' && !liveBridgeReady) && <p className="text-zinc-600">Console is empty — your app has not printed anything yet.</p>}
         {/* An ACTIVE filter hiding everything is a different state from an empty console, and saying
             "your app has not printed anything" there would simply be untrue. */}
         {consoleEntries.length > 0 && visibleConsoleEntries.length === 0 && (
@@ -1323,6 +1353,13 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
               label keeps the port (a process, not a machine) and drops everything that addresses one.
               See previewAddress.ts for why this is not, and is not meant to be, the lock. */}
           <span className="truncate flex-1 min-w-0" title="Your app is running on a NavBharatAI development machine. Use Publish to give anyone else a link.">{previewAddressLabel(effectiveUrl)}</span>
+          {/* THE LIVE PREVIEW NOW HAS A CONSOLE TOO (gap analysis 2026-09-10). It never did: the
+              mirror was built into the in-browser document only, so the mode where the app is most
+              real — actual dependencies, actual machine — reported nothing at all, and a user
+              watching their live app throw had to open devtools to find out why. Same button, same
+              drawer, same "Fix with AI"; the rows arrive from the bridge injected at dev-server
+              launch (AgentV3/previewBridge.ts). */}
+          {consoleButton}
           <button onClick={() => setLiveReloadKey((k) => k + 1)} className="shrink-0 flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           {/* RESTART THE SERVER — reachable while the preview is SHOWING (ROADMAP §8B B3).
               Diagnose only ever existed in the "No live preview yet" empty state, so a user whose
@@ -1363,6 +1400,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             split divider drags.
           */}
         </div>
+        {consoleOpen && consoleDrawer}
         {paidNote}
         {/* A restart is a 30–90s sandbox reboot. A spinner alone for that long is indistinguishable
             from a hang, so it says WHAT it is doing and for how long — the same real stage events the

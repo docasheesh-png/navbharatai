@@ -46697,3 +46697,39 @@ follow-up rather than shipped as a second write.
 `npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
 `npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
 **1509 files / 20,294 passed, 0 failed**.
+
+## 2026-09-10 — Publish history picker: go back to ANY earlier version (ROADMAP §13 item 1.4)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2796).
+
+### What shipped
+"Undo last publish" went one step back. Now, under it, **"Go back to an earlier version…"** lists every
+version the app has published — date and time, the live one marked — and puts any of them back live in
+two taps. Zero storage cost, for the same reason the one-step undo was free: the host already holds every
+finalized version; a rollback is one release call pointing the channel at one of them.
+
+- **`listRollbackChoices(releases, max=20)`** (pure, `publishRollback.ts`): same filters as
+  `pickRollbackTarget` (FINALIZED only, sorted by release time, never the API's order), **one entry per
+  VERSION** — after a rollback the same version sits in several releases, and listing it three times would
+  misdescribe the history — each keeping the time it was most recently live; bounded.
+- **`pickRollbackTargetByVersion(releases, versionName)`** (pure): the request's version is only ever a
+  KEY into the history the server itself read — unknown ⇒ null, the live one ⇒ null — and yields the same
+  target shape the one-step undo uses, so the route's hosting call is identical for both.
+- **Routes:** `rollback-status` now returns `choices`; `rollback` accepts an optional `versionName`
+  resolved through that function and refuses (409, `unknown-version`) anything not in the history.
+- **The screen:** a collapsed link under Undo; on open, the list with the same two-step confirm; an
+  unreadable history is said in words, never rendered as an empty one; "nothing is deleted — going back
+  adds a new entry, so you can come forward again." `AppKnowledgeBase` updated.
+
+### The lock that evolved, and why that was the honest move
+`publishRollback.test.ts` pinned "the rollback target is re-derived on the SERVER, never taken from the
+request" with a literal `not.toMatch(/req.body.versionName/)`. The picker needs the request to NAME a
+version, so the lock now asserts the actual property: the raw string reaches the hosting call only
+through `pickRollbackTargetByVersion(releases ?? [], requested)`, and never appears inside
+`rollbackChannel(…)` or a `versionName=` URL. The guarded invariant is unchanged and asserted more
+precisely than before.
+
+### Gate (CI-equivalent)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
+**1509 files / 20,298 passed, 0 failed**.

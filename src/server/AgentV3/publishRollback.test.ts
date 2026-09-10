@@ -2,12 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import {
-  pickRollbackTarget,
+import { pickRollbackTarget,
   rollbackAvailability,
   rollbackSummary,
-  type HostingRelease,
-} from './publishRollback';
+  type HostingRelease, listRollbackChoices, pickRollbackTargetByVersion } from './publishRollback';
 
 const rel = (version: string, time: string, status = 'FINALIZED'): HostingRelease => ({
   name: `sites/s/channels/c/releases/r-${time}`,
@@ -184,7 +182,13 @@ describe('the routes stay safe (locked against the real source)', () => {
     const b = block('rollback');
     expect(b).toContain('rollbackAvailability({ releases, bucketOnly })');
     expect(b).toContain('availability.target');
-    expect(b).not.toMatch(/req\.body\?*\.versionName/);
+    // Since the history picker (ROADMAP §13, 1.4) the request MAY name a version — but only as a KEY
+    // into the history the server itself read. The raw string must reach the hosting call through
+    // pickRollbackTargetByVersion and nothing else.
+    expect(b).toContain("pickRollbackTargetByVersion(releases ?? [], requested)");
+    expect(b).not.toMatch(/rollbackChannel\([^)]*req\.body/);
+    expect(b).not.toMatch(/versionName=\$\{[^}]*req\.body/);
+    expect(b).toContain('rollbackChannel(makeChannelId(workspaceId), target)');
   });
 
   it('🔒 "nothing to roll back to" is 409, not 500 — nothing failed', () => {
@@ -201,5 +205,46 @@ describe('the routes stay safe (locked against the real source)', () => {
     for (const r of ['rollback-status', 'rollback']) {
       expect(block(r)).toContain('bucketOnly ? [] :');
     }
+  });
+});
+
+describe('the history picker (ROADMAP §13, 1.4)', () => {
+  const rel = (v: string, t: string, status = 'FINALIZED') => ({ version: { name: `sites/s/versions/${v}`, status }, releaseTime: t });
+
+  it('lists ONE entry per version, newest first, and marks the live one', () => {
+    const choices = listRollbackChoices([
+      rel('a', '2026-09-01T00:00:00Z'),
+      rel('b', '2026-09-02T00:00:00Z'),
+      rel('c', '2026-09-03T00:00:00Z'),
+    ]);
+    expect(choices.map((c) => c.versionName.split('/').pop())).toEqual(['c', 'b', 'a']);
+    expect(choices.map((c) => c.live)).toEqual([true, false, false]);
+  });
+
+  it('🔒 a version re-released by a rollback appears ONCE, at the time it was most recently live', () => {
+    // a published, b published, then rolled back to a: a is live and appears once.
+    const choices = listRollbackChoices([
+      rel('a', '2026-09-01T00:00:00Z'),
+      rel('b', '2026-09-02T00:00:00Z'),
+      rel('a', '2026-09-03T00:00:00Z'),
+    ]);
+    expect(choices).toHaveLength(2);
+    expect(choices[0]).toEqual({ versionName: 'sites/s/versions/a', releaseTime: '2026-09-03T00:00:00Z', live: true });
+  });
+
+  it('skips expired versions and bounds the list', () => {
+    const many = Array.from({ length: 40 }, (_, i) => rel(`v${i}`, `2026-08-${String(1 + (i % 28)).padStart(2, '0')}T00:00:${String(i).padStart(2, '0')}Z`));
+    expect(listRollbackChoices(many)).toHaveLength(20);
+    expect(listRollbackChoices([rel('x', '2026-09-01T00:00:00Z', 'EXPIRED'), rel('y', '2026-09-02T00:00:00Z')])).toHaveLength(1);
+  });
+
+  it('🔒 pickRollbackTargetByVersion resolves against the history — never trusts the client string', () => {
+    const rels = [rel('a', '2026-09-01T00:00:00Z'), rel('b', '2026-09-02T00:00:00Z')];
+    expect(pickRollbackTargetByVersion(rels, 'sites/s/versions/a')).toEqual({ versionName: 'sites/s/versions/a', releaseTime: '2026-09-01T00:00:00Z' });
+    // Unknown, live, or empty ⇒ null: an arbitrary version name is an instruction to serve arbitrary bytes.
+    expect(pickRollbackTargetByVersion(rels, 'sites/s/versions/zzz')).toBeNull();
+    expect(pickRollbackTargetByVersion(rels, 'sites/s/versions/b')).toBeNull();
+    expect(pickRollbackTargetByVersion(rels, '')).toBeNull();
+    expect(pickRollbackTargetByVersion(rels, 42 as unknown as string)).toBeNull();
   });
 });

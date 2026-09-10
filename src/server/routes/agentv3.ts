@@ -362,7 +362,7 @@ import { lastDevServerLaunch } from '../AgentV3/devServerLaunchLog';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
 import { FirebaseHostingDeployer, makeChannelId } from '../AgentV3/Deployment';
 import { bucketOnlyPublishEnabled } from '../AgentV3/bucketOnlyPublish';
-import { rollbackAvailability, rollbackSummary } from '../AgentV3/publishRollback';
+import { rollbackAvailability, rollbackSummary, listRollbackChoices, pickRollbackTargetByVersion } from '../AgentV3/publishRollback';
 import { firebaseCustomDomainsEnabled } from '../lib/firebaseCustomDomain';
 import { firebaseDomainsForWorkspaceStrict } from '../lib/firebaseDomainLink';
 import { publishToCustomDomainSite, type CustomDomainPublishOutcome } from '../AgentV3/customDomainPublish';
@@ -7143,7 +7143,9 @@ async function noteBuildOutcome(
     // A bucket-only app has no channel at all, so its history is not merely empty — it does not
     // exist. Asking for it would be a wasted call that could only fail.
     const releases = bucketOnly ? [] : await new FirebaseHostingDeployer().listChannelReleases(makeChannelId(workspaceId));
-    res.json(rollbackAvailability({ releases, bucketOnly }));
+    // THE HISTORY PICKER (ROADMAP §13, 1.4): every version the user may go back to, one per version,
+    // newest first — beside the one-step verdict, so "undo" and "go back to Tuesday's" read one list.
+    res.json({ ...rollbackAvailability({ releases, bucketOnly }), choices: bucketOnly ? [] : listRollbackChoices(releases ?? []) });
   });
 
   /**
@@ -7184,8 +7186,21 @@ async function noteBuildOutcome(
       res.status(409).json({ ok: false, reason: availability.reason, error: availability.message });
       return;
     }
+    /**
+     * "GO BACK TO THIS ONE" (ROADMAP §13, 1.4). The request may name a version, but it is only ever a
+     * KEY into the history this server just read: `pickRollbackTargetByVersion` returns a target only
+     * for a FINALIZED, non-live version of THIS app's channel, and the rollback call below is the same
+     * one the one-step undo makes. A name that is not in the history is refused, never served — a
+     * version name from the browser is an instruction to put arbitrary bytes under the user's URL.
+     */
+    const requested = typeof req.body?.versionName === 'string' ? req.body.versionName : '';
+    const target = requested ? pickRollbackTargetByVersion(releases ?? [], requested) : availability.target;
+    if (!target) {
+      res.status(409).json({ ok: false, reason: 'unknown-version', error: 'That version is not in this app\'s publish history any more (or it is the one already live), so it cannot be brought back. Pick another from the list.' });
+      return;
+    }
 
-    const done = await deployer.rollbackChannel(makeChannelId(workspaceId), availability.target);
+    const done = await deployer.rollbackChannel(makeChannelId(workspaceId), target);
     if (!done) {
       res.status(502).json({ ok: false, error: 'The previous version could not be brought back just now. Your app is unchanged — nothing was removed. Please try again in a moment.' });
       return;
@@ -7195,7 +7210,7 @@ async function noteBuildOutcome(
     // which version that same url serves. Bumping `updatedAt` would make the record claim a publish
     // that did not happen, and the Publish Capacity screen reads these records to reason about
     // channels. The version history lives with the host, which is the thing that actually knows it.
-    res.json({ ok: true, message: rollbackSummary(availability.target), url: rec?.url ?? null });
+    res.json({ ok: true, message: rollbackSummary(target), url: rec?.url ?? null });
   });
 
   app.post('/api/agentv3/unpublish', workspaceRateLimiter(), async (req: Request, res: Response) => {

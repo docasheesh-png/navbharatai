@@ -48,6 +48,7 @@ import { registerAppDebugRoutes } from './src/server/routes/appDebug';
 import { registerImageGenRoutes } from './src/server/routes/imageGen';
 import { registerDevtoolsProxyRoutes } from './src/server/routes/devtoolsProxy';
 import { registerScreenshotToPromptRoutes } from './src/server/routes/screenshotToPrompt';
+import { registerSiteImportRoutes } from './src/server/routes/siteImport';
 import { registerFigmaProxyRoutes } from './src/server/routes/figmaProxy';
 import { registerCodeReviewRoutes } from './src/server/routes/codeReview';
 import { registerPaymentRoutes } from './src/server/routes/payment';
@@ -689,6 +690,7 @@ setInterval(() => {
   registerImageGenRoutes(app); // AI Image Gen — real image generation on our own key (POST /api/image/generate)
   registerDevtoolsProxyRoutes(app); // API Tester — SSRF-guarded server proxy (POST /api/devtools/proxy)
   registerScreenshotToPromptRoutes(app); // Screenshot→Code — vision → build prompt (POST /api/screenshot/to-prompt)
+  registerSiteImportRoutes(app); // Website→App — SSRF-guarded fetch → deterministic build prompt (POST /api/site-import/to-prompt)
   registerFigmaProxyRoutes(app); // Figma Import — server-side Figma fetch (POST /api/figma/proxy)
   registerCodeReviewRoutes(app); // P-DEV.11 — inline code review comments (/api/workspace/:workspaceId/review)
   registerZipRoutes(app, chatLimiter);

@@ -46850,3 +46850,56 @@ copy; a safeguard-6 search (five names, filename-first) found none here.
 `npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
 `npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS · `vitest run`
 **1515 files / 20,335 passed, 0 failed**.
+
+## 2026-09-10 — Website → App: clone a site's DESIGN from its address (ROADMAP §13 item 4.2)
+
+**Session:** claude/upgrade-md-review-vxbdy0 (after #2800).
+
+### The gap
+Lovable, Bolt, v0 and Replit take a URL and hand back an editable app that looks like it. We took a
+SCREENSHOT (`/api/screenshot/to-prompt`) and a GitHub repo (`importUrl` — the safeguard-6 check confirmed
+it is the repo import only), never a live site. A user who wanted "my shop, laid out like this one"
+screenshotted it page by page.
+
+### The design, and why it is NOT the screenshot path again
+The roadmap row suggested "snapshot with the pre-baked browser, feed the design-contract path". Adapted
+(external-suggestion rule): that would spin a sandbox (₹7/hr) and a vision call just to READ a page, for a
+result that varies run to run. Instead:
+- **One fetch through `webFetchUrl`** — the SSRF-guarded reader every URL feature uses (public IPs only,
+  no redirects, 2 MB, 15 s). It gained an opt-in `keepHtml` (off by default, so the tool path is
+  byte-identical); a page that is all `<script>` hands back its `<head>` on the honest failure so the
+  importer can say "this site draws itself with JavaScript" instead of "nothing there".
+- **`src/server/lib/siteImport.ts`** (pure, regex, no DOM, same discipline as `htmlToText`):
+  `extractSiteDesign` reads title, description, language, navigation (in order, de-duplicated), headings
+  with level, CTAs (buttons + button-styled links), form fields (label > placeholder > aria-label > name;
+  hidden/submit skipped; submit text), colours (hex, normalised, most-used first, the declared
+  `theme-color` outranking frequency), fonts (Google Fonts link families + `font-family`), image ALT
+  texts, counts, login/payment/search flags, a capped text sample, and `thin`. `<script>`/`<style>`/`<svg>`
+  bodies are removed first, so a bundle's fake heading or colour never surfaces. **No model call** — the
+  same page always yields the same spec, in about a second, for ₹0.
+- **The VISUAL half is delegated to the builder**: `buildSiteImportPrompt` tells v5.0 to open the live
+  page in its own browser first (proportions, spacing, imagery, the real colours) and to fall back to the
+  summary if it will not open. Markup gives the words and the skeleton; the browser gives the look.
+- **`POST /api/site-import/to-prompt`** (`routes/siteImport.ts`, registered in `server.ts`): sign-in
+  required (our server fetching a visitor's address — an IP-keyed anonymous allowance is unbounded in
+  total), 30/hour, `anon: 0`; no `inAiSpendZone`, no `gateToolAction`, no charge — a deterministic tool
+  is free by the one-wallet law. A refused or unreadable address is a 422 in the guard's own words; a
+  non-HTML answer says "not a web page". The intent-aware design & anti-phishing policy
+  (`cloneGuardrailsBlock`) is hard-appended server-side, exactly as the screenshot path does.
+- **🔒 Copyright by construction:** no image URL, logo, icon, font file or stylesheet enters the spec —
+  an `<img>` contributes its alt text and nothing else — and the spec says in words: do not download,
+  hot-link or reproduce the site's assets; placeholders of the same size, the user's own assets.
+- **Client** (`ScreenshotToCode.tsx`): a "From a website address" box above the drop zone. "Read website"
+  shows WHAT was read (title, nav chips, counts, fonts, colour swatches, the JavaScript-drawn note) BEFORE
+  a second, explicit "Build from this website" hands the spec to Pro v5.0. `AppKnowledgeBase` entry
+  `website_to_app`.
+- Locked by `siteImport.test.ts` (extraction, caps, script-body exclusion, alt-text-only, thin, prompt
+  wording, white-label), the `keepHtml` block in `webFetch.test.ts`, and `tests/siteImportWiring.test.ts`
+  (SSRF reader only, no raw fetch, sign-in, no model/spend calls, policy appended, honest 422, second
+  press to build, knowledge base).
+
+### Honest limits
+- A site that renders entirely with JavaScript gives a thin summary; the spec says so and leans on the
+  live browser look. A redirecting address must be pasted in its final form (the guard refuses redirects,
+  for the reason recorded in `webFetch.ts`).
+- The structure is read from ONE page. Multi-page cloning = paste each page, or ask v5.0 to browse.

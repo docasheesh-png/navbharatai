@@ -1604,3 +1604,50 @@ describe('a repaired blocker must stop being a blocker (Fight 3D, buildId 5e2de8
     expect(before).toContain('verdict.ready');
   });
 });
+
+/**
+ * A BUILD THAT NEVER RECORDED AN ENDING (admin report 2026-09-10).
+ *
+ * The reported build ran 29m59s against a 30-minute cap and was exported with `ok`, `summary` AND
+ * `endedAt` all absent — no terminal event of any kind reached the report. `deriveRootCause` then fell
+ * through to "pick the most severe unresolved issue" and named `$ npx vitest run → exit 1` as the root
+ * cause: a test failure the build had ALREADY fixed and re-run green four times, blamed for a build it
+ * did not end.
+ *
+ * That is the same false attribution `finalizeOnDeadline` was written to stop (a 35.8-minute build
+ * blamed on `npm audit fix`), which is the proof the hole is not in one ending path but in relying on
+ * every ending path to remember.
+ */
+describe('deriveRootCause — a build that ended without recording an outcome', () => {
+  const issues = [
+    { ts: 1, phase: 'build' as const, severity: 'error' as const, code: 'SANDBOX_CMD_FAILED', message: '$ npx vitest run → exit 1 (2s)', autoResolved: false },
+  ];
+
+  it('🔒 does NOT present the worst recorded issue as the reason it stopped', () => {
+    const out = deriveRootCause({ issues, endedWithoutOutcome: true })!;
+    expect(out).toMatch(/without recording an outcome/i);
+    expect(out).toMatch(/NOT known/);
+  });
+
+  it('still NAMES that issue — the claim withdrawn is causation, not the evidence', () => {
+    // Losing the most useful line we have would be a different dishonesty.
+    expect(deriveRootCause({ issues, endedWithoutOutcome: true })).toContain('npx vitest run');
+  });
+
+  it('says so plainly when there is no unresolved issue either', () => {
+    const clean = [{ ts: 1, phase: 'build' as const, severity: 'info' as const, code: 'AGENT_STEP', message: 'working', autoResolved: true }];
+    expect(deriveRootCause({ issues: clean, endedWithoutOutcome: true })).toMatch(/no unresolved issue was recorded either/i);
+  });
+
+  it('🔒 EVERY existing caller is untouched — the flag is opt-in, set only by the serializer', () => {
+    // Many callers pass no `ok` at all; treating that as "never ended" would have rewritten the root
+    // cause of builds that were merely mid-flight. Five existing tests caught exactly that.
+    expect(deriveRootCause({ issues })).toBe('$ npx vitest run → exit 1 (2s)');
+    expect(deriveRootCause({ issues, endedWithoutOutcome: false })).toBe('$ npx vitest run → exit 1 (2s)');
+  });
+
+  it('a build that DID report an ending keeps its real verdict', () => {
+    expect(deriveRootCause({ issues: [], ok: true, endedWithoutOutcome: false }))
+      .toBe('Build completed successfully with no problems recorded.');
+  });
+});

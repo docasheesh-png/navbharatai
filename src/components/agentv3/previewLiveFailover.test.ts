@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { shouldFailoverToLive, liveFailoverNotice, noLiveRescueNotice, type LiveFailoverSignals, rescueActionForPreviewError } from './previewLiveFailover';
 
 // The exact state of admin report 858f6d7b: the app built and ran on the sandbox, but the in-browser
@@ -165,5 +167,47 @@ describe('rescueActionForPreviewError — the preview that "stopped working afte
     ];
     for (const s of silent) expect(rescueActionForPreviewError(s)).toBe('none');
     expect(rescueActionForPreviewError({ ...base, hasLiveUrl: false })).not.toBe('none');
+  });
+});
+
+/**
+ * THE WATCHDOG MUST ASK ABOUT THE URL THE USER IS LOOKING AT (admin report 2026-09-10).
+ *
+ * The preview sat on E2B's "Closed Port Error … port 3000" while the build had verified port 5000
+ * twenty minutes earlier, with "Your preview moved to a new server — reconnecting you to it now."
+ * showing above it — the healing machinery had fired and still could not break out.
+ *
+ * Root cause: the frame renders `effectiveUrl` (`foundUrl || url`) while the 150-second health probe
+ * sent `url || foundUrl` — the OPPOSITE order — even though its own comment already claimed it sent
+ * "the URL we are ACTUALLY displaying". The two agree only when one value is empty; when both exist
+ * and differ (exactly what a failover creates) the server was asked to judge a machine the user was
+ * not looking at, answered "same", and returned no correction. Nothing in the loop could ever break
+ * out, because the one question that would have was never asked.
+ *
+ * Grep-locked rather than rendered: the bug was a one-token ordering drift between two call sites, and
+ * that is precisely what a source assertion catches and a behavioural test would not.
+ */
+describe('🔒 both preview-health probes send the DISPLAYED url', () => {
+  const surface = readFileSync(join(process.cwd(), 'src/components/agentv3/PreviewSurface.tsx'), 'utf8');
+
+  it('the frame renders effectiveUrl = foundUrl || url', () => {
+    expect(surface).toContain('const effectiveUrl = foundUrl || url;');
+  });
+
+  it('🔒 NEITHER probe sends the opposite order', () => {
+    // The exact expression that caused the stuck frame.
+    expect(surface).not.toContain("previewUrl: url || foundUrl");
+  });
+
+  it('every preview-health call sends effectiveUrl', () => {
+    const calls = surface.split("'/api/agentv3/preview-health'").slice(1);
+    expect(calls.length).toBeGreaterThanOrEqual(2); // the 150s watchdog + the error-failover probe
+    for (const c of calls) {
+      expect(c.slice(0, 2600)).toContain('previewUrl: effectiveUrl');
+    }
+  });
+
+  it('the watchdog gates on the displayed url existing, not on either half', () => {
+    expect(surface).toContain('const hasUrl = !!effectiveUrl;');
   });
 });

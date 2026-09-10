@@ -46447,17 +46447,55 @@ event stream itself dropped earlier (around the repeated tool-call failures at m
 client's local `previewUrl` state was already behind the server's by the time anything tried to correct
 it. **Trigger for revisiting:** a reproducible case, or a second admin report of the same symptom.
 
-### 🟡 Open root cause #2 — the diagnostics EXPORT SCHEMA has no field for the build's final outcome
+### ⚠️ CORRECTION — open root cause #2 as first written was WRONG, and the truth was worse
 
-While investigating #1, found that `BuildDiagnosticsReport`'s top-level keys (`schema, buildId,
-promptHash, sessionId, workspaceId, prompt, model, plannedModel, framework, startedAt, counts, issues,
-problems, rootCause, commands, llmCalls, providerDelivery, builtBy, priorFailedBuilds`) carry no
-`ok`/`summary`/`outcome` field at all — the terminal result text a build actually returns to the client
-is not part of the exported report. This is WHY confirming or ruling out root cause #1's hypotheses from
-the diagnostics JSON alone was impossible: even a perfectly honest server-side finish leaves no trace of
-its own summary in this artifact. `rootCause` (derived from the LAST `OUTCOME_*`-coded issue, per PR
-#2788 above) is the closest proxy but is not the same thing — it is inferred, not the actual returned
-`result.summary`. **The economical fix, not done here:** add `outcome: { ok: boolean; summary: string;
-timedOut?: boolean; budgetReached?: boolean }` to the schema, filled from the same `result` the route
-already has in hand at the merge point PR #2788 touches. Free, small, and would have made root cause #1
-answerable from this exact report instead of requiring a live-code investigation.
+It said "the diagnostics export schema has no field for the build's final outcome". **False.**
+`BuildDiagnosticsReport` has carried `ok?: boolean` and `summary?: string` all along, and
+`BuildDiagnostics` sets both from the `done` event (`case 'done': this.ok = e.ok; this.summary = e.summary`).
+I inferred "no field" from the exported JSON's KEY LIST — `JSON.stringify` drops `undefined`, so absent
+keys meant absent VALUES, not an absent schema. The same class of mistake safeguard #6 records about
+searches: an empty result is not proof of non-existence.
+
+**What the absence actually proved, and it is the real finding:** `ok`, `summary` AND `endedAt` were all
+undefined together, which means **no terminal event of any kind was ever recorded into that report** —
+no `done`, no `finish()`, no `OUTCOME_*`. The build did not exit through any of its honest endings.
+
+### 🔴 …and that is why the report blamed an innocent command
+
+With no `OUTCOME_*` present, `deriveRootCause` fell through to "pick the most severe unresolved issue"
+and named **`$ npx vitest run → exit 1`** as the root cause — a test failure the build had ALREADY fixed
+and re-run green four times before it stopped. A resolved command was blamed for ending a build it did
+not end.
+
+This is the SAME false attribution `finalizeOnDeadline` already exists to prevent — its own comment cites
+"a 35.8-minute build that had actually hit the 30-minute cap" being blamed on `npm audit fix`. That fix
+records `OUTCOME_STOPPED` from the deadline timer; it did not fire here (the report contains no
+`OUTCOME_*` at all). Which is the point: **the hole is not in any one ending path — it is in relying on
+every ending path to remember.** `endBuild()` sets `rb.ended = true` and `finalizeOnDeadline` bails on
+exactly that flag, so any path that ends a build without recording an outcome silently disarms the one
+thing that would have.
+
+**Fixed at the choke point instead (PR #2789).** `deriveRootCause` gains `endedWithoutOutcome`, set ONLY
+by the serializer — the one caller that can tell "this build never reported an ending" apart from "the
+caller did not pass `ok`" (many do not, and five existing tests caught that distinction the first time I
+got it wrong). When set, the report says plainly that the reason it stopped is not known, and demotes the
+worst recorded issue to what it actually is — the worst thing SEEN, not the reason. The issue is still
+named, because it is the most useful line available; only the causation claim is withdrawn.
+
+### ✅ Open root cause #1 SOLVED — and it was a one-token ordering drift
+
+The stale-port preview is no longer open. The frame renders `effectiveUrl = foundUrl || url`, while the
+150-second health probe sent **`url || foundUrl` — the opposite order** — under a comment that already
+claimed it sent "the URL we are ACTUALLY displaying". The sibling probe (the error-failover one, same
+file) had it right, which is what makes this a drift between two call sites rather than a missing idea.
+
+The two orders agree only when one value is empty. When both exist and differ — exactly what a failover
+creates — the user SEES `foundUrl` while the server is asked to judge `url`; the freshness check compares
+the wrong machine, answers "same", and returns no correction. **Not a transient: nothing in the loop can
+break out, because the one question that would have was never asked**, and the 150-second watchdog
+reports everything as fine forever. That matches the screenshot exactly, including why "Your preview
+moved to a new server — reconnecting you to it now." was showing ABOVE a frame that never moved.
+
+Both probes now send `effectiveUrl`, and `previewLiveFailover.test.ts` grep-locks that neither can drift
+back — a source assertion rather than a rendered one, because the bug WAS a one-token ordering
+difference between two call sites.

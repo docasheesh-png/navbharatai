@@ -80,3 +80,21 @@ export function internalPreviewUrl(url: string, domain = previewDomain()): strin
     '$1.e2b.app',
   );
 }
+
+/**
+ * A regex matching a preview URL for THIS deployment's sandbox host(s) — the raw `e2b.app` shape
+ * always, plus whatever custom domain `applyPreviewDomain` currently swaps onto (so a build shown
+ * under the branded host is caught too). Built fresh on every call, never a shared module-level
+ * instance: a `g`-flagged RegExp carries `lastIndex` state between uses, and a stale value there
+ * would silently skip matches on some calls and not others — a bug that would only show up
+ * intermittently, exactly the kind redaction code cannot afford (see SecretRedactor.ts).
+ *
+ * Scoped to the exact `{port}-{sandboxId}.<host>` shape E2B actually serves (mirroring
+ * `internalPreviewUrl`'s own pattern) rather than a bare host match, so an unrelated URL that merely
+ * happens to end in the same domain can never be swept up by mistake.
+ */
+export function previewUrlPattern(domain = previewDomain()): RegExp {
+  const escaped = domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const hosts = domain === 'e2b.app' ? 'e2b\\.app' : `(?:e2b\\.app|${escaped})`;
+  return new RegExp(`https?:\\/\\/\\d{1,5}-[a-z0-9]{6,64}\\.${hosts}(?::\\d{1,5})?(?:\\/[^\\s)\\]}"'<>]*)?`, 'gi');
+}

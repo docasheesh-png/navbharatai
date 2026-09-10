@@ -94,7 +94,9 @@ export function PublishCelebration({ kind, url, appName, firstPublish = false, o
 
   return createPortal(
     <div
-      className="nb-sheet-overlay fixed inset-0 flex items-center justify-center"
+      /* `nb-sheet-over-nav`: CELEBRATION_Z (300) is above the global tab bar's z-150, so this card
+         covers the bar instead of being covered by it and must not hold a strip for it. */
+      className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 flex items-center justify-center"
       style={{ zIndex: CELEBRATION_Z, background: 'rgba(2,6,12,0.72)' }}
       role="dialog"
       aria-modal="true"

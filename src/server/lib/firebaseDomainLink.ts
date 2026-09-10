@@ -22,6 +22,13 @@ export interface DomainLink {
   domain: string;
   workspaceId: string;
   userId: string;
+  /**
+   * Set on the `www` twin of a connected apex (ROADMAP §13, 1.2): this link exists so the twin is
+   * detached and re-attached WITH its redirect alongside its canonical, and is skipped by every
+   * reader that wants "the workspace's domain" — a twin is a spelling of that domain, not a second
+   * one. Absent/null on an ordinary link. See domainPair.ts.
+   */
+  alternateOf?: string | null;
 }
 
 /** Record that `domain` is connected to `workspaceId` (owned by `userId`) via Firebase hosting. */
@@ -35,6 +42,7 @@ export async function linkWorkspaceDomain(link: DomainLink): Promise<void> {
       workspaceId: link.workspaceId,
       userId: link.userId,
       provider: 'firebase',
+      alternateOf: link.alternateOf ?? null,
       updatedAt: Date.now(),
     },
     { merge: true },
@@ -97,7 +105,11 @@ export async function firebaseDomainsForWorkspaceStrict(workspaceId: string): Pr
     );
     const out: string[] = [];
     snap.forEach((d: any) => {
-      const domain = d.data()?.domain;
+      const data = d.data() ?? {};
+      // A `www` twin is a spelling of the canonical domain, not a second domain: it shares the site,
+      // and every caller of this list wants "the domain" to publish to, point, or display.
+      if (data.alternateOf) return;
+      const domain = data.domain;
       if (typeof domain === 'string' && domain) out.push(domain);
     });
     return out;
@@ -114,6 +126,30 @@ export async function firebaseDomainsForWorkspaceStrict(workspaceId: string): Pr
  */
 export async function firebaseDomainsForWorkspace(workspaceId: string): Promise<string[]> {
   return (await firebaseDomainsForWorkspaceStrict(workspaceId)) ?? [];
+}
+
+/**
+ * Every domain currently SERVING through NavBharatAI hosting — the set the uptime sweep probes
+ * (ROADMAP §13, 1.8). Skips suspended links (a paused plan has no site to be down) and `www` twins
+ * (they redirect to the canonical, which is what is probed). Bounded; fail-open to [].
+ */
+export async function activeDomainLinks(limit = 500): Promise<DomainLinkRecord[]> {
+  try {
+    const db = getDb() as any;
+    if (!db) return [];
+    const snap = await getDocs(query(collection(db, COLLECTION), where('provider', '==', 'firebase')));
+    const out: DomainLinkRecord[] = [];
+    snap.forEach((d: any) => {
+      if (out.length >= Math.max(1, limit)) return;
+      const data = d.data() as DomainLinkRecord;
+      if (!data || typeof data.domain !== 'string' || !data.domain || typeof data.workspaceId !== 'string') return;
+      if (data.suspended || data.alternateOf) return;
+      out.push(data);
+    });
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 /** True when the workspace has at least one Firebase-connected custom domain (fail-open → false). */
@@ -142,6 +178,24 @@ export async function rememberDomainDnsRecords(domain: string, records: readonly
     const merged = dedupeRecords([...(Array.isArray(existing) ? existing : []), ...records]);
     await setDoc(ref, { dnsRecords: merged, updatedAt: Date.now() }, { merge: true });
   } catch { /* best-effort — the live pending set is still shown if this fails */ }
+}
+
+/**
+ * Who holds this domain right now — the workspace and user its link names — or null when nobody
+ * does or we could not ask (ROADMAP §13, 1.3). Fail-open to null: an unreadable link must never be
+ * mistaken for "held by someone else" (a refusal) nor for "held by you" (a move).
+ */
+export async function linkForDomain(domain: string): Promise<DomainLinkRecord | null> {
+  try {
+    const db = getDb() as any;
+    if (!db || !domain) return null;
+    const snap = await getDoc(doc(db, COLLECTION, docId(domain)));
+    if (!snap.exists()) return null;
+    const data = snap.data() as DomainLinkRecord;
+    return typeof data?.workspaceId === 'string' && data.workspaceId ? data : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The records ever shown for a domain (empty on any error — fail-open to the live set). */

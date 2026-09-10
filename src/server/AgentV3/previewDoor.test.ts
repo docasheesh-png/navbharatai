@@ -109,10 +109,35 @@ describe('🔒 the pages the user sees instead of a vendor error', () => {
     }
   });
 
-  it('a browser that blocks storage degrades to retrying once per load — the SAFE direction', () => {
-    // If the counter cannot be kept, the catch swallows the whole retry arm: no timer is armed, so a
-    // storage-blocked tab retries only when something reloads it, never on its own forever.
-    expect(doorPage('starting')).toMatch(/catch\(e\)\{ \/\* blocked storage/);
+  it('🔒 a browser that blocks storage shows the escape hatch immediately, never spins forever', () => {
+    // THE BUG THIS REPLACES (admin screenshot, 2026-09-08, a Capacitor WebView: "ek ghante se yah
+    // ghume ja raha hai" — an hour stuck on this exact page). The old catch body was a COMMENT
+    // claiming a blocked sessionStorage read left the page "retrying once per load" — but the read
+    // that throws is INSIDE the try, so the throw fires before any timer is armed. No timer, no
+    // reload, and the give-up UI lived in the `else` branch the throw had already jumped past. A
+    // storage-partitioned context (this exact nested-iframe-in-a-WebView shape, also Safari ITP and
+    // private browsing) therefore froze on the spinner with no click that could ever move it — worse
+    // than either designed outcome, because rule 5's own 50/50 law says a self-heal that cannot run
+    // its normal path must still terminate somewhere a person can act.
+    //
+    // Both outcomes now go through the SAME giveUp() — the retry cap's function, not a second copy.
+    const html = doorPage('starting');
+    expect(html).toContain('catch(e){ giveUp(); }');
+    expect(html).toContain('function giveUp(){');
+    // The one property the old test actually protected — the catch never THROWS, even if
+    // sessionStorage.removeItem also fails inside the Try again handler — still holds.
+    expect(html).toMatch(/r\.onclick=function\(\)\{try\{sessionStorage\.removeItem/);
+  });
+
+  it('the retry cap and the storage-blocked case land on the identical escape hatch', () => {
+    // Two triggers, one destination — so a future edit to the Wake-up copy cannot fix one path and
+    // silently leave the other on the frozen spinner again.
+    const html = doorPage('starting');
+    const giveUpBody = html.slice(html.indexOf('function giveUp(){'), html.indexOf('try {'));
+    expect(giveUpBody).toContain('Still waiting on your app');
+    expect(giveUpBody).toContain('press Wake up');
+    // Called from the retry-cap `else` AND from `catch` — not duplicated as two separate DOM patches.
+    expect(html.match(/giveUp\(\)/g)?.length).toBe(3); // the definition + else branch + catch branch
   });
 
   it('is a complete standalone document — it renders inside a bare iframe with no app around it', () => {

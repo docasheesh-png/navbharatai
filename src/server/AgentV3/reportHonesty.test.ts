@@ -222,8 +222,26 @@ describe('a provider failure keeps its reason, not just its count', () => {
   });
 
   it('an UNRECOGNISED failure keeps its own text — a new failure mode must not vanish into "other"', () => {
-    expect(classifyProviderFailure(new Error('model glm-9 has been retired')))
-      .toContain('model glm-9 has been retired');
+    // The example changed on 2026-09-01 and the assertion did NOT. 'model glm-9 has been retired' used
+    // to land here, and now classifies as `model-unavailable` — a real improvement, not a regression:
+    // a retired model is the one failure a retry can never fix, and it was previously indistinguishable
+    // from a passing blip. So this keeps testing the fallback branch, with an input that genuinely has
+    // no bucket.
+    expect(classifyProviderFailure(new Error('flux capacitor desynchronised at stage 3')))
+      .toContain('flux capacitor desynchronised');
+  });
+
+  it('a model that can NEVER answer is its own bucket, not "other"', () => {
+    // From a real build: 40 model calls, 57 KIMI failures, all "404 Not found the model kimi-k2.5 or
+    // Permission denied" — the first rung of the free ladder, unreachable on this account. Landing in
+    // `other:` is what let 56 of that build's 59 "self-heals" be one misconfiguration nobody saw.
+    for (const m of [
+      'model glm-9 has been retired',
+      '404 Not found the model kimi-k2.5 or Permission denied',
+      'no such model: gpt-legacy',
+    ]) {
+      expect(classifyProviderFailure(new Error(m)), m).toBe('model-unavailable');
+    }
   });
 
   it('classifies the shapes that actually occur', () => {

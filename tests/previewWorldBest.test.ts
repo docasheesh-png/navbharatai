@@ -38,18 +38,29 @@ describe('console mirror in the generated preview page', () => {
 const surface = readFileSync(join(__dirname, '..', 'src/components/agentv3/PreviewSurface.tsx'), 'utf8');
 const panel = readFileSync(join(__dirname, '..', 'src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
 
+const consoleRules = readFileSync(join(__dirname, '..', 'src/components/agentv3/previewConsole.ts'), 'utf8');
+
 describe('console drawer in the panel', () => {
-  it('listens for the mirror, ring-buffers entries, and shows an error-count badge', () => {
+  it('listens for the mirror, bounds the buffer, and shows an error-count badge', () => {
     expect(surface).toContain('__nbaiPreviewConsole');
-    expect(surface).toContain('.slice(-200)');                 // ring buffer — never unbounded
     expect(surface).toContain('consoleErrorCount');
     expect(surface).toContain('Console is empty');
+    // THE RING BUFFER MOVED (2026-09-10) into previewConsole.ts so it could be unit-tested and shared
+    // with the Live preview — it was NOT dropped, and this asserts it where it now lives. An unbounded
+    // console is how one render loop takes the whole tab down with it.
+    expect(surface).toContain('appendConsoleEntry(');
+    expect(consoleRules).toContain('CONSOLE_BUFFER_MAX');
+    expect(consoleRules).toMatch(/\.slice\(-Math\.max\(1, max\)\)/);
   });
 
   it('every error row hands off to the SAME Fix-with-AI flow the preview already uses', () => {
-    const drawer = surface.slice(surface.indexOf('consoleOpen && ('));
+    const drawer = surface.slice(surface.indexOf('const consoleDrawer = ('));
     expect(drawer).toContain('onFixError(c.text)');
     expect(drawer).toContain('Fix with AI');
+    // The row-level decision is the SHARED, tested rule rather than an inline level check that could
+    // silently drift from it — which is what let real React warnings (a missing list key, a controlled
+    // input flipping to uncontrolled) sit in the drawer with no way to fix them.
+    expect(drawer).toContain('consoleRowFixable(c.level, c.text)');
   });
 });
 

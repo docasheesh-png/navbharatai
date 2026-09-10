@@ -113,6 +113,7 @@ export interface UseAgentV3Build {
   listConversations: (opts?: { userId?: string; email?: string }) => Promise<{ items: ConversationMeta[]; error?: string }>;
   /** Delete a saved conversation (history-menu delete action). Returns true on success. */
   deleteConversation: (id: string, opts?: { userId?: string; email?: string }) => Promise<boolean>;
+  duplicateConversation: (id: string) => Promise<{ id: string; name: string } | { error: string }>;
   /** Pin/unpin a saved build. Returns the new pinned state on success, or null on failure. */
   pinConversation: (id: string, opts: { userId?: string; email?: string; pinned: boolean }) => Promise<boolean | null>;
   /** Watch a build running on another device/instance (cross-device live mirror). Returns a stop fn.
@@ -765,6 +766,27 @@ export function useAgentV3Build(): UseAgentV3Build {
       return res.ok;
     } catch {
       return false;
+    }
+  }, []);
+
+  /**
+   * Make a copy of a saved app (ROADMAP §13, 3.6): files + chat under a new name, nothing that points at
+   * a place in the world (repo, deployment, domain, secrets). Resolves to the new session's id, or an
+   * honest error string.
+   */
+  const duplicateConversation = useCallback(async (id: string): Promise<{ id: string; name: string } | { error: string }> => {
+    if (!id) return { error: 'No app selected.' };
+    try {
+      const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(id)}/duplicate`, {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.id) return { error: data?.error || 'Could not make a copy just now. Nothing was changed.' };
+      return { id: String(data.id), name: String(data.name || '') };
+    } catch {
+      return { error: 'Could not reach NavBharatAI. Check your connection and try again.' };
     }
   }, []);
 
@@ -1570,5 +1592,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReadiness, markServerReady, isServerReady } from './health';
+import { buildReadiness, markServerReady, isServerReady, buildPublicConfig } from './health';
 
 describe('health/readiness (P2.4)', () => {
   it('buildReadiness reflects initialized + backupConfigured', () => {
@@ -17,5 +17,40 @@ describe('health/readiness (P2.4)', () => {
     // (module singleton — once ready it stays ready, which is the intended startup semantics)
     markServerReady();
     expect(isServerReady()).toBe(true);
+  });
+});
+
+describe('buildPublicConfig — the advertising pixel id, and nothing secret', () => {
+  it('passes a real numeric pixel id through, trimmed', () => {
+    expect(buildPublicConfig('1234567890123456').metaPixelId).toBe('1234567890123456');
+    expect(buildPublicConfig('  1234567890123456  ').metaPixelId).toBe('1234567890123456');
+  });
+
+  it('UNSET means no pixel — the default state must be silent, never broken', () => {
+    for (const raw of [undefined, null, '', '   ']) {
+      expect(buildPublicConfig(raw).metaPixelId).toBeNull();
+    }
+  });
+
+  it('a MALFORMED value is treated exactly like unset, not injected into the page', () => {
+    for (const bad of ['your-pixel-id', '123', 'https://facebook.com/12345678', '12345678901234567890123', '<script>']) {
+      expect(buildPublicConfig(bad).metaPixelId).toBeNull();
+    }
+  });
+
+  it('exposes ONLY these keys — a new one here would be a public disclosure', () => {
+    // Still an EXACT list, deliberately: this route is served unauthenticated to every browser, so
+    // adding a key must be a decision someone makes here on purpose, not a side effect elsewhere.
+    // `platformFeePct` was added 2026-09-10 and is safe by nature — a rate is printed on the
+    // purchase screen either way, and the browser needs it to show the split before the user pays.
+    expect(Object.keys(buildPublicConfig('1234567890123456')).sort()).toEqual(['metaPixelId', 'platformFeePct']);
+  });
+
+  it('serves the recharge fee rate, falling back to the default when unset or unreadable', () => {
+    expect(buildPublicConfig(null, '2.5').platformFeePct).toBe(2.5);
+    expect(buildPublicConfig(null, undefined).platformFeePct).toBe(2);
+    expect(buildPublicConfig(null, '').platformFeePct).toBe(2);
+    expect(buildPublicConfig(null, 'abc').platformFeePct).toBe(2);
+    expect(buildPublicConfig(null, '0').platformFeePct).toBe(0);
   });
 });

@@ -9,7 +9,7 @@
 // login as the repo owner. Implements PrCapableClient so it plugs straight into mergeViaPullRequest.
 // Everything is injectable (fetch) so it is fully unit-testable without GitHub.
 
-import type { CiVerdict, PrComment, PullRequestInfo, RepoInfo } from './GitHubAppClient';
+import { PLATFORM_REPO_DESCRIPTION, type CiVerdict, type PrComment, type PullRequestInfo, type RepoInfo } from './GitHubAppClient';
 import type { PrCapableClient, ReviewCapableClient } from './GitHubPrFlow';
 import { normalizePrComments, type RawPrComment } from './prCommentMapping';
 
@@ -49,7 +49,7 @@ export class UserGitHubClient implements PrCapableClient, ReviewCapableClient {
       throw new Error(`ensureRepo: unexpected GET /repos response (HTTP ${got.status}).`);
     }
     const created = await this.request<RepoApi>('POST', '/user/repos', {
-      name, private: true, auto_init: true, description: 'Built with NavBharatAI Pro v5.0',
+      name, private: true, auto_init: true, description: PLATFORM_REPO_DESCRIPTION,
     });
     if (!created.ok || !created.body) {
       throw new Error(`ensureRepo: could not create repo "${name}" in your GitHub account (HTTP ${created.status}).`);
@@ -60,6 +60,34 @@ export class UserGitHubClient implements PrCapableClient, ReviewCapableClient {
   /** A clone/push URL that carries the user's token as the git credential. */
   authedCloneUrl(name: string, login: string): string {
     return `https://x-access-token:${this.token}@github.com/${login}/${name}.git`;
+  }
+
+  /**
+   * Rename the user's repo `<login>/<from>` to `<to>` (admin 2026-09-04, the app-name feature).
+   *
+   * A RENAME, NOT A RE-CREATE — that distinction is the whole point. GitHub moves the existing repo
+   * with all of its commits, branches and history intact, which is exactly what creating a new repo
+   * under the new name would NOT do. `ensureRepo` cannot express this: handed an unfamiliar name it
+   * creates an empty repo, so without this call a "rename" would strand the real app.
+   *
+   * NEVER THROWS. The caller has already applied the user's chosen display name, and a build may be
+   * running against the old repo; a thrown error here would turn a cosmetic outcome into a failed
+   * request. `ok:false` with a `status` lets the route tell the user the honest truth — 422 in
+   * particular means GitHub itself says that name is taken, which is the authoritative duplicate
+   * check no local scan can replace.
+   */
+  async renameRepo(from: string, to: string): Promise<{ ok: boolean; status: number; name: string }> {
+    if (!from || !to || from === to) return { ok: false, status: 0, name: from };
+    try {
+      const login = await this.getLogin();
+      const res = await this.request<RepoApi>('PATCH', `/repos/${login}/${encodeURIComponent(from)}`, { name: to });
+      // GitHub returns the repo it ended up with; trust ITS name over the one we asked for, since it
+      // may normalise what we sent and we must persist what actually exists.
+      const actual = (res.body?.full_name || '').split('/')[1] || to;
+      return { ok: res.ok, status: res.status, name: res.ok ? actual : from };
+    } catch {
+      return { ok: false, status: 0, name: from };
+    }
   }
 
   /**
@@ -221,6 +249,7 @@ interface RepoApi {
   clone_url?: string;
   html_url?: string;
   default_branch?: string;
+  description?: string | null;
   permissions?: { push?: boolean; admin?: boolean; pull?: boolean };
 }
 
@@ -231,6 +260,7 @@ function toRepoInfo(r: RepoApi, created: boolean): RepoInfo {
     htmlUrl: r.html_url ?? '',
     defaultBranch: r.default_branch ?? 'main',
     created,
+    ...(typeof r.description === 'string' ? { description: r.description } : {}),
   };
 }
 

@@ -86,7 +86,20 @@ describe('the preview path uses it, and in the right order', () => {
     expect(route).toContain('if (scriptPort === null)');
   });
 
-  it('reads the code port from the project files', () => {
-    expect(route).toContain('serverPortFromFiles(src)');
+  /**
+   * ⚠️ RE-ANCHORED 2026-09-04, and NOT to make a failing test pass.
+   *
+   * This asserted the literal `serverPortFromFiles(src)` — a reader that consults a FIXED list of
+   * server entry paths. That was enough for an app we scaffold and wrong for an IMPORTED one, which
+   * pins its port in `vite.config.*`, in a `.env`, or in a server entry outside that list. The admin
+   * reported exactly that as *"import karta hai to kis port par run karna hai confuse ho jata hai"*.
+   *
+   * The property this assertion protects — the preview path reads the port from the PROJECT'S OWN
+   * FILES rather than guessing — is unchanged and now strictly stronger: `declaredAppPort` reads every
+   * declaration site, with its precedence documented and unit-tested in declaredAppPort.test.ts.
+   * `serverPortFromFiles` itself is untouched and still covered by the tests above.
+   */
+  it('reads the port from the project files — from EVERY place an app declares one', () => {
+    expect(route).toContain('declaredAppPort(src, pkgRaw)');
   });
 });

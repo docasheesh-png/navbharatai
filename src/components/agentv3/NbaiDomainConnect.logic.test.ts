@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { connectStage, relativeRecordName, cleanDomainInput, visitUrl, publishButton, unpublishArmed, UNPUBLISH_WORD, statusIcon, lastCheckedLabel } from './NbaiDomainConnect';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { connectStage, relativeRecordName, cleanDomainInput, visitUrl, publishButton, unpublishArmed, UNPUBLISH_WORD, statusIcon, lastCheckedLabel, registrarEditsApply, needsStandaloneApplyButton } from './NbaiDomainConnect';
 
 describe('connectStage — plain-language, honest connect stages', () => {
   it('active domain: done, no further action — but only CONNECTED until something SAW it serve', () => {
@@ -332,5 +335,77 @@ describe('lastCheckedLabel — the honest replacement for a spinner\'s fake moti
     expect(lastCheckedLabel(null, now)).toBe('');
     expect(lastCheckedLabel(undefined, now)).toBe('');
     expect(lastCheckedLabel(0, now)).toBe('');
+  });
+});
+
+describe('🔴 the domain screen must not contradict itself once WE manage the DNS (admin 2026-09-10, mitrify.com)', () => {
+  // The screenshot that produced these tests showed, on ONE render:
+  //   • "any record you add at your registrar's DNS page is ignored from now on"
+  //   • "At your registrar: in the 'Type' dropdown choose TXT, copy Name and Value into their boxes"
+  //   • an ownership-mismatch verdict saying "Tap “Check & apply records” above" — with no such button
+  //     anywhere on the page.
+  // Three sentences, no way forward. Each one is pinned below.
+
+  it('registrarEditsApply: the registrar is dead the moment the zone is active', () => {
+    expect(registrarEditsApply('active')).toBe(false);
+    // Every other state — pending, moved, an error, or nothing known yet — still means the user's own
+    // registrar is where the records have to go. Absence must never be read as "we manage it".
+    for (const s of ['pending', 'moved', 'initializing', '', null, undefined]) {
+      expect(registrarEditsApply(s)).toBe(true);
+    }
+  });
+
+  it('needsStandaloneApplyButton: the remedy follows the STATE that needs it, not the setup block', () => {
+    // An active zone with the setup block absent is exactly the admin's dead end.
+    expect(needsStandaloneApplyButton('active', false)).toBe(true);
+    // …and is suppressed when that block is already offering the same button — two identical buttons
+    // is its own confusion.
+    expect(needsStandaloneApplyButton('active', true)).toBe(false);
+    // No zone of ours ⇒ nothing for us to apply; the manual path is the real one.
+    expect(needsStandaloneApplyButton('pending', false)).toBe(false);
+    expect(needsStandaloneApplyButton(null, false)).toBe(false);
+  });
+
+  it('🔒 the ownership verdicts name a control, so that control must be reachable', () => {
+    // connectStage is pure and cannot see the DOM, so it names the button by label. That is only
+    // honest if the label it names is one this screen guarantees — which is what the source-lock
+    // below enforces. If the button is ever renamed, BOTH must move together.
+    for (const state of ['MISMATCH', 'CONFLICT']) {
+      const s = connectStage({ active: false, ownershipState: state, hostState: 'ACTIVE', sslState: 'ACTIVE' });
+      expect(s.note).toContain('Check & apply records');
+      // …and it must never tell the user to wait, which is what cost the admin three days twice.
+      expect(s.headline).toMatch(/will not (change|clear) it/i);
+    }
+  });
+});
+
+describe('🔒 source-lock: no sentence may send the user to a DNS panel that stopped being read', () => {
+  const src = readFileSync(resolve(__dirname, 'NbaiDomainConnect.tsx'), 'utf8');
+
+  it('the per-record registrar instruction is behind registrarEditsApply', () => {
+    // The 2026-08-22 fix added a WARNING above this instruction and left the instruction itself
+    // rendering unconditionally — a warning above a wrong instruction is a louder wrong instruction.
+    // Assert the GUARD, not the warning.
+    const at = src.indexOf('At your registrar: in the "Type" dropdown');
+    expect(at).toBeGreaterThan(-1);
+    // A short window, so this can only match the real guard and never the function's own declaration
+    // hundreds of lines above (the mistake that made two earlier source-locks pass for the wrong reason).
+    expect(src.slice(Math.max(0, at - 400), at)).toContain('registrarEditsApply(autoZoneStatus)');
+  });
+
+  it('the "we write these for you" notice carries the button that makes us write them', () => {
+    const at = src.indexOf('needsStandaloneApplyButton(autoZoneStatus');
+    expect(at).toBeGreaterThan(-1);
+    // The button, its handler and its disabled state all live inside that guard.
+    const block = src.slice(at, at + 900);
+    expect(block).toContain('Check & apply records');
+    expect(block).toContain('autoDnsSync');
+    expect(block).toContain('autoBusy');
+  });
+
+  it('a verified record is not described as living at the registrar when we hold it', () => {
+    const at = src.indexOf('Already live at your registrar');
+    expect(at).toBeGreaterThan(-1);
+    expect(src.slice(Math.max(0, at - 300), at)).toContain('registrarEditsApply(autoZoneStatus)');
   });
 });

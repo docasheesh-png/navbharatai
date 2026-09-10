@@ -33,6 +33,39 @@ export function adminAppOptions(env: NodeJS.ProcessEnv = process.env): { project
   return projectId ? { projectId } : {};
 }
 
+/**
+ * Permanently delete a user's Firebase Auth account.
+ *
+ * WHY THIS EXISTS: erasing a user's Firestore documents is not "deleting the account". The Auth
+ * record — the email/phone → uid mapping and the sign-in credential — outlives it, so a person who
+ * asked to be deleted can still sign in and finds a blank account waiting. That is not what
+ * "delete my account" means to anyone who clicks it, and it is not what Google Play's account-
+ * deletion requirement means either.
+ *
+ * ORDERING MATTERS AT THE CALL SITE: erase the data FIRST, then call this. Deleting the credential
+ * first would strand any data whose deletion then failed, with the owner no longer able to sign in
+ * and retry.
+ *
+ * Returns an honest outcome rather than throwing: 'deleted' | 'not-found' (already gone — the same
+ * end state, so it is a success) | 'unavailable' (the admin SDK could not be reached) | 'failed'.
+ * The caller reports which one happened instead of claiming a clean wipe it cannot verify.
+ */
+export async function deleteAuthAccount(uid: string): Promise<'deleted' | 'not-found' | 'unavailable' | 'failed'> {
+  if (!uid || typeof uid !== 'string') return 'failed';
+  const auth = await getAdminAuth();
+  if (!auth) return 'unavailable';
+  try {
+    await auth.deleteUser(uid);
+    return 'deleted';
+  } catch (err: unknown) {
+    const code = (err as { code?: string } | null)?.code ?? '';
+    // Already absent is the outcome the caller wanted, not an error to report as a failure.
+    if (code === 'auth/user-not-found') return 'not-found';
+    console.error('[AUTH] deleteAuthAccount failed:', err instanceof Error ? err.message : err);
+    return 'failed';
+  }
+}
+
 async function getAdminAuth(): Promise<import('firebase-admin/auth').Auth | null> {
   if (process.env.VITEST) return null;
   try {

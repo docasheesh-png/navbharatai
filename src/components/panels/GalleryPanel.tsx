@@ -24,6 +24,12 @@ interface GalleryPanelProps {
   files: Record<string, string>;
   /** Called with the remixed files so the builder can start a new app from them. */
   onRemix?: (title: string, files: Record<string, string>, remixedFrom: string) => void;
+  /**
+   * Take the user to Billing → Plans. Remixing another creator's app is part of a hosting plan
+   * (admin 2026-09-10), and a refusal with no way to act on it is the dead button this project's
+   * second absolute rule forbids — so the prompt below carries a real route to the purchase screen.
+   */
+  onOpenPlans?: () => void;
 }
 
 interface PublicApp {
@@ -49,7 +55,7 @@ async function authedHeaders(): Promise<Record<string, string>> {
   return base;
 }
 
-export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix }) => {
+export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix, onOpenPlans }) => {
   const [apps, setApps] = useState<PublicApp[]>([]);
   const [mine, setMine] = useState<PublicApp[]>([]);
   const [query, setQuery] = useState('');
@@ -61,6 +67,8 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
   const [publishing, setPublishing] = useState(false);
   const [message, setMessage] = useState('');
   const [blockers, setBlockers] = useState<Blocker[]>([]);
+  /** Set when the server refuses a remix for want of a plan — carries the price it named. */
+  const [needsPlan, setNeedsPlan] = useState<{ message: string; priceInr: number } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,7 +117,18 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
     try {
       const r = await fetch(`/api/gallery/${app.id}/remix`, { method: 'POST', headers: await authedHeaders() });
       const d = await r.json();
-      if (!r.ok) { setMessage(d.error || 'Could not remix that app.'); return; }
+      if (!r.ok) {
+        // A plan refusal is not an error to read and shrug at — it is an offer. The PRICE comes from
+        // the server's own answer rather than a number typed here, so it can never go stale.
+        if (r.status === 402 && d?.needsPlan) {
+          setNeedsPlan({ message: String(d.error || ''), priceInr: Number(d.priceInr) || 0 });
+          setMessage('');
+          return;
+        }
+        setMessage(d.error || 'Could not remix that app.');
+        return;
+      }
+      setNeedsPlan(null);
       onRemix?.(d.title, d.files, d.remixedFrom);
       setMessage(`Started "${d.title}". ${d.note}`);
       load();
@@ -121,6 +140,33 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
   return (
     <div className="flex-1 h-full overflow-auto bg-[#0d1117] p-6 space-y-5">
       <h2 className="text-lg font-black text-white tracking-tight">Community Gallery</h2>
+
+      {/* Remix needs a plan — the offer, with a real way to take it. */}
+      {needsPlan && (
+        <div className={cn(cardClasses(), 'p-5 space-y-3 border-indigo-500/30 bg-indigo-500/5')}>
+          <div className="flex items-center gap-2">
+            <GitFork className="w-4 h-4 text-indigo-400" />
+            <h3 className="text-sm font-black text-white uppercase tracking-tight">
+              Remixing is part of a hosting plan
+            </h3>
+          </div>
+          <p className="text-[11px] text-[#c9d1d9] leading-relaxed">{needsPlan.message}</p>
+          <p className="text-[11px] text-[#8b949e] leading-relaxed">
+            A plan also removes the "Made with NavBharatAI" badge, connects your own domain, and keeps
+            NavBharatAI ad-free for you. It is paid from your normal wallet balance — there is no card
+            to add.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => { setNeedsPlan(null); onOpenPlans?.(); }} disabled={!onOpenPlans}>
+              {needsPlan.priceInr > 0 ? `See plans — from ₹${needsPlan.priceInr}/month` : 'See plans'}
+            </Button>
+            <Button variant="secondary" onClick={() => setNeedsPlan(null)}>Not now</Button>
+          </div>
+          {!onOpenPlans && (
+            <p className="text-[10px] text-[#8b949e]">Open Wallet &amp; Billing from the sidebar menu to start a plan.</p>
+          )}
+        </div>
+      )}
 
       {/* ── Publish your own ─────────────────────────────────────────────────────────────────── */}
       <div className={cn(cardClasses(), 'p-5 space-y-3')}>

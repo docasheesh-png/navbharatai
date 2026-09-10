@@ -6,6 +6,7 @@ import {
   computePlanPurchase, computeLazyRenewal, purchaseHostingPlan, readHostingPlanStatus,
   probeHostingPlan, _clearPlanCacheForTests,
 } from '../src/server/lib/hostingPlan';
+import { HOSTING_TIERS, LEGACY_HOSTING_PLAN_ID, hostingAgreementTerms, overageInr, tierForPlanId } from '../src/lib/hostingTiers';
 import { setServerDb } from '../src/server/lib/serverDb';
 import { TOKENS_PER_RUPEE } from '../src/server/lib/payments';
 
@@ -18,7 +19,15 @@ import { TOKENS_PER_RUPEE } from '../src/server/lib/payments';
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = '2026-08-06T12:00:00.000Z';
 const NOW_MS = Date.parse(NOW);
-const PRICE_TOKENS = 99 * TOKENS_PER_RUPEE;
+// The catalogue's ENTRY tier is what an un-tiered purchase buys, so its price is the unit here.
+const STARTER = HOSTING_TIERS[0];
+const PRICE_TOKENS = STARTER.priceInr * TOKENS_PER_RUPEE;
+/**
+ * Every purchase in this file passes the agreement tick, because since 2026-09-10 a purchase without
+ * it is REFUSED — the tick is what makes the plan's overage terms chargeable, so a plan record
+ * created without one must not exist. The refusal itself is tested on its own below.
+ */
+const AGREED = { agreedToTerms: true };
 
 function wallet(tokens: number, extra: Record<string, any> = {}): Record<string, any> {
   return { userId: 'u1', tokenBalance: tokens, totalTokensUsed: 0, remaining_balance: tokens / TOKENS_PER_RUPEE, walletLedger: [], ...extra };
@@ -32,36 +41,40 @@ afterEach(() => {
 });
 
 describe('flags and price', () => {
-  it('plans are ON by default, off/false/0 disables; price defaults to ₹99 and is env-tunable', () => {
+  it('plans are ON by default, off/false/0 disables; the entry price is Starter and is env-tunable', () => {
     expect(hostingPlansEnabled()).toBe(true);
     process.env.AGENTV3_HOSTING_PLANS = 'off';
     expect(hostingPlansEnabled()).toBe(false);
-    expect(hostingPlanPriceInr()).toBe(99);
-    process.env.HOSTING_PLAN_PRICE_INR = '149';
-    expect(hostingPlanPriceInr()).toBe(149);
+    expect(hostingPlanPriceInr()).toBe(STARTER.priceInr);
+    process.env.HOSTING_PLAN_PRICE_INR = '249';
+    expect(hostingPlanPriceInr()).toBe(249);
     process.env.HOSTING_PLAN_PRICE_INR = '-5';
-    expect(hostingPlanPriceInr()).toBe(99); // junk never becomes a price
+    expect(hostingPlanPriceInr()).toBe(STARTER.priceInr); // junk never becomes a price
   });
 });
 
 describe('computePlanPurchase', () => {
-  it('debits exactly ₹99 in tokens, grants 30 days, writes the ledger row', () => {
-    const r = computePlanPurchase(wallet(PRICE_TOKENS + 500), NOW);
+  it('debits exactly the Starter price in tokens, grants its period, writes the ledger row', () => {
+    const r = computePlanPurchase(wallet(PRICE_TOKENS + 500), NOW, STARTER.id, AGREED);
     if (!r.ok) throw new Error('expected ok');
     expect(r.charged).toBe(true);
     expect(r.wallet.tokenBalance).toBe(500);
-    expect(r.plan.id).toBe(HOSTING_PLAN_ID);
-    expect(Date.parse(r.plan.expiresAt)).toBe(NOW_MS + HOSTING_PLAN_DAYS * DAY);
+    expect(r.plan.id).toBe(STARTER.id);
+    expect(Date.parse(r.plan.expiresAt)).toBe(NOW_MS + STARTER.days * DAY);
     expect(r.plan.autoRenew).toBe(true);
+    // The agreement is FROZEN onto the record as it was shown — that is what makes overage
+    // chargeable later, and what a legacy plan (no agreement) deliberately lacks.
+    expect(r.plan.agreedAt).toBe(NOW);
+    expect(r.plan.agreedTerms).toEqual(hostingAgreementTerms(STARTER));
     const row = r.wallet.walletLedger.at(-1);
-    expect(row.description).toContain('Hosting plan — Custom Domain');
+    expect(row.description).toContain(`Hosting plan — ${STARTER.name}`);
     expect(hostingPlanActive(r.wallet, NOW_MS)).toBe(true);
     expect(hostingPlanActive(r.wallet, NOW_MS + 31 * DAY)).toBe(false);
   });
 
   it('NO overdraft: a short balance is refused with the shortfall, nothing changes', () => {
     const w = wallet(PRICE_TOKENS - 1000);
-    const r = computePlanPurchase(w, NOW);
+    const r = computePlanPurchase(w, NOW, STARTER.id, AGREED);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error('unreachable');
     expect(r.reason).toBe('insufficient');
@@ -70,19 +83,19 @@ describe('computePlanPurchase', () => {
   });
 
   it('buying while active EXTENDS from the current expiry — paying early never loses days', () => {
-    const first = computePlanPurchase(wallet(3 * PRICE_TOKENS), NOW);
+    const first = computePlanPurchase(wallet(3 * PRICE_TOKENS), NOW, STARTER.id, AGREED);
     if (!first.ok) throw new Error('expected ok');
-    const second = computePlanPurchase(first.wallet, new Date(NOW_MS + 10 * DAY).toISOString());
+    const second = computePlanPurchase(first.wallet, new Date(NOW_MS + 10 * DAY).toISOString(), STARTER.id, AGREED);
     if (!second.ok) throw new Error('expected ok');
     expect(Date.parse(second.plan.expiresAt)).toBe(NOW_MS + 60 * DAY); // 30 + 30, not 10 + 30
     expect(second.wallet.tokenBalance).toBe(PRICE_TOKENS);
   });
 
   it('is idempotent per period: replaying the same purchase charges nothing more', () => {
-    const first = computePlanPurchase(wallet(2 * PRICE_TOKENS), NOW);
+    const first = computePlanPurchase(wallet(2 * PRICE_TOKENS), NOW, STARTER.id, AGREED);
     if (!first.ok) throw new Error('expected ok');
     // Same period start (same NOW, still-active plan extends from expiry — so replay the RAW result):
-    const replay = computePlanPurchase({ ...first.wallet, hostingPlan: { ...first.plan, expiresAt: NOW } }, NOW);
+    const replay = computePlanPurchase({ ...first.wallet, hostingPlan: { ...first.plan, expiresAt: NOW } }, NOW, STARTER.id, AGREED);
     if (!replay.ok) throw new Error('expected ok');
     expect(replay.charged).toBe(false); // ledger ref already present — no second debit
     expect(replay.wallet.tokenBalance).toBe(first.wallet.tokenBalance);
@@ -90,20 +103,135 @@ describe('computePlanPurchase', () => {
 
   it('plans disabled ⇒ refused as disabled', () => {
     process.env.AGENTV3_HOSTING_PLANS = 'off';
-    const r = computePlanPurchase(wallet(2 * PRICE_TOKENS), NOW);
+    const r = computePlanPurchase(wallet(2 * PRICE_TOKENS), NOW, STARTER.id, AGREED);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('disabled');
   });
 });
 
+describe('the two tiers (admin 2026-09-10: "do tier banao, credit bundle karo, 20 GB theek hai")', () => {
+  const GROWTH = HOSTING_TIERS[1];
+
+  it('the catalogue is exactly Starter ₹149 and Growth ₹499 — and Business is deliberately not buyable', () => {
+    expect(HOSTING_TIERS.map((t) => [t.id, t.priceInr, t.includedTransferGb, t.domains, t.bundledCreditInr]))
+      .toEqual([['starter', 149, 5, 1, 0], ['growth', 499, 20, 3, 150]]);
+    // A ₹2,999 tier with no customers would be a promise about capacity and support that no code
+    // keeps. It is "talk to us" until a real customer defines it.
+    expect(HOSTING_TIERS.find((t) => t.priceInr > 999)).toBeUndefined();
+  });
+
+  it('🔒 a purchase WITHOUT the agreement tick is refused, and nothing is charged', () => {
+    // The tick is not decoration: it is what makes the overage charge chargeable. A plan record with
+    // no agreement must be impossible to create, not merely awkward to reach from the UI.
+    const w = wallet(5 * PRICE_TOKENS);
+    const r = computePlanPurchase(w, NOW, STARTER.id, {});
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('unreachable');
+    expect(r.reason).toBe('agreement_required');
+  });
+
+  it('the agreement says the limit, the overage rate, AND that the app is never switched off', () => {
+    const terms = hostingAgreementTerms(GROWTH).join(' ');
+    expect(terms).toContain('20 GB');
+    expect(terms).toContain('₹20 per GB');
+    expect(terms).toContain('KEEP RUNNING');
+    expect(terms).toContain('₹499');
+    expect(terms).toContain('₹150');
+    // The terms are generated FROM the tier, so a price change cannot leave the agreement quoting
+    // the old one. Proven by asserting Starter's differ in exactly the tier-derived places.
+    expect(hostingAgreementTerms(STARTER).join(' ')).toContain('5 GB');
+    expect(hostingAgreementTerms(STARTER).join(' ')).not.toContain('₹150');
+  });
+
+  it('Growth grants its ₹150 bundled credit at purchase — and again on each renewal', () => {
+    const start = wallet(GROWTH.priceInr * TOKENS_PER_RUPEE);
+    const r = computePlanPurchase(start, NOW, GROWTH.id, AGREED);
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.bundledCreditInr).toBe(150);
+    // Paid ₹499, received ₹150 back as ordinary credit.
+    expect(r.wallet.tokenBalance).toBe(150 * TOKENS_PER_RUPEE);
+    expect(r.wallet.walletLedger.at(-1).description).toContain('₹150 build credit included');
+
+    const expired = { ...r.plan, expiresAt: new Date(NOW_MS - DAY).toISOString() };
+    const topped = { ...r.wallet, hostingPlan: expired, tokenBalance: GROWTH.priceInr * TOKENS_PER_RUPEE };
+    const renewed = computeLazyRenewal(topped, NOW);
+    expect(renewed.renewed).toBe(true);
+    expect(renewed.wallet.tokenBalance).toBe(150 * TOKENS_PER_RUPEE);
+  });
+
+  it('a replayed purchase grants NO second month of credit for one payment', () => {
+    const first = computePlanPurchase(wallet(3 * GROWTH.priceInr * TOKENS_PER_RUPEE), NOW, GROWTH.id, AGREED);
+    if (!first.ok) throw new Error('expected ok');
+    const replay = computePlanPurchase(
+      { ...first.wallet, hostingPlan: { ...first.plan, expiresAt: NOW } }, NOW, GROWTH.id, AGREED,
+    );
+    if (!replay.ok) throw new Error('expected ok');
+    expect(replay.charged).toBe(false);
+    expect(replay.bundledCreditInr).toBe(0);
+    expect(replay.wallet.tokenBalance).toBe(first.wallet.tokenBalance);
+  });
+
+  it('UPGRADING mid-period returns the unused days as credit, then charges the new tier in full', () => {
+    const bought = computePlanPurchase(wallet(10 * PRICE_TOKENS), NOW, STARTER.id, AGREED);
+    if (!bought.ok) throw new Error('expected ok');
+    const day3 = new Date(NOW_MS + 3 * DAY).toISOString();
+    const up = computePlanPurchase(bought.wallet, day3, GROWTH.id, AGREED);
+    if (!up.ok) throw new Error('expected ok');
+    // 27 of 30 Starter days left, at ₹149/30 per day.
+    expect(up.creditedInr).toBeCloseTo((27 * 149) / 30, 1);
+    expect(up.plan.id).toBe(GROWTH.id);
+    // A full new period from TODAY — the old one was paid back, so it is not extended.
+    expect(Date.parse(up.plan.expiresAt)).toBe(Date.parse(day3) + GROWTH.days * DAY);
+    expect(up.wallet.walletLedger.some((r: any) => String(r.description).includes('Unused days'))).toBe(true);
+  });
+
+  it('a DOWNGRADE while the higher tier is still live is refused rather than silently shortening it', () => {
+    const g = computePlanPurchase(wallet(10 * GROWTH.priceInr * TOKENS_PER_RUPEE), NOW, GROWTH.id, AGREED);
+    if (!g.ok) throw new Error('expected ok');
+    const down = computePlanPurchase(g.wallet, new Date(NOW_MS + DAY).toISOString(), STARTER.id, AGREED);
+    expect(down.ok).toBe(false);
+  });
+
+  it('overage is charged only past the allowance, and by the part-GB', () => {
+    expect(overageInr(5, STARTER)).toBe(0);
+    expect(overageInr(5.5, STARTER)).toBe(10);      // 0.5 GB × ₹20
+    expect(overageInr(25, GROWTH)).toBe(100);       // 5 GB × ₹20
+    expect(overageInr(NaN, STARTER)).toBe(0);
+  });
+});
+
+describe('the legacy ₹99 plan is honoured, never quietly repriced', () => {
+  const legacy = {
+    id: LEGACY_HOSTING_PLAN_ID, purchasedAt: NOW,
+    expiresAt: new Date(NOW_MS - DAY).toISOString(), autoRenew: true,
+  };
+
+  it('it still counts as ACTIVE and grants Starter entitlements', () => {
+    const live = { ...legacy, expiresAt: new Date(NOW_MS + DAY).toISOString() };
+    expect(hostingPlanActive(wallet(0, { hostingPlan: live }), NOW_MS)).toBe(true);
+    expect(tierForPlanId(LEGACY_HOSTING_PLAN_ID)?.id).toBe('starter');
+  });
+
+  it('🔒 it renews at ₹99, NOT at the new ₹149 — raising a live subscription is not ours to do', () => {
+    const r = computeLazyRenewal(wallet(200 * TOKENS_PER_RUPEE, { hostingPlan: legacy }), NOW);
+    expect(r.renewed).toBe(true);
+    expect(r.wallet.tokenBalance).toBe(101 * TOKENS_PER_RUPEE); // 200 − 99
+    expect(r.wallet.walletLedger.at(-1).description).toContain('Custom Domain');
+  });
+
+  it('it carries NO agreement, which is exactly why nothing beyond its price may be billed to it', () => {
+    expect((legacy as any).agreedAt).toBeUndefined();
+  });
+});
+
 describe('computeLazyRenewal', () => {
-  const expiredPlan = { id: HOSTING_PLAN_ID, purchasedAt: NOW, expiresAt: new Date(NOW_MS - DAY).toISOString(), autoRenew: true };
+  const expiredPlan = { id: STARTER.id, purchasedAt: NOW, expiresAt: new Date(NOW_MS - DAY).toISOString(), autoRenew: true };
 
   it('renews an expired auto-renew plan for 30 days FROM NOW (never back-dated)', () => {
     const r = computeLazyRenewal(wallet(2 * PRICE_TOKENS, { hostingPlan: expiredPlan }), NOW);
     expect(r.renewed).toBe(true);
     expect(r.applied).toBe(true);
-    expect(Date.parse((r.wallet.hostingPlan as any).expiresAt)).toBe(NOW_MS + 30 * DAY);
+    expect(Date.parse((r.wallet.hostingPlan as any).expiresAt)).toBe(NOW_MS + STARTER.days * DAY);
     expect(r.wallet.tokenBalance).toBe(PRICE_TOKENS);
     expect(r.wallet.walletLedger.at(-1).description).toContain('auto-renewal');
   });
@@ -151,22 +279,24 @@ describe('purchase + status over the injected db seam', () => {
   it('purchaseHostingPlan debits and grants atomically; readHostingPlanStatus reports it active', async () => {
     const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(2 * PRICE_TOKENS) };
     const db = fakeAdminDb(docs);
-    const result = await purchaseHostingPlan(db, 'u1');
+    const result = await purchaseHostingPlan(db, 'u1', undefined, STARTER.id, AGREED);
     if (!result.ok) throw new Error(`purchase failed via seam: ${result.error}`);
-    expect(result.plan.id).toBe(HOSTING_PLAN_ID);
+    expect(result.plan.id).toBe(STARTER.id);
     expect(result.tokenBalance).toBe(PRICE_TOKENS);
-    expect(docs['user_token_wallets/u1'].hostingPlan.id).toBe(HOSTING_PLAN_ID); // persisted, not just returned
+    expect(docs['user_token_wallets/u1'].hostingPlan.id).toBe(STARTER.id); // persisted, not just returned
 
     const status = await readHostingPlanStatus(db, 'u1');
     expect(status.active).toBe(true);
-    expect(status.plan?.id).toBe(HOSTING_PLAN_ID);
+    expect(status.plan?.id).toBe(STARTER.id);
+    expect(status.tier?.id).toBe(STARTER.id);
+    expect(status.renewalPriceInr).toBe(STARTER.priceInr);
 
   });
 
   it('reading an EXPIRED auto-renew plan renews it lazily in the same transaction', async () => {
     const docs: Record<string, any> = {
       'user_token_wallets/u1': wallet(2 * PRICE_TOKENS, {
-        hostingPlan: { id: HOSTING_PLAN_ID, purchasedAt: NOW, expiresAt: new Date(Date.now() - DAY).toISOString(), autoRenew: true },
+        hostingPlan: { id: STARTER.id, purchasedAt: NOW, expiresAt: new Date(Date.now() - DAY).toISOString(), autoRenew: true },
       }),
     };
     const status = await readHostingPlanStatus(fakeAdminDb(docs), 'u1');
@@ -210,12 +340,19 @@ describe('plan wiring', () => {
   it('domain connect is plan-gated with free-list exemption and FAIL-OPEN on unknown', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/routes/nbaiDomains.ts'), 'utf8');
     const code = stripComments(src);
-    expect(code).toContain('hostingPlansEnabled() && !isAgentV3FreeUser(');
-    expect(code).toContain('plan.known && !plan.active'); // unknown ⇒ allow (rule #1)
+    expect(code).toContain('hostingPlansEnabled() || isAgentV3FreeUser(uid, email)');
+    // Unknown ⇒ allow (rule #1). The condition moved into the SHARED gate on 2026-09-10, when
+    // auto-dns/start was found ungated — the fail-open direction is unchanged, only its home.
+    expect(code).toContain('if (!plan.known || plan.active) return false;');
     expect(code).toContain('needsPlan: true');
-    // The gate covers ONLY connect — the status/state routes must stay ungated so a lapse never
+    // BOTH write paths that begin a custom-domain setup go through the one gate — connect, and the
+    // auto-DNS start that precedes it.
+    // `await refusedForNoPlan(res` matches only the CALL sites — the bare name would also match the
+    // function's own declaration and quietly count three.
+    expect(code.match(/await refusedForNoPlan\(res/g) ?? []).toHaveLength(2);
+    // The gate covers only those — the status/state routes must stay ungated so a lapse never
     // breaks an already-live domain's checks.
-    const statusRoute = code.indexOf("'/api/domains/nbai/status'");
+    const statusRoute = code.indexOf("app.get('/api/domains/nbai/status'");
     expect(code.slice(statusRoute, statusRoute + 1200)).not.toContain('needsPlan');
   });
 
@@ -242,7 +379,7 @@ describe('plan wiring', () => {
 describe('the clock is an input, not an ambient fact', () => {
   it('purchaseHostingPlan dates the plan from the INJECTED time', async () => {
     const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(2 * PRICE_TOKENS) };
-    const r = await purchaseHostingPlan(fakeAdminDb(docs), 'u1', NOW);
+    const r = await purchaseHostingPlan(fakeAdminDb(docs), 'u1', NOW, STARTER.id, AGREED);
     if (!r.ok) throw new Error(r.error);
     // Pinned to the fixture's clock, so this assertion means the same thing on any future day.
     expect(Date.parse(r.plan.expiresAt)).toBe(NOW_MS + HOSTING_PLAN_DAYS * DAY);
@@ -257,8 +394,8 @@ describe('the clock is an input, not an ambient fact', () => {
     // key two same-instant calls differently and turn a genuine replay into a double charge.
     const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(3 * PRICE_TOKENS) };
     const db = fakeAdminDb(docs);
-    const first = await purchaseHostingPlan(db, 'u1', NOW);
-    const second = await purchaseHostingPlan(db, 'u1', NOW);
+    const first = await purchaseHostingPlan(db, 'u1', NOW, STARTER.id, AGREED);
+    const second = await purchaseHostingPlan(db, 'u1', NOW, STARTER.id, AGREED);
     if (!first.ok || !second.ok) throw new Error('purchase failed');
     expect(second.tokenBalance).toBe(first.tokenBalance - PRICE_TOKENS); // a second period, a second charge
     expect(Date.parse(second.plan.expiresAt)).toBe(NOW_MS + 2 * HOSTING_PLAN_DAYS * DAY); // 30 + 30
@@ -275,7 +412,7 @@ describe('the clock is an input, not an ambient fact', () => {
     // attempts at this test asserted the wrong thing for exactly that reason.)
     const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(PRICE_TOKENS) };
     const db = fakeAdminDb(docs);
-    const bought = await purchaseHostingPlan(db, 'u1', NOW);
+    const bought = await purchaseHostingPlan(db, 'u1', NOW, STARTER.id, AGREED);
     if (!bought.ok) throw new Error(bought.error);
     expect((await readHostingPlanStatus(db, 'u1', NOW)).active).toBe(true);
 
@@ -285,7 +422,7 @@ describe('the clock is an input, not an ambient fact', () => {
 
   it('omitting the time still uses the real clock — the production path is unchanged', async () => {
     const docs: Record<string, any> = { 'user_token_wallets/u1': wallet(2 * PRICE_TOKENS) };
-    const r = await purchaseHostingPlan(fakeAdminDb(docs), 'u1');
+    const r = await purchaseHostingPlan(fakeAdminDb(docs), 'u1', undefined, STARTER.id, AGREED);
     if (!r.ok) throw new Error(r.error);
     const expiresIn = Date.parse(r.plan.expiresAt) - Date.now();
     expect(expiresIn).toBeGreaterThan((HOSTING_PLAN_DAYS - 1) * DAY);

@@ -1,5 +1,12 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
+import { copyName, copyStatus } from '../AgentV3/duplicateApp';
+import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
+import express from 'express';
+import { HIT_PATH, parseHit, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
+import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
+import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
+import { validateSiteConfig, DEFAULT_SITE_CONFIG, MAX_REDIRECTS } from '../AgentV3/siteConfig';
+import { siteConfigStore } from '../AgentV3/siteConfigStore';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
 import { recordPlatformBuild } from '../lib/platformBuildMetrics';
@@ -76,6 +83,10 @@ import {
   planRevert,
   repoNameForProject,
   readableAppNameForRepo,
+  validateAppName,
+  appNameErrorMessage,
+  findDuplicate,
+  effectiveAppName,
   resolveStorageTarget,
   ownRepoStorageEnabled,
   parseGitHubRepo,
@@ -163,11 +174,13 @@ import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
+import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
 import { decideGreenGuard, restorePlan, greenGuardMessage, greenGuardUnverifiedMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
 import { languageInstruction } from '../AgentV3/IndicLanguage';
+import { decidePublishConsent } from '../AgentV3/publishConsent';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
@@ -200,6 +213,12 @@ import {
 } from '../AgentV3/ShellSessions';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
+import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
+import { createRenderService, fetchServiceEnvKeys } from '../AgentV3/renderCreateService';
+import { readDeployVerdict } from '../AgentV3/renderDeployStatus';
+import { planBackendEnv, backendEnvNote, requiredBackendEnvNames } from '../AgentV3/backendEnvVars';
+import { declaredAppPort } from '../lib/declaredAppPort';
+import { managedDnsConfigured, ensureZone, applyRecords } from '../lib/cloudflareManagedDns';
 import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
@@ -207,14 +226,25 @@ import { designHealDecision, designHealGuardNote } from '../AgentV3/designHealGu
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
-import { analyzeApiWiring, buildEnvForSplit, mergeEnvFile } from '../AgentV3/apiWiring';
+import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
+import { repoAvailableForDeploy, resolveDeployRepo } from '../AgentV3/deployRepoMemory';
+import { decidePushBranch } from '../AgentV3/pushAppTarget';
+import { hostingAvailability, hostAppOnNavBharatCloud } from '../AgentV3/hostApp';
+import { appsProject, appsRegion, serviceNameFor, deleteHostedService } from '../AgentV3/cloudRunHosting';
+import { readHostingUsage, usageGapNote } from '../AgentV3/hostingUsage';
+import {
+  hostingCostUsd, hostingBillableUsd, hostingBillingEnabled, hostingMarkupPct, hostingCostNote,
+} from '../AgentV3/hostingCost';
+// ADC for the apps project — on Cloud Run the service identity is used automatically, exactly as
+// Deployment.ts does for Firebase Hosting.
+import { GoogleAuth } from 'google-auth-library';
 import { proveBrowserRunnable } from '../AgentV3/previewCapability';
 import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
-import { publishedAppCap } from '../lib/HostingQuota';
-import { hostingPlansEnabled, hostingPlanPriceInr } from '../lib/hostingPlan';
+import { publishedAppCap, publishedAppCapForTier } from '../lib/HostingQuota';
+import { hostingPlansEnabled, hostingPlanPriceInr, readHostingPlanStatus } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
 import {
   buildOutputCandidates, buildOutputCensusCommand, readBuildOutputCensus, builtSiteRefusal,
@@ -312,7 +342,7 @@ function sessionCostCapUsd(): number {
   const v = parseFloat(process.env.SESSION_COST_CAP_USD ?? '');
   return Number.isFinite(v) && v > 0 ? v : 5.0;
 }
-import { deploymentStore, withDeploymentPersistence, isLiveDeployment, publishedAppList, type DeploymentRecord } from '../AgentV3/DeploymentStore';
+import { deploymentStore, withDeploymentPersistence, isLiveDeployment, publishedAppList, pausedAppList, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 import { resolvePublishState } from '../AgentV3/publishState';
 import { ensureBootEnv, bootEnvNote, type BootEnvIo } from '../AgentV3/devSecretsBoot';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
@@ -323,7 +353,7 @@ import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage
 import { previewKeepAliveEnabled, isTopLevelNavigation } from '../AgentV3/previewKeepAlive';
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
-import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE } from '../AgentV3/previewSnapshot';
+import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
 import { scoreBuildOutcome, shouldAutoReport, autoReportReason, complaintInText } from '../AgentV3/buildOutcomeSignals';
@@ -333,7 +363,9 @@ import { decideAppSignature, appSignatureNotice } from '../AgentV3/appSignatureE
 import { probeHostingPlan } from '../lib/hostingPlan';
 import { lastDevServerLaunch } from '../AgentV3/devServerLaunchLog';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
-import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
+import { FirebaseHostingDeployer, makeChannelId } from '../AgentV3/Deployment';
+import { bucketOnlyPublishEnabled } from '../AgentV3/bucketOnlyPublish';
+import { rollbackAvailability, rollbackSummary, listRollbackChoices, pickRollbackTargetByVersion } from '../AgentV3/publishRollback';
 import { firebaseCustomDomainsEnabled } from '../lib/firebaseCustomDomain';
 import { firebaseDomainsForWorkspaceStrict } from '../lib/firebaseDomainLink';
 import { publishToCustomDomainSite, type CustomDomainPublishOutcome } from '../AgentV3/customDomainPublish';
@@ -350,7 +382,7 @@ import {
   type DesignContract,
 } from '../AgentV3/designContract';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
-import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
+import { collectWorkspaceFiles, writeWorkspaceFiles, pool } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
@@ -382,6 +414,7 @@ import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from 
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
 import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings } from '../AgentV3/ReviewerAgent';
+import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
 import {
   saveWorkspaceMemory,
   restoreWorkspaceMemory,
@@ -389,7 +422,7 @@ import {
   deleteWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
-import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { makeFirstPaintHandler } from '../AgentV3/streamingFirstPaint';
@@ -397,6 +430,10 @@ import { buildRuntimeLogCommand, parseRuntimeLogOutput, runtimeLogGapNotice } fr
 import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeServiceStatus, extraPorts, portsSummary } from '../AgentV3/portsPanel';
 import { findProjectInstructionPath, normalizeProjectInstructions, projectInstructionsBlock, projectInstructionsNotice } from '../AgentV3/projectInstructions';
 import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '../AgentV3/fileMentions';
+import { mcpServerStore } from '../AgentV3/McpServerStore';
+import { listRemoteTools } from '../AgentV3/mcpTransport';
+import { externalToolDefs, externalToolsPreamble, canConnectServer, MAX_SERVERS_PER_WORKSPACE, type SafeMcpTool } from '../AgentV3/mcpClient';
+import { assertPublicHttpUrl } from '../lib/ssrfGuard';
 import { parseIgnoreFile, ignoreRulesBlock, IGNORE_FILE } from '../AgentV3/ignoreRules';
 import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } from '../AgentV3/terminalQuota';
 import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../AgentV3/terminalMeter';
@@ -420,7 +457,7 @@ import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { recentBuildHistoryFor, etaBasisNote } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
-import { buildAdminReportRecord, saveAdminBuildReport } from '../AgentV3/AdminBuildReportStore';
+import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
@@ -474,6 +511,8 @@ import {
   safeWorkspaceUid,
 } from '../lib/workspaceIdentity';
 import { adminRequestOk } from '../lib/adminAuth';
+import { previewFidelityCaveats, previewFidelityNotice } from '../AgentV3/previewFidelity';
+import { journeyUserSummary } from '../AgentV3/journeyUserSummary';
 export { buildActuator };
 
 /**
@@ -591,7 +630,13 @@ let sharedConversationStore: ConversationStore | null = null;
  * missing-credentials environment never errors). Singleton. Gated on AGENTV3_PERSIST_FIRESTORE
  * so CI/local stay on the in-memory store, matching the cautious v5.0 flag-gating.
  */
-function getConversationStore(): ConversationStore {
+/**
+ * EXPORTED (2026-09-07) so other routes read the SAME singleton rather than constructing a second
+ * one. Two stores in one process would each hold their own Firestore client and, worse, their own
+ * in-memory fallback — so a fact written through one would be invisible through the other, which is
+ * exactly the drift this codebase keeps having to unlearn.
+ */
+export function getConversationStore(): ConversationStore {
   if (sharedConversationStore) return sharedConversationStore;
   // Durable chat history by DEFAULT — it survives a process restart, a redeploy, and
   // horizontal scaling across Cloud Run instances. Previously this was OFF unless
@@ -1475,6 +1520,14 @@ export function buildMaxTokensPerTurn(): number {
  * build wall-clock deadline timer is armed — without this, a single stalled provider/Firestore call hangs
  * the whole HTTP request forever (the deadline never starts). Pure + exported for testing.
  */
+/**
+ * How many oversized sandbox-only text files (lockfiles) an import writes to the sandbox at once.
+ *
+ * Mirrors ASSET_WRITE_CONCURRENCY's shape deliberately — same clamp, same env key — so the two
+ * network-write paths of one import behave identically and there is a single number to reason about.
+ */
+const SANDBOX_ONLY_WRITE_CONCURRENCY = Math.max(1, Math.min(32, Number(process.env.AGENTV3_ASSET_WRITE_CONCURRENCY) || 16));
+
 export function raceTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
@@ -2097,7 +2150,13 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: b
           // + auto-shrink concurrency on 429/timeout. Keyed by the BASE provider name so all keys of one
           // provider share one bucket (global per-provider pacing). No-op passthrough when the flag is off.
           const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars), name);
-          runners.push(k === 0 ? { name, runner } : { name: `${name}#${k + 1}`, runner, reportAs: name });
+          // `modelId` rides along so a rung whose MODEL is unreachable on this account can be retired
+          // on its own (see deadKeyFor in MultiProviderTurnRunner). It must be the model this rung
+          // actually calls — every rung of a ladder shares one bench name, so the model id is the only
+          // thing that tells `kimi-k2.5` (dead) apart from `kimi-k2.6` (the rung that delivers).
+          runners.push(k === 0
+            ? { name, runner, modelId: model }
+            : { name: `${name}#${k + 1}`, runner, reportAs: name, modelId: model });
         } catch { /* misconfigured model/key rung — skip; the next rung / Claude still backstops */ }
       });
     }
@@ -2127,7 +2186,22 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: b
   // The FREE ladder is deliberately UNCHANGED (admin: "weak module abhi jaisa hai vaise hi"): it is
   // ordered cheapest-first with the flagship LAST, so putting a newer flagship in front would invert
   // the free tier's whole cost model.
-  const kimiDefault = opts?.free ? ['kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code'] : ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'];
+  // ⚠️ `kimi-k2.5` REMOVED FROM THE FREE LADDER (admin-approved 2026-09-04). Two build reports proved
+  // it is unreachable on this account — "404 Not found the model kimi-k2.5 or Permission denied" — so
+  // it led every free build with a model that cannot answer: 5 wasted requests out of 5 calls in one
+  // report, 57 out of 40 in an earlier one. (#2741 cut that to one per build by retiring a dead rung
+  // after its first failure; this removes the waste entirely.)
+  //
+  // COSTS NOTHING TO REMOVE, which is what settled it: `providerRates` prices k2.5 and k2.6 at the
+  // SAME rate (`/k2[.\-]?[56]/` → $0.60 in / $2.50 out), so the rung below it is exactly as cheap and
+  // is the one that has been delivering every turn anyway. Re-enabling k2.5 on the Moonshot account
+  // would have been strictly worse: it is the OLDEST rung and sits FIRST, so a free build's quality
+  // floor would drop to it for no saving — and one extra heal pass costs far more than any per-token
+  // difference our rate card cannot even see.
+  //
+  // The rate-card entry for k2.5 deliberately STAYS: an older build's telemetry still names it, and it
+  // must keep pricing correctly. This is a routing change, not a billing one.
+  const kimiDefault = opts?.free ? ['kimi-k2.6', 'kimi-k2.7-code'] : ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'];
   const glmEnv = opts?.free ? process.env.AGENTV3_FREE_GLM_MODEL : process.env.GLM_MODEL;
   const kimiEnv = opts?.free ? process.env.AGENTV3_FREE_KIMI_MODEL : process.env.KIMI_MODEL;
   // FLAGSHIP-ONLY (admin 2026-08-02, weak-fail repair): when the WEAK build fails, its last repair pass
@@ -2963,8 +3037,13 @@ export function registerAgentV3Routes(app: Express): void {
           const dep = c.workspaceId ? deployments.get(c.workspaceId) : undefined;
           const live = isLiveDeployment(dep);
           return {
-            id: c.id, title: c.title, status: c.status, workspaceId: c.workspaceId,
+            // `title` carries the EFFECTIVE name (admin 2026-09-04: "har jagah wahi name") so every
+            // existing reader of this list shows the user's chosen name with no change of its own —
+            // the surest way to get "everywhere" right is to leave nothing to update. `appName` rides
+            // along separately so a caller can still tell a chosen name from a derived one.
+            id: c.id, title: effectiveAppName(c), status: c.status, workspaceId: c.workspaceId,
             billedUsd: c.billedUsd, createdAt: c.createdAt, updatedAt: c.updatedAt,
+            ...(c.appName ? { appName: c.appName } : {}),
             ...(c.pinned ? { pinned: true } : {}),
             ...(live ? { live: true, liveUrl: dep!.url } : {}),
           };
@@ -3123,6 +3202,178 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
+  /**
+   * RENAME THE APP (admin 2026-09-04): *"jab user save kare to har jagah wahi name ho jo user ne dala
+   * hai (duplicate not allowed) aur sath me ai ka app building disturb bhi na ho."*
+   *
+   * TWO NAMES MOVE, AND THEY ARE DELIBERATELY NOT THE SAME PROMISE:
+   *
+   *  1. The DISPLAY name (`appName`) — persisted first, and once it is written the request has
+   *     succeeded. Every surface resolves through `effectiveAppName`, so this alone is what makes the
+   *     new name appear everywhere. It is a single field write: it cannot fail halfway.
+   *
+   *  2. The GITHUB REPO name — attempted afterwards, BEST-EFFORT, and never allowed to fail the
+   *     request. This is the half that touches something a build might be using, which is exactly why
+   *     it is second and why it cannot throw.
+   *
+   * WHY THE BUILD IS SAFE — a property, not a hope. Since `repoName` is now PERSISTED, the build
+   * pushes to the name stored on the record. If GitHub refuses the rename, that stored name is
+   * unchanged and the build carries on pushing precisely where it already was; the only casualty is
+   * that the repo keeps its old name, which we then say out loud instead of pretending. The rename
+   * cannot half-apply either: `repoName` is written ONLY after GitHub confirms the move.
+   *
+   * `updatedAt` is preserved (as pinning does): naming an app is not "working on" it, and bumping it
+   * would silently reorder the user's history list under them.
+   */
+  /**
+   * DUPLICATE APP — "make a copy of this app" (ROADMAP §13, 3.6).
+   *
+   * Copies the FILES and the CHAT under a new name, into a fresh workspace of the SAME verified user.
+   * Copies nothing that points at a place in the world — repo, deployment, domain, site settings,
+   * secrets (per-app by construction) — so a copy starts unpublished and unconnected, which is the
+   * only honest state for a thing that has never been published or connected. See duplicateApp.ts.
+   */
+  app.post('/api/agentv3/conversations/:id/duplicate', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    if (!userId || userId === 'anon') {
+      res.status(403).json({ error: 'Sign in to make a copy of an app.' });
+      return;
+    }
+    const store = getConversationStore();
+    let source: Awaited<ReturnType<typeof store.get>> = null;
+    let forbidden = false;
+    for (const cid of candidateConversationIds(req.params.id, userId)) {
+      const rec = await store.get(cid).catch(() => null);
+      const access = conversationAccess(rec, userId);
+      if (access === 'ok' && rec) { source = rec; break; }
+      if (access === 'forbidden') forbidden = true;
+    }
+    if (!source) {
+      res.status(forbidden ? 403 : 404).json({ error: forbidden ? 'This app belongs to another account.' : 'This app could not be found.' });
+      return;
+    }
+    const files = await loadWorkspaceFiles(source.workspaceId).catch(() => ({} as Record<string, string>));
+    if (Object.keys(files).length === 0) {
+      res.status(409).json({ error: 'This app has no files yet, so there is nothing to copy. Build it first.' });
+      return;
+    }
+    const newSessionId = randomUUID();
+    const newWorkspaceId = workspaceIdFor(userId, newSessionId);
+    if (!newWorkspaceId) { res.status(400).json({ error: 'Could not create a workspace for the copy.' }); return; }
+    const mine = await store.listByUser(userId, 200).catch(() => []);
+    const name = copyName(effectiveAppName(source), mine.map((c) => effectiveAppName(c)));
+    const now = Date.now();
+    try {
+      await saveWorkspaceFiles(newWorkspaceId, files);
+      // Files + chat + name. Deliberately NOT: repoName, repoOwner, deployBranch, backendDomain,
+      // pinned, or anything about hosting — see duplicateApp.ts.
+      await store.create({ id: newSessionId, userId, workspaceId: newWorkspaceId, title: name, messages: source.messages ?? [], createdAt: now });
+      await store.update(newSessionId, { appName: name, status: copyStatus(source.status), updatedAt: now, ...(source.framework ? { framework: source.framework } : {}) });
+    } catch (err) {
+      console.error(`[HTTP 500] duplicate app: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+      res.status(500).json({ error: 'Could not make the copy just now. The original is unchanged.' });
+      return;
+    }
+    res.json({ ok: true, id: newSessionId, workspaceId: newWorkspaceId, name });
+  });
+
+  app.post('/api/agentv3/conversations/:id/name', async (req: Request, res: Response) => {
+    const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const validated = validateAppName(typeof req.body?.name === 'string' ? req.body.name : '');
+    if (!validated.ok) {
+      res.status(400).json({ error: appNameErrorMessage(validated.error!), reason: validated.error });
+      return;
+    }
+    try {
+      const store = getConversationStore();
+      // DUPLICATE CHECK across the user's OWN apps, before anything is written. An 'anon' identity is
+      // not enumerable by design (Phase 3.1), so this list comes back empty for it — no local check is
+      // possible there, and GitHub's own 422 remains the authoritative backstop on the repo name.
+      // `?? ''` is not a shrug: isEnumerableUserId('') is false, so a token-less identity yields an
+      // empty list here by the same Phase-3.1 rule that protects the shared-anon bucket.
+      const mine = await store.listByUser(userId ?? '', 200).catch(() => []);
+      let renamed: { id: string; repoName?: string } | null = null;
+      let forbidden = false;
+      for (const cid of candidateConversationIds(req.params.id, userId)) {
+        const rec = await store.get(cid).catch(() => null);
+        const access = conversationAccess(rec, userId);
+        if (access !== 'ok' || !rec) {
+          if (access === 'forbidden') forbidden = true;
+          continue;
+        }
+        const clash = findDuplicate(validated.name, mine, rec.id);
+        if (clash) {
+          res.status(409).json({ error: appNameErrorMessage('duplicate'), reason: 'duplicate' });
+          return;
+        }
+        await store.update(cid, { appName: validated.name, updatedAt: rec.updatedAt });
+        // WHICH REPO TO MOVE. A pinned name is a fact and always wins. When none is pinned yet — the
+        // normal state right after a first build, since the record is created only late in that
+        // request — reconstruct the name the build path would have derived, from the SAME immutable
+        // inputs (`title` + `createdAt`) and the same project id the builder uses (`req.params.id` is
+        // the client's sessionId, which is exactly that). A reconstruction that misses simply 404s and
+        // is reported honestly; it can never rename the wrong repo, because the name is derived from
+        // this record's own identity.
+        renamed = {
+          id: cid,
+          repoName: rec.repoName || repoNameForProject(userId, req.params.id, {
+            appName: rec.title,
+            createdAtMs: typeof rec.createdAt === 'number' && rec.createdAt > 0 ? rec.createdAt : Date.now(),
+          }),
+        };
+      }
+      if (!renamed) {
+        res.status(forbidden ? 403 : 404).json({
+          error: forbidden ? 'This build belongs to another account.' : 'Conversation not found.',
+        });
+        return;
+      }
+
+      // ---- The repo half. Everything below is best-effort and reported, never thrown. ----
+      let repoRenamed = false;
+      let repoNote = '';
+      const ghToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
+      const fromRepo = renamed.repoName || '';
+      const toRepo = validated.slug;
+      if (fromRepo === toRepo) {
+        // Already called this. Pin it anyway: an app whose repo name is only ever DERIVED is one
+        // rename away from ambiguity, and a fact costs nothing to record.
+        await store.update(renamed.id, { repoName: toRepo, updatedAt: Date.now() }).catch(() => { /* cosmetic */ });
+        repoNote = 'already-named';
+      } else if (ghToken) {
+        const out = await new UserGitHubClient(ghToken).renameRepo(fromRepo, toRepo);
+        if (out.ok) {
+          // Persist ONLY what GitHub confirmed — the name it reports, not the one we asked for.
+          await store.update(renamed.id, { repoName: out.name, updatedAt: Date.now() }).catch(() => { /* display rename already stands */ });
+          repoRenamed = true;
+        } else if (out.status === 404) {
+          // NOTHING TO MOVE — this app has never been pushed to GitHub. So pin the chosen name and the
+          // repo is simply BORN with it on the first save. This is the common path for a rename right
+          // after the first build, and pinning here is safe precisely because no repo exists to strand.
+          await store.update(renamed.id, { repoName: toRepo, updatedAt: Date.now() }).catch(() => { /* cosmetic */ });
+          repoNote = 'will-use-on-first-save';
+        } else {
+          // 422 is GitHub itself saying the name is taken — the authoritative duplicate check that no
+          // local scan can replace. Nothing is pinned, so the app keeps using the repo it already has.
+          repoNote = out.status === 422 ? 'repo-name-taken' : 'repo-rename-failed';
+        }
+      } else {
+        repoNote = 'no-github-token';
+      }
+      res.json({ ok: true, name: validated.name, repoRenamed, ...(repoNote ? { repoNote } : {}) });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // Provider diagnosis — confirms whether a real Anthropic key is configured.
   // Returns no secrets (only the public "sk-ant-" scheme prefix + lengths), so a
   // wrong/leftover key is visible without exposing it. Optional ?test=1 makes one
@@ -3271,7 +3522,7 @@ async function noteBuildOutcome(
   // the request body, so a user can only report their OWN build (no IDOR). Honest: if there is no
   // report yet, or the save genuinely fails, we say so — never a fake "sent".
   app.post('/api/agentv3/report-to-admin', async (req: Request, res: Response) => {
-    const body = (req.body ?? {}) as { workspaceId?: string; buildId?: string; activeBuildId?: string; promptHash?: string };
+    const body = (req.body ?? {}) as { workspaceId?: string; buildId?: string; activeBuildId?: string; promptHash?: string; note?: string };
     const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : '';
     const buildId = typeof body.buildId === 'string' && body.buildId ? body.buildId : '';
     const verifiedUid = await verifyFirebaseToken(req);
@@ -3357,6 +3608,10 @@ async function noteBuildOutcome(
       workspaceId: workspaceId || report.workspaceId || null,
       buildId: buildId || report.buildId || null,
       reportedAt: Date.now(),
+      // WHAT THE USER SAID WAS WRONG (admin 2026-08-28). Sanitised at the boundary — the words are
+      // never edited, only made safe to store and render. Optional by design: a blank note is honest
+      // evidence, a compulsory box produces "." to get past it.
+      userNote: sanitizeUserNote(body.note),
     }, sessionBuilds, manualHistoryUnreadable);
     const saved = await saveAdminBuildReport(record);
     if (!saved) {
@@ -3762,11 +4017,534 @@ async function noteBuildOutcome(
     const renderVault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
     const renderKey = resolveRenderKey(renderVault);
     if (!renderKey) { res.status(503).json({ ok: false, reason: 'not-configured', error: renderRequirement(process.env, renderVault) }); return; }
+    /**
+     * 🔴 THE REPO REMEMBERED, NOT ONLY THE ONE JUST CLICKED (admin 2026-09-06, "GitHub se import ki
+     * hai, matlab connect hai!"). `repoUrl` above is whatever THIS request's client happened to send
+     * — real when a build just streamed a `repo` event this session, empty on a reload. The
+     * workspace's own durable record (written the moment code lands in the user's own GitHub — see
+     * deployRepoMemory.ts) now backs it up, so a returning visit can deploy the SAME app the import
+     * already connected, without repeating work that already happened.
+     *
+     * `resolvedRepo.branch` is what finally makes the deploy target the app's shipped state rather
+     * than silently defaulting to `main` regardless of what the workspace actually uses.
+     */
+    const durableRepoRec = await getConversationStore().get(workspaceId).catch(() => null);
+    const resolvedRepo = resolveDeployRepo(repoUrl, durableRepoRec);
+    const effectiveRepoUrl = resolvedRepo?.repoUrl ?? repoUrl;
+    // What we can honestly say about the environment the backend runs with. '' = nothing worth saying,
+    // which is the ordinary case and must stay silent.
+    let envNote = '';
+    // Only set when WE created the service and therefore know which plan it is on — see below.
+    let planNote = '';
     try {
-      const result = await deployBackendToRender({ repoUrl, appName, apiKey: renderKey.key });
-      res.status(result.ok ? 200 : 409).json(result);
+      /**
+       * THE APP'S OWN FILES, READ ONCE (audit 2026-09-07). Three decisions below need them — the
+       * env check, service creation, and whether the DOMAIN may follow the backend — and each used to
+       * load the workspace on its own, or not at all. One read, one verdict, no way to disagree.
+       */
+      const appFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+      const wiring = analyzeApiWiring(appFiles);
+      let result = await deployBackendToRender({ repoUrl: effectiveRepoUrl, appName, apiKey: renderKey.key });
+      /**
+       * AN *EXISTING* SERVICE GETS THE TRUTH, NOT OUR KEYS (admin 2026-09-05).
+       *
+       * Render's env-var API replaces the whole set, so writing ours into a service the user already
+       * runs would delete anything they configured in Render's own dashboard — a destructive fix for a
+       * reporting problem. Creation is the one moment an environment can be set without taking
+       * something away. Here we only READ, and only to say what is absent.
+       *
+       * 🔒 AND AN UNREADABLE ANSWER IS NOT A CLEAN ONE. `fetchServiceEnvKeys` returns null when it
+       * could not find out, and null must never collapse into "has everything" — that is the exact
+       * habit of reporting a narrow success as the whole outcome that this deploy path keeps having to
+       * unlearn.
+       */
+      if (result.ok) {
+        const required = requiredBackendEnvNames(appFiles);
+        if (required.length > 0) {
+          const have = await fetchServiceEnvKeys(renderKey.key, result.serviceId);
+          if (have === null) {
+            envNote = `We could not check whether your backend has the settings it reads (${required.join(', ')}). `
+              + 'If your app does not work, check those in your backend host.';
+          } else {
+            const absent = required.filter((n) => !have.includes(n));
+            if (absent.length > 0) {
+              envNote = `Your app reads ${absent.join(', ')}, and your backend does not have `
+                + `${absent.length === 1 ? 'it' : 'them'} set. Add `
+                + `${absent.length === 1 ? 'it' : 'them'} in your backend host, or save `
+                + `${absent.length === 1 ? 'it' : 'them'} under Settings → Secrets & API Keys.`;
+            }
+          }
+        }
+      }
+      /**
+       * 🔴 NO SERVICE YET? CREATE ONE (admin 2026-09-04 — "han", after the four-step path was named).
+       *
+       * `deployBackendToRender` MATCHES an existing service and, finding none, returns an honest
+       * instruction to go build it by hand in Render's own dashboard. True, and still the last manual
+       * wall between an app and a live site — the user leaves NavBharatAI, works in someone else's UI,
+       * and comes back. Render's API can create the service, so that wall was ours, not theirs.
+       *
+       * 🔒 ONLY ON `no-service`, and only with a repo. Every other failure (a bad key, an API error)
+       * keeps its own message — creating a service in answer to an unrelated error would be guessing
+       * with the user's account. And a creation that Render REFUSES leaves the original hand-off
+       * message standing, so the fallback is never worse than what it replaced.
+       */
+      /**
+       * 🔒 CREATING A SERVICE REQUIRES THE USER'S OWN KEY — a cost guard on this very feature.
+       *
+       * `resolveRenderKey` falls back to the SERVER's key so a deploy can still run. That is safe for
+       * TRIGGERING a deploy of a service someone deliberately created, and it is NOT safe for
+       * CREATING one: with the server key, every fullstack user without their own account would have a
+       * brand-new service made inside NAVBHARATAI'S Render account, on NavBharatAI's plan limits and
+       * bill. That is precisely what the standing rule forbids — "user apps run on the USER's own
+       * accounts", the same reason NavBharatAI's Firebase project is never used for user databases.
+       *
+       * Triggering keeps today's behaviour (it multiplies nothing). Creation is gated, and the honest
+       * hand-off underneath is what a server-key user still gets — the same instruction they had
+       * before this feature existed, so nobody is worse off.
+       */
+      if (!result.ok && result.reason === 'no-service' && effectiveRepoUrl && renderKey.source === 'user') {
+        const repoPath = effectiveRepoUrl.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '');
+        // The start command comes from the app's OWN package.json — see deriveServiceCommands for why
+        // a guessed one is worse than no service at all.
+        const pkgRaw = await loadWorkspaceFilesByPath(workspaceId, ['package.json'])
+          .then((f: Record<string, string>) => f['package.json'] ?? null)
+          .catch(() => null);
+        /**
+         * 🔴 THE ENVIRONMENT THE SERVICE BOOTS WITH — the gap that made "deployed" a lie.
+         *
+         * The PREVIEW app is handed the user's saved keys before it runs; the created service used to
+         * be handed none. An app reading DATABASE_URL therefore worked on screen, built here, and
+         * crashed on boot while we reported success. `planBackendEnv` sources them from the VAULT
+         * (portable real credentials) rather than the sandbox `.env`, whose database address exists
+         * only inside that sandbox — see backendEnvVars.ts for why shipping that value would be worse
+         * than shipping none.
+         */
+        const envSource = appFiles;
+        const envPlan = planBackendEnv(renderVault, envSource);
+        /**
+         * WHICH RUNTIME? — asked of the app, not assumed (2026-09-05).
+         *
+         * The create request used to ask for a Node service unconditionally, so a Flask or FastAPI app
+         * that `planDeployment` had correctly identified as `python-server` could be NAMED by the
+         * platform and never hosted by it. The same planner that classifies it now decides how it is
+         * built, so the two cannot disagree.
+         */
+        const backendRuntime = planDeployment(envSource).backend?.runtime === 'python' ? 'python' : 'node';
+        /**
+         * 🔒 AN APP SHIPPED WHOLE THAT STILL READS AN API BASE MUST BE TOLD WHAT THAT BASE IS —
+         * otherwise the CORS gate in apiWiring.ts would be a cure worse than the disease.
+         *
+         * Such a frontend builds `${base}/api/x`; with no value that becomes the literal string
+         * `undefined/api/x` and every call 404s. Shipped in one piece the API lives at the app's OWN
+         * origin, so the honest value is the EMPTY string — `${''}/api/x` is `/api/x`, the relative
+         * call that works precisely because one server serves both halves.
+         *
+         * This is a build-time value, which is why it belongs in the service's environment: the host
+         * runs the frontend build, so the variable has to exist there.
+         */
+        const wholeEnv = buildEnvForWhole(wiring);
+        const createEnvVars = [
+          ...envPlan.envVars,
+          ...Object.entries(wholeEnv)
+            // Never override a value the user deliberately saved — theirs is a decision, ours a default.
+            .filter(([k]) => !envPlan.envVars.some((e) => e.key === k))
+            .map(([key, value]) => ({ key, value })),
+        ];
+        const created = await createRenderService({
+          apiKey: renderKey.key,
+          name: (appName || repoPath.split('/')[1] || 'app').slice(0, 60),
+          repoUrl: effectiveRepoUrl, repoPath, packageJson: pkgRaw,
+          envVars: createEnvVars,
+          runtime: backendRuntime, files: envSource,
+          // The app's shipped state — never a work-in-progress branch. Falls back to 'main' inside
+          // buildCreateServiceRequest when no durable record names one (an app the client just pushed
+          // this very turn, before its durable write landed).
+          branch: resolvedRepo?.branch,
+        });
+        if (created.ok) {
+          // Render deploys a newly-created service by itself, so this IS the deploy — reporting it as
+          // one is honest, and triggering a second would be a duplicate build on the user's account.
+          result = { ok: true, url: created.service.serviceUrl, serviceId: created.service.id, serviceName: created.service.name };
+          envNote = backendEnvNote(envPlan);
+          /**
+           * THE FREE PLAN SLEEPS, AND THE USER SHOULD HEAR IT FROM US (admin 2026-09-05).
+           *
+           * `buildCreateServiceRequest` deliberately picks the FREE plan — a default that cannot
+           * surprise someone with a bill on their own account. The cost of that default is real: the
+           * service idles out after about a quarter of an hour, and the next visitor waits while it
+           * wakes. Someone who learns that from their own slow site concludes NavBharatAI built
+           * something bad; someone told up front knows it is a plan they can change.
+           *
+           * 🔒 SAID ONLY WHERE IT IS TRUE. This is the branch where WE created the service and chose
+           * that plan, so we know. An EXISTING service may be on any plan, and claiming it sleeps
+           * would be a confident guess about somebody else's account.
+           */
+          planNote = 'This runs on your host\'s free plan, which goes to sleep after about 15 minutes with no '
+            + 'visitors — the next visit then takes up to a minute to wake it. Upgrade that service in your '
+            + 'host\'s dashboard if you need it always-on.';
+        } else {
+          // Its OWN reason (audit 2026-09-07): folded into `no-service`, the client answered a "no
+          // start script" or "no GitHub access" refusal with the Blueprint walkthrough — a fix for a
+          // problem the user did not have. The message names the real step; the reason keeps it so.
+          result = { ok: false, reason: 'create-refused', message: `${created.message}` };
+        }
+      }
+      /**
+       * 🔴 AND NOW POINT THE DOMAIN AT IT (admin 2026-09-04 — the root cause behind a month of
+       * mitrify.com serving "Site Not Found").
+       *
+       * A fullstack ship-whole app cannot be served by static hosting, so its Firebase site never
+       * receives a release and Firebase answers "Site Not Found" forever. The user's domain was
+       * attached to THAT site, and nothing in the product could move it — so the domain was bound to a
+       * place that structurally could not serve the app, permanently.
+       *
+       * This is the missing half, and it belongs HERE rather than on the connect screen: a domain can
+       * only point at a service that exists, and this is the exact moment one starts to. No new button,
+       * no new step for the user — deploying the backend simply takes the domain with it.
+       *
+       * 🔒 STRICTLY ADDITIVE. Every failure is reported and none of it can turn a successful deploy
+       * into a failed request: the deploy already happened, and telling the user it failed because a
+       * DNS write did would be a lie about the thing they actually asked for.
+       */
+      let domainPointed: { domain: string; records: number } | null = null;
+      let domainNote = '';
+      if (result.ok) {
+        try {
+          // `Strict` returns null for "could not ask", which is NOT "no domain" — a lookup failure
+          // must never silently skip pointing a domain the user really does have.
+          const domains = await firebaseDomainsForWorkspaceStrict(workspaceId).catch(() => null);
+          if (domains === null) domainNote = 'Your app is deployed. We could not check whether you have a connected domain — open the domain screen to confirm it points here.';
+          const domain = domains?.[0] || '';
+          /**
+           * 🔴 A SPLIT APP'S DOMAIN BELONGS TO ITS WEBSITE, NOT ITS API (audit 2026-09-07). This
+           * pointed the domain at the backend whenever a deploy succeeded — right for an app shipped
+           * whole (the server IS the site), wrong for one whose website is published separately: the
+           * user would open their domain and be looking at their API. The same wiring verdict the
+           * publish route uses decides here, so the two halves cannot disagree about one app.
+           */
+          if (domain && wiring.strategy === 'split') {
+            domainNote = `${domain} stays on your website, which is where it belongs for an app whose website `
+              + `and server are hosted separately. Your server runs at ${result.url}. Press Publish once so the `
+              + 'website is rebuilt to use it.';
+          } else if (domain) {
+            const attach = await attachRenderCustomDomain({
+              apiKey: renderKey.key, serviceId: result.serviceId, serviceUrl: result.url, domain,
+            });
+            if (!attach.ok) {
+              domainNote = attach.message;
+            } else if (managedDnsConfigured()) {
+              // The zone is ours (nameserver delegation), so the records are written for the user —
+              // the same "DNS hum set kar dein" promise the connect screen already makes.
+              const zone = await ensureZone(domain);
+              const applied = await applyRecords(zone.id, attach.records);
+              domainPointed = { domain, records: applied.added };
+              /**
+               * 🔒 REMEMBER THAT THIS DOMAIN NOW BELONGS TO THE SERVICE — a safety fact, not a note.
+               *
+               * From here the STATIC host's records for this domain are deliberately gone, so its own
+               * status goes non-active and every screen reading that view concludes the domain is
+               * broken and offers to re-apply those records. That would write an A record at the apex,
+               * the cross-type sweep would delete this CNAME, and the live site would go down. The
+               * routes that could do that read this field and refuse. See domainPointing.ts.
+               */
+              await getConversationStore().update(workspaceId, {
+                backendDomain: domain, updatedAt: Date.now(),
+              }).catch(() => { /* best-effort — the domain is already pointed either way */ });
+            } else {
+              // No managed zone ⇒ we cannot write it, and must say so rather than imply it is done.
+              domainNote = `Your app is deployed. Point ${domain} at it by adding a CNAME to `
+                + `${attach.records[0]?.value ?? 'your backend host'} at your registrar.`;
+            }
+          }
+        } catch (e) {
+          domainNote = `Your app deployed, but we could not point your domain at it yet: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
+      /**
+       * ONE STATUS PER REASON (audit 2026-09-07). Every failure used to be a 409, and the client reads
+       * 409 as "connect your repo in Render" — so a rejected key, a host outage and a refused creation
+       * all came back as a Blueprint walkthrough. The code now says what the reason says.
+       */
+      const status = result.ok ? 200
+        : result.reason === 'no-service' ? 409
+        : result.reason === 'not-configured' ? 503
+        : result.reason === 'create-refused' ? 422
+        : 502;
+      res.status(status).json({
+        ...result,
+        ...(domainPointed ? { domainPointed } : {}),
+        ...(domainNote ? { domainNote } : {}),
+        ...(envNote ? { envNote } : {}),
+        ...(planNote ? { planNote } : {}),
+      });
     } catch (e) {
       res.status(502).json({ ok: false, reason: 'api-error', error: `Render deploy failed: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  });
+
+  /**
+   * NAVBHARAT CLOUD — host this app on NavBharatAI's own infrastructure (ROADMAP §11, slice 1c).
+   *
+   * 🔴 WHAT THIS REPLACES. Hosting an app with a server half means, today: press Publish, be refused,
+   * put the app in GitHub, open Render, make an account, generate an API key, paste it back, press
+   * Deploy backend. Five steps through two other websites. Researched 2026-09-07: Replit, Lovable,
+   * Base44, Bolt, v0 and Emergent all host the backend themselves, and NONE of them makes a
+   * third-party dashboard key the default path. This route is the first half of closing that gap.
+   *
+   * 🔒 INERT UNTIL DELIBERATELY SWITCHED ON, in two flags. `NAVBHARAT_CLOUD` off — the default —
+   * means this answers 404 and nothing else in the product changes. With it on, hosting stays
+   * ADMIN-ONLY until `NAVBHARAT_CLOUD_PUBLIC` is also set. The same shape as AGENTV3_ENABLED /
+   * AGENTV3_PAID_PUBLIC, for the same reason: a path that spends real money should take two
+   * deliberate acts to reach real users.
+   *
+   * 🔒 AND IT CANNOT RUN IN THE PLATFORM'S OWN PROJECT. `hostingAvailability` refuses when
+   * NAVBHARAT_APPS_PROJECT is unset AND when it names the platform project (admin decision D4,
+   * 2026-09-07) — user code must not share a project with Firestore, the wallet and every user
+   * record. There is deliberately no fallback: a working fallback is how an isolation decision gets
+   * quietly reversed.
+   *
+   * ⚠️ NOT BILLED YET. Metering is slice 2, and nothing goes past admin-only before it exists —
+   * unmetered hosting is precisely the loss ROADMAP's cost plan exists to prevent.
+   */
+  app.post('/api/agentv3/host-app', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    // The VERIFIED identity, never the body's claim — a spoofed email deciding admin access is the
+    // exact hole every other gate in this file closes.
+    const { userId, email } = await resolveReadIdentity(req);
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+
+    const gate = hostingAvailability({ isAdmin: isReportAdmin(email) });
+    if (!gate.available) { res.status(503).json({ ok: false, reason: 'unavailable', error: gate.message }); return; }
+
+    try {
+      const files = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+      // Scoped to THIS app, so hosting inherits the same least-privilege the build path uses; and
+      // planBackendEnv then narrows further to the names the app's own code actually reads.
+      const vault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
+      // ADC — on Cloud Run the service identity is used automatically. The cloud-platform scope covers
+      // Cloud Build, Cloud Storage and Cloud Run in the apps project.
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const token = await auth.getAccessToken().catch(() => null);
+      if (!token) {
+        res.status(503).json({ ok: false, reason: 'unavailable', error: 'Hosting could not authenticate with Google Cloud just now. Nothing was changed.' });
+        return;
+      }
+      const appRec = await getConversationStore().get(workspaceId).catch(() => null);
+      const result = await hostAppOnNavBharatCloud({
+        workspaceId,
+        appName: appRec?.appName || appRec?.title || null,
+        files,
+        vaultSecrets: vault,
+        token: String(token),
+      });
+      if (!result.ok) {
+        // The provider's own words are ADMIN-ONLY (the white-label law): the user gets our sentence,
+        // the server log gets the reason. A build's compiler output must never reach a response body.
+        if (result.detail) console.error(`[host-app] ${workspaceId} ${result.reason}: ${result.detail}`);
+        const status = result.reason === 'unavailable' ? 503
+          : result.reason === 'no-source' || result.reason === 'unpackable' ? 422
+          : 502;
+        res.status(status).json({ ok: false, reason: result.reason, error: result.message });
+        return;
+      }
+      res.json({
+        ok: true, url: result.url, service: result.service, ready: result.ready,
+        ...(result.envNote ? { envNote: result.envNote } : {}),
+      });
+    } catch (e) {
+      res.status(502).json({ ok: false, reason: 'deploy-failed', error: `Hosting failed: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  });
+
+  /**
+   * WHAT DID THIS HOSTED APP USE, AND WHAT WOULD IT COST? (ROADMAP §11, slice 2. Admin-only.)
+   *
+   * 🔴 WHY THIS EXISTS BEFORE THE CHARGING DOES. D5 sets hosting at real cost + 20%, and ROADMAP's own
+   * cost plan closes with the rule that "a saving nobody measured is a story, not a saving" — every
+   * money change should be preceded by a look at real numbers and followed by another. So this route
+   * ships FIRST: it reads what a real app actually used and reports what it WOULD be billed, with
+   * `NAVBHARAT_BILL_HOSTING` still off and nobody's wallet touched. Flipping that switch is then a
+   * decision made against measurements rather than against a plan.
+   *
+   * 🔒 ADMIN-ONLY, AND HONEST ABOUT ITS GAPS. Two different kinds of hole are reported separately and
+   * neither is allowed to look like zero: `unmeasured` is usage we could not read from Google, and
+   * `unbilled` is usage we read but have no admin-set rate for. Both under-bill, which is the safe
+   * direction — the billing law permits absorbing our own cost and never permits charging for
+   * something we did not observe.
+   */
+  app.post('/api/agentv3/host-usage', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    const { userId, email } = await resolveReadIdentity(req);
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    // Cost figures are OUR infrastructure spend, which the white-label law keeps admin-side. A user
+    // never sees a provider line item — they see the wallet, once slice 2c debits it.
+    if (!isReportAdmin(email)) { res.status(403).json({ error: 'Not available for this account.' }); return; }
+
+    const gate = hostingAvailability({ isAdmin: true });
+    if (!gate.available) { res.status(503).json({ ok: false, error: gate.message }); return; }
+
+    try {
+      const project = appsProject();
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const token = await auth.getAccessToken().catch(() => null);
+      if (!token) { res.status(503).json({ ok: false, error: 'Could not authenticate with Google Cloud just now.' }); return; }
+
+      const hours = Math.min(720, Math.max(1, Number(req.body?.hours) || 24));
+      const endIso = new Date().toISOString();
+      const startIso = new Date(Date.now() - hours * 3600_000).toISOString();
+      const rec = await getConversationStore().get(workspaceId).catch(() => null);
+      const serviceName = serviceNameFor(workspaceId, rec?.appName || rec?.title || null);
+
+      const measured = await readHostingUsage({
+        token: String(token),
+        projectId: String(project.projectId),
+        serviceName,
+        startIso,
+        endIso,
+        buildMinutes: Number(req.body?.buildMinutes) || 0,
+      });
+      const cost = hostingCostUsd(measured.usage);
+      res.json({
+        ok: true,
+        service: serviceName,
+        window: { startIso, endIso, hours },
+        usage: measured.usage,
+        cost: cost.usd,
+        lines: cost.lines,
+        wouldBill: hostingBillableUsd(cost),
+        markupPct: hostingMarkupPct(),
+        billingOn: hostingBillingEnabled(),
+        note: `${hostingCostNote(cost)} ${usageGapNote(measured)}`.trim(),
+      });
+    } catch (e) {
+      res.status(502).json({ ok: false, error: `Could not read hosting usage: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  });
+
+  /**
+   * DID THE BACKEND ACTUALLY COME UP? (admin 2026-09-05)
+   *
+   * 🔴 THE GAP THIS CLOSES. `deploy-backend` reported success the moment the host ACCEPTED the
+   * request — which is all it ever knew. "Deploy triggered" was true; "your app is live" was never
+   * checked. A failed build, a service that boots and crashes on a missing setting, a start command
+   * that exits immediately: every one produced the same cheerful message, and the user found out by
+   * opening their own site.
+   *
+   * That is this path's recurring bug class in one line: each layer reported its own narrow success as
+   * the whole outcome. The records existed, so DNS was "done". The host accepted the domain, so it was
+   * "connected". The host accepted the request, so it was "deployed". Every one true, none of them
+   * meaning the user had a working site.
+   *
+   * 🔒 A SEPARATE ENDPOINT, NOT A WAIT INSIDE THE DEPLOY. A build takes minutes we do not control, so
+   * holding the deploy request open would trade a dishonest fast answer for an honest one that times
+   * out — no better. The client asks this as often as it likes, and each answer is evidence-backed.
+   */
+  app.post('/api/agentv3/deploy-status', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const serviceId = typeof req.body?.serviceId === 'string' ? req.body.serviceId.trim() : '';
+    const serviceUrl = typeof req.body?.serviceUrl === 'string' ? req.body.serviceUrl.trim() : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!serviceId) { res.status(400).json({ error: 'serviceId is required.' }); return; }
+    // The same ownership check the deploy itself makes — a status is about someone's own service, and
+    // reading one with a borrowed workspace id would leak which services exist.
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    const vault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
+    const key = resolveRenderKey(vault);
+    if (!key) { res.status(503).json({ error: renderRequirement(process.env, vault) }); return; }
+    const verdict = await readDeployVerdict({ apiKey: key.key, serviceId, serviceUrl });
+    // `status` is the HOST'S OWN word (build_failed, live, …) and names a provider's pipeline, so it
+    // stays out of the user-facing payload under the white-label law. The message is ours.
+    res.json({ live: verdict.live, phase: verdict.phase, message: verdict.message });
+  });
+
+  /**
+   * PUT THIS APP IN THE USER'S OWN GITHUB REPO — on demand (admin 2026-09-04).
+   *
+   * 🔴 THE DEAD END THIS ENDS. The backend-deploy panel tells a fullstack user, in numbered steps:
+   * *"Your code has to live in a GitHub repository first… Connect GitHub, then push this app to a repo
+   * of your own."* On the admin's screenshot GitHub was ALREADY connected — the panel's own
+   * Connect-GitHub button was therefore absent — and **"push this app to a repo of your own" had no
+   * control anywhere in the product**. Every `pushAll` in this file lives inside the BUILD route, so
+   * the only way to get your app into your own repo was to run a build while a GitHub token happened
+   * to be attached. The user had done everything asked of them and the screen still had no next step.
+   *
+   * This is the same capability the build path already uses (`UserGitHubClient.ensureRepo` +
+   * `GitRepoSync.pushAll`) — exposed as an action, so the instruction on screen finally has a button.
+   *
+   * 🔒 THE USER'S OWN ACCOUNT, NEVER THE PLATFORM ORG. It uses THEIR token, so the repo is theirs and
+   * their own host can read it. The platform-org mirror is deliberately not offered for a deploy:
+   * their Render account cannot see it, so a deploy from it could only ever fail.
+   */
+  app.post('/api/agentv3/github/push-app', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken.trim() : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!githubToken) { res.status(401).json({ error: 'Connect GitHub first — we need your permission to create the repository in your account.' }); return; }
+    try {
+      const actuator = buildActuator();
+      // The files must be IN the sandbox to be pushed. After the idle sweep the sandbox comes back
+      // empty while the app sits safe in the durable store — the exact trap the publish route
+      // documents — so seed it first rather than pushing an empty repo.
+      const prep = await prepareSandboxForBuild(actuator, workspaceId);
+      if (!prep.ready) { res.status(422).json({ error: prep.reason }); return; }
+
+      const store = getConversationStore();
+      const rec = await store.get(workspaceId).catch(() => null);
+      // The PERSISTED name wins, exactly as the build path does — so this push lands in the repo the
+      // app already uses (including one the user renamed) instead of creating a second one beside it.
+      const repoName = rec?.repoName
+        || repoNameForProject(userId, workspaceId, {
+          appName: rec?.appName || rec?.title || 'app',
+          createdAtMs: typeof rec?.createdAt === 'number' && rec.createdAt > 0 ? rec.createdAt : Date.now(),
+        });
+
+      const client = new UserGitHubClient(githubToken);
+      const login = await client.getLogin();
+      const repo = await client.ensureRepo(repoName);
+      /**
+       * 🔴 NEVER FORCE-PUSH OVER A REPOSITORY WE DID NOT CREATE (2026-09-07). `ensureRepo` is
+       * get-or-create and `pushAll` is `git push --force` — so when the name resolved to a repository
+       * the USER made (their own history on its default branch), this route would have replaced that
+       * history with the sandbox, irreversibly. The decision now comes from evidence — created just
+       * now, or carrying the description every NavBharatAI-made repository carries — and anything else
+       * is pushed to the working branch only, with the default branch left exactly as it was. See
+       * pushAppTarget.ts. The pushed branch is also the DEPLOY branch: it is the one holding this app.
+       */
+      const target = decidePushBranch({ created: repo.created, description: repo.description, defaultBranch: repo.defaultBranch || 'main' });
+      const authedUrl = client.authedCloneUrl(repoName, login);
+      const sync = new GitRepoSync(actuator, workspaceId);
+      const pushed = await sync.pushAll(authedUrl, target.branch, 'Save this app to GitHub (NavBharatAI)');
+      if (!pushed.pushed && !pushed.noChange) {
+        res.status(502).json({ error: 'Your repository was created, but the code could not be pushed to it. Nothing was lost — your app is safe here. Try again in a moment.' });
+        return;
+      }
+      // Remember it, so the Publish screen knows about this repo on every later visit rather than only
+      // while a build event happens to be in flight — which is what made the panel ask for a repo the
+      // user already had. It is ALSO how a client that stopped waiting learns the push landed: the
+      // screen polls this record after its own timeout (see HostingChooser.awaitRepoFact).
+      await store.update(workspaceId, {
+        repoName, repoOwner: login, repoOwnedByUser: true, deployBranch: target.branch,
+        updatedAt: rec?.updatedAt ?? Date.now(),
+      }).catch(() => { /* the push is what mattered; a failed note only costs the shortcut */ });
+
+      res.json({
+        ok: true, fullName: repo.fullName || `${login}/${repoName}`, htmlUrl: repo.htmlUrl || '', owner: login, repo: repoName,
+        pushedBranch: target.branch, defaultBranch: repo.defaultBranch || 'main', mode: target.mode,
+      });
+    } catch (e) {
+      res.status(502).json({ error: `Could not save your app to GitHub: ${e instanceof Error ? e.message : String(e)}` });
     }
   });
 
@@ -3945,12 +4723,16 @@ async function noteBuildOutcome(
       // exactly like the chat build path (deriveWorkspaceId → ensureWorkspace(resumeSandboxId) → hydrate).
       // Best-effort: on any failure we fall through to the structure check — never worse than today.
       sendStage('Restoring your project into the sandbox', 6);
+      // The durable files, loaded ONCE for this wake and reused by the port resolver and the migration
+      // decision below — three reads of the same Firestore index would be three chances to disagree.
+      let durableFiles: Record<string, string> | null = null;
       try {
         const resumeSandboxId = sandboxResumeEnabled()
           ? (await sandboxStore.get(workspaceId).catch(() => null)) ?? undefined
           : undefined;
         await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
         const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+        durableFiles = saved;
         // SELF-HEAL the recurring "No package.json found" (admin, 2026-07-21). A hydrated vite-react
         // project that has real source files but LOST its package.json (a scaffold gap, or a save that
         // dropped it) is RUNNABLE the moment the foundation is synthesized — so heal it here instead of
@@ -4011,10 +4793,24 @@ async function noteBuildOutcome(
        * framework guess only where BOTH are — so this can add knowledge but never overrule a better
        * source. Reading the files is best-effort; a failure leaves today's behaviour untouched.
        */
+      /**
+       * …AND AN IMPORTED REPO DECLARES IT SOMEWHERE ELSE AGAIN (admin 2026-09-04: *"jab github se koi
+       * repo import karta hai, to kis port par run karna hai yeh confuse ho jata hai"*).
+       *
+       * 🔒 THE CLASS, NOT A THIRD INSTANCE. This line used to call `serverPortFromFiles`, which reads a
+       * FIXED list of server entry paths. That is enough for an app WE scaffold, and wrong for an
+       * imported one, which pins its port in `vite.config.*`, in a `.env`, or in a server entry outside
+       * that list (`backend/server.js`, `api/index.js`). A `clientVitePort` reader already existed but
+       * was module-private, so this path — the one that most needed it — could not call it.
+       *
+       * `declaredAppPort` is the single resolver over EVERY declaration site, with the precedence
+       * documented there. Same precedence as before at the top (an explicit script flag still wins), so
+       * this can only ever ADD knowledge where we previously had none.
+       */
       let codePort: number | null = null;
       if (scriptPort === null) {
-        const src = await loadWorkspaceFiles(workspaceId).catch(() => null);
-        if (src) codePort = serverPortFromFiles(src);
+        const src = durableFiles ?? await loadWorkspaceFiles(workspaceId).catch(() => null);
+        if (src) codePort = declaredAppPort(src, pkgRaw)?.port ?? null;
       }
       const effectivePort = scriptPort ?? codePort ?? expectedPort;
       if (!structure.ok) {
@@ -4030,9 +4826,20 @@ async function noteBuildOutcome(
         finish({ ok: false, portListening: false, reason, detail: '' });
         return;
       }
-      // 90s — matches the SimpleBuilder fastPreview default (deps install + start + port-wait +
-      // one retry can legitimately take that long on a cold sandbox; a shorter cap would report a
-      // false "could not reach the sandbox" for an install that's simply still running).
+      // 🔒 A BUDGET DERIVED FROM THE WORK, NOT A 90-SECOND WALL (admin 2026-09-08: "2-3 din bad
+      // preview band ho jana. kitna bhi wake up karo, wapas preview nahi chalna").
+      //
+      // This used to be `90_000`, with a comment saying a cold install "can legitimately take that
+      // long". It cannot. On a fresh machine — which is what a wake meets after E2B has killed the old
+      // one — the one runCommand below contains: a deps-stale check, `npm install` (60-180 s cold, its
+      // own 5-minute bound), a 25-second port wait, and up to two recovery rounds of which a Postgres
+      // re-provision alone is 120 s. The 90-second race lost EVERY time on a cold machine, reported
+      // "could not reach the sandbox" for an install that was still running — and then, far worse,
+      // the `finally` below released the sandbox hold while that install continued, so the idle sweep
+      // paused the machine mid-install and left a torn node_modules that no later wake could boot.
+      // The actuator now holds the machine for the operation's real duration (E2BActuator
+      // `_opsInFlight`), and the wait here is sized to the work (previewWake.ts). The stream's
+      // heartbeat keeps the client honest for the whole window.
       sendStage('Installing dependencies & starting the dev server', 35);
       const bootStartedAt = Date.now();
       if (streaming) {
@@ -4074,10 +4881,41 @@ async function noteBuildOutcome(
         const note = bootEnvNote(envResult);
         if (note) sendStage(note, 70);
       } catch { /* the app boots as it would have — this can only add keys, never remove them */ }
-      const result = await withTimeout(actuator.runCommand(workspaceId, devRunCommand), 90_000, 'preview-diagnose');
+      const result = await withTimeout(actuator.runCommand(workspaceId, devRunCommand), previewWakeBudgetMs(), 'preview-diagnose');
+      let combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+      // 🔒 THE TABLES, NOT JUST THE SERVER (admin 2026-09-08, the third link in the dead-preview chain).
+      //
+      // When the wake meets a fresh machine, the boot's own recovery re-provisions Postgres — a NEW,
+      // EMPTY database. The app's migrations ran only on the IMPORT path (detectMigrationCommand,
+      // ~9385), never here, so the server came up and every page that reads data died on
+      // `relation "x" does not exist`. Replaying them is the same step the import runs, decided by
+      // the same pure detector over the same durable files, and it runs only when ALL of: the app
+      // needs a database, it ships its own migration mechanism, and DATABASE_URL points at the
+      // sandbox's OWN loopback Postgres. A user's real Supabase/Neon is never the target of a schema
+      // push on a wake — that is a decision only they may make. Bounded, best-effort, recorded
+      // honestly in the result; a failure changes nothing about the boot verdict below.
+      let dbMigration: 'applied' | 'failed' | 'not-needed' = 'not-needed';
+      try {
+        const migration = durableFiles ? detectMigrationCommand(durableFiles) : null;
+        if (migration && durableFiles && detectNeedsDatabase(durableFiles)) {
+          const envText = await actuator.readFile(workspaceId, '.env').catch(() => '');
+          const databaseUrl = envFileValue(envText, 'DATABASE_URL');
+          if (shouldMigrateOnWake({ needsDb: true, hasMigration: true, databaseUrl })) {
+            sendStage(`Creating your app's database tables (${migration.label})`, 80);
+            const mres = await withTimeout(
+              actuator.runCommand(workspaceId, `${shellEnvAssignment('DATABASE_URL', databaseUrl!)} ${migration.command}`),
+              150_000, 'preview-diagnose-migrate',
+            );
+            dbMigration = mres.exitCode === 0 ? 'applied' : 'failed';
+            combined += `\n[wake] ${migration.label} → ${dbMigration}${dbMigration === 'failed' ? `\n${(mres.stdout + mres.stderr).split('\n').slice(-12).join('\n')}` : ''}`;
+          }
+        }
+      } catch (e) {
+        dbMigration = 'failed';
+        combined += `\n[wake] database migrations did not finish: ${e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200)}`;
+      }
       if (heartbeat) clearInterval(heartbeat);
       sendStage('Running the health check', 85);
-      const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
       const { up, port } = parseDevServerHealthCheck(combined);
       // A port that ONCE genuinely rendered THIS app outranks any guess about it — the health check's
       // own reading still wins, because that is a live observation rather than a memory.
@@ -4130,6 +4968,7 @@ async function noteBuildOutcome(
         finish({
           ok: served.rendered,
           recipeSaved,
+          dbMigration,
           portListening: true,
           port: winnerPort,
           previewUrl,
@@ -4208,6 +5047,23 @@ async function noteBuildOutcome(
     const page = (status: number, kind: 'asleep' | 'starting' | 'refused' | 'in-app-only') =>
       res.status(status).type('html').send(doorPage(kind));
     try {
+      /**
+       * THE SPINNER IS THE LAST THING TO TRY, NOT THE FIRST (admin 2026-09-08).
+       *
+       * A machine that exists but is not answering yet is now a MINUTES-long state, not a seconds-long
+       * one: the wake budget was raised to ten minutes so a cold install can finish (previewWake.ts).
+       * Watching a spinner for that long, over an app whose saved copy we are holding, is the worse
+       * experience — so when the copy is PROVABLY still this app (nothing written since it was taken),
+       * the user gets their app and the live one takes over on its own.
+       *
+       * Declared here so BOTH 'starting' exits below go through it. Two exits meant two chances for a
+       * later edit to fix one and leave the other on the spinner.
+       */
+      let startingSnapshot: (() => boolean) | null = null;
+      const starting = (): void => {
+        if (startingSnapshot?.()) return;
+        page(200, 'starting');
+      };
       if (!previewDoorEnabled()) return page(404, 'refused');
       const ws = typeof req.query?.ws === 'string' ? req.query.ws : '';
       if (!verifyDoorToken(ws, typeof req.query?.exp === 'string' ? req.query.exp : null,
@@ -4253,6 +5109,25 @@ async function noteBuildOutcome(
         }
         return page(200, 'asleep');
       }
+      // A machine EXISTS. Below this line every exit that cannot reach it goes through `starting()`,
+      // which offers the saved copy first — but only on PROOF that the copy is still this app. The
+      // stamp is read once, bounded and best-effort: unreadable means no proof, which means today's
+      // waiting page, never a guess. (Read here rather than inside the helper so the port sweep's
+      // latency and this Firestore read do not stack on the slowest path.)
+      const lastChangeAt = previewSnapshotEnabled() && doorRecord?.snapshotUrl
+        ? await raceTimeout(workspaceFilesSavedAt(ws), 3_000, 'doorLastChange').catch(() => null)
+        : null;
+      startingSnapshot = () => {
+        if (!shouldServeSnapshot({
+          enabled: previewSnapshotEnabled(),
+          doorState: 'starting',
+          snapshotUrl: doorRecord?.snapshotUrl,
+          snapshotAt: doorRecord?.snapshotAt,
+          lastChangeAt,
+        })) return false;
+        res.redirect(302, String(doorRecord!.snapshotUrl));
+        return true;
+      };
       // The PROVEN port leads the sweep — recorded the moment this app last genuinely rendered — and
       // the sweep verifies whatever it claims: the door never redirects to a port it did not just see
       // answer. This is what kills the 3000-vs-5000 loop: no url is ever believed about a port again.
@@ -4295,9 +5170,9 @@ async function noteBuildOutcome(
         20_000, 'doorPortSweep',
       ).catch(() => null);
       const found = parsePortSweep(sweep?.stdout);
-      if (found === null) return page(200, 'starting');
+      if (found === null) return starting();
       const live = await raceTimeout(actuator.getPortUrl(ws, found), 5_000, 'doorPortUrl').catch(() => '');
-      if (!live) return page(200, 'starting');
+      if (!live) return starting();
       const target = applyPreviewDomain(String(live));
       // THE KEEP-ALIVE SHELL USED TO BE SERVED HERE, and it is deliberately gone (admin 2026-08-25).
       // Its only consumer was a popped-out tab, which the in-app-only rule above now refuses before
@@ -4481,11 +5356,19 @@ async function noteBuildOutcome(
       );
       const describesUserView = measurementDescribesUserView(urlVerdict);
 
-      // Is the user currently being shown the VM-free copy? True only when the machine is genuinely
-      // gone AND a snapshot exists — the same condition the door itself applies, read from the same
-      // record, so the two can never tell the user different stories.
+      // Is the user currently being shown the VM-free copy? Answered by applying THE DOOR'S OWN
+      // decision to the same record, so the two can never tell the user different stories.
+      //
+      // 🔒 THIS IS THE HALF THAT MAKES THE WAKING FALLBACK HONEST, not a nicety (admin 2026-09-08).
+      // The door may now serve the saved copy while a machine is still starting. It is the CURRENT
+      // app when it does — that is the proof the door demands — but it is static, and the user must be
+      // told which of the two they are looking at. If this block still answered only for a machine
+      // that is GONE, the panel would show a saved copy under no note at all, which is precisely the
+      // silent substitution the old blanket refusal existed to prevent. The two decisions therefore
+      // move together, from one shared function, or neither should move.
       let snapshotServing = false;
       let snapshotTakenAt: number | null = null;
+      let snapshotWaking = false;
       try {
         if (previewSnapshotEnabled() && livePortUp !== true) {
           const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'healthSnapshot').catch(() => null);
@@ -4493,12 +5376,24 @@ async function noteBuildOutcome(
             buildActuator().getSandboxId ? buildActuator().getSandboxId!(workspaceId) : Promise.resolve(null),
             3_000, 'healthSandboxId',
           ).catch(() => null));
-          if (sandboxGone && shouldServeSnapshot({ enabled: true, doorState: 'asleep', snapshotUrl: rec?.snapshotUrl })) {
+          // The stamp is only needed for the 'starting' case, so it is only read there.
+          const lastChangeAt = sandboxGone || !rec?.snapshotUrl
+            ? null
+            : await raceTimeout(workspaceFilesSavedAt(workspaceId), 3_000, 'healthLastChange').catch(() => null);
+          const doorState = sandboxGone ? 'asleep' as const : 'starting' as const;
+          if (shouldServeSnapshot({
+            enabled: true,
+            doorState,
+            snapshotUrl: rec?.snapshotUrl,
+            snapshotAt: rec?.snapshotAt,
+            lastChangeAt,
+          })) {
             snapshotServing = true;
+            snapshotWaking = doorState === 'starting';
             snapshotTakenAt = typeof rec?.snapshotAt === 'number' ? rec.snapshotAt : null;
           }
         }
-      } catch { /* the note is a nicety; the door already does the real work */ }
+      } catch { /* a read failure means no note and today's waiting page — never a wrong note */ }
 
       const health = classifyPreviewHealth({
         hasFiles: fileCount > 0,
@@ -4537,7 +5432,10 @@ async function noteBuildOutcome(
         // app rather than a spinner (previewSnapshot.ts); this is what lets the surface SAY so. It
         // matters: they are looking at the last built version, and without being told they would
         // report a bug about an edit that is simply not in this copy.
-        ...(snapshotServing ? { snapshotServing: true, snapshotNote: SNAPSHOT_NOTE, snapshotAt: snapshotTakenAt } : {}),
+        // Two situations, two notes: an EXPIRED machine (the user may want to bring it back) and one
+        // that is STARTING (nothing is wrong and they need do nothing). One note for both would be
+        // wrong for one of them every time.
+        ...(snapshotServing ? { snapshotServing: true, snapshotNote: snapshotWaking ? SNAPSHOT_WAKING_NOTE : SNAPSHOT_NOTE, snapshotAt: snapshotTakenAt } : {}),
         // The machine is deliberately asleep and the saved copy is answering for the app. Distinct from
         // `snapshotServing` above, which means the machine is GONE — here it is alive and we are simply
         // not waking it. The client frames the copy and says so; nothing is broken and nothing is lost.
@@ -6099,10 +6997,22 @@ async function noteBuildOutcome(
     // Only LIVE apps, and `orphaned` surfaced so the UI can say plainly why an app has no chat to
     // open — the very case this endpoint exists for. See publishedAppList for both rules.
     const apps = publishedAppList(records);
+    // Apps a plan lapse took offline, listed separately so the user can find and restore them. They
+    // are deliberately NOT in `apps` — that count has to equal what the publish cap enforces.
+    const paused = pausedAppList(records);
+    // The tier the user actually holds, so the cap shown matches the cap enforced. Bounded and
+    // forgiving: unreadable ⇒ null ⇒ the free cap, which is the safe answer in both directions.
+    const tier = await readHostingPlanStatus(getDb() as any, identity.uid)
+      .then((st) => st.tier)
+      .catch(() => null);
     res.json({
       apps,
-      // The cap is stated with the list so "5 of 5 used" is visible before a publish is refused.
-      cap: publishedAppCap(),
+      paused,
+      // The cap is stated with the list so "5 of 5 used" is visible before a publish is refused. It
+      // follows the user's PLAN, so a Growth customer is not told they are at the free limit of 5.
+      cap: publishedAppCapForTier(tier),
+      freeCap: publishedAppCap(),
+      planName: tier?.name ?? null,
       used: apps.length,
     });
   });
@@ -6144,6 +7054,279 @@ async function noteBuildOutcome(
    * status is 'unpublished', NOT 'taken_down' — the owner must be able to publish it again (see
    * DeploymentStatus), and the deploy gate only blocks republish for a takedown.
    */
+  /**
+   * IS THERE AN EARLIER VERSION TO GO BACK TO? — read-only, so the UI can show an honest control.
+   *
+   * The client asks this rather than guessing, because every reason a rollback is unavailable needs
+   * different words: never published, only one version, served from storage (which keeps no history),
+   * or simply unreadable right now. A greyed-out button with no explanation reads as broken.
+   */
+  /** The services connected to this app. Credentials are NEVER returned — see McpServerStore. */
+  app.post('/api/agentv3/mcp/list', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    res.json({ servers: await mcpServerStore.listForDisplay(workspaceId), max: MAX_SERVERS_PER_WORKSPACE });
+  });
+
+  /**
+   * Connect a service.
+   *
+   * 🔒 The address is checked with `assertPublicHttpUrl` — the SAME guard web_fetch uses, which
+   * resolves DNS — because this URL is one OUR SERVER will fetch. Without it a connect form is a
+   * request to read the cloud metadata endpoint. The check is repeated on every later call too
+   * (mcpTransport): a host that resolves publicly today can resolve elsewhere tomorrow.
+   *
+   * The connection is PROVEN before it is saved: we ask the service for its tools, and refuse to
+   * store one that answered nothing. Saving an unverified connection would leave the user with a
+   * service listed as connected that silently contributes nothing.
+   */
+  app.post('/api/agentv3/mcp/connect', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+    const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    const headers = (req.body?.headers && typeof req.body.headers === 'object' && !Array.isArray(req.body.headers))
+      ? req.body.headers as Record<string, string> : undefined;
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+
+    const urlCheck = await assertPublicHttpUrl(url).catch(() => ({ ok: false }));
+    const existing = await mcpServerStore.listForDisplay(workspaceId);
+    const verdict = canConnectServer({
+      serverId: id,
+      urlIsValid: /^https?:\/\//i.test(url),
+      urlIsPublic: !!urlCheck.ok,
+      existingIds: existing.map((e) => e.id),
+    });
+    if (!verdict.ok) { res.status(400).json({ error: verdict.message, reason: verdict.reason }); return; }
+
+    const probe = await listRemoteTools({ id, url, headers });
+    if (probe.tools.length === 0) {
+      res.status(400).json({
+        error: probe.error
+          || 'That service did not offer any tools, so there is nothing to connect. Check the address and any key it needs.',
+      });
+      return;
+    }
+    if (!(await mcpServerStore.add(workspaceId, { id, url, headers }))) {
+      res.status(500).json({ error: 'The connection could not be saved. Please try again.' });
+      return;
+    }
+    res.json({ ok: true, id, toolCount: probe.tools.length, tools: probe.tools.map((t) => t.remoteName) });
+  });
+
+  /** Disconnect a service. Idempotent — already gone is success, not an error. */
+  app.post('/api/agentv3/mcp/remove', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const id = typeof req.body?.id === 'string' ? req.body.id : '';
+    if (!workspaceId || !id) { res.status(400).json({ error: 'Nothing to remove.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const ok = await mcpServerStore.remove(workspaceId, id);
+    res.json(ok ? { ok: true } : { ok: false, error: 'Could not remove that service right now.' });
+  });
+
+  // ═══ SITE ANALYTICS — "kitne log aaye?" (ROADMAP §13, 1.1) ═══
+  //
+  // THE HIT ENDPOINT IS PUBLIC AND CROSS-ORIGIN BY DESIGN: the caller is a visitor's browser on a
+  // published app's own origin, and it has no session with us. The beacon sends `text/plain`, which
+  // is a CORS "simple request" (no preflight), and reads nothing back — the headers below exist so a
+  // `fetch` fallback is never blocked either. Defences are exactly what a public endpoint can have:
+  // accept nothing that is not the beacon's shape (parseHit), honour DNT/GPC here as well as in the
+  // page, a rate limit, and a store that buffers, bounds every document and never throws.
+  // The response goes out BEFORE any work — a counter must never slow a visitor down.
+  const hitCors = (res: Response) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  };
+  app.options(HIT_PATH, (_req: Request, res: Response) => { hitCors(res); res.status(204).end(); });
+  // Per-IP 1,200/h is ~20 page views a minute from one address — generous for a person, cheap to
+  // exhaust for a script. In-memory only (`durable: false`): a lost count on a cold start costs
+  // nothing here, and a Firestore read per page view would cost more than the feature.
+  const hitLimiter = rateLimiter({ name: 'site-hit', authed: 3000, anon: 1200, noun: 'hits', durable: false, anonGlobalPerHour: 500_000 });
+  app.post(HIT_PATH, express.text({ type: '*/*', limit: '4kb' }), hitLimiter, (req: Request, res: Response) => {
+    hitCors(res);
+    res.status(204).end();
+    if (!siteAnalyticsEnabled() || requestOptsOut(req.headers as Record<string, unknown>)) return;
+    const hit = parseHit(req.body);
+    if (!hit) return;
+    siteAnalyticsStore.record({
+      ...hit,
+      ip: req.ip || '',
+      userAgent: String(req.headers['user-agent'] || ''),
+      nowMs: Date.now(),
+    });
+  });
+
+  /**
+   * The builder's own numbers. Owner-checked like rollback-status: a visitor count discloses how an
+   * app is doing, which is the owner's business and nobody else's. The app id is derived here from
+   * the workspace, never taken from the client — the same reason rollback re-derives its target.
+   */
+  app.post('/api/agentv3/site-analytics', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    if (!siteAnalyticsEnabled()) { res.json({ available: false, reason: 'disabled' }); return; }
+    const days = Math.min(30, Math.max(1, Math.floor(Number(req.body?.days) || 7)));
+    res.json(await siteAnalyticsStore.summary(siteIdForWorkspace(workspaceId), days));
+  });
+
+  // ═══ SITE SETTINGS — redirects, embedding, a real 404 (ROADMAP §13, 1.6) ═══
+  //
+  // Read and saved by the app's verified OWNER only; validated by the pure `validateSiteConfig`, so
+  // a rule that could turn the site into an open redirect never reaches the store, let alone the
+  // host. Settings take effect on the NEXT publish — the response says so rather than implying the
+  // live site changed.
+  app.post('/api/agentv3/site-config', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const saved = await siteConfigStore.get(workspaceId);
+    res.json({ config: saved ?? DEFAULT_SITE_CONFIG, maxRedirects: MAX_REDIRECTS });
+  });
+
+  app.post('/api/agentv3/site-config/save', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const { config, errors } = validateSiteConfig(req.body?.config);
+    if (!config) { res.status(400).json({ ok: false, errors }); return; }
+    const stored = await siteConfigStore.set(workspaceId, userId ?? '', config);
+    if (!stored) { res.status(503).json({ ok: false, errors: ['Your settings could not be saved just now. Nothing was changed — try again in a moment.'] }); return; }
+    res.json({ ok: true, config, message: 'Saved. Publish again for these settings to reach your live site.' });
+  });
+
+  app.post('/api/agentv3/rollback-status', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    // Same owner check as publish and unpublish: this discloses an app's publish history.
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+
+    const rec = await deploymentStore.get(workspaceId).catch(() => null);
+    if (!isLiveDeployment(rec)) {
+      res.json({ available: false, reason: 'never-published', message: 'This app is not published right now, so there is no live version to undo.' });
+      return;
+    }
+    const bucketOnly = bucketOnlyPublishEnabled();
+    // A bucket-only app has no channel at all, so its history is not merely empty — it does not
+    // exist. Asking for it would be a wasted call that could only fail.
+    const releases = bucketOnly ? [] : await new FirebaseHostingDeployer().listChannelReleases(makeChannelId(workspaceId));
+    // THE HISTORY PICKER (ROADMAP §13, 1.4): every version the user may go back to, one per version,
+    // newest first — beside the one-step verdict, so "undo" and "go back to Tuesday's" read one list.
+    res.json({ ...rollbackAvailability({ releases, bucketOnly }), choices: bucketOnly ? [] : listRollbackChoices(releases ?? []) });
+  });
+
+  /**
+   * PUT THE LIVE APP BACK to the version before this one.
+   *
+   * Nothing is deleted: this creates a NEW release pointing at a version the host already holds, so
+   * the history keeps growing and a rollback can itself be undone. The target is re-derived here
+   * rather than trusted from the client — a version name from the browser is an instruction to serve
+   * arbitrary content, and the check that it is genuinely this app's previous version must happen on
+   * the server.
+   */
+  app.post('/api/agentv3/rollback', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'No app selected.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+
+    const rec = await deploymentStore.get(workspaceId).catch(() => null);
+    if (!isLiveDeployment(rec)) {
+      res.status(409).json({ ok: false, error: 'This app is not published right now, so there is nothing to undo.' });
+      return;
+    }
+    const bucketOnly = bucketOnlyPublishEnabled();
+    const deployer = new FirebaseHostingDeployer();
+    const releases = bucketOnly ? [] : await deployer.listChannelReleases(makeChannelId(workspaceId));
+    const availability = rollbackAvailability({ releases, bucketOnly });
+    if (!availability.available) {
+      // 409, not 500: nothing failed — there is genuinely nothing to roll back to, and the message
+      // says which of the several reasons applies.
+      res.status(409).json({ ok: false, reason: availability.reason, error: availability.message });
+      return;
+    }
+    /**
+     * "GO BACK TO THIS ONE" (ROADMAP §13, 1.4). The request may name a version, but it is only ever a
+     * KEY into the history this server just read: `pickRollbackTargetByVersion` returns a target only
+     * for a FINALIZED, non-live version of THIS app's channel, and the rollback call below is the same
+     * one the one-step undo makes. A name that is not in the history is refused, never served — a
+     * version name from the browser is an instruction to put arbitrary bytes under the user's URL.
+     */
+    const requested = typeof req.body?.versionName === 'string' ? req.body.versionName : '';
+    const target = requested ? pickRollbackTargetByVersion(releases ?? [], requested) : availability.target;
+    if (!target) {
+      res.status(409).json({ ok: false, reason: 'unknown-version', error: 'That version is not in this app\'s publish history any more (or it is the one already live), so it cannot be brought back. Pick another from the list.' });
+      return;
+    }
+
+    const done = await deployer.rollbackChannel(makeChannelId(workspaceId), target);
+    if (!done) {
+      res.status(502).json({ ok: false, error: 'The previous version could not be brought back just now. Your app is unchanged — nothing was removed. Please try again in a moment.' });
+      return;
+    }
+    // The registry is deliberately NOT rewritten here. Its fields describe WHICH app is published and
+    // where — the url, the owner, the file count — and a rollback changes none of them; it changes
+    // which version that same url serves. Bumping `updatedAt` would make the record claim a publish
+    // that did not happen, and the Publish Capacity screen reads these records to reason about
+    // channels. The version history lives with the host, which is the thing that actually knows it.
+    res.json({ ok: true, message: rollbackSummary(target), url: rec?.url ?? null });
+  });
+
   app.post('/api/agentv3/unpublish', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
@@ -6181,8 +7364,44 @@ async function noteBuildOutcome(
       return;
     }
 
+    /**
+     * 🔴 GIVE THE HOSTING SLOT BACK (ROADMAP §11, after the admin asked "aisa to nahi kuch user ke bad
+     * hosting band ho jaye").
+     *
+     * Cloud Run allows **1,000 services per project per region and Google does not raise it**. §10's
+     * lesson about the Firebase channel ceiling applies exactly: the cap is not reached by working
+     * apps, it is reached by DEAD ones nobody deleted. An unpublished app whose service survives costs
+     * nothing to run (it scales to zero) and still holds a slot forever — so the ceiling would arrive
+     * early, and for the stupidest possible reason.
+     *
+     * 🔒 BEST-EFFORT ON PURPOSE, AND ONLY IN THIS DIRECTION. The static site is already down by the
+     * time we get here, which is what the user asked for; failing their takedown because a Cloud Run
+     * delete did not answer would be refusing to do the thing that already succeeded. A service that
+     * survives is waste, and `hostedServiceInventory` classifies exactly that as reclaimable — it is
+     * visible rather than lost. The reverse order would not be safe, which is why the channel delete
+     * above still gates the response.
+     */
+    let hostedSlotFreed: boolean | null = null;
+    try {
+      const project = appsProject();
+      if (project.projectId) {
+        const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+        const token = await auth.getAccessToken().catch(() => null);
+        if (token) {
+          const convo = await getConversationStore().get(workspaceId).catch(() => null);
+          const del = await deleteHostedService({
+            token: String(token),
+            projectId: project.projectId,
+            region: appsRegion(),
+            service: serviceNameFor(workspaceId, convo?.appName || convo?.title || null),
+          });
+          hostedSlotFreed = del.ok;
+        }
+      }
+    } catch { /* the takedown the user asked for has already happened — never fail it on this */ }
+
     const marked = await deploymentStore.setStatus(workspaceId, 'unpublished').catch(() => false);
-    try { audit('APP_UNPUBLISHED_BY_OWNER', { workspaceId, userId: userId ?? 'anon', registryUpdated: marked }); }
+    try { audit('APP_UNPUBLISHED_BY_OWNER', { workspaceId, userId: userId ?? 'anon', registryUpdated: marked, hostedSlotFreed }); }
     catch { /* audit never blocks */ }
     res.json({
       ok: true,
@@ -6405,9 +7624,21 @@ async function noteBuildOutcome(
            * right, and every request goes nowhere. Falling through to the offer below is the correct
            * outcome — the user deploys the backend first, then publishes.
            */
+          /**
+           * 🔴 LOOKED UP BY THE WRONG KEY (audit 2026-09-07). This asked the host for a service NAMED
+           * `<workspaceId>`. No service is ever named that — a created one is named after the app or
+           * its repository — so the lookup could never match, the address stayed empty, and every
+           * split app was refused on every publish while the message said "deploy the server first,
+           * then publish". The repository is what the host matches on; it comes from the workspace's
+           * durable record (deployRepoMemory.ts), with the repo name as the name fallback.
+           */
+          const durableRepoRec = await getConversationStore().get(workspaceId).catch(() => null);
           let wiredToBackend = false;
           if (wiring?.strategy === 'split' && key) {
-            const backendUrl = await findBackendUrl({ apiKey: key.key, appName: workspaceId }).catch(() => '');
+            const splitRepo = resolveDeployRepo(undefined, durableRepoRec);
+            const backendUrl = await findBackendUrl({
+              apiKey: key.key, repoUrl: splitRepo?.repoUrl, appName: durableRepoRec?.repoName || undefined,
+            }).catch(() => '');
             const envVars = buildEnvForSplit(wiring, backendUrl);
             if (Object.keys(envVars).length > 0) {
               const existing = await actuator.readFile(workspaceId, '.env.production').catch(() => '');
@@ -6417,9 +7648,35 @@ async function noteBuildOutcome(
           }
           // Wired: the frontend half is now an ordinary static publish, so fall through and run it.
           if (!wiredToBackend) {
+          /**
+           * ONE SCREEN, ONE STORY (admin 2026-09-04, from a screenshot of it contradicting itself).
+           *
+           * The refusal said *"Render is configured — a real deploy can run"* while the panel directly
+           * beneath it said *"Your code has to live in a GitHub repository first"* — and no "Deploy
+           * backend" button existed, because `backendDeployOffer` had correctly withheld it for
+           * having no repo. The panel checked key AND repo; this message checked only the key.
+           *
+           * The client's `deployRepo` is the very fact the panel renders, so taking it from there
+           * makes the two agree BY CONSTRUCTION rather than by two implementations staying in step.
+           * It shapes a sentence only — never an authorisation — so a client-supplied value costs
+           * nothing, and its absence (`undefined`) keeps exactly the old wording.
+           */
+          /**
+           * 🔴 THE CLIENT'S CLAIM IS NOT THE ONLY FACT WE HAVE (admin 2026-09-06, "GitHub se import
+           * ki hai, matlab connect hai!"). `req.body.hasRepo` reflects only THIS browser tab's
+           * live-session state, which starts empty on every reload — so a workspace whose import
+           * genuinely landed in the user's own GitHub would still be told to go connect and push one.
+           * The workspace's OWN durable record is consulted too; see deployRepoMemory.ts for why an
+           * empty client claim never overrides a durable yes.
+           */
+          // `durableRepoRec` was read above, before the split lookup — one read serves both.
+          const hasRepo = repoAvailableForDeploy(
+            { hasRepo: typeof req.body?.hasRepo === 'boolean' ? req.body.hasRepo : false },
+            durableRepoRec,
+          );
           const decision = deployDecision(plan, {
             canDeploy: key !== null,
-            requirement: renderRequirement(process.env, vault),
+            requirement: renderRequirement(process.env, vault, hasRepo),
             splitAdvised: wiring ? wiring.strategy === 'split' : undefined,
             wholeAppNote: wiring?.summary ?? '',
           });
@@ -6516,6 +7773,10 @@ async function noteBuildOutcome(
         actuator, workspaceId, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
         makeDeployFn({ userId, githubToken, providerId, onDomainOutcome: (o) => { domainOutcome = o; } }),
       );
+      // THE USER PRESSED PUBLISH — that is the consent, and it is granted explicitly (2026-09-01).
+      // `deploy` denies by default now, so this line is what keeps the button working; without it the
+      // button would silently stop publishing, which is why it sits directly above the dispatch.
+      dispatcher.setPublishConsent(true);
       const result = await dispatcher.dispatch({ id: 'publish', name: 'deploy', input: {} });
       if (result.is_error) {
         res.status(422).json({ error: result.content });
@@ -6772,7 +8033,7 @@ async function noteBuildOutcome(
       const fresh = req.body?.fresh === true;
       const cached = fresh ? undefined : inbrowserPreviewCache.get(cacheKey);
       if (cached && cached.hash === filesHash && Date.now() - cached.ts < INBROWSER_CACHE_TTL_MS) {
-        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed });
+        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)) });
         return;
       }
       const vfs = VirtualFileSystem.fromRecord(files);
@@ -6784,7 +8045,7 @@ async function noteBuildOutcome(
         const oldest = inbrowserPreviewCache.keys().next().value;
         if (oldest !== undefined) inbrowserPreviewCache.delete(oldest);
       }
-      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed });
+      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)) });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
     }
@@ -6948,7 +8209,15 @@ async function noteBuildOutcome(
             let repoName = repoNameForProject(userId, workspaceId);
             try {
               const idRec = await getConversationStore().get(workspaceId).catch(() => null);
-              if (idRec?.title) {
+              // Same precedence as the build path (admin 2026-09-04): a STORED repo name wins
+              // outright, then the user's chosen app name, then the auto-derived title. Converging on
+              // the identical rule here is the point of this block — an import that picked a
+              // different name would land the user's files in a second, disconnected repo.
+              if (idRec?.repoName) {
+                repoName = idRec.repoName;
+              } else if (idRec?.title) {
+                // `title`, never `appName` — same reason as the build path: a repo name derived from
+                // a value the user can change is a repo that moves out from under the app.
                 repoName = repoNameForProject(userId, workspaceId, {
                   appName: idRec.title,
                   createdAtMs: typeof idRec.createdAt === 'number' && idRec.createdAt > 0 ? idRec.createdAt : Date.now(),
@@ -6956,11 +8225,20 @@ async function noteBuildOutcome(
               }
             } catch { /* readable-name lookup is best-effort — the stable fallback name still works */ }
             const repo = await userClient.ensureRepo(repoName);
+            // Same guard as push-app (2026-09-07): a name that resolves to a repository the USER made
+            // must never be force-pushed on its default branch. See pushAppTarget.ts.
+            const target = decidePushBranch({ created: repo.created, description: repo.description, defaultBranch: repo.defaultBranch || 'main' });
             const authedUrl = userClient.authedCloneUrl(repoName, login);
             const repoSync = new GitRepoSync(actuator, workspaceId);
-            const pushed = await repoSync.pushAll(authedUrl, repo.defaultBranch || 'main', 'Import large project from ZIP');
+            const pushed = await repoSync.pushAll(authedUrl, target.branch, 'Import large project from ZIP');
             if (pushed.pushed || pushed.noChange) {
               github = { url: repo.htmlUrl, fullName: repo.fullName || `${login}/${repoName}` };
+              // Remember it durably — this repo is in the user's own account, so it is exactly as
+              // deployable as one made by "Put this app in my GitHub" (the 2026-09-06 memory rule).
+              // Best-effort: an import that precedes any conversation record has nothing to update yet.
+              await getConversationStore().update(workspaceId, {
+                repoName, repoOwner: login, repoOwnedByUser: true, deployBranch: target.branch, updatedAt: Date.now(),
+              }).catch(() => { /* the backup itself is what mattered; a missing record only costs the shortcut */ });
             }
           } catch { /* GitHub backup is a best-effort backstop — never blocks the import */ }
         } else {
@@ -8079,7 +9357,33 @@ async function noteBuildOutcome(
         // Best-effort: an 'import'-type workspace starts EMPTY so the imported app never gets
         // template scaffold files mixed in (mirrors the import-files route).
         try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
-        const landed = await writeWorkspaceFiles(actuator, workspaceId, importedFiles);
+        /**
+         * NAME THE QUIET MINUTES OF AN IMPORT (autopsy faa98da9, 2026-09-04).
+         *
+         * The phase mechanism has existed for a while and every PREVIEW stretch uses it — which is why
+         * that report could say "creating the database tables took 50s" and "installing dependencies …
+         * took 28s". The IMPORT's own stretches never entered a phase, so the same report carried a
+         * 40-SECOND HOLE with nothing recorded, and its own TIME_TO_FIRST_CALL warning could only say
+         * where the silence STARTED, not what caused it.
+         *
+         * Two things this buys, and neither is cosmetic:
+         *   • the ADMIN report gets `⏳ … took Ns` lines for the import, so the next person chasing a
+         *     slow import reads the answer instead of guessing at a gap;
+         *   • the USER's heartbeat stops echoing a stale narration. In that report minute 1 read
+         *     "still working (last: 🔗 Connected to https://github.com/…)" — the heartbeat names the
+         *     ACTIVE PHASE when there is one, and during the import there was none.
+         *
+         * Purely additive: optional-chained, wrapped, and closed in `finally`, so a diagnostics slip can
+         * never affect an import. `enterPhase` also supersedes an unclosed phase by design, so even a
+         * missed exit cannot strand the label.
+         */
+        let landed;
+        try { opts.diag?.enterPhase?.('importing your project\'s files'); } catch { /* diagnostics are best-effort */ }
+        try {
+          landed = await writeWorkspaceFiles(actuator, workspaceId, importedFiles);
+        } finally {
+          try { opts.diag?.exitPhase?.(); } catch { /* diagnostics are best-effort */ }
+        }
         written = landed.written;
         // HOW the files landed (bulk tar vs per-file) + the count-proof — into the build report, so a
         // future "files missing after import" report can be diagnosed from evidence instead of guesses
@@ -8096,9 +9400,29 @@ async function noteBuildOutcome(
         // Sandbox-only extras (big text lockfiles): the live sandbox gets them so `npm install`
         // reproduces the app's exact dependency tree; the durable store skips them by design
         // (over its per-doc cap — the import summary says so honestly). Best-effort.
-        for (const [p, c] of Object.entries(opts.sandboxOnly ?? {})) {
+        /**
+         * THE FIFTH INSTANCE OF ONE BUG CLASS — serial awaits over a network (2026-09-04).
+         *
+         * `materializeAssets` closed this class on 2026-08-04 and its comment names the four it had
+         * found: the sandbox landing (a 648s incident), the Firestore merge, `collectWorkspaceFiles`
+         * (a 13-minute per-turn stall), and the asset writes themselves — "same fix, same shared
+         * helper, so the class is closed here rather than patched again". This loop is a sibling that
+         * was missed, ten lines above one of them.
+         *
+         * SMALL TODAY, AND THAT IS THE POINT. `sandboxOnly` holds oversized text files the durable
+         * store cannot take — usually one lockfile, so this is typically ONE round-trip. But a repo
+         * carrying several (package-lock + yarn.lock + pnpm-lock, or a monorepo's per-package locks)
+         * pays one full sandbox round-trip each, in series, before the build can start. Nothing about
+         * the loop bounds that, which is exactly how the other four grew.
+         *
+         * Semantics are preserved exactly: the per-file catch stays per-file (one unwritable lockfile
+         * must never block the rest — npm just resolves fresh), ordering between independent writes
+         * carries no meaning, and the same shared `pool` and concurrency the asset path uses is used
+         * here, so there is one behaviour to reason about rather than two.
+         */
+        await pool(Object.entries(opts.sandboxOnly ?? {}), SANDBOX_ONLY_WRITE_CONCURRENCY, async ([p, c]) => {
           try { await actuator.writeFile(workspaceId, p, c); } catch { /* install falls back to fresh resolution */ }
-        }
+        });
       } else {
         written = Object.keys(importedFiles); // already in the sandbox (e.g. a git clone)
       }
@@ -8108,7 +9432,13 @@ async function noteBuildOutcome(
       // entirely out of `importedFiles`, so they never pollute the text map. Best-effort.
       const assets = opts.assets ?? {};
       if (Object.keys(assets).length > 0) {
-        if (opts.writeToSandbox) { try { await materializeAssets(actuator, workspaceId, assets); } catch { /* an asset failing never blocks the import */ } }
+        if (opts.writeToSandbox) {
+          // Named because it is the biggest one on a media-heavy repo: the report that prompted this
+          // carried 129 image/font assets plus 22 large images.
+          try { opts.diag?.enterPhase?.('adding your project\'s images and fonts'); } catch { /* best-effort */ }
+          try { await materializeAssets(actuator, workspaceId, assets); } catch { /* an asset failing never blocks the import */ }
+          finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
+        }
         void saveWorkspaceAssets(workspaceId, assets).catch(() => {});
       }
       // SANDBOX-ONLY images (large images the durable store can't hold): materialize them for the LIVE
@@ -8120,7 +9450,9 @@ async function noteBuildOutcome(
       }
       // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
       // empty": without it the import lives only in the ephemeral sandbox.
+      try { opts.diag?.enterPhase?.('saving your project so it survives a restart'); } catch { /* best-effort */ }
       try { await mergeWorkspaceFiles(workspaceId, importedFiles); } catch { /* durable persist is best-effort */ }
+      finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
       framework = validation.framework;
       // TELL THE REPORT (autopsy d6deaaf0): the diagnostics object captured `framework` at build
       // start, before the import existed, so it kept the request default while the manifest recorded
@@ -8505,8 +9837,19 @@ async function noteBuildOutcome(
             opts.diag?.enterPhase?.('checking the live preview');
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {
-              const scriptPort = devScriptPort(importedFiles['package.json'] ?? null);
-              let bootPort = port ?? scriptPort ?? oneShotDevPort(framework);
+              /**
+               * 🔒 THE IMPORT PATH IS WHERE THE ADMIN ACTUALLY HIT THIS (2026-09-04) — and it had the
+               * narrowest reader of all: `devScriptPort` (package.json scripts) and then a framework
+               * GUESS. An imported repo pins its port in `vite.config.*`, in a `.env`, or in a server
+               * entry the old fixed list never covered — so the common case fell straight through to
+               * the guess, we visited the wrong port, and the app was reported as not running while it
+               * served perfectly somewhere else.
+               *
+               * Order is unchanged in strength: the boot log's own testimony still wins (it is the app
+               * saying where it landed), then everything the app DECLARES, and only then the guess.
+               */
+              const declared = declaredAppPort(importedFiles)?.port ?? null;
+              let bootPort = port ?? declared ?? oneShotDevPort(framework);
               // EARN THE VERDICT (admin 2026-08-03, "Cannot GET /customer/home" shown as a live preview):
               // a bound port is NOT the app serving. Actually VISIT the home route and read the rendered
               // HTML — only claim "✅ up" when it genuinely serves the app; otherwise say WHY (the exact
@@ -8533,7 +9876,9 @@ async function noteBuildOutcome(
                 try {
                   listening = parseListeningPorts((await withTimeout(actuator.runCommand(workspaceId, LISTENING_PORTS_COMMAND), 10_000, 'import-preview-port-scan')).stdout);
                 } catch { /* best-effort — without the scan the flip simply has no extra candidates */ }
-                for (const cand of rankPortCandidates({ parsed: port, scriptPort, expected: bootPort, listening, framework })) {
+                // `declared` (every declaration site) replaces the old script-only value here too — the
+                // flip's second tier should rank whatever the app really declares, not just a flag.
+                for (const cand of rankPortCandidates({ parsed: port, scriptPort: declared, expected: bootPort, listening, framework })) {
                   if (cand === bootPort) continue;
                   const attempt = await visit(cand);
                   if (attempt.url && attempt.served.rendered) { winner = attempt; bootPort = cand; break; }
@@ -8545,6 +9890,42 @@ async function noteBuildOutcome(
               // each of the branches beneath, so a future branch cannot forget it and be misreported as
               // a boot that was cut off.
               bootVerdictRecorded = true;
+              /**
+               * 🔒 THE IMPORT LANE PROVED ITS PREVIEW AND THEN FORGOT IT (admin 2026-09-08, and it is
+               * the second half of their own question: *"agar github par app port 3000 par hai, aur
+               * navbharatai us app ko port 5000 par ya kisi aur port try kare…"*).
+               *
+               * Every OTHER lane records what it proved at the moment it proves it — the build path
+               * saves the recipe the instant a browser renders the app (~15019) and the declared port
+               * on every successful build (~15625); the wake path saves the recipe the same way
+               * (~4900). This block did neither: it resolves the port from every declaration site,
+               * VISITS the page, confirms it renders — the strongest evidence any lane ever holds —
+               * and then dropped all of it on the floor.
+               *
+               * The consequence lands days later, which is why it was invisible: the sandbox is
+               * eventually gone, the door looks for a recipe and a declared port, finds NEITHER, and
+               * falls through to the common-ports guess starting at 3000 — for an imported repo, the
+               * one class of app most likely to serve on 5000. The user then sees a preview that will
+               * not come back for an app that booted perfectly the day they imported it.
+               *
+               * Two writes, deliberately with different conditions, mirroring the precedent exactly:
+               *  • the RECIPE only when the page genuinely RENDERED — a recipe is a port we have SEEN
+               *    serving, and a bound-but-blank port must never be promoted to one (the "earn it"
+               *    rule every other lane follows).
+               *  • the DECLARED PORT whenever the app states one, render or not — precisely because a
+               *    preview that never came up has no recipe at all, and that is the case where the
+               *    door has nothing else to lead with.
+               * Best-effort and silent: an import that worked must never fail over a memory write.
+               */
+              try {
+                if (Number.isInteger(declared) && declared! > 0) {
+                  await sandboxStore.saveDeclaredPort(workspaceId, declared!).catch(() => {});
+                }
+                if (served.rendered) {
+                  const importCheck = buildRecipe({ devCommand: bootCommand, port: bootPort, framework, now: Date.now() });
+                  if (importCheck.ok && importCheck.recipe) await sandboxStore.saveRecipe(workspaceId, importCheck.recipe);
+                }
+              } catch { /* remembering is insurance for the NEXT view — never this import's problem */ }
               if (bootUrl) emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
               // BOOT LOG DIAGNOSER (admin task 2, 2026-08-05 — Mitrify build d5f0a2bc): the boot log
               // is IN HAND here, and on that build it named the exact cause (`ECONNREFUSED …:5432` at
@@ -9790,10 +11171,26 @@ async function noteBuildOutcome(
           // the record is about to be created with. Best-effort: any lookup failure falls back cleanly.
           let readableAppName = deriveTitle(prompt);
           let readableCreatedAt = Date.now();
+          // THE REPO WE ALREADY USE (admin 2026-09-04). `pinnedRepoName` is the repo this app is
+          // ALREADY stored in. When present it WINS over the derivation below — that is what lets the
+          // app be renamed without the next build computing an unfamiliar name and having ensureRepo
+          // create an empty repo beside the real one.
+          //
+          // ⚠️ THE DERIVATION DELIBERATELY IGNORES THE USER'S CHOSEN NAME, and this is load-bearing.
+          // `title` is written once at record creation and never changes; `appName` changes on every
+          // rename. Feeding a MUTABLE value into a name that `ensureRepo` treats as an identity is
+          // precisely how a rename would orphan an app — and it could not be caught by the pin above,
+          // because the conversation record does not exist yet on the FIRST build turn (it is created
+          // much later in this same request), so turn one's pin write is a no-op by construction.
+          // Deriving from `title` means turn two recomputes the SAME name, finds the same repo, and
+          // pins it then. Renaming the actual GitHub repo is the rename endpoint's job, not a
+          // side-effect of a derivation.
+          let pinnedRepoName = '';
           try {
             const idRec = await getConversationStore().get(workspaceId).catch(() => null);
             if (idRec) {
               if (idRec.title) readableAppName = idRec.title;
+              if (idRec.repoName) pinnedRepoName = idRec.repoName;
               if (typeof idRec.createdAt === 'number' && idRec.createdAt > 0) readableCreatedAt = idRec.createdAt;
             }
           } catch { /* readable-name identity lookup is best-effort — prompt + now is a valid fallback */ }
@@ -9802,7 +11199,19 @@ async function noteBuildOutcome(
           // `import-this-app-from-my-github-repositor-…` for an app called `mitrify`. The imported repo's
           // own name is the better, equally-stable identity. See readableAppNameForRepo (pure + tested).
           readableAppName = readableAppNameForRepo({ importedRepo: parseGitHubRepo(importUrl), fallbackTitle: readableAppName });
-          const repoName = repoNameForProject(userId, projectId, { appName: readableAppName, createdAtMs: readableCreatedAt });
+          // A STORED repo name is a FACT; the derivation is only a proposal for an app that has none
+          // yet. Preferring the stored one is the single line that makes renaming safe — and it also
+          // hardens the pre-existing case where a title edit or an import would have silently moved a
+          // build to a different repo mid-session.
+          const repoName = pinnedRepoName || repoNameForProject(userId, projectId, { appName: readableAppName, createdAtMs: readableCreatedAt });
+          // Remember it the FIRST time, so every later turn takes the branch above rather than
+          // re-deriving. Best-effort and non-blocking: the build already has the name it needs, and a
+          // failed write only means the next turn re-derives exactly what it derived this turn.
+          if (!pinnedRepoName) {
+            void getConversationStore().get(workspaceId)
+              .then((rec) => rec && getConversationStore().update(workspaceId, { repoName, updatedAt: rec.updatedAt }))
+              .catch(() => { /* the derivation is deterministic — an unwritten name costs nothing */ });
+          }
           const userToken = typeof req.body?.githubToken === 'string' && req.body.githubToken ? req.body.githubToken : '';
           // PREFER THE USER'S OWN GITHUB: when the user signed in with GitHub, store the project in a
           // repo under THEIR account (their code, no lock-in) and run PR/CI/merge there. Best-effort —
@@ -9846,6 +11255,25 @@ async function noteBuildOutcome(
                     : `Connected to your own repo ${target.owner}/${target.repo} — edits will be saved to the ‘${target.workBranch}’ branch; your ‘${target.baseBranch}’ stays safe until you merge the PR.`,
                   ts: Date.now(),
                 });
+                /**
+                 * 🔴 REMEMBER THIS, DURABLY — not just for the live stream (admin 2026-09-06, "GitHub
+                 * se import ki hai, matlab connect hai!").
+                 *
+                 * Until now this fact only ever reached the CLIENT as a `repo`/`own_repo` stream
+                 * event — real, but scoped to this one live session. The Publish/Deploy-backend screen
+                 * reads it from REACT STATE, which starts empty on every reload. So a workspace whose
+                 * import genuinely landed in the user's own repo would, on the very next visit, tell
+                 * that same user to "push this app to a repo of your own" — a true fact about THIS
+                 * session's memory, reported as if it were a fact about the app.
+                 *
+                 * `deployBranch` is the BASE branch (`main`), never the working branch — a Render
+                 * deploy must never build from `navbharatai/work`, which can hold unreviewed,
+                 * mid-session edits. See renderCreateService's branch wiring.
+                 */
+                void getConversationStore().update(workspaceId, {
+                  repoOwner: target.owner, repoOwnedByUser: true, deployBranch: target.baseBranch,
+                  updatedAt: Date.now(),
+                }).catch(() => { /* best-effort — the live stream event above still reaches this session */ });
               } else {
                 // MIRROR (today's behaviour): a private per-project repo in the user's account.
                 const repo = await userClient.ensureRepo(repoName);
@@ -9864,6 +11292,12 @@ async function noteBuildOutcome(
                     : `Connected to your GitHub — this build will be saved to ${login}/${repoName}.`,
                   ts: Date.now(),
                 });
+                // Same durable memory as the own-repo branch above — this repo IS the user's own
+                // account (userClient.ensureRepo created it there), so it is exactly as deployable.
+                void getConversationStore().update(workspaceId, {
+                  repoOwner: login, repoOwnedByUser: true, deployBranch: repoBranch,
+                  updatedAt: Date.now(),
+                }).catch(() => { /* best-effort — the live stream event above still reaches this session */ });
               }
             } catch { repoSync = undefined; prClient = undefined; ownRepoTarget = null; /* fall through to the platform store */ }
           }
@@ -10521,6 +11955,22 @@ async function noteBuildOutcome(
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
         (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
+      // PUBLISHING NEEDS AN ASK (admin 2026-09-01). On a build turn the agent used to decide for
+      // itself — a user typed "continue", the build finished, and their app went live on a public URL
+      // with nobody having requested it. Consent is read from THIS message only: consent that carries
+      // forward is how one "publish it" becomes an app that republishes on every later "continue".
+      // Denied is the default inside the dispatcher, so a path that forgets this line cannot publish.
+      try {
+        const consent = decidePublishConsent(prompt);
+        dispatcher.setPublishConsent(consent.consent === 'granted');
+        if (consent.consent === 'granted') {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'PUBLISH_REQUESTED',
+            message: 'The user asked for this app to be published in their message, so the deploy tool is enabled for this turn.',
+            autoResolved: true,
+          });
+        }
+      } catch { /* a consent failure must leave it DENIED, which is what the default already is */ }
       // "made by NavBharatAI" signature: default ON, off only when the user toggled it off in
       // Settings → General. The dispatcher bakes the badge into index.html on preview publish.
       dispatcher.setSignatureEnabled(appSignatureEnabled);
@@ -10544,6 +11994,9 @@ async function noteBuildOutcome(
       // the user's SHARED keys plus the ones tied to THIS app. Keys saved before scoping existed have no
       // workspace, so they count as shared and every existing build behaves exactly as it did.
       let vaultSecrets: Record<string, string> = {};
+      // Tools contributed by services the user connected (MCP). Empty unless they connected one, so
+      // every path that reads it is byte-identical to today for everyone else.
+      let mcpTools: SafeMcpTool[] = [];
       try {
         if (userId) {
           vaultSecrets = await loadUserVaultSecrets(userId, workspaceId);
@@ -10551,6 +12004,26 @@ async function noteBuildOutcome(
           // keep it OUT of the built app's .env; it is only used to build the DB context prompt below.
           const { [DB_PROVIDER_MARKER]: _dbMarker, ...appEnv } = vaultSecrets;
           dispatcher.setUserSecrets(appEnv);
+          // CONNECTED SERVICES (MCP). Fetched ONCE here, before the loop, so the tool list the model
+          // sees is fixed for the whole build — a server that changes its tools mid-build cannot swap
+          // one out from under a call the model has already decided to make.
+          //
+          // Wholly best-effort: a service that is slow, down or hostile yields no tools and the build
+          // proceeds exactly as it does today. It must never be able to fail or delay a build.
+          try {
+            const servers = await mcpServerStore.listFull(workspaceId);
+            if (servers.length > 0) {
+              const lists = await Promise.all(servers.map((sv) => listRemoteTools(sv).catch(() => ({ tools: [] as SafeMcpTool[] }))));
+              mcpTools = lists.flatMap((l) => l.tools);
+              if (mcpTools.length > 0) {
+                dispatcher.setMcpServers(servers, mcpTools);
+                events.emit({
+                  type: 'narration', agent: 'architect', ts: Date.now(),
+                  text: `🔌 Using ${mcpTools.length} tool(s) from ${servers.length} service(s) you connected.`,
+                });
+              }
+            }
+          } catch { /* connected services are additive — never a reason a build fails */ }
           // PRE-FLIGHT WRITE (mitrify autopsy 2026-08-04). The secrets .env used to be written lazily from
           // inside run_command, so any path that starts a dev server through the ACTUATOR instead — an
           // import turn, the Diagnose button, update_preview — booted the app with NONE of the keys the
@@ -11047,7 +12520,9 @@ async function noteBuildOutcome(
         // are billed even when their `result` is later discarded.
         usageSink: buildUsage,
         system: architectSystem,
-        tools: catalogForTools(roleConfig('architect').tools),
+        // Built-in tools PLUS anything the user connected. Concatenated with ours FIRST so a
+        // connected service can never displace a platform tool in the list the model reads.
+        tools: [...catalogForTools(roleConfig('architect').tools), ...externalToolDefs(mcpTools)],
         onlyOpus,
         powerLevel: powerLevelReqEffective,
         // Slice 2 — weak-tier mid-build checkpoint scope. Same signal Slice 1 uses: a weak/cheap-only
@@ -11269,6 +12744,13 @@ async function noteBuildOutcome(
         // against the REAL tree, so a mention is a checked claim, never a path we invented; anything we
         // could not find is told to the user rather than silently dropped, because a dropped mention is
         // indistinguishable from the AI ignoring what they asked for.
+        // CONNECTED SERVICES — the model is told, before it sees them, that these tools and their
+        // descriptions were written by an OUTSIDE service and are DATA, not instructions. Sanitising
+        // (mcpClient.ts) makes an injection look odd; this is what makes it powerless. '' when nothing
+        // is connected, so the prompt is unchanged for everyone else.
+        const mcpPreamble = externalToolsPreamble(mcpTools);
+        if (mcpPreamble) buildPrompt = `${mcpPreamble}\n\n---\n\n${buildPrompt}`;
+
         const mentions = parseFileMentions(prompt, tree);
         const mentionBlock = fileMentionsBlock(mentions);
         if (mentionBlock) buildPrompt = `${mentionBlock}\n\n---\n\n${buildPrompt}`;
@@ -12244,6 +13726,32 @@ async function noteBuildOutcome(
       // result is always set here (OneShot, escalation, or the loop above).
       if (!result) result = await runner.run(buildPrompt);
 
+      /**
+       * 🔒 THE WALL-CLOCK CAP GETS ITS OWN HONEST OUTCOME CODE (admin diagnostics report, 2026-09-10).
+       *
+       * A build died at 29m59s — one second under `AGENTV3_MAX_BUILD_SECONDS`'s 1800s default — and the
+       * report gave no way to tell: every OTHER recognised outcome (`OUTCOME_BUILD_SUCCESS`,
+       * `OUTCOME_STOPPED`, `OUTCOME_SYNTAX_ERROR`, `OUTCOME_PREVIEW_FAILED`, …) gets a code here, but
+       * `AgentRunner` never touches `buildDiag` itself — only the route does, from `result` — so hitting
+       * the timeout silently looked like an ordinary finish. A reader was left to infer a timeout purely
+       * from the coincidence of the duration, which is the "wrong verdict" the honesty rule forbids.
+       *
+       * `severity` follows which of `buildTimedOut`'s two branches fired: `warning` when files were
+       * genuinely produced and saved (the common, resumable case — the user just sends another message),
+       * `error` when nothing was built at all (the build never got moving, worth real attention).
+       */
+      if (result.timedOut === true) {
+        try {
+          buildDiag.record({
+            phase: 'build', severity: result.ok ? 'warning' : 'error', code: 'OUTCOME_BUILD_TIMEOUT',
+            message: result.ok
+              ? `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (AGENTV3_MAX_BUILD_SECONDS) with real work saved — resumable, not a crash.`
+              : `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (AGENTV3_MAX_BUILD_SECONDS) before producing anything.`,
+            autoResolved: false,
+          });
+        } catch { /* diagnostics best-effort */ }
+      }
+
       // PLAN SYNC: reconcile the plan list with the real outcome — a successful build means the
       // plan is accomplished, so mark every item done (green ticks); a failed/partial build keeps
       // the progress reached. Best-effort — never affects the build result.
@@ -12997,7 +14505,19 @@ async function noteBuildOutcome(
           // which is exactly what this record measures. Building the runner first would be the same
           // mistake as scoring a benchmark nobody ran.
           try {
-            const sgFiles = Object.fromEntries(writtenFiles);
+            // THE WHOLE PROJECT, NOT JUST THIS TURN'S WRITES (admin autopsy 2026-09-01).
+            //
+            // This used to read `Object.fromEntries(writtenFiles)`. On a real build — an ad-blocker
+            // browser with an Express proxy in `server.ts` and a Vite frontend — that turn edited only
+            // frontend files, so the graph never saw `server.ts` and reported "Single service:
+            // frontend on port 5173". The platform had just STARTED that backend, health-checked it on
+            // :3001 and tested its API, and still described the project as single-service. A backend
+            // written in an earlier turn and untouched by this one is invisible to a turn-scoped view,
+            // which is exactly the normal case for the second service.
+            //
+            // `integrityFiles` is the durable project ∪ this build's writes and is already loaded a
+            // few hundred lines above, so this costs no extra I/O.
+            const sgFiles = integrityFiles;
             const sgPaths = Object.keys(sgFiles);
             const mono = detectMonorepo(sgPaths, sgFiles);
             const graph = buildServiceGraph({ contents: sgFiles, packageDirs: mono.packageDirs });
@@ -13593,6 +15113,46 @@ async function noteBuildOutcome(
       // works but the recipe could not be stored, which the user is told plainly at the only moment it
       // is still actionable. `null` = no green preview happened, so there was nothing to promise.
       let previewRecipeSaved: boolean | null = null;
+      /**
+       * AN IMPORT'S PREVIEW MUST LAND BEFORE ANYTHING JUDGES IT (report faa98da9, 2026-09-03).
+       *
+       * ROOT CAUSE. A zip/GitHub import boots its dev server in the BACKGROUND so the model can work
+       * while npm installs — correct, and the whole point. But the promise was awaited only in the
+       * `finally` block, ~2,700 lines below, so every runtime check between here and there ran while
+       * the boot was still in flight and each one is gated on `lastPreviewUrl`. They did not lose a
+       * race; there was never a race to win. On the import path they could not fire AT ALL.
+       *
+       * What that cost in the report: the render check, route smoke, page check and journey all
+       * skipped; `RELEASE_GATE` returned UNKNOWN with the words "no live preview was ever
+       * available" — 7.5 seconds before `PREVIEW_PUBLISHED` recorded that address going live — and
+       * the recap told the user "The live preview didn't start automatically". Three false statements,
+       * one ordering mistake. The 2026-08-27 fix taught the gate to distinguish "never came up" from
+       * "we never checked"; it could not help here, because at the moment it was asked the honest
+       * answer was neither — the preview was still starting.
+       *
+       * ⚠️ THIS ADDS NO WALL-CLOCK. The identical bounded await already ran unconditionally in the
+       * `finally` before the response could end (Cloud Run throttles CPU after the stream closes, so
+       * the wait is not optional). The user was ALREADY paying for it — after the verdict instead of
+       * before it. Moving it here only decides whether the checks get to see what it produces; the
+       * `finally` await stays as the net for a build that throws before reaching this line, where it
+       * now resolves instantly on an already-settled promise.
+       */
+      if (importPreviewBoot) {
+        const bootWaitStartedAt = Date.now();
+        await raceTimeout(importPreviewBoot, 380_000, 'importPreviewBoot').catch(() => {});
+        // Say it out loud, so a slow import is never mistaken for a slow build (rule 5 — the report
+        // must tell the truth about its own timing, not only about the app's).
+        try {
+          const waitedMs = Date.now() - bootWaitStartedAt;
+          if (waitedMs >= 1_000) {
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'IMPORT_PREVIEW_BOOT_AWAITED',
+              message: `Waited ${Math.round(waitedMs / 1000)}s for the imported app's background dev-server boot to finish before running the runtime checks — so the page-render, journey and release-gate verdicts describe the app as it actually is, not as it looked while it was still starting.`,
+              autoResolved: true,
+            });
+          }
+        } catch { /* diagnostics are best-effort — never blocks a build */ }
+      }
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
         && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size })
@@ -13856,7 +15416,10 @@ async function noteBuildOutcome(
             try {
               // The health-check wrapper in devServerHost recognises this command, installs stale deps
               // and waits for the port, so this one call is the whole restart.
-              await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 90_000, 'preview-server-revive');
+              // Sized to the work, not to a wall — the same budget the wake route uses, for the same
+              // reason (previewWake.ts): a restart that has to reinstall cannot finish in 90 s, and a
+              // timeout here never stops the install it started.
+              await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), previewWakeBudgetMs(), 'preview-server-revive');
             } catch { /* the re-check below is the real verdict — a failed restart just means another try */ }
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
@@ -14094,6 +15657,20 @@ async function noteBuildOutcome(
               autoResolved: verdict.ok,
               detail: journeyResults.map((r) => `${r.verdict.toUpperCase()} ${r.route} (${r.step}) — ${r.note}`).join('\n'),
             });
+            // SHOW THE USER THAT WE ACTUALLY CHECKED (gap analysis 2026-09-10). Everything above goes
+            // into the ADMIN diagnostics report, which the user cannot open — so the hardest and most
+            // valuable check the platform performs (fill the form, submit, RELOAD, confirm the entry
+            // survived) was invisible to the person it was performed for, and the chat said "your app
+            // is ready" in exactly the same words it uses when nothing was verified at all.
+            //
+            // Emitted as its own event rather than folded into the summary prose so it cannot be
+            // rewritten by a model, and so an honest failure is as visible as a pass. The wording is
+            // built by journeyUserSummary, which refuses to round "could not reach it" up into a pass
+            // and carries no codes, tool names or provider names.
+            try {
+              const proof = journeyUserSummary(journeyResults);
+              if (proof.headline) emit({ type: 'verified', ok: proof.ok, headline: proof.headline, steps: proof.steps, ts: Date.now() });
+            } catch { /* the proof is evidence for the user, never a gate on the build */ }
           } else {
             // A quiet result that explains itself. "Nothing ran" and "nothing could be derived" look
             // identical in a report unless one of them says which it was.
@@ -14969,6 +16546,8 @@ async function noteBuildOutcome(
           const reviewHeadroomMs = effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt));
           const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount);
           let review;
+          /** A verdict rebuilt from an unfinished review's own narration — see partialReview.ts. */
+          let salvaged: ReturnType<typeof salvageReview> = null;
           // THE TIMEOUT STOPS US WAITING — IT MUST NOT STOP US LOOKING (admin report 2026-08-12).
           //
           // The promise is held in its own binding so that when the budget expires it is still
@@ -14976,6 +16555,25 @@ async function noteBuildOutcome(
           // Styling — App will look broken` **1.5 seconds** after `raceTimeout` rejected; because the
           // reference was gone with the expression, that finding — 26 files of the user's tokens,
           // already spent — was discarded, and the user shipped the broken app instead.
+          /**
+           * LISTEN WHILE IT WORKS (admin report 2026-09-01, PROGRESS.md "STILL OPEN").
+           *
+           * That build spent 194s of budget plus the full 30s of grace on a 46-file review and got
+           * NOTHING — the findings were discarded and the app shipped with its completeness net down.
+           * Two earlier fixes moved that cliff (a size-scaled budget, then the grace window); neither
+           * could remove it, because the budget is a guess and some review will always land past it.
+           *
+           * The reviewer is a sub-agent on THIS event stream and narrates its findings as it goes —
+           * the 2026-08-12 timeline shows the full review text arriving as an AGENT_STEP one
+           * millisecond before `agent_done`. So the timeout can stop us WAITING without throwing away
+           * what the reviewer already said out loud. Costs nothing: no extra call, no extra token —
+           * this is money the user has already spent, being collected instead of binned.
+           */
+          const reviewerSaid: string[] = [];
+          const stopListening = events.subscribe((e) => {
+            if (e.type === 'narration' && e.agent === 'reviewer' && typeof e.text === 'string') reviewerSaid.push(e.text);
+            else if (e.type === 'agent_done' && e.agent === 'reviewer' && typeof e.summary === 'string') reviewerSaid.push(e.summary);
+          }, false); // no replay — only this review's own words, never an earlier turn's
           const reviewPromise = reviewBuild({
               userRequest: prompt,
               fileTree: rFiles,
@@ -15011,6 +16609,17 @@ async function noteBuildOutcome(
               // It landed. Everything downstream — recordReview, the C9 auto-fix, the honesty holder —
               // now runs exactly as it would have on a review that finished inside its budget.
               try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LATE', message: `Post-build review overran its ${reviewBudget}ms budget and was collected within the ${graceMs}ms grace — its findings were kept, not discarded.`, autoResolved: true }); } catch { /* best-effort */ }
+            } else if ((salvaged = salvageReview(reviewerSaid.join('\n'))) !== null) {
+              // SALVAGE before conceding. Everything the reviewer narrated is already paid for; the
+              // only question is whether anyone looks at it. A salvaged verdict can never FAIL the
+              // build (see salvageReview's honesty rules) and deliberately does NOT feed the C9
+              // auto-fix — a truncated finding may be one the reviewer was about to withdraw, and
+              // deep-test 66ec5c1e is what acting on a phantom critical costs. Reported as leads,
+              // which is strictly more than the nothing this branch used to deliver.
+              events.emit({ type: 'narration', agent: 'architect', text: formatPartialReview(salvaged), ts: Date.now() });
+              try { buildDiag.recordReview(formatPartialReview(salvaged, 50)); } catch { /* best-effort */ }
+              try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_PARTIAL', message: `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — but ${salvaged.issues.length} finding(s) it had already reported were RECOVERED from its own narration instead of discarded. Leads from an UNFINISHED review: they cannot fail a build and do not drive the auto-fix.`, autoResolved: false }); } catch { /* best-effort */ }
+              review = null;
             } else {
               events.emit({ type: 'narration', agent: 'architect', text: timedOut
                 ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish on this large app — send "review it" and I\'ll run it on its own.'
@@ -15022,6 +16631,10 @@ async function noteBuildOutcome(
               try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — its completeness findings are NOT available for this build` : 'Post-build review errored — its completeness findings are NOT available for this build', autoResolved: false }); } catch { /* best-effort */ }
               review = null;
             }
+          } finally {
+            // Always detach: the stream outlives this block, and a listener left attached would keep
+            // appending a later turn's reviewer output to this turn's buffer.
+            stopListening();
           }
           const reviewText = review ? formatReview(review) : '';
           if (reviewText) {
@@ -16302,6 +17915,12 @@ async function noteBuildOutcome(
       // local Postgres + ~240s to install & boot the dev server. Even if this is cut off, the DB +
       // dev .env are already set up in the sandbox, so the Diagnose button (a manual re-boot)
       // succeeds afterwards.
+      //
+      // NOW A NET, NOT THE PRIMARY WAIT (report faa98da9, 2026-09-03). The main path awaits this same
+      // promise before the runtime checks, because when it was awaited ONLY here every preview-gated
+      // check on the import path was structurally unreachable — see IMPORT_PREVIEW_BOOT_AWAITED. This
+      // therefore resolves instantly on a normal build; it still matters for a build that threw or was
+      // aborted before reaching that point, which is exactly why it stays.
       if (importPreviewBoot) {
         await raceTimeout(importPreviewBoot, 380_000, 'importPreviewBoot').catch(() => {});
       }

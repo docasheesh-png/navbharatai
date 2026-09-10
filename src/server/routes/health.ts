@@ -14,6 +14,7 @@ import { doraMetrics } from '../lib/DoraMetrics';
 import { serverStats } from '../lib/serverStats';
 import { buildHealthReport, renderStatusPageHtml, type HealthCheck } from '../lib/HealthReport';
 import { adminRequestOk } from '../lib/adminAuth';
+import { normalizeFeePct } from '../../lib/platformFee';
 
 // Set true once the server has finished initialization (wired from server.ts).
 let serverReady = false;
@@ -36,6 +37,37 @@ export interface ReadinessReport {
 }
 
 /** Pure (unit-tested): compute the readiness report from current signals. */
+/** The public runtime config the browser may read. Nothing secret may ever be added to this shape. */
+export interface PublicConfig {
+  /** Meta advertising pixel id, or null when unset OR unusable — the client treats both as "no pixel". */
+  metaPixelId: string | null;
+  /**
+   * The wallet-recharge platform fee, in percent. Served so the browser can show the user the SAME
+   * split the server will apply BEFORE they pay, instead of the two sides doing their own arithmetic.
+   * A rate is not a secret — it is printed on the purchase screen either way.
+   */
+  platformFeePct: number;
+}
+
+/**
+ * Pure: resolve the public config from the environment.
+ *
+ * A MALFORMED value is deliberately treated exactly like an unset one. Meta pixel ids are numeric,
+ * so anything else (a placeholder left in the field, a pasted URL, a stray quote) cannot work at
+ * Meta's end anyway — and failing here, visibly as "no pixel", beats injecting junk into every page
+ * and having advertising measurement fail invisibly.
+ */
+export function buildPublicConfig(
+  rawPixelId: string | undefined | null,
+  rawFeePct?: unknown,
+): PublicConfig {
+  const pixel = String(rawPixelId ?? '').trim();
+  return {
+    metaPixelId: /^\d{8,20}$/.test(pixel) ? pixel : null,
+    platformFeePct: normalizeFeePct(rawFeePct),
+  };
+}
+
 export function buildReadiness(ready: boolean, uptimeSec: number, backupConfigured: boolean): ReadinessReport {
   return { ready, uptime: uptimeSec, checks: { initialized: ready, backupConfigured } };
 }
@@ -145,6 +177,28 @@ export function registerHealthRoutes(app: Express): void {
       minAndroidVersionCode: num(process.env.ANDROID_MIN_VERSION_CODE),
       storeUrl: (process.env.ANDROID_STORE_URL || '').trim() || null,
     });
+  });
+
+  // PUBLIC RUNTIME CONFIG — non-secret values the browser needs before it can do anything.
+  //
+  // Today this carries one thing: the Meta (Facebook/Instagram) advertising pixel id.
+  //
+  // WHY A RUNTIME ROUTE AND NOT A VITE_ BUILD VARIABLE: the web bundle is built inside Docker, and
+  // `import.meta.env.VITE_*` is frozen at that moment (cloudbuild.yaml has to pass such values as a
+  // --build-arg from a trigger substitution). An admin setting VITE_META_PIXEL_ID in Cloud Run would
+  // therefore change NOTHING, with no error to reveal it — the exact doc-vs-reality drift CLAUDE.md
+  // warns about. Served here, META_PIXEL_ID takes effect on the next page load with no rebuild.
+  //
+  // DISCLOSING NOTHING: a pixel id is public by construction — it appears in the page source of every
+  // site that runs one — so an unauthenticated route is the right shape. No secret may ever be added
+  // to this response; anything that must stay private belongs behind an authenticated route.
+  //
+  // UNSET (today's state) ⇒ metaPixelId is null ⇒ the client never loads the pixel. A malformed value
+  // is treated exactly like an unset one, so a typo disables advertising measurement honestly instead
+  // of injecting junk into every page.
+  app.get('/api/public-config', (_req: Request, res: Response) => {
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json(buildPublicConfig(process.env.META_PIXEL_ID, process.env.PLATFORM_FEE_PCT));
   });
 
   // U-15 — public status page (self-contained, polls /api/health).

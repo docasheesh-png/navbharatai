@@ -6,6 +6,7 @@ import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
 import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildReportAnalytics';
 import { firstPassHeadline, FIRST_PASS_TARGET, type FirstPassMetaStats } from '../lib/firstPassQuality';
+import { type ExposureRow } from '../lib/licenceExposure';
 import { copyTextToClipboard } from '../lib/copyText';
 import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts';
 import { MonitorPanels } from './admin/MonitorPanels';
@@ -66,6 +67,12 @@ interface AdminBuildReportRow extends ReportTriage {
   unresolvedCount?: number;
   /** How many builds/edits of the session the record carries (1 when only the focused build exists). */
   sessionParts?: number;
+  /**
+   * WHAT THE USER SAID WAS WRONG, in their own words (admin 2026-08-28). Absent when they sent the
+   * report without typing anything, and on every report written before the box existed — neither is
+   * an error, and neither should read as one.
+   */
+  userNote?: string | null;
 }
 
 type ReportSortKey = 'time' | 'name' | 'app' | 'tier' | 'charged';
@@ -212,7 +219,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       if (reportStatusFilter === 'ok' && r.ok !== true) return false;
       if (reportStatusFilter === 'failed' && r.ok !== false) return false;
       if (q) {
-        const hay = `${r.name ?? ''} ${r.email ?? ''} ${r.appLabel ?? ''} ${r.userId ?? ''}`.toLowerCase();
+        // The user's own complaint is searchable too (admin 2026-08-28) — "show me every report that
+        // mentions the Save button" is the question this inbox exists to answer, and it is answerable
+        // only over the words the user wrote. Costs nothing: userNote is already in the listed meta.
+        const hay = `${r.name ?? ''} ${r.email ?? ''} ${r.appLabel ?? ''} ${r.userId ?? ''} ${r.userNote ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -269,6 +279,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
   const firstPass = firstPassData;
+  /**
+   * LICENCE EXPOSURE — third-party services whose terms do not cover a commercial product.
+   * Admin-only and read-only: it reports whether each source is running, never any credential value.
+   */
+  const [licenceRows, setLicenceRows] = useState<ExposureRow[] | null>(null);
+  const [licenceHeadline, setLicenceHeadline] = useState('');
+  const fetchLicenceExposure = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/licence-exposure', { headers });
+      const d = await r.json();
+      setLicenceRows(Array.isArray(d?.rows) ? d.rows : null);
+      setLicenceHeadline(typeof d?.headline === 'string' ? d.headline : '');
+    } catch (e) { console.error(e); setLicenceRows(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
   // M6-S6.1 — the speed signal: average / median / slowest build time across all reports.
   const buildTimeSummary = useMemo(() => summarizeBuildTimes(buildReports), [buildReports]);
   const fmtDuration = (ms: number): string => (ms >= 60_000 ? `${(ms / 60_000).toFixed(1)}m` : `${Math.round(ms / 1000)}s`);
@@ -846,7 +871,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) { console.error(e); setMfaStatus(null); }
   }, [adminToken]);
 
-  useEffect(() => { if (activeTab === 'security') fetchMfaStatus(); }, [activeTab, fetchMfaStatus]);
+  useEffect(() => { if (activeTab === 'security') { fetchMfaStatus(); fetchLicenceExposure(); } }, [activeTab, fetchMfaStatus, fetchLicenceExposure]);
 
   const startMfaEnroll = async () => {
     setMfaBusy(true);
@@ -1036,6 +1061,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 {statCard('Platform Margin', `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`, 'Revenue minus AI cost', (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
                 {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Paid transactions', 'bg-pink-500', Tag)}
                 {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Direct provider cost', 'bg-orange-500', Cpu)}
+              </div>
+
+              {/* PUBLISHED APPS, as a NUMBER among the numbers.
+                  The full Publish Capacity card below has carried this figure since 2026-08-21 — but it
+                  sits under four rows of tiles, and the admin did not know it existed. A ceiling that
+                  stops publishing for EVERY user at once has to be readable at a glance, next to the
+                  other counts, not found by scrolling.
+
+                  Same source as that card, so the two can never disagree. The colour follows the same
+                  verdict: amber at 70%, red at 90%. An unreadable list shows "—", never "0" — reporting
+                  a failed read as "no apps published" would be the exact dishonesty the endpoint itself
+                  refuses. */}
+              <div className="grid grid-cols-1 gap-4">
+                {statCard(
+                  'Published Apps',
+                  channelsError || !channels ? '—' : `${channels.verdict.used} / ${channels.verdict.cap}`,
+                  channelsError || !channels
+                    ? 'Could not read the list — not a count of zero'
+                    : `${channels.verdict.remaining} more can be published${channels.verdict.reclaimable > 0 ? ` · ${channels.verdict.reclaimable} reclaimable` : ''}`,
+                  channelsError || !channels ? 'bg-white/20'
+                    : channels.verdict.level === 'critical' ? 'bg-red-500'
+                    : channels.verdict.level === 'warn' ? 'bg-amber-500'
+                    : 'bg-emerald-500',
+                  Globe,
+                )}
               </div>
 
               {/* ── THE PUBLISH CEILING (ROADMAP §10) ────────────────────────────────────────
@@ -2656,6 +2706,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                         );
                                       })()}
                                     </span>
+                                    {/* THE USER'S OWN WORDS COME FIRST (admin 2026-08-28). `rootCause`
+                                        below is the ENGINE's verdict on itself; this is the only line
+                                        that can say the button does nothing or it built the wrong app.
+                                        When triaging fifty rows, that is the one worth reading first,
+                                        which is also why it lives in meta and needs no extra fetch. */}
+                                    {r.userNote && (
+                                      <span title={r.userNote} className="block text-[10px] text-sky-300/90 mt-0.5 truncate max-w-[240px]">“{r.userNote}”</span>
+                                    )}
                                     {r.rootCause && <span className="block text-[10px] text-amber-400/80 mt-0.5 truncate max-w-[240px]">{r.rootCause}</span>}
                                   </td>
                                   <td className="px-3 py-2.5 text-[12px] text-white/90 truncate max-w-[140px]">{r.name || <span className="text-[#8b949e]">—</span>}</td>
@@ -2709,14 +2767,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <h4 className="text-sm font-black text-white truncate">{selectedReport?.meta.appLabel ?? 'Loading…'}</h4>
                         {selectedReport && <p className="text-[10px] text-[#8b949e] truncate">{selectedReport.meta.email || selectedReport.meta.userId || 'unknown'} · {new Date(selectedReport.meta.reportedAt).toLocaleString()} · {partsSummary(selectedReport)}</p>}
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      {/* ⚠️ MOBILE CROP (admin 2026-09-03): on a narrow screen this row is wider than the
+                          buttons it holds (part picker + Copy JSON + Download JSON + Mark fixed + Delete
+                          + Close), and the modal's own `overflow-hidden` (for its rounded corners) simply
+                          clipped whatever didn't fit — Close was unreachable. `overflow-x-auto` alone did
+                          nothing here: a flex child only scrolls once something caps its width smaller than
+                          its content, so the cap (`max-w-[68vw]`, lifted on sm+ where the row already fits)
+                          is what turns the clip into a swipe. */}
+                      <div className="flex items-center gap-2 shrink-0 max-w-[68vw] sm:max-w-none overflow-x-auto">
                         {/* ⚠️ WE COULD NOT READ THIS SESSION'S HISTORY (admin 2026-08-27, on "shuru ke
                             9 gayab, only 10th report hi aati hai"). A read failure used to return an
                             empty list, which the record then rendered as a genuine one-build session —
                             a confident wrong number that nobody would ever question. Said out loud
                             here, because a missing report is only findable if it announces itself. */}
                         {selectedReport?.session?.historyUnreadable && (
-                          <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-2 rounded-xl border border-amber-500/50 text-amber-300 bg-amber-500/10">
+                          <span className="shrink-0 whitespace-nowrap text-[10px] font-black uppercase tracking-wider px-2.5 py-2 rounded-xl border border-amber-500/50 text-amber-300 bg-amber-500/10">
                             ⚠ Earlier builds could not be read — this may not be the whole session
                           </span>
                         )}
@@ -2728,7 +2793,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             value={reportPart}
                             onChange={(e) => setReportPart(e.target.value)}
                             aria-label="Which part of the report"
-                            className="bg-[#0d1117] border border-white/10 rounded-xl px-2.5 py-2 text-[11px] font-bold text-white focus:outline-none focus:border-indigo-500"
+                            className="shrink-0 bg-[#0d1117] border border-white/10 rounded-xl px-2.5 py-2 text-[11px] font-bold text-white focus:outline-none focus:border-indigo-500"
                           >
                             {selectedParts.map((p) => (
                               <option key={p.key} value={p.key}>{p.label}</option>
@@ -2738,14 +2803,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <button
                           onClick={copySelectedReport}
                           disabled={!selectedPartJson}
-                          className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-emerald-500/40 text-emerald-300 hover:text-white hover:bg-emerald-600/20 disabled:opacity-40"
+                          className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-emerald-500/40 text-emerald-300 hover:text-white hover:bg-emerald-600/20 disabled:opacity-40"
                         >
                           <FileText className="w-3.5 h-3.5" /> Copy JSON
                         </button>
                         <button
                           onClick={downloadSelectedReport}
                           disabled={!selectedPartJson}
-                          className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-indigo-500/40 text-indigo-300 hover:text-white hover:bg-indigo-600/20 disabled:opacity-40"
+                          className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-indigo-500/40 text-indigo-300 hover:text-white hover:bg-indigo-600/20 disabled:opacity-40"
                         >
                           <Download className="w-3.5 h-3.5" /> Download JSON
                         </button>
@@ -2763,7 +2828,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               title={isFixed
                                 ? reportStatusHint(selectedReport?.meta, (ms) => new Date(ms).toLocaleString())
                                 : 'Mark this report as fixed — only after the work is actually merged'}
-                              className={`flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border disabled:opacity-40 ${isFixed
+                              className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border disabled:opacity-40 ${isFixed
                                 ? 'border-emerald-500/60 text-emerald-200 bg-emerald-600/20 hover:bg-emerald-600/30'
                                 : 'border-white/15 text-[#8b949e] hover:text-white hover:bg-white/5'}`}
                             >
@@ -2777,13 +2842,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           onClick={() => selectedReport?.meta.id && void deleteReport(selectedReport.meta.id)}
                           disabled={!selectedReport?.meta.id}
                           title="Delete this report permanently (frees its storage)"
-                          className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-red-500/40 text-red-300 hover:text-white hover:bg-red-600/20 disabled:opacity-40"
+                          className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-red-500/40 text-red-300 hover:text-white hover:bg-red-600/20 disabled:opacity-40"
                         >
                           <Trash2 className="w-3.5 h-3.5" /> Delete
                         </button>
-                        <button onClick={() => setSelectedReport(null)} className="text-[#8b949e] hover:text-white px-2 py-2 rounded-xl hover:bg-white/5">Close</button>
+                        <button onClick={() => setSelectedReport(null)} className="shrink-0 whitespace-nowrap text-[#8b949e] hover:text-white px-2 py-2 rounded-xl hover:bg-white/5">Close</button>
                       </div>
                     </div>
+                    {/* THE COMPLAINT, IN FULL, ABOVE THE JSON (admin 2026-08-28).
+                        The list row truncates it to one line; here it is shown whole and FIRST,
+                        because it is the only part of this document the user wrote. Everything
+                        below is the engine describing itself, which is exactly the evidence that
+                        cannot notice "it built the wrong app". Rendered as plain text in a
+                        pre-wrap block — never as markup — since it is untrusted user input. */}
+                    {selectedReport?.meta.userNote && (
+                      <div className="mx-4 mt-4 rounded-2xl border border-sky-500/30 bg-sky-500/[0.06] px-4 py-3">
+                        <div className="text-[10px] font-black uppercase tracking-wider text-sky-300/80 mb-1">What the user said</div>
+                        <p className="text-[12px] leading-relaxed text-sky-100 whitespace-pre-wrap break-words">{selectedReport.meta.userNote}</p>
+                      </div>
+                    )}
                     <div className="flex-1 overflow-auto p-4">
                       {selectedReportLoading ? (
                         <div className="flex items-center justify-center py-12 text-[#8b949e] text-sm"><TirangaLoader className="w-5 h-5 mr-2" /> Loading report…</div>
@@ -2802,6 +2879,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── SECURITY TAB ── */}
           {activeTab === 'security' && (
             <div className="space-y-6">
+              {/* LICENCE EXPOSURE — the risks that were only ever written in a document.
+                  Two runtime services run on free tiers their own terms reserve for NON-COMMERCIAL
+                  use, while NavBharatAI charges money. Switching one off is a PAUSE; the fix is a
+                  commercial plan, so every row says so in the admin's own words. */}
+              {licenceRows && licenceRows.length > 0 && (
+                <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Shield className="w-4 h-4 text-amber-400" />
+                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Licence exposure</h3>
+                    <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${
+                      licenceRows.some((r) => r.state === 'active') ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-400'
+                    }`}>
+                      {licenceRows.filter((r) => r.state === 'active').length} running
+                    </span>
+                  </div>
+                  {licenceHeadline && <p className="text-[11px] text-[#8b949e] font-medium leading-snug">{licenceHeadline}</p>}
+                  <div className="space-y-3">
+                    {licenceRows.map((row) => (
+                      <div key={row.id} className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-xs font-black text-white">{row.name}</p>
+                          <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${
+                            row.state === 'active' ? 'bg-amber-500/20 text-amber-300'
+                              : row.state === 'switched-off' ? 'bg-white/5 text-[#8b949e]'
+                              : 'bg-white/5 text-[#6e7681]'
+                          }`}>
+                            {row.state === 'active' ? 'Running' : row.state === 'switched-off' ? 'Switched off' : 'Not configured'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#8b949e] leading-snug">{row.restriction}</p>
+                        <p className="text-[11px] text-[#8b949e] leading-snug"><span className="text-[#6e7681]">Powers:</span> {row.powers}</p>
+                        <p className="text-[11px] text-emerald-300/90 leading-snug"><span className="text-[#6e7681]">The real fix:</span> {row.honestFix}</p>
+                        <p className="text-[11px] text-[#8b949e] leading-snug"><span className="text-[#6e7681]">If switched off:</span> {row.whenOff}</p>
+                        <p className="text-[10px] text-[#6e7681] font-mono">
+                          {row.killSwitch ? `Switch: set ${row.killSwitch}=off in Cloud Run` : `Switch: remove ${row.requires ?? 'its key'} — publishing then blocks, by design`}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* ── P-SEC.3 — Two-Factor Authentication (TOTP) ── */}
               <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
                 <div className="flex items-center justify-between">

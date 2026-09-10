@@ -21,7 +21,18 @@ describe('HistoryPopup renders as an overlay, not a screen', () => {
   it('lies OVER the chat and never grows into a full page', () => {
     // The whole point of the request: you glance at the list and you are still in your conversation.
     expect(html).toContain('fixed inset-0');
-    expect(html).toContain('max-h-[80vh]');
+    // 80% is still the design's height — it just moved from a raw `max-h-[80vh]` into the shared
+    // clamp, so it can never exceed the room actually left once the app's tab bar is reserved
+    // (admin 2026-09-06: the bar was covering the bottom of sheets like this one). See
+    // tests/sheetOverlayGeometry.test.ts for the reservation itself.
+    expect(html).toContain('--nb-sheet-cap:80dvh');
+    expect(html).toContain('nb-sheet-partial');
+  });
+
+  it('reserves the app\'s own tab bar, which used to cover its bottom rows', () => {
+    // z-130 is BELOW the nav's z-150, so without this the bar painted over the sheet — and the
+    // sheet's scroll ended underneath it, so scrolling to the bottom did not help.
+    expect(html).toContain('nb-sheet-overlay-flush');
   });
 
   it('renders the list itself, not an error, when signed out', () => {

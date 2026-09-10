@@ -710,3 +710,110 @@ describe('POOL cooldown — service saturation benches the whole key pool', () =
     expect(cooldowns.until('pool:GLM')).toBe(0); // no pool entry for a 1-key provider
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// DEAD LADDER RUNG — a model this account cannot reach is retired, its siblings are not.
+//
+// Report faa98da9 (2026-09-03), and an earlier 40-call build before it: the free Kimi ladder leads
+// with `kimi-k2.5`, which answers "404 Not found the model kimi-k2.5 or Permission denied" on this
+// account. It is neither a timeout nor a 429, so it hit no bench and was re-tried on EVERY call — five
+// wasted round-trips out of five calls, and 57 out of 40 calls in the earlier build. The fallback that
+// rescued each one was then counted as a self-heal, which is how a config defect wore a green tick.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+describe('a model that can never answer is retired after ONE attempt (report faa98da9)', () => {
+  const DEAD = '404 Not found the model kimi-k2.5 or Permission denied';
+
+  it('tries the dead rung once, then skips it for every later turn in the run', async () => {
+    const dead = runnerFail(DEAD);
+    const alive = runnerOk('from kimi-k2.6');
+    const runner = makeMultiProviderTurnRunner([
+      { name: 'KIMI', runner: dead, modelId: 'kimi-k2.5' },
+      { name: 'KIMI', runner: alive, modelId: 'kimi-k2.6' },
+    ]);
+    for (let i = 0; i < 5; i++) expect((await runner.runTurn(PARAMS)).text).toBe('from kimi-k2.6');
+    // THE WHOLE POINT: one wasted request for the build, not one per call.
+    expect(dead.runTurn).toHaveBeenCalledTimes(1);
+    expect(alive.runTurn).toHaveBeenCalledTimes(5);
+  });
+
+  it('retires ONLY the dead model — its provider\'s healthy rungs keep delivering', async () => {
+    // The regression that a name-keyed fix would have caused: in the real report the dead rung and the
+    // rung that delivered all five turns share the single bench name 'KIMI'. Benching the NAME would
+    // have turned one wasted round-trip per call into a build with no Kimi at all.
+    const dead = runnerFail(DEAD);
+    const alive = runnerOk('from kimi-k2.6');
+    const claude = runnerOk('from claude');
+    const used: string[] = [];
+    const runner = makeMultiProviderTurnRunner([
+      { name: 'KIMI', runner: dead, modelId: 'kimi-k2.5' },
+      { name: 'KIMI', runner: alive, modelId: 'kimi-k2.6' },
+      { name: 'CLAUDE', runner: claude },
+    ], { onProviderUsed: (u) => used.push(u) });
+    await runner.runTurn(PARAMS);
+    await runner.runTurn(PARAMS);
+    expect(used).toEqual(['KIMI', 'KIMI']);
+    expect(claude.runTurn).not.toHaveBeenCalled();
+  });
+
+  it('never empties the chain — an all-dead ladder still reaches the backstop, then fails honestly', async () => {
+    const deadA = runnerFail('404 Not found the model glm-4.7-flash or Permission denied');
+    const deadB = runnerFail('The model `glm-5.2` does not exist or you do not have access to it');
+    const backstop = runnerOk('from haiku');
+    const runner = makeMultiProviderTurnRunner([
+      { name: 'GLM', runner: deadA, modelId: 'glm-4.7-flash' },
+      { name: 'GLM', runner: deadB, modelId: 'glm-5.2' },
+      { name: 'CLAUDE_HAIKU', runner: backstop },
+    ]);
+    expect((await runner.runTurn(PARAMS)).text).toBe('from haiku');
+    expect((await runner.runTurn(PARAMS)).text).toBe('from haiku');
+    expect(deadA.runTurn).toHaveBeenCalledTimes(1);
+    expect(deadB.runTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('a rung with no modelId still retires under its bench name (account-level fatal is unchanged)', async () => {
+    const dead = runnerFail('Your credit balance is too low');
+    const backstop = runnerOk('from claude');
+    const runner = makeMultiProviderTurnRunner([
+      { name: 'GLM', runner: dead },
+      { name: 'CLAUDE', runner: backstop },
+    ]);
+    await runner.runTurn(PARAMS);
+    await runner.runTurn(PARAMS);
+    expect(dead.runTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('an ACCOUNT-level fatal still retires the WHOLE provider, every rung of the ladder', async () => {
+    // The inverse property, and the one that keeps the model-scoped key honest: a revoked key or an
+    // empty balance is not a fact about one model. If per-model retirement leaked into this class, a
+    // dead account would be re-proved once per rung — the exact re-grind the 2026-07-07 fix removed.
+    const rung1 = runnerFail('Your credit balance is too low');
+    const rung2 = runnerFail('Your credit balance is too low');
+    const backstop = runnerOk('from claude');
+    const runner = makeMultiProviderTurnRunner([
+      { name: 'KIMI', runner: rung1, modelId: 'kimi-k2.5' },
+      { name: 'KIMI', runner: rung2, modelId: 'kimi-k2.6' },
+      { name: 'CLAUDE', runner: backstop },
+    ]);
+    await runner.runTurn(PARAMS);
+    await runner.runTurn(PARAMS);
+    // Stronger than "not re-tried next turn": rung1's failure retires the bench name mid-chain, so its
+    // sibling is skipped inside the SAME turn and never called at all. Asserted at the real number
+    // because a guard that accepts either count would not notice per-model leakage into this class.
+    expect(rung1.runTurn).toHaveBeenCalledTimes(1);
+    expect(rung2.runTurn).toHaveBeenCalledTimes(0);
+  });
+
+  it('a TRANSIENT failure is still retried — retirement is only for permanent answers', async () => {
+    // The guard against over-reach: a 429 or a 5xx must never be mistaken for a dead rung, or a
+    // momentarily-throttled cheap model would be lost for the whole build.
+    let n = 0;
+    const flaky: TurnRunner = { runTurn: vi.fn(async () => { n++; if (n === 1) throw new Error('429 Rate limit reached'); return ok('recovered'); }) };
+    const backstop = runnerOk('from claude');
+    const runner = makeMultiProviderTurnRunner([
+      { name: 'GLM', runner: flaky, modelId: 'glm-4.7' },
+      { name: 'CLAUDE', runner: backstop },
+    ]);
+    expect((await runner.runTurn(PARAMS)).text).toBe('from claude');
+    expect((await runner.runTurn(PARAMS)).text).toBe('recovered');
+  });
+});

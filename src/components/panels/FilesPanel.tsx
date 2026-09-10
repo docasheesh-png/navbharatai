@@ -324,8 +324,27 @@ export function FilesPanel({
                               <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{path}</span>
                               <span className="text-[8px] text-[#484f58] font-mono shrink-0">{lines}L · {sizeLabel}</span>
                             </button>
-                            {/* C1/C2/C8/C17 — copy path, duplicate, rename, delete. Hover-revealed on
-                                desktop; on touch layouts they stay visible (hover doesn't exist there). */}
+                            {/* C1/C2/C8/C17 — copy path, duplicate, rename, delete. Hover-revealed.
+                             *
+                             * ⚠️ TOUCH LAYOUTS DO NOT GET THIS STRIP (admin 2026-09-03, with a phone
+                             * screenshot of the column ringed in red: "uske andar woh sare button
+                             * hatao"). ROOT CAUSE of the clutter: on touch, EVERY action here is
+                             * already offered by the tap menu below as a real labelled button — so
+                             * five 10px icons sat permanently beside every row (`opacity-60`, since
+                             * hover cannot reveal them) duplicating a menu that was easier to hit,
+                             * and stole the width that made filenames truncate mid-name.
+                             *
+                             * The invariant that replaces it: the strip and the tap menu are
+                             * MUTUALLY EXCLUSIVE, and between them every action stays reachable
+                             * exactly once. That is why Rename and Duplicate were added to the tap
+                             * menu in the same change — removing the strip without them would have
+                             * deleted two working capabilities on mobile, not tidied a screen.
+                             *
+                             * The responsive classes stay as they are: with `tapActions` false on a
+                             * NARROW viewport (a phone forced into desktop mode) there is no hover
+                             * to reveal anything, so `opacity-60` below `sm` is the only thing
+                             * keeping these reachable at all. */}
+                            {!tapActions && (
                             <div className="flex items-center gap-0.5 pr-2 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
                               {/* "See" (admin 2026-08-02) — read-only view, parity with the touch menu so
                                   desktop users can read a file without opening the editor either. */}
@@ -378,11 +397,16 @@ export function FilesPanel({
                                 </button>
                               )}
                             </div>
+                            )}
                           </>
                         )}
                       </div>
-                      {/* Touch mode — inline action menu (admin 2026-07-07): Open · Copy file ·
-                          Copy path · Delete. Real full-width buttons (guaranteed tap→click on iOS). */}
+                      {/* Touch mode — inline action menu (admin 2026-07-07): See · Open · Copy file ·
+                          Copy path · Rename · Duplicate · Delete. Real labelled buttons (guaranteed
+                          tap→click on iOS).
+                          Rename and Duplicate joined it on 2026-09-03: they used to live ONLY in the
+                          icon strip above, so hiding that strip on touch without them here would have
+                          taken two working actions away from every phone user. */}
                       {tapActions && actionPath === path && !isRenaming && (
                         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2.5">
                           <button
@@ -410,6 +434,29 @@ export function FilesPanel({
                           >
                             <Copy className="w-3 h-3" /> Copy path
                           </button>
+                          {onRenameFile && (
+                            <button
+                              onClick={() => { setActionPath(null); setRenamingPath(path); setRenameValue(path); }}
+                              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] font-semibold text-[#c9d1d9] touch-manipulation"
+                            >
+                              <Pencil className="w-3 h-3" /> Rename
+                            </button>
+                          )}
+                          {onDuplicateFile && (
+                            <button
+                              onClick={() => {
+                                const dotIdx = path.lastIndexOf('.');
+                                const copyPath = dotIdx > 0
+                                  ? `${path.slice(0, dotIdx)}-copy${path.slice(dotIdx)}`
+                                  : `${path}-copy`;
+                                setActionPath(null);
+                                onDuplicateFile(path, copyPath);
+                              }}
+                              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] font-semibold text-[#c9d1d9] touch-manipulation"
+                            >
+                              <Plus className="w-3 h-3" /> Duplicate
+                            </button>
+                          )}
                           {onDeleteFile && (
                             <button
                               onClick={() => { if (window.confirm(`Delete ${path}?`)) { setActionPath(null); onDeleteFile(path); } }}

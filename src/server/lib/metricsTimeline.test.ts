@@ -9,6 +9,10 @@ import {
   summarize,
   safeProviderKey,
   metricsTimeline,
+  shardCount,
+  shardIndex,
+  bucketDocId,
+  readLimitFor,
 } from './metricsTimeline';
 import { getMetrics, setMetricsSink } from './metrics';
 import { recordPlatformBuild } from './platformBuildMetrics';
@@ -230,5 +234,122 @@ describe('AgentV3 telemetry wiring (locked)', () => {
 
   it('imports the shared recorder rather than re-implementing it at a call site', () => {
     expect(route).toContain("from '../lib/platformBuildMetrics'");
+  });
+});
+
+/**
+ * SHARDED BUCKETS (ROADMAP §12 #4).
+ *
+ * Firestore sustains ~1 write/second to a single document. Every instance flushes once a minute into
+ * the bucket for "now", so the write rate on that one document is (instances / 60) per second. At the
+ * 100-instance ceiling §12 #2 now permits that is 1.67/s — past the limit, and SILENTLY, because
+ * `doFlush` catches, restores the deltas and retries.
+ */
+describe('shardCount', () => {
+  it('defaults to real headroom, and is env-tunable within bounds', () => {
+    expect(shardCount({} as any)).toBe(8);
+    expect(shardCount({ MONITOR_SHARDS: '16' } as any)).toBe(16);
+    // 100 instances / 60s / 8 shards ≈ 0.2 writes per second per document.
+    expect(100 / 60 / shardCount({} as any)).toBeLessThan(1);
+  });
+
+  it('a nonsense value falls back rather than disabling or exploding the fan-out', () => {
+    expect(shardCount({ MONITOR_SHARDS: '' } as any)).toBe(8);
+    expect(shardCount({ MONITOR_SHARDS: 'many' } as any)).toBe(8);
+    expect(shardCount({ MONITOR_SHARDS: '0' } as any)).toBe(8);
+    expect(shardCount({ MONITOR_SHARDS: '-4' } as any)).toBe(8);
+    expect(shardCount({ MONITOR_SHARDS: '99999' } as any)).toBe(64);
+  });
+});
+
+describe('shardIndex / bucketDocId', () => {
+  it('this process picks ONE shard and keeps it', () => {
+    expect(shardIndex(8)).toBe(shardIndex(8));
+    expect(shardIndex(8)).toBeGreaterThanOrEqual(0);
+    expect(shardIndex(8)).toBeLessThan(8);
+  });
+
+  it('a shard is always in range, even for a silly count', () => {
+    for (const n of [1, 2, 64]) {
+      expect(shardIndex(n)).toBeGreaterThanOrEqual(0);
+      expect(shardIndex(n)).toBeLessThan(n);
+    }
+    expect(shardIndex(0)).toBe(0);
+  });
+
+  it('ids are per bucket AND per shard, so two shards never collide', () => {
+    expect(bucketDocId(1700000000000, 3)).toBe('1700000000000_s3');
+    expect(bucketDocId(1700000000000, 0)).not.toBe(bucketDocId(1700000000000, 1));
+  });
+
+  it('🔒 a sharded id is DISTINCT from the legacy bare id, so nothing is overwritten', () => {
+    // Pre-sharding buckets are `${t}`. They are still read, because the query filters on the
+    // bucketStart FIELD, not on ids — old and new sum together and the graph has no seam at deploy.
+    expect(bucketDocId(1700000000000, 0)).not.toBe('1700000000000');
+  });
+});
+
+describe('🔒 fillSeries SUMS shards — it used to keep only the last one', () => {
+  it('several documents for one bucket add up', () => {
+    const pts = fillSeries([
+      { bucketStart: 1000, builds: 1, aiRequests: 5 },
+      { bucketStart: 1000, builds: 2, aiRequests: 7 },
+      { bucketStart: 1000, builds: 4, aiRequests: 0 },
+    ], 1000, 1000, 1000);
+    expect(pts).toHaveLength(1);
+    expect(pts[0].builds).toBe(7);
+    expect(pts[0].aiRequests).toBe(12);
+    expect(pts[0].observed).toBe(true);
+  });
+
+  it('a legacy unsharded bucket and its new sharded siblings sum together', () => {
+    const pts = fillSeries([
+      { bucketStart: 2000, builds: 10 },   // written before sharding
+      { bucketStart: 2000, builds: 3 },    // shard 0 after the deploy
+      { bucketStart: 2000, builds: 2 },    // shard 5
+    ], 2000, 2000, 1000);
+    expect(pts[0].builds).toBe(15);
+  });
+
+  it('one bucket per document still behaves exactly as before', () => {
+    const pts = fillSeries([{ bucketStart: 1000, builds: 1 }, { bucketStart: 2000, builds: 2 }], 1000, 2000, 1000);
+    expect(pts.map((p) => p.builds)).toEqual([1, 2]);
+    expect(pts.map((p) => p.observed)).toEqual([true, true]);
+  });
+
+  it('gaps are still explicit zeros, and marked unobserved', () => {
+    const pts = fillSeries([{ bucketStart: 1000, builds: 1 }], 1000, 3000, 1000);
+    expect(pts.map((p) => p.observed)).toEqual([true, false, false]);
+    expect(pts.map((p) => p.builds)).toEqual([1, 0, 0]);
+  });
+
+  it('a bucketStart of 0 is still ignored — unchanged, epoch is not a real bucket', () => {
+    expect(fillSeries([{ bucketStart: 0, builds: 9 }], 1000, 1000, 1000)[0].builds).toBe(0);
+  });
+});
+
+describe('🔒 readLimitFor — the truncation bug sharding would have multiplied by 8', () => {
+  const FIVE_MIN = 5 * 60_000;
+
+  it('a 7-day window at 5-minute buckets needs MORE than the old flat 2000', () => {
+    // 2,016 buckets, and the old read stopped at 2,000 — ordered ASCENDING, so what it dropped was the
+    // NEWEST hours. The longest view was silently missing its most recent data before sharding existed.
+    const week = 7 * 24 * 60 * 60_000;
+    expect(readLimitFor(0, week, FIVE_MIN, 1)).toBeGreaterThan(2000);
+  });
+
+  it('scales with the shard count, because one bucket is now N documents', () => {
+    const day = 24 * 60 * 60_000;
+    expect(readLimitFor(0, day, FIVE_MIN, 8)).toBe(readLimitFor(0, day, FIVE_MIN, 1) * 8);
+  });
+
+  it('stays bounded, so no window can ask Firestore for an unlimited read', () => {
+    expect(readLimitFor(0, 365 * 24 * 3600_000, 60_000, 64)).toBeLessThanOrEqual(30_000);
+  });
+
+  it('an invalid or inverted window asks for the minimum, never for everything', () => {
+    expect(readLimitFor(1000, 0, FIVE_MIN, 8)).toBe(1);
+    expect(readLimitFor(0, 1000, 0, 8)).toBe(1);
+    expect(readLimitFor(NaN, 1000, FIVE_MIN, 8)).toBe(1);
   });
 });

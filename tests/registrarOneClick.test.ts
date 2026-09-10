@@ -123,9 +123,9 @@ const client = readFileSync(join(__dirname, '..', 'src/components/agentv3/NbaiDo
 
 describe('slice B/C surfaces', () => {
   it('both routes are ownership-checked; Hostinger is flag-gated and bounds the token', () => {
-    const dc = route.slice(route.indexOf('domain-connect/check'), route.indexOf('domain-connect/check') + 1400);
+    const dc = route.slice(route.indexOf("app.get('/api/domains/nbai/domain-connect/check'"), route.indexOf("app.get('/api/domains/nbai/domain-connect/check'") + 1400);
     expect(dc).toContain('ownsWorkspace');
-    const hg = route.slice(route.indexOf('hostinger/apply'), route.indexOf('hostinger/apply') + 2200);
+    const hg = route.slice(route.indexOf("app.post('/api/domains/nbai/hostinger/apply'"), route.indexOf("app.post('/api/domains/nbai/hostinger/apply'") + 2200);
     expect(hg).toContain('ownsWorkspace');
     expect(hg).toContain('hostingerDnsEnabled()');
     expect(hg).toContain('apiToken.length > 512');
@@ -134,7 +134,7 @@ describe('slice B/C surfaces', () => {
   it('the token is single-use by construction: never persisted server-side, cleared client-side after apply', () => {
     // Server: the token variable is passed straight to applyHostingerRecords and to nothing else.
     expect(route).not.toContain('setDoc') || undefined;
-    const hg = route.slice(route.indexOf('hostinger/apply'), route.indexOf('hostinger/apply') + 2200);
+    const hg = route.slice(route.indexOf("app.post('/api/domains/nbai/hostinger/apply'"), route.indexOf("app.post('/api/domains/nbai/hostinger/apply'") + 2200);
     expect(hg).toContain('applyHostingerRecords(apiToken');
     expect(hg).not.toMatch(/console\.(log|error)\([^)]*apiToken/);
     // Client: state cleared the moment the call succeeds.

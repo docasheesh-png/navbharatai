@@ -249,6 +249,22 @@ export interface AgentRunResult {
    *  build can be continued — a fresh run gets a fresh budget window). Lets the client show an honest
    *  "budget reached — continue" state instead of a hard failure. */
   budgetReached?: boolean;
+  /**
+   * The run stopped ONLY because it hit the wall-clock cap (`buildTimedOut`, AGENTV3_MAX_BUILD_SECONDS).
+   *
+   * 🔴 WHY THIS EXISTS (admin diagnostics report, 2026-09-10). A build died at 29m59s — one second under
+   * the 1800s default — and the diagnostics report gave NO way to tell. Every OTHER outcome this route
+   * recognises gets its own `OUTCOME_*` diagnostic code (`OUTCOME_BUILD_SUCCESS`, `OUTCOME_STOPPED`,
+   * `OUTCOME_SYNTAX_ERROR`, `OUTCOME_PREVIEW_FAILED`, …) — hitting the wall-clock cap did not, because
+   * `AgentRunner` never touches `buildDiag` at all; only the route does, from this return value. A
+   * report reader was left to INFER a timeout purely from the coincidence of the duration, which is
+   * exactly the "wrong verdict" the fifth absolute rule's honesty step forbids.
+   *
+   * True on BOTH branches of the `buildTimedOut()` check — the friendly "files so far are saved" one
+   * (`ok: true`) and the bare "wasn't making progress" one (`ok: false`) — so the call site can record
+   * the outcome honestly either way, rather than mis-reading a real timeout as an ordinary finish.
+   */
+  timedOut?: boolean;
 }
 
 interface ToolResultBlock {
@@ -488,7 +504,7 @@ export class AgentRunner {
             : `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up). Nothing was lost; try again or rephrase.`;
           await persist(builtSomething ? 'complete' : 'stopped');
           events.emit({ type: 'done', ok: builtSomething, summary, ts: Date.now() });
-          return { ok: builtSomething, summary, steps, usage, billedUsd: billed() };
+          return { ok: builtSomething, summary, steps, usage, billedUsd: billed(), timedOut: true };
         }
 
         // Full Team mid-build steering (Fix 60): drain the messages the user sent while the team was

@@ -20,15 +20,20 @@
 // so a deploy can never target a host that isn't set up. Pricing here is intentionally simple + honest
 // (static = Free); it is the single place to change when the admin sets real numbers.
 
-import { useEffect, useState } from 'react';
-import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, Store, Clipboard, Sparkles, Loader2 } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { Rocket, X, Globe, Server, Link2, GitBranch, ExternalLink, AlertCircle, Database, Smartphone, Store, Clipboard, Sparkles, Loader2, Check } from 'lucide-react';
 import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { NbaiDomainConnect } from './NbaiDomainConnect';
 import { usePublishState } from '../../hooks/usePublishState';
 import { needsPublishDot } from '../../lib/publishFreshness';
-import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type BackendKeySource } from '../../lib/backendDeployOffer';
+import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type BackendKeySource, shouldAutoDeployBackend } from '../../lib/backendDeployOffer';
 import { managedDeployRequest, managedDeployOutcome, renderConnectSteps } from '../../lib/backendDeployWiring';
+import { LONG_REQUEST_TIMEOUT_MS, fetchFailureLine, isFetchTimeout } from '../../lib/longRequest';
+import {
+  DEPLOY_BACKEND_FAILURE, PROVISION_DB_FAILURE, PUSH_APP_FAILURE, PUSH_APP_UNCONFIRMED_LINE,
+  pushSavedLine, repoFactOf, type PushAppResult,
+} from './pushAppFeedback';
 
 export interface HostingProvider {
   id: string;
@@ -83,10 +88,45 @@ export interface HostingChooserProps {
   /** Take the app off NavBharatAI hosting. Resolves to an honest message; the caller shows it. */
   onUnpublish?: () => Promise<void>;
   /**
+   * Put the live app back to the version before this one.
+   *
+   * Optional like `onUnpublish`: where the host cannot do it, no control appears at all rather than a
+   * button that could only fail.
+   */
+  onRollback?: (versionName?: string) => Promise<void>;
+  /**
+   * The publish history (ROADMAP §13, 1.4): every version the live app may be put back to, newest
+   * first, the live one marked. Resolves to null when the history could not be read — the list then
+   * says so instead of showing an empty history as "nothing to go back to".
+   */
+  onLoadRollbackChoices?: () => Promise<RollbackChoiceView[] | null>;
+  /** Site settings (ROADMAP §13, 1.6): redirects, embedding. Null when they could not be read. */
+  onLoadSiteConfig?: () => Promise<SiteConfigView | null>;
+  /** Save them; resolves to the server's errors (empty on success) and its message. */
+  onSaveSiteConfig?: (config: SiteConfigView) => Promise<{ errors: string[]; message?: string }>;
+  /**
+   * Visitor counts for the live app (ROADMAP §13, 1.1). `undefined`/`null` = not loaded yet;
+   * `available: false` = NavBharatAI could not read them, which the tile says in words — a zero it
+   * did not measure is the fake result this panel keeps refusing to show.
+   */
+  siteAnalytics?: SiteAnalyticsView | null;
+  /** Load (or reload) the counts for a window. Absent ⇒ no tile at all, never a dead one. */
+  onLoadSiteAnalytics?: (days: 7 | 30) => Promise<void>;
+  /**
    * Load every app this USER has live. Keyed by user rather than workspace on purpose — an app whose
    * chat was deleted has nothing pointing at it, and this list is the only way back to it.
    */
-  onLoadMyApps?: () => Promise<{ apps: Array<{ workspaceId: string; url: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }>; used: number; cap: number } | null>;
+  onLoadMyApps?: () => Promise<{
+    apps: Array<{ workspaceId: string; url: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }>;
+    used: number;
+    cap: number;
+    /** Apps a plan lapse took offline — listed separately because they hold no slot and have no URL. */
+    paused?: Array<{ workspaceId: string; url: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }>;
+    /** The free allowance, so the copy can name the number the user fell back to. */
+    freeCap?: number;
+    /** The plan the user holds, or null on the free tier. */
+    planName?: string | null;
+  } | null>;
   /** Take ONE of them offline by workspace id. Resolves to '' on success, or an honest message. */
   onUnpublishApp?: (workspaceId: string) => Promise<string>;
   /** Set once this workspace is storing its code in the user's OWN GitHub repo (git-native storage). */
@@ -96,7 +136,12 @@ export interface HostingChooserProps {
   /** Start the GitHub connect flow (reuses the panel's existing OAuth redirect). */
   onConnectGitHub?: () => void;
   /** Authenticated fetch, so the data gate can ask the server about THIS user's workspace. */
-  authedFetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  /**
+   * The third parameter is the request ceiling (see lib/longRequest.ts). It is part of the contract
+   * because the long actions on this screen — a GitHub push, a backend deploy, a database — take
+   * minutes, and a fetch that cannot be told so is cut at the 20-second default and lies about it.
+   */
+  authedFetch?: (url: string, init?: RequestInit, timeoutMs?: number) => Promise<Response>;
   /** Open Settings → App Settings → Database, for the "connect my own" answer. */
   onOpenDatabaseSettings?: () => void;
   /** Open the APK Builder (Other AI → APK Builder), pre-targeted to this app, to make an Android app. */
@@ -128,6 +173,8 @@ export interface HostingChooserProps {
    * not theirs, their host cannot see it, and a deploy offered from it could only ever fail.
    */
   deployRepo?: { owner: string; repo: string } | null;
+  /** Told when this app has just been saved into the user's own repo, so the screen can re-derive. */
+  onRepoPushed?: (repo: { owner: string; repo: string }) => void;
 }
 
 /** What the server knows about this app's data needs — see GET /api/agentv3/database-readiness. */
@@ -139,24 +186,89 @@ interface DatabaseReadiness {
   canProvision: boolean;
 }
 
+/** The client's view of the server's summary — declared here, not imported: the server module
+ *  pulls in node:crypto, which must never reach the frontend build (see PR #2778's lesson). */
+export interface SiteAnalyticsView {
+  available: boolean;
+  reason?: string;
+  days?: Array<{ day: string; views: number; uniques: number }>;
+  totalViews?: number;
+  totalUniques?: number;
+  todayViews?: number;
+  topPaths?: Array<{ path: string; views: number }>;
+  topReferrers?: Array<{ host: string; views: number }>;
+  sinceDay?: string;
+}
+
+/** One version the live app may go back to — the server's `choices` shape. */
+export interface RollbackChoiceView { versionName: string; releaseTime: string | null; live: boolean }
+
+/** A published app's site settings — the server's shape (ROADMAP §13, 1.6). */
+export interface SiteConfigView { redirects: Array<{ from: string; to: string; code: 301 | 302 }>; allowEmbedding: boolean }
+
 const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI hosting"
 
 export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr,
-  liveUrl, onUnpublish, onLoadMyApps, onUnpublishApp,
-  ownRepo, githubConnected, onConnectGitHub, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
+  liveUrl, onUnpublish, onRollback, onLoadMyApps, onUnpublishApp, siteAnalytics, onLoadSiteAnalytics, onLoadRollbackChoices, onLoadSiteConfig, onSaveSiteConfig,
+  ownRepo, githubConnected, onConnectGitHub, onRepoPushed, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
   onMakeIcon, publishRefusalCode, backendKeySource, deployRepo,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost' | 'myapps'>('choose');
+  // VISITOR COUNTS (ROADMAP §13, 1.1): loaded the moment a live app is on screen, because "did
+  // anyone come?" is the first question after publishing and should not need a click to answer.
+  const [analyticsDays, setAnalyticsDays] = useState<7 | 30>(7);
+  // THE HISTORY PICKER (ROADMAP §13, 1.4). Loaded on demand — most people pressing Undo want one step
+  // back, and a list nobody asked for is a request nobody needed. `undefined` = not asked yet,
+  // `null` = asked and could not be read (said in words, never shown as an empty history).
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // SITE SETTINGS (ROADMAP §13, 1.6). Loaded when opened; saved explicitly; the server's own errors
+  // shown verbatim; the one honest line — settings reach the live site on the NEXT publish.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [siteCfg, setSiteCfg] = useState<SiteConfigView | null | undefined>(undefined);
+  const [cfgErrors, setCfgErrors] = useState<string[]>([]);
+  const [cfgNote, setCfgNote] = useState('');
+  const [cfgBusy, setCfgBusy] = useState(false);
+  const openSettings = async () => {
+    setSettingsOpen(true); setCfgErrors([]); setCfgNote('');
+    if (!onLoadSiteConfig) return;
+    setSiteCfg(undefined);
+    setSiteCfg(await onLoadSiteConfig().catch(() => null));
+  };
+  const saveSettings = async () => {
+    if (!onSaveSiteConfig || !siteCfg) return;
+    setCfgBusy(true); setCfgErrors([]); setCfgNote('');
+    try {
+      const r = await onSaveSiteConfig(siteCfg);
+      setCfgErrors(r.errors);
+      if (r.errors.length === 0) setCfgNote(r.message || 'Saved. Publish again for these settings to reach your live site.');
+    } finally { setCfgBusy(false); }
+  };
+  const [choices, setChoices] = useState<RollbackChoiceView[] | null | undefined>(undefined);
+  const [pickedVersion, setPickedVersion] = useState<string | null>(null);
+  const openHistory = async () => {
+    setHistoryOpen(true);
+    if (!onLoadRollbackChoices) return;
+    setChoices(undefined);
+    setChoices(await onLoadRollbackChoices().catch(() => null));
+  };
+  useEffect(() => {
+    if (liveUrl && onLoadSiteAnalytics) void onLoadSiteAnalytics(analyticsDays);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveUrl, analyticsDays]);
   // MY PUBLISHED APPS (admin 2026-08-21). Loaded on demand, because most people opening Publish are
   // here to publish, not to audit — and a list nobody asked for is a request nobody needed.
   const [myApps, setMyApps] = useState<Array<{ workspaceId: string; url: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }> | null>(null);
-  const [myAppsMeta, setMyAppsMeta] = useState<{ used: number; cap: number } | null>(null);
+  const [myAppsMeta, setMyAppsMeta] = useState<{ used: number; cap: number; freeCap?: number; planName?: string | null } | null>(null);
+  const [myPausedApps, setMyPausedApps] = useState<Array<{ workspaceId: string; updatedAt: number | null; sizeMb: number | null; orphaned: boolean }>>([]);
   const [myAppsErr, setMyAppsErr] = useState('');
   const [myAppsBusy, setMyAppsBusy] = useState('');
   // Unpublish: two-step, because taking a public site down is irreversible from the visitor's side —
   // anyone holding the link loses it the moment this runs. `confirm` is the second step.
   const [unpubConfirm, setUnpubConfirm] = useState(false);
+  // Undo-last-publish: two-step like Unpublish, because it also changes what the public sees now.
+  const [rollbackConfirm, setRollbackConfirm] = useState(false);
+  const [rollbackBusy, setRollbackBusy] = useState(false);
   const [unpubBusy, setUnpubBusy] = useState(false);
   const [unpubNote, setUnpubNote] = useState('');
   // ── Nav App Store one-click publish (Kadam 1, admin: "1 click release/publish … v5 ke publish ke
@@ -267,15 +379,17 @@ export function HostingChooser({
     // A publish that has not answered in 90 seconds has not worked. The user is told exactly that, and
     // told the safe thing to do — checking before republishing, because a re-publish updates the same
     // listing rather than creating a second one, so the honest advice is "look first".
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 90_000);
+    // ⚠️ RE-ANCHORED 2026-09-07: this used to build its OWN AbortController and pass `signal`, and
+    // `authedFetch` overwrote that signal with its 20-second default — so the 90 seconds promised
+    // above never applied, and the abort arrived as authedFetch's error rather than an AbortError, so
+    // the timed-out branch below never ran either. The ceiling is now passed to authedFetch itself,
+    // and its timeout error is the one thing the catch checks for. See lib/longRequest.ts.
     try {
       const res = await authedFetch('/api/nav-store/web/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: ac.signal,
         body: JSON.stringify({ workspaceId, name, visibility: 'public', ...(storeIcon ? { iconDataUrl: storeIcon } : {}), ...(storeShots.length ? { screenshots: storeShots } : {}) }),
-      });
+      }, LONG_REQUEST_TIMEOUT_MS.storePublish);
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
         // The gate's refusals are REAL and specific (a hardcoded key with its file:line, "needs a
@@ -290,12 +404,11 @@ export function HostingChooser({
         ? 'Published! Your app is live on the store.'
         : 'Published! Your link works right now (copied) — the store listing goes live after a quick human review.' });
     } catch (e) {
-      const timedOut = (e as { name?: string })?.name === 'AbortError';
+      const timedOut = isFetchTimeout(e);
       setStoreResult({ ok: false, message: timedOut
         ? 'Publishing is taking longer than expected, so we stopped waiting. Check "Your published apps" — if it is not there, try again.'
         : 'Could not reach the server — nothing was published.' });
     } finally {
-      clearTimeout(timer);
       setStoreBusy(false);
     }
   };
@@ -314,6 +427,111 @@ export function HostingChooser({
   });
   const [backendBusy, setBackendBusy] = useState(false);
   const [backendLines, setBackendLines] = useState<string[]>([]);
+  const [pushBusy, setPushBusy] = useState(false);
+
+  /**
+   * Create a private repo in the USER'S OWN GitHub account and save this app to it.
+   *
+   * The action the panel's own step 2 has always described and never offered. On success the repo is
+   * reported back and `onRepoPushed` lets the screen re-derive its state, so the very next thing the
+   * user sees is the real "Deploy backend" button rather than the same steps again.
+   */
+  /**
+   * After a push outlived its request: watch the durable record until the repo lands, or say so.
+   *
+   * 🔒 THE RECORD IS THE PROOF, NOT THE RESPONSE (admin 2026-09-07). Saving a large app resumes a
+   * sandbox and pushes every file — minutes, not seconds — and the route records the repo the moment
+   * the push lands, whether or not anyone is still listening. So when this screen stops waiting it
+   * reads that record instead of guessing: the repo appears here the moment it is real, and the user
+   * is never told "nothing was changed" over a save that was completing behind them. Bounded, read-only,
+   * and a lost poll is not a failed push.
+   */
+  const awaitRepoFact = async (): Promise<void> => {
+    if (!authedFetch || !workspaceId) return;
+    const DEADLINE = Date.now() + 3 * 60_000;
+    while (Date.now() < DEADLINE) {
+      await new Promise((r) => setTimeout(r, 10_000));
+      try {
+        const r = await authedFetch(`/api/agentv3/conversations/${encodeURIComponent(workspaceId)}`);
+        const fact = repoFactOf(await r.json().catch(() => null));
+        if (fact) {
+          setBackendLines([pushSavedLine({ fullName: `${fact.owner}/${fact.repo}`, ...fact })]);
+          onRepoPushed?.(fact);
+          return;
+        }
+      } catch { /* a lost poll is not a failed push — try again inside the window */ }
+    }
+    setBackendLines([PUSH_APP_UNCONFIRMED_LINE]);
+  };
+
+  const pushAppToGitHub = async (): Promise<void> => {
+    if (pushBusy || !authedFetch) return;
+    setPushBusy(true);
+    setBackendLines([]);
+    try {
+      let githubToken: string | undefined;
+      try { githubToken = localStorage.getItem('gh_token') || undefined; } catch { /* optional */ }
+      // The real duration of this request is a sandbox resume plus a full git push — minutes for a
+      // large app. The 20-second default cut it every time and reported "nothing was changed" over a
+      // push that then landed (admin 2026-09-07). See lib/longRequest.ts.
+      const res = await authedFetch('/api/agentv3/github/push-app', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId, githubToken }),
+      }, LONG_REQUEST_TIMEOUT_MS.pushAppToGitHub);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        // The server's own reason — it knows whether the token expired, the sandbox was empty, or the
+        // push itself failed. A generic "could not save" is what made this area feel dead.
+        setBackendLines([data?.error || 'Could not save your app to GitHub. Your app is safe here — try again.']);
+        return;
+      }
+      setBackendLines([pushSavedLine(data as PushAppResult)]);
+      onRepoPushed?.({ owner: String(data.owner ?? ''), repo: String(data.repo ?? '') });
+    } catch (e) {
+      setBackendLines([fetchFailureLine(e, PUSH_APP_FAILURE)]);
+      // Our own timer fired — the server is still pushing. Watch for the fact rather than assume.
+      if (isFetchTimeout(e)) void awaitRepoFact();
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  /**
+   * Poll the honest verdict until it is decided, or until the window closes.
+   *
+   * 🔒 EVERY EXIT SAYS SOMETHING TRUE. Live, failed, or "still building after N minutes" — the one
+   * outcome that must not exist is silence, because silence after "Deploy triggered" is exactly what
+   * let a dead service pass for a live one.
+   */
+  const verifyBackend = async (serviceId: string, serviceUrl: string) => {
+    if (!authedFetch) return;
+    const DEADLINE = Date.now() + 5 * 60_000;
+    let delay = 8_000;
+    setBackendLines((prev) => [...prev, '⏳ Checking whether your backend comes up…']);
+    while (Date.now() < DEADLINE) {
+      await new Promise((r) => setTimeout(r, delay));
+      // Back off gently: a build takes minutes, and asking every eight seconds for five of them is
+      // noise on someone else's API for no extra information.
+      delay = Math.min(delay * 1.5, 30_000);
+      let verdict: { live?: boolean; phase?: string; message?: string } | null = null;
+      try {
+        const r = await authedFetch('/api/agentv3/deploy-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspaceId, serviceId, serviceUrl }),
+        });
+        verdict = await r.json().catch(() => null);
+      } catch { /* a lost check is not a failed deploy — try again inside the window */ }
+      if (!verdict) continue;
+      if (verdict.phase === 'in-progress') continue;   // still building: nothing new to report yet
+      setBackendLines((prev) => [...prev, `${verdict!.live ? '✅' : '⚠️'} ${verdict!.message ?? ''}`.trim()]);
+      return;
+    }
+    setBackendLines((prev) => [...prev,
+      'ℹ️ Your backend is still building after five minutes — that can be normal for a first deploy. '
+      + 'Open the address above in a few minutes to check.']);
+  };
 
   const deployBackend = async () => {
     if (backendBusy || !authedFetch) return;
@@ -328,7 +546,7 @@ export function HostingChooser({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      });
+      }, LONG_REQUEST_TIMEOUT_MS.deployBackend);
       const data = await res.json().catch(() => null);
       const outcome = managedDeployOutcome(res.status, data);
       // `needs-connect` is the one outcome whose next action is a walkthrough on somebody else's site,
@@ -336,12 +554,55 @@ export function HostingChooser({
       setBackendLines(outcome.kind === 'needs-connect'
         ? [...outcome.lines, ...renderConnectSteps(body.repoUrl)]
         : outcome.lines);
-    } catch {
-      setBackendLines(['Could not reach NavBharatAI — nothing was deployed.']);
+      /**
+       * 🔴 AND THEN FIND OUT WHETHER IT ACTUALLY CAME UP (admin 2026-09-05).
+       *
+       * "Deploy triggered" is the host accepting a request — it is not the app working, and until now
+       * it was the last thing we ever said. A failed build, a crash on a missing setting, a start
+       * command that exits: all of them ended at the same cheerful line, and the user discovered the
+       * truth by opening their own site.
+       *
+       * 🔒 THE CHECKING IS BOUNDED AND CANNOT BLOCK ANYTHING. It runs after the answer is already on
+       * screen, it stops at the first real verdict, and if the build outlives the window we say
+       * exactly that instead of pretending either way. A user who navigates away loses nothing —
+       * their deploy is unaffected, because this only ever READS.
+       */
+      if (outcome.kind === 'deployed' && typeof data?.serviceId === 'string') {
+        void verifyBackend(data.serviceId, typeof data?.url === 'string' ? data.url : '');
+      }
+    } catch (e) {
+      setBackendLines([fetchFailureLine(e, DEPLOY_BACKEND_FAILURE)]);
     } finally {
       setBackendBusy(false);
     }
   };
+
+  /**
+   * PRESSING "PUBLISH" NOW DEPLOYS THE SERVER HALF BY ITSELF (admin 2026-09-05).
+   *
+   * 🔴 THE STEP THIS REMOVES. To a user, Publish means *make my app live*. For an app with a server
+   * half that means BOTH halves — and what happened instead was: press Publish → refused → find the
+   * "Deploy backend" button → press that. The refusal was honest and the button worked; the second
+   * press was still ours to ask for, not theirs to make.
+   *
+   * The rule lives in `shouldAutoDeployBackend` so it can be tested directly: it fires only on a
+   * TRANSITION into this refusal (which can only mean a publish was just attempted — the panel clears
+   * the code before every attempt) and only when the button could already have been pressed. On mount
+   * the ref starts at the current code, so simply reopening this panel can never deploy anything.
+   */
+  const lastRefusalCode = useRef<string>(publishRefusalCode ?? '');
+  useEffect(() => {
+    const code = publishRefusalCode ?? '';
+    const previousCode = lastRefusalCode.current;
+    lastRefusalCode.current = code;
+    if (!shouldAutoDeployBackend({ code, previousCode, canDeploy: backendOffer.canDeploy, busy: backendBusy })) return;
+    // Say WHY a deploy started without being pressed — an action the user did not click must explain
+    // itself, or it reads as the app doing something behind their back.
+    setBackendLines(['🚀 Your app has a server half, so publishing means putting that online too — starting it now.']);
+    void deployBackend();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publishRefusalCode]);
+
 
   // The honest reason the LAST publish attempt didn't start. Shown inline; cleared on the next try.
   // A publish that cannot run must SAY SO here — never a button that silently does nothing.
@@ -381,7 +642,7 @@ export function HostingChooser({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspaceId: workspaceId ?? '' }),
-      });
+      }, LONG_REQUEST_TIMEOUT_MS.provisionDatabase);
       const data = await res.json().catch(() => null);
       // The server words these to tell the user what to do next (plan full, still starting up,
       // reconnect); passing them through unchanged is more useful than any generic line here.
@@ -390,8 +651,8 @@ export function HostingChooser({
       setDbNote(data?.schemaApplied === false
         ? 'Database created and connected — its tables could not be set up yet, so ask me to run your migrations after publishing.'
         : 'Database created in your own account and connected. You can publish now.');
-    } catch {
-      setDbNote('Could not reach NavBharatAI. Check your connection and try again.');
+    } catch (e) {
+      setDbNote(fetchFailureLine(e, PROVISION_DB_FAILURE));
     } finally {
       setDbBusy(false);
     }
@@ -488,6 +749,9 @@ export function HostingChooser({
               /* The SAME takedown the "Your published apps" list uses — one implementation, so the
                  domain screen can never drift into taking a site down differently from the list. */
               onUnpublish={onUnpublishApp && workspaceId ? () => onUnpublishApp(workspaceId) : undefined}
+              /* The Deploy-backend controls live on THIS sheet's server-half card (the `choose` view);
+                 the domain screen's verdict names that step, so it gets a button that goes there. */
+              onDeployBackend={() => setView('choose')}
             />
           </div>
         ) : view === 'myapps' ? (
@@ -500,7 +764,9 @@ export function HostingChooser({
             <div className="flex items-baseline justify-between gap-2">
               <h4 className="text-[13px] font-bold text-white">Your published apps</h4>
               {myAppsMeta && (
-                <span className="text-[11px] text-zinc-400">{myAppsMeta.used} of {myAppsMeta.cap} free slots used</span>
+                <span className="text-[11px] text-zinc-400">
+                  {myAppsMeta.used} of {myAppsMeta.cap} {myAppsMeta.planName ? `${myAppsMeta.planName} slots` : 'free slots'} used
+                </span>
               )}
             </div>
 
@@ -511,6 +777,39 @@ export function HostingChooser({
                 You have no apps published on NavBharatAI right now. Publishing one puts it at a permanent
                 link you can share.
               </p>
+            )}
+
+            {/*
+              PAUSED BY A LAPSED PLAN. These have no URL and hold no slot, so they cannot sit in the
+              list above — but they must be VISIBLE, or an app that vanished from every screen when
+              the plan ended would look deleted, and the user could never find it again.
+
+              There is deliberately no "Restore" button here: republishing re-runs a real build, which
+              happens by opening the app and pressing Publish. A button that only *looked* like a
+              one-tap restore would be the built-but-not-working state this project forbids — so the
+              copy says exactly what to do instead.
+            */}
+            {myPausedApps.length > 0 && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                <p className="text-[12px] font-bold text-amber-200">
+                  {myPausedApps.length} app{myPausedApps.length === 1 ? '' : 's'} paused — your plan ended
+                </p>
+                <p className="text-[11px] text-zinc-300 leading-relaxed">
+                  You are back on the free {myAppsMeta?.freeCap ?? 5} published apps, so these went
+                  offline. <span className="text-white font-semibold">Nothing was deleted</span> — all
+                  your files are still here. Renew a plan in Billing → Plans, then open each app and
+                  press Publish to put it back online.
+                </p>
+                <div className="space-y-1">
+                  {myPausedApps.map((a) => (
+                    <p key={a.workspaceId} className="text-[11px] text-zinc-400 break-all">
+                      • {a.workspaceId}
+                      {a.updatedAt ? ` · last updated ${new Date(a.updatedAt).toLocaleDateString()}` : ''}
+                      {a.orphaned ? ' · its chat was deleted, so it cannot be reopened' : ''}
+                    </p>
+                  ))}
+                </div>
+              </div>
             )}
 
             {myApps?.map((a) => (
@@ -683,6 +982,19 @@ export function HostingChooser({
                     Connect GitHub
                   </button>
                 )}
+                {/* THE BUTTON THAT WAS MISSING (admin 2026-09-04). The steps asked the user to push
+                    their app to a repo of their own; with GitHub already connected the panel showed
+                    them no control at all, because every push lived inside the build route. */}
+                {backendOffer.cta === 'push-to-github' && (
+                  <button
+                    onClick={() => void pushAppToGitHub()}
+                    disabled={pushBusy || busy}
+                    className="py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-[11.5px] font-bold flex items-center justify-center gap-2 transition-colors self-start"
+                  >
+                    {pushBusy ? <TirangaLoader size={14} /> : <Server className="w-3.5 h-3.5" />}
+                    {pushBusy ? 'Saving to GitHub…' : 'Put this app in my GitHub'}
+                  </button>
+                )}
               </>
             )}
             {backendLines.length > 0 && (
@@ -785,6 +1097,231 @@ export function HostingChooser({
               </button>
             )}
 
+            {/* UNDO LAST PUBLISH — above Unpublish deliberately: a user whose new version broke wants
+                the OLD one back, not the app taken offline, and the destructive control should never
+                be the first one they reach for. Two-step for the same reason Unpublish is: it changes
+                what the public sees this second.
+
+                Whether an earlier version actually exists is decided by the SERVER when the button is
+                pressed, and its refusal is shown verbatim — there are four different reasons ("never
+                published", "only one version", "served from storage, no history kept", "could not be
+                read right now") and a greyed-out button explains none of them. */}
+            {liveUrl && onRollback && (
+              <div className="pt-1">
+                {!rollbackConfirm ? (
+                  <button
+                    onClick={() => setRollbackConfirm(true)}
+                    disabled={busy || rollbackBusy || unpubBusy}
+                    className="w-full py-1.5 rounded-lg border border-zinc-700 hover:border-amber-600 text-zinc-400 hover:text-amber-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40"
+                  >
+                    Undo last publish — put the previous version back
+                  </button>
+                ) : (
+                  <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-2.5 flex flex-col gap-2">
+                    <p className="text-[11px] text-amber-100 leading-relaxed">
+                      Your live app goes back to the version you published before this one. Visitors see the
+                      change straight away. Your files and chat are untouched, and you can undo this too.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setRollbackBusy(true);
+                          void onRollback()
+                            .finally(() => { setRollbackBusy(false); setRollbackConfirm(false); });
+                        }}
+                        disabled={rollbackBusy}
+                        className="flex-1 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 text-white text-[11px] font-semibold disabled:opacity-50"
+                      >
+                        {rollbackBusy ? 'Bringing it back…' : 'Yes, go back'}
+                      </button>
+                      <button
+                        onClick={() => setRollbackConfirm(false)}
+                        disabled={rollbackBusy}
+                        className="flex-1 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 text-[11px] font-semibold disabled:opacity-50"
+                      >
+                        Keep this version
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* GO BACK TO ANY EARLIER VERSION (ROADMAP §13, 1.4). "Undo" is one step; this is the rest
+                of the history for the user who knows Tuesday's version was the good one. Same two-step
+                confirm as Undo, same server resolution — the name is only a key into the history. */}
+            {liveUrl && onRollback && onLoadRollbackChoices && (
+              <div className="pt-1">
+                {!historyOpen ? (
+                  <button onClick={() => void openHistory()} disabled={busy || rollbackBusy || unpubBusy}
+                    className="w-full py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-600 text-zinc-500 hover:text-zinc-300 text-[11px] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                    Go back to an earlier version…
+                  </button>
+                ) : (
+                  <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-2.5 flex flex-col gap-1.5" data-testid="publish-history">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-zinc-200">Publish history</span>
+                      <button onClick={() => { setHistoryOpen(false); setPickedVersion(null); }} className="text-[10px] text-zinc-500 hover:text-zinc-300">close</button>
+                    </div>
+                    {choices === undefined ? (
+                      <p className="text-[10.5px] text-zinc-500">Reading the history…</p>
+                    ) : choices === null ? (
+                      <p className="text-[10.5px] text-amber-200/90">The publish history could not be read just now — this is not an empty history. Try again in a moment.</p>
+                    ) : choices.length <= 1 ? (
+                      <p className="text-[10.5px] text-zinc-500">Only one published version so far — there is nothing earlier to go back to yet.</p>
+                    ) : (
+                      <ul className="flex flex-col gap-1 max-h-44 overflow-y-auto">
+                        {choices.map((c) => {
+                          const when = c.releaseTime ? new Date(c.releaseTime) : null;
+                          const label = when && !Number.isNaN(when.getTime()) ? when.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : 'time unknown';
+                          return (
+                            <li key={c.versionName} className={`flex items-center justify-between gap-2 px-2 py-1 rounded ${c.live ? 'bg-emerald-950/40' : 'bg-zinc-800/40'}`}>
+                              <span className="text-[10.5px] text-zinc-300 truncate">{label}{c.live ? ' — live now' : ''}</span>
+                              {!c.live && pickedVersion !== c.versionName && (
+                                <button onClick={() => setPickedVersion(c.versionName)} disabled={rollbackBusy} className="text-[10px] font-semibold text-amber-300 hover:text-amber-200 shrink-0">Go back to this</button>
+                              )}
+                              {!c.live && pickedVersion === c.versionName && (
+                                <span className="flex gap-1 shrink-0">
+                                  <button onClick={() => { setRollbackBusy(true); void onRollback(c.versionName).finally(() => { setRollbackBusy(false); setPickedVersion(null); setHistoryOpen(false); }); }} disabled={rollbackBusy}
+                                    className="px-2 py-0.5 rounded bg-amber-700 hover:bg-amber-600 text-white text-[10px] font-semibold disabled:opacity-50">{rollbackBusy ? 'Bringing it back…' : 'Yes, go back'}</button>
+                                  <button onClick={() => setPickedVersion(null)} disabled={rollbackBusy} className="px-2 py-0.5 rounded border border-zinc-700 text-zinc-300 text-[10px]">Keep</button>
+                                </span>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                    <p className="text-[10px] text-zinc-500">Nothing is deleted — going back adds a new entry, so you can come forward again.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SITE SETTINGS (ROADMAP §13, 1.6): redirects, embedding, and the 404 note. Offered only
+                on our hosting; validated by the SERVER (validateSiteConfig) so the screen never has to
+                be the last line of defence against an open redirect. */}
+            {onLoadSiteConfig && onSaveSiteConfig && (
+              <div className="pt-1">
+                {!settingsOpen ? (
+                  <button onClick={() => void openSettings()} disabled={busy}
+                    className="w-full py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-600 text-zinc-500 hover:text-zinc-300 text-[11px] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                    Site settings — redirects, embedding, 404
+                  </button>
+                ) : (
+                  <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-2.5 flex flex-col gap-2" data-testid="site-settings">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-zinc-200">Site settings</span>
+                      <button onClick={() => setSettingsOpen(false)} className="text-[10px] text-zinc-500 hover:text-zinc-300">close</button>
+                    </div>
+                    {siteCfg === undefined ? (
+                      <p className="text-[10.5px] text-zinc-500">Loading…</p>
+                    ) : siteCfg === null ? (
+                      <p className="text-[10.5px] text-amber-200/90">Your settings could not be read just now. Try again in a moment.</p>
+                    ) : (
+                      <>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-semibold text-zinc-300 uppercase tracking-widest">Redirects</span>
+                          {siteCfg.redirects.length === 0 && <p className="text-[10px] text-zinc-500">None yet. Send an old address to a new one — visitors with the old link still arrive.</p>}
+                          {siteCfg.redirects.map((r, i) => (
+                            <div key={i} className="flex items-center gap-1">
+                              <input value={r.from} placeholder="/old-page" onChange={(e) => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)) })}
+                                className="flex-1 min-w-0 bg-zinc-950 border border-zinc-700 rounded px-1.5 py-1 text-[10.5px] text-zinc-200 font-mono outline-none focus:border-zinc-500" />
+                              <span className="text-zinc-500 text-[10px]">→</span>
+                              <input value={r.to} placeholder="/new-page or https://…" onChange={(e) => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)) })}
+                                className="flex-1 min-w-0 bg-zinc-950 border border-zinc-700 rounded px-1.5 py-1 text-[10.5px] text-zinc-200 font-mono outline-none focus:border-zinc-500" />
+                              <select value={r.code} onChange={(e) => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.map((x, j) => (j === i ? { ...x, code: e.target.value === '302' ? 302 : 301 } : x)) })}
+                                className="bg-zinc-950 border border-zinc-700 rounded px-1 py-1 text-[10px] text-zinc-300">
+                                <option value={301}>301 permanent</option>
+                                <option value={302}>302 temporary</option>
+                              </select>
+                              <button onClick={() => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.filter((_, j) => j !== i) })} className="text-zinc-500 hover:text-red-400 text-[11px] px-1" title="Remove">×</button>
+                            </div>
+                          ))}
+                          <button onClick={() => setSiteCfg({ ...siteCfg, redirects: [...siteCfg.redirects, { from: '', to: '', code: 301 }] })} disabled={siteCfg.redirects.length >= 50}
+                            className="self-start text-[10px] text-zinc-400 hover:text-zinc-200 disabled:opacity-40">+ add a redirect</button>
+                        </div>
+                        <label className="flex items-start gap-2 text-[10.5px] text-zinc-300">
+                          <input type="checkbox" checked={siteCfg.allowEmbedding} onChange={(e) => setSiteCfg({ ...siteCfg, allowEmbedding: e.target.checked })} className="mt-0.5" />
+                          <span>Allow other websites to embed this app in a frame. <span className="text-zinc-500">Off by default — that is what stops a stranger's site from framing yours.</span></span>
+                        </label>
+                        <p className="text-[10px] text-zinc-500 leading-relaxed">
+                          404 pages: a multi-page site that includes a <span className="font-mono">404.html</span> gets it served for missing pages. A single-page app handles missing pages in its own router, so nothing changes there.
+                        </p>
+                        {cfgErrors.length > 0 && <ul className="text-[10.5px] text-red-300 list-disc pl-4">{cfgErrors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
+                        {cfgNote && <p className="text-[10.5px] text-emerald-300">{cfgNote}</p>}
+                        <button onClick={() => void saveSettings()} disabled={cfgBusy}
+                          className="self-start px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white text-[11px] font-semibold disabled:opacity-50">
+                          {cfgBusy ? 'Saving…' : 'Save settings'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* VISITORS (ROADMAP §13, 1.1) — the first question after publishing, answered where the
+                live link is. Three honest states: loading, numbers, or "could not read" in words.
+                Never a zero that was not measured. */}
+            {liveUrl && onLoadSiteAnalytics && (
+              <div className="rounded-lg border border-zinc-700/80 bg-zinc-900/60 p-2.5 flex flex-col gap-1.5" data-testid="site-analytics">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-zinc-200">Visitors</span>
+                  <div className="flex gap-1">
+                    {([7, 30] as const).map((d) => (
+                      <button key={d} onClick={() => setAnalyticsDays(d)}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${analyticsDays === d ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                        {d}d
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {!siteAnalytics ? (
+                  <p className="text-[10.5px] text-zinc-500">Counting…</p>
+                ) : !siteAnalytics.available ? (
+                  <p className="text-[10.5px] text-amber-200/90 leading-relaxed">
+                    Visitor counts are unavailable right now — NavBharatAI could not read them. This is not a zero; try again in a minute.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex items-baseline gap-3">
+                      <span className="text-lg font-black text-white leading-none">{siteAnalytics.totalUniques ?? 0}</span>
+                      <span className="text-[10.5px] text-zinc-400">people · {siteAnalytics.totalViews ?? 0} views · today {siteAnalytics.todayViews ?? 0}</span>
+                    </div>
+                    {/* One bar per day, height by that day's views against the window's max. */}
+                    <div className="flex items-end gap-[2px] h-7" aria-hidden="true">
+                      {(siteAnalytics.days ?? []).map((p) => {
+                        const max = Math.max(1, ...(siteAnalytics.days ?? []).map((q) => q.views));
+                        return <div key={p.day} title={`${p.day}: ${p.views} views`} className="flex-1 rounded-sm bg-emerald-500/70" style={{ height: `${Math.max(2, Math.round((p.views / max) * 100))}%` }} />;
+                      })}
+                    </div>
+                    {((siteAnalytics.topPaths?.length ?? 0) > 0 || (siteAnalytics.topReferrers?.length ?? 0) > 0) && (
+                      <div className="grid grid-cols-2 gap-2 text-[10px] text-zinc-400">
+                        <div>
+                          <div className="font-semibold text-zinc-300 mb-0.5">Top pages</div>
+                          {(siteAnalytics.topPaths ?? []).slice(0, 3).map((t) => (
+                            <div key={t.path} className="flex justify-between gap-2"><span className="truncate font-mono">{t.path}</span><span>{t.views}</span></div>
+                          ))}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-zinc-300 mb-0.5">Came from</div>
+                          {(siteAnalytics.topReferrers ?? []).length === 0
+                            ? <div className="text-zinc-500">direct / unknown</div>
+                            : (siteAnalytics.topReferrers ?? []).slice(0, 3).map((t) => (
+                              <div key={t.host} className="flex justify-between gap-2"><span className="truncate">{t.host}</span><span>{t.views}</span></div>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                    {(siteAnalytics.totalViews ?? 0) === 0 && (
+                      <p className="text-[10px] text-zinc-500">No visits recorded in this window yet. Counting starts from the first publish after 10 Sep 2026.</p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             {/* UNPUBLISH — shown ONLY when this app is genuinely live on our hosting. `liveUrl` comes
                 from the durable deployment record, which the server now returns only for an active
                 deployment, so this cannot appear for an app that was never published or is already
@@ -840,12 +1377,13 @@ export function HostingChooser({
               <button
                 onClick={() => {
                   setView('myapps');
-                  setMyApps(null); setMyAppsErr(''); setMyAppsMeta(null);
+                  setMyApps(null); setMyAppsErr(''); setMyAppsMeta(null); setMyPausedApps([]);
                   void onLoadMyApps()
                     .then((r) => {
                       if (!r) { setMyAppsErr('Could not load your published apps. Please try again.'); return; }
                       setMyApps(r.apps);
-                      setMyAppsMeta({ used: r.used, cap: r.cap });
+                      setMyPausedApps(Array.isArray(r.paused) ? r.paused : []);
+                      setMyAppsMeta({ used: r.used, cap: r.cap, freeCap: r.freeCap, planName: r.planName });
                     })
                     .catch(() => setMyAppsErr('Could not load your published apps. Please try again.'));
                 }}
@@ -940,11 +1478,32 @@ export function HostingChooser({
           </div>
 
           {/* Path 4 — Nav App Store (instant web app). One click; runs in every viewer's browser. */}
-          <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4 flex flex-col gap-2.5">
+          <div className={`rounded-xl border p-4 flex flex-col gap-2.5 ${liveUrl ? 'border-emerald-600 bg-emerald-950/30 ring-1 ring-emerald-600/30' : 'border-emerald-800/50 bg-emerald-950/20'}`}>
             <div className="flex items-center justify-between">
               <span className="text-[13px] font-bold text-white">Put it on App Mart</span>
               <span className="text-[9px] font-black uppercase tracking-widest text-emerald-300 bg-emerald-900/50 px-2 py-0.5 rounded-full">Instant</span>
             </div>
+
+            {/* THE NEXT STEP, OFFERED WHERE IT IS EARNED (admin 2026-09-01: "koi user apni app publish
+                on navbharatai kare, tabhi usko ek tick dikhe — post in app mart").
+ 
+                These four paths are siblings, so App Mart sat beside the hosting card as one more
+                option a user had to notice on their own. The moment someone HAS just published is the
+                moment putting it in front of people makes sense to them, so that is when this appears.
+                `liveUrl` is the honest gate — it comes from the durable deployment record and is set
+                only for a genuinely live app, the same signal the Unpublish control trusts.
+
+                ⚠️ It is a PROMPT, not an automatic listing. Publishing your app and showing it to
+                strangers are two different decisions, and the second one stays the user's — the same
+                reason the agent may no longer publish on its own (publishConsent.ts). */}
+            {liveUrl && (
+              <div className="rounded-lg border border-emerald-600/40 bg-emerald-900/30 px-2.5 py-2 flex items-start gap-2">
+                <Check className="w-3.5 h-3.5 text-emerald-300 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-emerald-100 leading-relaxed">
+                  Your app is live on NavBharatAI. Put it on App Mart too so people can actually find it — it stays free, and you can take it off any time.
+                </p>
+              </div>
+            )}
             <p className="text-[11.5px] text-zinc-400 leading-relaxed">
               One click — others run your app instantly in their browser. No APK, no hosting, no install.
             </p>

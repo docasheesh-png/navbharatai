@@ -9,7 +9,7 @@ import { signOutEverywhere } from '../../lib/firebase';
 import {
   readRoster, forgetAccount, addAccountLabel, canAddAccount,
   accountLabel, accountInitial, writeRoster, type RosterAccount,
-  SIGN_IN_HINT_KEY, SWITCH_ACCOUNT_LABEL, accountRows,
+  SIGN_IN_HINT_KEY, SIGN_IN_PROVIDER_KEY, SWITCH_ACCOUNT_LABEL, accountRows,
 } from '../../lib/accountRoster';
 import { NotificationBell } from '../NotificationBell';
 
@@ -97,6 +97,13 @@ export function TopNav({
       const hint = target?.email?.trim();
       if (hint) store()?.setItem(SIGN_IN_HINT_KEY, hint);
       else store()?.removeItem(SIGN_IN_HINT_KEY);
+      // …and WHICH METHOD signed them in, so the sign-in screen can say "continue with Google" instead
+      // of offering every method as if it had never met them. Written and cleared together with the
+      // email so the two can never disagree — a provider left behind from an earlier switch would
+      // name the wrong method on the next one.
+      const via = target?.provider?.trim();
+      if (hint && via) store()?.setItem(SIGN_IN_PROVIDER_KEY, via);
+      else store()?.removeItem(SIGN_IN_PROVIDER_KEY);
     } catch { /* the hint is a convenience; never block the sign-in on it */ }
     setShowAuth(true);
   };
@@ -305,6 +312,24 @@ export function TopNav({
                       exactly why this menu read as an add-only control (admin 2026-08-22). */}
                   <div className="py-1 border-b border-white/5">
                     <p className="px-4 pt-1 pb-1.5 text-[9px] font-black text-[#484f58] uppercase tracking-widest">{SWITCH_ACCOUNT_LABEL}</p>
+                    {/* SAY WHAT TAPPING WILL DO (admin 2026-09-02: "2 account login theek se nahi chal
+                        rahe — 2nd account add karo, wapas 1st par jao to login manta hai").
+ 
+                        Nothing here is broken, and that is precisely the problem. `accountRoster.ts`
+                        stores metadata and NEVER a token, because a refresh token in localStorage is a
+                        permanent account takeover for anyone who reaches that storage. The Firebase SDK
+                        also holds ONE live session per app instance. So a switch re-authenticates —
+                        correct, deliberate, and documented in that module's header, which even warns
+                        "the UI must not overstate it".
+ 
+                        Then this menu said "Switch account" and "Add account" — Gmail's exact words for
+                        a mechanism that DOES keep sessions live at once. The user was promised Gmail and
+                        given a re-auth, so a working design read as a bug. The mechanism is right; the
+                        promise was wrong. This line makes the promise true, and it is the whole fix:
+                        the same tap, no longer a surprise. */}
+                    <p className="px-4 pb-2 text-[10px] leading-relaxed text-[#6e7681]">
+                      Switching signs you in again — one tap with Google, your password for email accounts.
+                    </p>
                     {accountRows(roster, user.uid, user).map((a) => (
                         <div key={a.uid} className={cn('group flex items-center gap-2 px-2 transition-colors', a.isCurrent ? 'bg-white/[0.03]' : 'hover:bg-white/5')}>
                           <button

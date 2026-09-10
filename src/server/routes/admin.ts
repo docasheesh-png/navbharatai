@@ -34,6 +34,7 @@ import { sandboxStore } from '../AgentV3/SandboxStore';
 import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from '../AgentV3/sandboxHandover';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
+import { licenceExposures, licenceExposureHeadline, activeExposureCount } from '../../lib/licenceExposure';
 import { builderScorecard, scorecardHeadline } from '../../lib/builderMetrics';
 import { selectStaleDevices, canBroadcast, cohortSummary, updateBroadcastPayload } from '../lib/updateBroadcast';
 import { deviceTokenStore } from '../lib/DeviceTokenStore';
@@ -61,9 +62,38 @@ import { logStore } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
 import { rotateAllSecrets, getLatestKeyVersion, encrypt, decrypt } from '../lib/secrets';
 import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp';
-import { deploymentStore, type DeploymentStatus } from '../AgentV3/DeploymentStore';
+import { deploymentStore, isLiveDeployment, type DeploymentStatus } from '../AgentV3/DeploymentStore';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
 import { classifyChannels, channelCeilingVerdict, channelCap } from '../AgentV3/channelInventory';
+import { GoogleAuth } from 'google-auth-library';
+import { classifyHostedServices, hostingCapacity } from '../AgentV3/hostedServiceInventory';
+import {
+  appsProject, appsRegion, buildListServicesRequest, parseServiceList, SERVICES_PER_PROJECT_CAP,
+} from '../AgentV3/cloudRunHosting';
+import { loadBoard, worstLevel, type LoadReadings } from '../lib/loadBoard';
+import { readPlatformInstances, platformProjectId } from '../lib/platformInstances';
+import { runHostingPreflight } from '../AgentV3/hostingPreflight';
+import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
+
+/**
+ * The collections that GROW with use — per build, per user, per app (ROADMAP §12 #3).
+ *
+ * Verified by reading each store on 2026-09-07. Kept here beside the load board because its only job
+ * is to be compared against the retention registries: the gap IS the storage warning, and a collection
+ * stops counting automatically once it gains a policy.
+ *
+ * ⚠️ "Growing" is not the same as "should be purged". A collection grows either because the platform
+ * keeps writing about itself, or because USERS keep creating things — and the second is the product,
+ * not garbage. `collectionsNeedingRetention` subtracts BOTH the collections with a policy AND the ones
+ * `RETAINED_INDEFINITELY` records a reason for, so this list stays a complete inventory while the
+ * warning counts only what a human still has to decide.
+ */
+const GROWING_COLLECTIONS: readonly string[] = [
+  'app_builds', 'build_sessions', 'user_build_history', 'user_costs', 'server_logs',
+  'metrics_snapshots', 'session_error_hints', 'hosting_usage',
+  'workspace_files_v3', 'workspace_assets_v3', 'workspace_checkpoints_v3', 'workspace_embeddings_v3',
+  'workspace_memory_v3', 'workspace_diagnostics_v3', 'workspace_manual_edits_v3', 'project_plans_v3',
+];
 import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
 
 /**
@@ -675,6 +705,30 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to compute first-pass quality.' });
+    }
+  });
+
+  /**
+   * LICENCE EXPOSURE — the third-party services whose terms do not cover a COMMERCIAL product.
+   *
+   * Two of them run on free tiers reserved for non-commercial use, and NavBharatAI charges money, so
+   * the exposure is live today rather than at some future scale. Both were recorded as open items in
+   * CLAUDE.md and PROGRESS.md for weeks — which is the problem this route exists to fix: a legal risk
+   * written in a 46,000-line document is a risk nobody can act on, and the admin does not read source.
+   *
+   * Reads the SAME switch the sources themselves obey (licenceExposure.ts), so this panel can never
+   * report a source as off while its calls keep going out. Admin-only, no user surface, and it
+   * discloses no credential — only whether each key is PRESENT.
+   */
+  app.get('/api/admin/licence-exposure', verifyAdminToken, async (_req: Request, res: Response) => {
+    try {
+      res.json({
+        rows: licenceExposures(),
+        active: activeExposureCount(),
+        headline: licenceExposureHeadline(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to read the licence register.' });
     }
   });
 
@@ -1416,6 +1470,198 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       fetchError: selfFetch?.error ?? null,
       serviceId: APPLE_SERVICE_ID,
       returnUrl: APPLE_WEB_RETURN_URL,
+    });
+  });
+
+  /**
+   * THE NAVBHARAT CLOUD CEILING, made visible (ROADMAP §11) — the sibling of the channel inventory
+   * directly below, and built to the same rules for the same reason.
+   *
+   * 🔴 Cloud Run allows **1,000 services per project per region, and Google does not raise it**. The
+   * admin asked the right question — "aisa to nahi kuch user ke bad hosting band ho jaye" — and §10's
+   * answer applies again: a cap like this is not reached by working apps, it is reached by DEAD ones
+   * nobody deleted. Unpublish now removes the service, and this is where whatever still leaks becomes
+   * visible instead of silently eating the ceiling.
+   *
+   * 🔒 COMPLETENESS GATES RECLAIM, exactly as it does for channels. A service with no record is only
+   * an orphan if the registry was genuinely read in full; otherwise it is 'indeterminate' and nothing
+   * is offered. That distinction is not theoretical — treating it as an orphan is what once listed
+   * every live app as reclaimable waste after one Firestore hiccup.
+   */
+  /**
+   * IS THE APPS PROJECT SET UP CORRECTLY? — run the same calls a real publish makes, and name what is
+   * missing.
+   *
+   * Switching on app hosting means a new Google Cloud project, four APIs, an Artifact Registry
+   * repository, six IAM roles and one env var — none of which this codebase can see or set. Without
+   * this route the first evidence of a wrong step is a 403 inside a Cloud Build log on a user's
+   * publish. With it, the admin gets the exact missing step while they are still in the console.
+   */
+  app.get('/api/admin/hosting/preflight', verifyAdminToken, async (_req: Request, res: Response) => {
+    try {
+      // The SAME scope the hosting engine itself uses, so a permission this check passes is genuinely
+      // the permission a publish will have.
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const token = await auth.getAccessToken().catch(() => null);
+      res.json(await runHostingPreflight({ token: token ? String(token) : null }));
+    } catch (e) {
+      // A checker that 500s tells the admin nothing. Report the failure AS a failed check.
+      res.json({
+        verdict: 'incomplete', projectId: null, region: '',
+        checks: [{
+          id: 'preflight', label: 'Setup check', state: 'unknown',
+          detail: e instanceof Error ? e.message : String(e),
+          remedy: 'Re-run the check.',
+        }],
+        nextAction: 'Re-run the check.',
+      });
+    }
+  });
+
+  app.get('/api/admin/hosting/services', verifyAdminToken, async (_req: Request, res: Response) => {
+    try {
+      const project = appsProject();
+      if (!project.projectId) {
+        // Hosting is not switched on. That is not an error, and it is not "zero used" either.
+        res.json({ available: false, reason: project.problem, message: project.message });
+        return;
+      }
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+      const token = await auth.getAccessToken();
+      if (!token) throw new Error('Could not obtain a Google auth token for the apps project.');
+
+      const region = appsRegion();
+      const names: string[] = [];
+      let pageToken = '';
+      let servicesComplete = true;
+      // Paged, and bounded: the cap is 1,000, so more than a dozen pages means something is wrong
+      // with the loop rather than with the account.
+      for (let page = 0; page < 15; page++) {
+        const req2 = buildListServicesRequest(String(token), project.projectId, region, 100, pageToken);
+        const r = await fetch(req2.url, { method: req2.method, headers: req2.headers });
+        if (!r.ok) { servicesComplete = false; break; }
+        const parsed = parseServiceList(await r.json().catch(() => null));
+        names.push(...parsed.names);
+        pageToken = parsed.nextPageToken;
+        if (!pageToken) break;
+        if (page === 14) servicesComplete = false;   // more pages than the cap can justify
+      }
+
+      const reg = await deploymentStore.listWithCompleteness({ limit: 500 });
+      const records = reg.records
+        .map((d: any) => ({ workspaceId: String(d?.workspaceId ?? ''), live: isLiveDeployment(d) }))
+        .filter((r) => r.workspaceId);
+      const classified = classifyHostedServices(names, records, reg.complete && servicesComplete);
+      res.json({
+        available: true,
+        project: project.projectId,
+        region,
+        capacity: hostingCapacity(classified),
+        services: classified,
+        registryComplete: reg.complete,
+        servicesComplete,
+        ...(reg.complete && servicesComplete ? {} : {
+          warning: 'This inventory is INCOMPLETE, so nothing is offered for reclaim: a service missing '
+            + 'a record here may simply be a record we could not read. Reload before acting.',
+        }),
+      });
+    } catch (e: any) {
+      // An unreadable list is NOT "zero services in use" — reporting a made-up all-clear on the one
+      // number this endpoint exists for would be worse than reporting nothing.
+      console.error('[ADMIN] Hosted service inventory error:', e?.message);
+      res.status(502).json({ error: 'The hosting inventory could not be read, so no capacity figure is available.' });
+    }
+  });
+
+  /**
+   * THE LOAD BOARD (ROADMAP §12) — every ceiling in the platform as one number, on the admin home page.
+   *
+   * The admin asked for this directly: *"admin panel ke home page par to load dikhna chahiye — server
+   * load, user load, storage load, hosting load… sabhi load likhne hai."* §12's audit found eight
+   * ceilings and gave each a trigger; a trigger nobody can see is a hope, not a trigger.
+   *
+   * 🔒 EVERY READING IS OPTIONAL, AND THAT IS THE DESIGN. A source that cannot be read is simply left
+   * out, and `loadBoard` turns absence into UNKNOWN rather than zero. This route therefore never
+   * fabricates a healthy number to fill a tile — the one failure that would make the whole screen
+   * worse than not having it.
+   */
+  app.get('/api/admin/load', verifyAdminToken, async (_req: Request, res: Response) => {
+    const readings: LoadReadings = {};
+    // The container we are actually in. Always available — it is this process.
+    try {
+      const s = serverLoad.snapshot();
+      readings.requestsInFlight = s.inFlightRequests;
+      if (s.cpuPercent !== null) readings.cpuFraction = s.cpuPercent / 100;
+      if (s.memoryPercent !== null) readings.memoryFraction = s.memoryPercent / 100;
+    } catch { /* absent stays absent — it renders as unknown, never as zero */ }
+
+    // The platform's OWN instance count and ceiling (§12 #2). No process can count its siblings, so
+    // this is Cloud Monitoring; every failure degrades to null, which the board renders as unmeasured.
+    try {
+      const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/monitoring.read'] });
+      const token = await auth.getAccessToken().catch(() => null);
+      const inst = await readPlatformInstances({
+        token: token ? String(token) : null,
+        projectId: platformProjectId(),
+      });
+      // 🔒 The CAP is reported even when the COUNT could not be read, so the admin can at least see the
+      // ceiling they are deployed against. `gradeLoad` renders a null value as unknown regardless.
+      readings.instances = inst.peak;
+      readings.instancesCap = inst.cap;
+    } catch { /* unknown */ }
+
+    // Hosting: services that EXIST against the 1,000-per-project cap (§12 #5).
+    try {
+      const project = appsProject();
+      if (project.projectId) {
+        const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+        const token = await auth.getAccessToken().catch(() => null);
+        if (token) {
+          const names: string[] = [];
+          let pageToken = '';
+          for (let page = 0; page < 12; page++) {
+            const q = buildListServicesRequest(String(token), project.projectId, appsRegion(), 100, pageToken);
+            const r = await fetch(q.url, { method: q.method, headers: q.headers });
+            if (!r.ok) { names.length = 0; break; }
+            const parsed = parseServiceList(await r.json().catch(() => null));
+            names.push(...parsed.names);
+            pageToken = parsed.nextPageToken;
+            if (!pageToken) break;
+          }
+          if (names.length > 0 || pageToken === '') {
+            readings.hostedServices = names.length;
+            readings.hostedServicesCap = SERVICES_PER_PROJECT_CAP;
+          }
+        }
+      }
+    } catch { /* unknown */ }
+
+    // Publish channels against their cap (§10).
+    try {
+      const chan = await new FirebaseHostingDeployer().listChannelsWithCompleteness();
+      // 🔒 An INCOMPLETE list is not a count. Reporting a partial read as the number would understate
+      // exactly the ceiling this tile exists to warn about.
+      if (chan.complete) {
+        readings.publishChannels = chan.channels.length;
+        readings.publishChannelsCap = channelCap();
+      }
+    } catch { /* unknown */ }
+
+    // Storage: how many of the collections that GROW have no retention policy (§12 #3).
+    try {
+      // 🔒 Only the collections a human still has to decide about. A collection kept forever ON PURPOSE
+      // (the user's own code, their billing record) is NOT a missing policy — counting it would leave
+      // the tile warning about something correct, permanently, and a warning nobody can clear is a
+      // warning nobody reads.
+      readings.collectionsWithoutRetention = collectionsNeedingRetention(GROWING_COLLECTIONS).length;
+    } catch { /* unknown */ }
+
+    const tiles = loadBoard(readings);
+    res.json({
+      level: worstLevel(tiles),
+      tiles,
+      // Named so the screen can say WHICH ceilings it could not read, rather than showing a quiet zero.
+      unknown: tiles.filter((t) => t.level === 'unknown').map((t) => t.id),
     });
   });
 

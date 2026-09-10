@@ -71,6 +71,17 @@ describe('the agreement the user ticks', () => {
     }
   });
 
+  it('🔒 admits the traffic meter is not live yet, instead of implying a limit nothing enforces', () => {
+    // An agreement describing an enforcement we do not have would be the second absolute rule's
+    // exact case. This line goes the day the meter covers a site — until then it must stand, and
+    // this test is what makes removing it a deliberate act.
+    for (const t of HOSTING_TIERS) {
+      const text = hostingAgreementTerms(t).join(' ');
+      expect(text).toContain('Traffic measurement is still being rolled out');
+      expect(text).toContain('charged the plan price and nothing more');
+    }
+  });
+
   it('names no payment provider — the White-Label Law applies to plan terms too', () => {
     const all = HOSTING_TIERS.flatMap((t) => [...hostingAgreementTerms(t), ...t.includes, t.tagline]).join(' ');
     for (const vendor of ['Cashfree', 'Firebase', 'Google', 'Cloud Run', 'Cloudflare', 'Vercel', 'gateway']) {

@@ -152,6 +152,14 @@ export function hostingAgreementTerms(tier: HostingTier): readonly string[] {
     `₹${tier.priceInr} is taken from your NavBharatAI wallet now, and again every ${tier.days} days while auto-renew is on. You can switch auto-renew off at any time.`,
     `The plan includes ${tier.includedTransferGb} GB of visitor traffic every ${tier.days} days, across all your connected sites.`,
     `If your sites go past ${tier.includedTransferGb} GB, your apps KEEP RUNNING — nothing is switched off. The extra traffic is charged from your wallet at ₹${HOSTING_OVERAGE_INR_PER_GB} per GB, and every charge appears in your ledger.`,
+    // 🔴 THIS LINE IS HERE BECAUSE THE METER IS NOT LIVE YET, and an agreement that quietly implies
+    // otherwise would be describing a system we do not have (rule 2: fully working, or honestly not
+    // built). Traffic can only be measured where published apps pass through our own serving path,
+    // and today most are served by Firebase Hosting channels, whose bytes cannot be attributed to one
+    // user. Until a site's traffic is genuinely measured, NOTHING beyond the plan price is charged —
+    // the error is entirely in the user's favour. Delete this line the day the meter covers a site,
+    // and not one day earlier.
+    `Traffic measurement is still being rolled out. Until your site's traffic is actually measured, you are charged the plan price and nothing more — you will always see your measured usage before anything extra is charged.`,
     `You can connect up to ${tier.domains} domain${tier.domains === 1 ? '' : 's'} of your own on this plan.`,
     ...(tier.bundledCreditInr > 0
       ? [`₹${tier.bundledCreditInr} of build credit is added to your wallet with each ${tier.days}-day period. It is ordinary credit — it does not expire separately from your balance.`]

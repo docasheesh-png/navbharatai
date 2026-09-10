@@ -47142,3 +47142,30 @@ domain gate, so the two cannot drift.
 the store's whole conversion loop, viewer to creator in one tap. Gating that behind ₹149 would break
 signed-out remix entirely and remove the store's reason to exist. The GALLERY remix — taking another
 creator's published app as your starting point — is what the plan now covers.
+
+### Slice C (hosting traffic meter + overage) — OPEN ROOT CAUSE, honestly recorded (rule 6)
+
+**It cannot be built honestly today, and pretending otherwise would break the billing law.**
+
+The tiers include 5 GB / 20 GB of visitor traffic and quote ₹20/GB beyond it. Charging that needs a
+**per-app byte measurement**, and there is no honest source for one right now:
+
+- **Firebase Hosting** serves today's published apps as channels on ONE site. Its usage figures are
+  per-SITE, so the bytes of one user's app cannot be separated from everyone else's. Splitting them
+  would be inventing a number, which `hostingCost.ts`'s inherited law forbids outright.
+- **Cloud Run** metrics (`hostingUsage.ts`) measure NavBharatAI's own service, not a user's app.
+- **The site-analytics beacon** counts page VIEWS, not bytes. Multiplying views by an assumed page
+  weight would produce a figure that looks like a measurement and would land on a real person's bill.
+
+**The real path, when the admin wants it:** the Cloudflare Worker (`infra/cloudflare/mitrify-apps-worker.js`)
+is the one place every bucket-served app's response actually passes through, so it can count real
+response bytes per app and report them the way the analytics beacon already reports hits. That path
+only carries traffic once the bucket-only publishing sequence in CLAUDE.md is switched on — bucket
+public-readable → Worker `APPS_BUCKET` deployed → `PUBLISHED_APP_DOMAIN` set → `PUBLISHED_APPS_BUCKET_ONLY=on`.
+Until then the Worker would measure zero apps, so building the meter first would be building nothing.
+
+**What ships instead, and why it is safe:** no meter ⇒ no overage ⇒ the user is charged the plan price
+and nothing more. The error is entirely in their favour. The agreement SAYS SO in its own line, pinned
+by `tests/hostingTiers.test.ts` so removing that line the day the meter goes live is a deliberate act
+rather than a silent one, and `AppKnowledgeBase.ts` tells every AI to never claim a traffic charge a
+user's ledger does not actually show.

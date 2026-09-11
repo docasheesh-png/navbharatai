@@ -57,7 +57,7 @@ describe('a successful wake publishes what it just proved', () => {
 
   it('still does what it did before — adopts the url, switches to live, resets the streak', () => {
     expect(branch).toContain('setFoundUrl(data.previewUrl)');
-    expect(branch).toContain("setMode('live')");
+    expect(branch).toContain("setChoice('live')"); // the explicit ask, since 2026-09-11's one-pane rule
     expect(branch).toContain('healRef.current.streak = 0');
   });
 });

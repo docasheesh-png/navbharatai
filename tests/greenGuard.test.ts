@@ -246,10 +246,12 @@ describe('removing what the failed attempt added — in the SANDBOX too', () => 
 describe('LAYER 2 WIRING — the guard is on the real save path and can never cost a user their files', () => {
   const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
   const at = route.indexOf('── GREEN GUARD, LAYER 2');
-  // Widened from 5200 when the kept-but-unchecked branch landed (2026-08-25). The window still means
-  // "inside the Green Guard block" — it ends just past the plain-save fallback, which is the block's
-  // last line — so every assertion below is still about this code and not something further down.
-  const seg = route.slice(at, at + 6400);
+  // 🔴 NO LONGER A CHARACTER COUNT (2026-09-11). It was 5200, then 6400, and then it silently cut the
+  // plain-save fallback in half the next time a line was added inside the block — the fourth such
+  // drift this month, and CLAUDE.md's rule is explicit: bound a source window with the next STRUCTURE,
+  // never a count. The block ends where the incremental-build signal begins.
+  const end = route.indexOf('// P-BRE.2 — incremental signal', at);
+  const seg = route.slice(at, end > at ? end : at + 6400);
 
   it('sits at the durable file save — the exact line that used to overwrite a working app', () => {
     expect(at).toBeGreaterThan(-1);
@@ -278,8 +280,21 @@ describe('LAYER 2 WIRING — the guard is on the real save path and can never co
   });
 
   it('the plain save still runs when the guard did not save — a user never loses their files', () => {
-    expect(seg).toContain('if (!saved) saveWorkspaceFiles(workspaceId, toSave)');
+    // REPOINTED (2026-09-11): the same call is now BOUND to `finalSave`, because the snapshot
+    // confirmation that follows must await the save it is about to outdate (snapshotIdentity.ts).
+    // The guarantee this test exists for is unchanged and still asserted: when the guard did not
+    // save, the plain save runs, and its failure is still swallowed.
+    expect(seg).toContain('const finalSave = saved ? Promise.resolve() : saveWorkspaceFiles(workspaceId, toSave).catch(() => {});');
     expect(seg).toContain('/* the guard must never cost a user their save');
+  });
+
+  it('🔒 and the snapshot confirmation AWAITS that save — it may not stamp a copy before the save it outdates', () => {
+    const save = seg.indexOf('const finalSave =');
+    const wait = seg.indexOf('await finalSave;');
+    expect(save).toBeGreaterThan(-1);
+    expect(wait).toBeGreaterThan(save);
+    // And it compares what was PERSISTED, which is the restored green set when the guard restored.
+    expect(seg).toContain('workspaceContentHash(persisted)');
   });
 
   it('is flag-gated and records its decision for the admin either way', () => {

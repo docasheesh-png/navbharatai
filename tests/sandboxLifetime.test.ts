@@ -193,13 +193,29 @@ describe('wiring — the saved copy is raised by the route, cleared by every wri
     expect(drop).toContain('this._snapshotCurrent.delete(workspaceId)');
   });
 
-  it('the route raises the flag and emits the snapshot event right where the copy is saved', () => {
+  it('the route raises the flag right where the copy is saved, and records what the copy was built from', () => {
     const at = routes.indexOf("code: 'PREVIEW_SNAPSHOT_SAVED'");
-    const block = routes.slice(at - 1200, at);
+    const block = routes.slice(at - 1500, at);
     expect(block).toContain('actuator.noteSnapshotCurrent?.(workspaceId, true)');
-    expect(block).toContain("events.emit({ type: 'snapshot', url, at, note: SNAPSHOT_IDLE_NOTE, ts: at })");
+    expect(block).toContain('sandboxStore.saveSnapshot(workspaceId, url, at, filesHash)');
+    expect(block).toContain('snapshotTaken = { url, filesHash }');
+  });
+
+  it('🔒 the snapshot event is emitted at the FINAL durable save, only once the copy is proven current (snapshotIdentity.ts)', () => {
+    // MOVED (2026-09-11), not dropped. The build's final save runs AFTER the copy is taken and
+    // rewrites the workspace's durable stamp, so announcing the copy at save time — before knowing
+    // whether a later pass changed a file — could frame a stale copy as the app. The surface only
+    // applies the event after the build ends anyway, so emitting it here costs nothing.
+    const at = routes.indexOf("code: verdict.action === 'restamp' ? 'PREVIEW_SNAPSHOT_CURRENT' : 'PREVIEW_SNAPSHOT_STALE'");
+    expect(at).toBeGreaterThan(-1);
+    const block = routes.slice(at - 1400, at);
+    expect(block).toContain('await finalSave;');
+    expect(block).toContain('snapshotConfirmation({ taken: snapshotTaken, persistedHash: workspaceContentHash(persisted) })');
     // The durable stamp and the event carry the SAME instant, so the door and the frame agree.
-    expect(block).toContain('sandboxStore.saveSnapshot(workspaceId, url, at)');
+    expect(block).toContain('sandboxStore.saveSnapshot(workspaceId, snapshotTaken.url, at, snapshotTaken.filesHash)');
+    expect(block).toContain("events.emit({ type: 'snapshot', url: snapshotTaken.url, at, note: SNAPSHOT_IDLE_NOTE, ts: at })");
+    // The event is inside the restamp branch — never announced on a stale verdict.
+    expect(block.indexOf("if (verdict.action === 'restamp') {")).toBeLessThan(block.indexOf("events.emit({ type: 'snapshot'"));
   });
 
   it('the panel hands the copy to the surface, which mirrors it into the SAME state the health poll writes', () => {

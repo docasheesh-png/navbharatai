@@ -31,13 +31,22 @@ describe('the probe stands down when the saved copy can answer', () => {
   it('a running build is asked about by WORKSPACE, not globally', () => {
     // A global "is any build running" would stand the probe down on one user's idle app because a
     // different user was building — and, worse, keep it up on this one for the same reason.
-    expect(route).toContain('buildRunning: isBuildRunningFor(workspaceId)');
+    // A proven content match outranks the flag (the client owns "during a build"); otherwise it is asked per workspace.
+    expect(route).toContain('buildRunning: byContent === true ? false : isBuildRunningFor(workspaceId)');
     expect(route).toContain('function isBuildRunningFor(workspaceId: string | null | undefined): boolean');
   });
 
   it('honours the same kill switch as the snapshot itself', () => {
-    const i = route.indexOf('const idleServe = await');
-    expect(route.slice(i, i + 400)).toContain('previewSnapshotEnabled()');
+    // The verdict moved into ONE shared helper (2026-09-11, currentSnapshotFor) that the health probe
+    // and the in-browser preview both ask, so the two panes can never disagree about the copy.
+    expect(route).toContain('const idleServe = await currentSnapshotFor(workspaceId);');
+    const i = route.indexOf('async function currentSnapshotFor(');
+    expect(i).toBeGreaterThan(-1);
+    const helper = route.slice(i, route.indexOf('\n}\n', i));
+    expect(helper).toContain('if (!previewSnapshotEnabled()) return null;');
+    // And it now checks that nothing has changed since — the inline rule that stood here did not.
+    expect(helper).toContain('lastChangeAt,');
+    expect(helper).toContain('return null; // unknown is not proof');
   });
 });
 

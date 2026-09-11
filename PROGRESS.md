@@ -48070,3 +48070,115 @@ helper) — each carries a comment saying what moved.
 **Recorded, not done:** auto-selecting the live server for a full-stack app (which has no copy) would be
 correct-app behaviour but changes cost on every reopen — the admin's call. Skipping the bundle compile
 when a current copy is framed is a later optimisation.
+---
+
+## 2026-09-11 — THE FIFTY-ATTEMPT BUG: a dead sandbox now gets the app put BACK into it
+
+**The admin's report, verbatim, and it corrected me.** I had told them that deleting paused sandboxes
+costs nothing because *"app ki files hamare apne store me hain, to koi app nahi jaayega — bas resume ki
+jagah naya build hoga."* They answered: *"actually woh alredy mare huye hi hai, wapas on nahi hote hai.
+kitne bhi retry/diagnosis karo, woh wapas live nahi ate hai, bas starting ke 24hr tak hi live rahte hai,
+uske bad 2-3 din wapas wapas live preview chalao nahi chalta hai. aur isko aap bhi 50+ bar fix kiye ho.
+nahi hua"* — then, flatly: *"resume nahi hota hai. mean abhi jo preview pause hai, yahi preview resume
+nahi ho sakta kabhi bhi nahi!!!"*
+
+**They were right, and my claim was unverified.** I had asserted "a fresh build just happens" without
+ever checking that the fresh machine gets the app written into it. It does not.
+
+### Root cause — and why fifty symptom-level fixes could not work
+
+`getSandbox` already falls through a refused `Sandbox.connect` to a fresh `Sandbox.create`. The new
+machine is EMPTY, and the **only** thing that ever refilled it was the actuator's in-memory
+`_fileCache` — which the idle sweep DELETES when it pauses a workspace (`E2BActuator` ~line 903) and
+which dies with its Cloud Run instance on **every deploy**. So in precisely the situation that matters —
+days later, another instance, the paused snapshot gone from the vendor — the restore source was empty,
+the machine stayed empty, and every retry re-ran the same nothing.
+
+Every one of the earlier fixes was aimed at *waking a machine*. The real failure was that the app was
+never written into the machine we had just made. **The diagnosis was wrong, not the effort.**
+
+The app itself was never at risk: `WorkspaceFileStore` is Firestore, has no TTL, and is written on every
+build and edit. Two paths already read it before touching a sandbox — **publish** and **GitHub push**,
+via `sandboxSeed.ts` — because each was fixed on the day it broke. The **preview**, the surface the user
+actually looks at, was outside both.
+
+### Why a resume legitimately fails (the vendor half, named honestly)
+
+A paused sandbox is a snapshot E2B holds, and it can genuinely stop existing. Decisively: for every app
+built **before 2026-09-08**, E2B's default `onTimeout: kill` DELETED the machine outright at the one-hour
+mark (`SANDBOX_TIMEOUT_MS = 1 hour`; the SDK states "after the timeout expires the sandbox will be
+automatically killed"). PR #2782 changed that default to `pause` — but **a lifecycle is fixed at
+CREATION**, so no change can ever reach a machine already gone. The admin's "purani apps wapas nahi
+aayengi" is therefore correct *as a statement about those machines*, and the only possible answer is to
+rebuild a new machine from the durable code — which is exactly what they asked for.
+
+### The fix (at the ONE door, not at five call sites)
+
+`_restoreFreshSandbox` in `E2BActuator`, called whenever `freshCreate` is true:
+
+- **Durable store first, warm cache overlaid** (`sandboxRestore.ts`, pure + unit-tested). Durable decides
+  the SET because it is the only complete source that survives; the warm cache wins per PATH because it
+  may hold an edit Firestore has not seen. Taking the cache as the baseline would silently ship a
+  500-file truncation of a larger app; taking durable as the winner would undo the newest edit.
+- **Lands through the ONE shared writer**, `writeWorkspaceFiles`, which carries the archive fast path. The
+  serial per-file loop it replaces (`_replayFilesToSandbox`, now deleted) was the fifth instance of this
+  repo's "serial awaits over a network" class — the same shape that once cost a 2,460-file project 648
+  seconds.
+- **Binary assets too** (`restoreWorkspaceAssets`): an app back without its logo is the same report
+  arriving a second time.
+- **Inside the `sandbox-file-restore` Green Freeze pass**, which is already on the allowed list — without
+  it the freeze refuses every write on a verified-working app, which is how an identical restore once
+  told a user "your files could not be restored" about a perfectly safe app.
+- **Bounded at every remote step** (load 20s, write 4min, assets 90s) because `getSandbox` sits on the hot
+  path of every write, command and port sweep. A breach leaves a PARTIAL restore and still returns the
+  sandbox — a partial app builds far more often than an empty one — and it **never throws**.
+- **Because it lives at `getSandbox`, every path inherits it**: the preview door's port sweep, publish,
+  GitHub push, a file read and a build. One guarantee instead of five call sites remembering to ask.
+
+**No model call anywhere in it.** The files are copied, not regenerated — one Firestore read plus the
+writes — so this answers the admin's *"agar jyada kharcha na aye to"* directly: the cost is sandbox
+seconds, not tokens.
+
+### A second, unasked-for cost bug found while making the first one safe
+
+**There was no lock on `getSandbox`.** Every file write, command and port sweep calls it, and a build
+fires several at once, so two callers arriving before `this.sandboxes` was populated **both created a
+machine** — and only the second was remembered. The first became an orphan billed by the minute until a
+sweep found it. This is a standing candidate for the **1,110 sandbox starts/resumes in 30 days for a
+single tester** recorded in the E2B analysis. `_creating` now holds one in-flight creation per workspace.
+It also *had* to exist before the restore, which widens that race from milliseconds to seconds.
+
+No deadlock is possible: `_createSandbox` publishes into `this.sandboxes` BEFORE restoring, so the
+`writeFile` / `runCommand` calls the restore itself makes re-enter at the warm path and never reach the
+lock. Pinned by a test.
+
+### Honesty (fourth rule, step 5)
+
+A machine we could not fill used to be reported as a clean setup. The build report's `SETUP_TIMING` line
+now carries `restore=…` beside `sandbox=…` — "created a fresh machine because the resume was refused"
+next to "restored 24/24 files from the durable store" is a complete story where the origin alone was a
+mystery. A deliberate refusal (a live `.env`, an oversized file, an unsafe path) is reported as
+`skipped`, separately, so it cannot read as a missing file; `.env` is excluded on purpose because the
+app's keys are re-minted from the user's own vault, never restored out of a shared store. A genuine
+failure logs loudly and says `RESTORE FAILED — the machine is empty`.
+
+**Tests:** `sandboxRestore.test.ts` (16, the pure rules) + `tests/deadSandboxRestoreWiring.test.ts` (13,
+the wiring — including that the durable store is read at all, that the shared writer is used, that the
+Green Freeze pass is the allowed one, and that the sandbox is published before the restore runs).
+
+### OPEN ROOT CAUSE (rule 6) — the legacy Engineer AI actuator has the same class and cannot be fixed yet
+
+`src/server/EngineerAI/actuators/E2BActuator.ts` (the separate Engineer AI engine, live via
+`routes/build.ts` → `runProEngine`) has the identical shape — failed `connect` → empty `create` → nothing
+restored, and no `lifecycle: { onTimeout: 'pause' }`, so its machines are still KILLED at the hour. It is
+**not fixed here, deliberately**: that engine does not persist its files to `WorkspaceFileStore` at all
+(grep confirms no `saveWorkspaceFiles` anywhere under `src/server/EngineerAI/`), so there is genuinely
+nothing to restore *from*. Giving it durable persistence is an architecture change to a separate engine,
+which `CLAUDE.md` requires admin sign-off for. Recorded rather than patched or left silent.
+
+### Still open, and it is the vendor's half
+
+How long E2B keeps a PAUSED snapshot is not knowable from the SDK or our code — there is no retention
+field in the API schema. The admin can settle it from their own dashboard: if a machine shown as paused
+today is **gone from the list** in a few days, E2B reclaims it, and a rebuild-from-durable (what this
+change does) is the only possible answer rather than a better resume.

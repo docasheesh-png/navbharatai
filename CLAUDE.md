@@ -497,10 +497,25 @@ the code (it is actually read somewhere) on 2026-07-11.
   knobs above are worth real money, so here is the money. Billing window Jul 14 – Aug 13 2026 (30 days),
   read off the E2B usage dashboard: **1,260 sandboxes started/resumed · 2,078.29 vCPU-hours ·
   4,156.57 RAM-hours · $172.08 total**.
-  - **A running sandbox costs ~$0.083/hour (~₹7).** Derived: $172.08 ÷ 2,078.29 vCPU-hours. RAM-hours ÷
-    vCPU-hours is **exactly 2.0**, so every sandbox is **1 vCPU + 2 GB**, and $0.083 matches E2B's
-    published per-vCPU + per-GB rates almost to the cent — which is what makes this a measurement rather
-    than a guess.
+  - **$0.083 is the price of ONE vCPU-HOUR.** Derived: $172.08 ÷ 2,078.29 vCPU-hours.
+    🔴 **CORRECTION 2026-09-11 — THE LINE THAT STOOD HERE CONCLUDED "so every sandbox is 1 vCPU + 2 GB",
+    AND THAT WAS A REASONING ERROR THAT COST REAL MARGIN.** RAM-hours ÷ vCPU-hours is exactly 2.0, but
+    that ratio only says **2 GB per vCPU** — equally true of 1+2, 2+4 and 4+8. It cannot identify the
+    size on its own, and the size was never checked against the console.
+    **The E2B sandbox list settles it: every sandbox is `2 Core` / `4.0 GB`.** So a sandbox burns TWO
+    vCPU-hours per wall-clock hour, and **one hour of one sandbox costs ~$0.166 (~₹14.5), not $0.083.**
+    Confirmed independently from the admin's own Aug 12 – Sep 11 window: $88.13 ÷ 1,064.36 vCPU-hours =
+    $0.083 per vCPU-hour, and 1,064.36 ÷ 2 = **532 wall-clock sandbox hours**, so $88.13 ÷ 532 = **$0.166
+    per sandbox-hour**.
+    ⚠️ **WHAT THE ERROR ACTUALLY COST:** `E2B_USD_PER_HOUR` was set to `0.083` from this line, and
+    `sandboxCost.ts` multiplies that rate by **wall-clock sandbox seconds** (`(s / 3600) * rate`) with no
+    vCPU factor anywhere. So every paying user has been billed **half** the real VM cost of their build
+    and NavBharatAI absorbed the rest. The correct value for today's template is **`0.166`**.
+    🔑 **AND IT IS A DERIVED NUMBER, NOT A CONSTANT — re-derive it whenever the template changes.**
+    `E2B_USD_PER_HOUR` = (E2B's per-vCPU-hour price) × (the template's vCPU count). `infra/e2b/e2b.toml`
+    currently declares `cpu_count = 4` while the console reports 2 cores per sandbox, so **the file and
+    the running template already disagree** — trust the console, and if the template is ever rebuilt or
+    resized, this key must move with it or the undercharge comes straight back.
   - Per sandbox: **~$0.137** (they average 1.65 hours each). Whole-clock burn: **~$0.24/hour**, i.e.
     ~$5.70/day, ~$172/month (**~₹15,000/month** at ~₹87/$).
   - **🔑 THE BILL IS RUNNING TIME, NOT BUILDS.** A build that finishes in 5 minutes and then leaves the
@@ -534,7 +549,12 @@ the code (it is actually read somewhere) on 2026-07-11.
     moves with usage. To recompute: E2B dashboard → Billing → Usage; per-hour = cost ÷ vCPU-hours.
     Re-measure before quoting these numbers as current.
 - **Sandbox-time billing — NOW LIVE (admin SET both in Cloud Run 2026-08-13):** `AGENTV3_BILL_SANDBOX` and
-  `E2B_USD_PER_HOUR`. ✅ **`AGENTV3_BILL_SANDBOX=on`** + ✅ **`E2B_USD_PER_HOUR=0.083`** together turn on
+  `E2B_USD_PER_HOUR`. 🔴 **THE RATE IS WRONG BY EXACTLY 2× — see the CORRECTION in the E2B cost analysis
+  above. `0.083` is the price of one vCPU-HOUR and every sandbox is 2 vCPU, while `sandboxCost.ts`
+  multiplies the rate by WALL-CLOCK hours. Every paying user is billed HALF their build's real VM cost.
+  The correct value for today's 2-core template is `0.166`, and it must be re-derived if the template is
+  ever resized.**
+  ✅ **`AGENTV3_BILL_SANDBOX=on`** + ✅ **`E2B_USD_PER_HOUR=0.083`** together turn on
   charging the user for the REAL E2B VM time their build actually held — the *measured* sandbox seconds ×
   the admin's *real* rate ($0.083/hr, which is exactly the measured rate from the E2B cost analysis above),
   included in the build's real cost BEFORE markup (`sandboxCost.ts` → `sandboxBillableUsd`). This is honest

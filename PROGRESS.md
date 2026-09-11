@@ -47622,3 +47622,50 @@ what the tile implied. Either way the next reading is evidence instead of infere
 
 Verified to bite: making a failed provider call report `0` instead of `null` fails the honesty test by
 name.
+
+## 2026-09-11 — we have been billing every paying user HALF the real cost of their sandbox
+
+**Session:** claude/upgrade-md-review-vxbdy0, while answering the admin's "kharcha kam karne ke liye kya
+karna hai" with their live E2B console open.
+
+### The error, and it is arithmetic rather than code
+`CLAUDE.md`'s E2B cost analysis (2026-08-11) read: *"RAM-hours ÷ vCPU-hours is exactly 2.0, so every
+sandbox is 1 vCPU + 2 GB, and a running sandbox costs ~$0.083/hour."*
+
+**The ratio does not say that.** 2.0 means **2 GB per vCPU** — equally true of 1+2, 2+4 and 4+8. It
+cannot identify the size, and the size was never checked against the console. **The E2B sandbox list
+shows every sandbox as `2 Core` / `4.0 GB`.**
+
+So $0.083 is the price of ONE vCPU-HOUR, and a sandbox burning 2 vCPU costs **$0.166 per wall-clock
+hour**. Confirmed independently from the admin's Aug 12 – Sep 11 window: $88.13 ÷ 1,064.36 vCPU-hours =
+$0.083/vCPU-hour; 1,064.36 ÷ 2 = 532 wall-clock sandbox hours; $88.13 ÷ 532 = **$0.166**.
+
+### What it cost
+`E2B_USD_PER_HOUR` was set to `0.083` **from that line**, and `sandboxCost.ts` computes
+`(seconds / 3600) * rate` — wall-clock seconds, **no vCPU factor anywhere**. So since 2026-08-13 every
+paying user has been charged **half** the real VM cost of their build and NavBharatAI has absorbed the
+rest. Not a user overcharge — the opposite, a margin leak, which is why nothing ever complained.
+
+### Fixed here
+The registry now carries the correct derivation and flags the live value as wrong by 2×. **The key
+itself is the admin's to change: `E2B_USD_PER_HOUR=0.166`.**
+
+🔑 **It is a DERIVED number, not a constant:** `E2B_USD_PER_HOUR` = (E2B's per-vCPU-hour price) × (the
+template's vCPU count). ⚠️ `infra/e2b/e2b.toml` declares `cpu_count = 4` while the console reports 2
+cores per sandbox — **the file and the running template already disagree**. Trust the console, and move
+this key whenever the template is rebuilt or resized, or the undercharge returns silently.
+
+### The wider lesson
+This is the third doc-vs-reality drift `CLAUDE.md` has recorded about E2B, and the first that touched
+money. The previous two were about a DEFAULT going stale. This one was a **conclusion drawn from a
+ratio without checking the thing the ratio was supposed to identify** — the same shape as the truncated
+grep that once "proved" there was no privacy policy. A derivation is not a measurement, and where money
+depends on it, the console is the measurement.
+
+### Not touched here, and why
+The admin also asked whether to replace E2B. That question stays open deliberately: 532 wall-clock
+sandbox hours a month is 532 hours on any provider, so a vendor switch moves the bill rather than
+removing it. The honest order is to find the waste first — **1,110 sandbox starts/resumes in 30 days for
+a single tester (~37/day)** is the number that does not fit, and a preview-door hit RESUMES a paused
+sandbox, which E2B counts as a new start. That investigation is NOT started here because a parallel
+session is actively working in this exact area (it landed #2815 on the sandbox count mid-flight).

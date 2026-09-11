@@ -84,29 +84,98 @@ describe('delete is per-user dismissal, never a document delete', () => {
     expect(store).toContain('!state.dismissedIds.has(n.id)');
   });
 
-  it('"delete all" is resolved SERVER-side from what this user can see', () => {
-    // Never from a list the client sends, and never "every notification in the system".
+  it('🔒 there is NO "delete everything" request — deletion is by EXPLICIT ID only', () => {
+    // The first version accepted `{ all: true }` and resolved it server-side into every message the
+    // user could see. One call, whole inbox gone — and the admin lost theirs to a single mis-tap on
+    // the button that sent it (2026-09-11). The capability is REMOVED, not merely hidden behind a
+    // nicer UI: a destructive one-shot endpoint that no screen uses is a loaded gun for the next
+    // caller. Clearing an inbox still works — the client ticks the rows and sends their ids.
     const del = route.slice(route.indexOf("app.post('/api/notifications/delete'"));
-    expect(del).toContain('listNotificationsForUser(uid, email)');
+    expect(del).not.toContain('all === true');
+    expect(del).not.toContain('body.all');
     expect(del).toContain('verifyFirebaseToken(req)');
     // A caller cannot make us write an unbounded id list.
     expect(del).toContain('.slice(0, 200)');
   });
 
-  it('the bell removes rows only AFTER the server confirms', () => {
+  it('the bell removes rows only AFTER the server confirms, and says so when it fails', () => {
     // An optimistic removal would show a message as deleted and have it reappear on the next
     // 90-second poll — which reads as the delete button being broken.
     const bell = src('src/components/NotificationBell.tsx');
-    const fn = bell.slice(bell.indexOf('const deleteNotifications ='));
+    const fn = bell.slice(bell.indexOf('const confirmDelete ='));
     const body = fn.slice(0, fn.indexOf('\n  };') + 5);
-    expect(body.indexOf('if (!res.ok) return;')).toBeLessThan(body.indexOf('setItems((prev) => prev.filter'));
+    expect(body.indexOf('if (!res.ok) { setFailed(true); return; }')).toBeLessThan(body.indexOf('setItems((prev) => prev.filter'));
+    // A failed delete is stated on screen rather than looking like nothing happened.
+    expect(bell).toContain('nothing was removed');
+  });
+});
+
+/**
+ * 🔴 DELETING TAKES THREE DELIBERATE STEPS (admin 2026-09-11, after a mis-tap emptied their inbox).
+ *
+ * The first version put an unconfirmed **Delete all** in the header beside the close button, and a bin
+ * icon on every row. Both were single destructive taps in the exact place a thumb lands when trying to
+ * dismiss the panel. These tests pin the shape that replaced it, so nobody "simplifies" the friction
+ * away later — the friction IS the feature.
+ */
+describe('the delete flow cannot destroy anything in one tap', () => {
+  const bell = src('src/components/NotificationBell.tsx');
+  /**
+   * Comments are stripped before asserting a pattern is GONE. The file's own header explains WHY the
+   * old "Delete all" was removed and therefore has to quote it — and a naive search cannot tell the
+   * record of a mistake from the mistake itself. (Third time this exact trap has bitten in this repo;
+   * for an ABSENCE claim, always search the code, not the prose.)
+   */
+  const bellCode = bell
+    .split('\n')
+    .filter((l) => {
+      const t = l.trim();
+      return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');
+    })
+    .join('\n');
+
+  it('🔒 the header has NO delete-all, and no row has a one-tap bin', () => {
+    expect(bellCode).not.toContain('Delete all');
+    expect(bellCode).not.toContain('aria-label="Delete this message"');
+    // Nothing anywhere sends the old whole-inbox request.
+    expect(bellCode).not.toContain('all: true');
   });
 
-  it('the bell offers select-one, select-all and delete-all', () => {
-    const bell = src('src/components/NotificationBell.tsx');
-    expect(bell).toContain('Select all');
-    expect(bell).toContain('Delete all');
-    expect(bell).toContain('type="checkbox"');          // a real, keyboard-reachable control
-    expect(bell).toContain('aria-label="Delete this message"');
+  it('step 1 — the header offers only Select (plus close) until selecting', () => {
+    expect(bell).toContain('>\n                      Select\n                    <');
+    expect(bell).toContain('setSelecting(true)');
+  });
+
+  it('step 2 — checkboxes exist ONLY in select mode, so a normal read cannot mis-tap one', () => {
+    expect(bell).toContain('if (!selecting) {');
+    expect(bell).toContain('type="checkbox"');   // a real, keyboard-reachable control
+    expect(bell).toContain('Select all');        // lives inside select mode, still needs Delete + confirm
+  });
+
+  it('step 3 — Delete appears only with a selection, and opens a CONFIRMATION rather than deleting', () => {
+    expect(bell).toContain('selected.size > 0 &&');
+    expect(bell).toContain('setConfirming(true)');
+    // The Delete button must NOT call the delete function directly — that is the mis-tap this fixes.
+    const header = bell.slice(bell.indexOf('{selecting && ('), bell.indexOf('{/* Select-all lives'));
+    expect(header).not.toContain('confirmDelete');
+  });
+
+  it('the confirmation names the exact COUNT and what deleting does not do', () => {
+    expect(bell).toContain('Delete {selected.size} message');
+    expect(bell).toContain('other\n                      people keep');
+    expect(bell).toContain('OK, delete');
+    expect(bell).toContain('Cancel');
+  });
+
+  it('🔒 confirmDelete is reachable ONLY from the confirmation dialog', () => {
+    // Exactly one call site, and it is the OK button inside the confirming block.
+    const calls = bell.match(/confirmDelete\(\)/g) ?? [];
+    expect(calls).toHaveLength(1);
+    const dialog = bell.slice(bell.indexOf('{confirming && ('));
+    expect(dialog).toContain('void confirmDelete()');
+  });
+
+  it('closing the panel drops a half-made selection rather than keeping it armed', () => {
+    expect(bell).toContain('else cancelSelection();');
   });
 });

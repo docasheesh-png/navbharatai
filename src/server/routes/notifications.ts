@@ -28,14 +28,20 @@ export function registerNotificationRoutes(app: Express): void {
   });
 
   /**
-   * Delete notifications for THIS user (admin 2026-09-11: "delete karne ka bhi to button do — select
-   * delete, select all delete").
+   * Delete notifications for THIS user — by EXPLICIT ID ONLY.
    *
-   * `{ ids: [...] }` deletes those; `{ all: true }` deletes everything the user can currently see.
+   * 🔴 THERE IS NO "DELETE EVERYTHING" REQUEST, AND THAT IS THE POINT (2026-09-11). The first version
+   * accepted `{ all: true }` and resolved it server-side into every message the user could see. One
+   * call, whole inbox gone — and the admin lost theirs to a single mis-tap on the button that sent it.
+   * The capability is removed rather than merely hidden behind a nicer UI, because a destructive
+   * one-shot endpoint that no screen uses is a loaded gun waiting for the next caller.
    *
-   * 🔒 "ALL" IS RESOLVED SERVER-SIDE FROM WHAT THIS USER CAN SEE — never from a list the client sends
-   * and never as "every notification in the system". The store's dismissal is per-user (a broadcast is
-   * one shared document), so this can only ever empty the caller's own inbox.
+   * Clearing an inbox is still possible: the client ticks the messages and sends their ids. That is
+   * the same outcome reached deliberately, and it is capped at 200 ids per request (the list itself
+   * returns at most NOTIFICATIONS_DEFAULT_LIMIT, so a real "select all" is well inside that).
+   *
+   * Dismissal is per-user — a broadcast is one shared document — so this can only ever empty the
+   * caller's own inbox, never anyone else's.
    *
    * Idempotent, and an empty request is a no-op rather than an error: pressing delete twice, or with
    * nothing selected, must never look like a failure.
@@ -43,18 +49,12 @@ export function registerNotificationRoutes(app: Express): void {
   app.post('/api/notifications/delete', async (req: Request, res: Response) => {
     const uid = await verifyFirebaseToken(req);
     if (!uid) { res.status(401).json({ error: 'Please sign in.' }); return; }
-    const body = (req.body ?? {}) as { ids?: unknown; all?: unknown };
+    const body = (req.body ?? {}) as { ids?: unknown };
 
-    let ids: string[];
-    if (body.all === true) {
-      const email = await resolveVerifiedEmail(uid).catch(() => null);
-      ids = (await listNotificationsForUser(uid, email)).map((n) => n.id);
-    } else {
-      // Bounded: a caller cannot make us write an unbounded id list in one request.
-      ids = Array.isArray(body.ids)
-        ? (body.ids as unknown[]).filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 128).slice(0, 200)
-        : [];
-    }
+    // Bounded: a caller cannot make us write an unbounded id list in one request.
+    const ids = Array.isArray(body.ids)
+      ? (body.ids as unknown[]).filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 128).slice(0, 200)
+      : [];
 
     await dismissNotifications(uid, ids);
     res.json({ ok: true, deleted: ids.length });

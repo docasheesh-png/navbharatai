@@ -69,6 +69,8 @@ describe('the in-browser preview admits what it cannot reproduce', () => {
 
   it('the panel shows it only for a preview that actually rendered', () => {
     expect(surface).toContain('fidelityNotice');
-    expect(surface).toContain("mode === 'inbrowser' && !!html && !err && !refusal.refuse && !!fidelityNotice");
+    // `source`, not `mode` (2026-09-11): the caveat is about the BUNDLER's render, so it must not show
+    // over the saved copy — which is the real build and reproduces everything.
+    expect(surface).toContain("source === 'inbrowser' && !!html && !err && !refusal.refuse && !!fidelityNotice");
   });
 });

@@ -67,9 +67,13 @@ describe('Restore all files', () => {
   });
 });
 
-describe('Preview (dual: Live server + In-browser + Diagnose)', () => {
-  it('the real toggle + Diagnose exist in PreviewSurface', () => {
-    expect(preview).toContain('>In-browser<');
+describe('Preview (ONE pane + Live server on demand + Diagnose)', () => {
+  it('the real source rule, the Live-server action and Diagnose exist in PreviewSurface', () => {
+    // REPOINTED (2026-09-11): the two tabs became one pane. What this cluster test protects is that
+    // the controls are REAL rather than decorative, so it now names the rule that drives the pane
+    // (previewSource.ts) and the single on-demand action, instead of the removed In-browser tab.
+    expect(preview).toContain('choosePreviewSource({');
+    expect(preview).toContain("setChoice('live')");
     expect(preview).toContain('Live server');
     expect(preview).toContain('Diagnose');
     expect(preview).toContain('runDiagnose');

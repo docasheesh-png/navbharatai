@@ -558,6 +558,19 @@ the code (it is actually read somewhere) on 2026-07-11.
   A rising provider share after this date is the six-minute lifetime doing the reaping — the number
   the 20-minute window was only ever assumed from. Expected bill effect: ~29 → ~15 min per sandbox
   (~$88 → ~$46/month at today's volume); re-measure on the E2B dashboard before quoting it.
+  🖼️ **ONE PREVIEW PANE + the copy's identity by CONTENT (shipped 2026-09-11, PR C).** The two preview
+  tabs are gone: `previewSource.ts` picks the best FREE source (the saved copy of the last green build
+  when it is current and no build runs → else the instant in-browser render) and the paid live server is
+  only ever an explicit press. **The fact that made it possible, and the bug it exposed:** the build's
+  FINAL durable save runs AFTER `saveSnapshot` and rewrites `savedAt`, so every clock rule of the form
+  "no write since the copy" was FALSE for the very build that produced the copy — the door's
+  show-the-copy-while-waking path (2026-09-08) had never fired. `snapshotIdentity.ts` records the hash of
+  the source the copy was built from (`snapshotFilesHash` on the sandbox record), the final save compares
+  it with what was PERSISTED and re-stamps the copy to after the save on a match, and ONE helper
+  (`currentSnapshotFor` in `routes/agentv3.ts`) answers the health probe and the in-browser preview alike.
+  ⚠️ Do not add a second "is the copy current?" rule anywhere — ask that helper. And do not move the
+  `snapshot` stream event back to save time: it belongs after the confirmation, or a stale copy gets
+  announced as the app.
 - **📊 WHAT E2B ACTUALLY COSTS — measured, not estimated (admin's own dashboard, 2026-08-11).** The
   knobs above are worth real money, so here is the money. Billing window Jul 14 – Aug 13 2026 (30 days),
   read off the E2B usage dashboard: **1,260 sandboxes started/resumed · 2,078.29 vCPU-hours ·

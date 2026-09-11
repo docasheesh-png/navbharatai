@@ -35,7 +35,10 @@ describe('the Live preview gets a console — the gap this closes', () => {
     // if either reference is lost, one mode silently goes back to having no console.
     expect(surface).toContain('const consoleButton = (');
     expect(surface).toContain('const consoleDrawer = (');
-    expect((surface.match(/\{consoleButton\}/g) || []).length).toBeGreaterThanOrEqual(2);
+    // REPOINTED (2026-09-11, one preview pane): the in-browser branch now renders the button as
+    // `{previewToolsFor(source).console && consoleButton}` — hidden only while the pane frames the
+    // saved copy, a static page with no bridge to report from. Both branches still reference it.
+    expect((surface.match(/consoleButton\}/g) || []).length).toBeGreaterThanOrEqual(2);
     expect((surface.match(/\{consoleOpen && consoleDrawer\}/g) || []).length).toBeGreaterThanOrEqual(2);
   });
 

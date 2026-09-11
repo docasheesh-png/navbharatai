@@ -47784,6 +47784,47 @@ project and matter only while hosting is being switched on; firing them on every
 spend quota to render a line saying "not switched on". `services.available === false` renders as
 "hosting is not switched on", never as zero used.
 
+---
+
+## 2026-09-11 — Professionals leaves the sidebar (admin request)
+
+**Admin:** *"navbharatai slidebar menu me professional wala option hai. professional wale option ko ab,
+navbharatai free me andar hi shift kar diya gaya hai! to, slidebar menu me se bhi isko hata do!"*
+
+The premise checked out before anything was removed: the Free chat's **MODE** button already lists Doctor
+AI and every configured professional (`modePicker.ts`, admin 2026-08-25), opened through the same
+navigation with the same engines, pass-gates and limits. So the sidebar row really was a second door to a
+place that already has one.
+
+**🔒 IT IS HIDDEN, NOT DELETED FROM `menuItems` — and that distinction is the whole change.** `TopNav`
+does `const item = menuItems.find(m => m.id === tabId); if (!item) return null`, so deleting the entry
+would make opening Professionals render **no header window at all, silently**. That exact bug is already
+recorded in `App.tsx` beside the `other_ai` entry, which exists only because it was hit once before.
+`SidebarNav.tsx` already had the right mechanism — `SIDEBAR_HIDDEN`, the same set Git, Preview, Files and
+History were moved into — so this is a one-word addition to a pattern four features already use.
+
+**The bigger half was the 151 stale directions.** `AppKnowledgeBase.ts` is what EVERY AI in NavBharatAI
+reads to answer *"where is X?"* — and **151 entries** said `Sidebar → Professionals`. Hiding the row
+without fixing those would have left Free Chat, Pro Chat, Engineer AI and Doctor AI confidently sending
+users to a door that is no longer there, which is a worse outcome than leaving the row in place. All 151
+now route through `NavBharatAI Free chat → Mode (bottom bar)`, plus five prose claims that named the
+sidebar as a way in (the hub's own entry, its `howToUse`, the SIDEBAR/MENU description, and two places
+offering the hub as a route to the v5.0 builder — the hub is now reachable only from deep inside
+professional history, which is too deep to hand someone as a way *in*).
+
+**Two existing tests failed, and that is the gate working.** `polishProfessionals` asserted every
+professional's KB path contains "Professionals"; `polishAppBuilderCluster` asserted the builder KB names
+two gates. Both encoded the OLD navigation. They were **moved, not weakened** — the intent ("every
+professional's path must name a door a user can actually open") is unchanged and still enforced over the
+full registry, now against the Mode button; each carries a comment saying what moved and why, so a later
+session does not read it as a softened assertion. Two NEW assertions were added on top: no professional
+entry may name the removed sidebar row, and the builder entry may no longer advertise the hub.
+
+`SidebarNav.logic.test.ts` is new and pins the structural rule for all five hidden entries: **every id in
+`SIDEBAR_HIDDEN` must still exist in `menuItems`** — hiding is not deleting — together with the TopNav
+line that makes that rule necessary, and the two doors that keep Professionals reachable (the Mode list's
+real config import, and the hub's own back button).
+
 ### Gate (CI-equivalent, on the final state)
 `npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
 `npm run build` ok · `npm run test:bundle` within budget · `npm run boot:check` PASS ·
@@ -47796,3 +47837,4 @@ re-triggered by hand. So the outbound check is live against the code on `main`, 
 ceiling on it** until #2813 merges and deploys. At today's scale the exposure is small and bounded by
 construction — one daily sweep can send at most 200 apps × 60 origins = 12,000 lookups against a
 100,000/month free tier — but it is a real gap and is recorded here rather than left implicit.
+`npx vitest run` **1,529 files / 20,612 passed / 0 failed** (12 new), log grepped for `FAIL` — none.

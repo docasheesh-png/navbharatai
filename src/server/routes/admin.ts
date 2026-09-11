@@ -34,6 +34,7 @@ import { sandboxStore } from '../AgentV3/SandboxStore';
 import { liveSandboxNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
 import { buildActuator } from './actuatorFactory';
 import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from '../AgentV3/sandboxHandover';
+import { tallyPauseCauses } from '../AgentV3/sandboxLifetime';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { licenceExposures, licenceExposureHeadline, activeExposureCount } from '../../lib/licenceExposure';
@@ -1093,7 +1094,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           frontendOnly: s.known ? s.frontendOnly : undefined,
         };
       });
-      res.json({ headline: handoverHeadline(tally, projection), tally, projection, window: limit, sample });
+      // WHICH MECHANISM ACTUALLY ENDS MACHINES — the measurement the orphan-window work was waiting on.
+      // `providerOrUnknown` is the honest bucket for a machine E2B paused at its own lifetime: we
+      // never stamp those, and inventing a cause would be the same mistake the old LIVE tile made.
+      const pauseCauses = tallyPauseCauses(sandboxes);
+      res.json({ headline: handoverHeadline(tally, projection), tally, projection, window: limit, sample, pauseCauses });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to measure sandbox handover.' });
     }

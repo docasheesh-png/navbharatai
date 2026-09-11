@@ -20,6 +20,7 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { isUsableRecipe, type PreviewRecipe } from './previewRevival';
+import type { PauseCause } from './sandboxLifetime';
 
 export interface SandboxRecord {
   workspaceId: string;
@@ -28,6 +29,12 @@ export interface SandboxRecord {
   updatedAt: number;
   /** Epoch ms the orphan reaper paused this sandbox, if it ever did. See sandboxReaper.ts. */
   pausedAt?: number;
+  /**
+   * WHICH sweep paused it — so the admin can see which mechanism actually ends machines instead of
+   * inferring it from the bill (sandboxLifetime.ts). Absent on records paused before this existed,
+   * and absent on a machine E2B paused at its own lifetime, which we never stamp at all.
+   */
+  pausedBy?: PauseCause;
   /**
    * How to bring this preview back WITHOUT guessing — the command that actually started the dev
    * server and the port that actually rendered the app, captured the moment the preview first worked.
@@ -262,12 +269,12 @@ class SandboxStore {
    * exists and a returning user resumes it by id; only the compute is stopped. The stamp is what
    * keeps the next sweep from trying to pause it again every two minutes forever.
    */
-  async markPaused(workspaceId: string): Promise<void> {
+  async markPaused(workspaceId: string, by?: PauseCause): Promise<void> {
     const db = this.getDb();
     if (!db || !workspaceId) return;
     try {
       await db.collection('agentv3_sandboxes').doc(workspaceId).set(
-        { pausedAt: Date.now() },
+        { pausedAt: Date.now(), ...(by ? { pausedBy: by } : {}) },
         { merge: true },
       );
     } catch { /* best-effort */ }

@@ -493,6 +493,32 @@ the code (it is actually read somewhere) on 2026-07-11.
   tell it apart from an abandoned VM). The reaper reads the DURABLE record, so a sandbox orphaned by a
   Cloud Run instance recycle (i.e. by every deploy) is finally pausable; its cut-off is held a whole
   `AGENTV3_MAX_BUILD_SECONDS` + 10 min past last activity so it can never reach a running build.
+- **Sandbox LIFETIME heartbeat — the permanent orphan-window fix (shipped 2026-09-11):**
+  `AGENTV3_SANDBOX_LIFETIME_MINUTES` (**code default 6**, clamped 2–60 — how long E2B keeps a sandbox
+  RUNNING after the last extension). Read by `src/server/AgentV3/sandboxLifetime.ts`; applied in
+  `E2BActuator` (`_opts.timeoutMs`, `_extendLifetime`, `_heartbeatLifetimes`).
+  **WHAT CHANGED, in one line: E2B's own per-sandbox timer is now the dead-man switch.** It used to be a
+  one-hour constant refreshed on every operation — a backstop nobody expected to fire — so every
+  deploy-orphaned machine billed for the full 20-minute reaper window (`reapAfterMs`), and that window
+  had to be twenty because the reaper's signal (a stamp refreshed only by SANDBOX OPERATIONS) cannot
+  tell a build inside a long model call from an abandoned VM. Now the lifetime is SIX minutes,
+  extended by every operation and viewer ping (throttled to one call a minute) and by a TIMER-driven
+  heartbeat (every 2 min) while a build flag or an operation is in flight. When nothing extends it,
+  E2B pauses the machine itself — whichever instance created it, and even if the service is down.
+  The heartbeat dies WITH the instance that owned the build, which is exactly when the machine should
+  stop. The durable orphan sweep stays as a second net, unchanged.
+  🔒 **WHY A MISSED HEARTBEAT IS SAFE:** the expiry action is `pause` (#2782), never `kill`; a paused
+  handle fails with a shape `isDeadSandboxError` already matches (`sandbox … paused`), the corpse is
+  dropped and `getSandbox` reconnects by durable id, which resumes the machine with its files. Slower,
+  never lost. Do NOT set the lifetime below the idle limit (5 min) without a reason: at 6 the healthy
+  path is byte-identical to before (our sweep still pauses first); the change bites only where the
+  sweeps could not reach.
+  📏 **THE MEASUREMENT IS NOW VISIBLE:** every sweep pause writes `pausedBy` on the durable record
+  (`idle-sweep` / `orphan-sweep`); the admin Reports → *Where does a sandbox's billed time go?* card
+  shows "Who stopped them", with `provider / unknown` for machines we never stamped (E2B's own timer).
+  A rising provider share after this date is the six-minute lifetime doing the reaping — the number
+  the 20-minute window was only ever assumed from. Expected bill effect: ~29 → ~15 min per sandbox
+  (~$88 → ~$46/month at today's volume); re-measure on the E2B dashboard before quoting it.
 - **📊 WHAT E2B ACTUALLY COSTS — measured, not estimated (admin's own dashboard, 2026-08-11).** The
   knobs above are worth real money, so here is the money. Billing window Jul 14 – Aug 13 2026 (30 days),
   read off the E2B usage dashboard: **1,260 sandboxes started/resumed · 2,078.29 vCPU-hours ·

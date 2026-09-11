@@ -492,6 +492,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     tally: { examined: number; measured: number; buildHours: number; heldAfterHours: number; frontendOnlyCount: number; recoverableHours: number; unknown: Record<string, number> };
     projection: { spanDays: number; recoverableHoursPerDay: number; monthlyUsdEstimate: number };
     sample: Array<{ workspaceId: string; prompt: string; known: boolean; why?: string; buildMinutes?: number; heldAfterMinutes?: number; frontendOnly?: boolean }>;
+    /** Which mechanism stopped each recent sandbox — the measurement behind the lifetime heartbeat (sandboxLifetime.ts). */
+    pauseCauses?: { idleSweep: number; orphanSweep: number; sweepUnattributed: number; providerOrUnknown: number; total: number };
   } | null>(null);
   const [handoverLoading, setHandoverLoading] = useState(false);
 
@@ -2233,6 +2235,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       </div>
                     ))}
                   </div>
+                  {handover.pauseCauses && handover.pauseCauses.total > 0 && (
+                    // WHO STOPS THE MACHINES. Before the lifetime heartbeat, most sandboxes were expected to
+                    // fall to the 20-minute orphan sweep — that expectation was arithmetic, not evidence.
+                    // This row is the evidence. "Provider / unknown" is a machine we never stamped: E2B's
+                    // own timer, a kill, or one still running — reported as unknown rather than guessed.
+                    <p className="text-[11px] text-[#8b949e] leading-relaxed">
+                      <span className="font-black text-white">Who stopped them:</span>{' '}
+                      idle sweep <span className="tabular-nums font-black text-sky-300">{handover.pauseCauses.idleSweep}</span> ·{' '}
+                      orphan sweep <span className="tabular-nums font-black text-amber-300">{handover.pauseCauses.orphanSweep}</span> ·{' '}
+                      sweep (cause not recorded) <span className="tabular-nums font-black text-[#c9d1d9]">{handover.pauseCauses.sweepUnattributed}</span> ·{' '}
+                      provider / unknown <span className="tabular-nums font-black text-violet-300">{handover.pauseCauses.providerOrUnknown}</span>{' '}
+                      <span className="text-[#6e7681]">of {handover.pauseCauses.total} recent sandboxes. A rising "provider" share after 2026-09-11 is the six-minute lifetime doing the reaping.</span>
+                    </p>
+                  )}
                   {/* The extrapolation is kept visually APART from the measured numbers above, and says
                       what it is. The two must never be read as one row of equally solid figures. */}
                   {handover.projection.monthlyUsdEstimate > 0 && (

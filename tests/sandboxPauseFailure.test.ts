@@ -55,7 +55,9 @@ describe('both sweeps are wired to the answer', () => {
     // The original was `await this.pauseSandbox(...).catch(() => {})` — a void. There is no way to
     // honour a boolean you never took.
     expect(src).toContain('const paused = await this.pauseSandbox(sandbox.sandboxId).catch(() => false);');
-    expect(src).toContain('if (paused) await sandboxStore.markPaused(workspaceId).catch(() => {});');
+    // Since 2026-09-11 the call also names WHICH sweep paused the machine (sandboxLifetime.ts); the
+    // shape this test guards — mark only on a confirmed success — is unchanged.
+    expect(src).toContain("if (paused) await sandboxStore.markPaused(workspaceId, 'idle-sweep').catch(() => {});");
   });
 
   it('the orphan sweep marks only on success or after enough failures', () => {

@@ -48011,3 +48011,47 @@ opened at create; busy edges; sweep-before-pause ordering; report order; admin; 
 billed time go?* — "Where the minutes go" says whether the excess is idle or slow commands; "Why machines
 started" says who is starting them. The next cost PR is chosen from those two lines, not from a plan.
 `npx vitest run` **1,529 files / 20,612 passed / 0 failed** (12 new), log grepped for `FAIL` — none.
+
+---
+
+## 2026-09-11 — The delete button I shipped this morning destroyed the admin's inbox. Rebuilt.
+
+Admin, same day, after using it: **"delete all click hua galti se sare notification delete ho gaye"** —
+and they are right that this was a design failure, not a mis-click.
+
+**WHAT I GOT WRONG.** I put an unconfirmed **Delete all** in the panel header, permanently visible,
+sitting beside the close button — and a bin icon on every row. Both were SINGLE destructive taps, with
+no confirmation, in the exact place a thumb lands when trying to dismiss a panel. I made the worst
+possible outcome the easiest available gesture. The ergonomics of a destructive action were never
+considered; I treated "delete karne ka button do" as a feature request and not as a safety problem.
+
+**THE SHAPE THAT REPLACED IT — three deliberate steps, none of which can fire by accident:**
+1. **Select** — the header's only action while reading. Pressing it destroys nothing.
+2. **Tick** the messages. Checkboxes exist ONLY in select mode, so normal reading cannot mis-tap one.
+3. **Delete (n)** appears only once something is ticked, and opens a CONFIRMATION naming the exact
+   count — "Delete 3 messages?" — with *OK, delete* / *Cancel*.
+
+`confirmDelete` has exactly ONE call site and it is the OK button; the header's Delete button only
+opens the dialog. Closing the panel drops a half-made selection rather than leaving it armed. The
+confirmation is an in-panel dialog, not `window.confirm` — that one is blocked in some embedded
+contexts and cannot explain, in our own words, that deleting affects only this user's inbox.
+
+**🔒 THE SERVER CAPABILITY IS GONE, NOT HIDDEN.** `/api/notifications/delete` no longer accepts
+`{ all: true }`. That one call resolved server-side into every message the user could see — one
+request, whole inbox — and it is what the mis-tap sent. Removing it rather than just removing the
+button matters: a destructive one-shot endpoint that no screen uses is a loaded gun for the next
+caller. Clearing an inbox is still possible by ticking the rows and sending their ids (capped at 200;
+the list returns at most 50, so a real "select all" is well inside that).
+
+**Nothing was actually destroyed, and that is worth recording.** Deletion is per-user dismissal — a
+broadcast is ONE shared document — so the admin's messages still exist and are merely hidden for their
+account. Offered to restore them; the design flaw was the real damage.
+
+**Pinned by tests so the friction cannot be "simplified" away later:** no delete-all in the header, no
+row bin, checkboxes only in select mode, the Delete button must not call `confirmDelete` directly,
+exactly one call site for it, and the confirmation must name the count.
+
+⚠️ **A test-hygiene note, because this is the THIRD time this exact trap has bitten in this repo.**
+The absence assertions first failed on the file's OWN header comment, which necessarily quotes
+"Delete all" to explain why it was removed. A naive search cannot tell the record of a mistake from
+the mistake itself. For an ABSENCE claim, strip comments and search the CODE.

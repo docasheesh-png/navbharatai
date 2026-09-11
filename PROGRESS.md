@@ -47568,3 +47568,57 @@ provider (display name without brackets, no dot in the domain, two addresses in 
 **The general lesson, and it is the same one this file keeps re-learning:** a presence check is not a
 validity check. Anywhere config decides whether a feature reports itself as working, "not empty" and
 "usable" must not be the same test — the gap between them is a green light over a dead feature.
+
+---
+
+## 2026-09-11 — "18 sandboxes billing" was a number nobody could verify, including us
+
+**The report.** Admin screenshot of the Monitor: **LIVE SANDBOXES 18 — "Running now, billed by the
+minute"**, sitting directly beside **BUILDS "—", "no build in window"** for the last six hours, with the
+panel's own honest line underneath: *"Telemetry is live and nothing has been recorded in the last 6
+hours. That is a real zero, not a missing reading."*
+
+Eighteen machines billing while nothing is being built is either the most expensive bug in the platform
+or a counting error. **The important part is that nothing in the product could say which** — because the
+tile had never asked E2B anything.
+
+**What it actually counted:** `sandboxStore.listRecent(200).filter((r) => !r.pausedAt).length` — "every
+durable record WE did not pause OURSELVES". `pausedAt` is written from exactly three places, all inside
+our own idle and orphan sweeps (verified by grep). So every other way a sandbox stops running left the
+record looking alive and billing:
+
+- **E2B pausing it at its own `timeoutMs`** — which is now the NORMAL end for any sandbox both sweeps
+  miss, precisely because #2782 set `lifecycle: { onTimeout: 'pause' }` on purpose;
+- **E2B killing it**, which is what happened before #2782;
+- the sandbox dying any other way.
+
+And the error runs in the opposite direction too: the orphan sweep stamps `pausedAt` after three FAILED
+pause attempts (`shouldMarkPausedAfterFailure`) *because the machine may still be alive* — so a sandbox
+that genuinely is running can be counted as stopped. The tile could be wrong both ways at once.
+
+🔒 **This breaks the status-indicator rule on the platform's largest infrastructure line.** A number that
+says money is leaving right now must reflect real state; an invented one is worse than none, because it
+is the one an admin acts on. The admin has been managing a ~₹15,000/month E2B bill against this tile.
+
+**The fix: ask the only authority there is.** `Sandbox.list({ query: { state: ['running'] } })` — the
+provider's own answer about what is running — reached through a new `countRunningSandboxes()` on the
+actuator. `liveSandboxCount.ts` holds the decisions, PURE, with the network injected, so the rules below
+are unit-tested without a live E2B:
+
+- **A failed question yields `null`, never `0`.** A timeout, a missing key or a rejected request is
+  "unknown", and zero is a claim. The tile shows an amber "unknown, not zero" instead of a confident
+  dash, and the sub-line is now produced by the SERVER — hardcoding *"Running now — billed by the
+  minute"* in the component is exactly what let an unmeasured number claim money was leaving.
+- **Bounded at 5 pages** (~500 running machines). Unbounded, one panel load could crawl an external API
+  for minutes; bounded *silently*, a floor would be reported as a total — the same quiet wrongness
+  being removed. It reports `truncated` and the line says "at least".
+- A **paused fleet now reports a real 0** with "no machine is billing right now" — an answer the old
+  tile could not produce at all.
+
+**What this does NOT yet tell us, stated plainly:** whether the real number is 18 or 0. That is the
+point — it is now *answerable*. If the tile still reads 18 after this deploys, there is a genuine reaper
+failure worth a full autopsy; if it drops, the machines were already stopped and the bill was never
+what the tile implied. Either way the next reading is evidence instead of inference.
+
+Verified to bite: making a failed provider call report `0` instead of `null` fails the honesty test by
+name.

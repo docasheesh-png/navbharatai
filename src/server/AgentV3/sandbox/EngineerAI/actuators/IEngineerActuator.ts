@@ -140,6 +140,13 @@ export interface IEngineerActuator {
    */
   pauseSandbox(sandboxId: string): Promise<boolean>;
   /**
+   * How many sandboxes the provider says are RUNNING right now — a measured fact, never inferred
+   * from our own pause bookkeeping (which cannot see a provider-side pause or kill, and so counted
+   * stopped machines as billing; see liveSandboxCount.ts). Optional: an actuator with no cloud
+   * provider has nothing to ask, and the caller must treat its absence as "unknown", never as zero.
+   */
+  countRunningSandboxes?(): Promise<{ running: number | null; truncated: boolean; reason?: string }>;
+  /**
    * Mark a workspace as having a build IN FLIGHT, so the idle sweep leaves it alone.
    *
    * WHY IT IS NEEDED: idle is measured from the last SANDBOX operation, and a long model call is not

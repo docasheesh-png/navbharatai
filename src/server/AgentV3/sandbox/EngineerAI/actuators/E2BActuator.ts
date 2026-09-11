@@ -21,6 +21,7 @@ import { resolveTemplateId } from './fullstackRouting';
 import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
 import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
 import { sandboxLifecycle } from '../../../previewWake';
+import { countRunningSandboxes, type LiveSandboxCount } from '../../../liveSandboxCount';
 import { idleLimitMs, reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, shouldMarkPausedAfterFailure } from '../../../sandboxReaper';
 
 /**
@@ -81,6 +82,8 @@ const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 // slow/throttled/misconfigured E2B makes workspace setup HANG with no event emitted
 // (the "infinite loading then stop" symptom). On timeout we throw, so the route's
 // ensureWorkspace try/catch surfaces an honest "sandbox unavailable" instead of hanging.
+// One page of the sandbox list, bounded because it runs inside an admin panel request.
+const SANDBOX_LIST_TIMEOUT_MS = 8_000;
 const SANDBOX_CREATE_TIMEOUT_MS = Math.max(
   10_000,
   parseInt(process.env.AGENTV3_SANDBOX_CREATE_TIMEOUT_MS || '', 10) || 45_000,
@@ -2162,6 +2165,31 @@ ${paintWaitJs('p')}
     const started = this._sandboxStartedAt.get(workspaceId);
     if (!started) return null;
     return Math.max(0, Math.round((Date.now() - started) / 1000));
+  }
+
+  /**
+   * How many sandboxes E2B says are RUNNING right now — the only number that reflects real spend.
+   *
+   * The Monitor used to derive this from our own durable records ("everything we did not pause
+   * ourselves"), which counts a machine E2B paused at its own timeout, or killed, as though it were
+   * still billing. See liveSandboxCount.ts for the screenshot that exposed it.
+   *
+   * Bounded and best-effort by construction: the pure counter walks at most MAX_SANDBOX_PAGES, each
+   * page call is time-capped, and any failure yields a null count with a reason rather than a
+   * reassuring zero. Never throws — an admin panel must not break over a cost tile.
+   */
+  async countRunningSandboxes(): Promise<LiveSandboxCount> {
+    return countRunningSandboxes(async (nextToken?: string) => {
+      // A fresh paginator per page: the SDK's own object carries the cursor, and re-creating it with
+      // the token we were handed keeps this function honest about where it is in the walk.
+      const paginator = Sandbox.list({
+        ...(this.apiKey ? { apiKey: this.apiKey } : {}),
+        query: { state: ['running'] },
+        ...(nextToken ? { nextToken } : {}),
+      });
+      const items = await withTimeout(paginator.nextItems(), SANDBOX_LIST_TIMEOUT_MS, 'Sandbox.list');
+      return { items: items as { state?: string | null }[], nextToken: paginator.hasNext ? paginator.nextToken : null };
+    });
   }
 
   async getSandboxId(workspaceId: string): Promise<string | null> {

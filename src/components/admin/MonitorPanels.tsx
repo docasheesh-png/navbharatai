@@ -34,8 +34,14 @@ interface MonitorResponse {
   usdInr: number;
   snapshot: any;
   instanceUptimeSeconds: number;
-  /** Sandboxes running right now (durable, cross-instance). null = the store could not be read. */
+  /**
+   * Sandboxes the PROVIDER reports as running right now. null = we could not ask — which is unknown,
+   * never zero. It used to be inferred from our own pause records and counted provider-side pauses
+   * and kills as billing machines (see liveSandboxCount.ts).
+   */
   liveSandboxes: number | null;
+  /** The measured sub-line for that tile — it must never claim "billed" about an unmeasured number. */
+  liveSandboxNote?: string;
   /** Can alerts reach the admin outside the app? Carries the reason, never the key. */
   emailAlerts?: { configured: boolean; reason: string; recipients: number };
   /** How hard the instance that answered this request is working. */
@@ -394,8 +400,11 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
         <Tile
           label="Live sandboxes"
           value={data?.liveSandboxes == null ? '—' : String(data.liveSandboxes)}
-          sub={data?.liveSandboxes == null ? 'Store unreadable' : 'Running now — billed by the minute'}
-          tone={(data?.liveSandboxes ?? 0) > 0 ? 'text-sky-400' : 'text-white'}
+          // The sub-line comes from the SERVER, which is the only place that knows whether the
+          // provider answered. Hardcoding "Running now — billed by the minute" here is what let an
+          // unmeasured number claim money was leaving; the fallback says unknown rather than guessing.
+          sub={data?.liveSandboxNote || (data?.liveSandboxes == null ? 'Could not ask the sandbox provider — unknown, not zero.' : 'Running now — billed by the minute')}
+          tone={data?.liveSandboxes == null ? 'text-amber-400' : (data.liveSandboxes > 0 ? 'text-sky-400' : 'text-white')}
           Icon={Server}
         />
         <Tile

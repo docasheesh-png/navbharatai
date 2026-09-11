@@ -20,6 +20,9 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { isUsableRecipe, type PreviewRecipe } from './previewRevival';
+import type { PauseCause } from './sandboxLifetime';
+import type { SandboxSession } from './sandboxSessions';
+import { dayKey } from './sandboxSessions';
 
 export interface SandboxRecord {
   workspaceId: string;
@@ -28,6 +31,18 @@ export interface SandboxRecord {
   updatedAt: number;
   /** Epoch ms the orphan reaper paused this sandbox, if it ever did. See sandboxReaper.ts. */
   pausedAt?: number;
+  /**
+   * WHICH sweep paused it — so the admin can see which mechanism actually ends machines instead of
+   * inferring it from the bill (sandboxLifetime.ts). Absent on records paused before this existed,
+   * and absent on a machine E2B paused at its own lifetime, which we never stamp at all.
+   */
+  pausedBy?: PauseCause;
+  /**
+   * The most recent sandbox SESSION for this workspace — how long it was up, how much of that our
+   * operations were running, what started it and what ended it (sandboxSessions.ts). Written at start
+   * and again at end, so an admin can read where the minutes went instead of inferring it from the bill.
+   */
+  session?: SandboxSession;
   /**
    * How to bring this preview back WITHOUT guessing — the command that actually started the dev
    * server and the port that actually rendered the app, captured the moment the preview first worked.
@@ -85,6 +100,52 @@ class SandboxStore {
         { merge: true },
       );
     } catch { /* best-effort — never block a build */ }
+  }
+
+  /**
+   * A session began (create or resume). Best-effort, never awaited by a build: the session on the
+   * record, plus one increment on the UTC day's start counter under its reason — the two numbers the
+   * admin card reads to answer "why 37 starts a day?" and "where do the minutes go?".
+   */
+  async recordSessionStart(workspaceId: string, session: SandboxSession): Promise<void> {
+    const db = this.getDb();
+    if (!db || !workspaceId || !session?.sandboxId) return;
+    try {
+      await Promise.all([
+        db.collection('agentv3_sandboxes').doc(workspaceId).set({ workspaceId, session }, { merge: true }),
+        db.collection('agentv3_sandbox_starts').doc(dayKey(session.startedAt)).set(
+          { day: dayKey(session.startedAt), counts: { [session.reason]: admin.firestore.FieldValue.increment(1) } },
+          { merge: true },
+        ),
+      ]);
+    } catch { /* an observation must never block a build */ }
+  }
+
+  /** The session ended (paused or dropped). Overwrites the record's session with its final numbers. */
+  async recordSessionEnd(workspaceId: string, session: SandboxSession): Promise<void> {
+    const db = this.getDb();
+    if (!db || !workspaceId || !session?.sandboxId) return;
+    try {
+      await db.collection('agentv3_sandboxes').doc(workspaceId).set({ workspaceId, session }, { merge: true });
+    } catch { /* best-effort */ }
+  }
+
+  /** The last `days` UTC days of start counters, newest first. Bounded; never throws. */
+  async listDailyStarts(days = 14): Promise<Array<{ day: string; counts: Record<string, number> }>> {
+    const db = this.getDb();
+    if (!db) return [];
+    try {
+      const snap = await db.collection('agentv3_sandbox_starts')
+        .orderBy('day', 'desc')
+        .limit(Math.max(1, Math.min(90, days)))
+        .get();
+      return snap.docs
+        .map((d) => d.data() as { day?: string; counts?: Record<string, number> })
+        .filter((r) => r && typeof r.day === 'string' && r.counts && typeof r.counts === 'object')
+        .map((r) => ({ day: r.day as string, counts: r.counts as Record<string, number> }));
+    } catch {
+      return [];
+    }
   }
 
   /** Fetch the last known sandbox id for a workspace, or null if none / unavailable. */
@@ -262,12 +323,12 @@ class SandboxStore {
    * exists and a returning user resumes it by id; only the compute is stopped. The stamp is what
    * keeps the next sweep from trying to pause it again every two minutes forever.
    */
-  async markPaused(workspaceId: string): Promise<void> {
+  async markPaused(workspaceId: string, by?: PauseCause): Promise<void> {
     const db = this.getDb();
     if (!db || !workspaceId) return;
     try {
       await db.collection('agentv3_sandboxes').doc(workspaceId).set(
-        { pausedAt: Date.now() },
+        { pausedAt: Date.now(), ...(by ? { pausedBy: by } : {}) },
         { merge: true },
       );
     } catch { /* best-effort */ }

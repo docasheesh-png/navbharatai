@@ -22,7 +22,10 @@ import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
 import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
 import { sandboxLifecycle } from '../../../previewWake';
 import { countRunningSandboxes, type LiveSandboxCount } from '../../../liveSandboxCount';
-import { idleLimitMs, reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, shouldMarkPausedAfterFailure } from '../../../sandboxReaper';
+import { reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, shouldMarkPausedAfterFailure } from '../../../sandboxReaper';
+import { sandboxLifetimeMs, heartbeatIntervalMs, shouldExtendLifetime, heartbeatTargets, idleLimitFor } from '../../../sandboxLifetime';
+import { currentSandboxReason } from '../../../sandboxSessionZone';
+import type { SandboxSession } from '../../../sandboxSessions';
 
 /**
  * How often a stream of user-activity pings is written to the durable record.
@@ -33,8 +36,8 @@ import { idleLimitMs, reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTou
 const USER_ACTIVITY_WRITE_MS = 60_000;
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
-// billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
-// idle sweep fires before E2B kills the sandbox on its own.
+// billing on abandoned sessions. Shorter than the sandbox LIFETIME (sandboxLifetime.ts) so on a
+// healthy instance this sweep still fires before E2B's own timer pauses the machine.
 //
 // The limit itself now lives in sandboxReaper.ts (15 minutes, env-tunable) — it was 45, which meant a
 // five-minute build was followed by three quarters of an hour of billed idle VM, usually for someone
@@ -73,9 +76,14 @@ function assertSafeId(id: string, label: string): string {
 // Dedicated tools dir outside the user's workspace — persists across workspace resets
 const TOOLS_DIR = '/home/user/.e-tools';
 
-// 1-hour sandbox lifetime. Refreshed on every activity via sandbox.setTimeout() so
-// a long build (npm install + AI steps) never gets killed mid-run.
-const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
+// THE SANDBOX LIFETIME IS NO LONGER AN HOUR. It used to be a one-hour constant here, refreshed on
+// every activity — a backstop nobody expected to fire, which is exactly why every deploy-orphaned
+// machine billed for the full twenty-minute reaper window (and, before #2782, for the whole hour and
+// then died). The lifetime now comes from sandboxLifetime.ts: SHORT (six minutes), extended by every
+// operation, every viewer ping, and a timer-driven heartbeat while a build or an operation is in
+// flight. When nothing extends it, E2B pauses the machine itself — no matter which instance created
+// it, or whether that instance still exists. See that file for why this is the permanent answer to
+// the orphan window rather than a shorter one.
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 // Hard cap on how long Sandbox.create()/connect() may block. The e2b SDK's timeoutMs
 // option is the sandbox LIFETIME, not a connect-request timeout — so without this a
@@ -470,6 +478,20 @@ export class E2BActuator implements IEngineerActuator {
   // Last time each workspace's DURABLE record was refreshed, so a live build's timestamp says "in use"
   // to the cross-instance orphan reaper. Throttled — see shouldTouchDurable.
   private _lastDurableTouch = new Map<string, number>();
+  // Last time each workspace's E2B LIFETIME was extended (`sandbox.setTimeout`), by any path. The hot
+  // paths throttle on it (shouldExtendLifetime) and the heartbeat skips a machine extended within the
+  // last tick. Cleared with the sandbox — a resumed machine starts a fresh clock.
+  private _lastLifetimeExtend = new Map<string, number>();
+  // Workspaces whose saved copy is CURRENT — raised by the route when a snapshot is saved, cleared
+  // here on any write (the copy is stale the moment a byte changes) and when a build starts. While
+  // set, the idle sweep uses the shorter snapshot window: the user is looking at the copy, not at
+  // the machine. In-memory on purpose — it only ever shortens THIS instance's sweep.
+  private _snapshotCurrent = new Set<string>();
+  // The live SESSION per workspace — see sandboxSessions.ts. Started on create/resume, fed by the
+  // op-hold (busy time), finalised when this instance pauses or drops the machine.
+  private _session = new Map<string, SandboxSession>();
+  // When the op count went 0 → 1, so busy time is the union of overlapping operations, not their sum.
+  private _busySince = new Map<string, number>();
   // When this workspace's sandbox was created/resumed here. A v5 build runs a real VM billed by
   // WALL-CLOCK, which is a completely different cost shape from token spend — a build that used almost
   // no tokens but held a VM for forty minutes still cost real money, and nothing in the build report
@@ -485,6 +507,11 @@ export class E2BActuator implements IEngineerActuator {
     // Phase 12E — periodic idle sweep. unref() so it never keeps the process alive.
     const timer = setInterval(() => { void this._sweepIdleSandboxes(); }, IDLE_SWEEP_INTERVAL_MS);
     if (typeof timer.unref === 'function') timer.unref();
+    // The lifetime heartbeat — see sandboxLifetime.ts. Extends E2B's timer on every BUSY sandbox this
+    // instance holds, on a clock rather than on sandbox activity, so a build inside a long model call
+    // is never mistaken for an abandoned machine. Idle sandboxes are deliberately left to expire.
+    const heartbeat = setInterval(() => { void this._heartbeatLifetimes(); }, heartbeatIntervalMs());
+    if (typeof heartbeat.unref === 'function') heartbeat.unref();
   }
 
   /** Build the e2b SDK options, injecting the per-user key when set, and — A3 — the custom template
@@ -497,7 +524,7 @@ export class E2BActuator implements IEngineerActuator {
   private _opts(extra?: Record<string, unknown>, framework?: string): { timeoutMs: number; apiKey?: string; template?: string; lifecycle: { onTimeout: 'pause' } } {
     const template = resolveTemplateId(framework);
     return {
-      timeoutMs: SANDBOX_TIMEOUT_MS,
+      timeoutMs: sandboxLifetimeMs(),
       // 🔒 PAUSE, NEVER KILL, WHEN THE HOUR RUNS OUT (admin 2026-09-08: "2-3 din bad preview band ho
       // jana. kitna bhi wake up karo, wapas preview nahi chalna").
       //
@@ -639,8 +666,20 @@ export class E2BActuator implements IEngineerActuator {
 
   /** @see IEngineerActuator.setBuildActive */
   setBuildActive(workspaceId: string, active: boolean): void {
-    if (active) this._activeBuilds.set(workspaceId, Date.now());
-    else this._activeBuilds.delete(workspaceId);
+    if (active) {
+      this._activeBuilds.set(workspaceId, Date.now());
+      // A build is about to write. Whatever copy exists will not describe the app it produces.
+      this._snapshotCurrent.delete(workspaceId);
+    } else {
+      this._activeBuilds.delete(workspaceId);
+    }
+  }
+
+  /** @see IEngineerActuator.noteSnapshotCurrent */
+  noteSnapshotCurrent(workspaceId: string, current: boolean): void {
+    if (!workspaceId) return;
+    if (current) this._snapshotCurrent.add(workspaceId);
+    else this._snapshotCurrent.delete(workspaceId);
   }
 
   /**
@@ -692,8 +731,30 @@ export class E2BActuator implements IEngineerActuator {
         this._lastUserActivityWrite.set(workspaceId, now);
         void sandboxStore.touch(workspaceId, held.sandboxId).catch(() => {});
       }
+      // A viewer keeps E2B's own timer fresh too — with a six-minute lifetime, our sweeps standing
+      // down is no longer enough on its own. Throttled like every other extension.
+      this._extendLifetime(workspaceId, held);
+      return true;
     }
-    return !!held;
+    // NOT HELD HERE: the ping landed on an instance that never created this sandbox — the exact shape
+    // of the 2026-08-23 report (a finished app dying under its user). The holder's sweep reads the
+    // durable stamp written above, but E2B's timer on that machine is extended only by whoever
+    // touches it. So extend it by id, from here, best-effort: one read and one static API call per
+    // throttle window, and never against a record we believe is paused (a static setTimeout on a
+    // paused sandbox is at best an error and must not be the thing that wakes a paid machine).
+    const lastWrite = this._lastUserActivityWrite.get(workspaceId) ?? 0;
+    if (now - lastWrite >= USER_ACTIVITY_WRITE_MS) {
+      this._lastUserActivityWrite.set(workspaceId, now);
+      void (async () => {
+        const rec = await sandboxStore.getRecord(workspaceId).catch(() => null);
+        if (!rec?.sandboxId) return;
+        const pausedAt = Number(rec.pausedAt);
+        if (Number.isFinite(pausedAt) && pausedAt > 0 && pausedAt >= Number(rec.updatedAt)) return;
+        await sandboxStore.touch(workspaceId, rec.sandboxId).catch(() => {});
+        await withTimeout(Sandbox.setTimeout(rec.sandboxId, sandboxLifetimeMs()), 5_000, 'Sandbox.setTimeout').catch(() => {});
+      })();
+    }
+    return false;
   }
 
   /** Last time a user-activity ping was written durably, per workspace. See noteUserActivity. */
@@ -756,7 +817,17 @@ export class E2BActuator implements IEngineerActuator {
 
   /** Hold the sandbox for one operation. Returns the release; call it exactly once, in `finally`. */
   private _holdSandboxOp(workspaceId: string): () => void {
-    this._opsInFlight.set(workspaceId, (this._opsInFlight.get(workspaceId) ?? 0) + 1);
+    const before = this._opsInFlight.get(workspaceId) ?? 0;
+    this._opsInFlight.set(workspaceId, before + 1);
+    // SESSION ACCOUNTING (sandboxSessions.ts): busy time is the union of overlapping operations, so
+    // the clock starts only on the 0 → 1 edge and stops only on the 1 → 0 edge.
+    const s = this._session.get(workspaceId);
+    if (s) {
+      const now = Date.now();
+      s.ops++;
+      if (s.firstOpAt === undefined) s.firstOpAt = now;
+      if (before === 0) this._busySince.set(workspaceId, now);
+    }
     let released = false;
     return () => {
       if (released) return;
@@ -765,7 +836,37 @@ export class E2BActuator implements IEngineerActuator {
       if (n <= 0) this._opsInFlight.delete(workspaceId);
       else this._opsInFlight.set(workspaceId, n);
       this._lastActivity.set(workspaceId, Date.now());
+      const now = Date.now();
+      const sess = this._session.get(workspaceId);
+      if (sess) {
+        sess.lastOpAt = now;
+        const since = this._busySince.get(workspaceId);
+        if (n <= 0 && since !== undefined) {
+          sess.busyMs += Math.max(0, now - since);
+          this._busySince.delete(workspaceId);
+        }
+      }
     };
+  }
+
+  /** The live session for the build report, or null when this instance never started one. */
+  sandboxSession(workspaceId: string): SandboxSession | null {
+    const s = this._session.get(workspaceId);
+    if (!s) return null;
+    // Include an operation still in flight, so a report written mid-operation is not short.
+    const since = this._busySince.get(workspaceId);
+    const busyMs = s.busyMs + (since !== undefined ? Math.max(0, Date.now() - since) : 0);
+    return { ...s, busyMs };
+  }
+
+  /** Close the session and write its final numbers durably. Called by whoever stops the machine. */
+  private _endSession(workspaceId: string, endedBy: SandboxSession['endedBy']): void {
+    const s = this._session.get(workspaceId);
+    this._session.delete(workspaceId);
+    this._busySince.delete(workspaceId);
+    if (!s) return;
+    const final: SandboxSession = { ...s, endedAt: Date.now(), endedBy };
+    void sandboxStore.recordSessionEnd(workspaceId, final).catch(() => {});
   }
 
   /** True while any sandbox operation is still running for this workspace. */
@@ -808,6 +909,9 @@ export class E2BActuator implements IEngineerActuator {
     this.sandboxes.delete(workspaceId);
     this._sandboxStartedAt.delete(workspaceId);
     this._sandboxOrigin.delete(workspaceId);
+    this._lastLifetimeExtend.delete(workspaceId);
+    this._snapshotCurrent.delete(workspaceId);
+    this._endSession(workspaceId, 'dropped');
   }
 
   /** Record a pause we could not confirm and return the new count. */
@@ -819,10 +923,12 @@ export class E2BActuator implements IEngineerActuator {
 
   private async _sweepIdleSandboxes(): Promise<void> {
     const now = Date.now();
-    const limit = idleLimitMs();
     for (const [workspaceId, sandbox] of [...this.sandboxes]) {
       // A build in flight OR an operation still running (see `_opsInFlight`) — never a candidate.
       if (this._buildInFlight(workspaceId, now) || this._opInFlight(workspaceId)) continue;
+      // The window is per workspace: a machine whose app already lives on a CURRENT saved copy may
+      // sleep sooner (sandboxLifetime.ts). Everything else keeps the ordinary idle limit.
+      const limit = idleLimitFor(this._snapshotCurrent.has(workspaceId));
       const last = this._lastActivity.get(workspaceId) ?? now;
       if (now - last > limit) {
         // LAST CHECK BEFORE A PAUSE THAT CAN BREAK A RUNNING APP. A keep-alive ping from the user's
@@ -840,6 +946,12 @@ export class E2BActuator implements IEngineerActuator {
         // as one that worked, and `markPaused` below then hid a still-running machine from the orphan
         // reaper (`sandboxesToReap` skips anything already flagged paused). Nothing was left that
         // could stop it, and nothing reported a fault. See PAUSE_ATTEMPTS_BEFORE_GIVING_UP.
+        // The session ends HERE, before the pause: `pauseSandbox` drops the handle in its `finally`,
+        // and a drop would otherwise close the session as 'dropped' a moment before this line could
+        // say 'idle-sweep'. `endedBy` means "what took the machine out of this instance's hands" —
+        // true even when the pause call itself fails, since the handle is dropped either way; whether
+        // the machine actually stopped is the durable record's `pausedBy`/`pausedAt`, not this.
+        this._endSession(workspaceId, 'idle-sweep');
         const paused = await this.pauseSandbox(sandbox.sandboxId).catch(() => false);
         this._lastActivity.delete(workspaceId);
         this._lastDurableTouch.delete(workspaceId);
@@ -853,7 +965,7 @@ export class E2BActuator implements IEngineerActuator {
         // reaper's off switch, so it is written only for a pause we actually saw succeed. On failure
         // the record stays live and the orphan reaper — whose window is wider than this one — becomes
         // the thing that reclaims it, which is exactly the safety net it was built to be.
-        if (paused) await sandboxStore.markPaused(workspaceId).catch(() => {});
+        if (paused) await sandboxStore.markPaused(workspaceId, 'idle-sweep').catch(() => {});
         else this._notePauseFailure(workspaceId);
       }
     }
@@ -896,13 +1008,13 @@ export class E2BActuator implements IEngineerActuator {
       // compute — and the record is kept regardless, so a returning user still resumes by id.
       if (paused) {
         this._pauseFailures.delete(rec.workspaceId);
-        await sandboxStore.markPaused(rec.workspaceId).catch(() => {});
+        await sandboxStore.markPaused(rec.workspaceId, 'orphan-sweep').catch(() => {});
         this._lastActivity.delete(rec.workspaceId);
         this._lastDurableTouch.delete(rec.workspaceId);
         this._sandboxStartedAt.delete(rec.workspaceId);
         this._fileCache.delete(rec.workspaceId);
       } else if (shouldMarkPausedAfterFailure(this._notePauseFailure(rec.workspaceId))) {
-        await sandboxStore.markPaused(rec.workspaceId).catch(() => {});
+        await sandboxStore.markPaused(rec.workspaceId, 'orphan-sweep').catch(() => {});
       }
     }
   }
@@ -925,6 +1037,40 @@ export class E2BActuator implements IEngineerActuator {
     void sandboxStore.touch(workspaceId, sandboxId).catch(() => {});
   }
 
+  /**
+   * Push E2B's own expiry for this sandbox `sandboxLifetimeMs()` into the future.
+   *
+   * Throttled unless `force`d (the heartbeat forces; hot paths do not), fire-and-forget, and swallowed
+   * — a failed extension is repaired by the next one, and if none comes the machine pauses, which is
+   * recoverable by design (previewWake.ts: the expiry action is `pause`, and a paused handle fails
+   * with a shape `isDeadSandboxError` catches so `getSandbox` reconnects and resumes).
+   */
+  private _extendLifetime(workspaceId: string, sandbox: Sandbox, force = false): void {
+    const now = Date.now();
+    if (!force && !shouldExtendLifetime(this._lastLifetimeExtend.get(workspaceId), now)) return;
+    this._lastLifetimeExtend.set(workspaceId, now);
+    try { sandbox.setTimeout(sandboxLifetimeMs()).catch(() => {}); } catch { /* non-fatal */ }
+  }
+
+  /**
+   * The heartbeat tick: extend every BUSY sandbox this instance holds. Busy = a build flag raised and
+   * not expired, or an operation in flight. The decision is pure (heartbeatTargets); this only
+   * applies it. Best-effort throughout — a cost mechanism must never be able to fail a build.
+   */
+  private async _heartbeatLifetimes(): Promise<void> {
+    const now = Date.now();
+    const candidates = [...this.sandboxes.keys()].map((workspaceId) => ({
+      workspaceId,
+      buildStartedAt: this._activeBuilds.get(workspaceId) ?? null,
+      opsInFlight: this._opsInFlight.get(workspaceId) ?? 0,
+      lastExtendAt: this._lastLifetimeExtend.get(workspaceId) ?? null,
+    }));
+    for (const workspaceId of heartbeatTargets(candidates, now)) {
+      const sandbox = this.sandboxes.get(workspaceId);
+      if (sandbox) this._extendLifetime(workspaceId, sandbox, true);
+    }
+  }
+
   private async getSandbox(workspaceId: string, resumeSandboxId?: string, framework?: string): Promise<Sandbox> {
     // Refresh activity FIRST so any in-flight operation protects its sandbox from
     // the idle sweep for its full window.
@@ -932,9 +1078,9 @@ export class E2BActuator implements IEngineerActuator {
 
     const existing = this.sandboxes.get(workspaceId);
     if (existing) {
-      // Reset the E2B cloud-side countdown on every activity so a long build never
-      // gets killed mid-run. Fire-and-forget — failure is non-fatal.
-      existing.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
+      // Extend the E2B cloud-side lifetime on activity (throttled). Fire-and-forget — failure is
+      // non-fatal, and the heartbeat covers a busy machine regardless. See sandboxLifetime.ts.
+      this._extendLifetime(workspaceId, existing);
       this._touchDurable(workspaceId, existing.sandboxId);
       // A WARM SANDBOX STILL NEEDS A START TIME, and its absence was costing real money.
       //
@@ -981,7 +1127,9 @@ export class E2BActuator implements IEngineerActuator {
       // sandbox if the resume target was killed/expired.
       try {
         sandbox = await withTimeout(Sandbox.connect(resumeId, this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.connect');
-        await sandbox.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
+        // A resumed machine's clock starts now — connect does not apply the create-time lifetime.
+        await sandbox.setTimeout(sandboxLifetimeMs()).catch(() => {});
+        this._lastLifetimeExtend.set(workspaceId, Date.now());
         this._sandboxOrigin.set(workspaceId, 'resumed');
       } catch {
         sandbox = await withTimeout(Sandbox.create(this._opts(undefined, framework)), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
@@ -999,6 +1147,21 @@ export class E2BActuator implements IEngineerActuator {
     }
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');
+    // WHY, not just THAT: the zone names the caller (a build, the preview door, a wake, a publish,
+    // a file read…), and the session record is what turns "1,110 starts a month" into a table.
+    {
+      const session: SandboxSession = {
+        sandboxId: sandbox.sandboxId,
+        origin: this._sandboxOrigin.get(workspaceId) ?? 'unknown',
+        reason: currentSandboxReason(),
+        startedAt: Date.now(),
+        busyMs: 0,
+        ops: 0,
+      };
+      this._session.set(workspaceId, session);
+      this._busySince.delete(workspaceId);
+      if (sandboxResumeEnabled()) void sandboxStore.recordSessionStart(workspaceId, session).catch(() => {});
+    }
     if (!this._sandboxStartedAt.has(workspaceId)) this._sandboxStartedAt.set(workspaceId, Date.now());
     // Durable from the FIRST moment the sandbox exists, not from the end of the build — that gap was
     // what made a running build indistinguishable from an abandoned one.
@@ -1165,6 +1328,7 @@ export class E2BActuator implements IEngineerActuator {
     // disk is touched, so a corrupting post-green pass is a no-op rather than damage. Throws, which the
     // caller's write-then-record idiom skips cleanly (sandbox + writtenFiles + durable save together).
     assertWriteAllowed(workspaceId, rel);
+    this._snapshotCurrent.delete(workspaceId); // the saved copy no longer describes this app
     await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${rel}`, content));
     this._cacheFileWrite(workspaceId, rel, content); // warm-durability: remember for recreate-after-death restore
   }
@@ -1175,6 +1339,7 @@ export class E2BActuator implements IEngineerActuator {
     // post-green overwrite of one is refused by the same rule as a code file (adversarial review 2026-08-12).
     assertWriteAllowed(workspaceId, rel);
     const bytes = new Uint8Array(Buffer.from(base64, 'base64'));
+    this._snapshotCurrent.delete(workspaceId); // a binary asset changed — the saved copy is stale too
     await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${rel}`, bytes));
   }
 
@@ -2283,9 +2448,9 @@ ${paintWaitJs('p')}
     const existing = this.sandboxes.get(workspaceId);
     if (!existing) return; // nothing warm to hold — never resurrect a paused VM from a note
     this._lastActivity.set(workspaceId, Date.now());
-    // Reset the cloud-side countdown too, for the same reason a build does: our sweep is not the only
+    // Extend the cloud-side lifetime too, for the same reason a build does: our sweep is not the only
     // clock that can end a long-running command.
-    try { existing.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {}); } catch { /* non-fatal */ }
+    this._extendLifetime(workspaceId, existing);
     // Keeps the DURABLE record fresh so the cross-instance orphan reaper can tell a watched terminal
     // apart from an abandoned VM. Internally throttled by shouldTouchDurable.
     this._touchDurable(workspaceId, existing.sandboxId);
@@ -2547,6 +2712,7 @@ ${paintWaitJs('p')}
     // checkpointId is agent-controlled — validate before it reaches the shell to block injection.
     assertSafeId(workspaceId, 'workspaceId');
     assertSafeId(checkpointId, 'checkpointId');
+    this._snapshotCurrent.delete(workspaceId); // a restore rewrites the tree wholesale
     const tarPath = `${E2BActuator.CKPT_DIR}/${workspaceId}/${checkpointId}.tar.gz`;
     const result = await sandbox.commands.run(
       `test -f ${tarPath} && tar -xzf ${tarPath} -C ${WORKSPACE_ROOT} --overwrite`,

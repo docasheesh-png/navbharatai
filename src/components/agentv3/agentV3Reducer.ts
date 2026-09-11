@@ -71,7 +71,9 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
         buildId: event.buildId,
         promptHash: event.promptHash,
         ...(event.workspaceId ? { workspaceId: event.workspaceId } : {}),
-        ...(isNewBuild ? { todos: [], agents: {} } : {}),
+        // The saved copy belongs to the build that produced it. A new build means the copy is of
+        // the PREVIOUS app, and framing it during this one would show edits that are not there yet.
+        ...(isNewBuild ? { todos: [], agents: {}, snapshotUrl: undefined, snapshotNote: undefined } : {}),
       };
     }
 
@@ -224,6 +226,11 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     // B8 — replaces rather than accumulates: this is a CURRENT reading, not a log.
     case 'context_usage':
       return { ...state, contextUsage: { pct: event.pct, level: event.level, note: event.note } };
+
+    // A VM-free copy of this build now exists. Stored, not pushed to the activity log — it is a
+    // level the surface reads, not a step the user watches.
+    case 'snapshot':
+      return { ...state, snapshotUrl: event.url, snapshotNote: event.note };
 
     case 'preview':
       return {

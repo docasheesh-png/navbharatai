@@ -120,7 +120,11 @@ describe('4. the sweep respects activity it did not see itself', () => {
     // this read, a keep-alive that landed elsewhere protects nothing and the app still dies.
     const i = actuator.indexOf('private async _sweepIdleSandboxes');
     expect(i).toBeGreaterThan(-1);
-    const body = actuator.slice(i, i + 1800);
+    // Bounded by the next method, not a character count — a count drifts the first time a line is
+    // added to the sweep (2026-09-11, twice in one day across two test files).
+    const end = actuator.indexOf('private async _sweepOrphanSandboxes(', i);
+    expect(end).toBeGreaterThan(i);
+    const body = actuator.slice(i, end);
     expect(body).toContain('sandboxStore.getRecord(workspaceId)');
     const check = body.indexOf('sandboxStore.getRecord');
     const pause = body.indexOf('await this.pauseSandbox');

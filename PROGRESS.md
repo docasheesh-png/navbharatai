@@ -47875,4 +47875,139 @@ re-triggered by hand. So the outbound check is live against the code on `main`, 
 ceiling on it** until #2813 merges and deploys. At today's scale the exposure is small and bounded by
 construction — one daily sweep can send at most 200 apps × 60 origins = 12,000 lookups against a
 100,000/month free tier — but it is a real gap and is recorded here rather than left implicit.
+
+
+## 2026-09-11 — Sandbox lifetime heartbeat: the orphan window ends at the provider (PR A of the admin's "build karo")
+
+**Admin decision (verbatim): "theek hai! isko build karo."** Three items were agreed: (A) the 20-minute
+orphan window → a permanent fix; (B) build on E2B but show the user the REAL build output (`dist/`) and
+pause the VM right after the build, collapsing the two-preview system to one default + Live on demand;
+(C) wall-clock billing — which is the RESULT of A + B, not separate work. This entry is A. B follows.
+
+**Root cause, restated from the measurement.** 28.8 min wall-clock per sandbox with ~5 of real build.
+`reapAfterMs` = 20 min because the durable stamp it trusts is refreshed only by sandbox operations, and
+a build's longest silences are model calls that touch the sandbox not at all. The window was long because
+the signal was false — shortening the number would have paused live builds.
+
+**Fix — stop being the one who decides.** `sandboxLifetime.ts` (pure): E2B's own `timeoutMs` becomes
+SIX minutes (`AGENTV3_SANDBOX_LIFETIME_MINUTES`, clamped 2–60), extended by every operation and viewer
+ping through ONE throttled helper (`_extendLifetime`, ≤ 1 call/min), and by a timer heartbeat
+(`_heartbeatLifetimes`, every lifetime/3) for any held sandbox with a live build flag (bounded by
+`buildFlagExpiryMs`, so a crashed build cannot pin a VM) or an operation in flight. Idle machines are
+deliberately NOT extended — their timer is meant to run out. A viewer whose keep-alive lands on an
+instance that does not hold the machine extends it by id (`Sandbox.setTimeout` static, 5 s bound), never
+against a record believed paused — the 2026-08-23 "app dying under its user" shape, closed for the
+provider clock as it already was for our sweeps. The hour-long `SANDBOX_TIMEOUT_MS` constant is gone.
+
+**Why it is permanent.** The heartbeat shares fate with the process that owns the build: a recycled
+instance kills both, and a machine whose build is dead should pause. No cross-instance question remains,
+because the provider's timer does not care who set it. The orphan sweep stays as a second net, unchanged.
+
+**Why a miss is safe.** Expiry action is `pause` (#2782); a paused handle matches `isDeadSandboxError`,
+is dropped, and `getSandbox` reconnects by durable id, which resumes. Verified the pattern list contains
+`paused` before relying on it.
+
+**The measurement, finally.** `SandboxStore.markPaused(workspaceId, by)` records `pausedBy`
+(`idle-sweep` | `orphan-sweep`); `tallyPauseCauses` (pure) feeds `/api/admin/sandbox-handover` and a
+"Who stopped them" row on the admin card. `provider / unknown` is the honest bucket for machines we never
+stamped (E2B's own timer) — reported as unknown, never guessed, the same discipline as the LIVE tile fix.
+
+**Tests:** `tests/sandboxLifetime.test.ts` (20) — defaults/clamps/keep-alive floor, heartbeat cadence,
+the busy/idle/expired-flag decision, the tally, and source-pinned wiring with structural anchors.
+
+**Expected effect:** ~29 → ~15 min per sandbox (~$88 → ~$46/month at 1,110 sandboxes). To be confirmed
+on the E2B dashboard, not assumed — and the admin card now shows which mechanism is doing the reaping.
+
+
+## 2026-09-11 — PR B: the saved copy is framed the moment a build settles, and its machine sleeps sooner
+
+**The admin's ask (verbatim):** *"app build karne ke liye navbharatai e2b use kare, par user ko live e2b nahi,
+bas e2b ka copy in browser preview me dikhna chahiye!"*
+
+**Safeguard #6 paid for itself here.** Before building a "dist-copy pipeline", the search found it already
+existed, in three pieces: `previewSnapshot.ts` (a green build's real `dist/` on its own Hosting channel,
+`sn-<ws>-<hash>`, never the publish channel), `snapshotServeDecision.ts` (once a build is finished and a
+current copy exists, the health poll STOPS touching the sandbox and frames the copy — `idleSnapshotUrl`),
+and the door (serves the copy when the machine is asleep, or starting with nothing changed since). So the
+admin's design was ~90% shipped and running as a FALLBACK. What was missing was small and precise:
+
+1. **The frame learned about the copy late.** The health poll runs every 150 s and sleeps during a build,
+   so after the app was done the Live frame sat on the machine for up to 2.5 min, and the idle sweep
+   counted every one of them. Now the build stream emits `{ type: 'snapshot', url, at, note }` the instant
+   the copy is saved; the reducer stores it (cleared on a NEW `build_meta`, kept on a reconnect); the panel
+   hands it to `PreviewSurface`, which mirrors it into the SAME state the poll writes — only once the panel
+   is idle (`autoResume`), never during the build's own tail, so a heal that changes a file after the copy
+   is corrected by the poll exactly as before.
+2. **The idle window was one size.** `idleLimitFor(snapshotCurrent)` in `sandboxLifetime.ts`: 3 min for a
+   workspace whose copy is current, the ordinary 5 otherwise. `E2BActuator.noteSnapshotCurrent` is raised by
+   the route beside `saveSnapshot` and CLEARED on every write (`writeFile`, `writeBinaryFile`, `restore`),
+   on `setBuildActive(true)`, and on `_dropSandbox` — the copy is stale the moment a byte changes, and the
+   actuator, not the caller, is what knows that. Floor 3 min (one 150 s poll + a sweep tick), never above
+   the ordinary limit: a current copy is a reason to sleep sooner, never later.
+
+**Honest scope.** This is the SERVER half and the frame swap. The two preview tabs still exist; making one
+pane the default and "Live server" an on-demand action is a separate UI change (PreviewSurface is ~2,000
+lines and carries the Visual Editor's exact-edit, which only the in-browser lane can do). Also unchanged:
+a full-stack app gets no copy (`snapshotSuitable`) and keeps today's flow entirely.
+
+**Tests:** `tests/sandboxLifetime.test.ts` (+10: window rules, floor/ceiling, and structural wiring pins
+across actuator, route, panel, surface and reducer) and `agentV3Reducer.test.ts` (+2: the event is a level,
+a NEW build clears it, a reconnect does not). Two older source-pin tests that measured character windows
+were re-anchored on structure — the third such drift this week; the rule stands: **bound with the next
+method or block, never a count.**
+
+**Expected effect with PR A:** healthy path ≈ build + advisory tail + 3 min; orphan path ≈ build + 6 min.
+Roughly 29 → ~10 min per sandbox at today's volume — to be read off the E2B dashboard, not assumed.
+
+
+## 2026-09-11 — PR D: measure first — where the minutes go, why machines start, and peak memory
+
+**Trigger.** The admin forwarded an external plan ("Cut NavBharatAI's E2B sandbox bill — measure first,
+then fix. Do NOT guess.") with the instruction to mix it with the work in flight and apply the
+external-suggestion rule. Every claim in it was checked against the code before anything was adopted.
+
+**Verified against reality first.**
+- Its "PR #2818 is already done — rebase onto it" was FALSE at the time: #2818 was open and `dirty`
+  against `main`, not merged. Noted for the admin; it touches the same `getSandbox` as #2820 and whichever
+  lands second must merge `main` in.
+- Its cost model ($0.0504/vCPU-h + $0.0162/GB-h, 2 vCPU + 4 GB = $0.1656/h, RAM billed per wall-clock so
+  slower = dearer, break-even 1.44× for halving cores) matches `sandboxRate.ts` exactly. Adopted as the
+  reasoning behind "no RAM change without a measured peak".
+- Its "the door resumes a paused machine on every poll" was a hypothesis, not a finding. The code already
+  caps the door's self-retry and stops the health poll from touching the machine once a copy exists; but
+  a door hit DOES resume (the port sweep runs a command). Whether that is 37 starts/day is exactly what the
+  new instrument answers — so the instrument was built rather than the guess acted on.
+
+**Built (measurement only — changes no behaviour):**
+1. `sandboxSessions.ts` (pure) + `sandboxSessionZone.ts` (AsyncLocalStorage, the repo's own pattern) —
+   one Express middleware on `/api/agentv3` names each request's cause; `getSandbox` opens a session on
+   every create/resume carrying that reason and the origin; `_holdSandboxOp` clocks busy time as the
+   UNION of overlapping operations (0→1 and 1→0 edges); the idle sweep closes the session with its cause
+   BEFORE the pause (the drop inside `pauseSandbox` would otherwise overwrite it); `_dropSandbox` closes
+   any remaining session as `dropped`.
+2. Durable: `session` on the sandbox record (start and end), plus `agentv3_sandbox_starts/<UTC day>` with
+   a per-reason increment — ~37 writes/day, far below any hot-document concern.
+3. Build report: SETUP_TIMING now carries `started-by=`; `SANDBOX_SESSION` and `SANDBOX_PEAK_MEMORY` are
+   recorded LAST before RELEASE_GATE so the browser gates are inside the numbers. The memory probe reads
+   the machine's own cgroup accounting (v2 `memory.peak`, else v1, else honestly "not available"), 5 s
+   bound, read-only.
+4. Admin card: "Where the minutes go" (avg up / running our operations / idle, ended sessions only) and
+   "Why machines started" (per-reason counts, last 14 days).
+5. `infra/e2b/e2b.toml`: `cpu_count` 4 → 2 to match `build.mjs`, with the per-hour price of each size
+   beside the numbers. (The file is legacy and read by nothing; a wrong number in it was still a trap.)
+
+**Rejected from the plan, with reasons:** routing finished apps through `renderPreview.ts` (PR B frames
+the real `dist/`, strictly more faithful; the in-browser tab already IS that renderer for apps without a
+copy); the "1,110 → ~300 starts" target (a guess dressed as a target); and lowering nothing until the
+numbers exist — which is also why PR B's 3-minute snapshot window stands: it applies only when the frame
+is already on the copy, with a floor tied to the poll, not a blanket cut.
+
+**Tests:** `tests/sandboxSessions.test.ts` (20): the split, live-session handling, the report line, the
+tallies, the path→cause table (with `other` ≠ `unattributed`), the zone surviving awaits, the probe's
+read-only shape and parser, and structural wiring pins (middleware before the first route; session
+opened at create; busy edges; sweep-before-pause ordering; report order; admin; toml).
+
+**What to read next (the point of the PR):** after a few days, Admin → Reports → *Where does a sandbox's
+billed time go?* — "Where the minutes go" says whether the excess is idle or slow commands; "Why machines
+started" says who is starting them. The next cost PR is chosen from those two lines, not from a plan.
 `npx vitest run` **1,529 files / 20,612 passed / 0 failed** (12 new), log grepped for `FAIL` — none.

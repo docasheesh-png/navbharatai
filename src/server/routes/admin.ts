@@ -34,6 +34,8 @@ import { sandboxStore } from '../AgentV3/SandboxStore';
 import { liveSandboxNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
 import { buildActuator } from './actuatorFactory';
 import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from '../AgentV3/sandboxHandover';
+import { tallyPauseCauses } from '../AgentV3/sandboxLifetime';
+import { tallyMinutes, tallyStarts } from '../AgentV3/sandboxSessions';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { licenceExposures, licenceExposureHeadline, activeExposureCount } from '../../lib/licenceExposure';
@@ -1063,7 +1065,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.get('/api/admin/sandbox-handover', verifyAdminToken, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
-      const [builds, sandboxes] = await Promise.all([listBuildFacts(limit), sandboxStore.listRecent(limit)]);
+      const [builds, sandboxes, dailyStarts] = await Promise.all([listBuildFacts(limit), sandboxStore.listRecent(limit), sandboxStore.listDailyStarts(14)]);
       const byWorkspace = new Map(sandboxes.map((s) => [s.workspaceId, s]));
       const rows = builds.map((b) => {
         const sb = byWorkspace.get(b.workspaceId);
@@ -1093,7 +1095,15 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           frontendOnly: s.known ? s.frontendOnly : undefined,
         };
       });
-      res.json({ headline: handoverHeadline(tally, projection), tally, projection, window: limit, sample });
+      // WHICH MECHANISM ACTUALLY ENDS MACHINES — the measurement the orphan-window work was waiting on.
+      // `providerOrUnknown` is the honest bucket for a machine E2B paused at its own lifetime: we
+      // never stamp those, and inventing a cause would be the same mistake the old LIVE tile made.
+      const pauseCauses = tallyPauseCauses(sandboxes);
+      // WHERE DO THE MINUTES GO, and WHY DO MACHINES START — the two numbers the E2B bill implied for a
+      // month and nothing recorded (sandboxSessions.ts). Ended sessions only; live ones are not final.
+      const minutes = tallyMinutes(sandboxes.map((s) => s.session));
+      const starts = tallyStarts(dailyStarts);
+      res.json({ headline: handoverHeadline(tally, projection), tally, projection, window: limit, sample, pauseCauses, minutes, starts });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to measure sandbox handover.' });
     }

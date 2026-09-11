@@ -162,6 +162,14 @@ export interface IEngineerActuator {
    */
   noteUserActivity?(workspaceId: string): boolean;
   /**
+   * A VM-free copy of this workspace's app is CURRENT (true) — nothing written since it was taken —
+   * or is not (false). While current, the idle sweep may use the shorter snapshot window
+   * (sandboxLifetime.ts): the user is looking at the copy, not the machine. The actuator clears it on
+   * its own on every write, so a caller only ever needs to raise it. Optional: an actuator with no
+   * idle sweep has nothing to shorten.
+   */
+  noteSnapshotCurrent?(workspaceId: string, current: boolean): void;
+  /**
    * Search for workspace files whose content matches ANY of the given terms
    * (grep -rl style). Used by ContextRetriever to rank files by relevance to
    * the current task. Skips node_modules/.git/dist. Returns relative paths.

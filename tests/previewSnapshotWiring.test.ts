@@ -29,8 +29,13 @@ describe('1. the copy is taken only from a build that PROVED it packages', () =>
   });
 
   it('every failure inside it is swallowed', () => {
+    // Bounded by the NEXT block (the vaccine), not by a character count: a character window drifts
+    // the first time a line is added inside the block — which is exactly what happened on 2026-09-11.
     const i = route.indexOf('previewSnapshotEnabled() && snapshotSuitable(pkgRaw)');
-    expect(route.slice(i, i + 1800)).toContain('must never be able to affect the build it is copying');
+    const end = route.indexOf('vaccineEnabled(workspaceId)', i);
+    expect(i).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(i);
+    expect(route.slice(i, end)).toContain('must never be able to affect the build it is copying');
   });
 });
 

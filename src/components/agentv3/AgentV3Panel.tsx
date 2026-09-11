@@ -5336,6 +5336,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 versionSha={versionView?.sha}
                 onExitVersion={() => setVersionView(null)}
                 url={state.previewUrl}
+                snapshotUrl={state.snapshotUrl}
+                snapshotIdleNote={state.snapshotNote}
                 // Prefer the live build's workspace, but FALL BACK to this session's derived id when a
                 // restored/idle session has no live workspace in state (the "preview gaya" half of the
                 // stream-drop bug): PreviewSurface then recompiles from the durable files, exactly like

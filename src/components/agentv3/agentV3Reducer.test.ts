@@ -4,6 +4,27 @@ import { initialAgentV3State } from './agentV3Types';
 import type { AgentV3WireEvent } from './agentV3Types';
 
 describe('agentV3Reducer — folds wire events into surface state', () => {
+  it('stores the saved copy of THIS build from a snapshot event — a level, not an activity entry', () => {
+    let s = initialAgentV3State();
+    expect(s.snapshotUrl).toBeUndefined();
+    const before = s.activity.length;
+    s = agentV3Reducer(s, { type: 'snapshot', url: 'https://sn-ws.web.app', at: 5, note: 'Showing your finished app from its saved copy.', ts: 5 });
+    expect(s.snapshotUrl).toBe('https://sn-ws.web.app');
+    expect(s.snapshotNote).toBe('Showing your finished app from its saved copy.');
+    expect(s.activity.length).toBe(before);
+  });
+
+  it('🔒 a NEW build clears the saved copy (it is of the previous app); the same build re-sent does not', () => {
+    let s = initialAgentV3State();
+    s = agentV3Reducer(s, { type: 'build_meta', buildId: 'b1', promptHash: 'h', ts: 1 });
+    s = agentV3Reducer(s, { type: 'snapshot', url: 'https://sn-ws.web.app', at: 5, note: 'n', ts: 5 });
+    s = agentV3Reducer(s, { type: 'build_meta', buildId: 'b1', promptHash: 'h', ts: 6 }); // a reconnect
+    expect(s.snapshotUrl).toBe('https://sn-ws.web.app');
+    s = agentV3Reducer(s, { type: 'build_meta', buildId: 'b2', promptHash: 'h2', ts: 7 }); // a new build
+    expect(s.snapshotUrl).toBeUndefined();
+    expect(s.snapshotNote).toBeUndefined();
+  });
+
   it('records own-repo storage from an own_repo event (drives the Ship/Revert controls)', () => {
     let s = initialAgentV3State();
     expect(s.ownRepo).toBeUndefined();

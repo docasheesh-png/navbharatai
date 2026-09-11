@@ -110,6 +110,8 @@ export type AgentV3WireEvent =
   // per engine, so sending it would leak which engine ran (White-Label Law).
   | { type: 'context_usage'; pct: number; level: 'ok' | 'high' | 'critical'; note: string; ts: number }
   | { type: 'preview'; url: string; ts: number }
+  /** A permanent VM-free copy of THIS build exists — frame it as soon as the build settles. */
+  | { type: 'snapshot'; url: string; at: number; note: string; ts: number }
   // `ownedByUser` says whether this repo lives in the USER's own GitHub account. It decides whether we
   // may offer to deploy from it to THEIR host: the invisible platform-org repo (Email/Phone users)
   // is not theirs, and their own Render account cannot see it.
@@ -206,6 +208,12 @@ export interface AgentV3ClientState {
   buildPhase: BuildPhase;
   /** Live preview URL (the running app in the sandbox), once published. */
   previewUrl?: string;
+  /**
+   * The saved copy of THIS build (the real `dist/`), once it exists — cleared when a new build starts,
+   * because a copy of the previous build must never be framed as the current one.
+   */
+  snapshotUrl?: string;
+  snapshotNote?: string;
   /** The project's GitHub repo (the user's own, or platform-org), once git-native storage runs. */
   repoUrl?: string;
   repoFullName?: string;

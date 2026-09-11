@@ -186,6 +186,13 @@ export type AgentEvent =
    */
   | { type: 'framework'; framework: string; reason: 'imported' | 'detected'; ts: number }
   | { type: 'preview'; url: string; ts: number }
+  /**
+   * A permanent VM-free copy of THIS build now exists (previewSnapshot.ts). Emitted the moment it is
+   * saved so the surface can frame the real build output at once — instead of learning about it from
+   * the next 150-second health poll — which is what lets the machine sleep sooner (sandboxLifetime.ts).
+   * `note` is the honest line to show beside it; carried here so the client never keeps its own copy.
+   */
+  | { type: 'snapshot'; url: string; at: number; note: string; ts: number }
   // `ownedByUser` decides whether this repo can be handed to the user's OWN host. A mirror in their
   // GitHub account can; the invisible platform-org repo (Email/Phone users) cannot — their Render
   // account cannot see it — and offering a deploy from it would be a button that could only fail.

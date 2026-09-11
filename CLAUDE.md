@@ -493,6 +493,71 @@ the code (it is actually read somewhere) on 2026-07-11.
   tell it apart from an abandoned VM). The reaper reads the DURABLE record, so a sandbox orphaned by a
   Cloud Run instance recycle (i.e. by every deploy) is finally pausable; its cut-off is held a whole
   `AGENTV3_MAX_BUILD_SECONDS` + 10 min past last activity so it can never reach a running build.
+- **Sandbox LIFETIME heartbeat — the permanent orphan-window fix (shipped 2026-09-11):**
+  `AGENTV3_SANDBOX_LIFETIME_MINUTES` (**code default 6**, clamped 2–60 — how long E2B keeps a sandbox
+  RUNNING after the last extension). Read by `src/server/AgentV3/sandboxLifetime.ts`; applied in
+  `E2BActuator` (`_opts.timeoutMs`, `_extendLifetime`, `_heartbeatLifetimes`).
+  **WHAT CHANGED, in one line: E2B's own per-sandbox timer is now the dead-man switch.** It used to be a
+  one-hour constant refreshed on every operation — a backstop nobody expected to fire — so every
+  deploy-orphaned machine billed for the full 20-minute reaper window (`reapAfterMs`), and that window
+  had to be twenty because the reaper's signal (a stamp refreshed only by SANDBOX OPERATIONS) cannot
+  tell a build inside a long model call from an abandoned VM. Now the lifetime is SIX minutes,
+  extended by every operation and viewer ping (throttled to one call a minute) and by a TIMER-driven
+  heartbeat (every 2 min) while a build flag or an operation is in flight. When nothing extends it,
+  E2B pauses the machine itself — whichever instance created it, and even if the service is down.
+  The heartbeat dies WITH the instance that owned the build, which is exactly when the machine should
+  stop. The durable orphan sweep stays as a second net, unchanged.
+  🔒 **WHY A MISSED HEARTBEAT IS SAFE:** the expiry action is `pause` (#2782), never `kill`; a paused
+  handle fails with a shape `isDeadSandboxError` already matches (`sandbox … paused`), the corpse is
+  dropped and `getSandbox` reconnects by durable id, which resumes the machine with its files. Slower,
+  never lost. Do NOT set the lifetime below the idle limit (5 min) without a reason: at 6 the healthy
+  path is byte-identical to before (our sweep still pauses first); the change bites only where the
+  sweeps could not reach.
+  📏 **MEASURE FIRST (shipped 2026-09-11, PR D — adapted from a forwarded external plan, per the
+  external-suggestion rule: adopted what the code confirmed, rejected what it contradicted).** Three
+  instruments, no behaviour change: (1) **where the minutes go** — every sandbox SESSION now records
+  wall-clock, time INSIDE our operations, time idle, op count, what started it and what ended it
+  (`sandboxSessions.ts`; on the durable record as `session`; in the build report as `SANDBOX_SESSION`);
+  (2) **why machines start** — one Express zone per `/api/agentv3` request names the cause (build /
+  preview-door / preview-diagnose / preview-health / publish / files / exec / version-preview /
+  visual-edit / other; `unattributed` only outside any request) and every create or resume increments
+  that day's counter in `agentv3_sandbox_starts` (`sandboxSessionZone.ts`; the build report's
+  SETUP_TIMING line now carries `started-by=`); (3) **peak memory** — read from the machine's own cgroup
+  (`memory.peak` v2, else v1, else honestly "not available") LAST in the post-build sequence so the
+  browser gates are included, as `SANDBOX_PEAK_MEMORY` beside the template's 4 GB. The admin card
+  *Where does a sandbox's billed time go?* shows "Where the minutes go" and "Why machines started".
+  🔒 **THE RULE THIS ENFORCES: no RAM change to the template until SANDBOX_PEAK_MEMORY says it fits,
+  and no vCPU reduction at all without a measured speed ratio** — RAM is billed per WALL-CLOCK hour, so
+  a slower build is a dearer one (break-even ≈ 1.44× slower for halving cores). `infra/e2b/e2b.toml`
+  now carries the per-hour price of each size beside its numbers, and matches `build.mjs` (2 vCPU / 4 GB).
+  From the same forwarded plan, **rejected with reasons**: "route finished apps through
+  `renderPreview.ts`" (PR B already frames the REAL `dist/`, strictly more faithful than a babel
+  re-render, and the in-browser tab is that renderer for apps without a copy); "target 1,110 → ~300
+  starts" (a guess dressed as a target — the instrument above is what turns it into a number);
+  "PR #2818 is done" (it was OPEN and conflicting with `main` at the time — verified, not assumed).
+  💵 The plan also reports the admin **set `E2B_USD_PER_HOUR=0.166` in Cloud Run on 2026-09-11** (the
+  corrected rate; 0.166 vs the derived 0.1656 is within the 25% mismatch tolerance, so the Monitor's
+  amber warning clears). Recorded from the forwarded plan, not from a direct message — re-confirm on the
+  Monitor tile before relying on it.
+  ➕ **`AGENTV3_SNAPSHOT_IDLE_MINUTES` (shipped 2026-09-11, PR B — code default 3, floor 3, never above
+  the ordinary idle limit).** The idle window the sweep applies to a workspace whose SAVED COPY IS
+  CURRENT. The dist-copy pipeline already existed (`previewSnapshot.ts`: a green build's real `dist/`
+  on its own Hosting channel; `snapshotServeDecision.ts`: the health poll stops touching the machine
+  and frames the copy) — what PR B added is (1) the build stream's `snapshot` event, so the surface
+  frames the copy the moment the build settles instead of on the next 150 s poll, and (2) a per-
+  workspace idle window (`idleLimitFor` in `sandboxLifetime.ts`) that lets such a machine sleep at
+  3 min instead of 5. The flag is raised by the route when the copy is saved and CLEARED by the
+  actuator on every write (text, binary, restore) and when a build starts — so a heal pass that
+  changes a file after the copy can never leave a stale copy counted as current. Floor 3 min because
+  the frame must have left the machine before it is paused: one poll (150 s) plus a sweep tick. This
+  is the "user ko live e2b nahi, bas copy" decision; the UI consolidation (one pane, Live on demand)
+  is a separate, later change — the two tabs still exist.
+  📏 **THE MEASUREMENT IS NOW VISIBLE:** every sweep pause writes `pausedBy` on the durable record
+  (`idle-sweep` / `orphan-sweep`); the admin Reports → *Where does a sandbox's billed time go?* card
+  shows "Who stopped them", with `provider / unknown` for machines we never stamped (E2B's own timer).
+  A rising provider share after this date is the six-minute lifetime doing the reaping — the number
+  the 20-minute window was only ever assumed from. Expected bill effect: ~29 → ~15 min per sandbox
+  (~$88 → ~$46/month at today's volume); re-measure on the E2B dashboard before quoting it.
 - **📊 WHAT E2B ACTUALLY COSTS — measured, not estimated (admin's own dashboard, 2026-08-11).** The
   knobs above are worth real money, so here is the money. Billing window Jul 14 – Aug 13 2026 (30 days),
   read off the E2B usage dashboard: **1,260 sandboxes started/resumed · 2,078.29 vCPU-hours ·

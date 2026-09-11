@@ -30,6 +30,7 @@ import { pickedElementPrompt, type PickedElement } from './previewPick';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { LIVE_SERVER_PAID_NOTE, LIVE_SERVER_PAID_TAG, isLiveServerNoticeDismissed, dismissLiveServerNotice } from '../../lib/liveServerNotice';
 import { previewAddressLabel } from './previewAddress';
+import { choosePreviewSource, modeForSource, previewSourceLabel, previewSourceTitle, previewToolsFor, type PreviewChoice } from './previewSource';
 import {
   appendConsoleEntry, consoleErrorCount as countConsoleErrors, consoleRowFixable,
   filterConsoleEntries, normalizeConsoleLevel,
@@ -187,12 +188,21 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
    * billable-address rule the toolbar label follows. Never null-and-showing: no url ⇒ no banner.
    */
   versionUrl?: string; versionSha?: string; onExitVersion?: () => void }) {
-  // A4 (unified preview): in-browser is the DETERMINISTIC DEFAULT — it always renders the current
-  // files instantly with no server, so the preview is never a dead "No live preview yet" empty state
-  // that depends on an ephemeral E2B sandbox being up. "Live server" (full-fidelity, real runtime) is
-  // an explicit opt-in toggle the user picks (or auto-selects via Diagnose). Root cause: the live URL
-  // dies on sandbox idle-pause / recycle, so defaulting to it made the preview flaky.
-  const [mode, setMode] = useState<'live' | 'inbrowser'>('inbrowser');
+  // ONE PANE, ONE RULE (previewSource.ts, admin 2026-09-11: "2 preview wala system khatam karo").
+  // `choice` is what the user asked for — 'auto' by default, which means the best FREE source: the
+  // saved copy of the last green build when the server has confirmed it is current, else the instant
+  // in-browser render. 'live' (the paid machine) is only ever an explicit ask, or a deliberate
+  // auto-switch (Diagnose found it, an import boots there, a broken render fails over to a working
+  // server). `source` is the rule's answer; `mode` is which of the two frames this file owns renders
+  // it — the copy rides the in-browser branch, so every older `mode` check keeps its meaning.
+  const [choice, setChoice] = useState<PreviewChoice>('auto');
+  /** The saved copy to frame while a FINISHED app's machine is deliberately left asleep, and its note. */
+  const [idleSnapshotUrl, setIdleSnapshotUrl] = useState('');
+  const [idleSnapshotNote, setIdleSnapshotNote] = useState('');
+  const source = choosePreviewSource({ choice, buildPhase: buildPhase ?? 'idle', snapshotUrl: idleSnapshotUrl });
+  const mode = modeForSource(source);
+  /** Remounts the framed copy on the refresh button — it is a plain static page with nothing else to re-fetch it. */
+  const [snapshotReloadKey, setSnapshotReloadKey] = useState(0);
   // Chosen responsive viewport — shared across BOTH previews (live + in-browser), so switching the
   // preview source keeps the device you were testing at. 'auto' = fill the panel (default).
   const [viewport, setViewport] = useState<PreviewViewport>('auto');
@@ -316,9 +326,6 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
    * adoption rule above exists to avoid.
    */
   const snapshotFramedRef = useRef(false);
-  /** The saved copy to frame while a FINISHED app's machine is deliberately left asleep, and its note. */
-  const [idleSnapshotUrl, setIdleSnapshotUrl] = useState('');
-  const [idleSnapshotNote, setIdleSnapshotNote] = useState('');
   // "Diagnose" — reuses the build loop's real dev-server boot sequence (install/pre-kill/start/
   // port-wait/one retry) instead of guessing, so the empty state can show the REAL internal
   // reason the live preview isn't up (and self-heal + restore the URL when it actually comes up).
@@ -413,7 +420,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
       setDiagResult({ ok: !!data?.ok, reason, detail });
       if (data?.ok && typeof data?.previewUrl === 'string' && data.previewUrl) {
         setFoundUrl(data.previewUrl);
-        setMode('live');
+        setChoice('live');
         // ── 🔒 A SUCCESSFUL WAKE MUST ERASE WHAT IT JUST DISPROVED (admin screenshot 2026-08-28:
         // "live preview wakeup hi nahi ho raha") ────────────────────────────────────────────────
         //
@@ -601,15 +608,15 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
     // seconds heartbeat) lives in the Live view, so leaving the user on the in-browser render would
     // hide a legitimately 30-90s operation behind a silent screen — the "is it working or stuck?"
     // question this whole surface exists to answer.
-    const previousMode = mode;
-    setMode('live');
+    const previousChoice = choice;
+    setChoice('live');
     void runDiagnose().then((ok) => {
       // Honest retreat: a project the sandbox cannot start (a plain static site has no dev server to
       // boot, and a broken one genuinely fails) must not strand the user on a dead Live tab when the
       // in-browser preview can render it right now. `diagResult` keeps the real reason on screen.
-      if (!ok) setMode(previousMode);
+      if (!ok) setChoice(previousChoice);
     });
-  }, [bootSignal, workspaceId, sandbox, mode, browserRunnable, runDiagnose]);
+  }, [bootSignal, workspaceId, sandbox, mode, choice, browserRunnable, runDiagnose]);
 
   // C1b — auto-REBOOT a dead live preview behind an EXISTING URL. C1 above only fires when there is NO
   // url — but a preview URL is PERMANENT while the dev server behind it is EPHEMERAL (sandbox
@@ -863,6 +870,16 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
       setBrowserRunnable(typeof data.browserRunnable === 'boolean' ? data.browserRunnable : null);
       setBrowserBlockedReason(typeof data.browserBlockedReason === 'string' ? data.browserBlockedReason : '');
       setEnvVarsUsed(Array.isArray(data.envVarsUsed) ? data.envVarsUsed.filter((v: unknown): v is string => typeof v === 'string') : []);
+      // THE SAVED COPY, WHEN THE SERVER SAYS IT IS THIS APP (currentSnapshotFor). A string frames it in
+      // the pane; an explicit null un-frames one learnt earlier, because the files have changed since.
+      // An older server sends neither and the frame stays exactly as it was.
+      if (typeof data.snapshotUrl === 'string' && /^https?:\/\//i.test(data.snapshotUrl)) {
+        setIdleSnapshotUrl(data.snapshotUrl);
+        setIdleSnapshotNote(typeof data.snapshotNote === 'string' ? data.snapshotNote : '');
+      } else if (data.snapshotUrl === null) {
+        setIdleSnapshotUrl((prev) => (prev ? '' : prev));
+        setIdleSnapshotNote((prev) => (prev ? '' : prev));
+      }
       return nextHtml.length > 0;
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -1184,7 +1201,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             alreadyFailedOver: false, userPickedInBrowser: userPickedInBrowser.current,
           })) {
             setFailoverNote(liveFailoverNotice());
-            setMode('live');
+            setChoice('live');
           } else {
             // Nothing to rescue them with. Say so plainly instead of leaving a red wall unexplained —
             // and never move them to a second broken view just to look like something happened.
@@ -1370,19 +1387,24 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   // Turn edit mode off whenever we leave in-browser mode or the preview reloads with fresh content —
   // the iframe itself is a NEW document after a reload, so any prior postMessage toggle is gone anyway;
   // this just keeps the button's own displayed state honest.
-  useEffect(() => { if (mode !== 'inbrowser') setEditMode(false); }, [mode]);
+  useEffect(() => { if (source !== 'inbrowser') setEditMode(false); }, [source]);
   useEffect(() => { setEditMode(false); }, [html]);
 
-  // In-browser first (the default). "Live server" shows a ● when a live URL is available so the
-  // full-fidelity view is discoverable even though we no longer auto-switch to it.
+  // ONE PANE (previewSource.ts). The two tabs are gone: the pane shows the best free source by itself
+  // — the real build's saved copy when it is current, the instant render otherwise — and "Live
+  // server" is the one on-demand action, marked Paid because it is. On the live server the same slot
+  // becomes the way back, which also lets the machine go to sleep.
   const switcher = (
     <div className="flex items-center gap-1 shrink-0">
-      <button onClick={() => { userPickedInBrowser.current = true; setMode('inbrowser'); }} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="Instant, always-available preview rendered in your browser — no server needed (default)">In-browser</button>
-      {/* "Live server" wrapped onto two lines on a phone, which stretched this whole toolbar row
-          (admin 2026-08-17). It says "Live" on small screens and the full "Live server" from sm up.
-          The Paid tag is NOT shortened away at any width: it is the only always-visible statement
-          that this preview spends the user's credits, and the note beside it is dismissible. */}
-      <button onClick={() => setMode('live')} className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border whitespace-nowrap ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app on a real cloud machine (full fidelity — real npm/runtime). PAID: it uses your credits while it runs. The In-browser preview is free.">{effectiveUrl ? '● ' : ''}Live<span className="hidden sm:inline">&nbsp;server</span><span className="ml-0.5 rounded px-1 text-[9px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-400 border border-amber-500/30">{LIVE_SERVER_PAID_TAG}</span></button>
+      {mode === 'live' ? (
+        <button onClick={() => { userPickedInBrowser.current = true; setChoice('auto'); }} className="px-2 py-0.5 rounded text-[11px] border whitespace-nowrap text-zinc-400 border-zinc-700 hover:text-zinc-200" title="Back to the free preview — the live server is then allowed to go to sleep">← Preview</button>
+      ) : (
+        /* "Live server" wrapped onto two lines on a phone, which stretched this whole toolbar row
+           (admin 2026-08-17). It says "Live" on small screens and the full "Live server" from sm up.
+           The Paid tag is NOT shortened away at any width: it is the only always-visible statement
+           that this preview spends the user's credits, and the note beside it is dismissible. */
+        <button onClick={() => setChoice('live')} className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border whitespace-nowrap text-zinc-400 border-zinc-700 hover:text-zinc-200" title="The running app on a real cloud machine (full fidelity — real npm/runtime). PAID: it uses your credits while it runs. The preview you are on is free.">{effectiveUrl ? '● ' : ''}Live<span className="hidden sm:inline">&nbsp;server</span><span className="ml-0.5 rounded px-1 text-[9px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-400 border border-amber-500/30">{LIVE_SERVER_PAID_TAG}</span></button>
+      )}
     </div>
   );
 
@@ -1462,8 +1484,8 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         {consoleEntries.length === 0 && mode === 'live' && !liveBridgeReady && (
           <p className="text-zinc-600">
             The live console is not reporting for this app — server-rendered frameworks have no entry page to attach it to.{' '}
-            <button onClick={() => { userPickedInBrowser.current = true; setMode('inbrowser'); }} className="underline hover:text-zinc-400">
-              The in-browser preview
+            <button onClick={() => { userPickedInBrowser.current = true; setChoice('auto'); }} className="underline hover:text-zinc-400">
+              The instant preview
             </button>{' '}
             always shows one.
           </p>
@@ -1756,7 +1778,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
               The server is answering, but it is not serving your pages
               {notServing.length > 0 ? ` — ${notServing[0]}` : ''}. If the build is still running, give it
               a few more seconds. Meanwhile the{' '}
-              <button onClick={() => setMode('inbrowser')} className="underline hover:text-amber-100">In-browser preview</button>{' '}
+              <button onClick={() => setChoice('auto')} className="underline hover:text-amber-100">preview</button>{' '}
               renders your files right now.
             </span>
           </div>
@@ -1852,9 +1874,9 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
               </p>
               <div className="flex items-center justify-center gap-2 pt-1">
                 <button onClick={() => { setLiveReloadKey((k) => k + 1); void probeAndMaybeHeal(); }} className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-semibold">Check again</button>
-                <button onClick={() => setMode('inbrowser')} className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Open the in-browser preview</button>
+                <button onClick={() => setChoice('auto')} className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Back to the preview</button>
               </div>
-              <p className="text-zinc-600 text-xs">The in-browser preview renders your current files right now, without waiting for the server.</p>
+              <p className="text-zinc-600 text-xs">The preview shows your current files right now, without waiting for the server.</p>
             </div>
           </div>
         ) : (
@@ -1885,7 +1907,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             {sandboxOff ? (
               <>
                 <p className="text-zinc-200 font-medium">Live server preview isn't available on this deployment.</p>
-                <p>The full-fidelity live preview runs your app on a real cloud machine, which isn't configured here. Your app still builds and runs — use the <button onClick={() => setMode('inbrowser')} className="underline hover:text-zinc-200">In-browser preview</button> to see it.</p>
+                <p>The full-fidelity live preview runs your app on a real cloud machine, which isn't configured here. Your app still builds and runs — use the <button onClick={() => setChoice('auto')} className="underline hover:text-zinc-200">preview</button> to see it.</p>
                 <p className="text-zinc-500 text-xs">Admin: set <code className="text-zinc-400">E2B_API_KEY</code> in the server environment to enable the live cloud preview.</p>
               </>
             ) : knownEmpty ? (
@@ -1896,7 +1918,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             ) : (
               <>
                 <p className="text-zinc-200 font-medium">No live preview yet.</p>
-                <p>The live server appears the moment the agent starts your app. While you wait, the <button onClick={() => setMode('inbrowser')} className="underline hover:text-zinc-200">In-browser preview</button> renders the current files instantly.</p>
+                <p>The live server appears the moment the agent starts your app. While you wait, the <button onClick={() => setChoice('auto')} className="underline hover:text-zinc-200">preview</button> shows the current files instantly.</p>
                 {sandbox?.previewDomainWarning && (
                   <p className="text-amber-400/80 text-xs">{sandbox.previewDomainWarning}</p>
                 )}
@@ -1950,21 +1972,28 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
       <div className={TOOLBAR_ROW}>
         {switcher}
         {viewportSwitcher}
-        <span className="flex-1 min-w-0 truncate">{kind ? `In-browser preview (${kind})` : 'In-browser preview'}</span>
+        <span className="flex-1 min-w-0 truncate" title={previewSourceTitle(source)}>{previewSourceLabel(source, kind)}</span>
         {savingEdit && <TirangaLoader className="w-3.5 h-3.5 text-indigo-400" />}
         {!!html && !err && (
           <button
-            onClick={() => { const next = !editMode; setEditMode(next); setIframeEditMode(next); }}
+            onClick={() => {
+              // ON THE SAVED COPY there is nothing to edit in place: the Visual Editor needs the instant
+              // render, whose compiler stamps every element's source position. One press opens it.
+              if (source === 'snapshot') { setChoice('inbrowser'); return; }
+              const next = !editMode; setEditMode(next); setIframeEditMode(next);
+              // Leaving the editor hands the pane back to the rule — the copy again, if still current.
+              if (!next && choice === 'inbrowser') setChoice('auto');
+            }}
             disabled={savingEdit}
             className={`shrink-0 flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] border disabled:opacity-40 ${editMode ? 'bg-emerald-600 text-white border-emerald-500' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
-            title={editMode ? 'Exit visual editing' : 'Visual Editor — click any element to select it (toolbar: text size, colour, bold, align); double-click to edit its text'}
+            title={editMode ? 'Exit visual editing' : source === 'snapshot' ? 'Open the instant preview to edit elements in place' : 'Visual Editor — click any element to select it (toolbar: text size, colour, bold, align); double-click to edit its text'}
           >
             {editMode ? <Eye className="w-3.5 h-3.5" /> : <Pen className="w-3.5 h-3.5" />}
             {editMode ? 'Editing…' : 'Edit'}
           </button>
         )}
-        {consoleButton}
-        <button onClick={() => void loadInBrowser()} disabled={loading || !workspaceId} className="shrink-0 flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
+        {previewToolsFor(source).console && consoleButton}
+        <button onClick={() => { setSnapshotReloadKey((k) => k + 1); void loadInBrowser(); }} disabled={loading || !workspaceId} className="shrink-0 flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Refresh the preview from the current files">
           {loading ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
         </button>
       </div>
@@ -2030,17 +2059,17 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           package that only works on a server, code reaching for Node builtins). Without it those all
           rendered as a vaguely wrong app with no explanation, which is the state the second absolute
           rule calls "built but not really working". */}
-      {mode === 'inbrowser' && !refusal.refuse && browserRunnable === false && !hasBackend && browserBlockedReason && (
+      {source === 'inbrowser' && !refusal.refuse && browserRunnable === false && !hasBackend && browserBlockedReason && (
         <div className="px-3 py-1.5 text-[11px] text-amber-200 bg-amber-950/40 border-b border-amber-900 flex items-center justify-between gap-2">
           <span>ℹ️ Heads up — {browserBlockedReason}. What you see here may be incomplete.</span>
-          <button onClick={() => setMode('live')} className="shrink-0 px-2 py-0.5 rounded bg-amber-800 hover:bg-amber-700 text-amber-100 font-semibold">Live server</button>
+          <button onClick={() => setChoice('live')} className="shrink-0 px-2 py-0.5 rounded bg-amber-800 hover:bg-amber-700 text-amber-100 font-semibold">Live server</button>
         </div>
       )}
       {/* CONFIG VARIABLES WE DO NOT HOLD (Phase 1b). Live .env files are excluded at the import
           boundary on purpose — we never import somebody's secrets — so these read as undefined here,
           exactly as they would under Vite with an empty env. Saying which ones turns "one feature
           behaves oddly and nobody knows why" into a known, named limitation. */}
-      {mode === 'inbrowser' && envVarsUsed.length > 0 && (
+      {source === 'inbrowser' && envVarsUsed.length > 0 && (
         <div className="px-3 py-1.5 text-[11px] text-zinc-300 bg-zinc-900/70 border-b border-zinc-800">
           ⚙️ This app reads {envVarsUsed.length === 1 ? 'a setting' : `${envVarsUsed.length} settings`} we
           don't hold ({envVarsUsed.slice(0, 3).join(', ')}{envVarsUsed.length > 3 ? `, +${envVarsUsed.length - 3} more` : ''}) —
@@ -2052,16 +2081,16 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           false caveat teaches distrust of a preview that was in fact accurate, and sends the user to
           the paid live server for nothing. Deliberately ONE line: a wall of caveats above a working
           app reads as "this is broken", which is the opposite of what is being said. */}
-      {mode === 'inbrowser' && !!html && !err && !refusal.refuse && !!fidelityNotice && (
+      {source === 'inbrowser' && !!html && !err && !refusal.refuse && !!fidelityNotice && (
         <div className="px-3 py-1.5 text-[11px] text-amber-200/90 bg-amber-950/30 border-b border-amber-900/60 flex items-start gap-2">
           <span className="flex-1">{fidelityNotice}</span>
           {!!effectiveUrl && (
-            <button onClick={() => setMode('live')} className="shrink-0 underline hover:text-amber-100">See it on the live server</button>
+            <button onClick={() => setChoice('live')} className="shrink-0 underline hover:text-amber-100">See it on the live server</button>
           )}
           <button onClick={() => setFidelityNotice('')} className="shrink-0 text-amber-500/70 hover:text-amber-200" title="Dismiss">✕</button>
         </div>
       )}
-      {mode === 'inbrowser' && hasBackend && !refusal.refuse && (
+      {source === 'inbrowser' && hasBackend && !refusal.refuse && (
         // Task #64 — honest full-stack state. The in-browser preview compiles only the frontend, so an
         // app with a backend renders here with its data/API features non-functional. Say so plainly and
         // point to the Live server (which actually boots the backend) instead of a silently-broken app.
@@ -2070,10 +2099,30 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             ℹ️ This app has {backendReason || 'a backend'} — the in-browser preview shows the frontend
             only, so its data/API features won't work here. Switch to the Live server to run it fully.
           </span>
-          <button onClick={() => setMode('live')} className="shrink-0 px-2 py-0.5 rounded bg-sky-800 hover:bg-sky-700 text-sky-100 font-semibold">Live server</button>
+          <button onClick={() => setChoice('live')} className="shrink-0 px-2 py-0.5 rounded bg-sky-800 hover:bg-sky-700 text-sky-100 font-semibold">Live server</button>
         </div>
       )}
-      {mode === 'inbrowser' && refusal.refuse ? (
+      {source === 'snapshot' ? (
+        /**
+         * THE REAL BUILD, IN THE DEFAULT PANE (admin 2026-09-11: "bas e2b ka copy dikhna chahiye").
+         *
+         * The server confirmed this copy was built from exactly the files the workspace holds now
+         * (currentSnapshotFor), no build is running, and the user has not asked for anything else. So
+         * the pane frames the app's own `dist/` — the same bytes Publish ships — instead of the
+         * bundler's approximation, and no machine is running for it. FIRST in the chain on purpose: a
+         * current copy outranks a spinner, a refusal and a stale error alike, because it is the app.
+         */
+        <ResponsiveFrame viewport={viewport} zoom={zoom}>
+          <iframe
+            key={snapshotReloadKey}
+            title="Your app"
+            src={idleSnapshotUrl}
+            onLoad={() => { everRendered.current = true; }}
+            className="w-full h-full bg-white border-0"
+            allow={PREVIEW_IFRAME_ALLOW} sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          />
+        </ResponsiveFrame>
+      ) : refusal.refuse ? (
         /**
          * DO NOT RENDER A BUNDLE THE SERVER ALREADY SAID CANNOT RUN (Mitrify report de674a44).
          *
@@ -2090,7 +2139,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           <p className="text-[12px] text-zinc-500 max-w-sm">
             {refusal.detail} Your app isn&apos;t broken — switch to the Live server to see it fully.
           </p>
-          <button onClick={() => setMode('live')} className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">
+          <button onClick={() => setChoice('live')} className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">
             {effectiveUrl ? '● ' : ''}Open Live server
           </button>
         </div>

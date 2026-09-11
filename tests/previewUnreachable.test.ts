@@ -109,7 +109,10 @@ describe('the vendor error page is not framed as the user\'s app', () => {
     // where the user just wants to SEE their app now — it renders the current files without a server.
     const branch = unreachableJsx();
     expect(branch).toContain('Check again');
-    expect(branch).toContain("setMode('inbrowser')");
+    // REPOINTED (2026-09-11, one preview pane): the way back is `setChoice('auto')` — the rule then
+    // frames the saved copy if it is current, else the instant render. Same intent: a way to SEE the
+    // app now, without waiting for the server.
+    expect(branch).toContain("setChoice('auto')");
   });
 });
 

@@ -65,6 +65,12 @@ export interface SandboxRecord {
   /** When that snapshot was taken — so the surface can say how old the copy is, rather than guess. */
   snapshotAt?: number;
   /**
+   * The hash of the SOURCE the copy was built from (snapshotIdentity.ts) — what makes "is this copy
+   * the app as it stands now?" a question of content rather than of clocks. Absent on copies taken
+   * before it was recorded; readers then fall back to the clock rule.
+   */
+  snapshotFilesHash?: string;
+  /**
    * The port this app SAYS it serves on, read from its own scripts/config (declaredPort.ts).
    *
    * Strictly weaker than `recipe.port`, which is a port we have SEEN serving — and stored anyway,
@@ -168,12 +174,12 @@ class SandboxStore {
    * Merged, never overwritten: a snapshot must survive every later build that does not produce a new
    * one — the whole point is that it is there on the day the machine is not.
    */
-  async saveSnapshot(workspaceId: string, url: string, at: number): Promise<void> {
+  async saveSnapshot(workspaceId: string, url: string, at: number, filesHash?: string | null): Promise<void> {
     const db = this.getDb();
     if (!db || !workspaceId || !url) return;
     try {
       await db.collection('agentv3_sandboxes').doc(workspaceId).set(
-        { workspaceId, snapshotUrl: url, snapshotAt: at, updatedAt: Date.now() },
+        { workspaceId, snapshotUrl: url, snapshotAt: at, ...(filesHash ? { snapshotFilesHash: filesHash } : {}), updatedAt: Date.now() },
         { merge: true },
       );
     } catch { /* best-effort — a fallback copy must never be able to fail a build */ }

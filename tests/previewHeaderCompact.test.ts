@@ -61,7 +61,7 @@ describe('the honest cost marker survives every screen size', () => {
     // NOT be shortened away with it: the note next to it is dismissible, so this badge is the only
     // permanently visible statement that the live preview spends the user's credits. Hiding it on the
     // smallest screen would hide it from the users most likely to be surprised by a bill.
-    const btn = preview.slice(preview.indexOf("onClick={() => setMode('live')}"));
+    const btn = preview.slice(preview.indexOf("onClick={() => setChoice('live')}"));
     const tag = btn.indexOf('LIVE_SERVER_PAID_TAG');
     expect(tag).toBeGreaterThan(-1);
     const span = btn.lastIndexOf('<span', tag);
@@ -69,7 +69,7 @@ describe('the honest cost marker survives every screen size', () => {
   });
 
   it('only the word "server" is dropped on a phone — the button still says Live', () => {
-    const btn = preview.slice(preview.indexOf("onClick={() => setMode('live')}"), preview.indexOf('</button>', preview.indexOf("onClick={() => setMode('live')}")));
+    const btn = preview.slice(preview.indexOf("onClick={() => setChoice('live')}"), preview.indexOf('</button>', preview.indexOf("onClick={() => setChoice('live')}")));
     expect(btn).toContain('Live<span className="hidden sm:inline">&nbsp;server</span>');
   });
 });

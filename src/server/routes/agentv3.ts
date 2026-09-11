@@ -356,6 +356,7 @@ import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild
 import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
+import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, type SnapshotTaken } from '../AgentV3/snapshotIdentity';
 import { sandboxReasonMiddleware } from '../AgentV3/sandboxSessionZone';
 import { PEAK_MEMORY_PROBE, parsePeakMemory, describePeakMemory, describeSession, type SandboxSession } from '../AgentV3/sandboxSessions';
 import { sandboxRamGb } from '../AgentV3/sandboxRate';
@@ -1770,6 +1771,48 @@ function isBuildRunningFor(workspaceId: string | null | undefined): boolean {
     if (isBuildRunningForWorkspace(rb, workspaceId)) return true;
   }
   return false;
+}
+
+/**
+ * THE ONE ANSWER TO "MAY THE SAVED COPY STAND IN FOR THIS APP RIGHT NOW?" (snapshotIdentity.ts).
+ *
+ * Asked by the health probe (so it can stop touching a machine nobody needs) and by the in-browser
+ * preview (so the default pane can frame the real build instead of the bundler's approximation). It
+ * used to be answered in two places with two different rules — one that checked no clock at all and
+ * one whose clock rule was structurally always false — which is how a copy could be framed after an
+ * edit had outdated it AND refused for the very build that produced it. One rule, three proofs, all
+ * required: the kill switch is on, no build is running for THIS workspace, and the copy is current —
+ * by content when both hashes are known, else by the durable clock, where an unreadable stamp is not
+ * proof. Best-effort and bounded: any failure is "no copy", never a guess.
+ */
+async function currentSnapshotFor(
+  workspaceId: string,
+  currentFilesHash?: string | null,
+): Promise<{ url: string; at: number } | null> {
+  try {
+    if (!previewSnapshotEnabled()) return null;
+    const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'snapshotRecord').catch(() => null);
+    if (!rec?.snapshotUrl) return null;
+    const byContent = snapshotMatchesFiles(rec.snapshotFilesHash, currentFilesHash);
+    if (byContent === false) return null; // the source in hand is provably not what the copy was built from
+    const lastChangeAt = byContent === true
+      ? null // content already proved it; the clock cannot overrule a byte-for-byte match
+      : await raceTimeout(workspaceFilesSavedAt(workspaceId), 3_000, 'snapshotLastChange').catch(() => null);
+    if (byContent !== true && lastChangeAt === null) return null; // unknown is not proof
+    if (!canServeFromSnapshot({
+      // A byte-for-byte match outranks the build flag: the files in hand ARE the copy's files, so the
+      // copy is a faithful render of them whatever else is in flight. This is also what closes a race
+      // — the post-build reload can reach this route before the finished build has left the registry,
+      // and un-framing the copy the build just confirmed would leave the pane on the approximation
+      // until the next file change. Whether to show the copy DURING a build is the client's rule.
+      buildRunning: byContent === true ? false : isBuildRunningFor(workspaceId),
+      snapshotUrl: rec.snapshotUrl,
+      snapshotAt: rec.snapshotAt,
+      now: Date.now(),
+      lastChangeAt,
+    })) return null;
+    return { url: String(rec.snapshotUrl), at: Number(rec.snapshotAt) };
+  } catch { return null; }
 }
 
 /**
@@ -5275,19 +5318,10 @@ async function noteBuildOutcome(
        * place the app lives — so we stop touching it, the sweep it was beating pauses it, and the user
        * loses nothing. Never while a build runs, never for a full-stack app, never without a snapshot.
        */
-      const idleServe = await (async () => {
-        try {
-          if (!previewSnapshotEnabled()) return null;
-          const rec = await raceTimeout(sandboxStore.getRecord(workspaceId), 3_000, 'healthIdleServe').catch(() => null);
-          if (!canServeFromSnapshot({
-            buildRunning: isBuildRunningFor(workspaceId),
-            snapshotUrl: rec?.snapshotUrl,
-            snapshotAt: rec?.snapshotAt,
-            now: Date.now(),
-          })) return null;
-          return { url: String(rec!.snapshotUrl), at: Number(rec!.snapshotAt) };
-        } catch { return null; }
-      })();
+      // One shared verdict (currentSnapshotFor): kill switch, no build running for THIS workspace, and
+      // a copy proven current — never a copy that an edit has since outdated, which the inline rule
+      // that stood here did not check.
+      const idleServe = await currentSnapshotFor(workspaceId);
       if (diag.livePreviewAvailable && !idleServe) {
         try {
           const actuator = buildActuator();
@@ -8042,7 +8076,13 @@ async function noteBuildOutcome(
       // produces a different hash → fresh render). Per-instance, bounded, TTL'd; keyed by the
       // exact file contents + the origin baked into the HTML.
       const cacheKey = `${workspaceId}|${previewOrigin ?? ''}`;
-      const filesHash = hashKey(Object.entries(files).flatMap(([p, c]) => [p, c]));
+      const filesHash = workspaceContentHash(files);
+      // THE REAL BUILD, WHEN IT IS THIS APP. The preview pane frames the saved copy of the last green
+      // build in place of the bundler's approximation — but only when that copy was built from exactly
+      // these files (currentSnapshotFor). Sent as explicit nulls otherwise, so the client un-frames a
+      // copy it learnt of earlier rather than keeping a stale one on screen.
+      const copy = await currentSnapshotFor(workspaceId, filesHash);
+      const copyFields = { snapshotUrl: copy?.url ?? null, snapshotAt: copy?.at ?? null, snapshotNote: copy ? SNAPSHOT_IDLE_NOTE : null };
       // DEEP REFRESH (`fresh: true`): the client's "Fix with AI" on a broken preview first asks for a
       // cache-bypassing recompile — a blank/failed preview is often just a stale cached render, so
       // re-rendering from scratch can make the app work with no AI turn spent. Skip the cache READ
@@ -8050,7 +8090,7 @@ async function noteBuildOutcome(
       const fresh = req.body?.fresh === true;
       const cached = fresh ? undefined : inbrowserPreviewCache.get(cacheKey);
       if (cached && cached.hash === filesHash && Date.now() - cached.ts < INBROWSER_CACHE_TTL_MS) {
-        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)) });
+        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)), ...copyFields });
         return;
       }
       const vfs = VirtualFileSystem.fromRecord(files);
@@ -8062,7 +8102,7 @@ async function noteBuildOutcome(
         const oldest = inbrowserPreviewCache.keys().next().value;
         if (oldest !== undefined) inbrowserPreviewCache.delete(oldest);
       }
-      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)) });
+      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)), ...copyFields });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
     }
@@ -10464,6 +10504,13 @@ async function noteBuildOutcome(
     // of every file the agent writes (reliable — straight from the write op, not a later listFiles that
     // can come back empty). See the "DURABLE FILE SAVE" block for the normal-completion path.
     const writtenFiles = new Map<string, string>();
+    /**
+     * The copy this build took, if any, and the hash of the source it was built from — compared with
+     * what the FINAL durable save persists, so the copy is declared current only when it provably is
+     * (snapshotIdentity.ts). Hoisted beside writtenFiles for the same reason: both ends are in
+     * different blocks of this handler.
+     */
+    let snapshotTaken: SnapshotTaken | null = null;
     /**
      * THE PROJECT AS IT STOOD WHEN THIS TURN BEGAN — every file, not just the ones this turn writes.
      *
@@ -15961,7 +16008,13 @@ async function noteBuildOutcome(
                   );
                   if (url) {
                     const at = Date.now();
-                    await sandboxStore.saveSnapshot(workspaceId, url, at).catch(() => {});
+                    // WHAT THE COPY WAS BUILT FROM. Read now, from the same tree `npm run build` just
+                    // consumed — nothing writes between the two. The final durable save compares this
+                    // with what it persists; a copy whose source could not be read is never promoted.
+                    const filesHash = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
+                      .then((c) => workspaceContentHash(c.files)).catch(() => null);
+                    await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
+                    snapshotTaken = { url, filesHash };
                     // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
                     // Raising the flag lets the idle sweep use the shorter snapshot window; the event
                     // lets the frame move to the real build output the moment the build settles,
@@ -15969,7 +16022,9 @@ async function noteBuildOutcome(
                     // on the next write, so a later heal pass that changes a file cannot leave a
                     // stale copy counted as current.
                     try { actuator.noteSnapshotCurrent?.(workspaceId, true); } catch { /* advisory */ }
-                    events.emit({ type: 'snapshot', url, at, note: SNAPSHOT_IDLE_NOTE, ts: at });
+                    // The `snapshot` event is emitted at the FINAL durable save, once the copy is
+                    // proven to match what was persisted — the surface only applies it after the
+                    // build ends anyway, so nothing is lost and nothing stale is ever announced.
                     buildDiag.record({
                       phase: 'readiness', severity: 'info', code: 'PREVIEW_SNAPSHOT_SAVED',
                       message: 'Kept a permanent copy of this build, so the preview still works after its live server expires.',
@@ -17104,6 +17159,8 @@ async function noteBuildOutcome(
           // Everything here is best-effort and flag-gated; on ANY failure the original save still happens
           // exactly as before. Kill switch: AGENTV3_GREEN_GUARD=off.
           let saved = false;
+          /** What actually reached the durable store — `toSave`, unless the guard restored the green set. */
+          let persisted: Record<string, string> = toSave;
           if (greenGuardEnabled()) {
             try {
               const greenKey = greenWorkspaceKey(workspaceId);
@@ -17144,6 +17201,7 @@ async function noteBuildOutcome(
                 if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'green-guard-remove'); } catch { /* best-effort */ } }
                 await saveWorkspaceFiles(workspaceId, snapshot);
                 saved = true;
+                persisted = snapshot;
                 if (plan.remove.length > 0) await removeWorkspaceFiles(workspaceId, plan.remove).catch(() => {});
                 events.emit({ type: 'narration', agent: 'architect', text: greenGuardMessage(plan), ts: Date.now() });
                 buildDiag.record({
@@ -17170,7 +17228,30 @@ async function noteBuildOutcome(
               }
             } catch { /* the guard must never cost a user their save — fall through to the plain save */ }
           }
-          if (!saved) saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+          const finalSave = saved ? Promise.resolve() : saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+          // THE COPY IS THE APP — AND ONLY NOW CAN THAT BE SAID (snapshotIdentity.ts). The save above
+          // moves the workspace's durable stamp PAST the copy, so every clock-based "nothing written
+          // since" rule would call the copy stale from here on — which is exactly what silently killed
+          // the waking fallback. So: wait for the save, compare the hash of what was persisted with the
+          // hash the copy was built from, and on a match re-stamp the copy to AFTER the save (true by
+          // construction) and announce it to the surface. A mismatch is recorded honestly and the copy
+          // stays what it always was — a fallback for an expired machine.
+          if (snapshotTaken) {
+            await finalSave;
+            const verdict = snapshotConfirmation({ taken: snapshotTaken, persistedHash: workspaceContentHash(persisted) });
+            if (verdict.action === 'restamp') {
+              const at = Date.now();
+              await sandboxStore.saveSnapshot(workspaceId, snapshotTaken.url, at, snapshotTaken.filesHash).catch(() => {});
+              events.emit({ type: 'snapshot', url: snapshotTaken.url, at, note: SNAPSHOT_IDLE_NOTE, ts: at });
+            }
+            buildDiag.record({
+              phase: 'readiness',
+              severity: verdict.action === 'restamp' ? 'info' : 'warning',
+              code: verdict.action === 'restamp' ? 'PREVIEW_SNAPSHOT_CURRENT' : 'PREVIEW_SNAPSHOT_STALE',
+              message: verdict.reason,
+              autoResolved: true,
+            });
+          }
           // P-BRE.2 — incremental signal: compare this build's file hashes to the previous build's
           // (Firestore-cached per workspace), report how many files were UNCHANGED, and store the new
           // hashes for next time. Best-effort — never affects the build or the save above.

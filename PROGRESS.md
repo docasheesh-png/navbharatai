@@ -48011,3 +48011,62 @@ opened at create; busy edges; sweep-before-pause ordering; report order; admin; 
 billed time go?* — "Where the minutes go" says whether the excess is idle or slow commands; "Why machines
 started" says who is starting them. The next cost PR is chosen from those two lines, not from a plan.
 `npx vitest run` **1,529 files / 20,612 passed / 0 failed** (12 new), log grepped for `FAIL` — none.
+
+
+## 2026-09-11 — PR C: ONE preview pane, and the copy's identity fixed by content (a dead feature found on the way)
+
+**Trigger.** Admin (verbatim): *"user ko live e2b nahi, bas e2b ka copy in browser preview me dikhna
+chahiye! … 2 preview wala system khatam karo"* — the UI half deferred from PR B (#2820).
+
+**Root cause found FIRST, before touching the UI (rule 4, step 1).** To make the saved copy the default
+pane, the pane needs one honest answer to "is this copy the app as it stands now?". Reading the build
+route end to end showed there was none:
+- The build's FINAL durable save (`saveWorkspaceFiles(workspaceId, toSave)`, ~line 17130) runs AFTER
+  `saveSnapshot` (~15960) and rewrites the workspace's `savedAt`. So `snapshotStillCurrent(snapshotAt,
+  workspaceFilesSavedAt)` was FALSE for every build that ever produced a copy — the door's *"show the
+  copy while the machine starts"* path (2026-09-08) and the health probe's matching note were **dead on
+  arrival**, with no failure to show it. "Built but not really working" (rule 2), found by reading.
+- The health probe's `idleServe` (PR #2613) checked NO change stamp at all — so after an edit in the
+  Files tab or the Visual Editor it kept framing the outdated copy under a note saying it was the app.
+Opposite failures, one missing fact.
+
+**The fix is content identity, not a better clock (`snapshotIdentity.ts`, pure):**
+1. When the copy is taken, the build reads the same tree `npm run build` just consumed
+   (`collectWorkspaceFiles`, 15 s bound) and stores `workspaceContentHash` — sorted, length-prefixed —
+   on the sandbox record as `snapshotFilesHash`. An unreadable source is recorded as null, and null is
+   never a match.
+2. At the FINAL durable save, `snapshotConfirmation` compares that hash with the hash of what was
+   actually PERSISTED (`persisted`, which is the green-guard's restored tree when it restored). Equal ⇒
+   the copy is re-stamped to AFTER the save (true by construction, and what makes every existing clock
+   rule work again) and the `snapshot` stream event is emitted — moved here from save time, since the
+   surface only applies it after the build ends anyway. Different ⇒ `PREVIEW_SNAPSHOT_STALE` in the
+   report and the copy stays a fallback for an expired machine only.
+3. ONE helper, `currentSnapshotFor(workspaceId, filesHash?)`, now answers both the health probe and the
+   in-browser preview route: kill switch, no build running for THIS workspace, content match when both
+   hashes are known, else the clock rule where an unknown stamp is not proof. `/inbrowser-preview`
+   returns `snapshotUrl / snapshotAt / snapshotNote` as explicit nulls when there is no current copy.
+
+**The UI (`previewSource.ts`, pure; `PreviewSurface.tsx`):** `choice` ('auto' | 'live' | 'inbrowser',
+default auto) replaces the two-tab `mode`; `source = choosePreviewSource()` picks **snapshot** (the real
+`dist/` of the last green build, current, idle) → **inbrowser** (during a build, or no copy) → never
+**live** on its own. The pane frames the copy FIRST in its chain; the toolbar is a label ("Your app ·
+last build" / "Instant preview" / "Live server") plus ONE action — "Live server [Paid]" or "← Preview".
+Edit on the copy opens the instant render (the only document the Visual Editor can edit); leaving the
+editor hands the pane back to the rule. Console/picker are hidden over the copy (no bridge in a static
+page). Every bundler caveat/banner is gated on `source === 'inbrowser'`, so "this preview cannot
+reproduce Sass" never shows over the real build.
+
+**Cost effect.** The default pane no longer needs a machine once a build is green — the live server is
+opened only by an explicit press, and "← Preview" is what lets it sleep. Combined with PR A/B this is
+the "user ko bas copy" decision complete.
+
+**Tests:** `tests/snapshotIdentity.test.ts` (hash determinism/order/length-prefix; confirmation on
+match / changed / unreadable / none; the three-valued match; route + store wiring incl. the
+`persisted`-not-`toSave` guard) and `tests/previewSource.test.ts` (the rule incl. "never live on the
+user's behalf" and "never the copy during a build"; labels name no vendor; tools per source; surface
+wiring). Eight older pins re-anchored on the moved names (`setChoice`, the event's new home, the shared
+helper) — each carries a comment saying what moved.
+
+**Recorded, not done:** auto-selecting the live server for a full-stack app (which has no copy) would be
+correct-app behaviour but changes cost on every reopen — the admin's call. Skipping the bundle compile
+when a current copy is framed is a later optimisation.

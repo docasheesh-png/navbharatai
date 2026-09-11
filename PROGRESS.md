@@ -47748,3 +47748,51 @@ flagged, nothing is held, nothing is spent.
 `npm run typecheck:server` 0 · `npm run build` ok · `npm run test:bundle` within budget ·
 `npm run boot:check` PASS · `npx vitest run` **1,526 files / 20,566 passed / 0 failed** (25 new),
 log grepped for `FAIL` — none.
+## 2026-09-11 — The Load Board finally has a screen
+
+**This closes something I reported honestly and left open.** `/api/admin/load` (ROADMAP §12) has
+answered "how full is every ceiling in the platform?" since it shipped, and **nothing rendered it** —
+along with `/api/admin/hosting/services` and `/api/admin/hosting/preflight`. Three real,
+admin-authenticated APIs returning real data, reachable only by curl. That is precisely the
+"built but not really working" state the second absolute rule forbids, and it stood because the route
+was the deliverable I tracked and the screen was not.
+
+The admin's ask was explicit: *"admin panel ke home page par to load dikhna chahiye — server load, user
+load, storage load, hosting load… sabhi load likhne hai."* `LoadBoard.tsx` now sits **first** on the
+admin home tab, above the live monitor, because a ceiling that stops the whole platform outranks a
+chart of what it is doing right now.
+
+**🔒 The rule the screen is built around: an UNKNOWN tile must never look like a healthy one.** A
+capacity board whose reading failed and a platform with plenty of headroom are both "not red", and
+collapsing those two is how a capacity board becomes reassurance. `loadBoard()` already refuses to turn
+absence into zero; this renders that refusal three ways —
+
+- an unread ceiling is grey and prints the route's own `display` string (`unknown`), never a client-side
+  re-derivation that could print `0`;
+- `loadHeadline()` says **"all clear" only when every ceiling was genuinely read** — with any tile
+  unmeasured it says so and gives the count instead, and a failed fetch overrides even stale green
+  tiles still on screen;
+- the unmeasured ceilings are **named a second time** underneath, because a grey tile in a grid of green
+  ones is easy to read past and "we could not see this ceiling" is the one thing here that must not be.
+
+`loadHeadline` is exported and pure, so that honesty is unit-tested without a browser; a source-invariant
+test pins that the board is actually mounted on the home tab, since an unmounted panel is the exact
+failure this change exists to fix.
+
+**The hosting checks are deliberately on a button.** They make real Google API calls against the apps
+project and matter only while hosting is being switched on; firing them on every home-page visit would
+spend quota to render a line saying "not switched on". `services.available === false` renders as
+"hosting is not switched on", never as zero used.
+
+### Gate (CI-equivalent, on the final state)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` within budget · `npm run boot:check` PASS ·
+`npx vitest run` **1,526 files / 20,555 passed / 0 failed** (9 new), log grepped for `FAIL` — none.
+
+### Open, and honest about it
+`NAVBHARAT_WEB_RISK=on` was set in Cloud Run by the admin on 2026-09-11 **while PR #2813 (the monthly
+lookup ceiling) was still unmerged**, because that PR's CI never fired for eight hours and had to be
+re-triggered by hand. So the outbound check is live against the code on `main`, which has **no spend
+ceiling on it** until #2813 merges and deploys. At today's scale the exposure is small and bounded by
+construction — one daily sweep can send at most 200 apps × 60 origins = 12,000 lookups against a
+100,000/month free tier — but it is a real gap and is recorded here rather than left implicit.

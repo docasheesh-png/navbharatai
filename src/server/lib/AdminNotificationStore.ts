@@ -105,37 +105,87 @@ export async function listNotificationsForUser(
   try {
     const snap = await db.collection(COLLECTION).orderBy('createdAt', 'desc').limit(Math.max(1, limit)).get();
     const all = snap.docs.map((d) => d.data() as AdminNotification);
-    const applicable = all.filter((n) => notificationMatchesUser(n, uid, email));
-    const readIds = uid ? await getReadIds(uid) : new Set<string>();
-    return applicable.map((n) => ({ ...n, read: readIds.has(n.id) }));
+    const state = uid ? await getUserState(uid) : { readIds: new Set<string>(), dismissedIds: new Set<string>() };
+    // Dismissed ones are filtered out entirely — to this user they are deleted, and they never come
+    // back. The document itself survives for everyone else (see dismissNotifications).
+    const applicable = all.filter((n) => notificationMatchesUser(n, uid, email) && !state.dismissedIds.has(n.id));
+    return applicable.map((n) => ({ ...n, read: state.readIds.has(n.id) }));
   } catch {
     return [];
   }
 }
 
-async function getReadIds(uid: string): Promise<Set<string>> {
+/** Per-user state: which notifications this user has read, and which they have dismissed. */
+interface UserNotificationState {
+  readIds: Set<string>;
+  dismissedIds: Set<string>;
+}
+
+async function getUserState(uid: string): Promise<UserNotificationState> {
+  const empty: UserNotificationState = { readIds: new Set(), dismissedIds: new Set() };
   const db = getDb();
-  if (!db) return new Set();
+  if (!db) return empty;
   try {
     const doc = await db.collection(READS_COLLECTION).doc(uid).get();
-    const ids = doc.exists ? (doc.data()?.readIds as string[] | undefined) : undefined;
-    return new Set(Array.isArray(ids) ? ids : []);
+    if (!doc.exists) return empty;
+    const data = doc.data() ?? {};
+    return {
+      readIds: new Set(Array.isArray(data.readIds) ? (data.readIds as string[]) : []),
+      dismissedIds: new Set(Array.isArray(data.dismissedIds) ? (data.dismissedIds as string[]) : []),
+    };
   } catch {
-    return new Set();
+    return empty;
   }
+}
+
+/** Keep either list bounded for a very old account. Newest wins — the oldest ids fall off the end. */
+const STATE_CAP = 500;
+const capIds = (s: Set<string>): string[] => Array.from(s).slice(-STATE_CAP);
+
+/**
+ * The ONE writer for a user's notification state.
+ *
+ * 🔴 WHY IT IS ONE FUNCTION (2026-09-11, adding dismissal). The read-state write was
+ * `ref.set({ readIds }, { merge: false })` — a FULL document replace. Adding `dismissedIds` as a
+ * second independent writer would have meant that opening the bell (which marks things read) silently
+ * WIPED every dismissal, and dismissing silently wiped read state: deleted notifications would
+ * reappear, with nothing failing anywhere to explain it. Both fields are now read and written
+ * together, by this function only, so they cannot erase each other.
+ *
+ * Best-effort; never throws.
+ */
+async function updateUserState(uid: string, add: { read?: string[]; dismissed?: string[] }): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  try {
+    const state = await getUserState(uid);
+    for (const id of add.read ?? []) if (typeof id === 'string' && id) state.readIds.add(id);
+    for (const id of add.dismissed ?? []) if (typeof id === 'string' && id) state.dismissedIds.add(id);
+    await db.collection(READS_COLLECTION).doc(uid).set(
+      { readIds: capIds(state.readIds), dismissedIds: capIds(state.dismissedIds), updatedAt: Date.now() },
+      { merge: false },
+    );
+  } catch { /* best-effort */ }
 }
 
 /** Mark notifications read for a user (idempotent union). Best-effort; never throws. */
 export async function markNotificationsRead(uid: string, ids: string[]): Promise<void> {
   if (!uid || !Array.isArray(ids) || ids.length === 0 || process.env.VITEST) return;
-  const db = getDb();
-  if (!db) return;
-  try {
-    const ref = db.collection(READS_COLLECTION).doc(uid);
-    const existing = await getReadIds(uid);
-    for (const id of ids) if (typeof id === 'string' && id) existing.add(id);
-    // Cap so the read-list can't grow unbounded for a very old account.
-    const capped = Array.from(existing).slice(-500);
-    await ref.set({ readIds: capped, updatedAt: Date.now() }, { merge: false });
-  } catch { /* best-effort */ }
+  await updateUserState(uid, { read: ids });
+}
+
+/**
+ * Dismiss ("delete") notifications FOR THIS USER ONLY.
+ *
+ * 🔒 IT DOES NOT DELETE THE DOCUMENT, AND MUST NOT. A broadcast (`target: {type:'all'}`) is ONE
+ * document that every user's list reads. Deleting it because one person pressed a delete button would
+ * remove that message from everybody's inbox — including people who never saw it. Dismissal is
+ * per-user, exactly like read state, so the button does what the person expects and nothing more.
+ *
+ * Idempotent: dismissing the same id twice is a no-op, and dismissing an id the user cannot see
+ * changes nothing they can observe. Best-effort; never throws.
+ */
+export async function dismissNotifications(uid: string, ids: string[]): Promise<void> {
+  if (!uid || !Array.isArray(ids) || ids.length === 0 || process.env.VITEST) return;
+  await updateUserState(uid, { dismissed: ids });
 }

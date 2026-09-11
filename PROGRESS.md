@@ -47349,3 +47349,42 @@ immediately after paying. An existing test that stubbed no registry at all is wh
 is now: **skip only what we positively know is down** (a record that exists and is not active);
 absent, empty or unreadable all mean "cannot tell", and cannot-tell reattaches. The skipped domains are
 named in their own message with the one step that fixes them, because a silent skip looks like failure.
+
+---
+
+## 2026-09-11 — Deleting notifications, and the shared-document trap underneath it
+
+Admin: **"navbharatai me aye huye notification ko delete karne ka bhi to button do! select delete,
+select all delete"** — asked lightly, but the obvious implementation would have been a real bug.
+
+**🔒 A BROADCAST IS ONE DOCUMENT THAT EVERY USER'S LIST READS.** `admin_notifications` holds a single
+row per message; a `target: {type:'all'}` row is what the whole user base sees. So "delete" could not
+mean deleting the document — one person pressing a bin icon would have removed that announcement from
+**everybody's** inbox, including people who had never opened it. Deletion is therefore **per-user
+dismissal**, stored exactly like read state, and the message survives for everyone else.
+
+**🔴 AND THE SECOND TRAP, which is why there is now ONE writer.** The read-state write was
+`ref.set({ readIds }, { merge: false })` — a FULL document replace. Adding `dismissedIds` as a second
+independent writer would have meant **opening the bell silently wiped every deletion** (and dismissing
+silently wiped read state): deleted messages reappearing, with nothing failing anywhere to explain it.
+`updateUserState` now reads and writes both fields together and is the only thing that touches that
+document — pinned by a test asserting there is exactly one `.set(` on it and that it always carries
+both fields.
+
+**What the user gets:** a bin icon per message, a checkbox per row with "Delete N", "Select all", and
+— with nothing ticked — "Delete all". `all` is resolved SERVER-side from what that user can actually
+see, never from a list the client sends; explicit ids are bounded to 200 per request.
+
+**The rows disappear only AFTER the server confirms.** An optimistic removal would show a message as
+deleted and have it reappear on the next 90-second poll, which reads as the delete button being broken.
+A failed call leaves the list exactly as it was rather than claiming something that did not happen.
+
+### ⚠️ Noticed in the admin's screenshot, NOT yet investigated
+
+The same screenshot shows `mitrify.in` and `mitrify.com` alerting as "not answering" repeatedly —
+11 Sept at 1:07 am, 6:49 am and 11:04 am. The ~6-hour spacing matches `SITE_UPTIME_COOLDOWN_HOURS`
+exactly, so the sweep is behaving as designed; what it means is that those domains are being seen as
+down **continuously**, through the night. That is either a real outage on two of the admin's own live
+domains or a false positive in the probe — and `siteUptime.ts`'s own rule is that a probe which could
+not complete from our side must report "unknown" and never count as the user's site being down.
+Raised with the admin rather than guessed at: it needs one look at whether those sites actually load.

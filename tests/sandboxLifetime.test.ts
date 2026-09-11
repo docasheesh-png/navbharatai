@@ -21,6 +21,10 @@ import {
   shouldExtendLifetime,
   heartbeatTargets,
   tallyPauseCauses,
+  snapshotIdleLimitMs,
+  idleLimitFor,
+  SNAPSHOT_IDLE_MIN_MINUTES,
+  DEFAULT_SNAPSHOT_IDLE_MINUTES,
   LIFETIME_MIN_MINUTES,
   LIFETIME_MAX_MINUTES,
   DEFAULT_LIFETIME_MINUTES,
@@ -124,6 +128,93 @@ describe('the measurement — which mechanism ends machines', () => {
       null as never,
     ]);
     expect(t).toEqual({ idleSweep: 1, orphanSweep: 2, sweepUnattributed: 1, providerOrUnknown: 2, total: 6 });
+  });
+});
+
+describe('the snapshot idle window — a machine whose app lives on a CURRENT saved copy may sleep sooner', () => {
+  it('defaults to three minutes, shorter than the ordinary idle limit', () => {
+    expect(snapshotIdleLimitMs(env())).toBe(DEFAULT_SNAPSHOT_IDLE_MINUTES * MIN);
+    expect(snapshotIdleLimitMs(env())).toBeLessThan(idleLimitMs(env()));
+  });
+
+  it('🔒 the floor outlasts one health poll (150 s) plus margin — the frame must have left the machine first', () => {
+    expect(SNAPSHOT_IDLE_MIN_MINUTES * MIN).toBeGreaterThan(150_000);
+    expect(snapshotIdleLimitMs(env({ AGENTV3_SNAPSHOT_IDLE_MINUTES: '0.5' }))).toBe(SNAPSHOT_IDLE_MIN_MINUTES * MIN);
+  });
+
+  it('🔒 can never be LONGER than the ordinary idle limit — a current copy is a reason to sleep sooner, never later', () => {
+    expect(snapshotIdleLimitMs(env({ AGENTV3_SNAPSHOT_IDLE_MINUTES: '45' }))).toBe(idleLimitMs(env()));
+    const tight = env({ AGENTV3_SANDBOX_IDLE_MINUTES: '2' });
+    expect(snapshotIdleLimitMs(tight)).toBeLessThanOrEqual(idleLimitMs(tight));
+  });
+
+  it('junk falls back to the default', () => {
+    for (const junk of ['', 'three', '-1', 'NaN']) {
+      expect(snapshotIdleLimitMs(env({ AGENTV3_SNAPSHOT_IDLE_MINUTES: junk })), junk).toBe(DEFAULT_SNAPSHOT_IDLE_MINUTES * MIN);
+    }
+  });
+
+  it('idleLimitFor picks the window per workspace', () => {
+    expect(idleLimitFor(true, env())).toBe(snapshotIdleLimitMs(env()));
+    expect(idleLimitFor(false, env())).toBe(idleLimitMs(env()));
+  });
+});
+
+describe('wiring — the saved copy is raised by the route, cleared by every write, framed by the surface', () => {
+  const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
+  const codeOnly = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const actuator = codeOnly(read('../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts'));
+  const routes = codeOnly(read('../src/server/routes/agentv3.ts'));
+  const surface = codeOnly(read('../src/components/agentv3/PreviewSurface.tsx'));
+  const panel = codeOnly(read('../src/components/agentv3/AgentV3Panel.tsx'));
+  const reducer = codeOnly(read('../src/components/agentv3/agentV3Reducer.ts'));
+
+  it('the idle sweep uses the per-workspace window, and no longer a single limit for all', () => {
+    const at = actuator.indexOf('private async _sweepIdleSandboxes(');
+    const sweep = actuator.slice(at, at + 1200);
+    expect(sweep).toContain('idleLimitFor(this._snapshotCurrent.has(workspaceId))');
+    expect(sweep).not.toContain('const limit = idleLimitMs();');
+    // Still AFTER the build/op guard — a current copy never lets a busy machine be paused.
+    expect(sweep.indexOf('this._opInFlight(workspaceId)')).toBeLessThan(sweep.indexOf('idleLimitFor('));
+  });
+
+  it('🔒 every path that changes the tree clears the flag: text write, binary write, restore, and a starting build', () => {
+    const writeAt = actuator.indexOf('async writeFile(');
+    expect(actuator.slice(writeAt, writeAt + 700)).toContain('this._snapshotCurrent.delete(workspaceId)');
+    const binAt = actuator.indexOf('async writeBinaryFile(');
+    expect(actuator.slice(binAt, binAt + 900)).toContain('this._snapshotCurrent.delete(workspaceId)');
+    const restoreAt = actuator.indexOf('async restore(workspaceId: string, checkpointId: string)');
+    expect(actuator.slice(restoreAt, restoreAt + 600)).toContain('this._snapshotCurrent.delete(workspaceId)');
+    const flagAt = actuator.indexOf('setBuildActive(workspaceId: string, active: boolean): void {');
+    const flag = actuator.slice(flagAt, actuator.indexOf('noteSnapshotCurrent(', flagAt));
+    expect(flag).toContain('this._snapshotCurrent.delete(workspaceId)');
+    // And dropping the sandbox forgets it, like every other per-sandbox stamp.
+    const drop = actuator.slice(actuator.indexOf('private _dropSandbox('), actuator.indexOf('private _notePauseFailure('));
+    expect(drop).toContain('this._snapshotCurrent.delete(workspaceId)');
+  });
+
+  it('the route raises the flag and emits the snapshot event right where the copy is saved', () => {
+    const at = routes.indexOf("code: 'PREVIEW_SNAPSHOT_SAVED'");
+    const block = routes.slice(at - 1200, at);
+    expect(block).toContain('actuator.noteSnapshotCurrent?.(workspaceId, true)');
+    expect(block).toContain("events.emit({ type: 'snapshot', url, at, note: SNAPSHOT_IDLE_NOTE, ts: at })");
+    // The durable stamp and the event carry the SAME instant, so the door and the frame agree.
+    expect(block).toContain('sandboxStore.saveSnapshot(workspaceId, url, at)');
+  });
+
+  it('the panel hands the copy to the surface, which mirrors it into the SAME state the health poll writes', () => {
+    expect(panel).toContain('snapshotUrl={state.snapshotUrl}');
+    expect(panel).toContain('snapshotIdleNote={state.snapshotNote}');
+    const at = surface.indexOf('[snapshotUrl, snapshotIdleNote, autoResume]');
+    const effect = surface.slice(at - 700, at);
+    expect(effect).toContain('if (!autoResume) return;');          // never during a build
+    expect(effect).toContain('setIdleSnapshotUrl(snapshotUrl)');     // same state as the poll
+    expect(effect).toContain("setIdleSnapshotUrl((prev) => (prev ? '' : prev))"); // and un-frames on clear
+  });
+
+  it('the reducer clears the copy when a NEW build starts, and only then', () => {
+    expect(reducer).toContain("case 'snapshot':");
+    expect(reducer).toMatch(/isNewBuild \? \{ todos: \[\], agents: \{\}, snapshotUrl: undefined, snapshotNote: undefined \}/);
   });
 });
 

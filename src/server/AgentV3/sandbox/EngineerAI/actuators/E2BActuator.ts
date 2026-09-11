@@ -22,8 +22,8 @@ import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
 import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
 import { sandboxLifecycle } from '../../../previewWake';
 import { countRunningSandboxes, type LiveSandboxCount } from '../../../liveSandboxCount';
-import { idleLimitMs, reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, shouldMarkPausedAfterFailure } from '../../../sandboxReaper';
-import { sandboxLifetimeMs, heartbeatIntervalMs, shouldExtendLifetime, heartbeatTargets } from '../../../sandboxLifetime';
+import { reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, shouldMarkPausedAfterFailure } from '../../../sandboxReaper';
+import { sandboxLifetimeMs, heartbeatIntervalMs, shouldExtendLifetime, heartbeatTargets, idleLimitFor } from '../../../sandboxLifetime';
 
 /**
  * How often a stream of user-activity pings is written to the durable record.
@@ -480,6 +480,11 @@ export class E2BActuator implements IEngineerActuator {
   // paths throttle on it (shouldExtendLifetime) and the heartbeat skips a machine extended within the
   // last tick. Cleared with the sandbox — a resumed machine starts a fresh clock.
   private _lastLifetimeExtend = new Map<string, number>();
+  // Workspaces whose saved copy is CURRENT — raised by the route when a snapshot is saved, cleared
+  // here on any write (the copy is stale the moment a byte changes) and when a build starts. While
+  // set, the idle sweep uses the shorter snapshot window: the user is looking at the copy, not at
+  // the machine. In-memory on purpose — it only ever shortens THIS instance's sweep.
+  private _snapshotCurrent = new Set<string>();
   // When this workspace's sandbox was created/resumed here. A v5 build runs a real VM billed by
   // WALL-CLOCK, which is a completely different cost shape from token spend — a build that used almost
   // no tokens but held a VM for forty minutes still cost real money, and nothing in the build report
@@ -654,8 +659,20 @@ export class E2BActuator implements IEngineerActuator {
 
   /** @see IEngineerActuator.setBuildActive */
   setBuildActive(workspaceId: string, active: boolean): void {
-    if (active) this._activeBuilds.set(workspaceId, Date.now());
-    else this._activeBuilds.delete(workspaceId);
+    if (active) {
+      this._activeBuilds.set(workspaceId, Date.now());
+      // A build is about to write. Whatever copy exists will not describe the app it produces.
+      this._snapshotCurrent.delete(workspaceId);
+    } else {
+      this._activeBuilds.delete(workspaceId);
+    }
+  }
+
+  /** @see IEngineerActuator.noteSnapshotCurrent */
+  noteSnapshotCurrent(workspaceId: string, current: boolean): void {
+    if (!workspaceId) return;
+    if (current) this._snapshotCurrent.add(workspaceId);
+    else this._snapshotCurrent.delete(workspaceId);
   }
 
   /**
@@ -846,6 +863,7 @@ export class E2BActuator implements IEngineerActuator {
     this._sandboxStartedAt.delete(workspaceId);
     this._sandboxOrigin.delete(workspaceId);
     this._lastLifetimeExtend.delete(workspaceId);
+    this._snapshotCurrent.delete(workspaceId);
   }
 
   /** Record a pause we could not confirm and return the new count. */
@@ -857,10 +875,12 @@ export class E2BActuator implements IEngineerActuator {
 
   private async _sweepIdleSandboxes(): Promise<void> {
     const now = Date.now();
-    const limit = idleLimitMs();
     for (const [workspaceId, sandbox] of [...this.sandboxes]) {
       // A build in flight OR an operation still running (see `_opsInFlight`) — never a candidate.
       if (this._buildInFlight(workspaceId, now) || this._opInFlight(workspaceId)) continue;
+      // The window is per workspace: a machine whose app already lives on a CURRENT saved copy may
+      // sleep sooner (sandboxLifetime.ts). Everything else keeps the ordinary idle limit.
+      const limit = idleLimitFor(this._snapshotCurrent.has(workspaceId));
       const last = this._lastActivity.get(workspaceId) ?? now;
       if (now - last > limit) {
         // LAST CHECK BEFORE A PAUSE THAT CAN BREAK A RUNNING APP. A keep-alive ping from the user's
@@ -1239,6 +1259,7 @@ export class E2BActuator implements IEngineerActuator {
     // disk is touched, so a corrupting post-green pass is a no-op rather than damage. Throws, which the
     // caller's write-then-record idiom skips cleanly (sandbox + writtenFiles + durable save together).
     assertWriteAllowed(workspaceId, rel);
+    this._snapshotCurrent.delete(workspaceId); // the saved copy no longer describes this app
     await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${rel}`, content));
     this._cacheFileWrite(workspaceId, rel, content); // warm-durability: remember for recreate-after-death restore
   }
@@ -1249,6 +1270,7 @@ export class E2BActuator implements IEngineerActuator {
     // post-green overwrite of one is refused by the same rule as a code file (adversarial review 2026-08-12).
     assertWriteAllowed(workspaceId, rel);
     const bytes = new Uint8Array(Buffer.from(base64, 'base64'));
+    this._snapshotCurrent.delete(workspaceId); // a binary asset changed — the saved copy is stale too
     await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${rel}`, bytes));
   }
 
@@ -2621,6 +2643,7 @@ ${paintWaitJs('p')}
     // checkpointId is agent-controlled — validate before it reaches the shell to block injection.
     assertSafeId(workspaceId, 'workspaceId');
     assertSafeId(checkpointId, 'checkpointId');
+    this._snapshotCurrent.delete(workspaceId); // a restore rewrites the tree wholesale
     const tarPath = `${E2BActuator.CKPT_DIR}/${workspaceId}/${checkpointId}.tar.gz`;
     const result = await sandbox.commands.run(
       `test -f ${tarPath} && tar -xzf ${tarPath} -C ${WORKSPACE_ROOT} --overwrite`,

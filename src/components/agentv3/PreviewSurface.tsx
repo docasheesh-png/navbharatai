@@ -168,7 +168,9 @@ const TOOLBAR_ROW =
   'flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400 '
   + 'overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
 
-export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, buildPhase, bootSignal, onFixError, onFileEdited, onAskAiAboutElement, versionUrl, versionSha, onExitVersion }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean;
+export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, buildPhase, bootSignal, onFixError, onFileEdited, onAskAiAboutElement, versionUrl, versionSha, onExitVersion }: { url?: string;
+  /** The saved copy of THIS build (its real `dist/`), from the build stream — framed the moment the build settles. */
+  snapshotUrl?: string; snapshotIdleNote?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean;
   /**
    * Is this pane the surface actually on screen INSIDE the app?
    *
@@ -488,6 +490,31 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       if (url) setFoundUrl('');
     }
   }, [url]);
+  /**
+   * FRAME THE REAL BUILD OUTPUT THE MOMENT THE BUILD SETTLES (admin 2026-09-11: "user ko live e2b
+   * nahi, bas e2b ka copy dikhna chahiye").
+   *
+   * The health poll already frames the saved copy once a build is finished (`idleSnapshotUrl`) — but
+   * it runs every 150 s and sleeps during a build, so the frame used to sit on the live machine for up
+   * to two and a half minutes after the app was done, and the idle sweep counted every one of them.
+   * The build stream now says when the copy exists; this mirrors it into the same state the poll
+   * writes, so the two can never disagree about what is framed.
+   *
+   * 🔒 ONLY ONCE THE PANEL IS IDLE (`autoResume`). During the build's own tail — the passes that may
+   * still repair a file — the live app is the truth and the copy may be a byte behind it; the poll
+   * corrects any such window on its first tick exactly as before. An empty value (a new build began)
+   * un-frames the copy so the live app and its streaming reload take over.
+   */
+  useEffect(() => {
+    if (!autoResume) return;
+    if (snapshotUrl && /^https?:\/\//i.test(snapshotUrl)) {
+      setIdleSnapshotUrl(snapshotUrl);
+      setIdleSnapshotNote(snapshotIdleNote || '');
+    } else if (!snapshotUrl) {
+      setIdleSnapshotUrl((prev) => (prev ? '' : prev));
+      setIdleSnapshotNote((prev) => (prev ? '' : prev));
+    }
+  }, [snapshotUrl, snapshotIdleNote, autoResume]);
   // Arm the live-iframe working strip whenever the live view (re)loads a URL; the iframe's own
   // onLoad clears it — real load state, not a timer.
   useEffect(() => { if (mode === 'live' && effectiveUrl) setLiveLoading(true); }, [mode, effectiveUrl, liveReloadKey]);

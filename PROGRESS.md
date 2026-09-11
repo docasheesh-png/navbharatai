@@ -47838,3 +47838,44 @@ the busy/idle/expired-flag decision, the tally, and source-pinned wiring with st
 
 **Expected effect:** ~29 → ~15 min per sandbox (~$88 → ~$46/month at 1,110 sandboxes). To be confirmed
 on the E2B dashboard, not assumed — and the admin card now shows which mechanism is doing the reaping.
+
+
+## 2026-09-11 — PR B: the saved copy is framed the moment a build settles, and its machine sleeps sooner
+
+**The admin's ask (verbatim):** *"app build karne ke liye navbharatai e2b use kare, par user ko live e2b nahi,
+bas e2b ka copy in browser preview me dikhna chahiye!"*
+
+**Safeguard #6 paid for itself here.** Before building a "dist-copy pipeline", the search found it already
+existed, in three pieces: `previewSnapshot.ts` (a green build's real `dist/` on its own Hosting channel,
+`sn-<ws>-<hash>`, never the publish channel), `snapshotServeDecision.ts` (once a build is finished and a
+current copy exists, the health poll STOPS touching the sandbox and frames the copy — `idleSnapshotUrl`),
+and the door (serves the copy when the machine is asleep, or starting with nothing changed since). So the
+admin's design was ~90% shipped and running as a FALLBACK. What was missing was small and precise:
+
+1. **The frame learned about the copy late.** The health poll runs every 150 s and sleeps during a build,
+   so after the app was done the Live frame sat on the machine for up to 2.5 min, and the idle sweep
+   counted every one of them. Now the build stream emits `{ type: 'snapshot', url, at, note }` the instant
+   the copy is saved; the reducer stores it (cleared on a NEW `build_meta`, kept on a reconnect); the panel
+   hands it to `PreviewSurface`, which mirrors it into the SAME state the poll writes — only once the panel
+   is idle (`autoResume`), never during the build's own tail, so a heal that changes a file after the copy
+   is corrected by the poll exactly as before.
+2. **The idle window was one size.** `idleLimitFor(snapshotCurrent)` in `sandboxLifetime.ts`: 3 min for a
+   workspace whose copy is current, the ordinary 5 otherwise. `E2BActuator.noteSnapshotCurrent` is raised by
+   the route beside `saveSnapshot` and CLEARED on every write (`writeFile`, `writeBinaryFile`, `restore`),
+   on `setBuildActive(true)`, and on `_dropSandbox` — the copy is stale the moment a byte changes, and the
+   actuator, not the caller, is what knows that. Floor 3 min (one 150 s poll + a sweep tick), never above
+   the ordinary limit: a current copy is a reason to sleep sooner, never later.
+
+**Honest scope.** This is the SERVER half and the frame swap. The two preview tabs still exist; making one
+pane the default and "Live server" an on-demand action is a separate UI change (PreviewSurface is ~2,000
+lines and carries the Visual Editor's exact-edit, which only the in-browser lane can do). Also unchanged:
+a full-stack app gets no copy (`snapshotSuitable`) and keeps today's flow entirely.
+
+**Tests:** `tests/sandboxLifetime.test.ts` (+10: window rules, floor/ceiling, and structural wiring pins
+across actuator, route, panel, surface and reducer) and `agentV3Reducer.test.ts` (+2: the event is a level,
+a NEW build clears it, a reconnect does not). Two older source-pin tests that measured character windows
+were re-anchored on structure — the third such drift this week; the rule stands: **bound with the next
+method or block, never a count.**
+
+**Expected effect with PR A:** healthy path ≈ build + advisory tail + 3 min; orphan path ≈ build + 6 min.
+Roughly 29 → ~10 min per sandbox at today's volume — to be read off the E2B dashboard, not assumed.

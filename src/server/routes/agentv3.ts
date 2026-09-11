@@ -15942,7 +15942,16 @@ async function noteBuildOutcome(
                     90_000, 'snapshot-deploy',
                   );
                   if (url) {
-                    await sandboxStore.saveSnapshot(workspaceId, url, Date.now()).catch(() => {});
+                    const at = Date.now();
+                    await sandboxStore.saveSnapshot(workspaceId, url, at).catch(() => {});
+                    // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
+                    // Raising the flag lets the idle sweep use the shorter snapshot window; the event
+                    // lets the frame move to the real build output the moment the build settles,
+                    // instead of on the next 150-second poll. The actuator clears the flag by itself
+                    // on the next write, so a later heal pass that changes a file cannot leave a
+                    // stale copy counted as current.
+                    try { actuator.noteSnapshotCurrent?.(workspaceId, true); } catch { /* advisory */ }
+                    events.emit({ type: 'snapshot', url, at, note: SNAPSHOT_IDLE_NOTE, ts: at });
                     buildDiag.record({
                       phase: 'readiness', severity: 'info', code: 'PREVIEW_SNAPSHOT_SAVED',
                       message: 'Kept a permanent copy of this build, so the preview still works after its live server expires.',

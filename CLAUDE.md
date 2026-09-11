@@ -513,6 +513,19 @@ the code (it is actually read somewhere) on 2026-07-11.
   never lost. Do NOT set the lifetime below the idle limit (5 min) without a reason: at 6 the healthy
   path is byte-identical to before (our sweep still pauses first); the change bites only where the
   sweeps could not reach.
+  ➕ **`AGENTV3_SNAPSHOT_IDLE_MINUTES` (shipped 2026-09-11, PR B — code default 3, floor 3, never above
+  the ordinary idle limit).** The idle window the sweep applies to a workspace whose SAVED COPY IS
+  CURRENT. The dist-copy pipeline already existed (`previewSnapshot.ts`: a green build's real `dist/`
+  on its own Hosting channel; `snapshotServeDecision.ts`: the health poll stops touching the machine
+  and frames the copy) — what PR B added is (1) the build stream's `snapshot` event, so the surface
+  frames the copy the moment the build settles instead of on the next 150 s poll, and (2) a per-
+  workspace idle window (`idleLimitFor` in `sandboxLifetime.ts`) that lets such a machine sleep at
+  3 min instead of 5. The flag is raised by the route when the copy is saved and CLEARED by the
+  actuator on every write (text, binary, restore) and when a build starts — so a heal pass that
+  changes a file after the copy can never leave a stale copy counted as current. Floor 3 min because
+  the frame must have left the machine before it is paused: one poll (150 s) plus a sweep tick. This
+  is the "user ko live e2b nahi, bas copy" decision; the UI consolidation (one pane, Live on demand)
+  is a separate, later change — the two tabs still exist.
   📏 **THE MEASUREMENT IS NOW VISIBLE:** every sweep pause writes `pausedBy` on the durable record
   (`idle-sweep` / `orphan-sweep`); the admin Reports → *Where does a sandbox's billed time go?* card
   shows "Who stopped them", with `provider / unknown` for machines we never stamped (E2B's own timer).

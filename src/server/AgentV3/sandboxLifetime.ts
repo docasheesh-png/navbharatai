@@ -38,7 +38,7 @@
 //
 // PURE. Every number here is a decision the actuator applies; none of it touches the SDK.
 
-import { buildFlagExpiryMs } from './sandboxReaper';
+import { buildFlagExpiryMs, idleLimitMs } from './sandboxReaper';
 
 /**
  * Below this a heartbeat could not be missed even once without the machine pausing under a live
@@ -132,6 +132,37 @@ export function heartbeatTargets(
     out.push(c.workspaceId);
   }
   return out;
+}
+
+/**
+ * THE IDLE WINDOW WHEN A CURRENT SNAPSHOT EXISTS — the "dist-copy" half of the admin's decision.
+ *
+ * Once a build is green, `previewSnapshot.ts` has already put the REAL build output (`dist/`) on a
+ * permanent VM-free host, and `snapshotServeDecision.ts` already lets the health probe stop touching
+ * the machine and frame that copy instead. What kept the machine alive after that was only the idle
+ * window itself: five minutes, chosen for a sandbox whose app lived nowhere else. When the app lives
+ * on a saved copy that is CURRENT — nothing written since it was taken — a shorter window costs the
+ * user nothing they can see: the frame is already on the copy, and an edit resumes the machine by id.
+ *
+ * 🔒 THE FLOOR IS THE SWAP, NOT A TASTE. The frame moves to the copy on the build's own `snapshot`
+ * event, and — for a surface that missed it — on the next health poll, which runs every 150 s. The
+ * window must outlast one poll plus margin, or the sweep could pause a machine whose frame had not
+ * yet left it, and the user would meet a dead page. Never longer than the normal idle limit either:
+ * a current snapshot is a reason to sleep sooner, never later.
+ */
+export const SNAPSHOT_IDLE_MIN_MINUTES = 3; // one 150 s poll + a sweep tick of margin
+export const DEFAULT_SNAPSHOT_IDLE_MINUTES = 3;
+
+export function snapshotIdleLimitMs(env: NodeJS.ProcessEnv = process.env): number {
+  const mins = Number(env.AGENTV3_SNAPSHOT_IDLE_MINUTES);
+  const chosen = Number.isFinite(mins) && mins > 0 ? mins : DEFAULT_SNAPSHOT_IDLE_MINUTES;
+  const floored = Math.max(SNAPSHOT_IDLE_MIN_MINUTES, chosen) * 60_000;
+  return Math.floor(Math.min(floored, idleLimitMs(env)));
+}
+
+/** The idle limit the sweep applies to one workspace. Pure. */
+export function idleLimitFor(snapshotCurrent: boolean, env: NodeJS.ProcessEnv = process.env): number {
+  return snapshotCurrent ? snapshotIdleLimitMs(env) : idleLimitMs(env);
 }
 
 /**

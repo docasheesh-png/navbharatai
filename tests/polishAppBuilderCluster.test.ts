@@ -92,11 +92,17 @@ describe('NavBharatAI Pro v5.0 (builder) — entry points are real', () => {
     expect(e!.path).not.toMatch(/floating/i);
     expect(e!.howToUse).not.toMatch(/floating/i);
   });
-  it('the KB names the two REAL gates (sidebar + Professionals)', () => {
+  it('the KB names the REAL gate, and no longer advertises one that lost its own door', () => {
+    // This used to assert TWO gates: the sidebar row and the Professionals hub's Pro v5.0 card. The
+    // hub's own sidebar entry was removed on 2026-09-11 (the experts moved into the Free chat's Mode
+    // button), which left the hub reachable only from deep inside professional history — too deep to
+    // hand a user as a way IN to the builder. So the KB now names the one door that is one tap away.
+    //
+    // The hub card itself is deliberately still asserted to EXIST: it was not deleted, and if it ever
+    // is, that is a separate change that should fail here rather than pass quietly.
     const e = kb('agentv3_builder')!;
     expect(e.path).toMatch(/App Builder v5\.0/);
-    expect(e.path).toMatch(/Professionals/);
-    // Both gates exist in code.
+    expect(e.path).not.toMatch(/Professionals/);
     expect(read('src/components/panels/SidebarNav.tsx')).toContain('App Builder v5.0');
     expect(read('src/components/professionals/ProfessionalsView.tsx')).toContain("id: 'nbi_pro_chat'");
   });

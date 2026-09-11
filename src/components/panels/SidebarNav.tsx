@@ -121,7 +121,17 @@ export function SidebarNav({
   // sab AI ke andar already hai") — each already has a doorway INSIDE the relevant AI's footer (Preview:
   // Pro v5.0 + bottom footer; Files: Pro v5.0 footer; History: the per-AI footer). They stay in `menuItems`
   // so their header tab + view still open from those footers — only the redundant sidebar entry is removed.
-  const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'history']);
+  //
+  // Professionals joins them (admin 2026-09-11: "professional wale option ko navbharatai free ke andar hi
+  // shift kar diya gaya hai, to sidebar menu me se bhi isko hata do"). The move already shipped: the Free
+  // chat's Mode button lists Doctor AI and every other expert (`modePicker.ts`), opened through the SAME
+  // navigation, so the sidebar row was a second door to a place that already has one.
+  //
+  // 🔒 IT IS HIDDEN HERE, NOT DELETED FROM `menuItems`, AND THAT DISTINCTION IS LOAD-BEARING. TopNav does
+  // `const item = menuItems.find(m => m.id === tabId); if (!item) return null` — so removing the entry
+  // would make opening Professionals render NO header window at all, silently. That exact bug is already
+  // recorded one file over, in App.tsx, next to the `other_ai` entry that was added to fix it.
+  const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'history', 'professionals']);
   const visibleItems = menuItems.filter(item => !SIDEBAR_HIDDEN.has(item.id) && enabledModules[item.id] !== false);
 
   const makeClickHandler = (item: MenuItem, closeMenu?: boolean) => () => {

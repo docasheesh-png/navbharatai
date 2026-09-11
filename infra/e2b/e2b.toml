@@ -21,9 +21,16 @@
 template_name = "navbharat-builder"
 dockerfile    = "e2b.Dockerfile"
 
-# ⛔ HISTORICAL VALUES — superseded by build.mjs (2 vCPU / 4096 MB). See the
-# warning at the top of this file before using either number for anything.
-cpu_count = 4
+# Kept EQUAL to build.mjs so nobody can rebuild from a bigger machine by mistake
+# (this file is not read by v2, but a wrong number here is still a trap). What each
+# number costs, from E2B's published rates ($0.0504/vCPU-h, $0.0162/GB-h — they
+# reproduce two consecutive invoices to the cent, see sandboxRate.ts):
+#   2 vCPU + 4 GB  = $0.1656/h  (today)      4 vCPU + 4 GB = $0.2664/h  (+61%)
+#   2 vCPU + 2 GB  = $0.1332/h  (−20%)       2 vCPU + 3 GB = $0.1494/h  (−10%)
+# RAM is billed per WALL-CLOCK hour, so anything that makes a build slower costs
+# more; fewer vCPUs are not a saving by default (break-even ≈ 1.44× slower).
+# Changing RAM needs the measured peak first — SANDBOX_PEAK_MEMORY in the build report.
+cpu_count = 2
 memory_mb = 4096
 
 # No start_cmd: E2B's envd manages the sandbox lifecycle and the builders exec

@@ -356,6 +356,9 @@ import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild
 import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
+import { sandboxReasonMiddleware } from '../AgentV3/sandboxSessionZone';
+import { PEAK_MEMORY_PROBE, parsePeakMemory, describePeakMemory, describeSession, type SandboxSession } from '../AgentV3/sandboxSessions';
+import { sandboxRamGb } from '../AgentV3/sandboxRate';
 import { scoreBuildOutcome, shouldAutoReport, autoReportReason, complaintInText } from '../AgentV3/buildOutcomeSignals';
 import { buildOutcomeStore, buildOutcomeTrackingEnabled, watchedMsFrom, type BuildOutcomeRecord } from '../AgentV3/BuildOutcomeStore';
 import { buildPortSweepCommand, portCandidates, parsePortSweep } from '../AgentV3/sandbox/EngineerAI/actuators/portSweep';
@@ -1365,6 +1368,17 @@ export interface BillingLedgerView {
  * a reason the route cannot load. Absence returns null and the report says "unreported" — which is the
  * honest word for it, and is exactly what the old `resumed=yes` refused to say.
  */
+/** The live sandbox session for the report — duck-typed for the same reason as `sandboxOriginOf`. */
+function sandboxSessionOf(actuator: unknown, workspaceId: string): SandboxSession | null {
+  try {
+    const fn = (actuator as { sandboxSession?: (id: string) => SandboxSession | null })?.sandboxSession;
+    if (typeof fn !== 'function' || !workspaceId) return null;
+    return fn.call(actuator, workspaceId) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function sandboxOriginOf(actuator: unknown, workspaceId: string): string | null {
   try {
     const fn = (actuator as { sandboxOrigin?: (id: string) => string | null })?.sandboxOrigin;
@@ -2949,6 +2963,9 @@ async function probeFreeProviders(): Promise<Array<{ name: string; ok: boolean; 
 let lastDiagProbeTs = 0;
 
 export function registerAgentV3Routes(app: Express): void {
+  // WHY WAS THIS SANDBOX STARTED? One zone per request, opened before every route below, so a create
+  // or resume deep inside any handler can name its cause (sandboxSessionZone.ts). Decides nothing.
+  app.use('/api/agentv3', sandboxReasonMiddleware);
   // Capability probe — lets the frontend decide whether to show the v5.0 toggle.
   app.get('/api/agentv3/status', async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
@@ -11140,7 +11157,8 @@ async function noteBuildOutcome(
             // alongside it, because "had an id and still came up cold" is the interesting case.
             detail: `resume-id lookup ${resumeLookupMs}ms · sandbox create/connect + scaffold + install `
               + `${ensureWorkspaceMs}ms · had-resume-id=${resumeSandboxId ? 'yes' : 'no'} · `
-              + `sandbox=${sandboxOriginOf(actuator, workspaceId) ?? 'unreported'}`,
+              + `sandbox=${sandboxOriginOf(actuator, workspaceId) ?? 'unreported'}`
+              + ` · started-by=${sandboxSessionOf(actuator, workspaceId)?.reason ?? 'unreported'}`,
           });
         } catch { /* timing is observation only — it must never affect a build */ }
         // PREVIEW SYNC FIX (LearnLoop autopsy): the scaffold's root manifests (package.json, index.html,
@@ -16071,6 +16089,23 @@ async function noteBuildOutcome(
           highSeverity: 0,
           warnings: buildDiag.shippingIssueCount('warning'),
         }, gateQuality);
+        // WHERE DID THIS BUILD'S SANDBOX MINUTES GO, AND HOW MUCH MEMORY DID IT NEED? Two observations,
+        // recorded last so they include every gate above (the browser-driven ones most of all — a peak
+        // measured before Chromium ran would under-state exactly the number a RAM change must respect).
+        // Deterministic, no model call, bounded; the report says "not available" rather than guessing.
+        try {
+          const session = sandboxSessionOf(actuator, workspaceId);
+          buildDiag.record({
+            phase: 'readiness', severity: 'info', code: 'SANDBOX_SESSION', autoResolved: true,
+            message: describeSession(session, Date.now()),
+          });
+          const probe = await withTimeout(actuator.runCommand(workspaceId, PEAK_MEMORY_PROBE), 5_000, 'peak-memory').catch(() => null);
+          const peak = parsePeakMemory(probe?.stdout);
+          buildDiag.record({
+            phase: 'readiness', severity: 'info', code: 'SANDBOX_PEAK_MEMORY', autoResolved: true,
+            message: describePeakMemory(peak, sandboxRamGb()),
+          });
+        } catch { /* an observation must never affect the verdict it precedes */ }
         buildDiag.record({
           phase: 'readiness',
           // UNKNOWN is a warning, not an info: "we could not tell" is a finding about our own coverage,

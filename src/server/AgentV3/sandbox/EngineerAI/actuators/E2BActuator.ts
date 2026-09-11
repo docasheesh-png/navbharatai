@@ -24,6 +24,8 @@ import { sandboxLifecycle } from '../../../previewWake';
 import { countRunningSandboxes, type LiveSandboxCount } from '../../../liveSandboxCount';
 import { reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, shouldMarkPausedAfterFailure } from '../../../sandboxReaper';
 import { sandboxLifetimeMs, heartbeatIntervalMs, shouldExtendLifetime, heartbeatTargets, idleLimitFor } from '../../../sandboxLifetime';
+import { currentSandboxReason } from '../../../sandboxSessionZone';
+import type { SandboxSession } from '../../../sandboxSessions';
 
 /**
  * How often a stream of user-activity pings is written to the durable record.
@@ -485,6 +487,11 @@ export class E2BActuator implements IEngineerActuator {
   // set, the idle sweep uses the shorter snapshot window: the user is looking at the copy, not at
   // the machine. In-memory on purpose — it only ever shortens THIS instance's sweep.
   private _snapshotCurrent = new Set<string>();
+  // The live SESSION per workspace — see sandboxSessions.ts. Started on create/resume, fed by the
+  // op-hold (busy time), finalised when this instance pauses or drops the machine.
+  private _session = new Map<string, SandboxSession>();
+  // When the op count went 0 → 1, so busy time is the union of overlapping operations, not their sum.
+  private _busySince = new Map<string, number>();
   // When this workspace's sandbox was created/resumed here. A v5 build runs a real VM billed by
   // WALL-CLOCK, which is a completely different cost shape from token spend — a build that used almost
   // no tokens but held a VM for forty minutes still cost real money, and nothing in the build report
@@ -810,7 +817,17 @@ export class E2BActuator implements IEngineerActuator {
 
   /** Hold the sandbox for one operation. Returns the release; call it exactly once, in `finally`. */
   private _holdSandboxOp(workspaceId: string): () => void {
-    this._opsInFlight.set(workspaceId, (this._opsInFlight.get(workspaceId) ?? 0) + 1);
+    const before = this._opsInFlight.get(workspaceId) ?? 0;
+    this._opsInFlight.set(workspaceId, before + 1);
+    // SESSION ACCOUNTING (sandboxSessions.ts): busy time is the union of overlapping operations, so
+    // the clock starts only on the 0 → 1 edge and stops only on the 1 → 0 edge.
+    const s = this._session.get(workspaceId);
+    if (s) {
+      const now = Date.now();
+      s.ops++;
+      if (s.firstOpAt === undefined) s.firstOpAt = now;
+      if (before === 0) this._busySince.set(workspaceId, now);
+    }
     let released = false;
     return () => {
       if (released) return;
@@ -819,7 +836,37 @@ export class E2BActuator implements IEngineerActuator {
       if (n <= 0) this._opsInFlight.delete(workspaceId);
       else this._opsInFlight.set(workspaceId, n);
       this._lastActivity.set(workspaceId, Date.now());
+      const now = Date.now();
+      const sess = this._session.get(workspaceId);
+      if (sess) {
+        sess.lastOpAt = now;
+        const since = this._busySince.get(workspaceId);
+        if (n <= 0 && since !== undefined) {
+          sess.busyMs += Math.max(0, now - since);
+          this._busySince.delete(workspaceId);
+        }
+      }
     };
+  }
+
+  /** The live session for the build report, or null when this instance never started one. */
+  sandboxSession(workspaceId: string): SandboxSession | null {
+    const s = this._session.get(workspaceId);
+    if (!s) return null;
+    // Include an operation still in flight, so a report written mid-operation is not short.
+    const since = this._busySince.get(workspaceId);
+    const busyMs = s.busyMs + (since !== undefined ? Math.max(0, Date.now() - since) : 0);
+    return { ...s, busyMs };
+  }
+
+  /** Close the session and write its final numbers durably. Called by whoever stops the machine. */
+  private _endSession(workspaceId: string, endedBy: SandboxSession['endedBy']): void {
+    const s = this._session.get(workspaceId);
+    this._session.delete(workspaceId);
+    this._busySince.delete(workspaceId);
+    if (!s) return;
+    const final: SandboxSession = { ...s, endedAt: Date.now(), endedBy };
+    void sandboxStore.recordSessionEnd(workspaceId, final).catch(() => {});
   }
 
   /** True while any sandbox operation is still running for this workspace. */
@@ -864,6 +911,7 @@ export class E2BActuator implements IEngineerActuator {
     this._sandboxOrigin.delete(workspaceId);
     this._lastLifetimeExtend.delete(workspaceId);
     this._snapshotCurrent.delete(workspaceId);
+    this._endSession(workspaceId, 'dropped');
   }
 
   /** Record a pause we could not confirm and return the new count. */
@@ -898,6 +946,12 @@ export class E2BActuator implements IEngineerActuator {
         // as one that worked, and `markPaused` below then hid a still-running machine from the orphan
         // reaper (`sandboxesToReap` skips anything already flagged paused). Nothing was left that
         // could stop it, and nothing reported a fault. See PAUSE_ATTEMPTS_BEFORE_GIVING_UP.
+        // The session ends HERE, before the pause: `pauseSandbox` drops the handle in its `finally`,
+        // and a drop would otherwise close the session as 'dropped' a moment before this line could
+        // say 'idle-sweep'. `endedBy` means "what took the machine out of this instance's hands" —
+        // true even when the pause call itself fails, since the handle is dropped either way; whether
+        // the machine actually stopped is the durable record's `pausedBy`/`pausedAt`, not this.
+        this._endSession(workspaceId, 'idle-sweep');
         const paused = await this.pauseSandbox(sandbox.sandboxId).catch(() => false);
         this._lastActivity.delete(workspaceId);
         this._lastDurableTouch.delete(workspaceId);
@@ -1093,6 +1147,21 @@ export class E2BActuator implements IEngineerActuator {
     }
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');
+    // WHY, not just THAT: the zone names the caller (a build, the preview door, a wake, a publish,
+    // a file read…), and the session record is what turns "1,110 starts a month" into a table.
+    {
+      const session: SandboxSession = {
+        sandboxId: sandbox.sandboxId,
+        origin: this._sandboxOrigin.get(workspaceId) ?? 'unknown',
+        reason: currentSandboxReason(),
+        startedAt: Date.now(),
+        busyMs: 0,
+        ops: 0,
+      };
+      this._session.set(workspaceId, session);
+      this._busySince.delete(workspaceId);
+      if (sandboxResumeEnabled()) void sandboxStore.recordSessionStart(workspaceId, session).catch(() => {});
+    }
     if (!this._sandboxStartedAt.has(workspaceId)) this._sandboxStartedAt.set(workspaceId, Date.now());
     // Durable from the FIRST moment the sandbox exists, not from the end of the build — that gap was
     // what made a running build indistinguishable from an abandoned one.

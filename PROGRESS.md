@@ -47879,3 +47879,55 @@ method or block, never a count.**
 
 **Expected effect with PR A:** healthy path ≈ build + advisory tail + 3 min; orphan path ≈ build + 6 min.
 Roughly 29 → ~10 min per sandbox at today's volume — to be read off the E2B dashboard, not assumed.
+
+
+## 2026-09-11 — PR D: measure first — where the minutes go, why machines start, and peak memory
+
+**Trigger.** The admin forwarded an external plan ("Cut NavBharatAI's E2B sandbox bill — measure first,
+then fix. Do NOT guess.") with the instruction to mix it with the work in flight and apply the
+external-suggestion rule. Every claim in it was checked against the code before anything was adopted.
+
+**Verified against reality first.**
+- Its "PR #2818 is already done — rebase onto it" was FALSE at the time: #2818 was open and `dirty`
+  against `main`, not merged. Noted for the admin; it touches the same `getSandbox` as #2820 and whichever
+  lands second must merge `main` in.
+- Its cost model ($0.0504/vCPU-h + $0.0162/GB-h, 2 vCPU + 4 GB = $0.1656/h, RAM billed per wall-clock so
+  slower = dearer, break-even 1.44× for halving cores) matches `sandboxRate.ts` exactly. Adopted as the
+  reasoning behind "no RAM change without a measured peak".
+- Its "the door resumes a paused machine on every poll" was a hypothesis, not a finding. The code already
+  caps the door's self-retry and stops the health poll from touching the machine once a copy exists; but
+  a door hit DOES resume (the port sweep runs a command). Whether that is 37 starts/day is exactly what the
+  new instrument answers — so the instrument was built rather than the guess acted on.
+
+**Built (measurement only — changes no behaviour):**
+1. `sandboxSessions.ts` (pure) + `sandboxSessionZone.ts` (AsyncLocalStorage, the repo's own pattern) —
+   one Express middleware on `/api/agentv3` names each request's cause; `getSandbox` opens a session on
+   every create/resume carrying that reason and the origin; `_holdSandboxOp` clocks busy time as the
+   UNION of overlapping operations (0→1 and 1→0 edges); the idle sweep closes the session with its cause
+   BEFORE the pause (the drop inside `pauseSandbox` would otherwise overwrite it); `_dropSandbox` closes
+   any remaining session as `dropped`.
+2. Durable: `session` on the sandbox record (start and end), plus `agentv3_sandbox_starts/<UTC day>` with
+   a per-reason increment — ~37 writes/day, far below any hot-document concern.
+3. Build report: SETUP_TIMING now carries `started-by=`; `SANDBOX_SESSION` and `SANDBOX_PEAK_MEMORY` are
+   recorded LAST before RELEASE_GATE so the browser gates are inside the numbers. The memory probe reads
+   the machine's own cgroup accounting (v2 `memory.peak`, else v1, else honestly "not available"), 5 s
+   bound, read-only.
+4. Admin card: "Where the minutes go" (avg up / running our operations / idle, ended sessions only) and
+   "Why machines started" (per-reason counts, last 14 days).
+5. `infra/e2b/e2b.toml`: `cpu_count` 4 → 2 to match `build.mjs`, with the per-hour price of each size
+   beside the numbers. (The file is legacy and read by nothing; a wrong number in it was still a trap.)
+
+**Rejected from the plan, with reasons:** routing finished apps through `renderPreview.ts` (PR B frames
+the real `dist/`, strictly more faithful; the in-browser tab already IS that renderer for apps without a
+copy); the "1,110 → ~300 starts" target (a guess dressed as a target); and lowering nothing until the
+numbers exist — which is also why PR B's 3-minute snapshot window stands: it applies only when the frame
+is already on the copy, with a floor tied to the poll, not a blanket cut.
+
+**Tests:** `tests/sandboxSessions.test.ts` (20): the split, live-session handling, the report line, the
+tallies, the path→cause table (with `other` ≠ `unattributed`), the zone surviving awaits, the probe's
+read-only shape and parser, and structural wiring pins (middleware before the first route; session
+opened at create; busy edges; sweep-before-pause ordering; report order; admin; toml).
+
+**What to read next (the point of the PR):** after a few days, Admin → Reports → *Where does a sandbox's
+billed time go?* — "Where the minutes go" says whether the excess is idle or slow commands; "Why machines
+started" says who is starting them. The next cost PR is chosen from those two lines, not from a plan.

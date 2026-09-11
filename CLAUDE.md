@@ -513,6 +513,32 @@ the code (it is actually read somewhere) on 2026-07-11.
   never lost. Do NOT set the lifetime below the idle limit (5 min) without a reason: at 6 the healthy
   path is byte-identical to before (our sweep still pauses first); the change bites only where the
   sweeps could not reach.
+  📏 **MEASURE FIRST (shipped 2026-09-11, PR D — adapted from a forwarded external plan, per the
+  external-suggestion rule: adopted what the code confirmed, rejected what it contradicted).** Three
+  instruments, no behaviour change: (1) **where the minutes go** — every sandbox SESSION now records
+  wall-clock, time INSIDE our operations, time idle, op count, what started it and what ended it
+  (`sandboxSessions.ts`; on the durable record as `session`; in the build report as `SANDBOX_SESSION`);
+  (2) **why machines start** — one Express zone per `/api/agentv3` request names the cause (build /
+  preview-door / preview-diagnose / preview-health / publish / files / exec / version-preview /
+  visual-edit / other; `unattributed` only outside any request) and every create or resume increments
+  that day's counter in `agentv3_sandbox_starts` (`sandboxSessionZone.ts`; the build report's
+  SETUP_TIMING line now carries `started-by=`); (3) **peak memory** — read from the machine's own cgroup
+  (`memory.peak` v2, else v1, else honestly "not available") LAST in the post-build sequence so the
+  browser gates are included, as `SANDBOX_PEAK_MEMORY` beside the template's 4 GB. The admin card
+  *Where does a sandbox's billed time go?* shows "Where the minutes go" and "Why machines started".
+  🔒 **THE RULE THIS ENFORCES: no RAM change to the template until SANDBOX_PEAK_MEMORY says it fits,
+  and no vCPU reduction at all without a measured speed ratio** — RAM is billed per WALL-CLOCK hour, so
+  a slower build is a dearer one (break-even ≈ 1.44× slower for halving cores). `infra/e2b/e2b.toml`
+  now carries the per-hour price of each size beside its numbers, and matches `build.mjs` (2 vCPU / 4 GB).
+  From the same forwarded plan, **rejected with reasons**: "route finished apps through
+  `renderPreview.ts`" (PR B already frames the REAL `dist/`, strictly more faithful than a babel
+  re-render, and the in-browser tab is that renderer for apps without a copy); "target 1,110 → ~300
+  starts" (a guess dressed as a target — the instrument above is what turns it into a number);
+  "PR #2818 is done" (it was OPEN and conflicting with `main` at the time — verified, not assumed).
+  💵 The plan also reports the admin **set `E2B_USD_PER_HOUR=0.166` in Cloud Run on 2026-09-11** (the
+  corrected rate; 0.166 vs the derived 0.1656 is within the 25% mismatch tolerance, so the Monitor's
+  amber warning clears). Recorded from the forwarded plan, not from a direct message — re-confirm on the
+  Monitor tile before relying on it.
   ➕ **`AGENTV3_SNAPSHOT_IDLE_MINUTES` (shipped 2026-09-11, PR B — code default 3, floor 3, never above
   the ordinary idle limit).** The idle window the sweep applies to a workspace whose SAVED COPY IS
   CURRENT. The dist-copy pipeline already existed (`previewSnapshot.ts`: a green build's real `dist/`

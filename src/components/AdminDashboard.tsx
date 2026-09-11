@@ -10,6 +10,7 @@ import { type ExposureRow } from '../lib/licenceExposure';
 import { copyTextToClipboard } from '../lib/copyText';
 import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts';
 import { MonitorPanels } from './admin/MonitorPanels';
+import { LoadBoard } from './admin/LoadBoard';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
 
 interface AdminDashboardProps {
@@ -1036,6 +1037,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── OVERVIEW TAB ── */}
           {activeTab === 'monitor' && (
             <div className="space-y-6">
+              {/* THE LOAD BOARD, FIRST ON THE HOME PAGE. The admin asked for exactly this — "admin
+                  panel ke home page par to load dikhna chahiye" — and `/api/admin/load` had answered
+                  it for weeks with nothing rendering it. It sits ABOVE the live monitor because a
+                  ceiling that stops the whole platform outranks a chart of what it is doing now. */}
+              <LoadBoard adminToken={adminToken} />
+
               {/* LIVE MONITOR — real time-series from the platform's own telemetry. Everything below it
                   is the business view the Overview tab used to hold, unchanged. */}
               <MonitorPanels adminToken={adminToken} />

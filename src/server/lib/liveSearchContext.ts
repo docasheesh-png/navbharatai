@@ -169,9 +169,13 @@ export async function liveSearchContext(message: string, opts: LiveSearchOptions
       const r = await webFetchUrl(url);
       return { ok: r.ok, text: r.text };
     });
+    // 2.5 s, not 4 (2026-09-11). This read sits between the user and the FIRST WORD of their answer,
+    // and a page that has not responded in two and a half seconds is a heavy one whose text we would
+    // cap anyway — so the last 1.5 s buys almost no content and costs every grounded reply. The
+    // snippets are already in hand, and they are a complete answer on their own; this only enriches.
     const page = await withTimeout(
       fetchPage(results[0].url).catch(() => ({ ok: false, text: '' })),
-      opts.pageTimeoutMs ?? 4000,
+      opts.pageTimeoutMs ?? 2500,
       { ok: false, text: '' },
     );
     if (page.ok && page.text.trim()) {

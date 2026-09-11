@@ -47622,3 +47622,62 @@ what the tile implied. Either way the next reading is evidence instead of infere
 
 Verified to bite: making a failed provider call report `0` instead of `null` fails the honesty test by
 name.
+---
+
+## 2026-09-10 — Slice 4's cost half: the outbound check gets a spend ceiling
+
+**Trigger: the admin opened the Web Risk product page and said the pricing was far too high.** The
+screenshot showed **INR 4,777.25 / 1K count**. That number is real — it is just not ours. The console's
+pricing panel lists four SKUs with **SearchHashes Requests (Update API)** selected by default, and that
+is the $50/1K one. Our code calls `uris:search` — the **Lookup API**, which is **free to 100,000
+calls/month and $0.50/1K after** (admin then confirmed it on the same panel: `FREE — INR 0.00 /1K,
+starting after 0` and `TIER 1 — INR 47.7725 /1K, starting after 100K count/month`). Verified against
+Google's published pricing page, not from memory.
+
+**But the honest answer did not end there, and this is the part worth recording.** Correcting the
+number left a real defect standing: there was **no ceiling on the path at all**. The daily re-scan is
+bounded at 200 apps × 60 origins, so the theoretical worst case was ~360,000 lookups/month (~$130) if
+every app pointed at 60 hosts no other app pointed at. That will not happen — the cache collapses
+shared hosts — but "will not happen in normal use" is not a bound, and an unbounded spend path is one
+odd month away from being a surprise on an invoice. The admin's instinct was right about the risk even
+though the number he was reading was the wrong SKU.
+
+**Shipped: `src/server/AgentV3/webRiskBudget.ts`** — a monthly reservation counter, one Firestore
+document per calendar month (UTC, because Google's quota resets on its calendar and not ours).
+
+- **Default limit is exactly the free tier (100,000).** So the feature costs ₹0 until the admin
+  deliberately raises `NAVBHARAT_WEB_RISK_MAX_LOOKUPS`. An explicit `0` is a supported setting meaning
+  "record what apps point at, ask Google nothing"; an unreadable value falls back to the free tier and
+  **never to unlimited** — the same reasoning as `parseRolloutPercent`: someone who wanted the default
+  would have left the key unset.
+- **Reserve BEFORE spending, release the unused after.** Counting after the calls would lose whatever a
+  crash interrupts, and every lost increment is money spent twice. Reserving first means a crash costs
+  budget we did not use — an error in the direction that cannot produce a bill. The release matters as
+  much: cache hits are the common case, so without it a platform whose apps all point at the same
+  twenty hosts would exhaust a 100,000-call allowance having made almost no calls.
+- **🔒 It fails CLOSED, which is the deliberate opposite of `jobLease.ts`.** A lease that cannot be read
+  runs the job anyway, because a scheduled purge that never runs is worse than one that runs twice. A
+  budget that cannot be read spends nothing, because not looking up costs zero and changes no outcome:
+  an unchecked origin is `unknown`, and both `webRisk.ts` and `outboundRescan.ts` already refuse to act
+  on an `unknown`. The two modules fail in opposite directions and both are right; the contrast is
+  written into `webRiskBudget.ts`'s header so nobody "fixes" one to match the other.
+- **Exhausting the budget is never silent** — `webRiskSummary` names it as a separate clause from a
+  timeout, because "the allowance is spent" is an admin ACTION (raise the ceiling) while a timeout is
+  weather.
+- **One choke point, both spenders.** Publish and the daily sweep now both call
+  `scanOriginsWithBudget`; a source-invariant test asserts neither file contains a raw `scanOrigins(`
+  call, so a third caller added later cannot accidentally spend outside the ceiling.
+
+**Registry updated (`CLAUDE.md`)** with both `NAVBHARAT_WEB_RISK` and `NAVBHARAT_WEB_RISK_MAX_LOOKUPS`,
+including the ₹4,777-vs-₹47.77 SKU trap in writing, so the next person to check this price does not
+re-derive the same wrong conclusion from the same default-selected row.
+
+**Still open (admin, not code):** the Web Risk API is not yet enabled in `gen-lang-client-0866594388`,
+and `NAVBHARAT_WEB_RISK` is not set. Until both, every verdict is honestly `unknown` — nothing is
+flagged, nothing is held, nothing is spent.
+
+### Gate (CI-equivalent, on the final state)
+`npm ci` exit 0 · `npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean ·
+`npm run typecheck:server` 0 · `npm run build` ok · `npm run test:bundle` within budget ·
+`npm run boot:check` PASS · `npx vitest run` **1,526 files / 20,566 passed / 0 failed** (25 new),
+log grepped for `FAIL` — none.

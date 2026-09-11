@@ -126,6 +126,13 @@ export interface WebRiskScan {
   incomplete: boolean;
   /** How many lookups actually went to Google (the rest were cached) — for the free-tier budget. */
   lookups: number;
+  /**
+   * Origins left unchecked because the month's lookup budget was spent (see `webRiskBudget.ts`).
+   *
+   * These are `unknown` like any other unchecked origin, and deliberately so: running out of budget
+   * tells us nothing about the host, so it must produce the same honest verdict as a timeout.
+   */
+  skippedForBudget: number;
 }
 
 /**
@@ -141,15 +148,24 @@ export async function scanOrigins(opts: {
   nowMs?: number;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * The most lookups this scan may send to Google. Omitted means unlimited; `webRiskBudget.ts` is what
+   * normally supplies it. Cache hits are free and are NOT counted against it — that is the point of
+   * checking the cache first.
+   */
+  maxLookups?: number;
 }): Promise<WebRiskScan> {
   const now = Number.isFinite(opts.nowMs) ? Number(opts.nowMs) : Date.now();
   const doFetch = opts.fetchImpl ?? fetch;
+  const budget = Number.isFinite(opts.maxLookups) ? Math.max(0, Math.floor(Number(opts.maxLookups))) : Infinity;
   const results: OriginVerdict[] = [];
   let lookups = 0;
+  let skippedForBudget = 0;
   for (const origin of opts.origins ?? []) {
     const hit = cached(origin, now);
     if (hit) { results.push({ origin, ...hit }); continue; }
     if (!opts.token) { results.push({ origin, verdict: 'unknown', threats: [] }); continue; }
+    if (lookups >= budget) { skippedForBudget++; results.push({ origin, verdict: 'unknown', threats: [] }); continue; }
     let answer: { verdict: UrlVerdict; threats: string[] } = { verdict: 'unknown', threats: [] };
     try {
       const req = buildWebRiskRequest(opts.token, origin);
@@ -172,6 +188,7 @@ export async function scanOrigins(opts: {
     listed: results.filter((r) => r.verdict === 'listed'),
     incomplete: results.some((r) => r.verdict === 'unknown'),
     lookups,
+    skippedForBudget,
   };
 }
 
@@ -186,9 +203,12 @@ export function webRiskSummary(scan: WebRiskScan): string {
     return `⚠️ FLAGGED: ${named}. Checked ${scan.results.length} outbound host(s).`;
   }
   const unknowns = scan.results.filter((r) => r.verdict === 'unknown').length;
-  return scan.incomplete
-    // Said plainly, because "no listings found" over hosts nobody could check is the reassurance this
-    // module refuses to give.
-    ? `No listings found, but ${unknowns} of ${scan.results.length} outbound host(s) could NOT be checked — this is not a clean bill.`
-    : `All ${scan.results.length} outbound host(s) checked and clean.`;
+  if (!scan.incomplete) return `All ${scan.results.length} outbound host(s) checked and clean.`;
+  // Said plainly, because "no listings found" over hosts nobody could check is the reassurance this
+  // module refuses to give. The budget clause is separate on purpose: "we ran out of allowance" is an
+  // admin ACTION (raise the ceiling), while a timeout is weather.
+  const why = scan.skippedForBudget > 0
+    ? ` ${scan.skippedForBudget} of them were skipped because this month's lookup budget is spent — raise NAVBHARAT_WEB_RISK_MAX_LOOKUPS to check more.`
+    : '';
+  return `No listings found, but ${unknowns} of ${scan.results.length} outbound host(s) could NOT be checked — this is not a clean bill.${why}`;
 }

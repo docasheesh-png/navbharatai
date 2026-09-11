@@ -807,17 +807,20 @@ setInterval(() => {
               handler: async () => {
                 await import('./src/server/AgentV3/outboundRescan')
                   .then(async ({ runOutboundRescan, rescanSummary }) => {
-                    const [{ deploymentStore }, { scanOrigins }, { GoogleAuth }] = await Promise.all([
+                    const [{ deploymentStore }, { scanOriginsWithBudget }, { getServerDb }, { GoogleAuth }] = await Promise.all([
                       import('./src/server/AgentV3/DeploymentStore'),
-                      import('./src/server/AgentV3/webRisk'),
+                      import('./src/server/AgentV3/webRiskBudget'),
+                      import('./src/server/lib/serverDb'),
                       import('google-auth-library'),
                     ]);
                     const report = await runOutboundRescan({
                       list: (o) => deploymentStore.list(o),
+                      // The sweep is the bigger of the two spenders (200 apps a day), so it goes
+                      // through the SAME monthly ceiling as publish — one budget, not two.
                       scan: async (origins) => {
                         const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
                         const token = await auth.getAccessToken().catch(() => null);
-                        return scanOrigins({ origins, token: token ? String(token) : null });
+                        return scanOriginsWithBudget({ origins, token: token ? String(token) : null, store: getServerDb() as never });
                       },
                       // HELD, not taken down: reversible by the admin, because a machine acting on a
                       // third party's list should never give the irreversible verdict.

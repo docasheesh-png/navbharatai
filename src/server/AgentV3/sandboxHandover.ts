@@ -157,16 +157,21 @@ export function tallyHandover(inputs: ReadonlyArray<HandoverInput>): HandoverTal
 }
 
 /**
- * The measured E2B rate, in USD per running sandbox-hour.
+ * The measured E2B rate, in USD per running sandbox-hour — re-exported from the single source of truth.
  *
- * NOT invented: CLAUDE.md derives $0.083 from the admin's own dashboard ($172.08 ÷ 2,078.29 vCPU-hours,
- * with RAM-hours exactly 2× vCPU-hours, i.e. every sandbox is 1 vCPU + 2 GB). Env-tunable because the
- * rate is a real-world number that moves, and a hardcoded price is a future lie.
+ * 🔴 THE COMMENT THAT STOOD HERE WAS THE BUG, WRITTEN DOWN AS A JUSTIFICATION. It read: *"CLAUDE.md
+ * derives $0.083 from the admin's own dashboard ($172.08 ÷ 2,078.29 vCPU-hours, with RAM-hours exactly
+ * 2× vCPU-hours, i.e. every sandbox is 1 vCPU + 2 GB)"*. Every clause is true except the last one, and
+ * that one does not follow: a RAM-to-vCPU ratio of 2.0 describes the sandbox's shape and is equally
+ * true of 2 vCPU + 4 GB — which is what `infra/e2b/build.mjs` actually builds. So $0.0828 per
+ * **vCPU**-hour was recorded as the price of a **wall-clock** hour, understating every VM figure by 2×.
+ *
+ * Kept as a re-export rather than deleted because the reasoning is the useful part: "not invented" was
+ * true, and it was still wrong. A derivation is only checked when it can fail — see `sandboxRate.ts`,
+ * which reproduces two consecutive invoices to the cent.
  */
-export function sandboxUsdPerHour(env: NodeJS.ProcessEnv = process.env): number {
-  const v = Number(env.E2B_USD_PER_HOUR);
-  return Number.isFinite(v) && v > 0 ? v : 0.083;
-}
+export { sandboxUsdPerHour } from './sandboxRate';
+import { sandboxUsdPerHour } from './sandboxRate';
 
 export interface HandoverProjection {
   /** Days the measured sample spans. 0 when fewer than two builds landed. */

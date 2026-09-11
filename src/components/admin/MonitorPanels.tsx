@@ -71,7 +71,7 @@ interface MonitorResponse {
     from: number;
     to: number;
     points: MonitorPoint[];
-    summary: { sandboxUsd?: number | null; sandboxRateConfigured?: boolean } | null;
+    summary: { sandboxUsd?: number | null; sandboxRateConfigured?: boolean; sandboxRateNote?: string } | null;
     providers: Record<string, any>;
   };
 }
@@ -229,6 +229,9 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
   // priced", which the tile says out loud instead of showing ₹0.
   const sandboxRateConfigured = data?.timeline?.summary?.sandboxRateConfigured;
   const sandboxWindowUsd = data?.timeline?.summary?.sandboxUsd ?? null;
+  // Empty unless the configured rate contradicts the template it prices. Server-sourced on purpose:
+  // the component must never be the thing that decides a cost figure is trustworthy.
+  const sandboxRateNote = data?.timeline?.summary?.sandboxRateNote || '';
 
   const health = data?.health?.score ?? null;
   const alerts = Array.isArray(data?.alerts) ? data!.alerts : [];
@@ -416,8 +419,14 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
         <Tile
           label="VM cost"
           value={chartsLive && sandboxWindowUsd != null ? formatInr(microUsdToInr(sandboxWindowUsd * 1_000_000, usdInr)) : '—'}
-          sub={sandboxRateConfigured === false ? 'Set E2B_USD_PER_HOUR to price it' : 'Our infrastructure, not a user charge'}
-          tone={sandboxRateConfigured === false ? 'text-[#8b949e]' : 'text-orange-400'}
+          sub={
+            sandboxRateConfigured === false
+              ? 'Set E2B_USD_PER_HOUR to price it'
+              : sandboxRateNote
+                ? 'Rate disagrees with the machine — see below'
+                : 'Our infrastructure, not a user charge'
+          }
+          tone={sandboxRateConfigured === false ? 'text-[#8b949e]' : sandboxRateNote ? 'text-amber-400' : 'text-orange-400'}
           Icon={IndianRupee}
         />
         <Tile
@@ -427,6 +436,14 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
           Icon={Cpu}
         />
       </div>
+      {sandboxRateNote ? (
+        // A wrong cost figure is worse than a missing one, because it is the one an admin acts on.
+        // Shown in full rather than summarised: the sentence carries both numbers and the exact key
+        // to change, so the fix does not require coming back here to ask what the real rate was.
+        <p className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          {sandboxRateNote}
+        </p>
+      ) : null}
 
       {/* ── HOW ALERTS REACH YOU. Shown whether or not anything is firing, because the moment that
           matters is BEFORE an incident: an admin who believes they will be emailed, and will not,

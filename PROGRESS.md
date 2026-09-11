@@ -47622,3 +47622,70 @@ what the tile implied. Either way the next reading is evidence instead of infere
 
 Verified to bite: making a failed provider call report `0` instead of `null` fails the honesty test by
 name.
+
+## 2026-09-11 — E2B cost autopsy: the rate that priced every VM figure was exactly half
+
+**Trigger.** The admin sent three E2B console screenshots and asked why E2B is expensive and what happens
+at lakhs of users. Reconciling them against the code found a money defect nobody had reason to suspect,
+because the number involved was documented as measured.
+
+**Finding (verified, not inferred).** `E2B_USD_PER_HOUR = 0.083`, set in Cloud Run on 2026-08-13 and
+recorded in CLAUDE.md as "exactly the measured rate", is a price per **vCPU**-hour being used as the price
+of a **wall-clock** hour. The builder template is **2 vCPU / 4 GB**, so the true rate is **$0.1656/hour**
+and every VM cost figure in the platform was **exactly 50%** of the truth.
+
+**The faulty step, precisely.** CLAUDE.md derived `$172.08 ÷ 2,078.29 vCPU-hours` (correct) and then wrote
+*"RAM-hours ÷ vCPU-hours is exactly 2.0, so every sandbox is 1 vCPU + 2 GB"*. That ratio pins a sandbox's
+SHAPE and is equally true of 2 vCPU + 4 GB. The size was assumed. Two independent sources say it is 2/4:
+`infra/e2b/build.mjs` (`cpuCount: 2, memoryMB: 4096`) and every row of the admin's Sandboxes console
+("2 Core / 4.0 GB"). `infra/e2b/e2b.toml` says 4 vCPU and is LEGACY, read by nothing — now marked as such,
+because since this change the sandbox size feeds a cost calculation.
+
+**What makes the replacement checked rather than merely sourced.** E2B's published per-resource prices
+reproduce BOTH of the admin's billing windows to the cent, with the same two constants:
+`2,078.29 × $0.0504 + 4,156.57 × $0.0162 = $172.08` and `1,064.36 × $0.0504 + 2,128.72 × $0.0162 = $88.13`.
+The original derivation contained no step that could fail; this one does, and it is now a test.
+
+**Impact, stated in the safe direction.** The error UNDER-states our own cost, so paid builds recovered
+~50% of their VM cost and NavBharatAI absorbed the rest. **No user was over-charged and there is nothing to
+refund.** What it broke is the admin's ability to see the bill: the Monitor's VM COST tile showed half the
+real rupees, on the very panel used to ask why E2B is expensive.
+
+**Corrected wall-clock picture** (halved from what CLAUDE.md claimed): Jul 14 – Aug 13 = 1,039 wall-hours,
+~49.5 min per sandbox; Aug 12 – Sep 11 = 532 wall-hours, ~28.8 min per sandbox. The per-sandbox time really
+did halve — the idle 15 → 5 change worked — but both figures were previously stated at 2×.
+
+**Fixed (root cause + the class).**
+- New `src/server/AgentV3/sandboxRate.ts` — ONE source of truth. Named per-resource prices
+  (env-overridable), the template's size (env-overridable, defaults mirroring `build.mjs`), and the rate
+  DERIVED from the two. Replaces the two drifted copies of `sandboxUsdPerHour` that defaulted to **0.10**
+  (`sandboxCost.ts`) and **0.083** (`sandboxHandover.ts`) — the same question had two answers depending on
+  which module you asked. Both now delegate; a source-pinned test forbids a third.
+- `rateMismatch()` — a configured rate that contradicts the machine it prices is now reported, in the admin
+  build report's billing note and in amber on the Monitor, naming both figures and the exact value to set.
+  Tolerance 25%: wide enough for a real plan discount, tight enough that a shape error (always a whole
+  multiple) can never pass.
+- Corrections written where the wrong reasoning lived: the justifying comment in `sandboxHandover.ts`, two
+  places in CLAUDE.md, the assertions in `sandboxCost.test.ts` and `sandboxHandover.test.ts` that had
+  encoded the wrong default, and `AppKnowledgeBase.ts` for the tile's new behaviour.
+
+**🔴 OPEN ROOT CAUSE — the remaining half is admin-only (fourth absolute rule, step 6).**
+`E2B_USD_PER_HOUR` is SET in Cloud Run and an env value always beats a code default, so **production is
+still pricing at $0.083 until the admin sets `E2B_USD_PER_HOUR=0.1656`.** The code cannot fix this and does
+not pretend to — it warns loudly instead of pricing silently. Recorded here as open until the admin
+confirms the new value.
+
+**Lesson worth keeping.** "Not invented" is a weaker standard than "checked". The original derivation was
+honestly sourced from a real dashboard and still wrong, because it contained a step that could not fail.
+
+**Second finding, evidence-backed but not yet actioned — where the ~29 minutes per sandbox goes.** The
+in-memory idle sweep is 5 minutes, but `reapAfterMs = max(idle, touch×3 + 5min)` = **20 minutes**, and
+E2B's own `onTimeout: 'pause'` lifetime is **60 minutes**. `_touchDurable` is only called from sandbox
+operations (`getSandbox`, `noteActivity`), so a build that goes quiet during a long model call does not
+refresh the durable stamp — which is exactly why that window has to be 20. Since every Cloud Run deploy
+(i.e. every merge to `main`) orphans the creating instance, the **20-minute orphan window, not the
+5-minute idle limit, is probably what governs the bill** — meaning lowering the idle limit further would
+save nothing. The clean fix is a build heartbeat that refreshes the durable stamp on a timer independent
+of sandbox operations, after which the orphan window could shrink safely. NOT built: it can pause a live
+build if got wrong (safeguard #3), and it needs one measurement first — the distribution of sandbox
+lifetimes by which sweep ended them. Left as the next candidate, not a silent assumption.

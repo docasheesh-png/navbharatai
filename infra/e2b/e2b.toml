@@ -1,22 +1,28 @@
-# E2B template config — NavBharatAI Pro v3.0 builder sandbox.
+# ⛔ LEGACY — THIS FILE IS NOT READ BY ANYTHING. DO NOT TREAT IT AS CONFIG.
 #
-# Build & publish (from a machine with Docker + Docker Hub egress + E2B_API_KEY):
-#     cd infra/e2b
-#     e2b template build --name navbharat-builder
+# E2B deprecated build system v1 (the `e2b template build` CLI path this file was
+# written for) on 2026-06-27. The template is now built by `build.mjs` via the
+# SDK, and **`build.mjs` is the only source of truth for the sandbox's size**:
 #
-# After a successful build, E2B writes the resulting `template_id` back into
-# this file. Copy that id into the Cloud Run env var E2B_TEMPLATE_ID so the
-# server points new sandboxes at this image (see README.md → "Code wiring").
+#     cpuCount: 2, memoryMB: 4096      <- the machine we actually run
+#
+# 🔴 THE `cpu_count = 4` BELOW IS WRONG AND HAS BEEN SINCE v2 LANDED. It is left
+# here only as history; it is kept from being dangerous by this warning. Reading
+# it as live config would mis-size the sandbox by 2×, and since 2026-09-11 the
+# sandbox size is what `src/server/AgentV3/sandboxRate.ts` prices VM time with —
+# so a wrong number here would become a wrong number on the admin cost dashboard.
+# That is not hypothetical: a per-vCPU price read as a per-wall-hour price is
+# exactly the 2× error that file exists to end.
+#
+# To change the sandbox size, edit `build.mjs` (or its CPU_COUNT / MEMORY_MB env
+# overrides) and re-run the `e2b-template.yml` workflow — then update the
+# E2B_SANDBOX_VCPU / E2B_SANDBOX_RAM_GB defaults in sandboxRate.ts to match.
 
 template_name = "navbharat-builder"
 dockerfile    = "e2b.Dockerfile"
 
-# Resources — sized for a real `npm install` + `vite build` of a non-trivial
-# app. Bumped 2→4 vCPU / 2→4 GB (SPEED): npm install, `npx tsc --noEmit`,
-# `npm run build` and the baked Playwright/Chromium all share these cores, so
-# more vCPU cuts CPU-bound steps ~1.5-2x (install 30-90s→~20-50s, tsc 10-30s→
-# ~6-18s). COST NOTE: E2B bills per vCPU-second, so an ACTIVE sandbox costs ~2x
-# per second — partly offset because a faster build runs FEWER sandbox-seconds.
+# ⛔ HISTORICAL VALUES — superseded by build.mjs (2 vCPU / 4096 MB). See the
+# warning at the top of this file before using either number for anything.
 cpu_count = 4
 memory_mb = 4096
 

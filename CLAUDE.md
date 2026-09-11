@@ -501,6 +501,27 @@ the code (it is actually read somewhere) on 2026-07-11.
     vCPU-hours is **exactly 2.0**, so every sandbox is **1 vCPU + 2 GB**, and $0.083 matches E2B's
     published per-vCPU + per-GB rates almost to the cent — which is what makes this a measurement rather
     than a guess.
+  - 🔴 **CORRECTION 2026-09-11 — THAT PARAGRAPH IS WRONG, AND THE WRONG STEP IS THE ONE THAT SOUNDS
+    MOST RIGOROUS.** `$172.08 ÷ 2,078.29 vCPU-hours` is a price per **vCPU**-hour. The leap to "so every
+    sandbox is 1 vCPU + 2 GB" does not follow: a RAM-to-vCPU ratio of 2.0 pins a sandbox's **shape**, not
+    its **size**, and is equally true of **2 vCPU + 4 GB** — which is what `infra/e2b/build.mjs` actually
+    builds (`cpuCount: 2, memoryMB: 4096`) and what every row of the admin's own Sandboxes console reads
+    ("2 Core / 4.0 GB"). ⚠️ `infra/e2b/e2b.toml` says 4 vCPU and is **LEGACY, read by nothing** — v2
+    builds from `build.mjs`.
+    **THE REAL NUMBER: a running sandbox costs $0.1656/hour (~₹14), not $0.083.** Verified the way the
+    original never was — E2B's published per-resource prices reproduce BOTH billing windows to the cent:
+    `2,078.29 × $0.0504 + 4,156.57 × $0.0162 = $172.08` and `1,064.36 × $0.0504 + 2,128.72 × $0.0162 =
+    $88.13`. Two windows, zero cents of error, same two constants.
+    **What follows from it, all of it half of what this file used to say:** August was **1,039 wall-hours,
+    ~49.5 min per sandbox** (not 1.65 h); Aug 12 – Sep 11 was **532 wall-hours, ~28.8 min per sandbox**.
+    The per-sandbox time genuinely halved — the idle 15 → 5 change worked — but every wall-clock figure
+    above is 2× too long and every hour-rate 2× too cheap.
+    🔒 **THE LESSON, and it is not "check your arithmetic": "not invented" is a weaker standard than
+    "checked".** The original derivation was honestly sourced from a real dashboard and still wrong,
+    because it contained a step that could not fail. A derivation is only verified once it predicts
+    something it could have got wrong — which is why the constants now live in
+    `src/server/AgentV3/sandboxRate.ts` as named per-resource prices reconciled against two invoices,
+    rather than as one blended number that nothing can contradict.
   - Per sandbox: **~$0.137** (they average 1.65 hours each). Whole-clock burn: **~$0.24/hour**, i.e.
     ~$5.70/day, ~$172/month (**~₹15,000/month** at ~₹87/$).
   - **🔑 THE BILL IS RUNNING TIME, NOT BUILDS.** A build that finishes in 5 minutes and then leaves the
@@ -536,7 +557,19 @@ the code (it is actually read somewhere) on 2026-07-11.
 - **Sandbox-time billing — NOW LIVE (admin SET both in Cloud Run 2026-08-13):** `AGENTV3_BILL_SANDBOX` and
   `E2B_USD_PER_HOUR`. ✅ **`AGENTV3_BILL_SANDBOX=on`** + ✅ **`E2B_USD_PER_HOUR=0.083`** together turn on
   charging the user for the REAL E2B VM time their build actually held — the *measured* sandbox seconds ×
-  the admin's *real* rate ($0.083/hr, which is exactly the measured rate from the E2B cost analysis above),
+  the admin's *real* rate.
+  🔴 **THE VALUE IS HALF THE TRUTH AND MUST BE CHANGED: set `E2B_USD_PER_HOUR=0.1656`** (see the
+  CORRECTION 2026-09-11 above). `0.083` is the price of a **vCPU**-hour and the builder template is
+  **2 vCPU**, so a wall-clock hour costs twice that. **Nobody was over-charged — the error runs the
+  safe way**: paid builds recovered only ~50% of their VM cost and NavBharatAI absorbed the rest, so
+  there is nothing to refund. What it did break is the admin's own cost dashboard, which showed **half
+  the real rupees** on the exact panel used to judge E2B spend. Since 2026-09-11 the code no longer
+  prices silently: `sandboxRate.ts` derives the rate from the template's real size, and a configured
+  rate that contradicts the machine raises an amber warning on the Monitor and in the admin build
+  report naming both numbers and the value to set. ⚠️ **An env value still beats the code**, so the
+  warning is all the code can do — the fix itself is this one Cloud Run value.
+  (Historical note: the old text called $0.083 "exactly the measured rate from the E2B cost analysis
+  above", which is why it went unquestioned for a month.)
   included in the build's real cost BEFORE markup (`sandboxCost.ts` → `sandboxBillableUsd`). This is honest
   by construction — a clock times a stated price, never an estimate. ⚠️ **BOTH are required together:**
   with `AGENTV3_BILL_SANDBOX=on` but `E2B_USD_PER_HOUR` unset, the code bills **ZERO** (it refuses to charge

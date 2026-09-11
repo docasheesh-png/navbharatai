@@ -31,6 +31,7 @@ import { getServerDb } from './serverDb';
 import { setMetricsSink } from './metrics';
 import { metricsStore } from './metricsStore';
 import { sandboxUsdPerHour } from '../AgentV3/sandboxCost';
+import { rateIsConfigured as sandboxRateIsConfigured, rateMismatchNote } from '../AgentV3/sandboxRate';
 
 export const TIMELINE_COLLECTION = 'metrics_timeline';
 
@@ -110,6 +111,15 @@ export interface TimelineSummary extends TimelineCounters {
   sandboxUsd: number | null;
   /** Whether E2B_USD_PER_HOUR is actually set — so the UI can say why money is missing. */
   sandboxRateConfigured: boolean;
+  /**
+   * Set when the configured rate CONTRADICTS the sandbox template it prices, empty when they agree.
+   *
+   * This tile is where the admin looks to ask "why is the VM bill this size?", so it is the one place
+   * a 2× understated rate must not stay invisible. A rupee figure carrying no warning reads as
+   * measured — which is exactly how `E2B_USD_PER_HOUR = 0.083` went unquestioned on a two-vCPU
+   * template. See sandboxRate.ts.
+   */
+  sandboxRateNote: string;
 }
 
 const MINUTE = 60_000;
@@ -269,14 +279,17 @@ export function summarize(points: TimelinePoint[]): TimelineSummary {
     costUsd: total.costMicroUsd / 1_000_000,
     sandboxUsd: rateConfigured ? (total.sandboxSeconds / 3600) * sandboxUsdPerHour() : null,
     sandboxRateConfigured: rateConfigured,
+    sandboxRateNote: rateMismatchNote(),
   };
 }
 
-/** Is a REAL sandbox rate configured, or would we be pricing with the admitted placeholder? Pure. */
-export function sandboxRateIsConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  const n = Number(env.E2B_USD_PER_HOUR);
-  return Number.isFinite(n) && n > 0;
-}
+/**
+ * Is a REAL sandbox rate configured, or would we be pricing with the derived one? Pure.
+ *
+ * Delegates to `sandboxRate.ts` — a third private copy of "is the rate set?" is how the platform ended
+ * up with two different answers to "what is the rate?".
+ */
+export { rateIsConfigured as sandboxRateIsConfigured } from '../AgentV3/sandboxRate';
 
 /** Firestore field paths cannot contain `.`/`/` etc, and a provider id is free text. Pure. */
 export function safeProviderKey(name: string): string {

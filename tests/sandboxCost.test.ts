@@ -17,8 +17,11 @@ describe('what a build owed for its VM', () => {
 
   it('is retunable from Cloud Run — the real rate depends on the plan and the template', () => {
     expect(sandboxUsdPerHour({ E2B_USD_PER_HOUR: '0.35' })).toBe(0.35);
-    expect(sandboxUsdPerHour({})).toBe(0.10);
-    expect(sandboxUsdPerHour({ E2B_USD_PER_HOUR: 'cheap' })).toBe(0.10); // rubbish keeps the default
+    // ⚠️ CORRECTED 2026-09-11: the fallback used to be a round $0.10 placeholder. It is now DERIVED
+    // from the template's real size (2 vCPU / 4 GB), a figure that reconciles two consecutive E2B
+    // invoices to the cent — see tests/sandboxRate.test.ts. A verified derivation beats a placeholder.
+    expect(sandboxUsdPerHour({})).toBeCloseTo(0.1656, 4);
+    expect(sandboxUsdPerHour({ E2B_USD_PER_HOUR: 'cheap' })).toBeCloseTo(0.1656, 4); // rubbish keeps the default
   });
 
   it('always says the figure is an estimate', () => {

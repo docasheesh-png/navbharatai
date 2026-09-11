@@ -18,17 +18,16 @@
 // Pure — no I/O, no clock.
 
 /**
- * USD per sandbox-hour. E2B bills per second of RUNNING sandbox (a PAUSED one costs only storage), and
- * the exact figure depends on the plan and the vCPU/RAM of the template, so it is env-tunable rather
- * than hardcoded to a number that would quietly go stale.
+ * USD per sandbox-hour — re-exported from the single source of truth.
  *
- * The default is deliberately a ROUND, conservative placeholder: better to over-state our own cost than
- * to under-state it and be reassured by a number that was never true.
+ * ⚠️ THIS USED TO BE ITS OWN COPY, defaulting to a round `$0.10` placeholder, while `sandboxHandover.ts`
+ * kept a SECOND copy defaulting to `0.083`. The same question had two answers depending on which module
+ * you asked, which is the drift class the fourth absolute rule says to centralise rather than patch.
+ * Both now delegate to `sandboxRate.ts`, whose default is DERIVED from the template's real size and
+ * verified against two consecutive invoices to the cent. Do not reintroduce a local default here.
  */
-export function sandboxUsdPerHour(env: NodeJS.ProcessEnv = process.env): number {
-  const n = Number(env.E2B_USD_PER_HOUR);
-  return Number.isFinite(n) && n >= 0 ? n : 0.10;
-}
+export { sandboxUsdPerHour } from './sandboxRate';
+import { sandboxUsdPerHour, rateMismatchNote } from './sandboxRate';
 
 export interface SandboxCostRecord {
   /** Seconds the sandbox was held for this build. */
@@ -121,5 +120,9 @@ export function sandboxBillingNote(cost: SandboxCostRecord | null, env: NodeJS.P
     return `Sandbox ${cost.seconds}s — NOT billed: E2B_USD_PER_HOUR is unset, so the only available rate is a placeholder. `
       + 'Set the real rate from your E2B plan to start charging for it.';
   }
-  return `Sandbox ${cost.seconds}s ≈ $${cost.usd.toFixed(4)} at $${rate}/hr — included in this build's real cost before markup.`;
+  const base = `Sandbox ${cost.seconds}s ≈ $${cost.usd.toFixed(4)} at $${rate}/hr — included in this build's real cost before markup.`;
+  // A configured rate that contradicts the machine it prices is the one failure this line cannot show
+  // on its own: it would read as a confident, itemised, wrong number. See sandboxRate.ts.
+  const mismatch = rateMismatchNote(env);
+  return mismatch ? `${base}\n⚠️ ${mismatch}` : base;
 }

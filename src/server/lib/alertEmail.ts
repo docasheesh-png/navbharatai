@@ -43,6 +43,19 @@ export interface EmailConfig {
  * Every missing piece produces its OWN message. "Email is not set up" would leave the admin guessing
  * which of three things to fix, and guessing at a config screen is how a feature stays off for months.
  */
+/**
+ * The address inside a sender value, or null when there is not one. Accepts the two forms a provider
+ * accepts: a bare `alerts@example.com`, and the display-name form `NavBharatAI <alerts@example.com>`.
+ * Deliberately strict about the angle brackets: `Name alerts@example.com` without them is not a
+ * sender a provider will take, so calling it valid would only move the failure later. PURE.
+ */
+export function senderAddress(raw: string): string | null {
+  const value = String(raw ?? '').trim();
+  const angled = value.match(/^[^<>]*<([^<>\s]+)>$/);
+  const candidate = (angled ? angled[1] : value).trim();
+  return /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(candidate) ? candidate : null;
+}
+
 export function resolveEmailConfig(
   env: NodeJS.ProcessEnv = process.env,
   admins: string[] = adminEmailList(),
@@ -64,6 +77,22 @@ export function resolveEmailConfig(
     // A provider rejects a send from an unverified address, so without this the key would look
     // configured and every send would fail — the worst of both states.
     return { ...base, configured: false, reason: 'No sender set — add ALERT_EMAIL_FROM (a verified sender address).' };
+  }
+  if (!senderAddress(from)) {
+    /**
+     * 🔴 A MALFORMED SENDER IS THE SAME TRAP AS A MISSING ONE, AND IT HAPPENED FOR REAL (2026-09-10).
+     *
+     * While setting this up live, `ALERT_EMAIL_FROM` was entered as `NavBharatAI = alerts@send.…`
+     * — the display-name form with `=` where `<` and `>` belong. The check above only asks whether the
+     * value is EMPTY, so that passed: the Monitor would have reported "Alerts reach you by app and
+     * email" in green while the provider rejected every single send. That is precisely the "worst of
+     * both states" the comment above names, reached through the other door.
+     *
+     * So the shape is checked too. Both real forms are accepted — a bare `a@b.c` and `Name <a@b.c>` —
+     * and anything else is refused BY NAME, because a config screen that says "no" without saying
+     * which field is how a feature stays off for months.
+     */
+    return { ...base, configured: false, reason: `Sender is not an email address — ALERT_EMAIL_FROM should be "alerts@yourdomain.com" or "Your Name <alerts@yourdomain.com>", not "${from}".` };
   }
   if (recipients.length === 0) {
     return { ...base, configured: false, reason: 'No recipient — set ALERT_EMAIL_TO, or add an admin address.' };

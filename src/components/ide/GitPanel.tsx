@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { GitBranch, Github, History, RefreshCcw, Search, Loader2, Rocket, Cloud, Terminal, CheckCircle2, AlertCircle, Settings, Key, Globe, Layout, Layers, Play, Server, Cpu, Download, Copy, AlertTriangle, ChevronDown, Sparkles, Clock, Lock } from 'lucide-react';
+import { GitBranch, History, RefreshCcw, Search, Loader2, Rocket, Cloud, Terminal, CheckCircle2, AlertCircle, Settings, Key, Globe, Layout, Layers, Play, Server, Cpu, Download, Copy, AlertTriangle, ChevronDown, Sparkles, Clock, Lock } from 'lucide-react';
+import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';

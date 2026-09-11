@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Code, Bug, Shield, Zap, AlertCircle, CheckCircle2, ChevronRight, ChevronDown, Copy, Star, Info, X, Check, Download, Play, Lightbulb, Github, Box } from 'lucide-react';
+import { Code, Bug, Shield, Zap, AlertCircle, CheckCircle2, ChevronRight, ChevronDown, Copy, Star, Info, X, Check, Download, Play, Lightbulb, Box } from 'lucide-react';
+import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { ChatSession } from '../../types';
 

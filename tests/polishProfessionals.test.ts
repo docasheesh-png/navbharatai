@@ -38,11 +38,23 @@ describe('Registry ↔ ProfessionalsView ↔ KnowledgeBase are consistent', () =
     expect(missing.map((p) => p.id), 'registry professionals missing a KB entry').toEqual([]);
   });
 
-  it('every professional KB entry routes through "Professionals"', () => {
+  it('every professional KB entry routes through the REAL front door', () => {
+    // The door MOVED on 2026-09-11 (admin: "professional wale option ko navbharatai free ke andar hi
+    // shift kar diya gaya hai, to sidebar menu me se bhi isko hata do"), so this assertion moved with
+    // it — from "Professionals" to the Free chat's Mode button. The INTENT is unchanged and just as
+    // strict: every professional's KB path must name a door a user can actually open, because these
+    // strings are what every AI in the app reads when someone asks "where is X?".
     const wrongPath = registry
       .map((p) => APP_KNOWLEDGE_BASE.find((f) => f.id === p.id)!)
-      .filter((e) => e && !/Professionals/.test(e.path));
-    expect(wrongPath.map((e) => e.id), 'professional KB entries whose path omits "Professionals"').toEqual([]);
+      .filter((e) => e && !/Mode \(bottom bar\)/.test(e.path));
+    expect(wrongPath.map((e) => e.id), 'professional KB entries whose path omits the Mode button').toEqual([]);
+  });
+
+  it('🔒 and no professional KB entry still points at the removed sidebar row', () => {
+    const stale = registry
+      .map((p) => APP_KNOWLEDGE_BASE.find((f) => f.id === p.id)!)
+      .filter((e) => e && /Sidebar → Professionals/.test(`${e.path} ${e.howToUse}`));
+    expect(stale.map((e) => e.id), 'KB entries still naming the removed sidebar row').toEqual([]);
   });
 });
 

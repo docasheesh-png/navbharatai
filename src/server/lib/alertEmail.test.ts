@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  resolveEmailConfig, sendAlertEmail, alertSubject, DEFAULT_EMAIL_ENDPOINT,
+  resolveEmailConfig, sendAlertEmail, alertSubject, DEFAULT_EMAIL_ENDPOINT, senderAddress,
 } from './alertEmail';
 
 const admins = ['admin@example.com'];
@@ -123,5 +123,55 @@ describe('sendAlertEmail — never claim a send that did not happen', () => {
     const res = await sendAlertEmail(cfg, 'msg', { fetchImpl });
     expect(res.error).not.toContain('Bearer');
     expect(res.error).not.toContain(cfg.apiKey);
+  });
+});
+
+/**
+ * 🔴 THE MALFORMED SENDER, FROM A REAL SETUP (2026-09-10).
+ *
+ * Configuring this live, `ALERT_EMAIL_FROM` was entered as `NavBharatAI = alerts@send.navbharatai.com`
+ * — the display-name form with `=` where the angle brackets belong. The empty-check passed it, so the
+ * Monitor would have shown "Alerts reach you by app and email" in green while the provider rejected
+ * every send. A green light over a dead feature is worse than a red one.
+ */
+describe('resolveEmailConfig — a sender that is not an address fails HONESTLY', () => {
+  const env = (from: string) => ({ ALERT_EMAIL_API_KEY: 'k', ALERT_EMAIL_FROM: from } as NodeJS.ProcessEnv);
+
+  it('🔒 refuses the exact value that was typed in, and names the field', () => {
+    const cfg = resolveEmailConfig(env('NavBharatAI = alerts@send.navbharatai.com'), admins);
+    expect(cfg.configured).toBe(false);
+    expect(cfg.reason).toContain('ALERT_EMAIL_FROM');
+    expect(cfg.reason).toContain('not an email address');
+  });
+
+  it('accepts both forms a provider actually takes', () => {
+    expect(resolveEmailConfig(env('alerts@send.navbharatai.com'), admins).configured).toBe(true);
+    expect(resolveEmailConfig(env('NavBharatAI <alerts@send.navbharatai.com>'), admins).configured).toBe(true);
+  });
+
+  it('refuses the shapes that only fail later, at the provider', () => {
+    for (const bad of [
+      'NavBharatAI alerts@x.com',   // display name, no angle brackets
+      'alerts@localhost',           // no dot in the domain
+      'alerts at example.com',
+      'alerts@ex ample.com',
+      '<alerts@example.com',        // unclosed
+      'a@b.c, d@e.f',               // two addresses: a provider takes one From
+    ]) {
+      expect(resolveEmailConfig(env(bad), admins).configured, bad).toBe(false);
+    }
+  });
+});
+
+describe('senderAddress — the address inside a sender value', () => {
+  it('pulls the address out of the display-name form and passes a bare one through', () => {
+    expect(senderAddress('NavBharatAI <alerts@send.navbharatai.com>')).toBe('alerts@send.navbharatai.com');
+    expect(senderAddress('  alerts@send.navbharatai.com  ')).toBe('alerts@send.navbharatai.com');
+  });
+
+  it('returns null for anything a provider would reject', () => {
+    for (const bad of ['', '   ', 'NavBharatAI = alerts@x.com', 'not-an-address', 'a@b']) {
+      expect(senderAddress(bad), bad).toBeNull();
+    }
   });
 });

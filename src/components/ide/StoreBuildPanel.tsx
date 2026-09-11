@@ -1,10 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { chargeReceipt, chargeHint, readChargeHeaders, APK_PRICE_INR } from '../../lib/apkChargeNotice';
 import { PublishToNavStore } from './PublishToNavStore';
-import {
-  Loader2, Github, Download, CheckCircle2, AlertTriangle, ExternalLink,
-  Rocket, Key, RefreshCw, Wrench, FileJson, CircleStop,
-} from 'lucide-react';
+import { Loader2, Download, CheckCircle2, AlertTriangle, ExternalLink, Rocket, Key, RefreshCw, Wrench, FileJson, CircleStop } from 'lucide-react';
+import { Github } from '../ui/BrandIcons';
 import { authedHeaders } from '../../lib/authHeaders';
 // The workflow filenames come from the ONE shared registry the server's dispatch allow-list also reads.
 // Hand-written copies here and on the server are exactly why "Build my APK now" did nothing: this file

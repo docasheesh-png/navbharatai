@@ -1,5 +1,6 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { Github, ExternalLink, ShieldCheck, Sparkles, X, CreditCard, Clock, Link as LinkIcon, AlertCircle, Settings, Globe, Lock } from 'lucide-react';
+import { ExternalLink, ShieldCheck, Sparkles, X, CreditCard, Clock, Link as LinkIcon, AlertCircle, Settings, Globe, Lock } from 'lucide-react';
+import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { AuthComponent } from '../AuthComponent';

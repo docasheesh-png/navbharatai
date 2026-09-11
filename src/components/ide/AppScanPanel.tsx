@@ -10,10 +10,8 @@
 // nothing here (or from the server) names any underlying AI provider (white-label).
 
 import React, { useState, useCallback, useEffect } from 'react';
-import {
-  Bug, Loader2, Github, Box, RefreshCw, AlertTriangle, ShieldCheck,
-  ChevronDown, ChevronRight, FileSearch, CheckCircle2, Sparkles, Wrench,
-} from 'lucide-react';
+import { Bug, Loader2, Box, RefreshCw, AlertTriangle, ShieldCheck, ChevronDown, ChevronRight, FileSearch, CheckCircle2, Sparkles, Wrench } from 'lucide-react';
+import { Github } from '../ui/BrandIcons';
 import { authJsonHeaders } from '../../lib/authHeaders';
 
 type Severity = 'critical' | 'high' | 'medium' | 'low';

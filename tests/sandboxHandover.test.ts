@@ -137,15 +137,18 @@ describe('the extrapolation is kept apart from the measurement', () => {
     const p = projectHandover(tallyHandover([clean, day2]));
     expect(p.spanDays).toBe(1);
     expect(p.recoverableHoursPerDay).toBe(0.5);       // 2 × 15 minutes over one day
-    expect(p.monthlyUsdEstimate).toBeCloseTo(0.5 * 30 * 0.083, 2);
+    expect(p.monthlyUsdEstimate).toBeCloseTo(0.5 * 30 * 0.1656, 2);
   });
 
   it('the rate is the MEASURED one, and stays env-tunable', () => {
-    // $0.083 is derived in CLAUDE.md from the admin's own dashboard, not invented. A hardcoded price
-    // is a future lie, so the env wins.
-    expect(sandboxUsdPerHour({} as NodeJS.ProcessEnv)).toBe(0.083);
+    // ⚠️ CORRECTED 2026-09-11. This used to assert 0.083 and explain that it was "derived from the
+    // admin's own dashboard, not invented". Both halves were true and the number was still WRONG:
+    // $0.083 is the price of a vCPU-hour, and the builder template is 2 vCPU, so a WALL-clock hour
+    // costs $0.1656. "Not invented" is not the same standard as "checked" — see sandboxRate.ts, whose
+    // constants reproduce two consecutive invoices to the cent.
+    expect(sandboxUsdPerHour({} as NodeJS.ProcessEnv)).toBeCloseTo(0.1656, 4);
     expect(sandboxUsdPerHour({ E2B_USD_PER_HOUR: '0.26' } as unknown as NodeJS.ProcessEnv)).toBe(0.26);
-    expect(sandboxUsdPerHour({ E2B_USD_PER_HOUR: 'free' } as unknown as NodeJS.ProcessEnv)).toBe(0.083);
+    expect(sandboxUsdPerHour({ E2B_USD_PER_HOUR: 'free' } as unknown as NodeJS.ProcessEnv)).toBeCloseTo(0.1656, 4);
   });
 });
 

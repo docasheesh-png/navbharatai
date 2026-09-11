@@ -46447,8 +46447,58 @@ event stream itself dropped earlier (around the repeated tool-call failures at m
 client's local `previewUrl` state was already behind the server's by the time anything tried to correct
 it. **Trigger for revisiting:** a reproducible case, or a second admin report of the same symptom.
 
-### 🟡 Open root cause #2 — the diagnostics EXPORT SCHEMA has no field for the build's final outcome
+### ⚠️ CORRECTION — open root cause #2 as first written was WRONG, and the truth was worse
 
+It said "the diagnostics export schema has no field for the build's final outcome". **False.**
+`BuildDiagnosticsReport` has carried `ok?: boolean` and `summary?: string` all along, and
+`BuildDiagnostics` sets both from the `done` event (`case 'done': this.ok = e.ok; this.summary = e.summary`).
+I inferred "no field" from the exported JSON's KEY LIST — `JSON.stringify` drops `undefined`, so absent
+keys meant absent VALUES, not an absent schema. The same class of mistake safeguard #6 records about
+searches: an empty result is not proof of non-existence.
+
+**What the absence actually proved, and it is the real finding:** `ok`, `summary` AND `endedAt` were all
+undefined together, which means **no terminal event of any kind was ever recorded into that report** —
+no `done`, no `finish()`, no `OUTCOME_*`. The build did not exit through any of its honest endings.
+
+### 🔴 …and that is why the report blamed an innocent command
+
+With no `OUTCOME_*` present, `deriveRootCause` fell through to "pick the most severe unresolved issue"
+and named **`$ npx vitest run → exit 1`** as the root cause — a test failure the build had ALREADY fixed
+and re-run green four times before it stopped. A resolved command was blamed for ending a build it did
+not end.
+
+This is the SAME false attribution `finalizeOnDeadline` already exists to prevent — its own comment cites
+"a 35.8-minute build that had actually hit the 30-minute cap" being blamed on `npm audit fix`. That fix
+records `OUTCOME_STOPPED` from the deadline timer; it did not fire here (the report contains no
+`OUTCOME_*` at all). Which is the point: **the hole is not in any one ending path — it is in relying on
+every ending path to remember.** `endBuild()` sets `rb.ended = true` and `finalizeOnDeadline` bails on
+exactly that flag, so any path that ends a build without recording an outcome silently disarms the one
+thing that would have.
+
+**Fixed at the choke point instead (PR #2789).** `deriveRootCause` gains `endedWithoutOutcome`, set ONLY
+by the serializer — the one caller that can tell "this build never reported an ending" apart from "the
+caller did not pass `ok`" (many do not, and five existing tests caught that distinction the first time I
+got it wrong). When set, the report says plainly that the reason it stopped is not known, and demotes the
+worst recorded issue to what it actually is — the worst thing SEEN, not the reason. The issue is still
+named, because it is the most useful line available; only the causation claim is withdrawn.
+
+### ✅ Open root cause #1 SOLVED — and it was a one-token ordering drift
+
+The stale-port preview is no longer open. The frame renders `effectiveUrl = foundUrl || url`, while the
+150-second health probe sent **`url || foundUrl` — the opposite order** — under a comment that already
+claimed it sent "the URL we are ACTUALLY displaying". The sibling probe (the error-failover one, same
+file) had it right, which is what makes this a drift between two call sites rather than a missing idea.
+
+The two orders agree only when one value is empty. When both exist and differ — exactly what a failover
+creates — the user SEES `foundUrl` while the server is asked to judge `url`; the freshness check compares
+the wrong machine, answers "same", and returns no correction. **Not a transient: nothing in the loop can
+break out, because the one question that would have was never asked**, and the 150-second watchdog
+reports everything as fine forever. That matches the screenshot exactly, including why "Your preview
+moved to a new server — reconnecting you to it now." was showing ABOVE a frame that never moved.
+
+Both probes now send `effectiveUrl`, and `previewLiveFailover.test.ts` grep-locks that neither can drift
+back — a source assertion rather than a rendered one, because the bug WAS a one-token ordering
+difference between two call sites.
 While investigating #1, found that `BuildDiagnosticsReport`'s top-level keys (`schema, buildId,
 promptHash, sessionId, workspaceId, prompt, model, plannedModel, framework, startedAt, counts, issues,
 problems, rootCause, commands, llmCalls, providerDelivery, builtBy, priorFailedBuilds`) carry no
@@ -47170,6 +47220,41 @@ by `tests/hostingTiers.test.ts` so removing that line the day the meter goes liv
 rather than a silent one, and `AppKnowledgeBase.ts` tells every AI to never claim a traffic charge a
 user's ledger does not actually show.
 
+## 2026-09-10 — TWO SESSIONS FIXED ONE FLAKY TEST; the merge kept the better half (PR #2789 conflict resolution)
+
+**Session:** claude/upgrade-md-review-vxbdy0, resolving PR #2789 (branch
+`claude/preview-stale-port-and-root-cause`, opened by an earlier session) after it had sat open long
+enough for `main` to move 16 commits past its base.
+
+### What happened, and why it is worth recording rather than just merging
+PR #2789's three root-cause fixes (a port being UP is not proof of IDENTITY; the preview-health probe
+sending `url || foundUrl` while the frame renders `foundUrl || url`; a report blaming a command the
+build had already fixed) merged into today's `main` cleanly — **one file conflicted**, and the conflict
+was two sessions independently fixing the SAME flaky test in `AgentRunner.test.ts`:
+
+- **#2789's answer:** DELETE the end-to-end timeout test, keep only a source-grep assertion, on the
+  reasoning that "a flaky test is worse than no test."
+- **#2804's answer (already merged to `main`):** keep the end-to-end test AND fix the flake at its real
+  cause — the test's own arithmetic. The watchdog is checked at the TOP of the loop while
+  `totalToolUses` increments at the BOTTOM, so the ok:true branch needs
+  `turnDelayMs > maxBuildMs > time-to-first-check`; `maxBuildMs: 800` with `turnDelayMs: 1500` makes
+  that window real instead of hoping the machine is idle.
+
+**`main`'s version was kept in full.** It is strictly stronger: it holds the behavioural coverage
+#2789 was giving up AND the source-grep test, and it fixed the flake rather than removing the
+evidence of it. Nothing from #2789's actual subject matter was lost — its nine-file change touched this
+test file only to replace the flaky one, and every other file merged automatically.
+
+⚠️ **The PR body of #2789 still says it "replaces a test from #2788 that was flaky by construction".
+That sentence is no longer true of what shipped** — recorded here because a later session reading that
+description alone would look for a deletion that did not happen.
+
+### The wider lesson (safeguard #1, in a shape this file had not yet recorded)
+A finished, CI-GREEN PR is not safe just because it is green. #2789's green was earned on a base 16
+commits old; it proved nothing about today's `main`, and the one thing it could not have seen was
+another session solving the same problem better. **A PR left open drifts from green to unknown without
+any event marking the moment.** The rule that follows: re-verify a PR against current `main` before
+merging it, and treat an old green as a claim about a tree that no longer exists.
 ---
 
 ## 2026-09-10 — Renewal reminders: 5 / 3 / 1 days, plus the grace-window warning that was missing
@@ -47388,3 +47473,406 @@ down **continuously**, through the night. That is either a real outage on two of
 domains or a false positive in the probe — and `siteUptime.ts`'s own rule is that a probe which could
 not complete from our side must report "unknown" and never count as the user's site being down.
 Raised with the admin rather than guessed at: it needs one look at whether those sites actually load.
+## 2026-09-10 — lucide-react 1.x removed every brand icon; the two we use are now ours
+
+**Session:** claude/upgrade-md-review-vxbdy0. Dependabot PR #2724 (lucide-react 0.546 → 1.34) went RED
+on CI, and the reason turned out to be far larger than the one test that caught it.
+
+### What was actually wrong
+lucide-react 1.x REMOVED all brand marks. `Github` and `Figma` are not renamed and not moved to a
+subpath — verified against the real 1.34.0 tarball: absent from `dist/esm/lucide-react.mjs`, absent from
+all three `.d.ts` files, and no `icons/github.*` or `icons/figma.*` file exists. We import them in 14
+files.
+
+🔴 **And the typecheck does not catch it.** lucide-react ships no `types` field and no `exports` map, so
+`import { Github } from 'lucide-react'` resolves loosely and COMPILES CLEAN while evaluating to
+`undefined` at runtime. Rendering an undefined component is a React "Element type is invalid" CRASH, not
+a missing glyph. CI's typecheck and no-unused-imports steps both passed on the dependabot PR; the entire
+20,000-test suite caught it in exactly ONE place — `homeToolGroups.test.ts`, which happens to assert that
+every tool tile has an icon. **The sign-in screen, Settings, the Git panel and the v5 builder panel would
+all have crashed**, and nothing in the gate would have said so.
+
+### What shipped
+- **`src/components/ui/BrandIcons.tsx`** — `Github` and `Figma` vendored from lucide's OWN 0.546 path
+  data (ISC, attribution retained), with lucide's default SVG presentation and the same `size` /
+  `className` prop surface, so all 39 render sites are unchanged and the marks look identical. Nothing
+  was redrawn from memory, which is the point: an invented path would have been a wrong logo on the
+  sign-in button.
+- 14 files repointed from `lucide-react` to the vendored module; `lucide-react` bumped to ^1.44.0.
+- 🔴 **A separate, real user-facing bug found while sweeping (rule 3, hunt the siblings):** the
+  `portfolio-site` starter template in `SyncedTemplates.ts` imports `Github` INSIDE the template string
+  — code we write into a USER's generated app. Any user generating that template against current lucide
+  would get a crashing app. It was imported and never rendered, so the import is simply gone.
+- **`tests/lucideBrandIcons.test.ts`** locks it: no file under `src/` may import a removed brand icon
+  from lucide-react, template strings included, and the vendored paths must stay lucide's own.
+
+### Honest note on verification
+The local `npm run test:coverage` run exited 1 with `[vitest-worker]: Timeout calling "onTaskUpdate"` —
+a worker RPC timeout under coverage instrumentation on this machine, with **zero test failures** and
+thresholds comfortably met (branches 83.86% against a floor of 72). That is an environment limit, not a
+result; CI's dedicated runner is the authority and is what gates the merge.
+
+## 2026-09-10 — vitest 2 → 4: the lockfile trap, and a coverage ruler that changed
+
+**Session:** claude/upgrade-md-review-vxbdy0. Dependabot split this across #2723 (vitest) and #2722
+(@vitest/coverage-v8), which makes **both individually unmergeable**: CI's only test step is
+`npm run test:coverage`, and the coverage provider's major must match vitest's. Bumped together here.
+
+### The upgrade itself was free
+The same **1,523 files and 20,490 tests** pass under 4.1.11 with no test changes at all, and the config
+needed nothing (no `environmentMatchGlobs`, no `workspace`, no custom pool — the surface v3/v4 broke).
+
+### 🔴 The lockfile trap — this is the part that would have gone red after a green local run
+npm 10.9.7 (this machine's default) **crashes** resolving vitest 4's optional peer set:
+`Cannot read properties of null (reading 'edgesOut')` inside arborist's `#loadPeerSet`. The obvious
+workaround, `--legacy-peer-deps`, "succeeded" — and silently produced a lockfile that had **dropped
+`eslint` and `monaco-editor` and their entire trees**. Two consequences: `npm run build` failed locally
+with "monaco-editor not found", and `npm ci` — *exactly what CI runs* — refused the lockfile with
+EUSAGE and a list of missing packages.
+**The fix is to match CI's own toolchain:** CI upgrades to **npm 11.18.0** before installing, so the
+lockfile is now generated with that version via `npx` (a global install is not writable in this
+environment). `npm ci` then exits 0, vitest resolves to 4.1.11, and monaco is present.
+**Lesson for the gate:** a dependency change is not verified by tests passing. It is verified by
+`npm ci` succeeding on the lockfile being shipped, because that is the install CI performs.
+
+### The coverage floor moved because the RULER changed — and the first version of this note was wrong
+Vitest 4's v8 provider does AST-aware remapping unconditionally (v3's
+`coverage.experimentalAstAwareRemapping` toggle no longer exists), so every denominator moved. Measured
+on the same tree, both versions:
+
+|            | vitest 2          | vitest 4         |
+|------------|-------------------|------------------|
+| statements | 71.99% (117,020)  | 63.23% (71,596)  |
+| branches   | 83.86% ( 38,672)  | 60.70% (56,004)  |
+| functions  | 86.54% (  6,369)  | 70.33% (11,170)  |
+| lines      | 71.99%            | 64.52%           |
+
+⚠️ **An earlier draft of this claimed "only branches moved".** That was wrong, and it was wrong because
+it compared against the STALE baseline written in `vitest.config.ts`'s own comment (lines 63.6% /
+functions 73.5% / branches 79.5%) instead of measuring vitest 2 on today's tree. All four moved; the
+denominators move in BOTH directions (fewer statements, far more branches and functions), which is what
+a redefinition looks like and what a real coverage loss does not. Not one test stopped running.
+
+**Only `branches` fell below its floor, so only `branches` is re-baselined** (72 → 57, just under the
+honest 60.7% with the same ~3-point buffer `lines` has always had). The other three are left alone —
+lowering a floor that still passes weakens the gate for nothing. ⚠️ Recorded in the config: `functions`
+now clears 68 by only **2.3 points**, so if it trips on an unrelated change that is this upgrade's
+accounting, not a regression.
+
+### Gate (CI-equivalent, on the final state)
+`npm ci` (npm 11.18.0) **exit 0** · `npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean ·
+`npm run typecheck:server` 0 · `npm run build` ok · `npm run test:bundle` ok · `npm run boot:check` PASS ·
+`npm run test:coverage` **exit 0 — 1,523 files / 20,490 passed / 0 failed**, thresholds met.
+
+## 2026-09-10 — the mailer is live, and a green light over a dead feature was caught first
+
+**Session:** claude/upgrade-md-review-vxbdy0, walking the admin through Resend setup.
+
+### What is now true
+`ALERT_EMAIL_API_KEY` and `ALERT_EMAIL_FROM` are SET in Cloud Run, and `send.navbharatai.com` is
+**Verified** on Resend (DNS at Hostinger, sending region Tokyo). Both alert paths can now reach a real
+inbox: the admin Monitor's own alerts, and — the one that matters — the per-user "your site is down"
+mail from the uptime sweep shipped earlier today, which until now could only ring the in-app bell.
+
+⚠️ **This CORRECTS the "Honest limits" note in this file's item-1.8 entry above**, which said the mailer
+was not configured and only the bell would fire. That was true when written and is not true now.
+
+### Why a subdomain, and the evidence the live site was never at risk
+The admin's first question was whether editing DNS on the live domain would take the site down. It could
+not, and the setup was arranged so that it could not: every record went under **`send.navbharatai.com`**,
+so nothing at the zone root was added, edited or removed. Verified from this session by resolving them
+directly — DKIM TXT present and **complete** (218 characters, a single unsplit chunk, ending `…IDAQAB`,
+which is where a long DKIM record usually breaks), both CNAMEs matching Resend's targets exactly, and
+`navbharatai.com` still answering with Google's IPs throughout.
+
+The two hazards named up front, and neither happened: editing an existing row instead of adding one, and
+putting a CNAME at the apex.
+
+### 🔴 The bug this setup exposed — fixed the same hour
+`ALERT_EMAIL_FROM` was first entered as `NavBharatAI = alerts@send.navbharatai.com` — the display-name
+form with `=` where `<` and `>` belong. **`resolveEmailConfig` only checked that the sender was
+non-empty**, so that value passed every gate: the Monitor would have reported *"Alerts reach you by app
+and email"* in green while the provider rejected every single send.
+
+That is exactly the "worst of both states" the function's own comment names — reached through the other
+door. The empty-check was added because a missing sender fails on every send; a malformed one fails
+identically and was not checked at all.
+
+**Fixed:** `senderAddress()` now validates the shape and both real forms are accepted (`a@b.c` and
+`Name <a@b.c>`); anything else is refused **by name**, naming the field and showing the offending value.
+`alertEmail.test.ts` encodes the exact string that was typed, plus the shapes that only fail later at the
+provider (display name without brackets, no dot in the domain, two addresses in one From).
+
+**The general lesson, and it is the same one this file keeps re-learning:** a presence check is not a
+validity check. Anywhere config decides whether a feature reports itself as working, "not empty" and
+"usable" must not be the same test — the gap between them is a green light over a dead feature.
+
+---
+
+## 2026-09-11 — "18 sandboxes billing" was a number nobody could verify, including us
+
+**The report.** Admin screenshot of the Monitor: **LIVE SANDBOXES 18 — "Running now, billed by the
+minute"**, sitting directly beside **BUILDS "—", "no build in window"** for the last six hours, with the
+panel's own honest line underneath: *"Telemetry is live and nothing has been recorded in the last 6
+hours. That is a real zero, not a missing reading."*
+
+Eighteen machines billing while nothing is being built is either the most expensive bug in the platform
+or a counting error. **The important part is that nothing in the product could say which** — because the
+tile had never asked E2B anything.
+
+**What it actually counted:** `sandboxStore.listRecent(200).filter((r) => !r.pausedAt).length` — "every
+durable record WE did not pause OURSELVES". `pausedAt` is written from exactly three places, all inside
+our own idle and orphan sweeps (verified by grep). So every other way a sandbox stops running left the
+record looking alive and billing:
+
+- **E2B pausing it at its own `timeoutMs`** — which is now the NORMAL end for any sandbox both sweeps
+  miss, precisely because #2782 set `lifecycle: { onTimeout: 'pause' }` on purpose;
+- **E2B killing it**, which is what happened before #2782;
+- the sandbox dying any other way.
+
+And the error runs in the opposite direction too: the orphan sweep stamps `pausedAt` after three FAILED
+pause attempts (`shouldMarkPausedAfterFailure`) *because the machine may still be alive* — so a sandbox
+that genuinely is running can be counted as stopped. The tile could be wrong both ways at once.
+
+🔒 **This breaks the status-indicator rule on the platform's largest infrastructure line.** A number that
+says money is leaving right now must reflect real state; an invented one is worse than none, because it
+is the one an admin acts on. The admin has been managing a ~₹15,000/month E2B bill against this tile.
+
+**The fix: ask the only authority there is.** `Sandbox.list({ query: { state: ['running'] } })` — the
+provider's own answer about what is running — reached through a new `countRunningSandboxes()` on the
+actuator. `liveSandboxCount.ts` holds the decisions, PURE, with the network injected, so the rules below
+are unit-tested without a live E2B:
+
+- **A failed question yields `null`, never `0`.** A timeout, a missing key or a rejected request is
+  "unknown", and zero is a claim. The tile shows an amber "unknown, not zero" instead of a confident
+  dash, and the sub-line is now produced by the SERVER — hardcoding *"Running now — billed by the
+  minute"* in the component is exactly what let an unmeasured number claim money was leaving.
+- **Bounded at 5 pages** (~500 running machines). Unbounded, one panel load could crawl an external API
+  for minutes; bounded *silently*, a floor would be reported as a total — the same quiet wrongness
+  being removed. It reports `truncated` and the line says "at least".
+- A **paused fleet now reports a real 0** with "no machine is billing right now" — an answer the old
+  tile could not produce at all.
+
+**What this does NOT yet tell us, stated plainly:** whether the real number is 18 or 0. That is the
+point — it is now *answerable*. If the tile still reads 18 after this deploys, there is a genuine reaper
+failure worth a full autopsy; if it drops, the machines were already stopped and the bill was never
+what the tile implied. Either way the next reading is evidence instead of inference.
+
+Verified to bite: making a failed provider call report `0` instead of `null` fails the honesty test by
+name.
+
+## 2026-09-11 — E2B cost autopsy: the rate that priced every VM figure was exactly half
+
+**Trigger.** The admin sent three E2B console screenshots and asked why E2B is expensive and what happens
+at lakhs of users. Reconciling them against the code found a money defect nobody had reason to suspect,
+because the number involved was documented as measured.
+
+**Finding (verified, not inferred).** `E2B_USD_PER_HOUR = 0.083`, set in Cloud Run on 2026-08-13 and
+recorded in CLAUDE.md as "exactly the measured rate", is a price per **vCPU**-hour being used as the price
+of a **wall-clock** hour. The builder template is **2 vCPU / 4 GB**, so the true rate is **$0.1656/hour**
+and every VM cost figure in the platform was **exactly 50%** of the truth.
+
+**The faulty step, precisely.** CLAUDE.md derived `$172.08 ÷ 2,078.29 vCPU-hours` (correct) and then wrote
+*"RAM-hours ÷ vCPU-hours is exactly 2.0, so every sandbox is 1 vCPU + 2 GB"*. That ratio pins a sandbox's
+SHAPE and is equally true of 2 vCPU + 4 GB. The size was assumed. Two independent sources say it is 2/4:
+`infra/e2b/build.mjs` (`cpuCount: 2, memoryMB: 4096`) and every row of the admin's Sandboxes console
+("2 Core / 4.0 GB"). `infra/e2b/e2b.toml` says 4 vCPU and is LEGACY, read by nothing — now marked as such,
+because since this change the sandbox size feeds a cost calculation.
+
+**What makes the replacement checked rather than merely sourced.** E2B's published per-resource prices
+reproduce BOTH of the admin's billing windows to the cent, with the same two constants:
+`2,078.29 × $0.0504 + 4,156.57 × $0.0162 = $172.08` and `1,064.36 × $0.0504 + 2,128.72 × $0.0162 = $88.13`.
+The original derivation contained no step that could fail; this one does, and it is now a test.
+
+**Impact, stated in the safe direction.** The error UNDER-states our own cost, so paid builds recovered
+~50% of their VM cost and NavBharatAI absorbed the rest. **No user was over-charged and there is nothing to
+refund.** What it broke is the admin's ability to see the bill: the Monitor's VM COST tile showed half the
+real rupees, on the very panel used to ask why E2B is expensive.
+
+**Corrected wall-clock picture** (halved from what CLAUDE.md claimed): Jul 14 – Aug 13 = 1,039 wall-hours,
+~49.5 min per sandbox; Aug 12 – Sep 11 = 532 wall-hours, ~28.8 min per sandbox. The per-sandbox time really
+did halve — the idle 15 → 5 change worked — but both figures were previously stated at 2×.
+
+**Fixed (root cause + the class).**
+- New `src/server/AgentV3/sandboxRate.ts` — ONE source of truth. Named per-resource prices
+  (env-overridable), the template's size (env-overridable, defaults mirroring `build.mjs`), and the rate
+  DERIVED from the two. Replaces the two drifted copies of `sandboxUsdPerHour` that defaulted to **0.10**
+  (`sandboxCost.ts`) and **0.083** (`sandboxHandover.ts`) — the same question had two answers depending on
+  which module you asked. Both now delegate; a source-pinned test forbids a third.
+- `rateMismatch()` — a configured rate that contradicts the machine it prices is now reported, in the admin
+  build report's billing note and in amber on the Monitor, naming both figures and the exact value to set.
+  Tolerance 25%: wide enough for a real plan discount, tight enough that a shape error (always a whole
+  multiple) can never pass.
+- Corrections written where the wrong reasoning lived: the justifying comment in `sandboxHandover.ts`, two
+  places in CLAUDE.md, the assertions in `sandboxCost.test.ts` and `sandboxHandover.test.ts` that had
+  encoded the wrong default, and `AppKnowledgeBase.ts` for the tile's new behaviour.
+
+**🔴 OPEN ROOT CAUSE — the remaining half is admin-only (fourth absolute rule, step 6).**
+`E2B_USD_PER_HOUR` is SET in Cloud Run and an env value always beats a code default, so **production is
+still pricing at $0.083 until the admin sets `E2B_USD_PER_HOUR=0.1656`.** The code cannot fix this and does
+not pretend to — it warns loudly instead of pricing silently. Recorded here as open until the admin
+confirms the new value.
+
+**Lesson worth keeping.** "Not invented" is a weaker standard than "checked". The original derivation was
+honestly sourced from a real dashboard and still wrong, because it contained a step that could not fail.
+
+**Second finding, evidence-backed but not yet actioned — where the ~29 minutes per sandbox goes.** The
+in-memory idle sweep is 5 minutes, but `reapAfterMs = max(idle, touch×3 + 5min)` = **20 minutes**, and
+E2B's own `onTimeout: 'pause'` lifetime is **60 minutes**. `_touchDurable` is only called from sandbox
+operations (`getSandbox`, `noteActivity`), so a build that goes quiet during a long model call does not
+refresh the durable stamp — which is exactly why that window has to be 20. Since every Cloud Run deploy
+(i.e. every merge to `main`) orphans the creating instance, the **20-minute orphan window, not the
+5-minute idle limit, is probably what governs the bill** — meaning lowering the idle limit further would
+save nothing. The clean fix is a build heartbeat that refreshes the durable stamp on a timer independent
+of sandbox operations, after which the orphan window could shrink safely. NOT built: it can pause a live
+build if got wrong (safeguard #3), and it needs one measurement first — the distribution of sandbox
+lifetimes by which sweep ended them. Left as the next candidate, not a silent assumption.
+---
+
+## 2026-09-10 — Slice 4's cost half: the outbound check gets a spend ceiling
+
+**Trigger: the admin opened the Web Risk product page and said the pricing was far too high.** The
+screenshot showed **INR 4,777.25 / 1K count**. That number is real — it is just not ours. The console's
+pricing panel lists four SKUs with **SearchHashes Requests (Update API)** selected by default, and that
+is the $50/1K one. Our code calls `uris:search` — the **Lookup API**, which is **free to 100,000
+calls/month and $0.50/1K after** (admin then confirmed it on the same panel: `FREE — INR 0.00 /1K,
+starting after 0` and `TIER 1 — INR 47.7725 /1K, starting after 100K count/month`). Verified against
+Google's published pricing page, not from memory.
+
+**But the honest answer did not end there, and this is the part worth recording.** Correcting the
+number left a real defect standing: there was **no ceiling on the path at all**. The daily re-scan is
+bounded at 200 apps × 60 origins, so the theoretical worst case was ~360,000 lookups/month (~$130) if
+every app pointed at 60 hosts no other app pointed at. That will not happen — the cache collapses
+shared hosts — but "will not happen in normal use" is not a bound, and an unbounded spend path is one
+odd month away from being a surprise on an invoice. The admin's instinct was right about the risk even
+though the number he was reading was the wrong SKU.
+
+**Shipped: `src/server/AgentV3/webRiskBudget.ts`** — a monthly reservation counter, one Firestore
+document per calendar month (UTC, because Google's quota resets on its calendar and not ours).
+
+- **Default limit is exactly the free tier (100,000).** So the feature costs ₹0 until the admin
+  deliberately raises `NAVBHARAT_WEB_RISK_MAX_LOOKUPS`. An explicit `0` is a supported setting meaning
+  "record what apps point at, ask Google nothing"; an unreadable value falls back to the free tier and
+  **never to unlimited** — the same reasoning as `parseRolloutPercent`: someone who wanted the default
+  would have left the key unset.
+- **Reserve BEFORE spending, release the unused after.** Counting after the calls would lose whatever a
+  crash interrupts, and every lost increment is money spent twice. Reserving first means a crash costs
+  budget we did not use — an error in the direction that cannot produce a bill. The release matters as
+  much: cache hits are the common case, so without it a platform whose apps all point at the same
+  twenty hosts would exhaust a 100,000-call allowance having made almost no calls.
+- **🔒 It fails CLOSED, which is the deliberate opposite of `jobLease.ts`.** A lease that cannot be read
+  runs the job anyway, because a scheduled purge that never runs is worse than one that runs twice. A
+  budget that cannot be read spends nothing, because not looking up costs zero and changes no outcome:
+  an unchecked origin is `unknown`, and both `webRisk.ts` and `outboundRescan.ts` already refuse to act
+  on an `unknown`. The two modules fail in opposite directions and both are right; the contrast is
+  written into `webRiskBudget.ts`'s header so nobody "fixes" one to match the other.
+- **Exhausting the budget is never silent** — `webRiskSummary` names it as a separate clause from a
+  timeout, because "the allowance is spent" is an admin ACTION (raise the ceiling) while a timeout is
+  weather.
+- **One choke point, both spenders.** Publish and the daily sweep now both call
+  `scanOriginsWithBudget`; a source-invariant test asserts neither file contains a raw `scanOrigins(`
+  call, so a third caller added later cannot accidentally spend outside the ceiling.
+
+**Registry updated (`CLAUDE.md`)** with both `NAVBHARAT_WEB_RISK` and `NAVBHARAT_WEB_RISK_MAX_LOOKUPS`,
+including the ₹4,777-vs-₹47.77 SKU trap in writing, so the next person to check this price does not
+re-derive the same wrong conclusion from the same default-selected row.
+
+**Still open (admin, not code):** the Web Risk API is not yet enabled in `gen-lang-client-0866594388`,
+and `NAVBHARAT_WEB_RISK` is not set. Until both, every verdict is honestly `unknown` — nothing is
+flagged, nothing is held, nothing is spent.
+
+### Gate (CI-equivalent, on the final state)
+`npm ci` exit 0 · `npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean ·
+`npm run typecheck:server` 0 · `npm run build` ok · `npm run test:bundle` within budget ·
+`npm run boot:check` PASS · `npx vitest run` **1,526 files / 20,566 passed / 0 failed** (25 new),
+log grepped for `FAIL` — none.
+## 2026-09-11 — The Load Board finally has a screen
+
+**This closes something I reported honestly and left open.** `/api/admin/load` (ROADMAP §12) has
+answered "how full is every ceiling in the platform?" since it shipped, and **nothing rendered it** —
+along with `/api/admin/hosting/services` and `/api/admin/hosting/preflight`. Three real,
+admin-authenticated APIs returning real data, reachable only by curl. That is precisely the
+"built but not really working" state the second absolute rule forbids, and it stood because the route
+was the deliverable I tracked and the screen was not.
+
+The admin's ask was explicit: *"admin panel ke home page par to load dikhna chahiye — server load, user
+load, storage load, hosting load… sabhi load likhne hai."* `LoadBoard.tsx` now sits **first** on the
+admin home tab, above the live monitor, because a ceiling that stops the whole platform outranks a
+chart of what it is doing right now.
+
+**🔒 The rule the screen is built around: an UNKNOWN tile must never look like a healthy one.** A
+capacity board whose reading failed and a platform with plenty of headroom are both "not red", and
+collapsing those two is how a capacity board becomes reassurance. `loadBoard()` already refuses to turn
+absence into zero; this renders that refusal three ways —
+
+- an unread ceiling is grey and prints the route's own `display` string (`unknown`), never a client-side
+  re-derivation that could print `0`;
+- `loadHeadline()` says **"all clear" only when every ceiling was genuinely read** — with any tile
+  unmeasured it says so and gives the count instead, and a failed fetch overrides even stale green
+  tiles still on screen;
+- the unmeasured ceilings are **named a second time** underneath, because a grey tile in a grid of green
+  ones is easy to read past and "we could not see this ceiling" is the one thing here that must not be.
+
+`loadHeadline` is exported and pure, so that honesty is unit-tested without a browser; a source-invariant
+test pins that the board is actually mounted on the home tab, since an unmounted panel is the exact
+failure this change exists to fix.
+
+**The hosting checks are deliberately on a button.** They make real Google API calls against the apps
+project and matter only while hosting is being switched on; firing them on every home-page visit would
+spend quota to render a line saying "not switched on". `services.available === false` renders as
+"hosting is not switched on", never as zero used.
+
+---
+
+## 2026-09-11 — Professionals leaves the sidebar (admin request)
+
+**Admin:** *"navbharatai slidebar menu me professional wala option hai. professional wale option ko ab,
+navbharatai free me andar hi shift kar diya gaya hai! to, slidebar menu me se bhi isko hata do!"*
+
+The premise checked out before anything was removed: the Free chat's **MODE** button already lists Doctor
+AI and every configured professional (`modePicker.ts`, admin 2026-08-25), opened through the same
+navigation with the same engines, pass-gates and limits. So the sidebar row really was a second door to a
+place that already has one.
+
+**🔒 IT IS HIDDEN, NOT DELETED FROM `menuItems` — and that distinction is the whole change.** `TopNav`
+does `const item = menuItems.find(m => m.id === tabId); if (!item) return null`, so deleting the entry
+would make opening Professionals render **no header window at all, silently**. That exact bug is already
+recorded in `App.tsx` beside the `other_ai` entry, which exists only because it was hit once before.
+`SidebarNav.tsx` already had the right mechanism — `SIDEBAR_HIDDEN`, the same set Git, Preview, Files and
+History were moved into — so this is a one-word addition to a pattern four features already use.
+
+**The bigger half was the 151 stale directions.** `AppKnowledgeBase.ts` is what EVERY AI in NavBharatAI
+reads to answer *"where is X?"* — and **151 entries** said `Sidebar → Professionals`. Hiding the row
+without fixing those would have left Free Chat, Pro Chat, Engineer AI and Doctor AI confidently sending
+users to a door that is no longer there, which is a worse outcome than leaving the row in place. All 151
+now route through `NavBharatAI Free chat → Mode (bottom bar)`, plus five prose claims that named the
+sidebar as a way in (the hub's own entry, its `howToUse`, the SIDEBAR/MENU description, and two places
+offering the hub as a route to the v5.0 builder — the hub is now reachable only from deep inside
+professional history, which is too deep to hand someone as a way *in*).
+
+**Two existing tests failed, and that is the gate working.** `polishProfessionals` asserted every
+professional's KB path contains "Professionals"; `polishAppBuilderCluster` asserted the builder KB names
+two gates. Both encoded the OLD navigation. They were **moved, not weakened** — the intent ("every
+professional's path must name a door a user can actually open") is unchanged and still enforced over the
+full registry, now against the Mode button; each carries a comment saying what moved and why, so a later
+session does not read it as a softened assertion. Two NEW assertions were added on top: no professional
+entry may name the removed sidebar row, and the builder entry may no longer advertise the hub.
+
+`SidebarNav.logic.test.ts` is new and pins the structural rule for all five hidden entries: **every id in
+`SIDEBAR_HIDDEN` must still exist in `menuItems`** — hiding is not deleting — together with the TopNav
+line that makes that rule necessary, and the two doors that keep Professionals reachable (the Mode list's
+real config import, and the hub's own back button).
+
+### Gate (CI-equivalent, on the final state)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` within budget · `npm run boot:check` PASS ·
+`npx vitest run` **1,526 files / 20,555 passed / 0 failed** (9 new), log grepped for `FAIL` — none.
+
+### Open, and honest about it
+`NAVBHARAT_WEB_RISK=on` was set in Cloud Run by the admin on 2026-09-11 **while PR #2813 (the monthly
+lookup ceiling) was still unmerged**, because that PR's CI never fired for eight hours and had to be
+re-triggered by hand. So the outbound check is live against the code on `main`, which has **no spend
+ceiling on it** until #2813 merges and deploys. At today's scale the exposure is small and bounded by
+construction — one daily sweep can send at most 200 apps × 60 origins = 12,000 lookups against a
+100,000/month free tier — but it is a real gap and is recorded here rather than left implicit.
+`npx vitest run` **1,529 files / 20,612 passed / 0 failed** (12 new), log grepped for `FAIL` — none.

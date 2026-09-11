@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { GitBranch, Check, X, Plus, Trash2, Download, Zap, Shield, Rocket, Settings, Copy, AlertCircle, Github, Loader2 } from 'lucide-react';
+import { GitBranch, Check, X, Plus, Trash2, Download, Zap, Shield, Rocket, Settings, Copy, AlertCircle, Loader2 } from 'lucide-react';
+import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { workflowPath, commitTarget, commitMessage } from '../../lib/cicdTarget';
 

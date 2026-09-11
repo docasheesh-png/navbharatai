@@ -645,7 +645,7 @@ export default function App() {
     description: 'A responsive visual profile with scroll anchors, bento grid experience, project cards, and active contacts form.',
     files: {
       'src/App.tsx': `import React, { useState } from 'react';
-import { Mail, Github, Compass, Code, Layers, MessageSquare, ArrowUpRight, CheckCircle2, ChevronRight, User } from 'lucide-react';
+import { Mail, Compass, Code, Layers, MessageSquare, ArrowUpRight, CheckCircle2, ChevronRight, User } from 'lucide-react';
 
 export default function App() {
   const [formSubmitted, setFormSubmitted] = useState(false);

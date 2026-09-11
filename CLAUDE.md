@@ -501,6 +501,27 @@ the code (it is actually read somewhere) on 2026-07-11.
     vCPU-hours is **exactly 2.0**, so every sandbox is **1 vCPU + 2 GB**, and $0.083 matches E2B's
     published per-vCPU + per-GB rates almost to the cent — which is what makes this a measurement rather
     than a guess.
+  - 🔴 **CORRECTION 2026-09-11 — THAT PARAGRAPH IS WRONG, AND THE WRONG STEP IS THE ONE THAT SOUNDS
+    MOST RIGOROUS.** `$172.08 ÷ 2,078.29 vCPU-hours` is a price per **vCPU**-hour. The leap to "so every
+    sandbox is 1 vCPU + 2 GB" does not follow: a RAM-to-vCPU ratio of 2.0 pins a sandbox's **shape**, not
+    its **size**, and is equally true of **2 vCPU + 4 GB** — which is what `infra/e2b/build.mjs` actually
+    builds (`cpuCount: 2, memoryMB: 4096`) and what every row of the admin's own Sandboxes console reads
+    ("2 Core / 4.0 GB"). ⚠️ `infra/e2b/e2b.toml` says 4 vCPU and is **LEGACY, read by nothing** — v2
+    builds from `build.mjs`.
+    **THE REAL NUMBER: a running sandbox costs $0.1656/hour (~₹14), not $0.083.** Verified the way the
+    original never was — E2B's published per-resource prices reproduce BOTH billing windows to the cent:
+    `2,078.29 × $0.0504 + 4,156.57 × $0.0162 = $172.08` and `1,064.36 × $0.0504 + 2,128.72 × $0.0162 =
+    $88.13`. Two windows, zero cents of error, same two constants.
+    **What follows from it, all of it half of what this file used to say:** August was **1,039 wall-hours,
+    ~49.5 min per sandbox** (not 1.65 h); Aug 12 – Sep 11 was **532 wall-hours, ~28.8 min per sandbox**.
+    The per-sandbox time genuinely halved — the idle 15 → 5 change worked — but every wall-clock figure
+    above is 2× too long and every hour-rate 2× too cheap.
+    🔒 **THE LESSON, and it is not "check your arithmetic": "not invented" is a weaker standard than
+    "checked".** The original derivation was honestly sourced from a real dashboard and still wrong,
+    because it contained a step that could not fail. A derivation is only verified once it predicts
+    something it could have got wrong — which is why the constants now live in
+    `src/server/AgentV3/sandboxRate.ts` as named per-resource prices reconciled against two invoices,
+    rather than as one blended number that nothing can contradict.
   - Per sandbox: **~$0.137** (they average 1.65 hours each). Whole-clock burn: **~$0.24/hour**, i.e.
     ~$5.70/day, ~$172/month (**~₹15,000/month** at ~₹87/$).
   - **🔑 THE BILL IS RUNNING TIME, NOT BUILDS.** A build that finishes in 5 minutes and then leaves the
@@ -536,7 +557,19 @@ the code (it is actually read somewhere) on 2026-07-11.
 - **Sandbox-time billing — NOW LIVE (admin SET both in Cloud Run 2026-08-13):** `AGENTV3_BILL_SANDBOX` and
   `E2B_USD_PER_HOUR`. ✅ **`AGENTV3_BILL_SANDBOX=on`** + ✅ **`E2B_USD_PER_HOUR=0.083`** together turn on
   charging the user for the REAL E2B VM time their build actually held — the *measured* sandbox seconds ×
-  the admin's *real* rate ($0.083/hr, which is exactly the measured rate from the E2B cost analysis above),
+  the admin's *real* rate.
+  🔴 **THE VALUE IS HALF THE TRUTH AND MUST BE CHANGED: set `E2B_USD_PER_HOUR=0.1656`** (see the
+  CORRECTION 2026-09-11 above). `0.083` is the price of a **vCPU**-hour and the builder template is
+  **2 vCPU**, so a wall-clock hour costs twice that. **Nobody was over-charged — the error runs the
+  safe way**: paid builds recovered only ~50% of their VM cost and NavBharatAI absorbed the rest, so
+  there is nothing to refund. What it did break is the admin's own cost dashboard, which showed **half
+  the real rupees** on the exact panel used to judge E2B spend. Since 2026-09-11 the code no longer
+  prices silently: `sandboxRate.ts` derives the rate from the template's real size, and a configured
+  rate that contradicts the machine raises an amber warning on the Monitor and in the admin build
+  report naming both numbers and the value to set. ⚠️ **An env value still beats the code**, so the
+  warning is all the code can do — the fix itself is this one Cloud Run value.
+  (Historical note: the old text called $0.083 "exactly the measured rate from the E2B cost analysis
+  above", which is why it went unquestioned for a month.)
   included in the build's real cost BEFORE markup (`sandboxCost.ts` → `sandboxBillableUsd`). This is honest
   by construction — a clock times a stated price, never an estimate. ⚠️ **BOTH are required together:**
   with `AGENTV3_BILL_SANDBOX=on` but `E2B_USD_PER_HOUR` unset, the code bills **ZERO** (it refuses to charge
@@ -846,14 +879,63 @@ the code (it is actually read somewhere) on 2026-07-11.
   in the Privacy Policy §12 and pinned by `tests/privacyPolicyTruth.test.ts` — adding a field to the
   beacon fails CI until the policy discloses it.
 
+- **Outbound alert email — NOW LIVE (admin SET in Cloud Run 2026-09-10):** ✅ **`ALERT_EMAIL_API_KEY`**
+  (a Resend key) and ✅ **`ALERT_EMAIL_FROM`** = `alerts@send.navbharatai.com`. Read by
+  `src/server/lib/alertEmail.ts`; the endpoint defaults to Resend's (`ALERT_EMAIL_ENDPOINT` overrides it
+  for a provider with a compatible shape). **This is what finally turns email on for BOTH alert paths**
+  — the admin Monitor's own alerts (`monitorAlerts.ts`) and, more importantly, the per-user "your site
+  is down" mail from the uptime sweep, which until today could only ring the in-app bell.
+  **`ALERT_EMAIL_TO` is deliberately NOT set** — it falls back to the admin list, and user alerts pass an
+  explicit recipient (the owner's own verified address) anyway, so setting it would only risk sending a
+  user's outage mail to the admin list.
+  📌 **The sender lives on a SUBDOMAIN, `send.navbharatai.com`, and that was the point.** Verifying the
+  root domain would have put Resend's records beside the live site's own DNS; the subdomain keeps every
+  record under `send.` so `navbharatai.com` itself was never touched (verified during setup: the root A
+  records still answered with Google's IPs throughout). DNS is at **Hostinger**, sending region Tokyo
+  (`ap-northeast-1`). The FROM address is recorded here because it is public by construction — it appears
+  in the header of every mail we send — unlike the key, which is not written down anywhere.
+  ⚠️ **A MALFORMED sender used to read as CONFIGURED, and it nearly shipped that way.** During this very
+  setup `ALERT_EMAIL_FROM` was first entered as `NavBharatAI = alerts@send.…` (an `=` where `<` and `>`
+  belong); `resolveEmailConfig` only checked that the value was non-empty, so the Monitor would have
+  shown a green "Alerts reach you by app and email" while the provider rejected every send. Fixed the
+  same day — the sender's SHAPE is now validated (`senderAddress`, both `a@b.c` and `Name <a@b.c>`
+  accepted) and anything else is refused by name. Test-locked in `alertEmail.test.ts`.
 - **Site uptime alerts for connected domains (shipped 2026-09-10, ROADMAP §13 item 1.8):**
   `SITE_UPTIME_SWEEP` (kill switch — **default ON**; `off` stops the 15-minute probe of every connected
   custom domain), `SITE_UPTIME_COOLDOWN_HOURS` (default 6, clamped 1–72 — one "down" message per outage,
   then quiet while it stays down), `SITE_UPTIME_MAX_DOMAINS` (default 500, clamped ≤ 5000 — domains per
   sweep). Read by `src/server/lib/siteUptime.ts` / `siteUptimeSweep.ts`; registered in `server.ts` as the
   `site-uptime` scheduled job, **exclusive** (one instance probes). Email to the OWNER rides the existing
-  `ALERT_EMAIL_*` mailer — unconfigured ⇒ the in-app bell only, never a silent nothing. A probe that could
+  `ALERT_EMAIL_*` mailer — ✅ **configured since 2026-09-10, so the email really sends now**; unconfigured
+  ⇒ the in-app bell only, never a silent nothing. A probe that could
   not complete from our side is "unknown" and never counts as the user's site being down.
+
+- **Outbound abuse check for published apps (shipped 2026-09-10, NavBharat Cloud slice 4):**
+  `NAVBHARAT_WEB_RISK` (⚠️ **NOT set yet** — `on` turns on BOTH halves together: the publish-time
+  lookup of the outside hosts an app's code points at, and the daily `outbound-rescan` job that
+  re-asks about them and can **hold** a live app whose host became listed. Held is reversible from
+  the existing restore route; the sweep never takes an app down and never acts on anything but a
+  real listing.) `NAVBHARAT_WEB_RISK_MAX_LOOKUPS` (the monthly spend ceiling — **default 100,000**,
+  which is exactly Google's free allowance, so the feature costs ₹0 unless this is raised; an
+  explicit `0` records origins but asks Google nothing; an UNREADABLE value falls back to the free
+  tier, never to unlimited). Read by `src/server/AgentV3/webRisk.ts` / `webRiskBudget.ts`.
+  🔴 **THE API IS `uris:search` (Lookup API) — NOT `hashes.search` (Update API), and the difference
+  is 100×.** The console's Product-details page lists both, with SearchHashes selected FIRST: the
+  admin read ₹4,777.25/1K off that row on 2026-09-10 and reasonably concluded the feature was
+  unaffordable. That is the Update API, which we never call. Ours is **free to 100,000 calls/month,
+  then ₹47.77/1K** — and spend scales with DISTINCT HOSTS, not publishes, because the process cache
+  collapses the same `api.stripe.com` across every app into one lookup. Anyone re-checking this
+  price must click the **SearchUris** row.
+  ⚠️ **The key alone does nothing until the Web Risk API is ENABLED in `gen-lang-client-0866594388`**
+  (console → APIs & Services → Library → "Web Risk API"; **not** "Safe Browsing API", which is free
+  but non-commercial-only and so unusable by a commercial product). Auth is the Cloud Run service
+  account via ADC — **there is no API key to create or paste**. Until the API is on, every verdict is
+  honestly `unknown`, nothing is flagged and nothing is held.
+  🔒 **THE BUDGET FAILS CLOSED, WHICH IS THE OPPOSITE OF `jobLease.ts` AND DELIBERATE.** A lease it
+  cannot read runs the job anyway (a purge that never runs is worse than one that runs twice); a
+  budget it cannot read spends NOTHING, because not looking up costs zero and changes no outcome —
+  an unchecked origin is `unknown`, and nothing in the system acts on an `unknown`. Exhausting the
+  budget is never silent: it says so in the same `outboundNote` the admin already reads.
 
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 

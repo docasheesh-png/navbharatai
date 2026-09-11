@@ -54,15 +54,52 @@ export function decideSupersede(input: {
   newPort: number;
   recipe: PreviewRecipe | null;
   declaredPort?: number | null;
+  /**
+   * The port the APP'S OWN SOURCE says it serves on (`declaredPort.ts`), if it says anything.
+   *
+   * 🔴 THE ASSUMPTION THIS FIXES (admin build report 2026-09-10). The header above says this runs "at
+   * the ONE moment we hold proof about the new app: `update_preview` has just verified the new port
+   * UP." **A port being UP is not proof of IDENTITY.** A dev server left running by a PREVIOUS session
+   * in a resumed sandbox answers exactly as convincingly as the app just built.
+   *
+   * What that cost, from the report: an imported Express app whose `server/index.ts` serves on 5000.
+   * At minute 2 the agent called `update_preview :3000` — the framework DEFAULT, not the app's port —
+   * a leftover answered there, `portReady` went true, and this function was handed `newPort: 3000`
+   * with a recipe naming 5000. So it killed 5000: **the real app's own server**, to bless a leftover.
+   * The narration even said so out loud, backwards — "a previous app was still serving on port 5000 —
+   * superseded now that the current app is verified on port 3000". Twenty minutes of failing
+   * screenshots and flailing followed, the agent eventually read `server/index.ts`, corrected itself at
+   * minute 22, and the build hit its 30-minute cap eight minutes later.
+   *
+   * So the app's own declaration is now a VETO, not another port to free. Killing the port an app
+   * declares it serves on can only ever be wrong: either it is the app (killing it is the bug above),
+   * or the app is not up yet (killing it achieves nothing). It is deliberately only a veto — an app may
+   * legitimately hold a second port of its own, and refusing to kill is always the safe direction.
+   */
+  sourceDeclaredPort?: number | null;
 }): SupersedeDecision {
   const stale = new Set<number>();
+  const declared = typeof input.sourceDeclaredPort === 'number' && Number.isInteger(input.sourceDeclaredPort)
+    ? input.sourceDeclaredPort
+    : null;
   const usable = (p: unknown): p is number =>
     typeof p === 'number' && Number.isInteger(p) && p > 0 && p < 65536
-    && p !== input.newPort && !PROTECTED_PORTS.has(p);
+    && p !== input.newPort && !PROTECTED_PORTS.has(p)
+    // 🔒 THE VETO. Never free the port the app itself declares — see `sourceDeclaredPort`.
+    && p !== declared;
   const recipePort = input.recipe?.port;
   if (usable(recipePort)) stale.add(recipePort);
   if (usable(input.declaredPort)) stale.add(input.declaredPort as number);
-  const retireRecipe = typeof recipePort === 'number' && recipePort !== input.newPort;
+  /**
+   * 🔒 AND THE RECIPE THAT AGREES WITH THE APP IS NOT "STALE" EITHER.
+   *
+   * Retiring it would replace a port the app CLAIMS with one it never mentioned — re-pointing the
+   * preview door at the leftover for every later view, which is the half of the bug that outlived the
+   * build. When the app's own source and the stored recipe agree, a third port that merely answers
+   * does not get to overrule both.
+   */
+  const recipeMatchesApp = declared !== null && recipePort === declared && input.newPort !== declared;
+  const retireRecipe = typeof recipePort === 'number' && recipePort !== input.newPort && !recipeMatchesApp;
   const staleports = [...stale];
   const note = staleports.length === 0 && !retireRecipe
     ? ''

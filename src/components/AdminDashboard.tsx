@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, Image as PictureIcon } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, Info, Image as PictureIcon } from 'lucide-react';
 import { TirangaLoader } from './ui/TirangaLoader';
+import { stampLabel, dayLabel, signInMethodWords } from '../lib/adminUserDisplay';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
@@ -1378,6 +1379,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <thead>
                       <tr className="border-b border-white/10 text-[#8b949e] font-black uppercase tracking-widest text-[9px] bg-black/20">
                         <th className="py-3 px-4 text-left">User</th>
+                        {/* WHEN DID THEY JOIN, AND WHEN WERE THEY LAST HERE (admin 2026-09-11).
+                            Both come from Firebase Auth — Firestore answers neither properly; see
+                            adminUserActivity.ts. An unread date prints "—" with the reason on hover,
+                            never a blank cell that would read as "never signed in". */}
+                        <th className="py-3 px-4 text-left">Joined</th>
+                        <th className="py-3 px-4 text-left">Last Active</th>
                         <th className="py-3 px-4 text-left">Token Balance</th>
                         <th className="py-3 px-4 text-left">Total Used</th>
                         <th className="py-3 px-4 text-left">Wallet</th>
@@ -1388,13 +1395,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {usersLoading && (
-                        <tr><td colSpan={7} className="py-10 text-center"><TirangaLoader className="w-5 h-5 mx-auto" /></td></tr>
+                        <tr><td colSpan={9} className="py-10 text-center"><TirangaLoader className="w-5 h-5 mx-auto" /></td></tr>
                       )}
                       {!usersLoading && users.length === 0 && usersError && (
-                        <tr><td colSpan={7} className="py-10 text-center text-red-400 text-[10px] font-bold normal-case px-4">{usersError} <button onClick={fetchUsers} className="underline ml-1">Retry</button></td></tr>
+                        <tr><td colSpan={9} className="py-10 text-center text-red-400 text-[10px] font-bold normal-case px-4">{usersError} <button onClick={fetchUsers} className="underline ml-1">Retry</button></td></tr>
                       )}
                       {!usersLoading && users.length === 0 && !usersError && (
-                        <tr><td colSpan={7} className="py-10 text-center text-[#8b949e] text-[10px] font-bold uppercase">No users found. Click Load to fetch.</td></tr>
+                        <tr><td colSpan={9} className="py-10 text-center text-[#8b949e] text-[10px] font-bold uppercase">No users found. Click Load to fetch.</td></tr>
                       )}
                       {users.map((u: any) => (
                         <tr key={u.userId} className={`hover:bg-white/5 transition-colors ${u.banned ? 'bg-red-950/20' : ''}`}>
@@ -1406,6 +1413,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               <div className="text-[#8b949e] text-[9px] font-mono group-hover:text-white/80">{u.email}</div>
                             </button>
                           </td>
+                          {(() => {
+                            const joined = stampLabel(u.joinedAt, u.joinedAtSource);
+                            const active = stampLabel(u.lastActiveAt, u.lastActiveAtSource);
+                            return (
+                              <>
+                                <td className="py-3 px-4" title={joined.title}>
+                                  <span className={joined.unread ? 'text-[#484f58]' : 'text-[#8b949e]'}>{joined.unread ? joined.text : dayLabel(u.joinedAt)}</span>
+                                </td>
+                                <td className="py-3 px-4" title={active.title}>
+                                  <span className={active.unread ? 'text-[#484f58]' : 'text-[#8b949e]'}>{active.text}</span>
+                                </td>
+                              </>
+                            );
+                          })()}
                           <td className="py-3 px-4 font-mono text-amber-400 font-black">{(u.tokenBalance || 0).toLocaleString()}</td>
                           <td className="py-3 px-4 font-mono text-violet-400">{(u.totalTokensUsed || 0).toLocaleString()}</td>
                           <td className="py-3 px-4 font-mono text-emerald-400">₹{(u.remainingBalance || 0).toFixed(2)}</td>
@@ -1429,6 +1450,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                 </div>
                               ) : (
                                 <>
+                                  {/* The account sheet was only reachable by clicking the NAME, which
+                                      nobody discovers. An explicit, labelled button (admin 2026-09-11:
+                                      "user ke samne ek info button bhi banao") — same sheet, findable. */}
+                                  <button onClick={() => void openAccount(u.userId)} title="Everything we hold about this user — read only" className="px-2 py-1 bg-sky-500/10 border border-sky-500/20 rounded-lg text-[9px] font-black text-sky-300 uppercase hover:bg-sky-500/20 transition-all inline-flex items-center gap-1">
+                                    <Info className="w-3 h-3" /> Info
+                                  </button>
                                   <button onClick={() => { setSelectedUserId(u.userId); setTokenDelta(''); setTokenReason(''); }} className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[9px] font-black text-amber-400 uppercase hover:bg-amber-500/20 transition-all">
                                     Tokens
                                   </button>
@@ -1848,6 +1875,79 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   ))}
                 </div>
 
+                {/* WHO THIS PERSON IS — the facts of the account itself (admin 2026-09-11: "user ka
+                    biodata"). Read-only: nothing on this sheet writes to a profile. */}
+                <div className="mt-4 rounded-xl border border-white/10 p-3 space-y-1.5">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-white/40">Who they are</p>
+                  {(() => {
+                    const a = account.account || {};
+                    const p = account.profile || {};
+                    const joined = stampLabel(a.joinedAt, a.joinedAtSource);
+                    const active = stampLabel(a.lastActiveAt, a.lastActiveAtSource);
+                    const rows: Array<[string, React.ReactNode]> = [
+                      ['Joined', <span title={joined.title}>{joined.unread ? '—' : `${dayLabel(a.joinedAt)} · ${joined.text}`}</span>],
+                      ['Last active', <span title={active.title}>{active.text}</span>],
+                      ['Signs in with', signInMethodWords(a.signInMethods)],
+                      ['Email verified', a.emailVerified === null || a.emailVerified === undefined ? 'unread' : a.emailVerified ? 'Yes' : 'No'],
+                    ];
+                    if (a.phone) rows.push(['Phone (sign-in)', a.phone]);
+                    // `present: false` means they filled nothing in; `ok: false` means we could not
+                    // read the row. Different statements, and an admin must not read one as the other.
+                    if (p.present) {
+                      if (p.displayName) rows.push(['Display name', p.displayName]);
+                      if (p.phone) rows.push(['Phone (profile)', p.phone]);
+                      if (p.bio) rows.push(['Bio', p.bio]);
+                      if (p.budgetLimitInr > 0) rows.push(['Own monthly budget', `₹${Number(p.budgetLimitInr).toLocaleString('en-IN')}`]);
+                    } else if (p.ok === false) {
+                      rows.push(['Profile', 'could not be read']);
+                    }
+                    if (a.authDisabled === true) rows.push(['Sign-in', 'Disabled in Firebase Auth']);
+                    return rows.map(([label, value], i) => (
+                      <div key={`${label}-${i}`} className="flex items-start gap-3 text-[11px]">
+                        <span className="text-white/40 w-32 shrink-0">{label}</span>
+                        <span className="text-white/80 break-words min-w-0">{value}</span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+
+                {/* WHAT THEY USE — counts and times, never content. See the withheld note at the foot
+                    of this sheet and the header of adminUserActivity.ts for why that line is where it is. */}
+                <div className="mt-3 rounded-xl border border-white/10 p-3 space-y-1.5">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-white/40">How they use NavBharatAI</p>
+                  {(() => {
+                    const act = account.activity || {};
+                    const ent = account.entitlements || {};
+                    const last = stampLabel(act.aiLastAt, 'activity');
+                    const rows: Array<[string, React.ReactNode]> = [];
+                    rows.push(['App builds', account.builds?.ok
+                      ? `${account.builds.totalBuilds} build${account.builds.totalBuilds === 1 ? '' : 's'} across ${account.builds.apps?.length ?? 0} app${(account.builds.apps?.length ?? 0) === 1 ? '' : 's'}`
+                      : 'could not be read']);
+                    rows.push(['Published apps', account.publishedApps?.ok ? String(account.publishedApps.count) : 'could not be read']);
+                    rows.push(['AI chat requests', act.ok === false
+                      ? 'could not be read'
+                      : `${act.aiRequests ?? 0} recorded · ${act.aiLast30Days ?? 0} in the last 30 days · last ${last.text}`]);
+                    if (Array.isArray(act.byTier) && act.byTier.length > 0) {
+                      rows.push(['Busiest chat surface', act.byTier.slice(0, 3).map((t: any) => `${t.tier} (${t.requests})`).join(', ')]);
+                    }
+                    if (act.devices) {
+                      rows.push(['Devices seen', act.devices.ok === false
+                        ? 'could not be read'
+                        : `${act.devices.devices} fingerprint${act.devices.devices === 1 ? '' : 's'} · ${act.devices.browsers} browser${act.devices.browsers === 1 ? '' : 's'}`]);
+                    }
+                    rows.push(['Hosting plan', ent.hostingPlan ? `${ent.hostingPlan.name}${ent.hostingPlanExpiresAt ? ` · until ${dayLabel(Date.parse(ent.hostingPlanExpiresAt))}` : ''}` : 'None']);
+                    rows.push(['Professionals pass', ent.professionalPass === null || ent.professionalPass === undefined
+                      ? 'could not be read'
+                      : ent.professionalPass.active ? `Active${ent.professionalPass.expiresAt ? ` · until ${dayLabel(Date.parse(ent.professionalPass.expiresAt))}` : ''}` : 'None']);
+                    return rows.map(([label, value], i) => (
+                      <div key={`${label}-${i}`} className="flex items-start gap-3 text-[11px]">
+                        <span className="text-white/40 w-32 shrink-0">{label}</span>
+                        <span className="text-white/80 break-words min-w-0">{value}</span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+
                 <p className="mt-3 text-[11px] text-white/50">
                   Spent on builds: {account.builds?.ok ? `₹${Number(account.builds.spentInr).toFixed(2)}` : 'could not be read'}
                   {account.payments?.ok && <> · Paid in: ₹{Number(account.payments.totalInr).toFixed(2)} over {account.payments.successful} recharge{account.payments.successful === 1 ? '' : 's'}</>}
@@ -1874,6 +1974,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                 {account.publishedApps?.ok && account.publishedApps.count > 0 && (
                   <p className="mt-3 text-[11px] text-white/50">{account.publishedApps.count} published app{account.publishedApps.count === 1 ? '' : 's'} live</p>
+                )}
+
+                {/* SAID ON THE SCREEN, NOT ONLY IN A COMMENT. Without this line an absent section reads
+                    as "this user has done nothing", when it actually means "we deliberately do not
+                    look". The server sends the sentence so the screen cannot drift from the rule. */}
+                {account.withheld && (
+                  <p className="mt-4 text-[10px] leading-relaxed text-white/35 border-t border-white/5 pt-3">{account.withheld}</p>
                 )}
 
                 <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-white/10">

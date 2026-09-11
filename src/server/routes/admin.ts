@@ -29,6 +29,7 @@ import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport, deleteAdminBuildReport, deleteAllAdminBuildReports } from '../AgentV3/AdminBuildReportStore';
 import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
+import { fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt } from '../lib/adminUserActivity';
 import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, statusCounts, usersInBuilds } from '../lib/buildListFilter';
 import { sandboxStore } from '../AgentV3/SandboxStore';
 import { liveSandboxNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
@@ -1302,18 +1303,42 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       else if (sort === 'ai_per_day') users.sort((a: any, b: any) => (b.total_output_tokens_used || 0) - (a.total_output_tokens_used || 0));
       else if (sort === 'recent') users.sort((a: any, b: any) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
 
-      res.json(users.map((u: any) => ({
-        userId: u.userId || u.id,
-        email: u.userEmail || '–',
-        name: u.userName || 'NavBharat User',
-        tokenBalance: u.tokenBalance || 0,
-        totalTokensUsed: u.total_output_tokens_used || 0,
-        remainingBalance: u.remaining_balance || 0,
-        moneySpent: u.total_money_spent || 0,
-        hasPro: u.hasVishwakarmaPass || false,
-        banned: u.banned || false,
-        createdAt: u.updatedAt || u.createdAt || '',
-      })));
+      // WHEN DID THEY JOIN, AND WHEN WERE THEY LAST HERE (admin 2026-09-11)?
+      //
+      // Neither question has an answer in Firestore. `updatedAt` moves only when MONEY moves, so a
+      // user who chatted daily for a month without spending reads as dormant; the wallet's own
+      // `createdAt` is when the WALLET was made, and `welcomeBonus.ts` exists because a wallet can be
+      // re-created — which would make a long-standing user look new. Firebase Auth records both
+      // properly, so it is the source and the wallet is a LABELLED fallback (adminUserActivity.ts).
+      //
+      // Batched at Firebase's 100-identifier limit and capped, so one admin refresh can never become
+      // an unbounded number of Auth calls as the user base grows. Auth being unreachable degrades to
+      // `lastActiveAt: null`, which the table renders as "—" — never as a fabricated date, and never
+      // as the empty cell that would read like "never signed in".
+      const authMeta = await fetchAuthMetadata(users.map((u: any) => u.userId || u.id), await firebaseAuthBatch());
+
+      res.json(users.map((u: any) => {
+        const uid = u.userId || u.id;
+        const meta = authMeta.get(uid) ?? null;
+        const joined = resolveJoinedAt(meta, u.createdAt);
+        const lastActive = resolveLastActiveAt(meta, { walletUpdatedAt: u.updatedAt });
+        return {
+          userId: uid,
+          email: u.userEmail || '–',
+          name: u.userName || 'NavBharat User',
+          tokenBalance: u.tokenBalance || 0,
+          totalTokensUsed: u.total_output_tokens_used || 0,
+          remainingBalance: u.remaining_balance || 0,
+          moneySpent: u.total_money_spent || 0,
+          hasPro: u.hasVishwakarmaPass || false,
+          banned: u.banned || false,
+          createdAt: u.updatedAt || u.createdAt || '',
+          joinedAt: joined.atMs,
+          joinedAtSource: joined.source,
+          lastActiveAt: lastActive.atMs,
+          lastActiveAtSource: lastActive.source,
+        };
+      }));
     } catch (e: any) {
       // Admin-only endpoint: surface the REAL failure reason (Firestore error / timeout) so the panel can
       // show WHY the list didn't load instead of a misleading "no users found". (Not a user-facing surface,

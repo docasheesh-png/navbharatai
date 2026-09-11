@@ -243,6 +243,7 @@ import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
+import { summarizeRestore, type SandboxRestoreOutcome } from '../AgentV3/sandboxRestore';
 import { publishedAppCap, publishedAppCapForTier } from '../lib/HostingQuota';
 import { hostingPlansEnabled, hostingPlanPriceInr, readHostingPlanStatus } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
@@ -1386,6 +1387,24 @@ function sandboxOriginOf(actuator: unknown, workspaceId: string): string | null 
     if (typeof fn !== 'function' || !workspaceId) return null;
     const origin = fn.call(actuator, workspaceId);
     return typeof origin === 'string' && origin ? origin : null;
+  } catch {
+    return null; // an observation must never be a reason a build fails
+  }
+}
+
+/**
+ * What the restore onto a FRESH machine achieved — the other half of the origin above.
+ *
+ * The origin says the machine came up empty; only this says whether the app got put back into it. For
+ * weeks a report could say "created a fresh machine" beside a blank preview with nothing to point at,
+ * because the answer existed nowhere. Same duck-typing and same null-means-unreported contract.
+ */
+function sandboxRestoreOf(actuator: unknown, workspaceId: string): string | null {
+  try {
+    const fn = (actuator as { sandboxRestore?: (id: string) => SandboxRestoreOutcome | null })?.sandboxRestore;
+    if (typeof fn !== 'function' || !workspaceId) return null;
+    const outcome = fn.call(actuator, workspaceId);
+    return outcome ? summarizeRestore(outcome) : null;
   } catch {
     return null; // an observation must never be a reason a build fails
   }
@@ -11204,7 +11223,13 @@ async function noteBuildOutcome(
             // alongside it, because "had an id and still came up cold" is the interesting case.
             detail: `resume-id lookup ${resumeLookupMs}ms · sandbox create/connect + scaffold + install `
               + `${ensureWorkspaceMs}ms · had-resume-id=${resumeSandboxId ? 'yes' : 'no'} · `
-              + `sandbox=${sandboxOriginOf(actuator, workspaceId) ?? 'unreported'}`
+              + `sandbox=${sandboxOriginOf(actuator, workspaceId) ?? 'unreported'} · `
+              // Both halves of the same line, added by two sessions on the same day and kept together
+              // deliberately: `restore=` says whether a fresh machine was refilled from the durable
+              // store (#2818), `started-by=` says what caused the machine to exist at all (#2820).
+              // Reading them side by side is the whole point — "created fresh · restored 24/24 ·
+              // started-by=preview-door" is a complete story that neither line tells alone.
+              + `restore=${sandboxRestoreOf(actuator, workspaceId) ?? 'n/a (warm or resumed)'}`
               + ` · started-by=${sandboxSessionOf(actuator, workspaceId)?.reason ?? 'unreported'}`,
           });
         } catch { /* timing is observation only — it must never affect a build */ }

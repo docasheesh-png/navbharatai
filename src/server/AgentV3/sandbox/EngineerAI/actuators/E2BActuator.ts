@@ -44,10 +44,31 @@ const USER_ACTIVITY_WRITE_MS = 60_000;
 // who had already closed the tab.
 const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
+/**
+ * Bounds on putting a dead workspace's app back into a fresh machine (`_restoreFreshSandbox`).
+ *
+ * Each one is a CEILING, never a budget to spend: the restore is a Firestore read plus file writes, so
+ * the normal case is seconds. They exist so a slow store or a throttled sandbox DELAYS the caller
+ * instead of hanging it — `getSandbox` sits on the hot path of every write, command and port sweep, so
+ * an unbounded wait here would hang a build, a publish and the preview door together.
+ *
+ * A breach leaves a PARTIAL restore and returns the sandbox anyway, because a partial app builds far
+ * more often than an empty one — and the outcome is recorded, so nothing reports it as a clean setup.
+ */
+const DURABLE_RESTORE_LOAD_MS = 20_000;
+const DURABLE_RESTORE_WRITE_MS = 4 * 60_000;
+const DURABLE_RESTORE_ASSET_MS = 90_000;
+
 import {
   BROWSE_PAINT_DEADLINE_MS, BROWSE_PAINT_POLL_MS, splitPaintMarker,
 } from '../../../PreviewVerify';
-import { assertWriteAllowed } from '../../../greenFreeze';
+import { assertWriteAllowed, runInPass } from '../../../greenFreeze';
+import { loadWorkspaceFiles } from '../../../WorkspaceFileStore';
+import { writeWorkspaceFiles } from '../../../WorkspaceFiles';
+import { restoreWorkspaceAssets } from '../../../WorkspaceAssetStore';
+import {
+  mergeRestoreSources, restoreFailed, summarizeRestore, type SandboxRestoreOutcome,
+} from '../../../sandboxRestore';
 import { shellQuote } from '../../../../lib/shellQuote';
 import { needsLegacyPeerDeps } from '../../../npmInstallFallback';
 import { buildOutputCandidates, configDumpCommand, parseConfigDump } from '../../../builtSiteCheck';
@@ -787,6 +808,27 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   /**
+   * What the last restore onto a FRESH machine for this workspace actually achieved.
+   *
+   * Reported, never inferred — and it is the other half of `sandboxOrigin`. The origin says the machine
+   * came up empty; only this says whether the app got put back into it. A report carrying one without
+   * the other is what let "created a fresh machine" sit beside a blank preview for weeks with nothing
+   * to point at.
+   */
+  private _restoreOutcome = new Map<string, SandboxRestoreOutcome>();
+
+  /** The last fresh-machine restore for this workspace, or null when none has run this process. */
+  sandboxRestore(workspaceId: string): SandboxRestoreOutcome | null {
+    return this._restoreOutcome.get(workspaceId) ?? null;
+  }
+
+  /**
+   * Creations in flight, per workspace, so concurrent callers share ONE machine instead of each
+   * making their own and orphaning all but the last. See the note at the lock in `getSandbox`.
+   */
+  private _creating = new Map<string, Promise<Sandbox>>();
+
+  /**
    * Consecutive pauses we asked for and could not confirm, per workspace.
    *
    * In memory on purpose. An instance recycle resets it to zero, which restarts the retries — the safe
@@ -1103,6 +1145,43 @@ export class E2BActuator implements IEngineerActuator {
       return existing;
     }
 
+    /**
+     * 🔒 CONCURRENT CALLERS SHARE ONE CREATION — and this is not a tidy-up, it is a cost fix.
+     *
+     * There was no lock here. Every file write, command and port sweep calls `getSandbox`, and a build
+     * fires several of those at once, so two callers arriving before `this.sandboxes` was populated
+     * BOTH created a machine — and only the second one was remembered. The first became an orphan
+     * billed by the minute until a sweep found it, which is a standing candidate for the 1,110
+     * sandbox starts a single tester's month recorded.
+     *
+     * It also has to exist BEFORE the durable restore below, or the window would get much worse: the
+     * restore makes creation take seconds-to-minutes instead of milliseconds, widening the exact race
+     * it would otherwise lose.
+     *
+     * No deadlock is possible. `_createSandbox` publishes into `this.sandboxes` BEFORE restoring, so
+     * the `writeFile` / `runCommand` calls the restore itself makes re-enter at the warm path above
+     * and never reach this map.
+     */
+    const inFlight = this._creating.get(workspaceId);
+    if (inFlight) return await inFlight;
+    const creation = this._createSandbox(workspaceId, resumeSandboxId, framework);
+    this._creating.set(workspaceId, creation);
+    try {
+      return await creation;
+    } finally {
+      // Cleared whatever happened: a failed create must be retryable, not remembered as in-flight.
+      this._creating.delete(workspaceId);
+    }
+  }
+
+  /**
+   * Obtain a sandbox for a workspace that has none in this instance's memory: resume the workspace's
+   * own machine if we can, create one if we cannot — and in the second case, PUT THE APP BACK.
+   *
+   * Split out of `getSandbox` so the in-flight lock above has something to hold. The resume/create
+   * branching below is unchanged.
+   */
+  private async _createSandbox(workspaceId: string, resumeSandboxId?: string, framework?: string): Promise<Sandbox> {
     // Every create/connect is bounded by SANDBOX_CREATE_TIMEOUT_MS so a slow E2B can
     // never hang the build silently — on timeout we throw and the caller surfaces it.
     let sandbox: Sandbox;
@@ -1167,14 +1246,103 @@ export class E2BActuator implements IEngineerActuator {
     // what made a running build indistinguishable from an abandoned one.
     this._lastDurableTouch.delete(workspaceId);
     this._touchDurable(workspaceId, sandbox.sandboxId);
-    // RECREATE-AFTER-DEATH restore: a fresh sandbox comes back EMPTY. When we hold a cached copy of the
-    // source files this workspace already wrote (the dead sandbox that was just evicted), replay them so
-    // the build continues instead of losing everything. No-op on the very first create (cache empty).
-    if (freshCreate) {
-      const cached = this._fileCache.get(workspaceId);
-      if (cached && cached.size > 0) await this._replayFilesToSandbox(sandbox, cached);
-    }
+    // RECREATE-AFTER-DEATH restore: a fresh sandbox comes back EMPTY, so the app goes back INTO it —
+    // from the durable store first and this instance's warm cache second. See `_restoreFreshSandbox`.
+    if (freshCreate) await this._restoreFreshSandbox(workspaceId);
     return sandbox;
+  }
+
+  /**
+   * Put the workspace's app back into a machine that came up EMPTY.
+   *
+   * ── THE BUG THIS CLOSES (admin 2026-09-11) ────────────────────────────────────────────────────
+   * *"bas starting ke 24hr tak hi live rahte hai, uske bad 2-3 din wapas wapas live preview chalao
+   * nahi chalta hai. aur isko aap bhi 50+ bar fix kiye ho. nahi hua"* — and they were right, about
+   * both halves.
+   *
+   * This line used to replay `_fileCache` and nothing else. That cache is in this instance's MEMORY:
+   * the idle sweep DELETES it when it pauses a workspace, and it dies with its Cloud Run instance on
+   * every deploy. So in the one situation that matters — days later, another instance, the paused
+   * snapshot gone from the vendor — the restore source was empty, the machine stayed empty, and every
+   * retry re-ran the same nothing. That is why fifty symptom-level fixes could not work: each was
+   * trying to wake a machine, when the real failure was that the app was never written into the
+   * machine we had just made.
+   *
+   * The app itself was never at risk. `WorkspaceFileStore` is Firestore, has no TTL, and is written on
+   * every build and every edit. Two paths already read it before touching a sandbox — publish and
+   * GitHub push, via `sandboxSeed.ts` — because each was fixed on the day it broke. The PREVIEW, the
+   * surface the user actually looks at, was outside both. Doing it HERE is what makes that
+   * impossible to be outside of again: every path into a sandbox goes through `getSandbox`, so the
+   * door's port sweep, a publish, a push, a read and a build all inherit one guarantee instead of
+   * each remembering to ask.
+   *
+   * 🔒 WHY THIS IS NOT A COST PROBLEM. There is no model call anywhere in it — the files are copied,
+   * not regenerated — so the whole thing is one Firestore read plus the writes, and `writeWorkspaceFiles`
+   * lands a large project in two round trips via its archive path rather than one per file. A brand-new
+   * workspace reads an empty store and returns immediately.
+   *
+   * 🔒 WHY IT CANNOT MAKE THINGS WORSE. It only ever runs on a machine we JUST created, so there is no
+   * live work to overwrite; it is bounded, so a slow Firestore delays a build instead of hanging it;
+   * and it never throws, because a failed restore must still hand back the sandbox and be REPORTED as
+   * empty rather than crashing the caller that asked for it.
+   */
+  private async _restoreFreshSandbox(workspaceId: string): Promise<void> {
+    const warm = this._fileCache.get(workspaceId) ?? null;
+    let durable: Record<string, string> = {};
+    try {
+      durable = await withTimeout(
+        loadWorkspaceFiles(workspaceId), DURABLE_RESTORE_LOAD_MS, 'loadWorkspaceFiles(restore)',
+      ) ?? {};
+    } catch {
+      // An unreadable store must not lose the warm copy too — fall through with whatever we still hold.
+      durable = {};
+    }
+    const files = mergeRestoreSources(durable, warm);
+    const attempted = Object.keys(files).length;
+    const outcome: SandboxRestoreOutcome = {
+      durable: Object.keys(durable).length, warm: warm?.size ?? 0, attempted,
+      restored: 0, assets: 0, skipped: 0,
+    };
+    if (attempted === 0) { this._restoreOutcome.set(workspaceId, outcome); return; }
+    try {
+      // ONE shared landing path, not a fifth copy of "write a project into a sandbox".
+      // `writeWorkspaceFiles` is the tested implementation that also carries the archive fast path (a
+      // 2,460-file project took 648 SECONDS of one-write-per-file before it existed), and the actuator
+      // satisfies its sink interface exactly.
+      //
+      // The pass name matters: every `writeFile` passes through Green Freeze, which refuses to touch a
+      // verified-working app from a pass it does not recognise. `sandbox-file-restore` is on its
+      // allowed list for precisely this reason — copying an app's own durable bytes into a machine
+      // that has none alters nothing, and refusing it does not protect the app, it strands it.
+      const landed = await withTimeout(
+        runInPass('sandbox-file-restore', () => writeWorkspaceFiles(this, workspaceId, files)),
+        DURABLE_RESTORE_WRITE_MS, 'writeWorkspaceFiles(restore)',
+      );
+      outcome.restored = landed.written.length;
+      // A refusal is reported, not hidden: a live `.env` is excluded on purpose (the app's keys are
+      // re-minted from the user's own vault, never restored out of a shared store), and a reader who
+      // sees only "23/24" would go looking for a bug that is not there.
+      outcome.skipped = landed.skipped.length;
+    } catch {
+      // A timeout here leaves a PARTIAL restore, which still builds far more often than an empty
+      // machine — so the sandbox is returned either way and the outcome below tells the truth.
+    }
+    try {
+      // The logo, icons and fonts are source too: an app restored without them is back but visibly
+      // broken, which is the same report arriving a second time. Same durable-store guarantee, same
+      // best-effort contract, and it writes nothing when the workspace has no assets.
+      outcome.assets = await withTimeout(
+        runInPass('sandbox-file-restore', () => restoreWorkspaceAssets(this, workspaceId)),
+        DURABLE_RESTORE_ASSET_MS, 'restoreWorkspaceAssets(restore)',
+      );
+    } catch { /* an un-restored image 404s; it never blocks the app from coming back */ }
+    this._restoreOutcome.set(workspaceId, outcome);
+    if (restoreFailed(outcome)) {
+      // HONESTY (fourth rule, step 5). A machine we could not fill is the state the old code reported
+      // as a successful setup. It is logged loudly because nothing downstream can distinguish it from
+      // a workspace that genuinely has no files, and the build report carries the same line.
+      console.error(`[E2BActuator] fresh-sandbox restore FAILED for ${workspaceId}: ${summarizeRestore(outcome)}`);
+    }
   }
 
   /** Record a source-file write in the bounded per-workspace cache (for recreate-after-death restore). */
@@ -1185,14 +1353,6 @@ export class E2BActuator implements IEngineerActuator {
     if (!m) { m = new Map(); this._fileCache.set(workspaceId, m); }
     if (!m.has(relPath) && m.size >= E2BActuator.FILE_CACHE_MAX_FILES) return; // bounded — never grows unbounded
     m.set(relPath, content);
-  }
-
-  /** Best-effort replay of the cached source files onto a freshly-created sandbox. Never throws. */
-  private async _replayFilesToSandbox(sandbox: Sandbox, files: Map<string, string>): Promise<void> {
-    for (const [relPath, content] of files) { // keys are already safeRelPath'd by writeFile
-      try { await withTimeout(sandbox.files.write(`${WORKSPACE_ROOT}/${relPath}`, content), 15_000, 'files.write(replay)'); }
-      catch { /* one file failing to replay never blocks the recreate */ }
-    }
   }
 
   async ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {

@@ -9,6 +9,7 @@ import { buildDocumentContext } from '../lib/attachmentText';
 import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
+import { groundingStatusFor, firstTokenLog } from '../lib/chatGrounding';
 import { songcraftFor } from '../AI/songcraft';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { detectImageIntent, imageGenGuidance, imageGenToolPointer } from '../lib/imageIntent';
@@ -230,6 +231,9 @@ ${LANGUAGE_RULE}
 Be helpful, concise, and accurate. If the user wants to build an app, guide them.`;
 
   const chatHandler = async (req: any, res: any, tier: 'navbharat' | 'vishwakarma-basic' | 'vishwakarma-pro' | 'vip') => {
+    // Stamped FIRST so the measurement below covers everything the user actually waits through — the
+    // document extraction, the vision pass and the live lookup included, not just the model call.
+    const requestStartedAt = Date.now();
     let { message, history, currentApp, mode, intent, userProfile, fileAttachments, memorySummary } = req.body;
     if (!message && !Array.isArray(fileAttachments)) return res.status(400).json({ reply: 'Message is required' });
     message = message || '';
@@ -435,6 +439,27 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // LIVE WEB GROUNDING (admin 2026-07-12): for a message that needs current facts (sports/news/
     // prices/"latest"/"aaj"), fetch real results and prepend them so the model answers from TODAY's
     // data, not its training cutoff. Gated + bounded + best-effort — never blocks or slows normal chat.
+    //
+    // ⚠️ THE COMMENT ABOVE IS TRUE OF THE ORDINARY MESSAGE AND FALSE OF THE GROUNDED ONE, and the
+    // difference is the whole reason for the status below. This await sits BEFORE the model is allowed
+    // to speak: a search bounded at 6 s followed by a page read bounded at 2.5 s, i.e. up to eight and
+    // a half seconds in which the user sees NOTHING. The grounding itself is right — stale answers are
+    // worse than slow ones — so what is removed here is the silence, not the lookup.
+    //
+    // The stream is opened FIRST and says what is happening, so the first thing on screen arrives in a
+    // fraction of a second. `s` is a status field the answer never contains; a client that does not
+    // know it ignores it and renders exactly what it renders today.
+    const groundingStatus = groundingStatusFor(message);
+    if (groundingStatus && req.body.stream === true) {
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders();
+      }
+      if (!res.writableEnded) res.write(`data: ${JSON.stringify({ s: groundingStatus })}\n\n`);
+    }
     try {
       const liveBlock = await liveSearchContext(message);
       if (liveBlock) contextualMessage = `${liveBlock}\n\n---\n${contextualMessage}`;
@@ -442,12 +467,16 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
 
     try {
       if (req.body.stream === true) {
-        // SSE stream — proper format so proxies/load balancers don't drop idle connections
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('X-Accel-Buffering', 'no');
-        res.flushHeaders(); // send headers immediately, don't buffer
+        // SSE stream — proper format so proxies/load balancers don't drop idle connections.
+        // Guarded because the grounding status above may already have opened the stream; setting a
+        // header after flush throws, which would turn a speed improvement into a failed reply.
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('X-Accel-Buffering', 'no');
+          res.flushHeaders(); // send headers immediately, don't buffer
+        }
 
         const controller = new AbortController();
 
@@ -462,11 +491,20 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           clearInterval(heartbeat);
         });
 
+        // MEASURED, NOT ASSUMED. Every statement about chat speed in this repo so far has been read
+        // off the code — including the eight-and-a-half-second figure above, which is a BUDGET and not
+        // an observation. This records what actually happened, split by path, because averaging a
+        // grounded reply with a direct one hides the only number worth knowing.
+        let firstTokenAt: number | null = null;
         try {
           await aiRouter.routeStream(
             contextualMessage, history, tier, systemPrompt,
             (chunk: string) => {
               if (!res.writableEnded) {
+                if (firstTokenAt === null) {
+                  firstTokenAt = Date.now();
+                  console.log(firstTokenLog({ ms: firstTokenAt - requestStartedAt, grounded: !!groundingStatus, tier }));
+                }
                 // JSON-encode each chunk so newlines/special chars are safe in SSE
                 res.write(`data: ${JSON.stringify({ c: chunk })}\n\n`);
               }

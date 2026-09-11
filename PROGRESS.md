@@ -48225,3 +48225,52 @@ How long E2B keeps a PAUSED snapshot is not knowable from the SDK or our code �
 field in the API schema. The admin can settle it from their own dashboard: if a machine shown as paused
 today is **gone from the list** in a few days, E2B reclaims it, and a rebuild-from-durable (what this
 change does) is the only possible answer rather than a better resume.
+
+
+## 2026-09-11 — Free chat speed: the stall was never the model, it was the silence before it
+
+**Trigger.** Admin: *"kya navbharatai free ke response ko superfast banaya ja sakta hai"*.
+
+**Read the path before proposing anything (rule 4, step 1).** Most of it is already fast and was left
+alone: the reply genuinely streams (`aiRouter.routeStream` → SSE → the client renders every 40 ms with a
+cursor), the router RACES the top two providers so a slow leader costs nothing, the free chain leads with
+GLM-flash, and a plain message reaches the model with nothing awaited in front of it.
+
+**The one real stall, and it is structural.** `liveSearchContext(message)` is awaited BEFORE the model is
+allowed to speak: a web search bounded at 6 s, then a top-page read bounded at 4 s. And the gate is
+wide — `FRESH_SIGNAL` covers latest/current/today/price/rate/score/news/weather/who-is, the Hindi and
+Roman equivalents, plus the whole daily-life set (train/bus/flight/PNR/AQI/mandi). So **the questions
+users ask most are the slowest ones, and for up to ten seconds the reply bubble showed nothing at all**.
+From the user's chair that is indistinguishable from a frozen app.
+
+**What was fixed, and what deliberately was not.** The lookup itself is right — a stale answer is worse
+than a slow one — so it was not skipped or weakened. What was removed is the SILENCE:
+1. `chatGrounding.ts` (pure): `groundingStatusFor(message)` returns one honest line when, and only when,
+   the lookup will actually run. The route emits it as SSE **before** awaiting the lookup, opening the
+   stream itself. Ordinary messages get no status at all — a spinner for nothing teaches users to
+   distrust the one that means something.
+2. It rides its own field (`s`). The client appends only `c`, so an older client ignores it and the
+   server half is behaviour-identical until the client ships. The client renders `accumulated || status`,
+   so a status can never sit above real text and never reaches the saved message or history.
+3. The later header block is now `if (!res.headersSent)` — setting a header after flush throws, and that
+   would have turned a speed fix into a failed reply.
+4. Page-read budget 4 s → 2.5 s. A page that has not answered in 2.5 s is a heavy one whose text we cap
+   anyway, and the snippets already in hand are a complete answer on their own.
+5. **Measured, not assumed:** `firstTokenLog` records real time-to-first-token, split `grounded` vs
+   `direct` (averaging them hides the only useful number), stamped from the REQUEST so it covers document
+   extraction and vision too, marked `SLOW` past 2.5 s. Every speed claim in this repo so far — including
+   the ten seconds above — has been a BUDGET read off the code, not an observation.
+
+**Effect.** A grounded question now shows an honest line within a fraction of a second instead of a blank
+bubble for seconds, and its full answer lands up to 1.5 s sooner. An ordinary question is byte-identical.
+
+**Recorded, not done (the admin's call):** dropping the top-page read entirely on the free tier would save
+a further ~2.5 s on grounded answers, at the cost of the model seeing only search snippets rather than the
+page — speed bought with depth. Not taken unilaterally. Cold start (Cloud Run min-instances 0) is the
+other real first-message cost and is a standing monthly bill, so it belongs to the admin too.
+
+**Tests:** `tests/chatGrounding.test.ts` (15) — the gate fires on real everyday questions and stays silent
+on ordinary ones, survives rubbish input, the line names no vendor (white-label), the log's shape and its
+NaN/negative guards, and wiring pins: the status is emitted BEFORE the lookup (that ordering IS the fix),
+the later headers are guarded, the client never lets a status into the saved message, the timer starts at
+the request, and the page budget is 2.5 s.

@@ -31,6 +31,8 @@ import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnost
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
 import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, statusCounts, usersInBuilds } from '../lib/buildListFilter';
 import { sandboxStore } from '../AgentV3/SandboxStore';
+import { liveSandboxNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
+import { buildActuator } from './actuatorFactory';
 import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from '../AgentV3/sandboxHandover';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
@@ -494,9 +496,26 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     // in one Cloud Run instance's memory, so a tile built on it would show a different number depending
     // on which instance answered the request — worse than no tile, because it looks authoritative.
     // null (not 0) when the store cannot be read, so the UI shows "—" rather than a confident zero.
-    const liveSandboxes = await sandboxStore.listRecent(200)
-      .then((records) => records.filter((r) => !r.pausedAt).length)
-      .catch(() => null);
+    //
+    // 🔒 REPOINTED 2026-09-11 — IT USED TO INFER THIS, AND THE INFERENCE WAS WRONG ABOUT MONEY.
+    // The old line was `listRecent(200).filter(r => !r.pausedAt).length` — "every record WE did not
+    // pause ourselves". `pausedAt` is written from three places, all inside our own sweeps, so a
+    // sandbox E2B paused at its own timeout (the normal end for anything both sweeps miss, since
+    // #2782 set onTimeout:'pause') or killed was still counted as "billed by the minute". The admin's
+    // 2026-09-11 screenshot showed 18 such machines beside ZERO builds in six hours, and nothing in
+    // the platform could say whether that was a costly reaper bug or a counting error.
+    // It now asks E2B, which is the only authority on what is running. See liveSandboxCount.ts.
+    const liveCount = await (async (): Promise<LiveSandboxCount> => {
+      try {
+        const actuator = buildActuator();
+        return typeof actuator.countRunningSandboxes === 'function'
+          ? await actuator.countRunningSandboxes()
+          : { running: null, truncated: false, reason: 'No cloud sandbox provider is configured on this deployment.' };
+      } catch (err) {
+        return { running: null, truncated: false, reason: err instanceof Error ? err.message : 'Could not reach the sandbox provider.' };
+      }
+    })();
+    const liveSandboxes = liveCount.running;
     const providerStats = guard(() => getProviderStats());
 
     // The same composite health inputs the dedicated /health-score endpoint reports, from the same
@@ -531,6 +550,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       snapshot,
       instanceUptimeSeconds: Math.round(process.uptime()),
       liveSandboxes,
+      liveSandboxNote: liveSandboxNote(liveCount),
       // How hard THIS instance is working right now. One instance of several — the client says so.
       serverLoad: serverLoad.snapshot(),
       // Whether alerts can reach the admin OUTSIDE the app, and plainly why not when they cannot.

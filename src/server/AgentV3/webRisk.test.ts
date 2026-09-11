@@ -211,7 +211,10 @@ describe('🔒 the wiring — a check nobody runs is not a check', () => {
     expect(at).toBeGreaterThan(-1);
     const body = store.slice(at, at + 2200);
     expect(body).toContain('void (async () => {');
-    expect(body).toContain('scanOrigins(');
+    // Through the budget, never around it — a second, un-budgeted call path would silently reopen
+    // the unbounded spend `webRiskBudget.ts` exists to close.
+    expect(body).toContain('scanOriginsWithBudget(');
+    expect(store).not.toContain('scanOrigins(');
   });
 
   it('🔒 origins are recorded even when the lookup is switched OFF', () => {

@@ -910,6 +910,33 @@ the code (it is actually read somewhere) on 2026-07-11.
   ⇒ the in-app bell only, never a silent nothing. A probe that could
   not complete from our side is "unknown" and never counts as the user's site being down.
 
+- **Outbound abuse check for published apps (shipped 2026-09-10, NavBharat Cloud slice 4):**
+  `NAVBHARAT_WEB_RISK` (⚠️ **NOT set yet** — `on` turns on BOTH halves together: the publish-time
+  lookup of the outside hosts an app's code points at, and the daily `outbound-rescan` job that
+  re-asks about them and can **hold** a live app whose host became listed. Held is reversible from
+  the existing restore route; the sweep never takes an app down and never acts on anything but a
+  real listing.) `NAVBHARAT_WEB_RISK_MAX_LOOKUPS` (the monthly spend ceiling — **default 100,000**,
+  which is exactly Google's free allowance, so the feature costs ₹0 unless this is raised; an
+  explicit `0` records origins but asks Google nothing; an UNREADABLE value falls back to the free
+  tier, never to unlimited). Read by `src/server/AgentV3/webRisk.ts` / `webRiskBudget.ts`.
+  🔴 **THE API IS `uris:search` (Lookup API) — NOT `hashes.search` (Update API), and the difference
+  is 100×.** The console's Product-details page lists both, with SearchHashes selected FIRST: the
+  admin read ₹4,777.25/1K off that row on 2026-09-10 and reasonably concluded the feature was
+  unaffordable. That is the Update API, which we never call. Ours is **free to 100,000 calls/month,
+  then ₹47.77/1K** — and spend scales with DISTINCT HOSTS, not publishes, because the process cache
+  collapses the same `api.stripe.com` across every app into one lookup. Anyone re-checking this
+  price must click the **SearchUris** row.
+  ⚠️ **The key alone does nothing until the Web Risk API is ENABLED in `gen-lang-client-0866594388`**
+  (console → APIs & Services → Library → "Web Risk API"; **not** "Safe Browsing API", which is free
+  but non-commercial-only and so unusable by a commercial product). Auth is the Cloud Run service
+  account via ADC — **there is no API key to create or paste**. Until the API is on, every verdict is
+  honestly `unknown`, nothing is flagged and nothing is held.
+  🔒 **THE BUDGET FAILS CLOSED, WHICH IS THE OPPOSITE OF `jobLease.ts` AND DELIBERATE.** A lease it
+  cannot read runs the job anyway (a purge that never runs is worse than one that runs twice); a
+  budget it cannot read spends NOTHING, because not looking up costs zero and changes no outcome —
+  an unchecked origin is `unknown`, and nothing in the system acts on an `unknown`. Exhausting the
+  budget is never silent: it says so in the same `outboundNote` the admin already reads.
+
 ### 🔎 FULL CLOUD RUN AUDIT — 84 keys read off the live console (admin screenshots, 2026-08-20)
 
 The admin sent the complete list of env-var NAMES from the live Cloud Run service, and every one was

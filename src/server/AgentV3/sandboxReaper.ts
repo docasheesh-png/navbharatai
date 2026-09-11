@@ -147,6 +147,47 @@ export function sandboxesToReap(
 }
 
 /**
+ * How many sandboxes we can HONESTLY say are running and billing right now.
+ *
+ * 🔴 WHY THIS IS NOT JUST `!pausedAt` (admin report 2026-09-11). The Monitor's "Live sandboxes" tile
+ * counted every record without a `pausedAt` stamp, and read **18** while E2B's own dashboard — the only
+ * thing that decides the bill — showed **2**. The other sixteen were ghosts.
+ *
+ * `pausedAt` is written ONLY when OUR reaper pauses a sandbox. E2B also ends sandboxes on its own
+ * lifetime, a pause can fail, and `sandboxesToReap` deliberately never touches a record whose
+ * `updatedAt` is missing or unparseable ("unknown age → never reap", so a live build can never be
+ * killed). Every one of those paths leaves a record that is not paused, not running, and counted
+ * forever.
+ *
+ * WHAT MAKES THE AGE TEST CORRECT rather than a guess: a genuinely live sandbox REFRESHES its record
+ * every `touchIntervalMs` while it is in use. So a record older than the reaper's own window has either
+ * been paused (and carries the stamp) or cannot be shown to be running at all — and "running now,
+ * billed by the minute" is precisely the claim we cannot make about it.
+ *
+ * The damage a wrong number does is not cosmetic, and it nearly landed: reading 18, the admin was about
+ * to switch OFF `AGENTV3_SANDBOX_RESUME` to save money — the one flag that lets the orphan sweep pause
+ * anything at all, so turning it off would have RAISED the bill. A dashboard that overstates is how a
+ * cost-SAVING control gets switched off. PURE.
+ */
+export function countLiveSandboxes(
+  records: ReapableSandbox[],
+  now: number,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const freshEnough = now - reapAfterMs(env);
+  return (records || []).filter((r) => {
+    if (!r) return false;
+    const paused = Number(r.pausedAt);
+    if (Number.isFinite(paused) && paused > 0) return false;
+    const at = Number(r.updatedAt);
+    // Unknown age is NOT evidence of running. The reaper leaves such a record alone on purpose; the
+    // count must not turn that caution into a confident "it is billing you".
+    if (!Number.isFinite(at) || at <= 0) return false;
+    return at >= freshEnough;
+  }).length;
+}
+
+/**
  * How often a LIVE build refreshes its durable timestamp.
  *
  * The record used to be written only when a build FINISHED, which made `updatedAt` mean "when the

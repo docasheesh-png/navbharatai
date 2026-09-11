@@ -47568,3 +47568,49 @@ provider (display name without brackets, no dot in the domain, two addresses in 
 **The general lesson, and it is the same one this file keeps re-learning:** a presence check is not a
 validity check. Anywhere config decides whether a feature reports itself as working, "not empty" and
 "usable" must not be the same test — the gap between them is a green light over a dead feature.
+
+## 2026-09-11 — the Monitor said 18 sandboxes, E2B said 2, and the wrong number nearly raised the bill
+
+**Session:** claude/upgrade-md-review-vxbdy0, reading the admin's live Monitor screenshot.
+
+### What was wrong
+The "Live sandboxes" tile read **18** with **no builds in six hours**; E2B's own dashboard — the only
+thing that decides the bill — showed **2**. Sixteen ghosts.
+
+The tile counted `records.filter((r) => !r.pausedAt).length`. **`pausedAt` is written ONLY when OUR
+reaper pauses a sandbox.** Three ordinary paths leave a record that is not paused and not running:
+E2B ends a sandbox on its own lifetime; a pause attempt fails; or `sandboxesToReap` refuses to touch a
+record whose `updatedAt` is missing or unparseable — *"unknown age → never reap"*, which exists so a
+live build can never be killed. None of those write the stamp, so the record is counted **forever**.
+
+### 🔴 Why a cosmetic-looking bug mattered
+Reading 18, the admin's next question was whether to switch **`AGENTV3_SANDBOX_RESUME` off to save
+money**. That flag is the first line of `_sweepOrphanSandboxes()`: with it off the sweep returns
+immediately, and the orphan sweep is the ONLY one that can pause a sandbox created by a *different*
+Cloud Run instance — which is every sandbox from before the last deploy, and today's shipping recycled
+the instance seven times. **Turning it off would have raised the bill, not lowered it**, and it would
+also have dropped warm resume, making every returning user pay for a fresh sandbox.
+
+That is the same shape as the `AGENTV3_WEAK_FLAGSHIP_HEAL=off` cost trap already recorded in
+`CLAUDE.md`: a switch that sounds cheaper and is not. **The lesson worth keeping is that an overstating
+dashboard is not a display bug — it is how a cost-SAVING control gets switched off.**
+
+### The fix
+`countLiveSandboxes(records, now, env)` (pure, in `sandboxReaper.ts`) replaces the `!pausedAt` filter.
+A record counts only when it is unpaused AND its `updatedAt` is within the reaper's own window
+(`reapAfterMs`, 20 minutes by default). That threshold is not a guess: a genuinely live sandbox
+**refreshes its record every `touchIntervalMs`** while in use, so anything older has either been paused
+(and carries the stamp) or cannot be shown to be running — and "running now, billed by the minute" is
+exactly the claim we cannot make about it. Unknown age counts as NOT running, so the reaper's caution is
+never converted into a confident "this is billing you".
+
+Locked in `sandboxReaper.test.ts`, including a replay of the report itself (two fresh + sixteen ancient
+⇒ 2, not 18) and the boundary, so a sandbox is never dropped from the count while still reapable.
+
+### Honest limits
+- This corrects the COUNT. It does not delete the ghost records; they age out of `listRecent`'s
+  newest-200 window on their own and cost nothing. If they ever crowd that window, retiring them is a
+  separate change.
+- The count is still our own bookkeeping, not E2B's. **E2B's dashboard remains the authority on what is
+  billing**, and any future number that disagrees with it should be believed in E2B's favour.
+- No money was being lost: the real figure was 2 sandboxes.

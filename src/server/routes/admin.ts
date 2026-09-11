@@ -21,6 +21,7 @@ import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { metricsTimeline } from '../lib/metricsTimeline';
 import { resolveEmailConfig } from '../lib/alertEmail';
+import { countLiveSandboxes } from '../AgentV3/sandboxReaper';
 import { serverLoad } from '../lib/serverLoad';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
@@ -495,7 +496,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     // on which instance answered the request — worse than no tile, because it looks authoritative.
     // null (not 0) when the store cannot be read, so the UI shows "—" rather than a confident zero.
     const liveSandboxes = await sandboxStore.listRecent(200)
-      .then((records) => records.filter((r) => !r.pausedAt).length)
+      .then((records) => countLiveSandboxes(records, Date.now()))
       .catch(() => null);
     const providerStats = guard(() => getProviderStats());
 

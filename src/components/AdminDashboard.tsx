@@ -1112,7 +1112,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               {/* Row 2: 4 more metrics */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {statCard('Output Tokens', (analytics?.totalTokensUsed || 0).toLocaleString(), 'All providers combined', 'bg-amber-500', Zap)}
-                {statCard('Platform Margin', `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`, 'Revenue minus AI cost', (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
+                {/* 🔒 "AT MOST" WHEN THE COST IS A FLOOR. Some calls cannot be priced (a provider that
+                    reported no tokens, or a row written before usage was recorded), so the real cost is
+                    at least what we summed and the margin is at most what we show. This card used to
+                    read a flat "Platform Margin ₹155" while the engine-cost panel beside it showed
+                    ₹1,223 of spend — because cost was structurally zero and margin was revenue with a
+                    different label. Never again by accident: the word changes with the certainty. */}
+                {statCard(
+                  analytics?.providerCostComplete === false ? 'Platform Margin (at most)' : 'Platform Margin',
+                  `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`,
+                  analytics?.providerCostComplete === false
+                    ? `Revenue minus AI cost · ${analytics?.unpricedCalls || 0} call(s) could not be priced`
+                    : 'Revenue minus AI cost',
+                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
                 {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Paid transactions', 'bg-pink-500', Tag)}
                 {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Direct provider cost', 'bg-orange-500', Cpu)}
               </div>
@@ -1354,7 +1366,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     )}
                   </div>
                   <div className="bg-black/30 rounded-xl p-3 space-y-1 font-mono text-xs border border-white/5">
-                    <div className="flex justify-between"><span className="text-[#8b949e]">Total Provider Cost</span><span className="text-orange-400 font-black">₹{(analytics?.totalProviderCost || 0).toFixed(4)}</span></div>
+                    <div className="flex justify-between">
+                      <span className="text-[#8b949e]">
+                        {analytics?.providerCostComplete === false ? 'Provider Cost (at least)' : 'Total Provider Cost'}
+                      </span>
+                      <span className="text-orange-400 font-black">₹{(analytics?.totalProviderCost || 0).toFixed(4)}</span>
+                    </div>
                     <div className="flex justify-between"><span className="text-[#8b949e]">Cashfree Gateway</span><span className="text-emerald-400">{analytics?.cashfreeStatus?.clientId || '–'}</span></div>
                   </div>
                 </div>
@@ -1682,8 +1699,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             <div className="space-y-6">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'All time', 'bg-emerald-500', IndianRupee)}
-                {statCard('Provider Cost', `₹${(analytics?.totalProviderCost || 0).toFixed(4)}`, 'AI API cost', 'bg-red-500', Database)}
-                {statCard('Net Margin', `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`, 'Revenue - cost', (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
+                {statCard(
+                  analytics?.providerCostComplete === false ? 'Provider Cost (at least)' : 'Provider Cost',
+                  `₹${(analytics?.totalProviderCost || 0).toFixed(4)}`,
+                  analytics?.providerCostComplete === false
+                    ? `AI API cost · ${analytics?.pricedCalls || 0} priced, ${analytics?.unpricedCalls || 0} not`
+                    : 'AI API cost',
+                  'bg-red-500', Database)}
+                {statCard(
+                  analytics?.providerCostComplete === false ? 'Net Margin (at most)' : 'Net Margin',
+                  `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`,
+                  analytics?.providerCostComplete === false ? 'Revenue - cost (cost is a floor)' : 'Revenue - cost',
+                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
                 {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Successful payments', 'bg-pink-500', Tag)}
                 {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Avg AI provider cost', 'bg-orange-500', Cpu)}
                 {statCard('Active Users', analytics?.activeUsers24h || 0, 'Using AI in 24h', 'bg-violet-500', UserCheck)}

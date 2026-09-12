@@ -1,4 +1,4 @@
-// HostingChooser — the "Publish" surface for NavBharatAI Pro v5.0 (Hosting Phase 1).
+// HostingChooser — the "Publish" surface for NavBharatAI Pro (Hosting Phase 1).
 //
 // One screen, three paths, kept 100% in sync where it matters (all three publish/store the SAME
 // workspace files):

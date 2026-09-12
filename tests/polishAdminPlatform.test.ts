@@ -65,7 +65,7 @@ describe('Platform / Navigation — sampled real controls + fixed retired entrie
     for (const id of ['unified-workspace', 'unified-memory', 'engineer_ai_github', 'iterative-agent-build', 'guider-plan-confirm']) {
       const e = APP_KNOWLEDGE_BASE.find((f) => f.id === id);
       expect(e, `missing ${id}`).toBeTruthy();
-      expect(e!.path, `${id} path`).toMatch(/Pro v5\.0/);
+      expect(e!.path, `${id} path`).toMatch(/NavBharatAI Pro/);
     }
   });
 });

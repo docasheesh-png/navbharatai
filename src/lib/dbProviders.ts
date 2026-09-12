@@ -172,7 +172,7 @@ export const DB_PROVIDERS: DbProviderSpec[] = [
     keyLink: '',
     sdk: 'the appropriate client for its connection string',
     fields: [
-      { key: 'platformName', label: 'Platform Name', placeholder: 'e.g. CockroachDB, Xata, SQL Server…', where: 'The name of your database provider — used only as a label so v5.0 knows which SDK to wire' },
+      { key: 'platformName', label: 'Platform Name', placeholder: 'e.g. CockroachDB, Xata, SQL Server…', where: 'The name of your database provider — used only as a label so NavBharatAI Pro knows which SDK to wire' },
       { key: 'connectionString', label: 'Connection String / API Key', placeholder: 'postgresql://… or your API key', where: "Your provider's dashboard → Connect / Connection string (or API key)", env: 'DATABASE_URL' },
     ],
   },

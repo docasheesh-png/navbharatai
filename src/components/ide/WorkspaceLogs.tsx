@@ -147,7 +147,7 @@ export const WorkspaceLogs: React.FC<WorkspaceLogsProps> = ({ workspaceId, userI
         {!loaded && <div className="text-[#8b949e]">Loading logs…</div>}
         {loaded && lines.length === 0 && (
           <div className="text-[#8b949e]">
-            No build activity recorded yet for this workspace. Start a build in NavBharatAI Pro v5.0 chat — its live progress will appear here.
+            No build activity recorded yet for this workspace. Start a build in NavBharatAI Pro chat — its live progress will appear here.
           </div>
         )}
         {lines.map((l, i) => (

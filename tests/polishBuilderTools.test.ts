@@ -23,7 +23,7 @@ describe('Voice to App — real control is the Pro v5.0 mic', () => {
   it('the KB no longer points at the non-existent "Settings → AI Tools → Voice to App"', () => {
     const e = kb('voice_to_app')!;
     expect(e.path).not.toMatch(/Settings → AI Tools/);
-    expect(e.path).toMatch(/NavBharatAI Pro v5\.0/);
+    expect(e.path).toMatch(/NavBharatAI Pro/);
     expect(e.path).toMatch(/mic/i);
   });
   it('the inline dictation mic really exists in the Pro composer', () => {

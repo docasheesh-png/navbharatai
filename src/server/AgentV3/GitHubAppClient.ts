@@ -31,7 +31,7 @@ export interface GitHubConfig {
  * platform org. It is also EVIDENCE: `pushAppTarget.ts` reads it back to tell a mirror NavBharatAI made
  * from a repository the user made, and only the former may ever be force-pushed on its default branch.
  */
-export const PLATFORM_REPO_DESCRIPTION = 'Built with NavBharatAI Pro v5.0';
+export const PLATFORM_REPO_DESCRIPTION = 'Built with NavBharatAI Pro';
 
 export interface RepoInfo {
   fullName: string;

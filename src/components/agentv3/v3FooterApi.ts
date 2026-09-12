@@ -1,5 +1,5 @@
 // Dynamic per-view footer (admin 2026-07-07): on mobile/tablet the app's single bottom nav shows
-// VIEW-SPECIFIC options — v5.0 first. When NavBharatAI Pro v5.0 is the active view, the nav swaps
+// VIEW-SPECIFIC options — v5.0 first. When NavBharatAI Pro is the active view, the nav swaps
 // its default items (Home / AI / Preview / Studio / More) for v5.0's own six:
 // History · Pro Chat · Preview · Files · Code Studio · More.
 //

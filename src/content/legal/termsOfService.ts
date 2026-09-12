@@ -11,7 +11,7 @@ export const TERMS_OF_SERVICE = `# Terms of Service
 
 **Last updated: ${TERMS_OF_SERVICE_UPDATED}**
 
-These Terms of Service ("**Terms**") are an agreement between you and **NavBharatAI** ("we", "us") governing your use of the NavBharatAI website, mobile applications and every product inside them — NavBharatAI Free, NavBharatAI Pro v5.0 (the AI app builder), the Professionals assistants, the Nav App Store, and the developer tools (the "Platform").
+These Terms of Service ("**Terms**") are an agreement between you and **NavBharatAI** ("we", "us") governing your use of the NavBharatAI website, mobile applications and every product inside them — NavBharatAI Free, NavBharatAI Pro (the AI app builder), the Professionals assistants, the Nav App Store, and the developer tools (the "Platform").
 
 Please read them. The short version of the most important points: **the apps you build belong to you; tokens are prepaid usage credit, not money in a bank; a build that fails is not charged; you may not use the Platform to harm anyone; AI output must be verified before you rely on it; and the clinical assistant is a support tool for doctors, never a doctor.**
 

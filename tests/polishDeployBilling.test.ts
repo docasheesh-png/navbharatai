@@ -25,7 +25,7 @@ describe('Deploy entries route to the real v5.0 "Publish", not retired surfaces'
       expect(e).toBeTruthy();
       expect(e.path).not.toMatch(/Engineer AI chat/);
       expect(e.path).not.toMatch(/Pro Chat → header bar → Deploy/);
-      expect(e.path).toMatch(/Pro v5\.0/);
+      expect(e.path).toMatch(/NavBharatAI Pro/);
       expect(e.path).toMatch(/Publish/);
     },
   );

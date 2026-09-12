@@ -885,7 +885,7 @@ function ContentTab({ page, onCodeChange, onTitleChange, onAIGenerate, generatin
           }}
         >
           <ChevronRight size={12} />
-          Build in Pro v5.0
+          Build in NavBharatAI Pro
         </button>
 
         <button

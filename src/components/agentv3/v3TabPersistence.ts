@@ -1,4 +1,4 @@
-// Keeping the NavBharatAI Pro v5.0 TAB open across a full-page round trip.
+// Keeping the NavBharatAI Pro TAB open across a full-page round trip.
 //
 // ── THE REPORT (admin 2026-08-20) ───────────────────────────────────────────────────────────────
 // "v5 → Publish → Connect database → the Settings→Database page opens (correct!) — but Pro v5.0

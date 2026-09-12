@@ -249,8 +249,8 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
 
   async function start(term: Terminal, fit: FitAddon, alive: () => boolean, attempt = 0): Promise<void> {
     if (!workspaceId || !userId) {
-      setStatus({ kind: 'unavailable', message: 'Sign in and start a build in NavBharatAI Pro v5.0 to open a terminal.' });
-      term.write('\x1b[90mSign in and start a build in NavBharatAI Pro v5.0 to open a terminal.\x1b[0m\r\n');
+      setStatus({ kind: 'unavailable', message: 'Sign in and start a build in NavBharatAI Pro to open a terminal.' });
+      term.write('\x1b[90mSign in and start a build in NavBharatAI Pro to open a terminal.\x1b[0m\r\n');
       return;
     }
 
@@ -328,8 +328,8 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
         const message = j.reason === 'unknown'
           ? 'Could not check this workspace just now — try again in a moment.'
           : j.reason === 'dormant'
-            ? `Workspace is dormant after a restart — your ${j.savedFileCount} saved file${j.savedFileCount === 1 ? '' : 's'} ${j.savedFileCount === 1 ? 'is' : 'are'} safe. Send a message in NavBharatAI Pro v5.0 chat to bring the sandbox back online, then the terminal works again.`
-            : 'Sandbox not active yet — start a build in NavBharatAI Pro v5.0 chat to bring the terminal online.';
+            ? `Workspace is dormant after a restart — your ${j.savedFileCount} saved file${j.savedFileCount === 1 ? '' : 's'} ${j.savedFileCount === 1 ? 'is' : 'are'} safe. Send a message in NavBharatAI Pro chat to bring the sandbox back online, then the terminal works again.`
+            : 'Sandbox not active yet — start a build in NavBharatAI Pro chat to bring the terminal online.';
         setStatus({ kind: 'unavailable', message });
         term.write(`\x1b[90m${message}\x1b[0m\r\n`);
         // The exact precondition, dim and on its own line. It is meaningless to most users and
@@ -399,7 +399,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       term.write(`\r\n\x1b[31m${message}\x1b[0m\r\n`);   // \r\n first: end the in-place % line
       if (detail) term.write(`\x1b[90m${detail.slice(0, 300)}\x1b[0m\r\n`);
     };
-    if (attempt >= 4) { fail('The workspace keeps waking without becoming ready. Tap "Try again", or send a message in NavBharatAI Pro v5.0 chat to start it.'); return; }
+    if (attempt >= 4) { fail('The workspace keeps waking without becoming ready. Tap "Try again", or send a message in NavBharatAI Pro chat to start it.'); return; }
     // ONE line, updated IN PLACE (\r + erase): a percentage anchored to the real phases plus a live
     // elapsed timer, instead of a scroll of prose (admin 2026-08-06: "loading files hata do — % banao,
     // timer laga do"). The timer advances every tick even when the percent holds, so alive-but-slow
@@ -443,7 +443,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
         return;
       }
       if (Date.now() - startedAt > HARD_CEILING_MS) {
-        fail('The workspace is taking far longer than it should (5 min). Tap "Try again", or send a message in NavBharatAI Pro v5.0 chat.');
+        fail('The workspace is taking far longer than it should (5 min). Tap "Try again", or send a message in NavBharatAI Pro chat.');
         return;
       }
     }

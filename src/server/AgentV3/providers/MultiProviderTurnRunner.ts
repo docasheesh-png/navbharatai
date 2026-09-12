@@ -647,7 +647,7 @@ export function makeMultiProviderTurnRunner(
       // Every provider failed (or was known-dead) — surface the final error honestly, and when the
       // cause is a FATAL account problem, say so in plain words (it is the platform, not the app).
       const reason = lastError instanceof Error ? lastError.message : String(lastError);
-      const prefix = alive === 0 ? 'All v5.0 providers are unavailable (known-fatal from earlier in this build)' : `All v5.0 providers failed (${fellBackFrom.join(' → ')})`;
+      const prefix = alive === 0 ? 'All NavBharatAI Pro providers are unavailable (known-fatal from earlier in this build)' : `All NavBharatAI Pro providers failed (${fellBackFrom.join(' → ')})`;
       throw new Error(`${prefix}. Last error: ${reason}${fatalProviderHint(reason)}`);
     },
   };

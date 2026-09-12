@@ -494,7 +494,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                         which file and where — inventing the thing the button claims to know.
 
                         The real auto-fix path already exists and is genuinely wired: the App Scan tab
-                        scans a chosen Pro workspace and hands its findings to NavBharatAI Pro v5 via
+                        scans a chosen Pro workspace and hands its findings to NavBharatAI Pro via
                         `onAutoFixInV5`, which knows the workspace and can really edit the code. "Copy"
                         below delivers the fix text meanwhile. */}
                   </div>

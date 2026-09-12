@@ -1,4 +1,4 @@
-// Keep the NavBharatAI Pro v5.0 surface (ProV3Surface) MOUNTED like a real WINDOW in NavBharatAI's
+// Keep the NavBharatAI Pro surface (ProV3Surface) MOUNTED like a real WINDOW in NavBharatAI's
 // tab/window system — its state (chat, live build stream) survives switching among any number of
 // other tabs, and it only unmounts when the user explicitly CLOSES the v5.0 tab.
 //

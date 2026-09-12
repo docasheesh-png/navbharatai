@@ -8,7 +8,7 @@ import type { V3FooterApi } from './v3FooterApi';
 type V3Resume = { sessionId: string; messages: Array<{ role: 'user' | 'agent'; text: string; ts: number }>; nonce: number } | null;
 
 /**
- * NavBharatAI Pro v5.0 surface — the single Pro builder, replacing the retired Pro v2.0.
+ * NavBharatAI Pro surface — the single Pro builder, replacing the retired Pro v2.0.
  *
  * v5.0 is rolled out per-account (AGENTV3_ENABLED + allowlist). This wrapper asks the server
  * whether v5.0 is enabled for THIS user (the same /api/agentv3/status probe the launcher uses):
@@ -49,9 +49,9 @@ export function ProV3Surface({ userId, email, resume, freshOpenNonce, onFilesSyn
       <div className="w-14 h-14 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center">
         <Sparkles className="w-7 h-7 text-indigo-400" />
       </div>
-      <h2 className="text-lg font-bold">NavBharatAI Pro v5.0</h2>
+      <h2 className="text-lg font-bold">NavBharatAI Pro</h2>
       <p className="max-w-sm text-sm text-zinc-400 leading-relaxed">
-        Pro v5.0 — the new agentic app builder — is rolling out to accounts in batches. It will appear
+        NavBharatAI Pro — the agentic app builder — is rolling out to accounts in batches. It will appear
         here automatically as soon as it's enabled for your account.
       </p>
     </div>

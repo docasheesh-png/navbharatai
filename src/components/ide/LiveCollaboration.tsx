@@ -19,7 +19,7 @@ interface AiMessage {
 
 // Header AI switcher (admin 2026-07-28): the room's header picks WHICH AI the team uses.
 //  - 'free'         → shared NavBharatAI Free chat (real; billed to whoever asks)
-//  - 'pro'          → NavBharatAI Pro v5.0 real in-room build (coming soon)
+//  - 'pro'          → NavBharatAI Pro real in-room build (coming soon)
 //  - 'professional' → a Professional the OWNER selects from a dropdown (coming soon)
 //  - 'team'         → members / approvals / chat (kept)
 type RoomTab = 'free' | 'pro' | 'professional' | 'team';
@@ -601,8 +601,8 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
             <div className="w-14 h-14 bg-violet-500/10 rounded-2xl flex items-center justify-center border border-violet-500/20">
               <Zap className="w-7 h-7 text-violet-400" />
             </div>
-            <h3 className="text-sm font-semibold text-white">NavBharatAI Pro v5.0 — in the room</h3>
-            <p className="text-xs text-white/40 max-w-xs">Build a real app together — the whole team watches Pro v5.0 build live. <span className="text-amber-400/80 font-medium">Coming soon.</span></p>
+            <h3 className="text-sm font-semibold text-white">NavBharatAI Pro — in the room</h3>
+            <p className="text-xs text-white/40 max-w-xs">Build a real app together — the whole team watches NavBharatAI Pro build live. <span className="text-amber-400/80 font-medium">Coming soon.</span></p>
           </div>
           )}
 

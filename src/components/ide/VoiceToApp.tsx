@@ -16,7 +16,7 @@ import { useSpeechInput } from '../../hooks/useSpeechInput';
 
 interface VoiceToAppProps {
   /**
-   * Hands the spoken/edited prompt to the REAL build engine (NavBharatAI Pro v5.0): the app switches
+   * Hands the spoken/edited prompt to the REAL build engine (NavBharatAI Pro): the app switches
    * to the Pro chat with the composer prefilled, and pressing Send starts a genuine live build.
    * This replaced a dead POST /api/generate call (the route never existed on the server, so the old
    * "Build My App" button always errored — a display-only feature, admin autopsy 2026-07-20).
@@ -113,7 +113,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
             Voice to App
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            Just speak — NavBharatAI Pro v5.0 will build your app
+            Just speak — NavBharatAI Pro will build your app
           </p>
         </div>
 
@@ -258,7 +258,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
               {status === 'success' && (
                 <div className="mt-3 flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2.5 text-green-400 text-sm">
                   <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                  Your prompt is ready in Pro v5.0 chat — press Send to start the real build
+                  Your prompt is ready in NavBharatAI Pro chat — press Send to start the real build
                 </div>
               )}
 

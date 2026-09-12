@@ -4,7 +4,7 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface ScreenshotToCodeProps {
   /**
-   * Hands the screenshot-derived build prompt to the REAL engine (NavBharatAI Pro v5.0): the app
+   * Hands the screenshot-derived build prompt to the REAL engine (NavBharatAI Pro): the app
    * switches to the Pro chat with the composer prefilled, and pressing Send builds the real app.
    * Replaced onCodeGenerated, whose old generate-from-image endpoint never existed — the tool used
    * to silently emit a hardcoded fallback page regardless of the screenshot (admin autopsy 2026-07-20).
@@ -563,7 +563,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
               <div className="space-y-2">
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-950/30 border border-emerald-800/40 text-emerald-300 text-xs">
                   <Check className="w-3.5 h-3.5 shrink-0" />
-                  Build spec ready — sent to NavBharatAI Pro v5.0. Press Send there to build your app.
+                  Build spec ready — sent to NavBharatAI Pro. Press Send there to build your app.
                 </div>
                 <pre
                   className="text-xs leading-relaxed whitespace-pre-wrap break-words text-gray-300"

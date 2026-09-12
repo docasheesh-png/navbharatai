@@ -9,7 +9,7 @@ import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
  * Root cause fixed: the KB still described the RETIRED Pro Chat v2.0 surface and pointed Free Chat at a
  * "Reports" tab that no longer exists. The real surfaces today are:
  *   • Free Chat  → menu "NavBharatAI FREE"  /  Home "Start Free Chat"  (App.tsx menuItems + HomeView).
- *   • NavBharatAI Pro → Home "NavBharatAI Pro" card ("Open Pro Builder") / menu "App Builder v5.0"
+ *   • NavBharatAI Pro → Home "NavBharatAI Pro" card ("Open Pro Builder") / menu "NavBharatAI Pro"
  *     (the v2.0 ProChatPanel is retired — App.tsx: "The old ProChatPanel (v2.0) is retired").
  * This suite pins the corrected navigation so no NavBharatAI AI sends a user to a control that is gone.
  */
@@ -31,9 +31,14 @@ describe('Core AI Chat — real navigation labels exist in code', () => {
     expect(app).toContain("label: 'NavBharatAI FREE'");
     expect(home).toContain('Start Free Chat');
   });
-  it('Pro builder gate: Home "Open Pro Builder" + menu "App Builder v5.0"', () => {
+  it('Pro builder gate: Home "Open Pro Builder" + menu "NavBharatAI Pro"', () => {
+    // CORRECTED 2026-09-12. This asserted the sidebar row "App Builder v5.0" — whose destination
+    // (engine_builder) App.tsx no longer renders, making it a dead button that this very suite's
+    // header promises to catch ("so no NavBharatAI AI sends a user to a control that is gone"). A
+    // label assertion cannot see a deleted destination; the real gate is the menuItems entry.
     expect(home).toContain('Open Pro Builder');
-    expect(read('src/components/panels/SidebarNav.tsx')).toContain('App Builder v5.0');
+    expect(app).toContain("{ id: 'nbi_pro_chat', label: 'NavBharatAI Pro', icon: Bot }");
+    expect(read('src/components/panels/SidebarNav.tsx')).not.toContain("toggleTab('engine_builder')");
   });
   it('Offline AI + Freelancing gates exist', () => {
     expect(app).toContain("label: 'Offline AI'");
@@ -60,9 +65,9 @@ describe('Core AI Chat — no KB entry points at a retired control', () => {
     expect(fa.path).toMatch(/NavBharatAI FREE/);
   });
 
-  it('Pro entry routes to the real "NavBharatAI Pro" / "App Builder v5.0" gate', () => {
+  it('Pro entry routes to the real "NavBharatAI Pro" gate', () => {
     const pc = kb('pro_chat')!;
-    expect(pc.path).toMatch(/Open Pro Builder|App Builder v5\.0/);
+    expect(pc.path).toMatch(/Open Pro Builder|NavBharatAI Pro/);
   });
 });
 

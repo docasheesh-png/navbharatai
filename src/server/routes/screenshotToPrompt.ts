@@ -17,7 +17,7 @@ import { runVisionChain } from '../lib/visionChain';
  * masked every failure with a hardcoded FALLBACK_CODE stub, so it always emitted the same canned page
  * regardless of the screenshot (a rule-2 deception). This route genuinely reads the uploaded
  * screenshot with the vision chain (GLM → Vertex → Gemini → Grok, Free-tier: no Claude) and returns a
- * precise build prompt; the client then hands that prompt to NavBharatAI Pro v5.0, which builds the
+ * precise build prompt; the client then hands that prompt to NavBharatAI Pro, which builds the
  * real app. WHITE-LABEL: the prompt never names the underlying vision provider.
  */
 const MAX_IMAGE_B64 = 12_000_000; // ~9 MB decoded

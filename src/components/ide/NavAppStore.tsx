@@ -650,7 +650,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                 {myApps !== null && myApps.length === 0 && (
                   <p className="flex items-start gap-1.5 text-[11px] text-white/45 leading-snug mt-2">
                     <Info size={12} className="shrink-0 mt-px" />
-                    You have not built an app yet. Build one in NavBharatAI Pro v5.0, then come back —
+                    You have not built an app yet. Build one in NavBharatAI Pro, then come back —
                     it will appear in this list by itself.
                   </p>
                 )}

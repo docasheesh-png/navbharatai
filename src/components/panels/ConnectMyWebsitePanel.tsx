@@ -9,7 +9,7 @@
 // attaches a domain directly to a workspace's own dedicated Firebase Hosting site with honest
 // pending/active status. It just needed a workspaceId, which a global sidebar entry doesn't have.
 //
-// This panel supplies that: list the user's NavBharatAI Pro v5.0 apps (reusing the same
+// This panel supplies that: list the user's NavBharatAI Pro apps (reusing the same
 // /api/app-debug/sources endpoint the Full-App Debugger uses), auto-pick when there's exactly one,
 // otherwise let the user choose which app this domain should point to — then hand off to the real
 // NbaiDomainConnect flow. Honest end-to-end: an app-less account sees a clear "build an app first"
@@ -185,7 +185,7 @@ export function ConnectMyWebsitePanel({ onBack, uid }: ConnectMyWebsitePanelProp
               <div className="px-3 py-4 rounded-lg bg-zinc-900 border border-zinc-800 text-center flex flex-col items-center gap-2">
                 <Globe className="w-6 h-6 text-zinc-500" />
                 <p className="text-[12px] text-zinc-300">You don't have a built app yet.</p>
-                <p className="text-[11px] text-zinc-500">Build something with NavBharatAI Pro v5.0 first, then come back here to connect your own domain to it.</p>
+                <p className="text-[11px] text-zinc-500">Build something with NavBharatAI Pro first, then come back here to connect your own domain to it.</p>
               </div>
             )}
 

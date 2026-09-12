@@ -23,7 +23,7 @@ describe('No Reliability entry names the retired "Pro Chat" surface', () => {
       const e = kb(id)!;
       expect(e).toBeTruthy();
       expect(e.path).not.toMatch(/Pro Chat/);
-      expect(e.path).toMatch(/Pro v5\.0/);
+      expect(e.path).toMatch(/NavBharatAI Pro/);
     },
   );
 });

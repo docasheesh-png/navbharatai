@@ -116,7 +116,7 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
 
       // Clear the sensitive inputs from memory once they are safely in the encrypted vault.
       setFormCreds({});
-      setSavedMsg('Saved! Credentials are encrypted in Secrets & API Keys — NavBharatAI Pro v5.0 uses them automatically when it builds your app.');
+      setSavedMsg('Saved! Credentials are encrypted in Secrets & API Keys — NavBharatAI Pro uses them automatically when it builds your app.');
     } catch {
       setSavedMsg('Could not reach Secrets & API Keys — check your connection and try again.');
     } finally {
@@ -148,7 +148,7 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
           <div>
             <h3 className="font-black text-white text-sm uppercase tracking-wider">Your Database</h3>
             <p className="text-[10px] text-[#8b949e] font-medium mt-0.5">
-              Credentials are encrypted in Secrets &amp; Keys. NavBharatAI Pro v5.0 detects your connected database and wires that exact provider into your app&apos;s .env automatically — it never creates a new one, and NavBharatAI never uses your database for itself.
+              Credentials are encrypted in Secrets &amp; Keys. NavBharatAI Pro detects your connected database and wires that exact provider into your app&apos;s .env automatically — it never creates a new one, and NavBharatAI never uses your database for itself.
             </p>
           </div>
         </div>
@@ -265,7 +265,7 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
           </li>
           <li className="flex items-start gap-2">
             <span className="text-indigo-400 font-bold shrink-0">3.</span>
-            When <strong className="text-white">NavBharatAI Pro v5.0</strong> builds your app, it detects this connected database, wires that exact provider&apos;s SDK, and injects your keys into <code className="text-indigo-300">.env</code> automatically — it never creates a new or different database.
+            When <strong className="text-white">NavBharatAI Pro</strong> builds your app, it detects this connected database, wires that exact provider&apos;s SDK, and injects your keys into <code className="text-indigo-300">.env</code> automatically — it never creates a new or different database.
           </li>
           <li className="flex items-start gap-2">
             <span className="text-indigo-400 font-bold shrink-0">4.</span>

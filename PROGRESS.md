@@ -50287,3 +50287,65 @@ the two BYO providers — the same sentence the tool gave before this feature ex
 follows too (`defaultToolCatalog()` is a function, which is what makes that possible without a second
 tool): with the gateway off it advertises the BYO-only schema and never mentions the no-key path, so the
 builder is never steered toward an integration that cannot work. Four tests pin both directions.
+---
+
+## 2026-09-12 — The engine is called "NavBharatAI Pro". And the rename found a dead button.
+
+Admin: *"app builder engine bas navbharatai pro, nam se karo! yeh v5 ya v3 sab change kar ke sirf
+navbharatai pro rahne do"*. This is the PART 2 the previous entry deferred. The rename itself is the
+small half; two things it uncovered are the reason this entry is long.
+
+### 🔴 THE SIDEBAR'S MOST BUILDER-LOOKING BUTTON WENT NOWHERE
+
+The hamburger menu's row **"App Builder v5.0"** called `toggleTab('engine_builder')`. The separate
+`engine_builder` view was deleted from `App.tsx` long ago — its own comment says so: *"Separate
+'engine_builder' v5.0 view REMOVED — v5.0 is now reached only via the two gates"*. Nothing renders that
+view, so **tapping it rendered nothing at all.**
+
+Verified rather than argued: of the six destinations the sidebar can navigate to, `engine_builder` was
+the **only** one with zero `activeView === '…'` render sites. The other five had two or three each.
+
+It was also a SECOND door to a place that already has a working one — `nbi_pro_chat` ("NavBharatAI
+Pro") is not in `SIDEBAR_HIDDEN`, so the real gate was already listed a few rows above. Deleted, for
+the same reason the Professionals/Preview/Files rows were, with the difference that this one was broken
+as well as redundant.
+
+**The knowledge base named that dead row as THE way to reach the builder** (`agentv3_builder.path`,
+plus the retired-Engineer-AI entry and the Pro-chat entry). So every AI in the product was confidently
+sending users to a blank screen. All paths now name the real gate.
+
+### 🔴 TWO TESTS ASSERTED THE DEAD BUTTON, AND ONE PROMISED TO CATCH EXACTLY THIS
+
+`polishCoreAiChat.test.ts` opens by declaring it *"pins the corrected navigation so no NavBharatAI AI
+sends a user to a control that is gone"* — and then asserted `SidebarNav.tsx` contains the string
+`'App Builder v5.0'`. `polishAppBuilderCluster.test.ts` did the same. Both passed throughout.
+
+**A label assertion cannot see a deleted destination.** The string was present; the screen behind it
+was not. That is the whole gap, and it is why the replacement is a CLASS check rather than a better
+string: for every `toggleTab('x')` in the sidebar, some view must render `activeView === 'x'`. Verified
+to BITE — re-injecting the button fails both new assertions.
+
+### THE RENAME, AND THE LINE IT DELIBERATELY DOES NOT CROSS
+
+A user never reads a version number as part of the product's name; the code keeps whatever identifier
+production depends on. Unchanged on purpose: the **`AGENTV3_*` env keys set by hand in Cloud Run**
+(renaming one in code does not rename it in the console — the process just stops finding it, every flag
+reverts to its default, and nothing can detect that), the **`/api/agentv3/*` routes** (an installed
+Android build posts to them and cannot be updated from the server), and the **`agentv3_*` Firestore
+collections** (they hold existing users' data). Pinned as a POSITIVE assertion, so a future
+"finish the rename" pass fails in CI rather than in production.
+
+`AppKnowledgeBase.ts`: 262 version references in user-visible prose now read "NavBharatAI Pro".
+`keywords` deliberately KEEP `'v3'`, `'v5.0'`, `'vargen'` — they are search terms, and a user who still
+types "v5" must keep finding the builder.
+
+**One user-facing sentence existed 34 times:** `'AgentV3 (v5.0) is not enabled.'` — telling the user our
+internal codename AND a version, duplicated 34 times so the next person to reword it would have fixed
+one copy and left 33 saying something else. Now one `ENGINE_DISABLED` constant.
+
+**LEFT ALONE, deliberately:** the Settings About-footer badge "Navbharat AI v5.0.0". That is the APP's
+version beside the app's name — genuine information, not the builder engine's name. Reversible in one
+line if the admin wants it gone.
+
+**Gate on the final state:** typecheck 0, noUnusedImports clean, typecheck:server 0, build ok,
+test:bundle ok, boot:check PASS, vitest — see the commit.

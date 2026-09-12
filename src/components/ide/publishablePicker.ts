@@ -100,7 +100,7 @@ export function publishBlockedReason(input: {
 }): string {
   if (!input.signedIn) return 'Sign in to publish an app you built.';
   if (input.loading) return 'Looking for the apps you have built…';
-  if (input.appCount === 0) return 'You have not built an app yet — build one in NavBharatAI Pro v5.0 first, then come back here.';
+  if (input.appCount === 0) return 'You have not built an app yet — build one in NavBharatAI Pro first, then come back here.';
   if (!input.workspaceId) return 'Choose which of your apps to publish.';
   if (!input.name.trim()) return 'Give your app a name.';
   if (input.busy) return 'Publishing…';

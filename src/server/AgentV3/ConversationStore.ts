@@ -58,6 +58,16 @@ export interface ConversationRecord {
   repoOwner?: string;
   repoOwnedByUser?: boolean;
   /**
+   * 🔴 THE DEPLOY REPO'S NAME — separate from `repoName` on purpose (root-caused 2026-09-12).
+   *
+   * `repoName` is the STORAGE repo the build pushes to, and it is read back next turn to decide where
+   * to push. For an app imported from the user's OWN GitHub those are different objects: edits go to a
+   * working branch inside their real repo while `repoName` still holds the derived mirror name.
+   * Overwriting `repoName` to fix the deploy would have pointed the next turn's STORAGE at the user's
+   * real repository. See deployRepoMemory.ts — written only by `ownRepoMemoryPatch`.
+   */
+  deployRepoName?: string;
+  /**
    * The branch a backend deploy should build from — the app's SHIPPED state, never a work-in-progress
    * branch (own-repo storage keeps live edits on `navbharatai/work` until the user ships them to this
    * branch). Absent means "derive the ordinary default" (main), exactly as before this field existed.
@@ -132,6 +142,8 @@ export interface ConversationPatch {
   /** Which account that repo is under, and whether the user owns it (a deploy needs their own). */
   repoOwner?: string;
   repoOwnedByUser?: boolean;
+  /** See ConversationRecord.deployRepoName. */
+  deployRepoName?: string;
   /** See ConversationRecord.deployBranch. */
   deployBranch?: string;
   /** See ConversationRecord.backendDomain — written when a deploy moves a domain to the service. */
@@ -314,6 +326,7 @@ export class InMemoryConversationStore implements ConversationStore {
     if (patch.repoName !== undefined) rec.repoName = patch.repoName;
     if (patch.repoOwner !== undefined) rec.repoOwner = patch.repoOwner;
     if (patch.repoOwnedByUser !== undefined) rec.repoOwnedByUser = patch.repoOwnedByUser;
+    if (patch.deployRepoName !== undefined) rec.deployRepoName = patch.deployRepoName;
     if (patch.deployBranch !== undefined) rec.deployBranch = patch.deployBranch;
     if (patch.backendDomain !== undefined) rec.backendDomain = patch.backendDomain;
     rec.updatedAt = patch.updatedAt;

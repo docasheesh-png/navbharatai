@@ -651,6 +651,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'agentv3_app_ai',
+    name: 'AI inside your own app — no API key needed',
+    path: 'NavBharatAI Pro v5.0 → just ask for it in chat (for example "add an AI chatbot"), then Publish',
+    description: 'Your app can have its OWN AI — a chatbot, a summariser, a "write this for me" button — WITHOUT you signing up anywhere, pasting an API key, or paying a separate AI company. Ask for it in chat and NavBharatAI writes a small helper into your app (src/lib/ai.ts) with two functions: generateText(prompt) for one answer, and chat(messages) for a conversation. You call them straight from your app\'s own code; there is no backend to run and nothing to configure. WHEN IT STARTS WORKING: the assistant is switched on when you PUBLISH the app — publishing is what connects your app to NavBharatAI\'s AI. Before that it is honest rather than silent: isAiReady() returns false and the helper says "The assistant becomes available once this app is published", so you never chase a mystery failure in a preview. WHO PAYS: every answer your app gives is charged to YOUR NavBharatAI balance — the same balance your builds use, so there is only ever one balance to watch. There is a daily limit per app, so even if your app becomes popular overnight it can never drain your balance; when the limit is reached your app\'s assistant politely says it is unavailable today and starts again tomorrow, and your app keeps working normally in every other way. Each visitor also has their own smaller daily limit, so one person cannot use up your whole day. IF YOU PREFER YOUR OWN KEY: you can still bring your own OpenAI or Anthropic key — ask for it in chat and NavBharatAI writes the server-side version instead, where the key stays a secret on your server and NavBharatAI never stores it. That is the advanced path; the no-key option above is the default because it works immediately.',
+    howToUse: 'In NavBharatAI Pro v5.0, ask in chat for the AI feature you want — for example "add an AI chatbot to this page" or "add a button that summarises the notes". NavBharatAI writes the helper and wires it in. Then click "Publish": that is what switches the assistant on. Open your live app and try it. To use your own AI key instead, say so in chat ("use my own OpenAI key").',
+    relatedFeatures: ['agentv3_builder', 'agentv3_deploy', 'wallet'],
+    keywords: ['ai in my app', 'chatbot', 'chat bot', 'add ai', 'ai feature', 'openai key', 'api key', 'no api key', 'without api key', 'gpt', 'llm', 'ai chatbot banao', 'apne app me ai', 'ai kaise jodu', 'bina api key', 'key nahi hai', 'ai assistant', 'summarise', 'summary button', 'ai likhega', 'ai jawab', 'app ka ai', 'ai limit', 'ai kharcha', 'ai cost', 'assistant unavailable', 'isAiReady'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'agentv3_build_report',
     name: 'Report a build to NavBharatAI (admin-only report)',
     path: 'NavBharatAI Pro v5.0 → header tab row → "Report" button',

@@ -1,4 +1,5 @@
 import { dedupeToolsByName, type ClaudeToolDef } from './ClaudeClient';
+import { appAiGatewayEnabled } from '../lib/appAiGateway';
 import type { ToolName } from './types';
 import { WORKER_ROLES } from './AgentRegistry';
 
@@ -2521,8 +2522,36 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         required: ['provider'],
       },
     },
-    {
-      name: 'generate_ai',
+    /**
+     * 🔒 THE DESCRIPTION FOLLOWS THE FLAG. With `APP_AI_GATEWAY` unset the no-key path does not
+     * exist — publishing stamps no token — so advertising it here would steer the builder toward an
+     * integration that can never work, and the app would tell its owner to publish for an assistant
+     * that never arrives. The catalog is built per call (`defaultToolCatalog()`), which is what makes
+     * this possible without a second tool.
+     */
+    ...(appAiGatewayEnabled() ? [{
+      name: 'generate_ai' as const,
+      description:
+        'Add real AI text generation to the app — chat, summarise, draft, classify. DEFAULT and strongly ' +
+        'preferred: omit `provider` (or pass "navbharat") for a generateText(prompt) + chat(messages) helper ' +
+        'in src/lib/ai.ts that needs NO API KEY, NO signup and NO backend — it works on the app owner\'s ' +
+        'existing NavBharatAI balance and goes live when the app is published (isAiReady() reports that ' +
+        'honestly before then), with a daily limit per app. Only pass "openai" or "anthropic" when the user ' +
+        'explicitly asks to use their OWN key: that writes a SERVER helper instead (the key is a server ' +
+        'secret and must never reach the browser), NavBharatAI never stores it, and its own AI account is ' +
+        'never used. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          provider: {
+            type: 'string',
+            enum: ['navbharat', 'openai', 'anthropic'],
+            description: 'Leave this out for the no-key NavBharatAI assistant (the default). Name a provider only when the user wants to bring their own key.',
+          },
+        },
+      },
+    }] satisfies ClaudeToolDef[] : [{
+      name: 'generate_ai' as const,
       description:
         'Add real AI text generation to the app on the USER\'S OWN provider key (Bring-Your-Own): a server ' +
         'generateText(prompt) + chat(messages) helper for "openai" or "anthropic" — for chat, summarise, ' +
@@ -2530,13 +2559,13 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         'a server secret (never the browser); NavBharatAI never stores it and its own AI account is never used. ' +
         'Never overwrites an existing .env.example.',
       input_schema: {
-        type: 'object',
+        type: 'object' as const,
         properties: {
           provider: { type: 'string', enum: ['openai', 'anthropic'], description: 'The AI/LLM provider to wire up.' },
         },
         required: ['provider'],
       },
-    },
+    }] satisfies ClaudeToolDef[]),
     {
       name: 'generate_geocoding',
       description:

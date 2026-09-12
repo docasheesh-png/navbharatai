@@ -49888,6 +49888,74 @@ collision, the path-segment validation, and the ownership re-check on the image 
 Gate re-run on the final state: `typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 ·
 `build` ok · `test:bundle` within budget · `boot:check` PASS · `vitest run` **1,575 files / 21,733
 passed / 1 skipped / 0 failed**.
+## 2026-09-12 — ROADMAP §13 item 3.1: a published app can have AI without an API key
+
+The wall this removes is the one every competitor still has. NavBharatAI would generate a genuinely good
+chatbot and then end with "now paste your OpenAI key", which is where most people stop. A published app
+now calls `POST /api/app-ai/ask`, the answer rides the ordinary Professional chain, and the cost lands on
+the owner's EXISTING wallet under THE ONE-WALLET LAW — no second account, no second balance, no key.
+
+Behind `APP_AI_GATEWAY`, **unset**. Unset means today's behaviour exactly: nothing is minted, no page is
+stamped, and the endpoint refuses everything.
+
+### The fact the whole design is built on, stated first
+
+**The token in the page is PUBLIC.** It ships inside published client code, so anyone who opens View
+Source can read it. It is therefore an app IDENTIFIER — "which app is spending?" — and never an
+authorisation. Everything else follows from refusing to pretend otherwise:
+
+- The app id is **signed**, so a token lifted from app A cannot spend app B's budget. That is the one
+  guarantee a public string can actually make, and the route takes the app id from the VERIFIED token and
+  nowhere else — reading it from the body and using the token as a yes/no would be exactly the hole the
+  scoping exists to close.
+- **The CAP is the real defence**, not the token: ₹20 per app per day and ₹2 per visitor, both enforced,
+  neither optional. ₹20 is deliberately small — this is somebody's wallet being spent by strangers on the
+  internet, and the failure an owner would never forgive is waking up to an empty balance.
+- **There is no expiry.** An expiring token would break a working app on a random Tuesday with nothing to
+  explain it. Rotation is by REPUBLISH (a new nonce), with the previous nonce honoured for exactly ONE
+  generation — the registry row is written before the new files reach the host, so a page a visitor
+  already has open must keep working for the length of a deploy. Two generations would make rotation
+  decorative; zero would be a self-inflicted outage on every publish.
+- **Revocation is the live-deployment check.** Unpublishing, a takedown or an abuse hold switches the
+  assistant off without reaching into files that are already in somebody's browser — the only kind of
+  revocation that works when the token is public.
+
+### Two decisions that cost us money on purpose
+
+**A Professional Pass does not make an app's public traffic free**, and neither does the admin free list.
+The Pass pays for the HOLDER's own assistant use; treating it as a licence for an unlimited number of
+strangers would quietly resize a product that was already sold. Both flags are therefore deliberately not
+passed to `chargeForAiTurns`, and the wiring test asserts their absence.
+
+**The cap counter moves on what the turn COST, not on what was debited.** The two differ whenever the
+wallet switch is off or the owner is free-listed — and the cap has to keep biting in exactly those cases,
+or a flag about *who pays* would silently remove the only ceiling a public endpoint has.
+
+### White-label law, applied to somebody else's visitors
+
+A stranger on a user's website must never learn which vendor answered — a leak there is a leak on
+somebody else's site, which is worse than a leak on ours. So every refusal and error is branded text, and
+`app-cap` and `owner-empty` deliberately produce the SAME words: a visitor is not entitled to know that
+the site owner's balance ran out. That is a real person's billing state.
+
+### What the builder now writes by default
+
+`generate_ai` with no `provider` means the no-key path. It writes `src/lib/ai.ts` — a CLIENT-side helper,
+which is the point: a static app gets a working assistant with no backend at all, the one thing a BYO key
+can never do, because a real API key must never reach a browser. It is honest about the state it is in —
+`isAiReady()` is false before publishing and the helpers say *"The assistant becomes available once this
+app is published"*, rather than failing in a way the app author would have to decode. A NAMED but
+unrecognised provider is still an error: substituting a default for a typo would hand somebody a different
+integration from the one they asked for. BYO OpenAI/Anthropic is unchanged and still one sentence away.
+
+### One field written and then removed before it shipped
+
+The registry carried `capInr`, an owner's own daily ceiling. Nothing in the product can set it — there is
+no screen — so it would have been a promise with no product behind it, and the generated app's own
+instructions had already started telling owners to "raise it on the app's own screen". Removed, along with
+that sentence. Every app is on the platform default, which is real, enforced and admin-tunable; the
+owner-facing control arrives in the same PR as the screen, or not at all.
+
 ### Tests that can fail
 
 `appAiGateway.test.ts` (41) pins the decisions; `appAiGatewayWiring.test.ts` (19) pins the ORDER and the
@@ -50205,3 +50273,17 @@ Pro v5.0"* in ~69 files. The admin asked for plain *"NavBharatAI Pro"*. That is 
 the internal identifiers (`AgentV3`, `/api/agentv3`, and above all the `AGENTV3_*` **Cloud Run env
 keys**) must NOT be renamed — renaming an env key that is set in Cloud Run breaks production instantly,
 with nothing in the code able to detect it.
+
+**A bug of my own, caught before it merged.** `generate_ai` was made to DEFAULT to the no-key path — and
+the default did not consult the flag. With `APP_AI_GATEWAY` unset, publishing stamps no token, so
+`window.NavAI` is never defined and `isAiReady()` is false **forever**, while the generated helper says
+*"The assistant becomes available once this app is published."* The user would publish, be told the same
+thing again, and have nothing anywhere to explain it — a status indicator reporting a state that cannot
+arrive, which is exactly what the real-features rule forbids. It also broke this flag's own promise that
+unset means today's behaviour **exactly**.
+
+`resolveAiProvider` now takes the flag: with the gateway off, an unspecified provider is an error naming
+the two BYO providers — the same sentence the tool gave before this feature existed. The TOOL CATALOG
+follows too (`defaultToolCatalog()` is a function, which is what makes that possible without a second
+tool): with the gateway off it advertises the BYO-only schema and never mentions the no-key path, so the
+builder is never steered toward an integration that cannot work. Four tests pin both directions.

@@ -270,7 +270,8 @@ import { generateMetrics } from '../lib/MetricsGenerator';
 import { generateTracing } from '../lib/TracingGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
-import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
+import { generateAiIntegration, resolveAiProvider } from '../lib/AiGenerator';
+import { appAiGatewayEnabled } from '../lib/appAiGateway';
 import { generateGeocodingIntegration, isGeocodingProvider } from '../lib/GeocodingGenerator';
 import { generateTranslationIntegration, isTranslationProvider } from '../lib/TranslationGenerator';
 import { generateModerationIntegration, isModerationProvider } from '../lib/ModerationGenerator';
@@ -6750,8 +6751,18 @@ export class ToolDispatcher {
       case 'generate_ai': {
         // U-4 recipe — real BYO AI text generation on the USER's own key (OpenAI/Anthropic): a server
         // generateText + chat helper. Never uses NavBharatAI's own AI account. Pure generator in AiGenerator.ts.
-        const aiProvider = optStr(input, 'provider');
-        if (!isAiProvider(aiProvider)) return 'generate_ai: pass provider = "openai" | "anthropic".';
+        // ABSENT ⇒ the NavBharatAI gateway: the app's assistant works on the owner's existing
+        // balance with no key pasted anywhere, which is the only default that does not stop at a
+        // wall (ROADMAP §13, 3.1). A provider that is NAMED but unrecognised is still an error.
+        const aiGatewayOn = appAiGatewayEnabled();
+        const aiProvider = resolveAiProvider(optStr(input, 'provider'), aiGatewayOn);
+        if (!aiProvider) {
+          // With the gateway OFF the no-key path does not exist, so the message must not offer it —
+          // this is the same sentence this tool gave before the gateway was built.
+          return aiGatewayOn
+            ? 'generate_ai: pass provider = "navbharat" (default, no key needed) | "openai" | "anthropic".'
+            : 'generate_ai: pass provider = "openai" | "anthropic".';
+        }
         const aicfg = generateAiIntegration(aiProvider);
         const aiWritten: string[] = [];
         for (const [path, content] of Object.entries(aicfg.files)) {
@@ -6766,7 +6777,11 @@ export class ToolDispatcher {
           aiWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
         }
         this.scheduleCheckpoint('ai integration');
-        return `Wired ${aiProvider} AI text generation (on the user's own key):\n${aiWritten.join('\n')}\nAdd the dependency: ${aicfg.dependency.name}@${aicfg.dependency.version}\n\n${aicfg.instructions}`;
+        const aiHeadline = aiProvider === 'navbharat'
+          ? 'Wired AI text generation through NavBharatAI (no API key needed)'
+          : `Wired ${aiProvider} AI text generation (on the user's own key)`;
+        const aiDep = aicfg.dependency ? `\nAdd the dependency: ${aicfg.dependency.name}@${aicfg.dependency.version}` : '';
+        return `${aiHeadline}:\n${aiWritten.join('\n')}${aiDep}\n\n${aicfg.instructions}`;
       }
 
       case 'generate_geocoding': {

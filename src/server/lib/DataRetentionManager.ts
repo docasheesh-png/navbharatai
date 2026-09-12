@@ -165,6 +165,11 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
   // year-over-year comparison stays possible. `date` is the doc id AND a field ('YYYY-MM-DD'), which
   // sorts lexicographically, so it is its own timestamp.
   { collection: 'build_failures', ttlDays: 400, timestampField: 'date', timestampKind: 'iso' },
+  // `updatedAt: Date.now()` — AppAiUsageStore. The published-app AI gateway's daily spend counters.
+  // They exist to enforce THAT DAY's cap and are never read again afterwards, so 90 days is already
+  // generous; the per-visitor collection is the one that actually grows with an app's audience.
+  { collection: 'app_ai_usage', ttlDays: 90, timestampField: 'updatedAt', timestampKind: 'epochMs' },
+  { collection: 'app_ai_visitors', ttlDays: 30, timestampField: 'updatedAt', timestampKind: 'epochMs' },
 ];
 
 /**

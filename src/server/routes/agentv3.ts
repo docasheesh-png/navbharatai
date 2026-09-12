@@ -436,6 +436,7 @@ import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeSe
 import { findProjectInstructionPath, normalizeProjectInstructions, projectInstructionsBlock, projectInstructionsNotice } from '../AgentV3/projectInstructions';
 import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '../AgentV3/fileMentions';
 import { mcpServerStore } from '../AgentV3/McpServerStore';
+import { mcpLibraryStore, MAX_SAVED_SERVICES } from '../AgentV3/McpLibraryStore';
 import { listRemoteTools } from '../AgentV3/mcpTransport';
 import { externalToolDefs, externalToolsPreamble, canConnectServer, MAX_SERVERS_PER_WORKSPACE, type SafeMcpTool } from '../AgentV3/mcpClient';
 import { canUseConnectedServices, canRunConnectedServices, skippedServicesNotice, type McpPlanFacts } from '../AgentV3/mcpPlanGate';
@@ -7141,14 +7142,22 @@ async function noteBuildOutcome(
    * never disagree about a user's entitlement. The decision itself is pure (`mcpPlanGate.ts`); this
    * only gathers the three facts it needs.
    */
-  async function mcpPlanFacts(req: Request): Promise<McpPlanFacts> {
+  async function mcpIdentity(req: Request): Promise<{ uid: string | null; facts: McpPlanFacts }> {
     const identity = process.env.VITEST ? null : await verifyFirebaseIdentity(req);
     const uid = identity?.uid || null;
     const email = identity?.email || (uid ? await resolveVerifiedEmail(uid) : null);
     const isFreeListed = isAgentV3FreeUser(uid, email);
-    if (!uid) return { signedIn: false, hasActivePlan: false, planKnown: true, isFreeListed };
+    if (!uid) return { uid: null, facts: { signedIn: false, hasActivePlan: false, planKnown: true, isFreeListed } };
     const probe = await probeHostingPlan(uid).catch(() => ({ active: false, known: false }));
-    return { signedIn: true, hasActivePlan: !!probe.active, planKnown: !!probe.known, isFreeListed };
+    return {
+      uid,
+      facts: { signedIn: true, hasActivePlan: !!probe.active, planKnown: !!probe.known, isFreeListed },
+    };
+  }
+
+  /** The entitlement alone, for the call sites that have no use for the account id. */
+  async function mcpPlanFacts(req: Request): Promise<McpPlanFacts> {
+    return (await mcpIdentity(req)).facts;
   }
 
   app.post('/api/agentv3/mcp/list', workspaceRateLimiter(), async (req: Request, res: Response) => {
@@ -7160,10 +7169,16 @@ async function noteBuildOutcome(
     }
     // The entitlement travels WITH the list, so the screen can show an honest locked state instead of
     // a form that accepts a URL and then refuses it.
-    const gate = canUseConnectedServices(await mcpPlanFacts(req));
+    const { uid, facts } = await mcpIdentity(req);
+    const gate = canUseConnectedServices(facts);
+    // The account library rides along in the same answer, so the screen can offer "attach one you
+    // already saved" without a second round trip. Credentials are not in it — listForDisplay.
+    const saved = uid ? await mcpLibraryStore.listForDisplay(uid) : [];
     res.json({
       servers: await mcpServerStore.listForDisplay(workspaceId),
       max: MAX_SERVERS_PER_WORKSPACE,
+      saved,
+      savedMax: MAX_SAVED_SERVICES,
       canConnect: gate.allowed,
       ...(gate.allowed ? {} : { lockedReason: gate.reason, lockedMessage: gate.message }),
     });
@@ -7195,7 +7210,8 @@ async function noteBuildOutcome(
 
     // The plan gate comes FIRST — before the SSRF probe and before we ask the service anything. A user
     // who may not connect should not be able to make our server fetch a URL of their choosing.
-    const planGate = canUseConnectedServices(await mcpPlanFacts(req));
+    const { uid: connectUid, facts: connectFacts } = await mcpIdentity(req);
+    const planGate = canUseConnectedServices(connectFacts);
     if (!planGate.allowed) {
       res.status(403).json({ error: planGate.message, reason: planGate.reason });
       return;
@@ -7223,10 +7239,86 @@ async function noteBuildOutcome(
       res.status(500).json({ error: 'The connection could not be saved. Please try again.' });
       return;
     }
-    res.json({ ok: true, id, toolCount: probe.tools.length, tools: probe.tools.map((t) => t.remoteName) });
+    // Remember it for the user's NEXT app. Deliberately AFTER the app's own save and deliberately not
+    // awaited into the verdict: the connection this user asked for has already succeeded, and a
+    // library write that fails must not turn that into an error. Worst case they type it again.
+    const remembered = connectUid ? await mcpLibraryStore.save(connectUid, { id, url, headers }) : false;
+    res.json({
+      ok: true,
+      id,
+      toolCount: probe.tools.length,
+      tools: probe.tools.map((t) => t.remoteName),
+      remembered,
+    });
   });
 
-  /** Disconnect a service. Idempotent — already gone is success, not an error. */
+  /**
+   * ATTACH one of the user's SAVED services to this app — the one-tap half of the library.
+   *
+   * It re-proves the connection instead of trusting the saved record: a key can be revoked and a
+   * service can move, and listing a dead service as connected is the fake-success this codebase keeps
+   * rooting out. So this path is the connect path minus the typing, not a shortcut past its checks —
+   * same plan gate, same SSRF guard (a host that resolved publicly when it was saved can resolve
+   * elsewhere today), same per-app cap and duplicate rule.
+   */
+  app.post('/api/agentv3/mcp/attach', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+    if (!workspaceId || !id) { res.status(400).json({ error: 'Nothing to attach.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const { uid, facts } = await mcpIdentity(req);
+    const gate = canUseConnectedServices(facts);
+    if (!gate.allowed) { res.status(403).json({ error: gate.message, reason: gate.reason }); return; }
+
+    const saved = uid ? await mcpLibraryStore.get(uid, id) : null;
+    if (!saved) { res.status(404).json({ error: 'That saved service could not be found. Connect it again.' }); return; }
+
+    const urlCheck = await assertPublicHttpUrl(saved.url).catch(() => ({ ok: false }));
+    const existing = await mcpServerStore.listForDisplay(workspaceId);
+    const verdict = canConnectServer({
+      serverId: saved.id,
+      urlIsValid: /^https?:\/\//i.test(saved.url),
+      urlIsPublic: !!urlCheck.ok,
+      existingIds: existing.map((e) => e.id),
+    });
+    if (!verdict.ok) { res.status(400).json({ error: verdict.message, reason: verdict.reason }); return; }
+
+    const probe = await listRemoteTools(saved);
+    if (probe.tools.length === 0) {
+      res.status(400).json({
+        error: probe.error
+          || 'That service did not answer with any tools just now, so it was not attached. Its key may have expired.',
+      });
+      return;
+    }
+    if (!(await mcpServerStore.add(workspaceId, saved))) {
+      res.status(500).json({ error: 'The connection could not be saved. Please try again.' });
+      return;
+    }
+    res.json({ ok: true, id: saved.id, toolCount: probe.tools.length });
+  });
+
+  /**
+   * FORGET a saved service — remove it from the account library.
+   *
+   * Deliberately NOT behind the plan gate, for the same reason disconnecting is not: a user whose plan
+   * lapsed must always be able to delete their own key from our storage. Asking them to pay to do that
+   * would be indefensible.
+   */
+  app.post('/api/agentv3/mcp/forget', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+    if (!id) { res.status(400).json({ error: 'Nothing to remove.' }); return; }
+    const { uid } = await mcpIdentity(req);
+    if (!uid) { res.status(401).json({ error: 'Sign in to manage your saved services.' }); return; }
+    const ok = await mcpLibraryStore.remove(uid, id);
+    res.json(ok ? { ok: true } : { ok: false, error: 'Could not remove that saved service right now.' });
+  });
+
+  /** Disconnect a service from THIS app. Idempotent — already gone is success, not an error.
+   *  The user's saved copy is untouched, so re-attaching it is one tap and needs no key again. */
   app.post('/api/agentv3/mcp/remove', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const id = typeof req.body?.id === 'string' ? req.body.id : '';

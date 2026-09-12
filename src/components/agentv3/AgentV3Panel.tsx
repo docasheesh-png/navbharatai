@@ -5705,7 +5705,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           >
             <div className="sticky top-0 z-10 bg-zinc-900 flex items-center justify-between px-4 pt-3 pb-2 border-b border-zinc-800">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                {mobileSheet === 'history' ? 'Session history' : mobileSheet === 'report' ? 'Which build had the problem?' : mobileSheet === 'secrets' ? 'Keys & Secrets' : mobileSheet === 'services' ? 'Connected services' : 'More'}
+                {mobileSheet === 'history' ? 'Session history' : mobileSheet === 'report' ? 'Which build had the problem?' : mobileSheet === 'secrets' ? 'Keys & Secrets' : mobileSheet === 'services' ? 'Connected services (MCP)' : 'More'}
               </span>
               <button onClick={() => setMobileSheet(null)} aria-label="Close" className="p-1 rounded text-zinc-400 hover:text-white touch-manipulation">
                 <X className="w-4 h-4" />
@@ -5789,7 +5789,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
                 >
                   <Puzzle className="w-4 h-4 shrink-0 text-zinc-400" />
-                  <span className="flex-1 text-left">Connected services</span>
+                  <span className="flex-1 text-left">Connected services (MCP)</span>
                 </button>
                 <button onClick={() => openSurfaceFromFooter('history')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
                   <History className="w-4 h-4 shrink-0 text-zinc-400" />

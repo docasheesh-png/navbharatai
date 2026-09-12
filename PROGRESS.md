@@ -48226,6 +48226,63 @@ field in the API schema. The admin can settle it from their own dashboard: if a 
 today is **gone from the list** in a few days, E2B reclaims it, and a rebuild-from-durable (what this
 change does) is the only possible answer rather than a better resume.
 
+## 2026-09-12 — BRAVE_API_KEY set; Free Chat gets a THIRD lever on top of `searchOrder` (`cheap`)
+
+Admin set `BRAVE_API_KEY` in Cloud Run, then gave a direct cost instruction: "free chat me brave api ka
+istemal bahut hi kanjusi se karna hai. minimal use. jyadatar duckduckgo hi use ho" — Brave (a paid API
+past its free quota) must be used stingily on non-paying chat surfaces; DuckDuckGo (free) should lead.
+
+**Safeguard #1 in action, mid-flight.** The first draft of this fix (a standalone `preferCheap` option on
+`AgentV3/WebSearch.ts`, invented from this session's own base commit) was written, tested, and pushed
+before discovering — via a merge conflict against `main` on PR push — that a DIFFERENT session had, the
+same day, already built a far more complete answer to a related admin ask ("dono ko mila kar… jahan brave
+ki need na ho wahan duckduckgo"): a shared `src/server/lib/braveSearch.ts` client (one Brave request path
+for both `AgentV3/WebSearch.ts` and `EngineerAI/WebSearchClient.ts`, with in-flight coalescing, a
+freshness-aware cache, and a per-instance meter) plus a `SearchIntent` ('reference' | 'live') that decides
+provider order by WHAT is being asked — `reference` (build/doc lookups) leads DuckDuckGo, `live` (chat
+grounding) leads Brave.
+
+**That architecture did NOT yet cover WHO is asking**, though — `liveSearchContext()` called
+`client.search(query, limit, 'live')` unconditionally, so a free-tier chat message would have led with
+Brave exactly like a paid one. The two asks are complementary, not redundant, so per the fourth absolute
+rule the first draft was DISCARDED (not layered beside it) and rebuilt on top of the real shared client:
+`searchOrder(intent, hasBraveKey, cheap)` gained a third parameter — when `cheap` is true it forces
+DuckDuckGo-first regardless of intent, even for a `live` question, with Brave kept only as the
+last-resort rescue on a genuinely empty DuckDuckGo result. `WebSearch.search()` and `WebSearchClient.search()`
+both gained the matching `cheap` parameter (defaulting to `false`, so an untouched caller keeps today's
+paid behaviour) for structural symmetry with `intent` — even though only the chat path sets it today.
+`liveSearchContext()` threads its own `cheap` option straight into that 4th `search()` argument. Wired at
+all three call sites, each using that surface's own existing free/paid signal (no new concept invented):
+- `routes/chat.ts` → `cheap: isFree` (the `navbharat` tier — NavBharatAI Free Chat)
+- `professionals/engine.ts` → `cheap: tier === 'free'` (free-tier Professionals)
+- `routes/agentv3.ts` plain-chat-turn lane → `cheap: freeTierBuildActive || powerSpecResolved.cheapOnly`
+  (free-tier / weak-power AgentV3 chat turns — same "never Sonnet/Opus for weak" spirit, applied to search
+  spend instead of model spend)
+
+**Deliberately NOT touched:** the AgentV3/Engineer AI build-time web-search TOOL call (`makeWebSearch()`,
+`EngineerAgentLoop.ts`) that the agent invokes mid-build to look up docs/package versions — it is already
+`reference`-intent (DuckDuckGo-first) regardless of tier, and the admin's instruction was specifically
+about "free chat" (a conversational surface), not app builds. Revisit only on a fresh admin ask.
+
+**Tests (regression-locked, rule 4):** `tests/braveSearch.test.ts` gained cases pinning `cheap`'s exact
+behaviour on `searchOrder` itself (overrides `live` to duck-first, no-op with no key, defaults to `false`
+so every pre-existing call site is unaffected) plus updated its two source-text wiring assertions to the
+new `searchOrder(intent, !!braveKey, cheap)` call and the new `client.search(query, limit, 'live',
+opts.cheap)` line. `tests/agentV3WebSearchCheap.test.ts` (new) exercises the real `WebSearch` class
+end-to-end with a mocked `fetch`, resetting `braveSearch.ts`'s module-level cache/meter between cases
+(`__resetBraveSearch()`) so its in-memory coalescing/cache cannot leak results between tests using
+different `cheap`/intent combinations for the same-shaped query. A new case in
+`src/server/lib/liveSearchContext.test.ts` pins that `cheap` reaches the client as the 4th `search()` arg.
+
+**Verification gate run in full (safeguard #5) on the FINAL merged state, all green:** `tsc --noEmit`
+(frontend) + `tsc -p tsconfig.server.json` (server) + `vitest run` + `node scripts/noUnusedImports.mjs` +
+`npm run build` + `npm run test:bundle` + `npm run boot:check` (PASS — reached "Server running"; the
+Firestore ADC warning in the log is expected in this sandbox with no real GCP credentials, unrelated to
+this change).
+
+`CLAUDE.md`'s existing "Brave Search — the chat's grounding source" entry (written by the other session)
+was corrected in place — `BRAVE_API_KEY` marked ✅ SET rather than "still UNSET" — and extended with the
+`cheap` lever, rather than left to drift into two competing entries for the same key.
 
 ## 2026-09-11 — Free chat speed: the stall was never the model, it was the silence before it
 

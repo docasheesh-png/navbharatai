@@ -9413,7 +9413,7 @@ async function noteBuildOutcome(
         // (sports/news/prices/"latest"/"aaj") gets real search results folded in, so v5.0 answers from
         // today's data, not its training cutoff. Gated + bounded + best-effort — normal chat is untouched.
         try {
-          const liveBlock = await liveSearchContext(prompt);
+          const liveBlock = await liveSearchContext(prompt, { cheap: freeTierBuildActive || powerSpecResolved.cheapOnly });
           if (liveBlock) chatPrompt = `${liveBlock}\n\n---\n${chatPrompt}`;
         } catch { /* live search is best-effort */ }
         // v5.0 used to answer a plain chat question ("kितni files hai?") completely blind — the chat

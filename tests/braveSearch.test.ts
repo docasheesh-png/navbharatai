@@ -67,6 +67,20 @@ describe('searchOrder — free first where it is safe, paid first where it matte
     expect(searchOrder('live', true)).toHaveLength(2);
     expect(searchOrder('reference', true)).toHaveLength(2);
   });
+
+  it('🔒 `cheap` overrides even a LIVE question to DuckDuckGo-first (admin 2026-09-12: free chat kanjusi se Brave)', () => {
+    expect(searchOrder('live', true, true)).toEqual(['duck', 'brave']);
+    expect(searchOrder('reference', true, true)).toEqual(['duck', 'brave']);
+  });
+
+  it('`cheap` with no key is still just the free engine — nothing to override', () => {
+    expect(searchOrder('live', false, true)).toEqual(['duck']);
+  });
+
+  it('`cheap` defaults to false — every existing (non-free-chat) call site is unaffected', () => {
+    expect(searchOrder('live', true)).toEqual(searchOrder('live', true, false));
+    expect(searchOrder('reference', true)).toEqual(searchOrder('reference', true, false));
+  });
 });
 
 describe('cacheTtlMs — the freshness trade, made explicit and small', () => {
@@ -248,7 +262,7 @@ describe('wiring — ONE client, and both callers still fall back to the free pa
 
   it('🔒 both callers route through searchOrder, so neither engine failing leaves the caller with nothing', () => {
     for (const [name, src] of [['AgentV3', v3], ['EngineerAI', eng]] as const) {
-      expect(src, name).toContain('const order = searchOrder(intent, !!braveKey);');
+      expect(src, name).toContain('const order = searchOrder(intent, !!braveKey, cheap);');
       // A throw is swallowed to [] so the loop can try the OTHER engine — never so the caller gets [].
       expect(src, name).toContain('await braveSearch(query, limit, braveKey).catch(() => [])');
       expect(src, name).toContain('if (i > 0) noteRescue();');
@@ -264,8 +278,13 @@ describe('wiring — ONE client, and both callers still fall back to the free pa
 
   it("🔒 only the chat's grounding asks for the paid engine first — everything else defaults to free", () => {
     const live = readFileSync(join(process.cwd(), 'src/server/lib/liveSearchContext.ts'), 'utf8');
-    expect(live).toContain("client.search(query, limit, 'live')");
+    expect(live).toContain("client.search(query, limit, 'live', opts.cheap)");
     for (const [name, src] of [['AgentV3', v3], ['EngineerAI', eng]] as const)
       expect(src, name).toContain("intent: SearchIntent = 'reference'");
+  });
+
+  it('🔒 `cheap` defaults to false in both callers — a caller that forgets it keeps paid behaviour, never free', () => {
+    for (const [name, src] of [['AgentV3', v3], ['EngineerAI', eng]] as const)
+      expect(src, name).toContain('cheap = false');
   });
 });

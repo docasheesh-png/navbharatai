@@ -141,6 +141,14 @@ export interface LiveSearchOptions {
   readPages?: number;
   /** Injectable live-data source (tests). Defaults to the real liveDataContext dispatcher. */
   liveData?: (message: string) => Promise<string>;
+  /**
+   * Cost-conscious mode for a non-paying caller (Free Chat, a free-tier Professional, a free/weak
+   * AgentV3 turn) — admin 2026-09-12: "free chat me brave api ka istemal bahut hi kanjusi se karna
+   * hai, minimal use, jyadatar duckduckgo hi use ho". Overrides the normal 'live'-intent Brave-first
+   * order to DuckDuckGo-first; Brave is only spent as a last-resort rescue on an empty DuckDuckGo
+   * result. Paid surfaces leave this unset and keep the Brave-first order for their live questions.
+   */
+  cheap?: boolean;
 }
 
 /** How many results are READ (not merely quoted). Concurrent, so the cost is the slowest, not the sum. */
@@ -172,7 +180,8 @@ export async function liveSearchContext(message: string, opts: LiveSearchOptions
   const results = await withTimeout(
     // 'live' — the user is waiting on this and the answer moves, so the paid engine leads and the
     // free one rescues. Every other caller in the repo is 'reference' and leads with the free engine.
-    client.search(query, limit, 'live').catch(() => []),
+    // `cheap` (a non-paying caller) overrides that to DuckDuckGo-first even for a live question.
+    client.search(query, limit, 'live', opts.cheap).catch(() => []),
     opts.timeoutMs ?? 6000,
     [],
   );

@@ -500,7 +500,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       if (!res.writableEnded) res.write(`data: ${JSON.stringify({ s: groundingStatus })}\n\n`);
     }
     try {
-      const liveBlock = await liveSearchContext(message);
+      const liveBlock = await liveSearchContext(message, { cheap: isFree });
       if (liveBlock) contextualMessage = `${liveBlock}\n\n---\n${contextualMessage}`;
     } catch { /* live search is best-effort */ }
 

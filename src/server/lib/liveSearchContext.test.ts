@@ -63,6 +63,21 @@ describe('liveSearchContext — builds a grounding block only when useful', () =
     });
     expect(out).toBe('');
   });
+
+  it('threads `cheap` into the client as preferCheap (free-chat cost control, admin 2026-09-12)', async () => {
+    let receivedOpts: { preferCheap?: boolean } | undefined;
+    const client = {
+      search: async (_q: string, _l: number, opts?: { preferCheap?: boolean }) => {
+        receivedOpts = opts;
+        return [{ title: 't', url: 'u', snippet: 's' }];
+      },
+    };
+    await liveSearchContext('latest news', { client, cheap: true, fetchPage: async () => ({ ok: false, text: '' }) });
+    expect(receivedOpts?.preferCheap).toBe(true);
+
+    await liveSearchContext('latest news', { client, fetchPage: async () => ({ ok: false, text: '' }) });
+    expect(receivedOpts?.preferCheap).toBeUndefined();
+  });
 });
 
 /**

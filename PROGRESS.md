@@ -48225,3 +48225,47 @@ How long E2B keeps a PAUSED snapshot is not knowable from the SDK or our code �
 field in the API schema. The admin can settle it from their own dashboard: if a machine shown as paused
 today is **gone from the list** in a few days, E2B reclaims it, and a rebuild-from-durable (what this
 change does) is the only possible answer rather than a better resume.
+
+## 2026-09-12 — BRAVE_API_KEY set; Free Chat cost-conscious search order (DuckDuckGo-first)
+
+Admin set `BRAVE_API_KEY` in Cloud Run, then gave a direct cost instruction: "free chat me brave api ka
+istemal bahut hi kanjusi se karna hai. minimal use. jyadatar duckduckgo hi use ho" — Brave (a paid API
+past its free quota) must be used stingily on non-paying chat surfaces; DuckDuckGo (free) should lead.
+
+**Root cause of the risk:** both existing web-search clients (`AgentV3/WebSearch.ts`,
+`EngineerAI/WebSearchClient.ts`) had exactly ONE priority order — Brave first whenever the key is
+present — with no concept of free vs. paid caller. Setting the key would have silently put every Free
+Chat message, every free-tier Professional turn, and every free/weak AgentV3 chat turn onto Brave first,
+the opposite of what was asked.
+
+**Fix (root cause, not a per-call patch):** `WebSearch.search(query, limit, { preferCheap })` in
+`AgentV3/WebSearch.ts` now takes a `preferCheap` option. When true: DuckDuckGo runs first; Brave is only
+called if DuckDuckGo genuinely returns zero results (rare last-resort spend, not "never"). Default/omitted
+behaviour (paid surfaces) is byte-identical to before — Brave leads when a key is configured.
+`liveSearchContext()` threads this through as a `cheap` option. Wired at all three call sites, each using
+that surface's own existing free/paid signal (no new concept invented):
+- `routes/chat.ts` → `cheap: isFree` (the `navbharat` tier — NavBharatAI Free Chat)
+- `professionals/engine.ts` → `cheap: tier === 'free'` (free-tier Professionals)
+- `routes/agentv3.ts` plain-chat-turn lane → `cheap: freeTierBuildActive || powerSpecResolved.cheapOnly`
+  (free-tier / weak-power AgentV3 chat turns — same "never Sonnet/Opus for weak" spirit, applied to search
+  spend instead of model spend)
+
+**Deliberately NOT touched:** the AgentV3/Engineer AI build-time web-search TOOL call (`makeWebSearch()`,
+`EngineerAgentLoop.ts`) that the agent invokes mid-build to look up docs/package versions. The admin's
+instruction was specifically about "free chat" (a conversational surface), not free-tier app builds —
+extending the change there would be scope beyond what was asked. Revisit only on a fresh admin ask.
+
+**Tests (regression-locked, rule 4):** `tests/agentV3WebSearchCheap.test.ts` (new — pins DuckDuckGo-first
+on `preferCheap`, Brave-as-fallback-on-empty-DDG, no-key behaviour, and that the default/paid order is
+unchanged) + a new case in `src/server/lib/liveSearchContext.test.ts` pinning that `cheap` threads into
+`preferCheap` on the client call.
+
+**Verification gate run in full (safeguard #5), all green:** `tsc --noEmit` (frontend) + `tsc -p
+tsconfig.server.json` (server) + `vitest run` (20756 passed, 4 skipped, 0 FAIL — grepped the log, not just
+the tail) + `node scripts/noUnusedImports.mjs` + `npm run build` + `npm run test:bundle` + `npm run
+boot:check` (PASS — reached "Server running"; the Firestore ADC warning in the log is expected in this
+sandbox with no real GCP credentials, unrelated to this change).
+
+`CLAUDE.md`'s Cloud Run key registry updated in the same change: `BRAVE_API_KEY` marked SET, with the
+cost policy and exact wiring recorded so a future session does not silently flip the priority back to
+Brave-first-everywhere.

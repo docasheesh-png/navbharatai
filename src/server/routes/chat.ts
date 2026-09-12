@@ -436,7 +436,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // prices/"latest"/"aaj"), fetch real results and prepend them so the model answers from TODAY's
     // data, not its training cutoff. Gated + bounded + best-effort — never blocks or slows normal chat.
     try {
-      const liveBlock = await liveSearchContext(message);
+      const liveBlock = await liveSearchContext(message, { cheap: isFree });
       if (liveBlock) contextualMessage = `${liveBlock}\n\n---\n${contextualMessage}`;
     } catch { /* live search is best-effort */ }
 

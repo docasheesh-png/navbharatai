@@ -803,12 +803,28 @@ the code (it is actually read somewhere) on 2026-07-11.
   (`irctc1.p.rapidapi.com`, live train running status + PNR) and AeroDataBox (flight status); the admin
   also subscribed an IMDb API the same day, whose exact host is pending a screenshot before it is wired —
   do NOT guess the host, several APIs share the name. Read by `src/server/lib/transitLive.ts`; without the
-  key every path honestly degrades to web search, never an invented "live" answer). Companion keys, NOT
-  set yet: `BRAVE_API_KEY` (search-quality upgrade over the DuckDuckGo fallback, read by
-  `AgentV3/WebSearch.ts`), `TMDB_API_KEY` (movies-now-playing source in `lib/liveDataSources.ts` — may be
-  superseded by the admin's IMDb API once its host is known). Key-free live sources (weather/AQI/currency/
-  PIN codes) need no env at all. ⚠️ Open licensing item recorded in PROGRESS.md 2026-08-25: the no-key
-  weather source (Open-Meteo) is licensed non-commercial — license or swap it before heavy real traffic.
+  key every path honestly degrades to web search, never an invented "live" answer). `TMDB_API_KEY` — NOT
+  set yet: movies-now-playing source in `lib/liveDataSources.ts`, may be superseded by the admin's IMDb
+  API once its host is known. Key-free live sources (weather/AQI/currency/PIN codes) need no env at all.
+  ⚠️ Open licensing item recorded in PROGRESS.md 2026-08-25: the no-key weather source (Open-Meteo) is
+  licensed non-commercial — license or swap it before heavy real traffic.
+- **`BRAVE_API_KEY` (✅ SET in Cloud Run by the admin 2026-09-12)** — search-quality upgrade over the
+  DuckDuckGo fallback, read by `AgentV3/WebSearch.ts` (chat live-search + AgentV3 build tool) and
+  `EngineerAI/WebSearchClient.ts` (Engineer AI builder). No companion key/format needed — a bare token in
+  `X-Subscription-Token`.
+  🔒 **COST POLICY (admin-mandated 2026-09-12, verbatim: "free chat me brave api ka istemal bahut hi
+  kanjusi se karna hai, minimal use, jyadatar duckduckgo hi use ho"): every non-paying chat surface must
+  spend Brave only as a last resort, DuckDuckGo first.** Implemented as `WebSearch.search(query, limit,
+  { preferCheap })` (`AgentV3/WebSearch.ts`) — when `preferCheap` is true, DuckDuckGo runs FIRST and Brave
+  is called only if DuckDuckGo genuinely returns zero results; the paid/default order (Brave first when a
+  key is configured) is unchanged when `preferCheap` is omitted. `liveSearchContext()` threads this as a
+  `cheap` option, wired at all three call sites by each surface's own free/paid signal: `routes/chat.ts`
+  (`cheap: isFree`, i.e. the `navbharat` tier), `professionals/engine.ts` (`cheap: tier === 'free'`), and
+  `routes/agentv3.ts`'s plain-chat-turn lane (`cheap: freeTierBuildActive || powerSpecResolved.cheapOnly`).
+  Regression-locked in `tests/agentV3WebSearchCheap.test.ts` and `liveSearchContext.test.ts`. Deliberately
+  NOT extended to the AgentV3/Engineer AI build-time web-search TOOL call (`makeWebSearch()` /
+  `EngineerAgentLoop.ts`) — the admin's instruction was about "free chat", not free-tier app builds; revisit
+  only if the admin asks for that too.
 - **Sonic Chat (Amazon Nova Sonic voice — EXPERIMENTAL, route `/sonic`, admin 2026-07-13):**
   `SONIC_CHAT_ENABLED`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (= `us-east-1`),
   plus optional `SONIC_MODEL_ID` / `SONIC_VOICE_ID`. All set in Cloud Run 2026-07-13. The feature is

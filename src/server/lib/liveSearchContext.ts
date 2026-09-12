@@ -130,6 +130,12 @@ export interface LiveSearchOptions {
   fetchPage?: (url: string) => Promise<{ ok: boolean; text: string }>;
   /** Injectable live-data source (tests). Defaults to the real liveDataContext dispatcher. */
   liveData?: (message: string) => Promise<string>;
+  /**
+   * Cost-conscious mode for a non-paying surface (Free Chat, a free-tier Professional, a free/weak
+   * AgentV3 turn). Threads straight into WebSearch's `preferCheap` — DuckDuckGo leads, Brave is only
+   * a last-resort fallback on a genuinely empty DuckDuckGo result. Paid surfaces leave this unset.
+   */
+  cheap?: boolean;
 }
 
 /** How much of the top result's page is folded into the chat context. A chat turn is not a build. */
@@ -155,7 +161,7 @@ export async function liveSearchContext(message: string, opts: LiveSearchOptions
   const client = opts.client ?? new WebSearch();
   const query = shapeSearchQuery(message, opts.now ?? new Date());
   const results = await withTimeout(
-    client.search(query, limit).catch(() => []),
+    client.search(query, limit, { preferCheap: opts.cheap }).catch(() => []),
     opts.timeoutMs ?? 6000,
     [],
   );

@@ -22,9 +22,22 @@ export type WebSearchFn = (query: string, limit: number) => Promise<string>;
 const SEARCH_TIMEOUT_MS = 10_000;
 const NPM_TIMEOUT_MS = 8_000;
 
+export interface WebSearchOptions {
+  /**
+   * Cost-conscious mode (admin 2026-09-12: "free chat me brave api ka istemal bahut hi kanjusi se
+   * karna hai... jyadatar duckduckgo hi use ho"). Every Brave Search call costs money past the free
+   * quota; DuckDuckGo costs nothing. When true, DuckDuckGo runs FIRST and Brave is only spent as a
+   * last resort — when DuckDuckGo genuinely returns zero results — so a free-tier chat still gets an
+   * answer without NavBharatAI paying for every search a non-paying user makes. Paid surfaces (Pro
+   * chat, paid Professionals, paid/power AgentV3 turns) leave this unset and keep the Brave-first
+   * quality path unchanged.
+   */
+  preferCheap?: boolean;
+}
+
 export class WebSearch {
   /** Run a search and return up to `limit` de-duplicated results. */
-  async search(query: string, limit = 5): Promise<SearchResult[]> {
+  async search(query: string, limit = 5, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
 
     // 1. Package-style queries get authoritative npm metadata.
@@ -34,11 +47,18 @@ export class WebSearch {
       if (npm) results.push(npm);
     }
 
-    // 2. Web results: Brave if configured, else DuckDuckGo.
+    // 2. Web results: Brave if configured, else DuckDuckGo — UNLESS preferCheap flips the order so
+    // the free, key-less engine leads and Brave is only a fallback for a genuinely empty result.
     const braveKey = process.env.BRAVE_API_KEY;
-    const web = braveKey
-      ? await this.braveSearch(query, limit, braveKey).catch(() => this.duckDuckGo(query, limit).catch(() => []))
-      : await this.duckDuckGo(query, limit).catch(() => []);
+    let web: SearchResult[];
+    if (opts.preferCheap) {
+      const ddg = await this.duckDuckGo(query, limit).catch(() => []);
+      web = ddg.length > 0 || !braveKey ? ddg : await this.braveSearch(query, limit, braveKey).catch(() => []);
+    } else {
+      web = braveKey
+        ? await this.braveSearch(query, limit, braveKey).catch(() => this.duckDuckGo(query, limit).catch(() => []))
+        : await this.duckDuckGo(query, limit).catch(() => []);
+    }
 
     for (const r of web) {
       if (results.length >= limit) break;

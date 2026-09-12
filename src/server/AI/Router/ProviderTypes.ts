@@ -75,5 +75,12 @@ export interface AIProvider {
    * the DEAREST model while the ladder read as if they were not. Re-ordering the rungs could not have
    * fixed it; the pin had nowhere to go.
    */
+  /**
+   * The model this rung PINS, when it is a slotted rung (see `AIRouterManager.slot()`).
+   *
+   * A slot copies the base provider's `name`, so two rungs of the same provider are otherwise
+   * indistinguishable — which is why telemetry could never say WHICH Gemini actually answered.
+   */
+  pinnedModel?: string;
   executeStream?(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string): Promise<string>;
 }

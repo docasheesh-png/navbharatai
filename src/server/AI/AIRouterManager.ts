@@ -12,6 +12,8 @@ function slot(base: AIProvider, priority: number, model: string): AIProvider {
   return {
     name: base.name,
     priority,
+    // What this rung pins — so telemetry can name the model that actually served, not just "VERTEX".
+    pinnedModel: model,
     healthCheck: () => base.healthCheck(),
     execute: (p, s, _, sys) => base.execute(p, s, model, sys),
     // 🔴 THE MODEL MUST RIDE THE STREAM TOO. Dropping it here is what made every slotted rung stream

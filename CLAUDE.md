@@ -1338,7 +1338,7 @@ the code (it is actually read somewhere) on 2026-07-11.
 ### 💴 FULL MONEY AUDIT — every paying code path read end to end (admin-asked 2026-09-12)
 
 The admin asked for a microscopic audit of every money path: *"kahi koi money leak to nahi hai."* 53
-money-touching modules were mapped and walked. **Five real leaks were found, all verified from code
+money-touching modules were mapped and walked. **Seven real leaks were found, all verified from code
 rather than reasoned about, and all fixed in the same change.** The rest of the money surface held up —
 the Cashfree credit is transactional and derives tokens from the VERIFIED paid amount; the coupon table
 is server-side with an ATOMIC one-time claim; the weekly gift is transactional with its lifetime cap
@@ -1427,6 +1427,40 @@ and PROFESSIONAL keep every rung** — the ceiling is the FREE ladder's alone, a
 KEY was rate-limited, this rung usually fails too. It earns its place on a model-specific failure, not on
 a 429 storm, and it is NOT a substitute for a genuinely independent provider — **Kimi has no chat provider
 in this repo** (only the build engine has one), so adding it is a build, not a config change.
+
+**🔴 6. THE BIGGEST ONE, AND IT REFRAMES LEAK 1 ENTIRELY: A STREAMED TURN RACED **TWO** PROVIDERS, AND
+BOTH WERE BILLED (found 2026-09-12, admin said "fix karo").** `AIRouter.routeStream` starts the top TWO
+providers CONCURRENTLY and serves whichever speaks first. The loser's answer is discarded — **its
+invoice is not**. So on the FREE universe, whose leader is `glm-flash` at ₹0 and whose second rung was
+`gemini-2.5-pro` at $10/MTok out, **every single chat turn also paid for a gemini-2.5-pro call.** Not on
+fallback. Not when the leader failed. **Always.** Leak 1 as first reported ("the fallback is 4× dearer")
+described a fraction of it.
+🔒 **THE RULE: A RACE IS A PURCHASE OF SPEED, SO IT BELONGS WHERE SOMEONE IS PAYING** (`streamRacePolicy.ts`).
+PRO and PROFESSIONAL keep racing — those users bought the product. **FREE walks its ladder
+SEQUENTIALLY**: the ₹0 leader alone, and the next rung only when that one genuinely fails. An
+UNRECOGNISED universe does not race either, because the safe side is the one that cannot silently double
+a bill for a caller nobody has classified. Reversible without a deploy: `AI_STREAM_RACE=all` restores
+racing everywhere, `=off` stops it everywhere.
+⚠️ **WHAT IT COSTS THE FREE USER, PLAINLY:** when the free leader is SLOW (not failing — slow), nothing
+runs beside it to overtake it, so the reply starts later than it used to. That is the trade, it is real,
+and the admin chose it on being shown the duplicate bill. The grounding status (#2826) is what keeps
+that wait visible rather than blank.
+
+**🔴 7. THE STREAMING CHAT TURN WROTE NO USAGE LOG AT ALL.** `ai_usage_logs` — the collection the admin
+dashboard is built on — was written only in the NON-streaming branch of `chat.ts`, and **chat streams**.
+So the provider, model and outcome of real chat traffic were invisible, and after the free ladder's
+last-resort rungs were removed there would have been no way to see whether free chat had begun failing
+or which rung was serving. `routeStream` returned `Promise<void>` — it reported nothing — so this was
+not an oversight at one call site but a missing return value. It now returns a `StreamOutcome`
+(provider, pinned model, latency, `raced`, honest failure reason) and the streamed turn writes the same
+row shape the other branch does, with `usageMeasured: false` because a stream does not surface token
+counts today — "we do not know" is never written as a zero.
+
+🔴 **THREE BUGS OF ONE SHAPE IN ONE DAY: THE STREAMING PATH IN THIS REPO GETS FORGOTTEN.** `slot()`
+could not pin a model on it (1b); `VertexProvider.executeStream` hardcoded `pro`; `ai_usage_logs` was
+never written from it. **Any change to routing, cost or telemetry must be checked against
+`routeStream` explicitly — the non-streaming branch is the minority path, and reasoning that stops at
+`routeDetailed` has now been wrong three times.**
 
 🔒 **THE CLASS, NAMED SO IT IS RECOGNISED NEXT TIME: A FREE-FIRST LADDER WHOSE PAID RUNGS ARE UNGOVERNED.**
 Leaks 1 and 5 are the same mistake in two features — the cheap/free leader is reasoned about as if it

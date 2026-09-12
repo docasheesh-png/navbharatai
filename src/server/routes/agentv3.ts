@@ -199,7 +199,7 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
 import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetyScanner';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
-import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import {
   openShell,
@@ -438,6 +438,7 @@ import { findProjectInstructionPath, normalizeProjectInstructions, projectInstru
 import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '../AgentV3/fileMentions';
 import { mcpServerStore } from '../AgentV3/McpServerStore';
 import { mcpLibraryStore, MAX_SAVED_SERVICES } from '../AgentV3/McpLibraryStore';
+import { chooseFloorLead, healthLeadEnabled } from '../AgentV3/floorLead';
 import { serviceHealth, healthHeadline } from '../AgentV3/mcpHealth';
 import { allowAfterCooldown } from '../lib/callCooldown';
 import { listRemoteTools } from '../AgentV3/mcpTransport';
@@ -2359,8 +2360,49 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean; flagshipOnly?: b
   // balanced order for free builds too.
   const freeKimiLead = opts?.free === true && hasBoth
     && (process.env.AGENTV3_FREE_KIMI_LEAD ?? 'on').trim().toLowerCase() !== 'off';
+
+  // LIVE HEALTH BEATS A FROZEN RULE (2026-09-12).
+  //
+  // Both rules below decide the lead without looking at anything: the free-tier KIMI lead is a
+  // constant set from one day's autopsy in August, and the paid path alternates on a counter. Neither
+  // notices that GLM's throttling may have eased, or that KIMI may be the one failing today — and the
+  // admin's dashboard shows the result: 19.7M tokens through KIMI against 946 through GLM.
+  //
+  // The runner already keeps the only signal needed, shared across instances: the 429/timeout bench.
+  // A provider cooling down has PROVEN it is failing in the last minutes; one that is not has not.
+  //
+  // 🔒 It only REORDERS, and only when the two genuinely differ. Both providers stay in the chain, so
+  // the worst case is the order it would have used anyway — and when both are healthy or both are
+  // benched it defers to the rules below rather than inventing a preference from no difference.
+  if (hasBoth && healthLeadEnabled()) {
+    const now = Date.now();
+    const decision = chooseFloorLead(['GLM', 'KIMI'], {
+      nowMs: now,
+      coolingUntil: {
+        GLM: sharedRateLimitCooldowns.until('GLM'),
+        KIMI: sharedRateLimitCooldowns.until('KIMI'),
+      },
+    });
+    if (decision.lead) {
+      lastFloorLeadReason = decision.reason;
+      return balanceFloorLead(runners, decision.lead === 'KIMI');
+    }
+  }
+
   if (freeKimiLead) return balanceFloorLead(runners, true);
   return balanceFloorLead(runners, balanceOn && hasBoth && floorLeadCounter++ % 2 === 1);
+}
+
+/**
+ * Why the last floor order was chosen, for the admin build report.
+ *
+ * A reordering nobody can explain afterwards is indistinguishable from a bug, and this one changes
+ * which engine writes the user's app — so it says so out loud. Admin-only, like every other provider
+ * name (White-Label Law §3).
+ */
+let lastFloorLeadReason = '';
+export function floorLeadReason(): string {
+  return lastFloorLeadReason;
 }
 
 /**
@@ -11225,6 +11267,20 @@ async function noteBuildOutcome(
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
       });
+      // WHY THIS BUILD'S ENGINES ARE IN THIS ORDER. The floor can now put the healthier cheap coder
+      // first (floorLead.ts), which changes WHICH engine writes the user's app — so it is stated in
+      // the report rather than folded into an order nobody can explain later. Admin-only, like every
+      // other provider name. Silent when nothing was reordered.
+      try {
+        const leadWhy = floorLeadReason();
+        if (leadWhy) {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'FLOOR_LEAD', autoResolved: true,
+            message: 'Cheap-engine order chosen from live health',
+            detail: leadWhy,
+          });
+        }
+      } catch { /* observation only — never affects a build */ }
 
       /**
        * EVERY heal/repair runner, built ONE way — so its tokens are always attributed.

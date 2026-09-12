@@ -350,8 +350,16 @@ describe('the wiring stays safe (locked against the real source)', () => {
   });
 
   it('🔒 connected services can never fail a build', () => {
+    // Bound to the STRUCTURE, not to a character count. This used to slice a fixed 900-char window,
+    // which broke the day the block grew (the plan gate, 2026-09-12) even though the try/catch was
+    // still exactly where it should be — a test that fails when the code is right is worse than no
+    // test, because the tempting fix is to weaken the assertion. Now it finds the FIRST catch after
+    // the block and checks that one, so the invariant is what is asserted and the length is not.
     const start = routes.indexOf('mcpServerStore.listFull(workspaceId)');
-    const body = routes.slice(Math.max(0, start - 700), start + 900);
-    expect(body).toMatch(/catch \{[^}]*never a reason a build fails/);
+    expect(start).toBeGreaterThan(-1);
+    const after = routes.slice(start);
+    const catchAt = after.indexOf('} catch {');
+    expect(catchAt, 'the connected-services block must sit inside a try/catch').toBeGreaterThan(-1);
+    expect(after.slice(catchAt, catchAt + 160)).toContain('never a reason a build fails');
   });
 });

@@ -12,17 +12,84 @@
 // hardcoded id going stale. PURE builders; the generated code is correct and complete — no TODO stubs (the
 // real-features rule). Unit-tested.
 
-export type AiProvider = 'openai' | 'anthropic';
+export type AiProvider = 'navbharat' | 'openai' | 'anthropic';
 
 export interface AiConfig {
   provider: AiProvider;
   files: Record<string, string>;
   envKeys: string[];
-  dependency: { name: string; version: string };
+  /** Null for the NavBharatAI gateway — it is plain `fetch`, so there is nothing to install. */
+  dependency: { name: string; version: string } | null;
   instructions: string;
 }
 
 const ENV_EXAMPLE = '.env.example';
+
+// ── NavBharatAI gateway (the default — no key, no signup, no backend) ─────────────────────────────
+//
+// THE WALL THIS REMOVES. Both recipes below are real and correct, and both end the same way: the app
+// works only after its owner opens an account with a model vendor, pastes a card, and copies a secret
+// into a file. That is where most people stop, and every competitor has the same wall. Calling the
+// platform's own gateway instead means a generated chatbot answers on the first publish, on the
+// owner's existing NavBharatAI balance (ROADMAP §13, 3.1).
+//
+// It is CLIENT-side on purpose: the published page carries an app token that is public by design (see
+// server/lib/appAiGateway.ts), so a static app gets a working assistant with no backend at all — the
+// one thing a BYO key can never do, because a real API key must never reach a browser.
+//
+// The helper is honest about the two states it can be in. `window.NavAI` is stamped into the page at
+// PUBLISH, so while the app is still a preview it is genuinely absent, and the code says so in words
+// rather than throwing something the app author would have to decode.
+const NAVBHARAT_CLIENT = `// AI text generation through NavBharatAI — no API key, no backend, nothing to sign up for.
+//
+// The assistant is wired into this app when you PUBLISH it: publishing stamps this app's own
+// assistant into the page. Before that, isAiReady() is false and the helpers say so instead of
+// failing silently. Cost is charged to the NavBharatAI balance of whoever owns this app.
+
+interface NavAiBridge { app: string; available: boolean; ask(prompt: string, opts?: { system?: string }): Promise<string>; }
+
+function bridge(): NavAiBridge | null {
+  const w = globalThis as unknown as { NavAI?: NavAiBridge };
+  return w.NavAI && typeof w.NavAI.ask === 'function' ? w.NavAI : null;
+}
+
+/** True once this app is published and its assistant is live. */
+export function isAiReady(): boolean {
+  return bridge() !== null;
+}
+
+const NOT_READY = 'The assistant becomes available once this app is published.';
+
+/** One-shot: send a prompt, get the text back. The optional system text sets the assistant's role. */
+export async function generateText(prompt: string, system?: string): Promise<string> {
+  const b = bridge();
+  if (!b) throw new Error(NOT_READY);
+  return b.ask(prompt, system ? { system } : undefined);
+}
+
+export interface ChatMessage { role: 'user' | 'assistant'; content: string; }
+
+/**
+ * Multi-turn. The gateway takes one prompt, so the conversation is flattened into it — which keeps
+ * the whole thing a single call and means there is no session to lose.
+ */
+export async function chat(messages: ChatMessage[], system?: string): Promise<string> {
+  const b = bridge();
+  if (!b) throw new Error(NOT_READY);
+  const transcript = messages
+    .map((m) => (m.role === 'assistant' ? 'Assistant: ' : 'User: ') + m.content)
+    .join('\\n');
+  return b.ask(transcript + '\\nAssistant:', system ? { system } : undefined);
+}
+`;
+
+const NAVBHARAT_INSTRUCTIONS =
+  'AI text generation wired through NavBharatAI — no API key and no backend needed. Import ' +
+  'generateText(prompt) or chat(messages) from src/lib/ai.ts and call them straight from the browser. ' +
+  'The assistant goes live when you PUBLISH the app (isAiReady() is false until then, and the helpers ' +
+  'say so rather than failing quietly), and each answer is charged to the app owner\'s NavBharatAI ' +
+  'balance. Each app has a daily limit, so a busy day can never drain the balance. To use your own OpenAI or Anthropic key instead, ask for provider = "openai" or ' +
+  '"anthropic".';
 
 // ── OpenAI (Chat Completions) ────────────────────────────────────────────────────────────────────────────
 const OPENAI_SERVER = `import OpenAI from 'openai';
@@ -88,6 +155,15 @@ const ANTHROPIC_INSTRUCTIONS =
   'system) in server code — the key stays server-side, so proxy AI calls through your backend, never the browser.';
 
 export function generateAiIntegration(provider: AiProvider): AiConfig {
+  if (provider === 'navbharat') {
+    return {
+      provider,
+      files: { 'src/lib/ai.ts': NAVBHARAT_CLIENT },
+      envKeys: [],
+      dependency: null,
+      instructions: NAVBHARAT_INSTRUCTIONS,
+    };
+  }
   if (provider === 'openai') {
     return {
       provider,
@@ -113,5 +189,18 @@ export function generateAiIntegration(provider: AiProvider): AiConfig {
 }
 
 export function isAiProvider(v: unknown): v is AiProvider {
-  return v === 'openai' || v === 'anthropic';
+  return v === 'navbharat' || v === 'openai' || v === 'anthropic';
+}
+
+/**
+ * Which provider an unspecified request means.
+ *
+ * ABSENT means the NavBharatAI gateway, because that is the one that works with nothing pasted
+ * anywhere — the default has to be the path that does not stop at a wall. A provider that is PRESENT
+ * but unrecognised is still an error: silently substituting a default for a typo would hand somebody
+ * a different integration from the one they named.
+ */
+export function resolveAiProvider(v: unknown): AiProvider | null {
+  if (v === undefined || v === null || v === '') return 'navbharat';
+  return isAiProvider(v) ? v : null;
 }

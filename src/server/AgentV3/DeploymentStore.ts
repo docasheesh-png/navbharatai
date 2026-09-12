@@ -11,6 +11,7 @@
 //
 // Pattern mirrors UserCostStore: VITEST-skip (tests never touch Firestore), best-effort (never
 // throws, never blocks a deploy), set+merge so a missing doc is created atomically.
+import { randomBytes } from 'node:crypto';
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { enforceHostingQuota, isFirstPartyProvider, deployBytesMb } from '../lib/HostingQuota';
@@ -22,6 +23,10 @@ import { scanOriginsWithBudget } from './webRiskBudget';
 import { GoogleAuth } from 'google-auth-library';
 import { injectBadgeIntoFiles } from '../lib/madeWithBadge';
 import { injectBeaconIntoFiles, publicOrigin } from '../lib/siteAnalytics';
+import {
+  appAiGatewayEnabled, gatewaySecret, injectGatewayIntoFiles, mintAppAiToken,
+} from '../lib/appAiGateway';
+import { appAiRegistryStore } from '../lib/AppAiRegistryStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { probeHostingPlan } from '../lib/hostingPlan';
 import { audit } from '../lib/audit';
@@ -516,6 +521,27 @@ export function withDeploymentPersistence(
       try {
         injectBeaconIntoFiles(files, { appId: siteIdForWorkspace(workspaceId), origin: publicOrigin() });
       } catch { /* analytics must never break a publish */ }
+
+      // THE AI GATEWAY TOKEN (ROADMAP §13, 3.1) — stamped at the same choke point, for the same
+      // reason, and with one extra rule: the REGISTRY ROW IS WRITTEN FIRST AND THE STAMP DEPENDS ON
+      // IT. A token in the page whose row never landed would produce an assistant that fails on
+      // every question — the "built but not really working" state that must not exist — so a failed
+      // write means no stamp, and the app simply has no assistant. Republishing rotates the nonce;
+      // the previous one stays valid for one generation so a deploy cannot break a page a visitor
+      // already has open (see appAiGateway.ts). Off unless APP_AI_GATEWAY=on.
+      if (appAiGatewayEnabled()) {
+        try {
+          const appId = siteIdForWorkspace(workspaceId);
+          const nonce = randomBytes(9).toString('base64url');
+          if (await appAiRegistryStore.mint(appId, workspaceId, userId || '', nonce)) {
+            injectGatewayIntoFiles(files, {
+              appId,
+              token: mintAppAiToken(appId, gatewaySecret(), nonce),
+              origin: publicOrigin(),
+            });
+          }
+        } catch { /* the assistant must never break a publish */ }
+      }
     }
 
     const url = await base(workspaceId, files);

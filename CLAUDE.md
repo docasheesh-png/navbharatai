@@ -1059,6 +1059,40 @@ the code (it is actually read somewhere) on 2026-07-11.
   metering puts every hosted app's Cloud Run bill on NavBharatAI with nothing recording it. This is the
   metering. Opening hosting still needs the rates above to be set and a few real days of the admin
   report read first — the switch is not a consequence of this code existing.
+- **AI inside a PUBLISHED app — the gateway (built 2026-09-12, ROADMAP §13 item 3.1, NOT live yet):**
+  `APP_AI_GATEWAY` (the master switch — ⚠️ **UNSET, and unset means today's behaviour exactly**: no token
+  is minted, no page is stamped, and the endpoint refuses everything). Tunables, all with working code
+  defaults: `APP_AI_DAILY_CAP_INR` (**₹20** — what ONE APP's assistant may spend in a day) and
+  `APP_AI_VISITOR_CAP_INR` (**₹2** — what one VISITOR may spend of it). Read by
+  `src/server/lib/appAiGateway.ts`; the endpoint is `POST /api/app-ai/ask` (`routes/appAi.ts`).
+  **WHAT IT REMOVES:** a generated chatbot used to end with "now paste your OpenAI key", which is where
+  most people stop — every competitor has the same wall. With this on, the published app calls US, the
+  answer is routed on the ordinary Professional chain (GLM-flash led, so a typical answer is genuinely
+  free to us), and the cost lands on the owner's EXISTING wallet under THE ONE-WALLET LAW.
+  🔴 **THE TOKEN IN THE PAGE IS PUBLIC, AND THE WHOLE DESIGN IS BUILT ON SAYING SO.** It ships inside
+  published client code, so anyone can read it: it is an app IDENTIFIER ("which app is spending?"),
+  never an authorisation ("is this caller allowed?"). What follows, and what must not be undone:
+  the app id is SIGNED (a token lifted from app A cannot spend app B's budget); **the CAP is the real
+  defence**, which is why the per-app and per-visitor ceilings are both enforced and neither is
+  optional; there is **no expiry** (an expiring token would break a working app on a random Tuesday),
+  so rotation is by REPUBLISH — a new nonce, with the previous one honoured for exactly ONE generation
+  so a deploy cannot break a page a visitor already has open; and revocation is the live-deployment
+  check, so unpublishing or a takedown switches the assistant off without reaching into files already
+  in somebody's browser.
+  🔒 **WHITE-LABEL LAW, APPLIED TO SOMEBODY ELSE'S VISITORS.** A stranger on a user's website must never
+  learn which vendor answered, so every refusal and error is branded text with no provider name — and
+  `app-cap` and `owner-empty` deliberately say the SAME words, because a visitor is not entitled to know
+  that the site owner's balance ran out. Test-locked in `appAiGateway.test.ts` and
+  `appAiGatewayWiring.test.ts`.
+  ⚠️ **A Professional Pass does NOT make an app's public traffic free**, and neither does the free list.
+  The Pass pays for the HOLDER's own assistant use; treating it as a licence for an unlimited number of
+  strangers would quietly resize a product that was already sold.
+  ⚠️ **BEFORE FLIPPING IT ON:** the switch changes what a PUBLISH does, not what an existing app does —
+  apps published before it was set carry no token and are unaffected until they are published again.
+  The per-app cap is the platform default for every app; there is deliberately **no owner-facing
+  override yet**, because nothing in the product can set one and a field with no screen behind it is a
+  promise. Reverting is one key: unset it and new publishes stamp nothing, while apps already carrying
+  a token get an honest "not available" from the endpoint.
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,

@@ -228,6 +228,7 @@ import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { planDeployment, deployDecision } from '../AgentV3/deployPlan';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
 import { repoAvailableForDeploy, resolveDeployRepo, ownRepoMemoryPatch, renameStorageRepoPatch } from '../AgentV3/deployRepoMemory';
+import { githubGateVerdict, githubGateMessage, githubGateCode, GITHUB_GATE_CODE } from '../../lib/publishGithubGate';
 import { decidePushBranch } from '../AgentV3/pushAppTarget';
 import { hostingAvailability, hostAppOnNavBharatCloud } from '../AgentV3/hostApp';
 import { appsProject, appsRegion, serviceNameFor, deleteHostedService } from '../AgentV3/cloudRunHosting';
@@ -4095,6 +4096,17 @@ async function noteBuildOutcome(
     const platform = typeof req.body?.platform === 'string' ? req.body.platform : 'render';
     const repoUrl = typeof req.body?.repoUrl === 'string' ? req.body.repoUrl : undefined;
     const appName = typeof req.body?.appName === 'string' ? req.body.appName : undefined;
+    /**
+     * ⚠️ A HINT THAT CHOOSES THE SENTENCE, NEVER THE OUTCOME.
+     *
+     * The gate below refuses on the SERVER-RESOLVED repo and nothing else, so this flag — which comes
+     * from the browser and is therefore forgeable — cannot open the door. All it decides is whether
+     * the refusal reads "connect your GitHub" or "save this app to a repository", i.e. which of two
+     * refusals the user is given. Forging it buys a wrong sentence and no access, which is why it is
+     * safe to take the client's word for it. `deployBackendGateTruth` in the tests asserts exactly
+     * that: for EITHER value, no repo still means refused.
+     */
+    const githubConnectedHint = req.body?.githubConnected === true;
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
@@ -4125,6 +4137,41 @@ async function noteBuildOutcome(
     const durableRepoRec = await getConversationStore().get(workspaceId).catch(() => null);
     const resolvedRepo = resolveDeployRepo(repoUrl, durableRepoRec);
     const effectiveRepoUrl = resolvedRepo?.repoUrl ?? repoUrl;
+
+    /**
+     * 🔒 THE GITHUB PREREQUISITE, ENFORCED HERE AND NOT ONLY ON THE SCREEN (admin 2026-09-12:
+     * "केवल frontend पर button disable करना पर्याप्त नहीं है; backend/server-side validation भी होनी चाहिए").
+     *
+     * This route deploys an app's SERVER half, and a host builds that from a GitHub repository — so
+     * without one there is nothing to deploy from, whoever is asking and however they ask. That was
+     * already true, but only IMPLICITLY: the request went out to Render, came back `no-service`, and
+     * the user read a message about Render when the missing thing was GitHub. A caller hitting this
+     * endpoint directly got the same vague answer.
+     *
+     * One explicit gate, before any provider is contacted, using the SAME shared rules the Publish
+     * screen renders (`publishGithubGate`) — so the screen and the server cannot disagree about what
+     * is missing, which is exactly the contradiction the 2026-09-04 and 2026-09-12 reports were.
+     *
+     * `hasServerHalf: true` is not an assumption: this endpoint exists only to deploy one.
+     *
+     * 🔒 WHAT IS AUTHORITATIVE AND WHAT IS NOT. `hasRepo` is the repo the SERVER resolved — from the
+     * request's own url or, failing that, the workspace's durable record — and it alone decides
+     * whether this is refused. `connected` is a browser-supplied hint that only selects which of the
+     * two refusal sentences is returned. So there is no field a caller can set to get past this.
+     *
+     * An authorized user with no repo is told to save the app, never sent back through an
+     * authorization they already gave — the admin's own rule, and the reason the two states are
+     * separate verdicts rather than one boolean.
+     */
+    const gateVerdict = githubGateVerdict(
+      { hasServerHalf: true },
+      { connected: githubConnectedHint, hasRepo: !!effectiveRepoUrl },
+    );
+    if (gateVerdict !== 'ok') {
+      res.status(422).json({ error: githubGateMessage(gateVerdict), code: githubGateCode(gateVerdict) });
+      return;
+    }
+
     // What we can honestly say about the environment the backend runs with. '' = nothing worth saying,
     // which is the ordinary case and must stay silent.
     let envNote = '';

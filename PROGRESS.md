@@ -49019,3 +49019,76 @@ repo, never a twin) and writes one too. No migration is possible and none is pre
 `npm run build` ok · `npm run test:bundle` within budget · `npm run boot:check` PASS ·
 `npx vitest run` **1,556 files / 21,262 passed / 1 skipped / 0 failed** (15 new), log grepped for
 `FAIL` — none.
+
+---
+
+## 2026-09-12 — "Publish par GitHub mandatory karo" — adopted where it is true, refused where it would break the product
+
+**Trigger.** Admin sent a written requirement: Publish must check GitHub first, redirect to GitHub's
+OAuth page if not connected, return, and only then publish; server-side validation so the API cannot be
+called around it; no repeat OAuth for an already-connected user. Closing line: *"yeh meri non technical
+shalah hai. blindly follow nahi karni hai"* — an explicit invitation to apply the external-suggestion
+rule rather than transcribe.
+
+### 🔴 Followed literally it would have broken the product, and the code says why
+
+- The default publish provider is Firebase Hosting, `isConfigured: () => true` — it reads **nothing**
+  from GitHub. A gate there is a lock on a door that is not locked.
+- That screen's own headline is **"Host on NavBharatAI — One click, no account."** A mandatory OAuth
+  redirect is the opposite of the promise printed on it.
+- **Every Email/Phone user would lose the ability to publish at all.** Most have no GitHub account and
+  no reason to make one — and they are the India-first audience the product exists for.
+- No competitor (Lovable / Bolt / v0 / Replit) requires GitHub to publish. Adding it would make
+  NavBharatAI the hardest of them, against THE AIM.
+
+Said to the admin plainly rather than implemented quietly (third absolute rule).
+
+### ✅ Where the admin is exactly right, and what was genuinely missing
+
+For an app with a **server half**, a host builds the server **from a repository** — GitHub is a real
+prerequisite. Three gaps, all real:
+
+1. **The server-side enforcement was implicit.** `/api/agentv3/deploy-backend` had no explicit check:
+   the request went to Render, came back `no-service`, and the user read a message about Render when
+   the missing thing was GitHub. A direct API call got the same vague answer.
+2. **A refusal arriving as 422 would render as "we could not create the backend service in your
+   account"** — a sentence about Render for a problem that is not Render's.
+3. **The OAuth return dropped the user's place.** The redirect worked; the Publish sheet did not
+   survive the full page navigation, so a user who pressed Publish, authorized, and came back landed on
+   the home screen with no sign anything had happened.
+
+### What shipped
+- **`src/lib/publishGithubGate.ts`** — one set of rules, imported by BOTH the screen and the server, so
+  they cannot disagree (the shape of the last two bugs on this path). `hasServerHalf` decides whether
+  GitHub is needed at all; `connect-github` and `push-to-github` are kept as SEPARATE verdicts all the
+  way to the user, because their next actions differ — which is also how the admin's "no unnecessary
+  re-authorization" rule is enforced rather than remembered.
+- **An explicit gate in `/api/agentv3/deploy-backend`, before any provider is contacted.**
+  🔒 The authority is the **server-resolved** repo (`effectiveRepoUrl` — the request's url or the
+  workspace's durable record). The one browser-supplied value, `githubConnected`, is a **hint that
+  chooses the sentence and never the outcome**: forging it buys a wrong message and no access, and a
+  test asserts exactly that for both values.
+- **`needs-github` as its own client outcome**, matched on the CODE before the status branches, so the
+  refusal reaches the user as the right next action.
+- **`src/lib/publishResume.ts`** — the Publish sheet reopens for the same app after the GitHub round
+  trip. One-shot, workspace-scoped and expiring (10 min), storage injected so all three are tested
+  without a browser; a storage that throws costs the resume and never the publish. It reopens after a
+  CANCELLED authorization too — that user most needs to see the screen that asked.
+
+### The census guard did its job, and was justified rather than weakened
+`appIdentityGuard.test.ts` counts effects keyed on `[state.workspaceId]` and failed on the new one.
+That is the design: a new one must be argued for. Argued and recorded — it fills nothing from a
+workspace-scoped response, and it cannot fire for the wrong app because the marker carries its own
+workspace id. Count updated, test untouched.
+
+### Gate (CI-equivalent, run LAST, on the final state)
+`npm run typecheck` 0 · `node scripts/noUnusedImports.mjs` clean · `npm run typecheck:server` 0 ·
+`npm run build` ok · `npm run test:bundle` within budget · `npm run boot:check` PASS ·
+`npx vitest run` **1,561 files / 21,371 passed / 1 skipped / 0 failed** (20 new), log grepped for
+`FAIL` — none. `AppKnowledgeBase.ts` updated for the new user-facing behaviour.
+
+### Open for the admin
+If the blanket rule is still wanted after reading the above — GitHub required for EVERY publish,
+including a static one — it is one line: make `publishNeedsGitHub` return `true` unconditionally. The
+rest (server gate, wording, resume) already works for that case. It is recorded here as the admin's
+call, not closed off.

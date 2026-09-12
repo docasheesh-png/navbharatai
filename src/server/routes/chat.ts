@@ -558,15 +558,36 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           res.end();
         }
       } else {
-        const aiResponse = await aiRouter.route(contextualMessage, history, tier, undefined, systemPrompt);
-        // Fire-and-forget usage logging
+        const routed = await aiRouter.routeDetailed(contextualMessage, history, tier, undefined, systemPrompt);
+        // USAGE LOGGING — what actually happened, and nothing else (2026-09-12).
+        //
+        // 🔴 THIS BLOCK USED TO INVENT EVERY FIELD IT WROTE: `providerName: 'auto'`, `modelName: 'auto'`,
+        // `latencyMs: 0`, `estimated_provider_cost: 0`, and `outputTokens = reply.length / 4`. Not one of
+        // those was measured, and the admin dashboard is built on this collection — so it reported engine
+        // cost ₹0.0000 however much was spent, a "margin" that was arithmetically just revenue, and one
+        // imaginary provider named AUTO holding 100% of traffic at 0 ms.
+        //
+        // 🔒 TOKENS ARE WRITTEN ONLY WHEN THE PROVIDER REPORTED THEM. `usageMeasured` is the flag every
+        // reader must branch on: absent tokens mean "we do not know", which is a different answer from
+        // zero and must never be summed as one. `estimated_provider_cost` is GONE rather than zeroed —
+        // a field whose only value was a lie is not worth keeping, and its absence makes any old reader
+        // fail loudly instead of quietly adding 0. Cost is DERIVED from these real numbers where they
+        // exist (see admin analytics), which is the same rate card a build is priced with.
         const userId2 = req.body?.userId || req.body?.uid || 'anonymous';
         addDoc(collection(getDb() as any, 'ai_usage_logs'), {
-          userId: userId2, tier, latencyMs: 0, outputTokens: Math.round((aiResponse.length || 0) / 4),
-          modelName: 'auto', providerName: 'auto', estimated_provider_cost: 0,
+          userId: userId2,
+          tier,
+          latencyMs: routed.latencyMs,
+          modelName: routed.model,
+          providerName: routed.provider,
+          usageMeasured: !!routed.usage,
+          ...(routed.usage
+            ? { inputTokens: routed.usage.inputTokens, outputTokens: routed.usage.outputTokens }
+            : {}),
+          ok: routed.ok,
           createdAt: new Date().toISOString(),
         }).catch(() => {});
-        res.json({ reply: aiResponse });
+        res.json({ reply: routed.content });
       }
     } catch(e: any) {
       console.error(`Error for tier ${tier}:`, e.message);

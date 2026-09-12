@@ -60,6 +60,9 @@ import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore } from '../lib/HealthScore';
+import { summariseUsage, marginInr } from '../lib/usageLedger';
+import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
+import { usdToInr } from '../lib/UsdInrRate';
 import { analyzeFinOps } from '../lib/FinOpsAdvisor';
 import { generateInsights, generateOpsReport, answerMetricQuery } from '../lib/AiInsights';
 import { assessDeployRisk, analyzeIncident } from '../AppMakerLab/deployment/DeployRiskAdvisor';
@@ -369,7 +372,20 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // Provider error rate + latency are real only once at least one AI call has run.
       errorRatePct: totalReq > 0 ? (totalErr / totalReq) * 100 : null,
       avgLatencyMs: totalReq > 0 ? latencyWeighted / totalReq : null,
-      uptimeSeconds: process.uptime(),
+      // 🔴 UPTIME IS NOT REPORTED, AND THAT IS THE FIX (2026-09-12).
+      //
+      // This passed `process.uptime()`, which `scoreUptime` divides by 24 HOURS. NavBharatAI deploys on
+      // every merge to main, and Cloud Run recycles instances on its own — so the process is routinely
+      // minutes old while nothing whatsoever is wrong. A server deployed 50 minutes ago scored 3.5/100
+      // on this component and, at its 15% weight, lost the platform ~14 health points for the crime of
+      // having shipped. That is how a healthy platform came to read CRITICAL.
+      //
+      // "Seconds since this process started" was never uptime on a serverless host; it is deploy
+      // recency wearing uptime's name. `computeHealthScore` already renormalises over the components
+      // it HAS and lists the rest under `missing`, so omitting it removes a misleading signal and
+      // claims nothing in its place — which is the honest state until a real uptime measurement
+      // (the outside-in probe `siteUptime.ts` already does for user domains) exists for the platform.
+      uptimeSeconds: null,
     };
     res.json({
       score: computeHealthScore(inputs),
@@ -378,7 +394,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         successRatePct: 'metrics.builds (live build outcomes)',
         errorRatePct: 'AIRouter provider circuit stats',
         avgLatencyMs: 'AIRouter provider circuit stats (request-weighted)',
-        uptimeSeconds: 'process.uptime()',
+        // Not fed at all — see the note on `uptimeSeconds` above. Process age is deploy recency,
+        // not uptime, and NavBharatAI deploys on every merge.
+        uptimeSeconds: 'not measured (process age is not uptime on a serverless host)',
       },
       generatedAt: Date.now(),
     });
@@ -542,7 +560,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         successRatePct: snapshot.builds.total > 0 ? snapshot.builds.successRate * 100 : null,
         errorRatePct: totalReq > 0 ? (totalErr / totalReq) * 100 : null,
         avgLatencyMs: totalReq > 0 ? latencyWeighted / totalReq : null,
-        uptimeSeconds: process.uptime(),
+        // Same reason as the live endpoint above: process age is deploy recency, and scoring it made a
+        // freshly-deployed platform read CRITICAL. Omitted rather than guessed.
+        uptimeSeconds: null,
       };
       return { score: computeHealthScore(inputs), inputs };
     });
@@ -1179,20 +1199,29 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         }
       });
 
-      let totalTokensUsed = 0;
-      let totalProviderCost = 0;
+      // WHAT THE AI REALLY COST (2026-09-12). This used to be
+      // `totalProviderCost += log.estimated_provider_cost || 0`, and the ONE line in the codebase that
+      // wrote that field wrote a hardcoded 0 — so the platform's AI cost was structurally zero, and
+      // "PLATFORM MARGIN" (revenue − cost) was revenue with a different label. It reported a profit on
+      // a loss-making window. Now the tokens a provider REALLY reported are priced with the same rate
+      // card a build is priced by, and calls that cannot be priced are COUNTED rather than treated as
+      // free — see usageLedger.ts, which is where the honesty rule lives.
+      const usage = summariseUsage(logs as any, (provider, model, u) =>
+        usageCostUsd(u, realRateFor(provider, model)));
+      const totalTokensUsed = usage.outputTokens;
+      const totalProviderCost = usdToInr(usage.costUsd);
       const modelWise: any = {};
       const providerWise: any = {};
 
       logs.forEach((log: any) => {
-        totalTokensUsed += log.outputTokens || 0;
-        totalProviderCost += log.estimated_provider_cost || 0;
-
+        const out = Number(log.outputTokens);
+        // Only MEASURED tokens are attributed. An old row carries no usage, and adding its absent
+        // tokens as 0 would make a real model look idle rather than unrecorded.
+        if (!(log.usageMeasured === true) || !Number.isFinite(out) || out < 0) return;
         const model = log.modelName || 'unknown-model';
-        modelWise[model] = (modelWise[model] || 0) + (log.outputTokens || 0);
-
+        modelWise[model] = (modelWise[model] || 0) + out;
         const provider = log.providerName || 'unknown-provider';
-        providerWise[provider] = (providerWise[provider] || 0) + (log.outputTokens || 0);
+        providerWise[provider] = (providerWise[provider] || 0) + out;
       });
 
       const clientIdSample = (process.env.CASHFREE_CLIENT_ID || process.env.CASHFREE_APP_ID)?.trim();
@@ -1265,14 +1294,32 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const recentPurchases = [...successfulPurchases]
         .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 10)
-        .map((tx: any) => ({ userId: tx.userId, amount: tx.amountPaid, tokens: tx.tokenAmount || 0, date: tx.createdAt }));
+        // 🔒 TOKENS COME FROM `balanceAdded`, WHICH IS WHAT THE CREDIT PATHS ACTUALLY WRITE.
+        // This read `tx.tokenAmount`, which is set only when an ORDER is created and never on a
+        // successful credit — so every real purchase displayed as "0 tokens". A ₹150 top-up that had
+        // genuinely credited 15,000 tokens appeared on the admin's screen as money taken for nothing,
+        // which is the worst possible thing for a dashboard to be wrong about. `tokenAmount` stays as
+        // the fallback so the oldest rows, which have nothing else, still render.
+        .map((tx: any) => ({
+          userId: tx.userId,
+          amount: tx.amountPaid,
+          tokens: Number.isFinite(Number(tx.balanceAdded)) && Number(tx.balanceAdded) > 0
+            ? Math.round(Number(tx.balanceAdded) * TOKENS_PER_RUPEE)
+            : (tx.tokenAmount || 0),
+          date: tx.createdAt,
+        }));
 
       // Live provider stats from AIRouter
       const liveProviderStats = getProviderStats();
 
       return res.json({
         totalUsers, totalRevenue, totalTokensUsed, totalProviderCost,
-        estimatedProfit: totalRevenue - totalProviderCost,
+        // HOW SURE ARE WE? `providerCostComplete` false ⇒ the cost above is a FLOOR (some calls could
+        // not be priced), so the profit below is an UPPER BOUND and the screen must say "at most".
+        providerCostComplete: usage.complete,
+        pricedCalls: usage.measuredCalls,
+        unpricedCalls: usage.unmeasuredCalls,
+        estimatedProfit: marginInr(totalRevenue, totalProviderCost, usage.complete).valueInr,
         failedRequests: serverStats.failedLogins,
         expensiveUsers, modelWise, providerWise, cashfreeStatus, burnRate: totalProviderCost / Math.max(1, logs.length),
         // New fields

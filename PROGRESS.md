@@ -48690,3 +48690,253 @@ PASS · `npx vitest run` **1,556 files / 21,247 passed / 1 skipped / 0 failed**,
 The designated branch's remote tip was `9309413` (the Play-billing work), squash-merged to `main` long
 ago — all four of its files are on `main` today, and the branch was otherwise ~46k lines behind. It was
 subsumed with a `-s ours` merge rather than force-discarded, so the history survives.
+
+---
+
+## 2026-09-12 — India-first starters: the part of the library nobody else carries
+
+**What shipped.** Four starter buttons and four compile-proven golden scaffolds, on the branch
+`feat/india-starters`:
+
+| Button | Tier | What it actually is |
+|---|---|---|
+| 🏪 **GST bill** | simple (FREE) | shop billing with the **CGST/SGST split per slab** (0/5/12/18/28%), the slab on the ITEM, auto-incrementing bill number, print |
+| ✍️ **Mock test** | simple (FREE) | sectioned competitive-exam paper, one clock for the whole paper, question palette, mark-for-review, **negative marking 0.25** |
+| 🏢 **Society** | pro (showcase) | flats → monthly maintenance dues raised for the whole society in ONE action, notice board, complaints with status |
+| 📚 **Coaching** | pro | batches → students → daily attendance (% per student) → monthly fees **at each student's own batch rate** |
+
+**Why these and not four more generic templates.** Every other starter in the library is a shape a
+competitor also ships — a to-do list, a CRM, a store. These four are the only ones that are obviously
+Indian, and each is the app its user currently keeps in a paper notebook. A kirana owner does not want
+an "invoice"; they need a bill with CGST and SGST printed separately, at the slab that belongs to that
+item, because rice and a cold drink are not taxed alike.
+
+### The tier split is the decision, not a default
+
+**Two of the four are FREE on purpose.** The moat is worth nothing if a free user only ever sees it
+behind a lock, so the GST biller and the mock test were designed as the shape the weak tier ships whole:
+one screen, plain React state, localStorage, no backend. The society and coaching apps are pro because
+they are several LINKED records — flats→dues, students→batches→fees — which is precisely where a weak
+model produces half an app. That promise is now pinned by a test rather than a comment:
+`tests/indiaFirstStarters.test.ts` asserts that `partitionStarters(false)` offers exactly `gst-bill` and
+`exam-prep`. **Verified it bites** — flipping `gst-bill` to `pro` fails with
+`expected [ 'exam-prep' ] to deeply equal [ 'exam-prep', 'gst-bill' ]`.
+
+### What the new test pins, and why each line is there
+
+Every assertion is a property a later "simplification" could remove with nothing else failing:
+
+- **CGST *and* SGST both present.** A single merged tax line still produces a working app and a useless
+  bill.
+- **The slab lives on the item** (`gst:` per item, all five slabs present). One app-wide rate is the
+  usual shortcut and it is simply wrong.
+- **`₹` and `en-IN` formatting.** An app printing `$` for an Indian shop is a wrong app.
+- **Negative marking is really applied** (`correct - wrong * NEGATIVE`). Without it a practice score is
+  not comparable to the real exam, which is the only thing the user is practising for.
+- **`clearInterval` present.** A timer left running after submission keeps waking the tab.
+- **Both pro apps bill a whole month in one action AND skip anyone already billed.** Billing one by one
+  is the friction that sends a treasurer back to paper; billing twice is the bug that ends their trust.
+  Both are one line of code each and both are now pinned.
+- **Coaching bills at `b ? b.fee : 0`** — the student's OWN batch rate, so two batches at different fees
+  bill correctly and an already-issued receipt is not silently rewritten when a batch fee changes.
+
+All 12 exam questions were worked through by hand before shipping; a practice app with a wrong answer
+key teaches the wrong answer. (Article 17, Odisha, the Speaker, forests, 38, XPSE, his sister, 24 years,
+30, 7.5 s, Occurrence, Forsake.)
+
+### A compliance decision, recorded because the safe path is not the obvious one
+
+**A clinic / pharmacy template was on the shortlist and was deliberately NOT built.** It is a strong
+India-first candidate and purely CRUD — patients, appointments, stock — with no medical advice in it. But
+this developer account has already taken one Play policy strike on medical features, and `CLAUDE.md` is
+explicit that `MEDICAL_PROFESSIONAL_IDS` may not be touched until the organization account is live AND
+the Health-apps declaration is filed. Adding a health-shaped surface to the Android app before that is a
+risk measured in the whole account, against a gain of one template. The remaining candidates (courier,
+wedding RSVP, NGO, school ERP) are unblocked and cost nothing to defer, so the clinic template waits for
+the org account rather than being argued into safety.
+
+### Honest limit, stated plainly
+
+When I proposed this work I said each template would be tested "by running a real build". **I cannot run
+a production v5 build from this session, and I did not.** The golden scaffold is the substitute and for
+this purpose it is the stronger guarantee: the app a user receives on tapping the chip is the exact file
+set CI has proven parses under esbuild, compiles under the in-browser Babel preview, ships the complete
+runnable file set, and mounts. What it does NOT prove is how the builder then CUSTOMISES a pro scaffold
+on a real prompt — that still wants a real build, and it is the first thing to check on the next one.
+
+### Also in this change
+
+- `AppKnowledgeBase.ts` updated in the same commit, per the standing rule — the new buttons are named in
+  the template entry, and the keyword list now carries the words a user actually types (`kirana`,
+  `dukaan ka app`, `cgst sgst`, `sarkari exam`, `negative marking`, `rwa`, `flat maintenance`, `hajiri`,
+  `tuition app`, `khel banao`). A button nobody can find by asking for it may as well not exist.
+
+### Still open, deliberately not done here
+
+- **The picker is now 31 buttons.** That is approaching a wall even as small pills. Two weak performers
+  ("Converter", "Password") are the obvious trim, and the admin did delegate the button set. I have not
+  removed them in this PR: deleting user-facing capability deserves its own explicit decision rather
+  than riding along inside an additive change.
+- Output formats (.apk, desktop, extension, MCP) still sit in the picker; they belong on the publish
+  screen, which is where a user is when they want them.
+
+---
+
+## 2026-09-12 — MCP, three slices: saved once, and "connected" finally means something
+
+The previous entry ended with the other half the admin asked for still open, plus a standing
+instruction: *"aap isko apne hisab se behtar banao! meri baat ignore karo"* — improve connected
+services by my own judgement. Three slices shipped against that.
+
+### #2841 — Saved once, chosen per app (the "still open" item above, closed)
+
+A connection was remembered per **app**. The same app kept its services across every build — that part
+was already right — but a NEW app meant retyping the address and pasting the API key again, for a
+service the user had already proven works.
+
+🔒 **And the obvious fix is the wrong one.** "Apply every saved service to every new app" would repeat
+exactly the bug `secretScope.ts` closed for credentials — a to-do list app quietly carrying a key it has
+no business holding. So `McpLibraryStore` **remembers** and the user **chooses**, per app, in one tap.
+Saving and using stay two separate decisions, and nothing ever attaches itself.
+
+- One document per user; credentials server-side only (`listForDisplay` / `listFull` as two functions,
+  so a call site cannot leak a key by forgetting an argument).
+- `upsertSaved` **replaces** by name instead of appending, so a rotated key *is* the record rather than
+  a second row whose precedence nothing chose. The cap still allows a replacement — refusing a key
+  rotation would be a cap protecting nothing.
+- `/mcp/attach` is the connect path minus the typing, **not a shortcut past its checks**: same plan
+  gate, same SSRF guard (a host that resolved publicly when it was saved can resolve elsewhere today),
+  same per-app cap and duplicate rule, and it **re-proves** the service before listing it — a revoked
+  key must never show as connected.
+- `/mcp/forget` is deliberately **not** plan-gated, for the same reason disconnect is not.
+- Attaching COPIES into the app's own record, so the build path is unchanged. The honest consequence is
+  stated on the screen rather than left to be discovered: forgetting stops a service being offered to
+  new apps and does not reach into apps already using it.
+- The card header and menu row now say **MCP**, per the admin's direct request.
+
+### #2843 — "Connected" was never proof of "working"
+
+A connection is proven once and then trusted forever. But keys expire and services move, and the first
+place that showed up was in the MIDDLE of a build, as a service that quietly contributed nothing while
+the screen still said *connected*. **Connected only ever meant "we saved it"** — the same gap
+`credentialProbe.ts` closed for saved keys, where storage succeeding got reported as the credential
+working.
+
+🔒 **There is no "probably fine".** A service that answered with tools is working; anything else is
+reported as not working, with the reason it gave. A service answering with an EMPTY tool list is
+**failing, not fine** — unusable to a build either way, and "connected but contributes nothing" is
+precisely the silent state this ends. The headline is told how many services there WERE, so a partial
+check can never read as a whole one.
+
+Bounded by construction: the per-app cap of 5, the transport's own 15 s timeout, probes in parallel, and
+a 10 s per-workspace cooldown because each call fans out to somebody else's servers. Not plan-gated —
+seeing why a build lost a tool is not buying a feature. `callCooldown.ts` now holds the one
+implementation of that cooldown, shared with `routes/secrets.ts`'s `allowVerify`, which was the only
+copy and would otherwise have become two.
+
+**A real fragility this exposed, fixed rather than worked around.** Three structural tests anchored on
+`indexOf('mcpServerStore.listFull(workspaceId)')` to find the BUILD loop. The new route reads the same
+list and sits earlier in the file, so those tests **silently began asserting against the wrong block** —
+including 🔒 *"connected services can never fail a build"*, which would have kept passing against
+unrelated code. `buildLoopStart` anchors on the one thing only the build loop does (handing the servers
+to the dispatcher) and walks back to its read: real code, not a marker comment, so it cannot be deleted
+without changing behaviour. Note that this is the SECOND time this month a structural test pointed at
+the wrong thing — the first was the 900-character window in the entry above. The lesson both times:
+**bind a structural test to something only the target does.**
+
+### Gate (CI-equivalent, on the final state, each slice)
+`typecheck` 0 · `noUnusedImports` clean · `typecheck:server` 0 · `build` ok · `test:bundle` within
+budget · `boot:check` PASS · `vitest run` green, log grepped for `FAIL` — none. #2843 finished at
+**1,555 files / 21,243 passed**.
+
+---
+
+## 2026-09-12 — "Last write wins" was a coin flip: the secrets duplicate bug (#2842)
+
+**Two files said it, and it was true in neither.** `secretScope.ts` and `secrets.ts` both claimed "last
+write still wins among equally-scoped duplicates".
+
+Saving a key under a name the user already had did not replace the row — `POST /api/secrets/:userId` was
+an unconditional `addDoc`, so it **added a second one**. The read path then walked `getDocs` output,
+which comes back ordered by **document ID**, and Firestore auto-ids are random rather than chronological.
+
+So a user who rotated a leaked Stripe key had roughly a **coin flip's** chance of their next build
+injecting the OLD one — the key they had just gone to the trouble of revoking. Nothing failed, nothing
+errored, and there was nothing on screen to see. This is the most dangerous shape a bug takes here: a
+documented guarantee that was never implemented.
+
+**Root-caused in both halves, because the bug has two.**
+
+- **UPSTREAM, so the duplicate is never created.** `planSecretWrite` decides what a save does to the
+  rows already under that name: update the newest row of the SAME scope in place, and retire any others
+  in the same operation. A save is the one moment we know for certain which value the user means, so it
+  is the right moment to collapse a pile that already exists. A replacement moves `created_at` forward,
+  or a freshly rotated key would lose to the row it replaced.
+- **DOWNSTREAM, for the duplicates already in the database.** `resolveScopedSecrets` picks the newest row
+  by its recorded timestamp. `secretCreatedAtMs` reduces every shape a stored `created_at` arrives in —
+  Firestore `Timestamp`, `Date`, ISO string, and a Timestamp that lost its methods crossing JSON — to one
+  comparable number, and returns **absent** rather than `0` for anything unreadable, since `0` would make
+  a broken row look like the oldest write.
+
+Scope still beats age: an app-specific key overrides a shared one however old it is. An exception a
+general save can undo is not an exception.
+
+**The sibling, found and fixed in the same change, and it was worse.** `saveUserSecrets` (Supabase
+provisioning) deduped by **name alone** and **hard-deleted** — so provisioning a database destroyed a key
+the user had deliberately tied to one of their other apps. Both writers now share `planSecretWrite`, so
+they cannot drift apart again. `getSecretValue` had the same first-not-newest bug and is fixed with it.
+
+### Gate
+`vitest run` **1,553 files / 21,162 passed / 0 failed**, log grepped for `FAIL` — none; full
+CI-equivalent chain green on the final state.
+
+---
+
+## 2026-09-12 — A database reaching an app nobody asked on: the provisioning leak (#2846)
+
+Found while answering the admin's question about apps A, B and C seeing each other's data. The admin
+withdrew the feature request; the **audit it prompted found a real leak**, which is the part that
+mattered.
+
+**THE LEAK.** The zero-setup database wrote its keys as SHARED, so every app that user built afterwards
+received them in its `.env`: `VITE_SUPABASE_URL`, the anon key, and `DATABASE_URL` — **a full Postgres
+connection string with the password in it**. A landing page built on Tuesday silently carried the
+credentials of the shop database built on Monday, and if either app was published or exported the
+credentials went with it. Exactly the class `secretScope.ts` closed for hand-saved keys, still open on
+the one path that writes keys **on the user's behalf** — the path where the user never gets to notice,
+because they never typed anything.
+
+**WHY "JUST SCOPE IT" WOULD HAVE BEEN HALF AN ANSWER, AND A BREAKING ONE.** Supabase's free plan allows
+**two** projects per organisation. Scoping is one line, and it means a user's second app can no longer
+see the first app's database, is offered "create one", spends their second slot, and their third app
+hits a wall where today it silently worked.
+
+**So the fix is not narrower access, it is ASKED-FOR access** (`databaseReuse.ts`):
+
+- A provisioned database is scoped to the app it was made for.
+- Pressing "Create database" in an app that has none, when the user already has one, **attaches that
+  database instead of creating a second project**, and says so, naming the app it came from.
+- **An app nobody pressed the button on gets nothing.** That is the leak, gone.
+- `forceNew` is the escape hatch, offered only as a follow-up AFTER a reuse — it really does spend a
+  project slot, which is why it is not the first button.
+
+🔒 The distinction the module exists to preserve: **having a database and being given one are different
+events.** The old code merged them, and the merge was invisible.
+
+**Nothing moves for existing users:** rows already written stay shared, so their apps behave exactly as
+today; the first press of the button in a new app is what moves them onto the scoped model.
+
+A reuse reports `schemaApplied: null` — nothing was created, so nothing was migrated, and `true` would
+be the fake success this feature exists to avoid.
+
+### Open, stated rather than quietly left
+- **Database Studio reads unscoped**, so a user with two databases sees the newest without being told
+  which app it belongs to. Unchanged by this PR (the newest shared row already won), and Studio has no
+  workspace context to pass — it wants an honest label, not a silent change.
+- The mid-build "ask the user for keys" read is also unscoped, deliberately: filtered to the names just
+  asked for, and scoping it could break a key the client saved without a workspace. Left alone rather
+  than changed on a guess.
+
+### Gate
+`vitest run` **1,558 files / 21,316 passed / 0 failed**, log grepped for `FAIL` — none; full
+CI-equivalent chain green on the final rebased state.

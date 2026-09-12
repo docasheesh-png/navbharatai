@@ -50407,3 +50407,16 @@ with no live path. Left as it is rather than wired speculatively: pushing generi
 ("dependency failures are common") into every build prompt would cost tokens on every build and tell
 the model nothing it does not already know. It becomes worth wiring when the ledger shows a cause
 concentrated in one framework — which is exactly what the framework counts were added to reveal.
+
+**ROADMAP 3.6 (duplicate app) was already DONE — found by checking before building.** The roadmap still
+said *"verify the two `duplicate/clone` hits first"*, and the answer is that the whole path exists and is
+wired end to end: `POST /api/agentv3/conversations/:id/duplicate` → `duplicateConversation` in the hook →
+the history menu in `AgentV3Panel`, with the pure decisions in `duplicateApp.ts`. Marked done in the
+roadmap rather than rebuilt — safeguard #6 doing exactly what it exists for, and the second time today a
+search before building saved a duplicate feature.
+
+**Where the conveyor actually stands.** Everything left in Phases 2 and 3 is blocked on something a
+session cannot provide, and that is worth stating plainly rather than leaving as an empty queue:
+Slice 3 and ROADMAP 1.5 / 1.7 need the Cloudflare Worker deployed; Slice 6 needs decision D2; 2.7 (cron)
+needs Cloud Scheduler enabled in the apps project; 2.8 (backend logs) is real but only reaches an admin
+until hosting opens. The unblocked work is finished.
